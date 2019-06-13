@@ -20,6 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/mock"
 )
 
 var _ = Suite(&testOperatorControllerSuite{})
@@ -28,8 +29,8 @@ type testOperatorControllerSuite struct{}
 
 // issue #1338
 func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
-	opt := NewMockSchedulerOptions()
-	tc := NewMockCluster(opt)
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
 	oc := NewOperatorController(tc, nil)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
@@ -56,9 +57,9 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 }
 
 func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
-	opt := NewMockSchedulerOptions()
-	tc := NewMockCluster(opt)
-	oc := NewOperatorController(tc, MockHeadbeatStream{})
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
+	oc := NewOperatorController(tc, mock.NewHeartbeatStream())
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)
@@ -76,21 +77,21 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	c.Assert(oc.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_RUNNING)
 	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_RUNNING)
 	op1.createTime = time.Now().Add(-10 * time.Minute)
-	region2 = tc.ApplyOperatorStep(region2, op2)
+	region2 = ApplyOperatorStep(region2, op2)
 	tc.PutRegion(region2)
 	oc.Dispatch(region1, "test")
 	oc.Dispatch(region2, "test")
 	c.Assert(oc.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_TIMEOUT)
 	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_RUNNING)
-	tc.ApplyOperator(op2)
+	ApplyOperator(tc, op2)
 	oc.Dispatch(region2, "test")
 	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_SUCCESS)
 }
 
 func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
-	opt := NewMockSchedulerOptions()
-	tc := NewMockCluster(opt)
-	oc := NewOperatorController(tc, MockHeadbeatStream{})
+	opt := mock.NewScheduleOptions()
+	tc := mock.NewCluster(opt)
+	oc := NewOperatorController(tc, mock.NewHeartbeatStream())
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)

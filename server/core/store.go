@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pingcap/errcode"
@@ -32,27 +31,25 @@ type StoreInfo struct {
 	meta  *metapb.Store
 	stats *pdpb.StoreStats
 	// Blocked means that the store is blocked from balance.
-	blocked           bool
-	leaderCount       int
-	regionCount       int
-	leaderSize        int64
-	regionSize        int64
-	pendingPeerCount  int
-	lastHeartbeatTS   time.Time
-	leaderWeight      float64
-	regionWeight      float64
-	rollingStoreStats *RollingStoreStats
-	overloaded        bool
+	blocked          bool
+	leaderCount      int
+	regionCount      int
+	leaderSize       int64
+	regionSize       int64
+	pendingPeerCount int
+	lastHeartbeatTS  time.Time
+	leaderWeight     float64
+	regionWeight     float64
+	overloaded       bool
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{
-		meta:              store,
-		stats:             &pdpb.StoreStats{},
-		leaderWeight:      1.0,
-		regionWeight:      1.0,
-		rollingStoreStats: newRollingStoreStats(),
+		meta:         store,
+		stats:        &pdpb.StoreStats{},
+		leaderWeight: 1.0,
+		regionWeight: 1.0,
 	}
 	for _, opt := range opts {
 		opt(storeInfo)
@@ -63,19 +60,18 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
-		meta:              s.meta,
-		stats:             s.stats,
-		blocked:           s.blocked,
-		leaderCount:       s.leaderCount,
-		regionCount:       s.regionCount,
-		leaderSize:        s.leaderSize,
-		regionSize:        s.regionSize,
-		pendingPeerCount:  s.pendingPeerCount,
-		lastHeartbeatTS:   s.lastHeartbeatTS,
-		leaderWeight:      s.leaderWeight,
-		regionWeight:      s.regionWeight,
-		rollingStoreStats: s.rollingStoreStats,
-		overloaded:        s.overloaded,
+		meta:             s.meta,
+		stats:            s.stats,
+		blocked:          s.blocked,
+		leaderCount:      s.leaderCount,
+		regionCount:      s.regionCount,
+		leaderSize:       s.leaderSize,
+		regionSize:       s.regionSize,
+		pendingPeerCount: s.pendingPeerCount,
+		lastHeartbeatTS:  s.lastHeartbeatTS,
+		leaderWeight:     s.leaderWeight,
+		regionWeight:     s.regionWeight,
+		overloaded:       s.overloaded,
 	}
 
 	for _, opt := range opts {
@@ -247,11 +243,6 @@ func (s *StoreInfo) GetRegionWeight() float64 {
 // GetLastHeartbeatTS returns the last heartbeat timestamp of the store.
 func (s *StoreInfo) GetLastHeartbeatTS() time.Time {
 	return s.lastHeartbeatTS
-}
-
-// GetRollingStoreStats returns the rolling statistics of the store.
-func (s *StoreInfo) GetRollingStoreStats() *RollingStoreStats {
-	return s.rollingStoreStats
 }
 
 const minWeight = 1e-6
@@ -457,15 +448,6 @@ L:
 	return storeLabels
 }
 
-// StoreHotRegionInfos : used to get human readable description for hot regions.
-type StoreHotRegionInfos struct {
-	AsPeer   StoreHotRegionsStat `json:"as_peer"`
-	AsLeader StoreHotRegionsStat `json:"as_leader"`
-}
-
-// StoreHotRegionsStat used to record the hot region statistics group by store
-type StoreHotRegionsStat map[uint64]*HotRegionsStat
-
 type storeNotFoundErr struct {
 	storeID uint64
 }
@@ -481,9 +463,7 @@ func NewStoreNotFoundErr(storeID uint64) errcode.ErrorCode {
 
 // StoresInfo contains information about all stores.
 type StoresInfo struct {
-	stores         map[uint64]*StoreInfo
-	bytesReadRate  float64
-	bytesWriteRate float64
+	stores map[uint64]*StoreInfo
 }
 
 // NewStoresInfo create a StoresInfo with map of storeID to StoreInfo
@@ -514,8 +494,6 @@ func (s *StoresInfo) TakeStore(storeID uint64) *StoreInfo {
 // SetStore sets a StoreInfo with storeID.
 func (s *StoresInfo) SetStore(store *StoreInfo) {
 	s.stores[store.GetID()] = store
-	store.GetRollingStoreStats().Observe(store.GetStoreStats())
-	s.updateTotalBytesRate()
 }
 
 // BlockStore blocks a StoreInfo with storeID.
@@ -635,123 +613,4 @@ func (s *StoresInfo) UpdateStoreStatusLocked(storeID uint64, leaderCount int, re
 			SetRegionSize(regionSize))
 		s.SetStore(newStore)
 	}
-}
-
-func (s *StoresInfo) updateTotalBytesRate() {
-	var totalBytesWirteRate float64
-	var totalBytesReadRate float64
-	var writeRate, readRate float64
-	for _, s := range s.stores {
-		if s.IsUp() {
-			writeRate, readRate = s.GetRollingStoreStats().GetBytesRate()
-			totalBytesWirteRate += writeRate
-			totalBytesReadRate += readRate
-		}
-	}
-	s.bytesWriteRate = totalBytesWirteRate
-	s.bytesReadRate = totalBytesReadRate
-}
-
-// TotalBytesWriteRate returns the total written bytes rate of all StoreInfo.
-func (s *StoresInfo) TotalBytesWriteRate() float64 {
-	return s.bytesWriteRate
-}
-
-// TotalBytesReadRate returns the total read bytes rate of all StoreInfo.
-func (s *StoresInfo) TotalBytesReadRate() float64 {
-	return s.bytesReadRate
-}
-
-// GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
-func (s *StoresInfo) GetStoresBytesWriteStat() map[uint64]uint64 {
-	res := make(map[uint64]uint64, len(s.stores))
-	for _, s := range s.stores {
-		writeRate, _ := s.GetRollingStoreStats().GetBytesRate()
-		res[s.GetID()] = uint64(writeRate)
-	}
-	return res
-}
-
-// GetStoresBytesReadStat returns the bytes read stat of all StoreInfo.
-func (s *StoresInfo) GetStoresBytesReadStat() map[uint64]uint64 {
-	res := make(map[uint64]uint64, len(s.stores))
-	for _, s := range s.stores {
-		_, readRate := s.GetRollingStoreStats().GetBytesRate()
-		res[s.GetID()] = uint64(readRate)
-	}
-	return res
-}
-
-// GetStoresKeysWriteStat returns the keys write stat of all StoreInfo.
-func (s *StoresInfo) GetStoresKeysWriteStat() map[uint64]uint64 {
-	res := make(map[uint64]uint64, len(s.stores))
-	for _, s := range s.stores {
-		res[s.GetID()] = uint64(s.GetRollingStoreStats().GetKeysWriteRate())
-	}
-	return res
-}
-
-// GetStoresKeysReadStat returns the bytes read stat of all StoreInfo.
-func (s *StoresInfo) GetStoresKeysReadStat() map[uint64]uint64 {
-	res := make(map[uint64]uint64, len(s.stores))
-	for _, s := range s.stores {
-		res[s.GetID()] = uint64(s.GetRollingStoreStats().GetKeysReadRate())
-	}
-	return res
-}
-
-// RollingStoreStats are multiple sets of recent historical records with specified windows size.
-type RollingStoreStats struct {
-	sync.RWMutex
-	bytesWriteRate *RollingStats
-	bytesReadRate  *RollingStats
-	keysWriteRate  *RollingStats
-	keysReadRate   *RollingStats
-}
-
-const storeStatsRollingWindows = 3
-
-func newRollingStoreStats() *RollingStoreStats {
-	return &RollingStoreStats{
-		bytesWriteRate: NewRollingStats(storeStatsRollingWindows),
-		bytesReadRate:  NewRollingStats(storeStatsRollingWindows),
-		keysWriteRate:  NewRollingStats(storeStatsRollingWindows),
-		keysReadRate:   NewRollingStats(storeStatsRollingWindows),
-	}
-}
-
-// Observe records current statistics.
-func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
-	statInterval := stats.GetInterval()
-	interval := statInterval.GetEndTimestamp() - statInterval.GetStartTimestamp()
-	if interval == 0 {
-		return
-	}
-	r.Lock()
-	defer r.Unlock()
-	r.bytesWriteRate.Add(float64(stats.BytesWritten / interval))
-	r.bytesReadRate.Add(float64(stats.BytesRead / interval))
-	r.keysWriteRate.Add(float64(stats.KeysWritten / interval))
-	r.keysReadRate.Add(float64(stats.KeysRead / interval))
-}
-
-// GetBytesRate returns the bytes write rate and the bytes read rate.
-func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64) {
-	r.RLock()
-	defer r.RUnlock()
-	return r.bytesWriteRate.Median(), r.bytesReadRate.Median()
-}
-
-// GetKeysWriteRate returns the keys write rate.
-func (r *RollingStoreStats) GetKeysWriteRate() float64 {
-	r.RLock()
-	defer r.RUnlock()
-	return r.keysWriteRate.Median()
-}
-
-// GetKeysReadRate returns the keys read rate.
-func (r *RollingStoreStats) GetKeysReadRate() float64 {
-	r.RLock()
-	defer r.RUnlock()
-	return r.keysReadRate.Median()
 }

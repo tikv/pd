@@ -16,11 +16,11 @@ package server
 import (
 	"math/rand"
 
-	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/mock"
 )
 
 var _ = Suite(&testStoresInfoSuite{})
@@ -78,19 +78,6 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 	}
 
 	c.Assert(cache.GetStoreCount(), Equals, int(n))
-
-	bytesWritten := uint64(8 * 1024 * 1024)
-	bytesRead := uint64(128 * 1024 * 1024)
-	store := cache.GetStore(1)
-
-	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.BytesWritten = bytesWritten
-	newStats.BytesRead = bytesRead
-	newStats.Interval = &pdpb.TimeInterval{EndTimestamp: 10, StartTimestamp: 0}
-	newStore := store.Clone(core.SetStoreStats(newStats))
-	cache.SetStore(newStore)
-	c.Assert(cache.TotalBytesWriteRate(), Equals, float64(bytesWritten/10))
-	c.Assert(cache.TotalBytesReadRate(), Equals, float64(bytesRead/10))
 }
 
 var _ = Suite(&testRegionsInfoSuite{})
@@ -301,7 +288,7 @@ func (s *testClusterInfoSuite) TestLoadClusterInfo(c *C) {
 func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+	cluster := newClusterInfo(mock.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 
 	n, np := uint64(3), uint64(3)
 	stores := newTestStores(n)
@@ -347,7 +334,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+	cluster := newClusterInfo(mock.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 
 	n, np := uint64(3), uint64(3)
 
@@ -562,7 +549,7 @@ func heartbeatRegions(c *C, cluster *clusterInfo, regions []*metapb.Region) {
 func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, nil)
+	cluster := newClusterInfo(mock.NewIDAllocator(), opt, nil)
 
 	// 1: [nil, nil)
 	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
@@ -601,7 +588,7 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newClusterInfo(core.NewMockIDAllocator(), opt, nil)
+	cluster := newClusterInfo(mock.NewIDAllocator(), opt, nil)
 
 	regions := []*metapb.Region{
 		{

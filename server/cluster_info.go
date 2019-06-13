@@ -24,21 +24,20 @@ import (
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
 type clusterInfo struct {
 	sync.RWMutex
-	core *schedule.BasicCluster
-
+	core            *core.BasicCluster
 	id              core.IDAllocator
 	kv              *core.KV
 	meta            *metapb.Cluster
 	opt             *scheduleOption
 	regionStats     *regionStatistics
 	labelLevelStats *labelLevelStatistics
+	storesStats     *statistics.StoresStats
 	prepareChecker  *prepareChecker
 	changedRegions  chan *core.RegionInfo
 	hotSpotCache    *statistics.HotSpotCache
@@ -48,11 +47,12 @@ var defaultChangedRegionsLimit = 10000
 
 func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
 	return &clusterInfo{
-		core:            schedule.NewBasicCluster(),
+		core:            core.NewBasicCluster(),
 		id:              id,
 		opt:             opt,
 		kv:              kv,
 		labelLevelStats: newLabelLevelStatistics(),
+		storesStats:     statistics.NewStoresStats(),
 		prepareChecker:  newPrepareChecker(),
 		changedRegions:  make(chan *core.RegionInfo, defaultChangedRegionsLimit),
 		hotSpotCache:    statistics.NewHotSpotCache(),
@@ -89,7 +89,9 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 		zap.Int("count", c.core.Regions.GetRegionCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
-
+	for _, store := range c.core.Stores.GetStores() {
+		c.storesStats.CreateRollingStoreStats(store.GetID())
+	}
 	return c, nil
 }
 
@@ -203,6 +205,7 @@ func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
 		}
 	}
 	c.core.PutStore(store)
+	c.storesStats.CreateRollingStoreStats(store.GetID())
 	return nil
 }
 
@@ -219,6 +222,7 @@ func (c *clusterInfo) deleteStoreLocked(store *core.StoreInfo) error {
 		}
 	}
 	c.core.DeleteStore(store)
+	c.storesStats.RemoveRollingStoreStats(store.GetID())
 	return nil
 }
 
@@ -272,25 +276,25 @@ func (c *clusterInfo) getStoreCount() int {
 func (c *clusterInfo) getStoresBytesWriteStat() map[uint64]uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.Stores.GetStoresBytesWriteStat()
+	return c.storesStats.GetStoresBytesWriteStat()
 }
 
 func (c *clusterInfo) getStoresBytesReadStat() map[uint64]uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.Stores.GetStoresBytesReadStat()
+	return c.storesStats.GetStoresBytesReadStat()
 }
 
 func (c *clusterInfo) getStoresKeysWriteStat() map[uint64]uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.Stores.GetStoresKeysWriteStat()
+	return c.storesStats.GetStoresKeysWriteStat()
 }
 
 func (c *clusterInfo) getStoresKeysReadStat() map[uint64]uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.Stores.GetStoresKeysReadStat()
+	return c.storesStats.GetStoresKeysReadStat()
 }
 
 // ScanRegions scans region with start key, until number greater than limit.
@@ -384,10 +388,10 @@ func (c *clusterInfo) getRegionCount() int {
 	return c.core.Regions.GetRegionCount()
 }
 
-func (c *clusterInfo) getRegionStats(startKey, endKey []byte) *core.RegionStats {
+func (c *clusterInfo) getRegionStats(startKey, endKey []byte) *statistics.RegionStats {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.Regions.GetRegionStats(startKey, endKey)
+	return statistics.GetRegionStats(c.core.Regions, startKey, endKey)
 }
 
 func (c *clusterInfo) dropRegion(id uint64) {
@@ -491,6 +495,8 @@ func (c *clusterInfo) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	}
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
 	c.core.Stores.SetStore(newStore)
+	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
+	c.storesStats.UpdateTotalBytesRate(c.core.Stores)
 	return nil
 }
 
@@ -668,7 +674,7 @@ func (c *clusterInfo) collectMetrics() {
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
 	// collect hot cache metrics
-	c.hotSpotCache.CollectMetrics(c.core.Stores)
+	c.hotSpotCache.CollectMetrics(c.storesStats)
 }
 
 func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
@@ -680,7 +686,7 @@ func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.Regi
 	return c.regionStats.getRegionStatsByType(typ)
 }
 
-func (c *clusterInfo) GetOpt() schedule.NamespaceOptions {
+func (c *clusterInfo) GetOpt() namespace.ScheduleOptions {
 	return c.opt
 }
 
@@ -800,25 +806,25 @@ func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel
 }
 
 // RegionReadStats returns hot region's read stats.
-func (c *clusterInfo) RegionReadStats() []*core.RegionStat {
+func (c *clusterInfo) RegionReadStats() []*statistics.RegionStat {
 	// RegionStats is a thread-safe method
 	return c.hotSpotCache.RegionStats(statistics.ReadFlow)
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (c *clusterInfo) RegionWriteStats() []*core.RegionStat {
+func (c *clusterInfo) RegionWriteStats() []*statistics.RegionStat {
 	// RegionStats is a thread-safe method
 	return c.hotSpotCache.RegionStats(statistics.WriteFlow)
 }
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
-func (c *clusterInfo) CheckWriteStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
-	return c.hotSpotCache.CheckWrite(region, c.core.Stores)
+func (c *clusterInfo) CheckWriteStatus(region *core.RegionInfo) (bool, *statistics.RegionStat) {
+	return c.hotSpotCache.CheckWrite(region, c.storesStats)
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
-func (c *clusterInfo) CheckReadStatus(region *core.RegionInfo) (bool, *core.RegionStat) {
-	return c.hotSpotCache.CheckRead(region, c.core.Stores)
+func (c *clusterInfo) CheckReadStatus(region *core.RegionInfo) (bool, *statistics.RegionStat) {
+	return c.hotSpotCache.CheckRead(region, c.storesStats)
 }
 
 type prepareChecker struct {

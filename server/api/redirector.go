@@ -79,7 +79,7 @@ type customReverseProxies struct {
 
 func newCustomReverseProxies(urls []url.URL) *customReverseProxies {
 	p := &customReverseProxies{
-		client: server.DialClient,
+		client: dialClient,
 	}
 
 	p.urls = append(p.urls, urls...)

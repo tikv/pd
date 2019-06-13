@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
-	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
 )
@@ -78,8 +77,8 @@ func (s *hotTestSuite) TestHot(c *C) {
 	newStats.KeysWritten = keysWritten
 	newStats.KeysRead = keysRead
 	newStats.Interval = interval
-	newStore := ss.Clone(core.SetStoreStats(newStats))
-	newStore.GetRollingStoreStats().Observe(newStore.GetStoreStats())
+	rc := leaderServer.GetRaftCluster()
+	rc.GetStoresStats().Observe(ss.GetID(), newStats)
 
 	// TODO: Provide a way to test the result of hot read and hot write commands
 	// hot read

@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/mock"
 	"google.golang.org/grpc"
 )
 
@@ -39,7 +40,7 @@ func TestClient(t *testing.T) {
 var _ = Suite(&testClientSuite{})
 
 type idAllocator struct {
-	allocator *core.MockIDAllocator
+	allocator *mock.IDAllocator
 }
 
 func (i *idAllocator) alloc() uint64 {
@@ -48,7 +49,7 @@ func (i *idAllocator) alloc() uint64 {
 }
 
 var (
-	regionIDAllocator = &idAllocator{allocator: &core.MockIDAllocator{}}
+	regionIDAllocator = &idAllocator{allocator: &mock.IDAllocator{}}
 	// Note: IDs below are entirely arbitrary. They are only for checking
 	// whether GetRegion/GetStore works.
 	// If we alloc ID in client in the future, these IDs must be updated.

@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2019 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,22 +11,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package mock
 
-import (
-	. "github.com/pingcap/check"
-)
+import "sync/atomic"
 
-var _ = Suite(&testRollingStats{})
+// IDAllocator mocks IDAllocator and it is only used for test.
+type IDAllocator struct {
+	base uint64
+}
 
-type testRollingStats struct{}
+// NewIDAllocator create a new IDAllocator
+func NewIDAllocator() *IDAllocator {
+	return &IDAllocator{base: 0}
+}
 
-func (t *testRollingStats) TestRollingMedian(c *C) {
-	data := []float64{2, 4, 2, 800, 600, 6, 3}
-	expected := []float64{2, 3, 2, 3, 4, 6, 6}
-	stats := NewRollingStats(5)
-	for i, e := range data {
-		stats.Add(e)
-		c.Assert(stats.Median(), Equals, expected[i])
-	}
+// Alloc return a new id
+func (alloc *IDAllocator) Alloc() (uint64, error) {
+	return atomic.AddUint64(&alloc.base, 1), nil
 }
