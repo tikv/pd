@@ -15,9 +15,9 @@ package server
 
 import (
 	"path"
+	"strings"
 
 	"github.com/BurntSushi/toml"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server/core"
 )
@@ -122,5 +122,6 @@ type = "random-merge"
 	meta, err = toml.Decode(cfgData, &cfg)
 	c.Assert(err, IsNil)
 	err = cfg.Adjust(&meta)
-	c.Assert(err, NotNil)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(cfg.WarningMsgs[0], "Config contains undefined item"), IsTrue)
 }

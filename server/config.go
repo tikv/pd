@@ -332,7 +332,7 @@ func (m *configMetaData) CheckUndecoded() error {
 func (c *Config) Adjust(meta *toml.MetaData) error {
 	configMetaData := newConfigMetadata(meta)
 	if err := configMetaData.CheckUndecoded(); err != nil {
-		return err
+		c.WarningMsgs = append(c.WarningMsgs, err.Error())
 	}
 	adjustString(&c.Name, defaultName)
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
