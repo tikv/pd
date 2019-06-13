@@ -70,42 +70,27 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 			&metapb.Region{
 				Id:       3,
 				StartKey: []byte("t"),
-				EndKey:   []byte("u"),
+				EndKey:   []byte("x"),
 				Peers: []*metapb.Peer{
-					{Id: 106, StoreId: 1},
-					{Id: 107, StoreId: 4},
-					{Id: 108, StoreId: 5},
+					{Id: 106, StoreId: 2},
+					{Id: 107, StoreId: 5},
+					{Id: 108, StoreId: 6},
 				},
 			},
-			&metapb.Peer{Id: 107, StoreId: 4},
+			&metapb.Peer{Id: 108, StoreId: 6},
 			core.SetApproximateSize(1),
 			core.SetApproximateKeys(1),
 		),
 		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       4,
-				StartKey: []byte("u"),
-				EndKey:   []byte("x"),
-				Peers: []*metapb.Peer{
-					{Id: 109, StoreId: 2},
-					{Id: 110, StoreId: 5},
-					{Id: 111, StoreId: 6},
-				},
-			},
-			&metapb.Peer{Id: 111, StoreId: 6},
-			core.SetApproximateSize(10),
-			core.SetApproximateKeys(10),
-		),
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       5,
 				StartKey: []byte("x"),
 				EndKey:   []byte(""),
 				Peers: []*metapb.Peer{
-					{Id: 112, StoreId: 4},
+					{Id: 109, StoreId: 4},
 				},
 			},
-			&metapb.Peer{Id: 112, StoreId: 4},
+			&metapb.Peer{Id: 109, StoreId: 4},
 			core.SetApproximateSize(10),
 			core.SetApproximateKeys(10),
 		),
@@ -127,11 +112,8 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	// The size should be small enough.
 	ops = s.mc.Check(s.regions[1])
 	c.Assert(ops, IsNil)
-	// Always merge left into right,
-	// and should with same peer count.
-	ops = s.mc.Check(s.regions[3])
-	c.Assert(ops, IsNil)
-	ops = s.mc.Check(s.regions[3])
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
 	for _, op := range ops {
 		op.createTime = op.createTime.Add(-LeaderOperatorWaitTime - time.Second)
 		c.Assert(op.IsTimeout(), IsFalse)
@@ -149,34 +131,33 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 func (s *testMergeCheckerSuite) checkSteps(c *C, op *Operator, steps []OperatorStep) {
 	c.Assert(op.Kind()&OpMerge, Not(Equals), 0)
 	c.Assert(steps, NotNil)
+	c.Assert(op.Len(), Equals, len(steps))
 	for i := range steps {
 		c.Assert(op.Step(i), DeepEquals, steps[i])
 	}
-	c.Assert(op.Len(), Equals, len(steps))
 }
 
 func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	// partial store overlap not including leader
 	ops := s.mc.Check(s.regions[2])
-	c.Assert(ops, NotNil)
 	s.checkSteps(c, ops[0], []OperatorStep{
-		TransferLeader{FromStore: 4, ToStore: 5},
-		AddLearner{ToStore: 2, PeerID: 1},
-		PromoteLearner{ToStore: 2, PeerID: 1},
-		RemovePeer{FromStore: 1},
-		AddLearner{ToStore: 6, PeerID: 2},
-		PromoteLearner{ToStore: 6, PeerID: 2},
-		RemovePeer{FromStore: 4},
+		TransferLeader{FromStore: 6, ToStore: 5},
+		AddLearner{ToStore: 1, PeerID: 1},
+		PromoteLearner{ToStore: 1, PeerID: 1},
+		RemovePeer{FromStore: 2},
+		AddLearner{ToStore: 4, PeerID: 2},
+		PromoteLearner{ToStore: 4, PeerID: 2},
+		RemovePeer{FromStore: 6},
 		MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[3].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, ops[1], []OperatorStep{
 		MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[3].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
 		},
 	})
@@ -188,81 +169,81 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			{Id: 107, StoreId: 5},
 			{Id: 108, StoreId: 6},
 		}),
-		core.WithLeader(&metapb.Peer{Id: 107, StoreId: 5}),
+		core.WithLeader(&metapb.Peer{Id: 106, StoreId: 1}),
 	)
 	s.regions[2] = newRegion
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []OperatorStep{
-		AddLearner{ToStore: 2, PeerID: 3},
-		PromoteLearner{ToStore: 2, PeerID: 3},
-		RemovePeer{FromStore: 1},
+		AddLearner{ToStore: 4, PeerID: 3},
+		PromoteLearner{ToStore: 4, PeerID: 3},
+		RemovePeer{FromStore: 6},
 		MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[3].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, ops[1], []OperatorStep{
 		MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[3].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
 		},
 	})
 
 	// all stores overlap
 	s.regions[2] = s.regions[2].Clone(core.SetPeers([]*metapb.Peer{
-		{Id: 106, StoreId: 2},
+		{Id: 106, StoreId: 1},
 		{Id: 107, StoreId: 5},
-		{Id: 108, StoreId: 6},
+		{Id: 108, StoreId: 4},
 	}))
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []OperatorStep{
 		MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[3].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, ops[1], []OperatorStep{
 		MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[3].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
 		},
 	})
 
 	// all stores not overlap
 	s.regions[2] = s.regions[2].Clone(core.SetPeers([]*metapb.Peer{
-		{Id: 109, StoreId: 1},
+		{Id: 109, StoreId: 2},
 		{Id: 110, StoreId: 3},
-		{Id: 111, StoreId: 4},
-	}), core.WithLeader(&metapb.Peer{Id: 109, StoreId: 1}))
+		{Id: 111, StoreId: 6},
+	}), core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}))
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []OperatorStep{
-		AddLearner{ToStore: 2, PeerID: 4},
-		PromoteLearner{ToStore: 2, PeerID: 4},
+		AddLearner{ToStore: 1, PeerID: 4},
+		PromoteLearner{ToStore: 1, PeerID: 4},
 		RemovePeer{FromStore: 3},
-		AddLearner{ToStore: 5, PeerID: 5},
-		PromoteLearner{ToStore: 5, PeerID: 5},
-		RemovePeer{FromStore: 4},
-		AddLearner{ToStore: 6, PeerID: 6},
-		PromoteLearner{ToStore: 6, PeerID: 6},
-		TransferLeader{FromStore: 1, ToStore: 2},
-		RemovePeer{FromStore: 1},
+		AddLearner{ToStore: 4, PeerID: 5},
+		PromoteLearner{ToStore: 4, PeerID: 5},
+		RemovePeer{FromStore: 6},
+		AddLearner{ToStore: 5, PeerID: 6},
+		PromoteLearner{ToStore: 5, PeerID: 6},
+		TransferLeader{FromStore: 2, ToStore: 1},
+		RemovePeer{FromStore: 2},
 		MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[3].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
 	s.checkSteps(c, ops[1], []OperatorStep{
 		MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
-			ToRegion:   s.regions[3].GetMeta(),
+			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
 		},
 	})
