@@ -70,6 +70,7 @@ merge-schedule-limit = 8
 tolerant-size-ratio = 0
 # Enable two-way merge, set it to true may help improving merge speed.
 #enable-two-way-merge = false
+#tolerant-size-ratio = 5.0
 
 # customized schedulers, the format is as below
 # if empty, it will use balance-leader, balance-region, hot-region as default
@@ -85,6 +86,8 @@ max-replicas = 3
 # For example, ["zone", "rack"] means that we should place replicas to
 # different zones first, then to different racks if we don't have enough zones.
 location-labels = []
+# Strictly checks if the label of TiKV is matched with location labels.
+#strictly-match-label = false
 
 [label-property]
 # Do not assign region leaders to stores that have these tags.
