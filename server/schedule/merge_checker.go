@@ -119,6 +119,10 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 		return nil
 	}
 	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
+	if region.GetApproximateSize() > target.GetApproximateSize() ||
+		region.GetApproximateKeys() > target.GetApproximateKeys() {
+		checkerCounter.WithLabelValues("merge_checker", "larger_source").Inc()
+	}
 	return ops
 }
 
