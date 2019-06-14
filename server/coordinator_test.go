@@ -23,9 +23,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/mock/mockhbstream"
+	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/mock"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedulers"
@@ -53,7 +54,7 @@ type testClusterInfo struct {
 
 func newTestClusterInfo(opt *scheduleOption) *testClusterInfo {
 	return &testClusterInfo{clusterInfo: newClusterInfo(
-		mock.NewIDAllocator(),
+		mockid.NewIDAllocator(),
 		opt,
 		core.NewKV(core.NewMemoryKV()),
 	)}
@@ -206,7 +207,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	testutil.CheckTransferLeader(c, co.opController.GetOperator(2), schedule.OpBalance, 4, 2)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 
-	stream := mock.NewHeartbeatStream()
+	stream := mockhbstream.NewHeartbeatStream()
 
 	// Transfer peer.
 	region := tc.GetRegion(1).Clone()
@@ -228,7 +229,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	waitNoResponse(c, stream)
 }
 
-func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream mock.HeartbeatStream) error {
+func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream mockhbstream.HeartbeatStream) error {
 	co.hbStreams.bindStream(region.GetLeader().GetStoreId(), stream)
 	if err := co.cluster.putRegion(region.Clone()); err != nil {
 		return err
@@ -338,7 +339,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	c.Assert(tc.addRegionStore(3, 3), IsNil)
 	c.Assert(tc.addRegionStore(4, 4), IsNil)
 
-	stream := mock.NewHeartbeatStream()
+	stream := mockhbstream.NewHeartbeatStream()
 
 	// Add peer to store 1.
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
@@ -403,7 +404,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	c.Assert(tc.addRegionStore(4, 40), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3, 4), IsNil)
 
-	stream := mock.NewHeartbeatStream()
+	stream := mockhbstream.NewHeartbeatStream()
 
 	// Wait for schedule.
 	waitOperator(c, co, 1)
@@ -551,7 +552,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(co.removeScheduler("label-scheduler"), IsNil)
 	c.Assert(co.schedulers, HasLen, 0)
 
-	stream := mock.NewHeartbeatStream()
+	stream := mockhbstream.NewHeartbeatStream()
 
 	// Add stores 1,2,3
 	c.Assert(tc.addLeaderStore(1, 1), IsNil)
@@ -704,7 +705,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	// Add 1 replica on store 2.
 	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
-	stream := mock.NewHeartbeatStream()
+	stream := mockhbstream.NewHeartbeatStream()
 	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 2)
 	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
@@ -737,7 +738,7 @@ func (s *testOperatorControllerSuite) TestOperatorCount(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	tc := newTestClusterInfo(opt)
-	hbStreams := mock.NewHeartbeatStreams(tc.clusterInfo.getClusterID())
+	hbStreams := mockhbstream.NewHeartbeatStreams(tc.clusterInfo.getClusterID())
 
 	oc := schedule.NewOperatorController(tc.clusterInfo, hbStreams)
 	c.Assert(oc.OperatorCount(schedule.OpLeader), Equals, uint64(0))
@@ -938,7 +939,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	}
 }
 
-func waitAddLearner(c *C, stream mock.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
+func waitAddLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
@@ -954,7 +955,7 @@ func waitAddLearner(c *C, stream mock.HeartbeatStream, region *core.RegionInfo, 
 	)
 }
 
-func waitPromoteLearner(c *C, stream mock.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
+func waitPromoteLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
@@ -971,7 +972,7 @@ func waitPromoteLearner(c *C, stream mock.HeartbeatStream, region *core.RegionIn
 	)
 }
 
-func waitRemovePeer(c *C, stream mock.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
+func waitRemovePeer(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
@@ -987,7 +988,7 @@ func waitRemovePeer(c *C, stream mock.HeartbeatStream, region *core.RegionInfo, 
 	)
 }
 
-func waitTransferLeader(c *C, stream mock.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
+func waitTransferLeader(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
@@ -1000,7 +1001,7 @@ func waitTransferLeader(c *C, stream mock.HeartbeatStream, region *core.RegionIn
 	)
 }
 
-func waitNoResponse(c *C, stream mock.HeartbeatStream) {
+func waitNoResponse(c *C, stream mockhbstream.HeartbeatStream) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		res := stream.Recv()
 		return res == nil

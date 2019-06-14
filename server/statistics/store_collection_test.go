@@ -11,16 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package statistics
 
 import (
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/statistics"
 )
 
 var _ = Suite(&testStoreStatisticsSuite{})
@@ -28,10 +28,8 @@ var _ = Suite(&testStoreStatisticsSuite{})
 type testStoreStatisticsSuite struct{}
 
 func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
-	_, opt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
-	rep := opt.GetReplication().load()
-	rep.LocationLabels = []string{"zone", "host"}
+	opt := mockoption.NewScheduleOptions()
+	opt.LocationLabels = []string{"zone", "host"}
 
 	metaStores := []*metapb.Store{
 		{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}},
@@ -43,7 +41,7 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 		{Id: 7, Address: "mock://tikv-7", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h1"}}},
 		{Id: 8, Address: "mock://tikv-8", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h2"}}},
 	}
-	storesStats := statistics.NewStoresStats()
+	storesStats := NewStoresStats()
 	var stores []*core.StoreInfo
 	for _, m := range metaStores {
 		s := core.NewStoreInfo(m, core.SetLastHeartbeatTS(time.Now()))
@@ -55,7 +53,7 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 	stores[3] = store3
 	store4 := stores[4].Clone(core.SetLastHeartbeatTS(stores[4].GetLastHeartbeatTS().Add(-time.Hour)))
 	stores[4] = store4
-	storeStats := newStoreStatisticsMap(opt, namespace.DefaultClassifier)
+	storeStats := NewStoreStatisticsMap(opt, namespace.DefaultClassifier)
 	for _, store := range stores {
 		storeStats.Observe(store, storesStats)
 	}

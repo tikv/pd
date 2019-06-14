@@ -18,8 +18,8 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/mock"
 )
 
 var _ = Suite(&testTableNamespaceSuite{})
@@ -41,7 +41,7 @@ type testTableNamespaceSuite struct {
 
 func (s *testTableNamespaceSuite) newClassifier(c *C) *tableNamespaceClassifier {
 	kv := core.NewKV(core.NewMemoryKV())
-	classifier, err := NewTableNamespaceClassifier(kv, mock.NewIDAllocator())
+	classifier, err := NewTableNamespaceClassifier(kv, mockid.NewIDAllocator())
 	c.Assert(err, IsNil)
 	tableClassifier := classifier.(*tableNamespaceClassifier)
 	testNamespace1 := Namespace{
@@ -136,7 +136,7 @@ func (s *testTableNamespaceSuite) TestTableNameSpaceGetRegionNamespace(c *C) {
 
 func (s *testTableNamespaceSuite) TestNamespaceOperation(c *C) {
 	kv := core.NewKV(core.NewMemoryKV())
-	classifier, err := NewTableNamespaceClassifier(kv, mock.NewIDAllocator())
+	classifier, err := NewTableNamespaceClassifier(kv, mockid.NewIDAllocator())
 	c.Assert(err, IsNil)
 	tableClassifier := classifier.(*tableNamespaceClassifier)
 	nsInfo := tableClassifier.nsInfo

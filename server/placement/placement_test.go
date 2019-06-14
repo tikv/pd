@@ -17,7 +17,8 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server/mock"
+	"github.com/pingcap/pd/pkg/mock/mockcluster"
+	"github.com/pingcap/pd/pkg/mock/mockoption"
 )
 
 func TestPlacement(t *testing.T) {
@@ -96,8 +97,8 @@ func (s *testPlacementSuite) config(constraints ...*Constraint) *Config {
 }
 
 func (s *testPlacementSuite) TestFunctions(c *C) {
-	opt := mock.NewScheduleOptions()
-	cluster := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	cluster := mockcluster.NewCluster(opt)
 	cluster.PutStoreWithLabels(1, "zone", "z1", "host", "h1", "disk", "ssd")
 	cluster.PutStoreWithLabels(2, "zone", "z1", "host", "h1", "disk", "ssd")
 	cluster.PutStoreWithLabels(3, "zone", "z1", "host", "h2", "disk", "hdd")
@@ -146,8 +147,8 @@ func (s *testPlacementSuite) TestFunctions(c *C) {
 }
 
 func (s *testPlacementSuite) TestScore(c *C) {
-	opt := mock.NewScheduleOptions()
-	cluster := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	cluster := mockcluster.NewCluster(opt)
 	cluster.PutStoreWithLabels(1)
 	cluster.PutStoreWithLabels(2)
 	cluster.PutStoreWithLabels(3)
