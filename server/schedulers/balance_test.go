@@ -381,7 +381,6 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	// Store 4 has smaller region score than store 2.
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
-	fmt.Println(sb.Schedule(tc))
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 2, 4)
 
 	// Store 5 has smaller region score than store 1.
@@ -515,7 +514,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	for i := 0; i < 1000; i++ {
 		sb.Schedule(tc)
 	}
-	// now filte the store 5, and can transfer store 1 to store 4
+	// now filter the store 5, and can transfer store 1 to store 4
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 4)
 }
 
