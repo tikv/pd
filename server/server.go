@@ -838,7 +838,7 @@ func (s *Server) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	unhealthMembers := make(map[uint64]*pdpb.Member)
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
-			resp, err := DialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
+			resp, err := dialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
 			if resp != nil {
 				resp.Body.Close()
 			}
