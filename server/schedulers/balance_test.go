@@ -819,6 +819,7 @@ type testRandomMergeSchedulerSuite struct{}
 func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.MergeScheduleLimit = 1
+	opt.EnableTwoWayMerge = true
 	tc := mockcluster.NewCluster(opt)
 	hb := mockhbstream.NewHeartbeatStreams(tc.ID)
 	oc := schedule.NewOperatorController(tc, hb)
