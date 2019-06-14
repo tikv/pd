@@ -18,24 +18,25 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/mock/mockcluster"
+	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/mock"
 	"github.com/pingcap/pd/server/namespace"
 )
 
 var _ = Suite(&testMergeCheckerSuite{})
 
 type testMergeCheckerSuite struct {
-	cluster *mock.Cluster
+	cluster *mockcluster.Cluster
 	mc      *MergeChecker
 	regions []*core.RegionInfo
 }
 
 func (s *testMergeCheckerSuite) SetUpTest(c *C) {
-	cfg := mock.NewScheduleOptions()
+	cfg := mockoption.NewScheduleOptions()
 	cfg.MaxMergeRegionSize = 2
 	cfg.MaxMergeRegionKeys = 2
-	s.cluster = mock.NewCluster(cfg)
+	s.cluster = mockcluster.NewCluster(cfg)
 	s.regions = []*core.RegionInfo{
 		core.NewRegionInfo(
 			&metapb.Region{

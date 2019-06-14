@@ -19,8 +19,8 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/mock"
 )
 
 var _ = Suite(&testStoresInfoSuite{})
@@ -288,7 +288,7 @@ func (s *testClusterInfoSuite) TestLoadClusterInfo(c *C) {
 func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newClusterInfo(mock.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+	cluster := newClusterInfo(mockid.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 
 	n, np := uint64(3), uint64(3)
 	stores := newTestStores(n)
@@ -334,7 +334,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newClusterInfo(mock.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+	cluster := newClusterInfo(mockid.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
 
 	n, np := uint64(3), uint64(3)
 
@@ -549,7 +549,7 @@ func heartbeatRegions(c *C, cluster *clusterInfo, regions []*metapb.Region) {
 func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newClusterInfo(mock.NewIDAllocator(), opt, nil)
+	cluster := newClusterInfo(mockid.NewIDAllocator(), opt, nil)
 
 	// 1: [nil, nil)
 	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
@@ -588,7 +588,7 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newClusterInfo(mock.NewIDAllocator(), opt, nil)
+	cluster := newClusterInfo(mockid.NewIDAllocator(), opt, nil)
 
 	regions := []*metapb.Region{
 		{
