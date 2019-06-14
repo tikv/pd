@@ -479,8 +479,8 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 // and the space of last store 5 if very small, about 5 * regionsize
 // the source region is more likely distributed in store[1, 2, 3].
 func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(nil, nil)
 
 	opt.TolerantSizeRatio = 1
