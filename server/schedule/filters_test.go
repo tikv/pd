@@ -15,8 +15,9 @@ package schedule
 import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/mock/mockcluster"
+	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/mock"
 )
 
 var _ = Suite(&testFiltersSuite{})
@@ -25,8 +26,8 @@ type testFiltersSuite struct{}
 
 func (s *testReplicationSuite) TestPendingPeerFilter(c *C) {
 	filter := NewPendingPeerCountFilter()
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	store := core.NewStoreInfo(&metapb.Store{Id: 1})
 	c.Assert(filter.FilterSource(tc, store), IsFalse)
 	newStore := store.Clone(core.SetPendingPeerCount(30))

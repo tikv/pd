@@ -23,8 +23,44 @@ var (
 			Name:      "status",
 			Help:      "Status of the hotspot.",
 		}, []string{"name", "type"})
+
+	storeStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "store_status",
+			Help:      "Store status for schedule",
+		}, []string{"namespace", "address", "store", "type"})
+
+	clusterStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "status",
+			Help:      "Status of the cluster.",
+		}, []string{"type", "namespace"})
+
+	placementStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "placement_status",
+			Help:      "Status of the cluster placement.",
+		}, []string{"type", "name", "namespace"})
+
+	configStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "config",
+			Name:      "status",
+			Help:      "Status of the scheduling configurations.",
+		}, []string{"type", "namespace"})
 )
 
 func init() {
 	prometheus.MustRegister(hotCacheStatusGauge)
+	prometheus.MustRegister(storeStatusGauge)
+	prometheus.MustRegister(clusterStatusGauge)
+	prometheus.MustRegister(placementStatusGauge)
+	prometheus.MustRegister(configStatusGauge)
 }

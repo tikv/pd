@@ -21,15 +21,17 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/mock/mockcluster"
+	"github.com/pingcap/pd/pkg/mock/mockhbstream"
+	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/mock"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/statistics"
 )
 
-func newTestReplication(mso *mock.ScheduleOptions, maxReplicas int, locationLabels ...string) {
+func newTestReplication(mso *mockoption.ScheduleOptions, maxReplicas int, locationLabels ...string) {
 	mso.MaxReplicas = maxReplicas
 	mso.LocationLabels = locationLabels
 }
@@ -74,8 +76,8 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		{80, 70, 50, false},
 	}
 
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	// create a region to control average region size.
 	tc.AddLeaderRegion(1, 1, 2)
 
@@ -101,8 +103,8 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 }
 
 func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	tc.AddLeaderStore(1, 10)
 	tc.AddLeaderStore(2, 20)
 	tc.AddLeaderStore(3, 30)
@@ -118,14 +120,14 @@ func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})
 
 type testBalanceLeaderSchedulerSuite struct {
-	tc *mock.Cluster
+	tc *mockcluster.Cluster
 	lb schedule.Scheduler
 	oc *schedule.OperatorController
 }
 
 func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
-	opt := mock.NewScheduleOptions()
-	s.tc = mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	s.tc = mockcluster.NewCluster(opt)
 	s.oc = schedule.NewOperatorController(nil, nil)
 	lb, err := schedule.CreateScheduler("balance-leader", s.oc)
 	c.Assert(err, IsNil)
@@ -320,8 +322,8 @@ var _ = Suite(&testBalanceRegionSchedulerSuite{})
 type testBalanceRegionSchedulerSuite struct{}
 
 func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(nil, nil)
 
 	sb, err := schedule.CreateScheduler("balance-region", oc)
@@ -355,8 +357,8 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(nil, nil)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
@@ -424,8 +426,8 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(nil, nil)
 
 	newTestReplication(opt, 5, "zone", "rack", "host")
@@ -462,8 +464,8 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(nil, nil)
 
 	sb, err := schedule.CreateScheduler("balance-region", oc)
@@ -491,8 +493,8 @@ var _ = Suite(&testReplicaCheckerSuite{})
 type testReplicaCheckerSuite struct{}
 
 func (s *testReplicaCheckerSuite) TestBasic(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 
 	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
@@ -565,8 +567,8 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
@@ -583,8 +585,8 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestOffline(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
@@ -640,8 +642,8 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
@@ -718,8 +720,8 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 
 	newTestReplication(opt, 5, "zone", "host")
 
@@ -747,9 +749,9 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
-	opt := mock.NewScheduleOptions()
+	opt := mockoption.NewScheduleOptions()
 	opt.LocationLabels = []string{"zone"}
-	tc := mock.NewCluster(opt)
+	tc := mockcluster.NewCluster(opt)
 	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
@@ -782,8 +784,8 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 }
 
 func (s *testReplicaCheckerSuite) TestOpts(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.AddRegionStore(1, 100)
@@ -815,10 +817,10 @@ var _ = Suite(&testRandomMergeSchedulerSuite{})
 type testRandomMergeSchedulerSuite struct{}
 
 func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
-	opt := mock.NewScheduleOptions()
+	opt := mockoption.NewScheduleOptions()
 	opt.MergeScheduleLimit = 1
-	tc := mock.NewCluster(opt)
-	hb := mock.NewHeartbeatStreams(tc.ID)
+	tc := mockcluster.NewCluster(opt)
+	hb := mockhbstream.NewHeartbeatStreams(tc.ID)
 	oc := schedule.NewOperatorController(tc, hb)
 
 	mb, err := schedule.CreateScheduler("random-merge", oc)
@@ -845,9 +847,9 @@ var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
 type testBalanceHotWriteRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
-	opt := mock.NewScheduleOptions()
+	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
-	tc := mock.NewCluster(opt)
+	tc := mockcluster.NewCluster(opt)
 	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 
@@ -904,7 +906,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	opt.HotRegionScheduleLimit = 0
 	c.Assert(hb.Schedule(tc), HasLen, 0)
 	// hot region scheduler is not affect by `balance-region-schedule-limit`.
-	opt.HotRegionScheduleLimit = mock.NewScheduleOptions().HotRegionScheduleLimit
+	opt.HotRegionScheduleLimit = mockoption.NewScheduleOptions().HotRegionScheduleLimit
 	opt.RegionScheduleLimit = 0
 	c.Assert(hb.Schedule(tc), HasLen, 1)
 	// Always produce operator
@@ -939,7 +941,7 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	// hot region scheduler is restricted by schedule limit.
 	opt.LeaderScheduleLimit = 0
 	c.Assert(hb.Schedule(tc), HasLen, 0)
-	opt.LeaderScheduleLimit = mock.NewScheduleOptions().LeaderScheduleLimit
+	opt.LeaderScheduleLimit = mockoption.NewScheduleOptions().LeaderScheduleLimit
 
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
@@ -951,8 +953,8 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 type testBalanceHotReadRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewOperatorController(nil, nil))
 	c.Assert(err, IsNil)
 
@@ -1026,8 +1028,8 @@ var _ = Suite(&testScatterRangeLeaderSuite{})
 type testScatterRangeLeaderSuite struct{}
 
 func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	// Add stores 1,2,3,4,5.
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 0)
@@ -1096,8 +1098,8 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 }
 
 func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
-	opt := mock.NewScheduleOptions()
-	tc := mock.NewCluster(opt)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
 	// Add stores 1,2,3.
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 0)

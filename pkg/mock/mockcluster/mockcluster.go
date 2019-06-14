@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mock
+package mockcluster
 
 import (
 	"fmt"
@@ -21,6 +21,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/mock/mockid"
+	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/statistics"
@@ -30,18 +32,18 @@ import (
 // Cluster is used to mock clusterInfo for test use.
 type Cluster struct {
 	*core.BasicCluster
-	*IDAllocator
-	*ScheduleOptions
+	*mockid.IDAllocator
+	*mockoption.ScheduleOptions
 	*statistics.HotSpotCache
 	*statistics.StoresStats
 	ID uint64
 }
 
 // NewCluster creates a new Cluster
-func NewCluster(opt *ScheduleOptions) *Cluster {
+func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 	return &Cluster{
 		BasicCluster:    core.NewBasicCluster(),
-		IDAllocator:     NewIDAllocator(),
+		IDAllocator:     mockid.NewIDAllocator(),
 		ScheduleOptions: opt,
 		HotSpotCache:    statistics.NewHotSpotCache(),
 		StoresStats:     statistics.NewStoresStats(),

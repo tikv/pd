@@ -17,8 +17,8 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/mock/mockclassifier"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/mock"
 )
 
 var _ = Suite(&testRegionStatisticsSuite{})
@@ -58,7 +58,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
 	region2 := core.NewRegionInfo(r2, peers[0])
-	regionStats := newRegionStatistics(opt, mock.Classifier{})
+	regionStats := newRegionStatistics(opt, mockclassifier.Classifier{})
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[learnerPeer]), Equals, 1)

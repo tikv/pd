@@ -15,8 +15,8 @@ package schedule
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/mock"
 )
 
 // ApplyOperatorStep applies operator step. Only for test purpose.
@@ -88,7 +88,7 @@ func ApplyOperatorStep(region *core.RegionInfo, op *Operator) *core.RegionInfo {
 }
 
 // ApplyOperator applies operator. Only for test purpose.
-func ApplyOperator(mc *mock.Cluster, op *Operator) {
+func ApplyOperator(mc *mockcluster.Cluster, op *Operator) {
 	origin := mc.GetRegion(op.RegionID())
 	region := origin
 	for !op.IsFinish() {

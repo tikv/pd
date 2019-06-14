@@ -33,22 +33,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"result"})
 
-	clusterStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "cluster",
-			Name:      "status",
-			Help:      "Status of the cluster.",
-		}, []string{"type", "namespace"})
-
-	placementStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "cluster",
-			Name:      "placement_status",
-			Help:      "Status of the cluster placement.",
-		}, []string{"type", "name", "namespace"})
-
 	healthStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -106,14 +90,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
 		}, []string{"address", "store"})
 
-	storeStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "store_status",
-			Help:      "Store status for schedule",
-		}, []string{"namespace", "address", "store", "type"})
-
 	hotSpotStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -155,14 +131,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 15),
 		})
 
-	configStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "config",
-			Name:      "status",
-			Help:      "Status of the scheduling configurations.",
-		}, []string{"type", "namespace"})
-
 	tsoHandleDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -176,20 +144,16 @@ var (
 func init() {
 	prometheus.MustRegister(txnCounter)
 	prometheus.MustRegister(txnDuration)
-	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(regionHeartbeatCounter)
 	prometheus.MustRegister(regionHeartbeatLatency)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(tsoCounter)
-	prometheus.MustRegister(storeStatusGauge)
 	prometheus.MustRegister(regionStatusGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
 	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(patrolCheckRegionsHistogram)
-	prometheus.MustRegister(placementStatusGauge)
-	prometheus.MustRegister(configStatusGauge)
 	prometheus.MustRegister(tsoHandleDuration)
 }

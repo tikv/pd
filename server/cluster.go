@@ -658,7 +658,7 @@ func (c *RaftCluster) checkOperators() {
 
 func (c *RaftCluster) collectMetrics() {
 	cluster := c.cachedCluster
-	statsMap := newStoreStatisticsMap(c.cachedCluster.opt, c.GetNamespaceClassifier())
+	statsMap := statistics.NewStoreStatisticsMap(c.cachedCluster.opt, c.GetNamespaceClassifier())
 	for _, s := range cluster.GetStores() {
 		statsMap.Observe(s, cluster.storesStats)
 	}
