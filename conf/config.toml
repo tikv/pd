@@ -68,6 +68,8 @@ region-schedule-limit = 1024
 replica-schedule-limit = 1024
 merge-schedule-limit = 8
 tolerant-size-ratio = 0
+# Enable two-way merge, set it to true may help improving merge speed.
+#enable-two-way-merge = false
 
 # customized schedulers, the format is as below
 # if empty, it will use balance-leader, balance-region, hot-region as default

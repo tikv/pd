@@ -98,11 +98,15 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 		return nil
 	}
 
-	var target *core.RegionInfo
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
+	var target *core.RegionInfo
+	targetNext := m.checkTarget(region, next, target)
 	target = m.checkTarget(region, prev, target)
-	target = m.checkTarget(region, next, target)
+	if target != targetNext && !m.cluster.GetEnableTwoWayMerge() {
+		checkerCounter.WithLabelValues("merge_checker", "skip_left").Inc()
+		target = targetNext
+	}
 
 	if target == nil {
 		checkerCounter.WithLabelValues("merge_checker", "no_target").Inc()
@@ -114,6 +118,11 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 	ops, err := CreateMergeRegionOperator("merge-region", m.cluster, region, target, OpMerge)
 	if err != nil {
 		return nil
+	}
+	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
+	if region.GetApproximateSize() > target.GetApproximateSize() ||
+		region.GetApproximateKeys() > target.GetApproximateKeys() {
+		checkerCounter.WithLabelValues("merge_checker", "larger_source").Inc()
 	}
 	return ops
 }

@@ -815,6 +815,7 @@ type testRandomMergeSchedulerSuite struct{}
 func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	opt := schedule.NewMockSchedulerOptions()
 	opt.MergeScheduleLimit = 1
+	opt.EnableTwoWayMerge = true
 	tc := schedule.NewMockCluster(opt)
 	hb := schedule.NewMockHeartbeatStreams(tc.ID)
 	oc := schedule.NewOperatorController(tc, hb)

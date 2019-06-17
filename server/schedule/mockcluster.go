@@ -527,6 +527,7 @@ const (
 	defaultMaxMergeRegionSize          = 0
 	defaultMaxMergeRegionKeys          = 0
 	defaultSplitMergeInterval          = 0
+	defaultTwoWayMerge                 = false
 	defaultMaxStoreDownTime            = 30 * time.Minute
 	defaultLeaderScheduleLimit         = 4
 	defaultRegionScheduleLimit         = 4
@@ -554,6 +555,7 @@ type MockSchedulerOptions struct {
 	MaxMergeRegionSize           uint64
 	MaxMergeRegionKeys           uint64
 	SplitMergeInterval           time.Duration
+	EnableTwoWayMerge            bool
 	MaxStoreDownTime             time.Duration
 	MaxReplicas                  int
 	LocationLabels               []string
@@ -584,6 +586,7 @@ func NewMockSchedulerOptions() *MockSchedulerOptions {
 	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
 	mso.MaxMergeRegionKeys = defaultMaxMergeRegionKeys
 	mso.SplitMergeInterval = defaultSplitMergeInterval
+	mso.EnableTwoWayMerge = defaultTwoWayMerge
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.HotRegionCacheHitsThreshold = defaultHotRegionCacheHitsThreshold
@@ -647,6 +650,11 @@ func (mso *MockSchedulerOptions) GetMaxMergeRegionKeys() uint64 {
 // GetSplitMergeInterval mock method
 func (mso *MockSchedulerOptions) GetSplitMergeInterval() time.Duration {
 	return mso.SplitMergeInterval
+}
+
+// GetEnableTwoWayMerge mock method
+func (mso *MockSchedulerOptions) GetEnableTwoWayMerge() bool {
+	return mso.EnableTwoWayMerge
 }
 
 // GetMaxStoreDownTime mock method
