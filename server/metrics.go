@@ -41,22 +41,6 @@ var (
 			Help:      "Status of the cluster.",
 		}, []string{"name"})
 
-	regionStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "regions",
-			Name:      "status",
-			Help:      "Status of the regions.",
-		}, []string{"type"})
-
-	regionLabelLevelGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "regions",
-			Name:      "label_level",
-			Help:      "Number of regions in the different label level.",
-		}, []string{"type"})
-
 	timeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -150,8 +134,6 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatLatency)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(tsoCounter)
-	prometheus.MustRegister(regionStatusGauge)
-	prometheus.MustRegister(regionLabelLevelGauge)
 	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(patrolCheckRegionsHistogram)

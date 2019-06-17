@@ -686,7 +686,7 @@ func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 	}
 	c.RLock()
 	defer c.RUnlock()
-	return c.cachedCluster.GetRegionStatsByType(downPeer), nil
+	return c.cachedCluster.GetRegionStatsByType(statistics.DownPeer), nil
 }
 
 // GetExtraPeerRegions gets the region exceeds the specified number of peers.
@@ -697,7 +697,7 @@ func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
 	}
 	c.RLock()
 	defer c.RUnlock()
-	return c.cachedCluster.GetRegionStatsByType(extraPeer), nil
+	return c.cachedCluster.GetRegionStatsByType(statistics.ExtraPeer), nil
 }
 
 // GetMissPeerRegions gets the region less than the specified number of peers.
@@ -708,7 +708,7 @@ func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
 	}
 	c.RLock()
 	defer c.RUnlock()
-	return c.cachedCluster.GetRegionStatsByType(missPeer), nil
+	return c.cachedCluster.GetRegionStatsByType(statistics.MissPeer), nil
 }
 
 // GetPendingPeerRegions gets the region with pending peer.
@@ -719,7 +719,7 @@ func (h *Handler) GetPendingPeerRegions() ([]*core.RegionInfo, error) {
 	}
 	c.RLock()
 	defer c.RUnlock()
-	return c.cachedCluster.GetRegionStatsByType(pendingPeer), nil
+	return c.cachedCluster.GetRegionStatsByType(statistics.PendingPeer), nil
 }
 
 // GetIncorrectNamespaceRegions gets the region with incorrect namespace peer.
@@ -730,5 +730,5 @@ func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 	}
 	c.RLock()
 	defer c.RUnlock()
-	return c.cachedCluster.GetRegionStatsByType(incorrectNamespace), nil
+	return c.cachedCluster.GetRegionStatsByType(statistics.IncorrectNamespace), nil
 }

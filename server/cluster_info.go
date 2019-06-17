@@ -35,8 +35,8 @@ type clusterInfo struct {
 	kv              *core.KV
 	meta            *metapb.Cluster
 	opt             *scheduleOption
-	regionStats     *regionStatistics
-	labelLevelStats *labelLevelStatistics
+	regionStats     *statistics.RegionStatistics
+	labelLevelStats *statistics.LabelLevelStatistics
 	storesStats     *statistics.StoresStats
 	prepareChecker  *prepareChecker
 	changedRegions  chan *core.RegionInfo
@@ -51,7 +51,7 @@ func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clus
 		id:              id,
 		opt:             opt,
 		kv:              kv,
-		labelLevelStats: newLabelLevelStatistics(),
+		labelLevelStats: statistics.NewLabelLevelStatistics(),
 		storesStats:     statistics.NewStoresStats(),
 		prepareChecker:  newPrepareChecker(),
 		changedRegions:  make(chan *core.RegionInfo, defaultChangedRegionsLimit),
@@ -620,9 +620,9 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		}
 		for _, item := range overlaps {
 			if c.regionStats != nil {
-				c.regionStats.clearDefunctRegion(item.GetId())
+				c.regionStats.ClearDefunctRegion(item.GetId())
 			}
-			c.labelLevelStats.clearDefunctRegion(item.GetId())
+			c.labelLevelStats.ClearDefunctRegion(item.GetId())
 		}
 
 		// Update related stores.
@@ -670,13 +670,13 @@ func (c *clusterInfo) collectMetrics() {
 	c.hotSpotCache.CollectMetrics(c.storesStats)
 }
 
-func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
+func (c *clusterInfo) GetRegionStatsByType(typ statistics.RegionStatisticType) []*core.RegionInfo {
 	if c.regionStats == nil {
 		return nil
 	}
 	c.RLock()
 	defer c.RUnlock()
-	return c.regionStats.getRegionStatsByType(typ)
+	return c.regionStats.GetRegionStatsByType(typ)
 }
 
 func (c *clusterInfo) GetOpt() namespace.ScheduleOptions {

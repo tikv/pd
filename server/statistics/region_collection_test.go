@@ -11,13 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package statistics
 
 import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockclassifier"
+	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -26,8 +27,7 @@ var _ = Suite(&testRegionStatisticsSuite{})
 type testRegionStatisticsSuite struct{}
 
 func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
-	_, opt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
+	opt := mockoption.NewScheduleOptions()
 	peers := []*metapb.Peer{
 		{Id: 5, StoreId: 1},
 		{Id: 6, StoreId: 2},
@@ -58,51 +58,51 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
 	region2 := core.NewRegionInfo(r2, peers[0])
-	regionStats := newRegionStatistics(opt, mockclassifier.Classifier{})
+	regionStats := NewRegionStatistics(opt, mockclassifier.Classifier{})
 	regionStats.Observe(region1, stores)
-	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[learnerPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
 		core.WithPendingPeers(peers[0:1]),
 	)
 	regionStats.Observe(region1, stores)
-	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[missPeer]), Equals, 0)
-	c.Assert(len(regionStats.stats[downPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[learnerPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
+	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[MissPeer]), Equals, 0)
+	c.Assert(len(regionStats.stats[DownPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[IncorrectNamespace]), Equals, 1)
 
 	region2 = region2.Clone(core.WithDownPeers(downPeers[0:1]))
 	regionStats.Observe(region2, stores[0:2])
-	c.Assert(len(regionStats.stats[extraPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[missPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[downPeer]), Equals, 2)
-	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[learnerPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[offlinePeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 1)
+	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[MissPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[DownPeer]), Equals, 2)
+	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[OfflinePeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[IncorrectNamespace]), Equals, 1)
 
 	region1 = region1.Clone(core.WithRemoveStorePeer(7))
 	regionStats.Observe(region1, stores[0:3])
-	c.Assert(len(regionStats.stats[extraPeer]), Equals, 0)
-	c.Assert(len(regionStats.stats[missPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[downPeer]), Equals, 2)
-	c.Assert(len(regionStats.stats[pendingPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[learnerPeer]), Equals, 0)
-	c.Assert(len(regionStats.stats[offlinePeer]), Equals, 0)
-	c.Assert(len(regionStats.stats[incorrectNamespace]), Equals, 0)
+	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 0)
+	c.Assert(len(regionStats.stats[MissPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[DownPeer]), Equals, 2)
+	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 0)
+	c.Assert(len(regionStats.stats[OfflinePeer]), Equals, 0)
+	c.Assert(len(regionStats.stats[IncorrectNamespace]), Equals, 0)
 
 	store3 = stores[3].Clone(core.SetStoreState(metapb.StoreState_Up))
 	stores[3] = store3
 	regionStats.Observe(region1, stores)
-	c.Assert(len(regionStats.stats[offlinePeer]), Equals, 0)
+	c.Assert(len(regionStats.stats[OfflinePeer]), Equals, 0)
 }
 
 func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
-	labelLevelStats := newLabelLevelStatistics()
+	labelLevelStats := NewLabelLevelStatistics()
 	labelsSet := [][]map[string]string{
 		{
 			{"zone": "z1", "rack": "r1", "host": "h1"},
