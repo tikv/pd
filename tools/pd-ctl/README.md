@@ -173,6 +173,12 @@ Usage:
     >> config set split-merge-interval 24h  // Set the interval between `split` and `merge` to one day
     ```
 
+- `enable-two-way-merge` controls the merge scheduler behavior. This means a Region can be merged into left or right. Set it to true may help improving merge speed.
+
+    ```bash
+    >> config set enable-two-way-merge true  // Enable two way merge.
+    ```
+
 - `patrol-region-interval` controls the execution frequency that `replicaChecker` checks the health status of Regions. A shorter interval indicates a higher execution frequency. Generally, you do not need to adjust it.
 
     ```bash
