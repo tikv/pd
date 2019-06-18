@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	   http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -62,6 +62,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args := []string{"-u", pdAddr, "config", "show"}
 	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
+	scheduleCfg := server.ScheduleConfig{}
 	cfg := make(map[string]interface{})
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	c.Assert(cfg["schedule"], DeepEquals, svr.GetScheduleConfig())
