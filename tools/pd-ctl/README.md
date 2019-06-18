@@ -93,43 +93,61 @@ Use this command to view or modify the configuration information.
 Usage:
 
 ```bash
->> config show                                // Display the config information of the scheduler
+>> config show                                // Display the config information of the replication and schedule
 {
-  "max-snapshot-count": 3,
-  "max-pending-peer-count": 16,
-  "max-merge-region-size": 50,
-  "max-merge-region-rows": 200000,
-  "split-merge-interval": "1h",
-  "patrol-region-interval": "100ms",
-  "max-store-down-time": "1h0m0s",
-  "leader-schedule-limit": 4,
-  "region-schedule-limit": 4,
-  "replica-schedule-limit":8,
-  "merge-schedule-limit": 8,
-  "tolerant-size-ratio": 5,
-  "low-space-ratio": 0.8,
-  "high-space-ratio": 0.6,
-  "disable-raft-learner": "false",
-  "disable-remove-down-replica": "false",
-  "disable-replace-offline-replica": "false",
-  "disable-make-up-replica": "false",
-  "disable-remove-extra-replica": "false",
-  "disable-location-replacement": "false",
-  "disable-namespace-relocation": "false",
-  "schedulers-v2": [
-    {
-      "type": "balance-region",
-      "args": null
-    },
-    {
-      "type": "balance-leader",
-      "args": null
-    },
-    {
-      "type": "hot-region",
-      "args": null
-    }
-  ]
+  "replication": {
+    "location-labels": "",
+    "max-replicas": 3,
+    "strictly-match-label": "true"
+  },
+  "schedule": {
+    "disable-location-replacement": "false",
+    "disable-make-up-replica": "false",
+    "disable-namespace-relocation": "false",
+    "disable-raft-learner": "false",
+    "disable-remove-down-replica": "false",
+    "disable-remove-extra-replica": "false",
+    "disable-replace-offline-replica": "false",
+    "high-space-ratio": 0.6,
+    "hot-region-cache-hits-threshold": 3,
+    "hot-region-schedule-limit": 2,
+    "leader-schedule-limit": 4,
+    "low-space-ratio": 0.8,
+    "max-merge-region-keys": 200000,
+    "max-merge-region-size": 20,
+    "max-pending-peer-count": 16,
+    "max-snapshot-count": 3,
+    "max-store-down-time": "30m0s",
+    "merge-schedule-limit": 8,
+    "patrol-region-interval": "100ms",
+    "region-schedule-limit": 4,
+    "replica-schedule-limit": 8,
+    "schedulers-v2": [
+      {
+        "args": null,
+        "disable": false,
+        "type": "balance-region"
+      },
+      {
+        "args": null,
+        "disable": false,
+        "type": "balance-leader"
+      },
+      {
+        "args": null,
+        "disable": false,
+        "type": "hot-region"
+      },
+      {
+        "args": null,
+        "disable": false,
+        "type": "label"
+      }
+    ],
+    "split-merge-interval": "1h0m0s",
+    "store-balance-rate": 1,
+    "tolerant-size-ratio": 5
+  }
 }
 >> config show all                            // Display all config information
 >> config show namespace ts1                  // Display the config information of the namespace named ts1
