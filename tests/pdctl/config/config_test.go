@@ -62,9 +62,10 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args := []string{"-u", pdAddr, "config", "show"}
 	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	scheduleCfg := server.ScheduleConfig{}
-	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
-	c.Assert(&scheduleCfg, DeepEquals, svr.GetScheduleConfig())
+	cfg := make(map[string]interface{})
+	c.Assert(json.Unmarshal(output, &cfg), IsNil)
+	c.Assert(cfg["schedule"], DeepEquals, svr.GetScheduleConfig())
+	c.Assert(cfg["replication"], DeepEquals, svr.GetReplicationConfig())
 
 	// config show replication
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
