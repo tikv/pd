@@ -172,7 +172,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	cfg = server.Config{}
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
-	c.Assert(cfg.Schedule, Equals, svr.GetScheduleConfig())
+	c.Assert(&cfg.Schedule, Equals, svr.GetScheduleConfig())
 	scheduleCfg = cfg.Schedule
 	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, svr.GetScheduleConfig().LeaderScheduleLimit)
 	c.Assert(scheduleCfg.HotRegionScheduleLimit, Equals, svr.GetScheduleConfig().HotRegionScheduleLimit)
