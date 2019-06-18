@@ -185,7 +185,8 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args2 = []string{"-u", pdAddr, "config", "show"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
-	scheduleCfg = server.ScheduleConfig{}
-	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
+	cfg = server.Config{}
+	c.Assert(json.Unmarshal(output, &cfg), IsNil)
+	scheduleCfg = cfg.Schedule
 	c.Assert(scheduleCfg.DisableLearner, Equals, svr.GetScheduleConfig().DisableLearner)
 }
