@@ -48,7 +48,7 @@ func NewConfigCommand() *cobra.Command {
 func NewShowConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:   "show [namespace|replication|label-property|all]",
-		Short: "show schedule config of PD",
+		Short: "show replication and schedule config of PD",
 		Run:   showConfigCommandFunc,
 	}
 	sc.AddCommand(NewShowAllConfigCommand())
@@ -184,12 +184,28 @@ func NewDeleteLabelPropertyConfigCommand() *cobra.Command {
 }
 
 func showConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, schedulePrefix, http.MethodGet)
+	allR, err := doRequest(cmd, configPrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	cmd.Println(r)
+	allData := make(map[string]interface{})
+	err = json.Unmarshal([]byte(allR), &allData)
+	if err != nil {
+		cmd.Printf("Failed to unmarshal config: %s\n", err)
+		return
+	}
+
+	data := make(map[string]interface{})
+	data["replication"] = allData["replication"]
+	data["schedule"] = allData["schedule"]
+
+	r, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		cmd.Printf("Failed to marshal config: %s\n", err)
+		return
+	}
+	cmd.Println(string(r))
 }
 
 func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {

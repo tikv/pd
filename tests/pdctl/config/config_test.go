@@ -63,8 +63,10 @@ func (s *configTestSuite) TestConfig(c *C) {
 	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	scheduleCfg := server.ScheduleConfig{}
-	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
-	c.Assert(&scheduleCfg, DeepEquals, svr.GetScheduleConfig())
+	cfg := server.Config{}
+	c.Assert(json.Unmarshal(output, &cfg), IsNil)
+	c.Assert(&cfg.Schedule, DeepEquals, svr.GetScheduleConfig())
+	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
 
 	// config show replication
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
@@ -168,8 +170,9 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args2 = []string{"-u", pdAddr, "config", "show"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
-	scheduleCfg = server.ScheduleConfig{}
-	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
+	cfg = server.Config{}
+	c.Assert(json.Unmarshal(output, &cfg), IsNil)
+	scheduleCfg = cfg.Schedule
 	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, svr.GetScheduleConfig().LeaderScheduleLimit)
 	c.Assert(scheduleCfg.HotRegionScheduleLimit, Equals, svr.GetScheduleConfig().HotRegionScheduleLimit)
 	c.Assert(scheduleCfg.HotRegionCacheHitsThreshold, Equals, svr.GetScheduleConfig().HotRegionCacheHitsThreshold)
@@ -182,7 +185,8 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args2 = []string{"-u", pdAddr, "config", "show"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
-	scheduleCfg = server.ScheduleConfig{}
-	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
+	cfg = server.Config{}
+	c.Assert(json.Unmarshal(output, &cfg), IsNil)
+	scheduleCfg = cfg.Schedule
 	c.Assert(scheduleCfg.DisableLearner, Equals, svr.GetScheduleConfig().DisableLearner)
 }
