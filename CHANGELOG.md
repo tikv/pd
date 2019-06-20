@@ -1,5 +1,41 @@
 # PD Change Log
 
+## v3.0.0-rc.3
+
++ Add light peer without considering the influence [1563](https://github.com/pingcap/pd/pull/1563)
++ Add initialized flag in cluster status [1581](https://github.com/pingcap/pd/pull/1581)
++ Add option to only merge from left into right [1583](https://github.com/pingcap/pd/pull/1583)
++ Improve config check [1585](https://github.com/pingcap/pd/pull/1585)
++ Fix store maybe always overloaded [1590](https://github.com/pingcap/pd/pull/1590)
++ Adjust store balance rate meaning [1591](https://github.com/pingcap/pd/pull/1591)
+
+## v3.0.0-rc.2
+
++ Enable the Region storage by default to store the Region metadata [1524](https://github.com/pingcap/pd/pull/1524)
++ Fix the issue that hot Region scheduling is preempted by another scheduler [1522](https://github.com/pingcap/pd/pull/1522)
++ Fix the issue that the priority for the leader does not take effect [1533](https://github.com/pingcap/pd/pull/1533)
++ Add the gRPC interface for ScanRegions [1535](https://github.com/pingcap/pd/pull/1535)
++ Push operators actively [1536](https://github.com/pingcap/pd/pull/1536)
++ Add the store limit mechanism for separately controlling the speed of operators for each store [1474](https://github.com/pingcap/pd/pull/1474)
++ Fix the issue of inconsistent Config status [1476](https://github.com/pingcap/pd/pull/1476)
+
+## v3.0.0-rc.1
+
++ Upgrade ETCD [1452](https://github.com/pingcap/pd/pull/1452)
+    - Unify the log format of etcd and PD server
+    - Fix the issue of failing to elect Leader by PreVote
+    - Support fast dropping the “propose” and “read” requests that are to fail to avoid blocking the subsequent requests
+    - Fix the deadlock issue of Lease
++ Fix the issue that a hot store makes incorrect statistics of keys [1487](https://github.com/pingcap/pd/pull/1487)
++ Support forcibly rebuilding a PD cluster from a single PD node [1485](https://github.com/pingcap/pd/pull/1485)
++ Fix the issue that regionScatterer might generate an invalid OperatorStep [1482](https://github.com/pingcap/pd/pull/1482)
++ Fix the too short timeout issue of the MergeRegion operator [1495](https://github.com/pingcap/pd/pull/1495)
++ Support giving high priority to hot region scheduling [1492](https://github.com/pingcap/pd/pull/1492)
++ Add the metrics for recording the time of handling TSO requests on the PD server side [1502](https://github.com/pingcap/pd/pull/1502)
++ Add the corresponding Store ID and Address to the metrics related to the store [1506](https://github.com/pingcap/pd/pull/1506)
++ Support the GetOperator service [1477](https://github.com/pingcap/pd/pull/1477)
++ Fix the issue that the error cannot be sent in the Heartbeat stream because the store cannot be found [1521](https://github.com/pingcap/pd/pull/1521)
+
 ## v3.0.0-beta.1
 
 + Unify the log format for easy collection and analysis by tools
