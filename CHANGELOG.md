@@ -1,5 +1,8 @@
 # PD Change Log
 
+## v2.1.13
+- No changes
+
 ## v2.1.12
 - Use different timeouts for HTTP clients [1574](https://github.com/pingcap/pd/pull/1574)
 
