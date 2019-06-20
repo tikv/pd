@@ -47,7 +47,7 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	cluster, err := tests.NewTestCluster(3,
 		func(conf *server.Config) { conf.Replication.MaxReplicas = 2 },
 		func(conf *server.Config) { conf.Schedule.MaxStoreDownTime.Duration = time.Since(t) },
-		func(conf *server.Config) { conf.Schedule.StoreBalanceRate = 4 },
+		func(conf *server.Config) { conf.Schedule.StoreBalanceRate = 240 },
 	)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()

@@ -32,7 +32,7 @@ const (
 	defaultReplicaScheduleLimit        = 8
 	defaultMergeScheduleLimit          = 8
 	defaultHotRegionScheduleLimit      = 2
-	defaultStoreBalanceRate            = 1
+	defaultStoreBalanceRate            = 60
 	defaultTolerantSizeRatio           = 2.5
 	defaultLowSpaceRatio               = 0.8
 	defaultHighSpaceRatio              = 0.6
