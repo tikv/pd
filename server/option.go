@@ -188,6 +188,10 @@ func (o *scheduleOption) GetHighSpaceRatio() float64 {
 	return o.load().HighSpaceRatio
 }
 
+func (o *scheduleOption) GetSchedulerMaxWaitingOperator() uint64 {
+	return o.load().SchedulerMaxWaitingOperator
+}
+
 func (o *scheduleOption) IsRaftLearnerEnabled() bool {
 	return !o.load().DisableLearner
 }

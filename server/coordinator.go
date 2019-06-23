@@ -160,7 +160,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 			continue
 		}
 		op := schedule.CreatePromoteLearnerOperator("promote-learner", region, p)
-		if opController.AddOperator(op) {
+		if opController.AddWaitingOperator(op) {
 			return true
 		}
 	}
@@ -169,7 +169,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		opController.OperatorCount(schedule.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
 		opController.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.namespaceChecker.Check(region); op != nil {
-			if opController.AddOperator(op) {
+			if opController.AddWaitingOperator(op) {
 				return true
 			}
 		}
@@ -177,7 +177,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 
 	if opController.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
-			if opController.AddOperator(op) {
+			if opController.AddWaitingOperator(op) {
 				return true
 			}
 		}
@@ -185,7 +185,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
-			if opController.AddOperator(ops...) {
+			if opController.AddWaitingOperator(ops...) {
 				return true
 			}
 		}
@@ -429,7 +429,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 				continue
 			}
 			if op := s.Schedule(); op != nil {
-				c.opController.AddOperator(op...)
+				c.opController.AddWaitingOperator(op...)
 			}
 
 		case <-s.Ctx().Done():

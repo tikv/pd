@@ -46,6 +46,7 @@ type Options interface {
 	GetTolerantSizeRatio() float64
 	GetLowSpaceRatio() float64
 	GetHighSpaceRatio() float64
+	GetSchedulerMaxWaitingOperator() uint64
 
 	IsRaftLearnerEnabled() bool
 

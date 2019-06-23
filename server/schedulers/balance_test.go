@@ -837,7 +837,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	c.Assert(ops[0].Kind()&schedule.OpMerge, Not(Equals), 0)
 	c.Assert(ops[1].Kind()&schedule.OpMerge, Not(Equals), 0)
 
-	oc.AddOperator(ops...)
+	oc.AddWaitingOperator(ops...)
 	c.Assert(mb.IsScheduleAllowed(tc), IsFalse)
 }
 

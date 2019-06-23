@@ -309,8 +309,10 @@ type Operator struct {
 	steps       []OperatorStep
 	currentStep int32
 	createTime  time.Time
-	stepTime    int64
-	level       core.PriorityLevel
+	// startTime is used to record the start time of an operator which is added into running operators.
+	startTime time.Time
+	stepTime  int64
+	level     core.PriorityLevel
 }
 
 // NewOperator creates a new operator.
@@ -328,7 +330,7 @@ func NewOperator(desc string, regionID uint64, regionEpoch *metapb.RegionEpoch, 
 }
 
 func (o *Operator) String() string {
-	s := fmt.Sprintf("%s (kind:%s, region:%v(%v,%v), createAt:%s, currentStep:%v, steps:%+v) ", o.desc, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.createTime, atomic.LoadInt32(&o.currentStep), o.steps)
+	s := fmt.Sprintf("%s (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, steps:%+v) ", o.desc, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.createTime, o.startTime, atomic.LoadInt32(&o.currentStep), o.steps)
 	if o.IsTimeout() {
 		s = s + "timeout"
 	}
@@ -376,6 +378,11 @@ func (o *Operator) Kind() OperatorKind {
 // ElapsedTime returns duration since it was created.
 func (o *Operator) ElapsedTime() time.Duration {
 	return time.Since(o.createTime)
+}
+
+// RunningTime returns duration since it was promoted.
+func (o *Operator) RunningTime() time.Duration {
+	return time.Since(o.startTime)
 }
 
 // Len returns the operator's steps count.
@@ -428,10 +435,13 @@ func (o *Operator) IsTimeout() bool {
 	if o.IsFinish() {
 		return false
 	}
+	if o.startTime.IsZero() {
+		return false
+	}
 	if o.kind&OpRegion != 0 {
-		timeout = time.Since(o.createTime) > RegionOperatorWaitTime
+		timeout = time.Since(o.startTime) > RegionOperatorWaitTime
 	} else {
-		timeout = time.Since(o.createTime) > LeaderOperatorWaitTime
+		timeout = time.Since(o.startTime) > LeaderOperatorWaitTime
 	}
 	if timeout {
 		return true

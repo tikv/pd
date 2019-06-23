@@ -318,6 +318,15 @@ func (h *Handler) GetOperators() ([]*schedule.Operator, error) {
 	return c.opController.GetOperators(), nil
 }
 
+// GetWaitingOperators returns the waiting operators.
+func (h *Handler) GetWaitingOperators() ([]*schedule.Operator, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil, err
+	}
+	return c.opController.GetWaitingOperators(), nil
+}
+
 // GetAdminOperators returns the running admin operators.
 func (h *Handler) GetAdminOperators() ([]*schedule.Operator, error) {
 	return h.GetOperatorsOfKind(schedule.OpAdmin)

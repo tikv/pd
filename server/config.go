@@ -500,7 +500,9 @@ type ScheduleConfig struct {
 	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
-	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode
+	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
+	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator,omitempty" json:"scheduler-max-waiting-operator"`
+	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
 	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
 
 	// DisableRemoveDownReplica is the option to prevent replica checker from
@@ -547,6 +549,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		TolerantSizeRatio:            c.TolerantSizeRatio,
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
+		SchedulerMaxWaitingOperator:  c.SchedulerMaxWaitingOperator,
 		DisableLearner:               c.DisableLearner,
 		DisableRemoveDownReplica:     c.DisableRemoveDownReplica,
 		DisableReplaceOfflineReplica: c.DisableReplaceOfflineReplica,
@@ -579,6 +582,7 @@ const (
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
+	defaultSchedulerMaxWaitingOperator = 3
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -617,6 +621,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("tolerant-size-ratio") {
 		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
+	}
+	if !meta.IsDefined("scheduler-max-waiting-operator") {
+		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)

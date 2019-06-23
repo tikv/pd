@@ -76,6 +76,8 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 				ops, err = h.GetLeaderOperators()
 			case "region":
 				ops, err = h.GetRegionOperators()
+			case "waiting":
+				ops, err = h.GetWaitingOperators()
 			}
 			if err != nil {
 				h.r.JSON(w, http.StatusInternalServerError, err.Error())
