@@ -15,6 +15,10 @@ package region_test
 
 import (
 	"encoding/json"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -25,6 +29,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
+	ctl "github.com/pingcap/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -37,6 +42,33 @@ type regionTestSuite struct{}
 
 func (s *regionTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
+}
+
+func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
+	c.Parallel()
+
+	cluster, err := tests.NewTestCluster(1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	url := cluster.GetConfig().GetClientURLs()
+	store := metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
+	fname := filepath.Join(os.TempDir(), "stdout")
+	old := os.Stdout
+	temp, _ := os.Create(fname)
+	os.Stdout = temp
+	ctl.Start([]string{"-u", url, "region", "key", "--format=raw", " "})
+	temp.Close()
+	os.Stdout = old
+	out, _ := ioutil.ReadFile(fname)
+	c.Assert(strings.Contains(string(out), "unknown flag"), IsFalse)
 }
 
 func (s *regionTestSuite) TestRegion(c *C) {

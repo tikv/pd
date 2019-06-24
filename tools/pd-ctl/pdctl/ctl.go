@@ -70,12 +70,6 @@ func Start(args []string) {
 	rootCmd.SetUsageTemplate(command.UsageTemplate)
 	rootCmd.SetOutput(os.Stdout)
 
-	if err := rootCmd.ParseFlags(args); err != nil {
-		rootCmd.Println(err)
-		rootCmd.Println(rootCmd.UsageString())
-		return
-	}
-
 	if len(commandFlags.CAPath) != 0 {
 		if err := command.InitHTTPSClient(commandFlags.CAPath, commandFlags.CertPath, commandFlags.KeyPath); err != nil {
 			rootCmd.Println(err)
@@ -84,6 +78,6 @@ func Start(args []string) {
 	}
 
 	if err := rootCmd.Execute(); err != nil {
-		rootCmd.Println(rootCmd.UsageString())
+		rootCmd.Println(err)
 	}
 }
