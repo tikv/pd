@@ -68,6 +68,9 @@ func (s *testUtilSuite) TestVerifyLabels(c *C) {
 		{"www.pingcap.com", false},
 		{"h_127.0.0.1", false},
 		{"a", false},
+		{"a/b", false},
+		{"ab/", true},
+		{"/ab", true},
 	}
 	for _, t := range tests {
 		c.Assert(ValidateLabelString(t.label) != nil, Equals, t.hasErr)
