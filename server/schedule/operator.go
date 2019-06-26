@@ -385,6 +385,16 @@ func (o *Operator) RunningTime() time.Duration {
 	return time.Since(o.startTime)
 }
 
+// SetStartTime sets the start time for operator.
+func (o *Operator) SetStartTime(t time.Time) {
+	o.startTime = t
+}
+
+// GetStartTime ges the start time for operator.
+func (o *Operator) GetStartTime() time.Time {
+	return o.startTime
+}
+
 // Len returns the operator's steps count.
 func (o *Operator) Len() int {
 	return len(o.steps)

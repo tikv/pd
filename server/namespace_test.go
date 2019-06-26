@@ -16,6 +16,7 @@ package server
 import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -50,20 +51,20 @@ func (s *testNamespaceSuite) TestReplica(c *C) {
 	s.classifier.setStore(2, "ns1")
 	s.classifier.setStore(3, "ns2")
 
-	checker := schedule.NewReplicaChecker(s.tc, s.classifier)
+	rc := checker.NewReplicaChecker(s.tc, s.classifier)
 
 	// Replica should be added to the store with the same namespace.
 	s.classifier.setRegion(1, "ns1")
 	c.Assert(s.tc.addLeaderRegion(1, 1), IsNil)
-	op := checker.Check(s.tc.GetRegion(1))
+	op := rc.Check(s.tc.GetRegion(1))
 	testutil.CheckAddPeer(c, op, schedule.OpReplica, 2)
 	c.Assert(s.tc.addLeaderRegion(1, 3), IsNil)
-	op = checker.Check(s.tc.GetRegion(1))
+	op = rc.Check(s.tc.GetRegion(1))
 	testutil.CheckAddPeer(c, op, schedule.OpReplica, 1)
 
 	// Stop adding replica if no store in the same namespace.
 	c.Assert(s.tc.addLeaderRegion(1, 1, 2), IsNil)
-	op = checker.Check(s.tc.GetRegion(1))
+	op = rc.Check(s.tc.GetRegion(1))
 	c.Assert(op, IsNil)
 }
 
@@ -79,12 +80,12 @@ func (s *testNamespaceSuite) TestNamespaceChecker(c *C) {
 	s.classifier.setStore(2, "ns1")
 	s.classifier.setStore(3, "ns2")
 
-	checker := schedule.NewNamespaceChecker(s.tc, s.classifier)
+	nc := checker.NewNamespaceChecker(s.tc, s.classifier)
 
 	// Move the region if it was not in the right store.
 	s.classifier.setRegion(1, "ns2")
 	c.Assert(s.tc.addLeaderRegion(1, 1), IsNil)
-	op := checker.Check(s.tc.GetRegion(1))
+	op := nc.Check(s.tc.GetRegion(1))
 	testutil.CheckTransferPeer(c, op, schedule.OpReplica, 1, 3)
 
 	// Only move one region if the one was in the right store while the other was not.
@@ -92,15 +93,15 @@ func (s *testNamespaceSuite) TestNamespaceChecker(c *C) {
 	c.Assert(s.tc.addLeaderRegion(2, 1), IsNil)
 	s.classifier.setRegion(3, "ns2")
 	c.Assert(s.tc.addLeaderRegion(3, 2), IsNil)
-	op = checker.Check(s.tc.GetRegion(2))
+	op = nc.Check(s.tc.GetRegion(2))
 	c.Assert(op, IsNil)
-	op = checker.Check(s.tc.GetRegion(3))
+	op = nc.Check(s.tc.GetRegion(3))
 	testutil.CheckTransferPeer(c, op, schedule.OpReplica, 2, 3)
 
 	// Do NOT move the region if it was in the right store.
 	s.classifier.setRegion(4, "ns2")
 	c.Assert(s.tc.addLeaderRegion(4, 3), IsNil)
-	op = checker.Check(s.tc.GetRegion(4))
+	op = nc.Check(s.tc.GetRegion(4))
 	c.Assert(op, IsNil)
 
 	// Move the peer with questions to the right store if the region has multiple peers.
@@ -108,10 +109,10 @@ func (s *testNamespaceSuite) TestNamespaceChecker(c *C) {
 	c.Assert(s.tc.addLeaderRegion(5, 1, 1, 3), IsNil)
 
 	s.scheduleConfig.DisableNamespaceRelocation = true
-	c.Assert(checker.Check(s.tc.GetRegion(5)), IsNil)
+	c.Assert(nc.Check(s.tc.GetRegion(5)), IsNil)
 	s.scheduleConfig.DisableNamespaceRelocation = false
 
-	op = checker.Check(s.tc.GetRegion(5))
+	op = nc.Check(s.tc.GetRegion(5))
 	testutil.CheckTransferPeer(c, op, schedule.OpReplica, 3, 2)
 }
 

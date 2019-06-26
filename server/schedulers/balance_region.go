@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/cache"
+	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"go.uber.org/zap"
@@ -149,7 +150,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	source := cluster.GetStore(oldPeer.GetStoreId())
 	scoreGuard := schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
 
-	checker := schedule.NewReplicaChecker(cluster, nil)
+	checker := checker.NewReplicaChecker(cluster, nil)
 	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard)
 	if storeID == 0 {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_replacement").Inc()
