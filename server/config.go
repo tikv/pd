@@ -49,9 +49,10 @@ type Config struct {
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
 	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
 
-	Name            string `toml:"name" json:"name"`
-	DataDir         string `toml:"data-dir" json:"data-dir"`
-	ForceNewCluster bool   `json:"force-new-cluster"`
+	Name              string `toml:"name" json:"name"`
+	DataDir           string `toml:"data-dir" json:"data-dir"`
+	ForceNewCluster   bool   `json:"force-new-cluster"`
+	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
@@ -199,6 +200,7 @@ const (
 
 	defaultUseRegionStorage   = true
 	defaultStrictlyMatchLabel = false
+	defaultEnableGRPCGateway  = true
 )
 
 func adjustString(v *string, defValue string) {
@@ -426,6 +428,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	if !configMetaData.IsDefined("enable-prevote") {
 		c.PreVote = true
+	}
+	if !configMetaData.IsDefined("enable-grpc-gateway") {
+		c.EnableGRPCGateway = defaultEnableGRPCGateway
 	}
 	return nil
 }
@@ -872,6 +877,7 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
+	cfg.EnableGRPCGateway = c.EnableGRPCGateway
 	cfg.Logger = "zap"
 	var err error
 
