@@ -29,22 +29,35 @@ const (
 )
 
 // ScheduleOptions is an interface to access configurations.
+// TODO: merge the Options to schedule.Options
 type ScheduleOptions interface {
 	GetLocationLabels() []string
-	GetMaxStoreDownTime() time.Duration
+
 	GetLowSpaceRatio() float64
 	GetHighSpaceRatio() float64
 	GetTolerantSizeRatio() float64
+	GetStoreBalanceRate() float64
+
+	GetSchedulerMaxWaitingOperator() uint64
 	GetLeaderScheduleLimit(name string) uint64
 	GetRegionScheduleLimit(name string) uint64
 	GetReplicaScheduleLimit(name string) uint64
 	GetMergeScheduleLimit(name string) uint64
+	GetHotRegionScheduleLimit(name string) uint64
 	GetMaxReplicas(name string) int
+	GetHotRegionCacheHitsThreshold() int
+	GetMaxSnapshotCount() uint64
+	GetMaxPendingPeerCount() uint64
+	GetMaxMergeRegionSize() uint64
+	GetMaxMergeRegionKeys() uint64
+
 	IsRaftLearnerEnabled() bool
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool
 	IsRemoveDownReplicaEnabled() bool
 	IsReplaceOfflineReplicaEnabled() bool
+
+	GetMaxStoreDownTime() time.Duration
 }
 
 type storeStatistics struct {
@@ -160,6 +173,13 @@ func (s *storeStatistics) Collect() {
 	configs["high_space_ratio"] = float64(s.opt.GetHighSpaceRatio())
 	configs["low_space_ratio"] = float64(s.opt.GetLowSpaceRatio())
 	configs["tolerant_size_ratio"] = float64(s.opt.GetTolerantSizeRatio())
+	configs["store-balance-rate"] = float64(s.opt.GetStoreBalanceRate())
+	configs["hot-region-schedule-limit"] = float64(s.opt.GetHotRegionScheduleLimit(s.namespace))
+	configs["hot-region-cache-hits-threshold"] = float64(s.opt.GetHotRegionCacheHitsThreshold())
+	configs["max-pending-peer-count"] = float64(s.opt.GetMaxPendingPeerCount())
+	configs["max-snapshot-count"] = float64(s.opt.GetMaxSnapshotCount())
+	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
+	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
 
 	var disableMakeUpReplica, disableLearner, disableRemoveDownReplica, disableRemoveExtraReplica, disableReplaceOfflineReplica float64
 	if !s.opt.IsMakeUpReplicaEnabled() {
