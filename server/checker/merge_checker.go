@@ -104,7 +104,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*schedule.Operator {
 	var target *core.RegionInfo
 	targetNext := m.checkTarget(region, next, target)
 	target = m.checkTarget(region, prev, target)
-	if target != targetNext && !m.cluster.GetEnableTwoWayMerge() {
+	if target != targetNext && m.cluster.GetEnableOneWayMerge() {
 		checkerCounter.WithLabelValues("merge_checker", "skip_left").Inc()
 		target = targetNext
 	}

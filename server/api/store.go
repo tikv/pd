@@ -400,7 +400,7 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	for s, l := range limit {
 		ret[s] = struct {
 			Rate float64 `json:"rate"`
-		}{Rate: l}
+		}{Rate: l * schedule.StoreBalanceBaseTime}
 	}
 
 	h.rd.JSON(w, http.StatusOK, ret)

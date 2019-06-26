@@ -125,8 +125,8 @@ func (o *scheduleOption) GetSplitMergeInterval() time.Duration {
 	return o.load().SplitMergeInterval.Duration
 }
 
-func (o *scheduleOption) GetEnableTwoWayMerge() bool {
-	return o.load().EnableTwoWayMerge
+func (o *scheduleOption) GetEnableOneWayMerge() bool {
+	return o.load().EnableOneWayMerge
 }
 
 func (o *scheduleOption) GetPatrolRegionInterval() time.Duration {

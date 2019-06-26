@@ -37,7 +37,6 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	cfg := mockoption.NewScheduleOptions()
 	cfg.MaxMergeRegionSize = 2
 	cfg.MaxMergeRegionKeys = 2
-	cfg.EnableTwoWayMerge = true
 	s.cluster = mockcluster.NewCluster(cfg)
 	s.regions = []*core.RegionInfo{
 		core.NewRegionInfo(
@@ -125,11 +124,11 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 		c.Assert(op.IsTimeout(), IsTrue)
 	}
 
-	// Disable two way merge
-	s.cluster.ScheduleOptions.EnableTwoWayMerge = false
+	// Enable one way merge
+	s.cluster.ScheduleOptions.EnableOneWayMerge = true
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
-	s.cluster.ScheduleOptions.EnableTwoWayMerge = true
+	s.cluster.ScheduleOptions.EnableOneWayMerge = false
 
 	// Skip recently split regions.
 	s.mc.RecordRegionSplit(s.regions[2].GetID())

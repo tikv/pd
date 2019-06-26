@@ -56,7 +56,7 @@ type ScheduleOptions struct {
 	MaxMergeRegionKeys           uint64
 	SchedulerMaxWaitingOperator  uint64
 	SplitMergeInterval           time.Duration
-	EnableTwoWayMerge            bool
+	EnableOneWayMerge            bool
 	MaxStoreDownTime             time.Duration
 	MaxReplicas                  int
 	LocationLabels               []string
@@ -155,9 +155,9 @@ func (mso *ScheduleOptions) GetSplitMergeInterval() time.Duration {
 	return mso.SplitMergeInterval
 }
 
-// GetEnableTwoWayMerge mocks method
-func (mso *ScheduleOptions) GetEnableTwoWayMerge() bool {
-	return mso.EnableTwoWayMerge
+// GetEnableOneWayMerge mocks method
+func (mso *ScheduleOptions) GetEnableOneWayMerge() bool {
+	return mso.EnableOneWayMerge
 }
 
 // GetMaxStoreDownTime mocks method

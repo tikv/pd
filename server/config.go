@@ -463,8 +463,8 @@ type ScheduleConfig struct {
 	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys,omitempty" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
-	// EnableTwoWayMerge is the option to enable two way merge
-	EnableTwoWayMerge bool `toml:"enable-two-way-merge,omitempty" json:"enable-two-way-merge,string"`
+	// EnableOneWayMerge is the option to enable one way merge
+	EnableOneWayMerge bool `toml:"enable-one-way-merge,omitempty" json:"enable-one-way-merge,string"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
 	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
 	// MaxStoreDownTime is the max duration after which
@@ -543,7 +543,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
-		EnableTwoWayMerge:            c.EnableTwoWayMerge,
+		EnableOneWayMerge:            c.EnableOneWayMerge,
 		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
 		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
 		StoreBalanceRate:             c.StoreBalanceRate,
@@ -575,7 +575,6 @@ const (
 	defaultRegionScheduleLimit    = 64
 	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
-	defaultEnableTwoWayMerge      = true
 	defaultHotRegionScheduleLimit = 2
 	defaultStoreBalanceRate       = 15
 	defaultTolerantSizeRatio      = 0
@@ -626,9 +625,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
-	}
-	if !meta.IsDefined("enable-two-way-merge") {
-		c.EnableTwoWayMerge = defaultEnableTwoWayMerge
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
