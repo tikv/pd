@@ -86,18 +86,25 @@ func readJSON(r io.ReadCloser, data interface{}) error {
 	return nil
 }
 
-func postJSON(url string, data []byte) error {
+func postJSON(url string, data []byte, checkOpts ...func(res []byte) bool) error {
 	resp, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return errors.WithStack(err)
 	}
 	res, err := ioutil.ReadAll(resp.Body)
-	resp.Body.Close()
+	defer resp.Body.Close()
+
 	if err != nil {
 		return err
 	}
+
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(string(res))
+	}
+	for _, opt := range checkOpts {
+		if !opt(res) {
+			return errors.New("check failed")
+		}
 	}
 	return nil
 }
