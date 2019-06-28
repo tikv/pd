@@ -1,5 +1,34 @@
 # PD Change Log
 
+## v3.0.0
+
++ Support re-creating a cluster from a single node 
++ Migrate Region metadata from etcd to the go-leveldb storage engine to solve the storage bottleneck in etcd for large-scale clusters 
++ API 
+  - Add the `remove-tombstone` API to clear Tombstone stores
+  - Add the `ScanRegions` API to batch query Region information
+  - Add the `GetOperator` API to query running operators
+  - Optimize the performance of the `GetStores` API
++ Configurations
+  - Optimize configuration check logic to avoid configuration item errors
+  - Add `enable-two-way-merge` to control the direction of Region merge 
+  - Add `hot-region-schedule-limit` to control the scheduling rate for hot Regions 
+  - Add `hot-region-cache-hits-threshold` to identify hotspot when hitting multiple thresholds consecutively 
+  - Add the `store-balance-rate` configuration item to control the maximum numbers of balance Region operators allowed per minute
++ Scheduler Optimizations
+  - Add the store limit mechanism for separately controlling the speed of operators for each store
+  - Support the `waitingOperator` queue to optimize the resource race among different schedulers
+  - Support scheduling rate limit to actively send scheduling operations to TiKV. This improves the scheduling rate by limiting the number of concurrent scheduling tasks on a single node.
+  - Optimize the `Region Scatter` scheduling to be not restrained by the limit mechanism
+  - Add the `shuffle-hot-region` scheduler to facilitate TiKV stability test in scenarios of poor hotspot scheduling
++ Simulator
+  - Add simulator for data import scenarios
+  - Support setting different heartbeats intervals for the Store 
++ Others
+  - Upgrade etcd to solve the issues of inconsistent log output formats, Leader selection failure in prevote, and lease deadlocking. 
+  - Develop a unified log format specification with restructured log system to facilitate collection and analysis by tools
+  - Add monitoring metrics including scheduling parameters, cluster label information, time comsumped by PD to process TSO requests, Store ID and address information, etc.
+
 ## v3.0.0-rc.3
 
 + Add light peer without considering the influence [1563](https://github.com/pingcap/pd/pull/1563)
