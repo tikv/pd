@@ -11,7 +11,7 @@
   - Optimize the performance of the `GetStores` API
 + Configurations
   - Optimize configuration check logic to avoid configuration item errors
-  - Add `enable-two-way-merge` to control the direction of Region merge 
+  - Add `enable-one-way-merge` to control the direction of Region merge 
   - Add `hot-region-schedule-limit` to control the scheduling rate for hot Regions 
   - Add `hot-region-cache-hits-threshold` to identify hotspot when hitting multiple thresholds consecutively 
   - Add the `store-balance-rate` configuration item to control the maximum numbers of balance Region operators allowed per minute
