@@ -489,6 +489,36 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 3)
 }
 
+func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	oc := schedule.NewOperatorController(nil, nil)
+
+	newTestReplication(opt, 3, "zone", "rack", "host")
+
+	sb, err := schedule.CreateScheduler("balance-region", oc)
+	c.Assert(err, IsNil)
+
+	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
+	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	tc.AddLabelsStore(2, 7, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
+	tc.AddLabelsStore(3, 15, map[string]string{"zone": "z1", "rack": "r2", "host": "h2"})
+	// Store 4 has smaller region score than store 1 and more better place than store 2.
+	tc.AddLabelsStore(4, 10, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+
+	// set pending peer
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 1, 2, 3)
+	tc.AddLeaderRegion(3, 2, 1, 3)
+	region := tc.GetRegion(3)
+	region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(1)}))
+	tc.PutRegion(region)
+
+	c.Assert(sb.Schedule(tc)[0].RegionID(), Equals, uint64(3))
+	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 4)
+
+}
+
 var _ = Suite(&testReplicaCheckerSuite{})
 
 type testReplicaCheckerSuite struct{}

@@ -95,10 +95,15 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	var hasPotentialTarget bool
 	for i := 0; i < balanceRegionRetryLimit; i++ {
-		// Priority the region that has a follower in the source store.
-		region := cluster.RandFollowerRegion(sourceID, core.HealthRegion())
+		// Priority picks the region that has a pending peer.
+		// Pending region may means the disk is overload, remove the pending region firstly.
+		region := cluster.RandPendingRegion(sourceID, core.HealthRegionAllowPending())
 		if region == nil {
-			// Then the region has the leader in the source store
+			// Then picks the region that has a follower in the source store.
+			region = cluster.RandFollowerRegion(sourceID, core.HealthRegion())
+		}
+		if region == nil {
+			// Last, picks the region has the leader in the source store.
 			region = cluster.RandLeaderRegion(sourceID, core.HealthRegion())
 		}
 		if region == nil {

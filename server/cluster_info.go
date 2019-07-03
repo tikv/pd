@@ -415,6 +415,13 @@ func (c *clusterInfo) RandFollowerRegion(storeID uint64, opts ...core.RegionOpti
 	return c.core.RandFollowerRegion(storeID, opts...)
 }
 
+// RandPendingRegion returns a random region that has a pending peer on the store.
+func (c *clusterInfo) RandPendingRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core.RandPendingRegion(storeID, opts...)
+}
+
 // GetAverageRegionSize returns the average region approximate size.
 func (c *clusterInfo) GetAverageRegionSize() int64 {
 	c.RLock()

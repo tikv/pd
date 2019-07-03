@@ -415,6 +415,11 @@ func (f StoreStateFilter) FilterTarget(opt Options, store *core.StoreInfo) bool 
 		return true
 	}
 
+	// only target consider the pending peers because pending more means the disk is slowler.
+	if opt.GetMaxPendingPeerCount() > 0 && store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount()) {
+		return true
+	}
+
 	if f.MoveRegion && f.filterMoveRegion(opt, store) {
 		return true
 	}
@@ -430,9 +435,6 @@ func (f StoreStateFilter) filterMoveRegion(opt Options, store *core.StoreInfo) b
 		return true
 	}
 
-	if opt.GetMaxPendingPeerCount() > 0 && store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount()) {
-		return true
-	}
 	if uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount() {
