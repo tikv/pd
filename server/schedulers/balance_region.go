@@ -8,7 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// See the License for the specific language governing permissions and
+// See the License for the specific language governing permisions and
 // limitations under the License.
 
 package schedulers
@@ -110,7 +110,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		}
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
-			s.hitsCounter.hit(source, nil)
+			s.hitsCounter.put(source, nil)
 			continue
 		}
 		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
@@ -119,7 +119,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		if len(region.GetPeers()) != cluster.GetMaxReplicas() {
 			log.Debug("region has abnormal replica count", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 			schedulerCounter.WithLabelValues(s.GetName(), "abnormal_replica").Inc()
-			s.hitsCounter.hit(source, nil)
+			s.hitsCounter.put(source, nil)
 			continue
 		}
 
@@ -127,7 +127,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		if cluster.IsRegionHot(region.GetID()) {
 			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 			schedulerCounter.WithLabelValues(s.GetName(), "region_hot").Inc()
-			s.hitsCounter.hit(source, nil)
+			s.hitsCounter.put(source, nil)
 			continue
 		}
 
@@ -151,7 +151,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, hitsFilter)
 	if storeID == 0 {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_replacement").Inc()
-		s.hitsCounter.hit(source, nil)
+		s.hitsCounter.put(source, nil)
 		return nil
 	}
 
@@ -170,7 +170,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(core.RegionKind)),
 			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
-		s.hitsCounter.hit(source, target)
+		s.hitsCounter.put(source, target)
 		return nil
 	}
 
@@ -184,8 +184,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 		schedulerCounter.WithLabelValues(s.GetName(), "create_operator_fail").Inc()
 		return nil
 	}
-	s.hitsCounter.miss(source, target)
-	s.hitsCounter.miss(source, nil)
+	s.hitsCounter.remove(source, target)
+	s.hitsCounter.remove(source, nil)
 	sourceLabel := strconv.FormatUint(sourceID, 10)
 	targetLabel := strconv.FormatUint(targetID, 10)
 	balanceRegionCounter.WithLabelValues("move_peer", source.GetAddress()+"-out", sourceLabel).Inc()
@@ -239,14 +239,14 @@ func (h *hitsStoreBuilder) filter(source, target *core.StoreInfo) bool {
 	return false
 }
 
-func (h *hitsStoreBuilder) miss(source, target *core.StoreInfo) {
+func (h *hitsStoreBuilder) remove(source, target *core.StoreInfo) {
 	key := h.getKey(source, target)
 	if _, ok := h.hits[key]; ok && key != "" {
 		delete(h.hits, key)
 	}
 }
 
-func (h *hitsStoreBuilder) hit(source, target *core.StoreInfo) {
+func (h *hitsStoreBuilder) put(source, target *core.StoreInfo) {
 	key := h.getKey(source, target)
 	if key == "" {
 		return
