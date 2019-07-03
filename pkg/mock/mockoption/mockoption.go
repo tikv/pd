@@ -32,10 +32,11 @@ const (
 	defaultReplicaScheduleLimit        = 8
 	defaultMergeScheduleLimit          = 8
 	defaultHotRegionScheduleLimit      = 2
-	defaultStoreBalanceRate            = 1
+	defaultStoreBalanceRate            = 60
 	defaultTolerantSizeRatio           = 2.5
 	defaultLowSpaceRatio               = 0.8
 	defaultHighSpaceRatio              = 0.6
+	defaultSchedulerMaxWaitingOperator = 3
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true
 )
@@ -53,7 +54,9 @@ type ScheduleOptions struct {
 	MaxPendingPeerCount          uint64
 	MaxMergeRegionSize           uint64
 	MaxMergeRegionKeys           uint64
+	SchedulerMaxWaitingOperator  uint64
 	SplitMergeInterval           time.Duration
+	EnableOneWayMerge            bool
 	MaxStoreDownTime             time.Duration
 	MaxReplicas                  int
 	LocationLabels               []string
@@ -84,6 +87,7 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.MaxSnapshotCount = defaultMaxSnapshotCount
 	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
 	mso.MaxMergeRegionKeys = defaultMaxMergeRegionKeys
+	mso.SchedulerMaxWaitingOperator = defaultSchedulerMaxWaitingOperator
 	mso.SplitMergeInterval = defaultSplitMergeInterval
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
@@ -151,6 +155,11 @@ func (mso *ScheduleOptions) GetSplitMergeInterval() time.Duration {
 	return mso.SplitMergeInterval
 }
 
+// GetEnableOneWayMerge mocks method
+func (mso *ScheduleOptions) GetEnableOneWayMerge() bool {
+	return mso.EnableOneWayMerge
+}
+
 // GetMaxStoreDownTime mocks method
 func (mso *ScheduleOptions) GetMaxStoreDownTime() time.Duration {
 	return mso.MaxStoreDownTime
@@ -189,6 +198,11 @@ func (mso *ScheduleOptions) GetLowSpaceRatio() float64 {
 // GetHighSpaceRatio mocks method
 func (mso *ScheduleOptions) GetHighSpaceRatio() float64 {
 	return mso.HighSpaceRatio
+}
+
+// GetSchedulerMaxWaitingOperator mocks method.
+func (mso *ScheduleOptions) GetSchedulerMaxWaitingOperator() uint64 {
+	return mso.SchedulerMaxWaitingOperator
 }
 
 // SetMaxReplicas mocks method

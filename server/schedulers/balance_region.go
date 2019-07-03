@@ -8,7 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// See the License for the specific language governing permisions and
+// See the License for the specific language governing permissions and
 // limitations under the License.
 
 package schedulers
@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	log "github.com/pingcap/log"
+	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"go.uber.org/zap"
@@ -147,7 +148,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	source := cluster.GetStore(oldPeer.GetStoreId())
 	scoreGuard := schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
 	hitsFilter := s.hitsCounter.buildTargetFilter(cluster, source)
-	checker := schedule.NewReplicaChecker(cluster, nil)
+	checker := checker.NewReplicaChecker(cluster, nil)
 	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, hitsFilter)
 	if storeID == 0 {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_replacement").Inc()

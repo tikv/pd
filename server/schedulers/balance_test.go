@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -553,7 +554,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	opt.MaxSnapshotCount = 2
 
@@ -630,7 +631,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 
-	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	// now region peer in store 1,2,3.but we just have store 1,2
 	// This happens only in recovering the PD tc
@@ -647,7 +648,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
@@ -704,7 +705,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.AddLabelsStore(1, 9, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 8, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -782,7 +783,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 
 	newTestReplication(opt, 5, "zone", "host")
 
-	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
@@ -809,7 +810,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.LocationLabels = []string{"zone"}
 	tc := mockcluster.NewCluster(opt)
-	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(1, 0.5, 0.5)
@@ -843,7 +844,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
 
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -895,7 +896,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	c.Assert(ops[0].Kind()&schedule.OpMerge, Not(Equals), 0)
 	c.Assert(ops[1].Kind()&schedule.OpMerge, Not(Equals), 0)
 
-	oc.AddOperator(ops...)
+	oc.AddWaitingOperator(ops...)
 	c.Assert(mb.IsScheduleAllowed(tc), IsFalse)
 }
 

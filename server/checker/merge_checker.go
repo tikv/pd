@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package checker
 
 import (
 	"time"
@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/schedule"
 	"go.uber.org/zap"
 )
 
@@ -29,13 +30,13 @@ const mergeBlockMarker = 0
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
-	cluster    Cluster
+	cluster    schedule.Cluster
 	classifier namespace.Classifier
 	splitCache *cache.TTLUint64
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(cluster Cluster, classifier namespace.Classifier) *MergeChecker {
+func NewMergeChecker(cluster schedule.Cluster, classifier namespace.Classifier) *MergeChecker {
 	splitCache := cache.NewIDTTL(time.Minute, cluster.GetSplitMergeInterval())
 	splitCache.Put(mergeBlockMarker)
 	return &MergeChecker{
@@ -52,7 +53,7 @@ func (m *MergeChecker) RecordRegionSplit(regionID uint64) {
 }
 
 // Check verifies a region's replicas, creating an Operator if need.
-func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
+func (m *MergeChecker) Check(region *core.RegionInfo) []*schedule.Operator {
 	if m.splitCache.Exists(mergeBlockMarker) {
 		checkerCounter.WithLabelValues("merge_checker", "recently_start").Inc()
 		return nil
@@ -98,11 +99,15 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 		return nil
 	}
 
-	var target *core.RegionInfo
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
+	var target *core.RegionInfo
+	targetNext := m.checkTarget(region, next, target)
 	target = m.checkTarget(region, prev, target)
-	target = m.checkTarget(region, next, target)
+	if target != targetNext && m.cluster.GetEnableOneWayMerge() {
+		checkerCounter.WithLabelValues("merge_checker", "skip_left").Inc()
+		target = targetNext
+	}
 
 	if target == nil {
 		checkerCounter.WithLabelValues("merge_checker", "no_target").Inc()
@@ -110,11 +115,15 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*Operator {
 	}
 
 	log.Debug("try to merge region", zap.Reflect("from", core.HexRegionMeta(region.GetMeta())), zap.Reflect("to", core.HexRegionMeta(target.GetMeta())))
-	ops, err := CreateMergeRegionOperator("merge-region", m.cluster, region, target, OpMerge)
+	ops, err := schedule.CreateMergeRegionOperator("merge-region", m.cluster, region, target, schedule.OpMerge)
 	if err != nil {
 		return nil
 	}
 	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
+	if region.GetApproximateSize() > target.GetApproximateSize() ||
+		region.GetApproximateKeys() > target.GetApproximateKeys() {
+		checkerCounter.WithLabelValues("merge_checker", "larger_source").Inc()
+	}
 	return ops
 }
 

@@ -21,6 +21,7 @@ import (
 
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
+	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -55,10 +56,11 @@ type coordinator struct {
 	cancel context.CancelFunc
 
 	cluster          *clusterInfo
-	replicaChecker   *schedule.ReplicaChecker
+	learnerChecker   *checker.LearnerChecker
+	replicaChecker   *checker.ReplicaChecker
+	namespaceChecker *checker.NamespaceChecker
+	mergeChecker     *checker.MergeChecker
 	regionScatterer  *schedule.RegionScatterer
-	namespaceChecker *schedule.NamespaceChecker
-	mergeChecker     *schedule.MergeChecker
 	schedulers       map[string]*scheduleController
 	opController     *schedule.OperatorController
 	classifier       namespace.Classifier
@@ -72,10 +74,11 @@ func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifie
 		ctx:              ctx,
 		cancel:           cancel,
 		cluster:          cluster,
-		replicaChecker:   schedule.NewReplicaChecker(cluster, classifier),
+		learnerChecker:   checker.NewLearnerChecker(),
+		replicaChecker:   checker.NewReplicaChecker(cluster, classifier),
+		namespaceChecker: checker.NewNamespaceChecker(cluster, classifier),
+		mergeChecker:     checker.NewMergeChecker(cluster, classifier),
 		regionScatterer:  schedule.NewRegionScatterer(cluster, classifier),
-		namespaceChecker: schedule.NewNamespaceChecker(cluster, classifier),
-		mergeChecker:     schedule.NewMergeChecker(cluster, classifier),
 		schedulers:       make(map[string]*scheduleController),
 		opController:     schedule.NewOperatorController(cluster, hbStreams),
 		classifier:       classifier,
@@ -155,11 +158,8 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
-	for _, p := range region.GetLearners() {
-		if region.GetPendingLearner(p.GetId()) != nil {
-			continue
-		}
-		op := schedule.CreatePromoteLearnerOperator("promote-learner", region, p)
+
+	if op := c.learnerChecker.Check(region); op != nil {
 		if opController.AddOperator(op) {
 			return true
 		}
@@ -169,7 +169,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		opController.OperatorCount(schedule.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
 		opController.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.namespaceChecker.Check(region); op != nil {
-			if opController.AddOperator(op) {
+			if opController.AddWaitingOperator(op) {
 				return true
 			}
 		}
@@ -177,7 +177,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 
 	if opController.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
-			if opController.AddOperator(op) {
+			if opController.AddWaitingOperator(op) {
 				return true
 			}
 		}
@@ -185,7 +185,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
-			if opController.AddOperator(ops...) {
+			if opController.AddWaitingOperator(ops...) {
 				return true
 			}
 		}
@@ -429,7 +429,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 				continue
 			}
 			if op := s.Schedule(); op != nil {
-				c.opController.AddOperator(op...)
+				c.opController.AddWaitingOperator(op...)
 			}
 
 		case <-s.Ctx().Done():

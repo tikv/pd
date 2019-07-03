@@ -40,7 +40,7 @@ type StoreInfo struct {
 	lastHeartbeatTS  time.Time
 	leaderWeight     float64
 	regionWeight     float64
-	overloaded       bool
+	overloaded       func() bool
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -87,7 +87,10 @@ func (s *StoreInfo) IsBlocked() bool {
 
 // IsOverloaded returns if the store is overloaded.
 func (s *StoreInfo) IsOverloaded() bool {
-	return s.overloaded
+	if s.overloaded == nil {
+		return false
+	}
+	return s.overloaded()
 }
 
 // IsUp checks if the store's state is Up.
@@ -520,24 +523,11 @@ func (s *StoresInfo) UnblockStore(storeID uint64) {
 	s.stores[storeID] = store.Clone(SetStoreUnBlock())
 }
 
-// SetStoreOverload set a StoreInfo with storeID overload.
-func (s *StoresInfo) SetStoreOverload(storeID uint64) {
-	store, ok := s.stores[storeID]
-	if !ok {
-		log.Fatal("store is overloaded, but it is not found",
-			zap.Uint64("store-id", storeID))
+// AttachOverloadStatus attaches the overload status to a store.
+func (s *StoresInfo) AttachOverloadStatus(storeID uint64, f func() bool) {
+	if store, ok := s.stores[storeID]; ok {
+		s.stores[storeID] = store.Clone(SetOverloadStatus(f))
 	}
-	s.stores[storeID] = store.Clone(SetStoreOverload())
-}
-
-// ResetStoreOverload reset a StoreInfo with storeID overload.
-func (s *StoresInfo) ResetStoreOverload(storeID uint64) {
-	store, ok := s.stores[storeID]
-	if !ok {
-		log.Fatal("store is not overloaded anymore, but it is not found",
-			zap.Uint64("store-id", storeID))
-	}
-	s.stores[storeID] = store.Clone(ResetStoreOverload())
 }
 
 // GetStores gets a complete set of StoreInfo.

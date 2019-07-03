@@ -32,6 +32,14 @@ var (
 			Help:      "Store status for schedule",
 		}, []string{"namespace", "address", "store", "type"})
 
+	regionStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "status",
+			Help:      "Status of the regions.",
+		}, []string{"type"})
+
 	clusterStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -55,12 +63,22 @@ var (
 			Name:      "status",
 			Help:      "Status of the scheduling configurations.",
 		}, []string{"type", "namespace"})
+
+	regionLabelLevelGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "label_level",
+			Help:      "Number of regions in the different label level.",
+		}, []string{"type"})
 )
 
 func init() {
 	prometheus.MustRegister(hotCacheStatusGauge)
 	prometheus.MustRegister(storeStatusGauge)
+	prometheus.MustRegister(regionStatusGauge)
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)
+	prometheus.MustRegister(regionLabelLevelGauge)
 }

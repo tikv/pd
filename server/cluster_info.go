@@ -35,8 +35,8 @@ type clusterInfo struct {
 	kv              *core.KV
 	meta            *metapb.Cluster
 	opt             *scheduleOption
-	regionStats     *regionStatistics
-	labelLevelStats *labelLevelStatistics
+	regionStats     *statistics.RegionStatistics
+	labelLevelStats *statistics.LabelLevelStatistics
 	storesStats     *statistics.StoresStats
 	prepareChecker  *prepareChecker
 	changedRegions  chan *core.RegionInfo
@@ -51,7 +51,7 @@ func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clus
 		id:              id,
 		opt:             opt,
 		kv:              kv,
-		labelLevelStats: newLabelLevelStatistics(),
+		labelLevelStats: statistics.NewLabelLevelStatistics(),
 		storesStats:     statistics.NewStoresStats(),
 		prepareChecker:  newPrepareChecker(),
 		changedRegions:  make(chan *core.RegionInfo, defaultChangedRegionsLimit),
@@ -240,18 +240,11 @@ func (c *clusterInfo) UnblockStore(storeID uint64) {
 	c.core.UnblockStore(storeID)
 }
 
-// SetStoreOverload stops balancer from selecting the store.
-func (c *clusterInfo) SetStoreOverload(storeID uint64) {
+// AttachOverloadStatus attaches the overload status to a store.
+func (c *clusterInfo) AttachOverloadStatus(storeID uint64, f func() bool) {
 	c.Lock()
 	defer c.Unlock()
-	c.core.SetStoreOverload(storeID)
-}
-
-// ResetStoreOverload allows balancer to select the store.
-func (c *clusterInfo) ResetStoreOverload(storeID uint64) {
-	c.Lock()
-	defer c.Unlock()
-	c.core.ResetStoreOverload(storeID)
+	c.core.AttachOverloadStatus(storeID, f)
 }
 
 // GetStores returns all stores in the cluster.
@@ -627,9 +620,9 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		}
 		for _, item := range overlaps {
 			if c.regionStats != nil {
-				c.regionStats.clearDefunctRegion(item.GetId())
+				c.regionStats.ClearDefunctRegion(item.GetId())
 			}
-			c.labelLevelStats.clearDefunctRegion(item.GetId())
+			c.labelLevelStats.ClearDefunctRegion(item.GetId())
 		}
 
 		// Update related stores.
@@ -677,13 +670,13 @@ func (c *clusterInfo) collectMetrics() {
 	c.hotSpotCache.CollectMetrics(c.storesStats)
 }
 
-func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {
+func (c *clusterInfo) GetRegionStatsByType(typ statistics.RegionStatisticType) []*core.RegionInfo {
 	if c.regionStats == nil {
 		return nil
 	}
 	c.RLock()
 	defer c.RUnlock()
-	return c.regionStats.getRegionStatsByType(typ)
+	return c.regionStats.GetRegionStatsByType(typ)
 }
 
 func (c *clusterInfo) GetOpt() namespace.ScheduleOptions {
@@ -726,6 +719,10 @@ func (c *clusterInfo) GetHighSpaceRatio() float64 {
 	return c.opt.GetHighSpaceRatio()
 }
 
+func (c *clusterInfo) GetSchedulerMaxWaitingOperator() uint64 {
+	return c.opt.GetSchedulerMaxWaitingOperator()
+}
+
 func (c *clusterInfo) GetMaxSnapshotCount() uint64 {
 	return c.opt.GetMaxSnapshotCount()
 }
@@ -744,6 +741,10 @@ func (c *clusterInfo) GetMaxMergeRegionKeys() uint64 {
 
 func (c *clusterInfo) GetSplitMergeInterval() time.Duration {
 	return c.opt.GetSplitMergeInterval()
+}
+
+func (c *clusterInfo) GetEnableOneWayMerge() bool {
+	return c.opt.GetEnableOneWayMerge()
 }
 
 func (c *clusterInfo) GetPatrolRegionInterval() time.Duration {

@@ -93,43 +93,62 @@ Use this command to view or modify the configuration information.
 Usage:
 
 ```bash
->> config show                                // Display the config information of the scheduler
+>> config show                                // Display the config information of the replication and schedule
 {
-  "max-snapshot-count": 3,
-  "max-pending-peer-count": 16,
-  "max-merge-region-size": 50,
-  "max-merge-region-rows": 200000,
-  "split-merge-interval": "1h",
-  "patrol-region-interval": "100ms",
-  "max-store-down-time": "1h0m0s",
-  "leader-schedule-limit": 4,
-  "region-schedule-limit": 4,
-  "replica-schedule-limit":8,
-  "merge-schedule-limit": 8,
-  "tolerant-size-ratio": 5,
-  "low-space-ratio": 0.8,
-  "high-space-ratio": 0.6,
-  "disable-raft-learner": "false",
-  "disable-remove-down-replica": "false",
-  "disable-replace-offline-replica": "false",
-  "disable-make-up-replica": "false",
-  "disable-remove-extra-replica": "false",
-  "disable-location-replacement": "false",
-  "disable-namespace-relocation": "false",
-  "schedulers-v2": [
-    {
-      "type": "balance-region",
-      "args": null
-    },
-    {
-      "type": "balance-leader",
-      "args": null
-    },
-    {
-      "type": "hot-region",
-      "args": null
-    }
-  ]
+  "replication": {
+    "location-labels": "",
+    "max-replicas": 3,
+    "strictly-match-label": "true"
+  },
+  "schedule": {
+    "disable-location-replacement": "false",
+    "disable-make-up-replica": "false",
+    "disable-namespace-relocation": "false",
+    "disable-raft-learner": "false",
+    "disable-remove-down-replica": "false",
+    "disable-remove-extra-replica": "false",
+    "disable-replace-offline-replica": "false",
+    "high-space-ratio": 0.6,
+    "hot-region-cache-hits-threshold": 3,
+    "hot-region-schedule-limit": 2,
+    "leader-schedule-limit": 4,
+    "low-space-ratio": 0.8,
+    "max-merge-region-keys": 200000,
+    "max-merge-region-size": 20,
+    "max-pending-peer-count": 16,
+    "max-snapshot-count": 3,
+    "max-store-down-time": "30m0s",
+    "merge-schedule-limit": 8,
+    "patrol-region-interval": "100ms",
+    "region-schedule-limit": 64,
+    "replica-schedule-limit": 64,
+    "scheduler-max-waiting-operator": 3,
+    "schedulers-v2": [
+      {
+        "args": null,
+        "disable": false,
+        "type": "balance-region"
+      },
+      {
+        "args": null,
+        "disable": false,
+        "type": "balance-leader"
+      },
+      {
+        "args": null,
+        "disable": false,
+        "type": "hot-region"
+      },
+      {
+        "args": null,
+        "disable": false,
+        "type": "label"
+      }
+    ],
+    "split-merge-interval": "1h0m0s",
+    "store-balance-rate": 1,
+    "tolerant-size-ratio": 0
+  }
 }
 >> config show all                            // Display all config information
 >> config show namespace ts1                  // Display the config information of the namespace named ts1
@@ -151,7 +170,7 @@ Usage:
 - `max-snapshot-count` controls the maximum number of snapshots that a single store receives or sends out at the same time. The scheduler is restricted by this configuration to avoid taking up normal application resources. When you need to improve the speed of adding replicas or balancing, increase this value.
 
     ```bash
-    >> config set max-snapshort-count 16  // Set the maximum number of snapshots to 16
+    >> config set max-snapshot-count 16  // Set the maximum number of snapshots to 16
     ```
 
 - `max-pending-peer-count` controls the maximum number of pending peers in a single store. The scheduler is restricted by this configuration to avoid producing a large number of Regions without the latest log in some nodes. When you need to improve the speed of adding replicas or balancing, increase this value. Setting it to 0 indicates no limit.
@@ -176,6 +195,12 @@ Usage:
 
     ```bash
     >> config set split-merge-interval 24h  // Set the interval between `split` and `merge` to one day
+    ```
+
+- `enable-one-way-merge` controls the merge scheduler behavior. This means a Region can only be merged into left.
+
+    ```bash
+    >> config set enable-one-way-merge true  // Enable one way merge.
     ```
 
 - `patrol-region-interval` controls the execution frequency that `replicaChecker` checks the health status of Regions. A shorter interval indicates a higher execution frequency. Generally, you do not need to adjust it.

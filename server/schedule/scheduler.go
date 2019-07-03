@@ -44,8 +44,7 @@ type Cluster interface {
 	BlockStore(id uint64) error
 	UnblockStore(id uint64)
 
-	SetStoreOverload(id uint64)
-	ResetStoreOverload(id uint64)
+	AttachOverloadStatus(id uint64, f func() bool)
 
 	IsRegionHot(id uint64) bool
 	RegionWriteStats() []*statistics.RegionStat

@@ -49,9 +49,10 @@ type Config struct {
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
 	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
 
-	Name            string `toml:"name" json:"name"`
-	DataDir         string `toml:"data-dir" json:"data-dir"`
-	ForceNewCluster bool   `json:"force-new-cluster"`
+	Name              string `toml:"name" json:"name"`
+	DataDir           string `toml:"data-dir" json:"data-dir"`
+	ForceNewCluster   bool   `json:"force-new-cluster"`
+	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
@@ -199,6 +200,7 @@ const (
 
 	defaultUseRegionStorage   = true
 	defaultStrictlyMatchLabel = false
+	defaultEnableGRPCGateway  = true
 )
 
 func adjustString(v *string, defValue string) {
@@ -427,6 +429,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if !configMetaData.IsDefined("enable-prevote") {
 		c.PreVote = true
 	}
+	if !configMetaData.IsDefined("enable-grpc-gateway") {
+		c.EnableGRPCGateway = defaultEnableGRPCGateway
+	}
 	return nil
 }
 
@@ -463,6 +468,8 @@ type ScheduleConfig struct {
 	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys,omitempty" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
+	// EnableOneWayMerge is the option to enable one way merge
+	EnableOneWayMerge bool `toml:"enable-one-way-merge,omitempty" json:"enable-one-way-merge,string"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
 	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
 	// MaxStoreDownTime is the max duration after which
@@ -498,7 +505,9 @@ type ScheduleConfig struct {
 	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
-	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode
+	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
+	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator,omitempty" json:"scheduler-max-waiting-operator"`
+	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
 	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
 
 	// DisableRemoveDownReplica is the option to prevent replica checker from
@@ -539,12 +548,14 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
+		EnableOneWayMerge:            c.EnableOneWayMerge,
 		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
 		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
 		StoreBalanceRate:             c.StoreBalanceRate,
 		TolerantSizeRatio:            c.TolerantSizeRatio,
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
+		SchedulerMaxWaitingOperator:  c.SchedulerMaxWaitingOperator,
 		DisableLearner:               c.DisableLearner,
 		DisableRemoveDownReplica:     c.DisableRemoveDownReplica,
 		DisableReplaceOfflineReplica: c.DisableReplaceOfflineReplica,
@@ -566,17 +577,18 @@ const (
 	defaultPatrolRegionInterval   = 100 * time.Millisecond
 	defaultMaxStoreDownTime       = 30 * time.Minute
 	defaultLeaderScheduleLimit    = 8
-	defaultRegionScheduleLimit    = 1024
-	defaultReplicaScheduleLimit   = 1024
+	defaultRegionScheduleLimit    = 64
+	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 2
-	defaultStoreBalanceRate       = 1
+	defaultStoreBalanceRate       = 15
 	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
 	defaultHighSpaceRatio         = 0.6
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
+	defaultSchedulerMaxWaitingOperator = 3
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -615,6 +627,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("tolerant-size-ratio") {
 		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
+	}
+	if !meta.IsDefined("scheduler-max-waiting-operator") {
+		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
@@ -862,6 +877,7 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
+	cfg.EnableGRPCGateway = c.EnableGRPCGateway
 	cfg.Logger = "zap"
 	var err error
 

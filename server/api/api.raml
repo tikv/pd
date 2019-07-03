@@ -64,15 +64,20 @@ types:
       max-merge-region-size?: integer
       max-merge-region-keys?: integer
       split-merge-interval?: string
+      enable-one-way-merge?: boolean
       patrol-region-interval?: string
       max-store-down-time?: string
       leader-schedule-limit?: integer
       region-schedule-limit?: integer
       replica-schedule-limit?: integer
       merge-schedule-limit?: integer
+      hot-region-schedule-limit?: integer
+      hot-region-cache-hits-threshold?: integer
+      store-balance-rate?: number
       tolerant-size-ratio?: number
       low-space-ratio?: number
       high-space-ratio?: number
+      scheduler-max-waiting-operator?: integer
       disable-raft-learner?: boolean
       disable-remove-down-replica?: boolean
       disable-replace-offline-replica?: boolean
@@ -662,6 +667,41 @@ types:
       500:
         description: PD server failed to proceed the request.
 
+  /limit:
+    description: The balance rate limit for all stores.
+    get:
+      description: Get all stores' balance rate limit.
+      responses:
+        200:
+          body:
+          application/json:
+            type: string
+        500:
+          description: PD server failed to proceed the request.
+    post:
+      description: Set all stores' balance rate limit.
+      body:
+        application/json:
+          description: key-value pair.
+          type: object
+      responses:
+        200:
+          description: All stores' balance rate limits are updated.
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+
+  /remove-tombstone:
+    description: Remove all tombstone stores.
+    delete:
+      description: Remove all tombstone stores.
+      responses:
+        200:
+          description: All tombstone stores are removed.
+        500:
+          description: PD server failed to proceed the request.
+
 /store/{storeId}:
   description: A specific store.
   uriParameters:
@@ -695,7 +735,7 @@ types:
         description: PD server failed to proceed the request.
 
   /state:
-    description: The specific store's state.
+    description: The state for the specific store.
     post:
       description: Set the store's state.
       queryParameters:
@@ -713,7 +753,7 @@ types:
           description: PD server failed to proceed the request.
 
   /label:
-    description: The specific store's label.
+    description: The label for the specific store.
     post:
       description: Set the store's label.
       body:
@@ -729,7 +769,7 @@ types:
           description: PD server failed to proceed the request.
 
   /weight:
-    description: The specific store's weight.
+    description: The weight for the specific store.
     post:
       description: Set the store's leader/region weight.
       body:
@@ -740,6 +780,22 @@ types:
       responses:
         200:
           description: The store's weight is updated.
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+
+  /limit:
+    description: The balance rate limit for the specific store.
+    post:
+      description: Set the store's balance rate limit.
+      body:
+        application/json:
+          description: key-value pair.
+          type: object
+      responses:
+        200:
+          description: The store's balance rate limit is updated.
         400:
           description: The input is invalid.
         500:

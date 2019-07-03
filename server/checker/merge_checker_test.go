@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package checker
 
 import (
 	"time"
@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/schedule"
 )
 
 var _ = Suite(&testMergeCheckerSuite{})
@@ -116,11 +117,19 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	for _, op := range ops {
-		op.createTime = op.createTime.Add(-LeaderOperatorWaitTime - time.Second)
+		op.SetStartTime(time.Now())
+		op.SetStartTime(op.GetStartTime().Add(-schedule.LeaderOperatorWaitTime - time.Second))
 		c.Assert(op.IsTimeout(), IsFalse)
-		op.createTime = op.createTime.Add(-RegionOperatorWaitTime - time.Second)
+		op.SetStartTime(op.GetStartTime().Add(-schedule.RegionOperatorWaitTime - time.Second))
 		c.Assert(op.IsTimeout(), IsTrue)
 	}
+
+	// Enable one way merge
+	s.cluster.ScheduleOptions.EnableOneWayMerge = true
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	s.cluster.ScheduleOptions.EnableOneWayMerge = false
+
 	// Skip recently split regions.
 	s.mc.RecordRegionSplit(s.regions[2].GetID())
 	ops = s.mc.Check(s.regions[2])
@@ -129,8 +138,8 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops, IsNil)
 }
 
-func (s *testMergeCheckerSuite) checkSteps(c *C, op *Operator, steps []OperatorStep) {
-	c.Assert(op.Kind()&OpMerge, Not(Equals), 0)
+func (s *testMergeCheckerSuite) checkSteps(c *C, op *schedule.Operator, steps []schedule.OperatorStep) {
+	c.Assert(op.Kind()&schedule.OpMerge, Not(Equals), 0)
 	c.Assert(steps, NotNil)
 	c.Assert(op.Len(), Equals, len(steps))
 	for i := range steps {
@@ -141,22 +150,22 @@ func (s *testMergeCheckerSuite) checkSteps(c *C, op *Operator, steps []OperatorS
 func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	// partial store overlap not including leader
 	ops := s.mc.Check(s.regions[2])
-	s.checkSteps(c, ops[0], []OperatorStep{
-		TransferLeader{FromStore: 6, ToStore: 5},
-		AddLearner{ToStore: 1, PeerID: 1},
-		PromoteLearner{ToStore: 1, PeerID: 1},
-		RemovePeer{FromStore: 2},
-		AddLearner{ToStore: 4, PeerID: 2},
-		PromoteLearner{ToStore: 4, PeerID: 2},
-		RemovePeer{FromStore: 6},
-		MergeRegion{
+	s.checkSteps(c, ops[0], []schedule.OperatorStep{
+		schedule.TransferLeader{FromStore: 6, ToStore: 5},
+		schedule.AddLearner{ToStore: 1, PeerID: 1},
+		schedule.PromoteLearner{ToStore: 1, PeerID: 1},
+		schedule.RemovePeer{FromStore: 2},
+		schedule.AddLearner{ToStore: 4, PeerID: 2},
+		schedule.PromoteLearner{ToStore: 4, PeerID: 2},
+		schedule.RemovePeer{FromStore: 6},
+		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
-	s.checkSteps(c, ops[1], []OperatorStep{
-		MergeRegion{
+	s.checkSteps(c, ops[1], []schedule.OperatorStep{
+		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
@@ -175,18 +184,18 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.regions[2] = newRegion
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
-	s.checkSteps(c, ops[0], []OperatorStep{
-		AddLearner{ToStore: 4, PeerID: 3},
-		PromoteLearner{ToStore: 4, PeerID: 3},
-		RemovePeer{FromStore: 6},
-		MergeRegion{
+	s.checkSteps(c, ops[0], []schedule.OperatorStep{
+		schedule.AddLearner{ToStore: 4, PeerID: 3},
+		schedule.PromoteLearner{ToStore: 4, PeerID: 3},
+		schedule.RemovePeer{FromStore: 6},
+		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
-	s.checkSteps(c, ops[1], []OperatorStep{
-		MergeRegion{
+	s.checkSteps(c, ops[1], []schedule.OperatorStep{
+		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
@@ -201,15 +210,15 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	}))
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
-	s.checkSteps(c, ops[0], []OperatorStep{
-		MergeRegion{
+	s.checkSteps(c, ops[0], []schedule.OperatorStep{
+		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
-	s.checkSteps(c, ops[1], []OperatorStep{
-		MergeRegion{
+	s.checkSteps(c, ops[1], []schedule.OperatorStep{
+		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,
@@ -224,25 +233,25 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	}), core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}))
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
-	s.checkSteps(c, ops[0], []OperatorStep{
-		AddLearner{ToStore: 1, PeerID: 4},
-		PromoteLearner{ToStore: 1, PeerID: 4},
-		RemovePeer{FromStore: 3},
-		AddLearner{ToStore: 4, PeerID: 5},
-		PromoteLearner{ToStore: 4, PeerID: 5},
-		RemovePeer{FromStore: 6},
-		AddLearner{ToStore: 5, PeerID: 6},
-		PromoteLearner{ToStore: 5, PeerID: 6},
-		TransferLeader{FromStore: 2, ToStore: 1},
-		RemovePeer{FromStore: 2},
-		MergeRegion{
+	s.checkSteps(c, ops[0], []schedule.OperatorStep{
+		schedule.AddLearner{ToStore: 1, PeerID: 4},
+		schedule.PromoteLearner{ToStore: 1, PeerID: 4},
+		schedule.RemovePeer{FromStore: 3},
+		schedule.AddLearner{ToStore: 4, PeerID: 5},
+		schedule.PromoteLearner{ToStore: 4, PeerID: 5},
+		schedule.RemovePeer{FromStore: 6},
+		schedule.AddLearner{ToStore: 5, PeerID: 6},
+		schedule.PromoteLearner{ToStore: 5, PeerID: 6},
+		schedule.TransferLeader{FromStore: 2, ToStore: 1},
+		schedule.RemovePeer{FromStore: 2},
+		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
-	s.checkSteps(c, ops[1], []OperatorStep{
-		MergeRegion{
+	s.checkSteps(c, ops[1], []schedule.OperatorStep{
+		schedule.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
 			IsPassive:  true,

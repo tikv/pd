@@ -18,9 +18,9 @@ type PriorityLevel int
 
 // Built-in priority level
 const (
-	HighPriority PriorityLevel = iota
+	LowPriority PriorityLevel = iota
 	NormalPriority
-	LowPriority
+	HighPriority
 )
 
 // ResourceKind distinguishes different kinds of resources.

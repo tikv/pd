@@ -125,6 +125,10 @@ func (o *scheduleOption) GetSplitMergeInterval() time.Duration {
 	return o.load().SplitMergeInterval.Duration
 }
 
+func (o *scheduleOption) GetEnableOneWayMerge() bool {
+	return o.load().EnableOneWayMerge
+}
+
 func (o *scheduleOption) GetPatrolRegionInterval() time.Duration {
 	return o.load().PatrolRegionInterval.Duration
 }
@@ -182,6 +186,10 @@ func (o *scheduleOption) GetLowSpaceRatio() float64 {
 
 func (o *scheduleOption) GetHighSpaceRatio() float64 {
 	return o.load().HighSpaceRatio
+}
+
+func (o *scheduleOption) GetSchedulerMaxWaitingOperator() uint64 {
+	return o.load().SchedulerMaxWaitingOperator
 }
 
 func (o *scheduleOption) IsRaftLearnerEnabled() bool {

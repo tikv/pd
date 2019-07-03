@@ -16,14 +16,6 @@ package schedule
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	checkerCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "checker",
-			Name:      "event_count",
-			Help:      "Counter of checker events.",
-		}, []string{"type", "name"})
-
 	operatorStepDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -58,7 +50,24 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
 		}, []string{"type"})
 
-	storeLimit = prometheus.NewGaugeVec(
+	operatorWaitCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "operators_waiting_count",
+			Help:      "Counter of schedule waiting operators.",
+		}, []string{"type", "event"})
+
+	operatorWaitDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "waiting_operators_duration_seconds",
+			Help:      "Bucketed histogram of waiting time (s) of operator for being promoted.",
+			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
+		}, []string{"type"})
+
+	storeLimitGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "schedule",
@@ -68,10 +77,11 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(checkerCounter)
 	prometheus.MustRegister(operatorStepDuration)
 	prometheus.MustRegister(filterCounter)
 	prometheus.MustRegister(operatorCounter)
 	prometheus.MustRegister(operatorDuration)
-	prometheus.MustRegister(storeLimit)
+	prometheus.MustRegister(operatorWaitDuration)
+	prometheus.MustRegister(storeLimitGauge)
+	prometheus.MustRegister(operatorWaitCounter)
 }
