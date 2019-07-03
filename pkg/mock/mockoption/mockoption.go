@@ -27,13 +27,13 @@ const (
 	defaultMaxMergeRegionKeys          = 0
 	defaultSplitMergeInterval          = 0
 	defaultMaxStoreDownTime            = 30 * time.Minute
-	defaultLeaderScheduleLimit         = 8
+	defaultLeaderScheduleLimit         = 4
 	defaultRegionScheduleLimit         = 64
 	defaultReplicaScheduleLimit        = 64
 	defaultMergeScheduleLimit          = 8
 	defaultHotRegionScheduleLimit      = 4
 	defaultStoreBalanceRate            = 60
-	defaultTolerantSizeRatio           = 0
+	defaultTolerantSizeRatio           = 2.5
 	defaultLowSpaceRatio               = 0.8
 	defaultHighSpaceRatio              = 0.6
 	defaultSchedulerMaxWaitingOperator = 3
