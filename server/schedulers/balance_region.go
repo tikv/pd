@@ -207,12 +207,29 @@ func (s *balanceRegionScheduler) hasPotentialTarget(cluster schedule.Cluster, re
 
 	for _, store := range cluster.GetStores() {
 		if schedule.FilterTarget(cluster, store, filters) {
+			log.Debug("skip target store by filters",
+				zap.String("scheduler", s.GetName()),
+				zap.Uint64("region", region.GetID()),
+				zap.Uint64("source", source.GetID()),
+				zap.Uint64("target", store.GetID()))
 			continue
 		}
 		if !store.IsUp() || store.DownTime() > cluster.GetMaxStoreDownTime() {
+			log.Debug("skip target store by status",
+				zap.String("scheduler", s.GetName()),
+				zap.Uint64("region", region.GetID()),
+				zap.Uint64("source", source.GetID()),
+				zap.Uint64("target", store.GetID()),
+				zap.Bool("isup", store.IsUp()),
+				zap.Duration("downtime", store.DownTime()))
 			continue
 		}
 		if !shouldBalance(cluster, source, store, region, core.RegionKind, opInfluence) {
+			log.Debug("skip target store for it should not balance",
+				zap.String("scheduler", s.GetName()),
+				zap.Uint64("region", region.GetID()),
+				zap.Uint64("source", source.GetID()),
+				zap.Uint64("target", store.GetID()))
 			continue
 		}
 		return true
