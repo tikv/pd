@@ -1,5 +1,11 @@
 # PD Change Log
 
+## Unreleased
+
++ Fix the issue about the limit of the hot region [#1552](https://github.com/pingcap/pd/pull/1552)
++ Add a option about grpc gateway [#1596](https://github.com/pingcap/pd/pull/1596)
++ Add the missing schedule config items [#1601](https://github.com/pingcap/pd/pull/1601)
+
 ## v3.0.0
 
 + Support re-creating a cluster from a single node 
