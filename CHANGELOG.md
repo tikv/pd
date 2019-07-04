@@ -1,5 +1,8 @@
 # PD Change Log
 
+## v2.1.14
+- Adjust the log output level from `Error` to `Warning` when reading an invalid configuration item [#1577](https://github.com/pingcap/pd/pull/1577)
+
 ## v2.1.12
 - Use different timeouts for HTTP clients [1574](https://github.com/pingcap/pd/pull/1574)
 
