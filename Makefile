@@ -39,14 +39,14 @@ build: pd-server pd-ctl pd-tso-bench pd-recover
 pd-server: export GO111MODULE=on
 pd-server:
 ifeq ("$(WITH_RACE)", "1")
-	CGO_ENABLED=1 go build -race -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=1 go build -race -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
-	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
 
 pd-ctl: export GO111MODULE=on
 pd-ctl:
-	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
 pd-tso-bench: export GO111MODULE=on
 pd-tso-bench:
 	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
