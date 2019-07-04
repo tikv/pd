@@ -516,7 +516,6 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 
 	c.Assert(sb.Schedule(tc)[0].RegionID(), Equals, uint64(3))
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], schedule.OpBalance, 1, 4)
-
 }
 
 var _ = Suite(&testReplicaCheckerSuite{})

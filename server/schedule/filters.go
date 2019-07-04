@@ -415,7 +415,7 @@ func (f StoreStateFilter) FilterTarget(opt Options, store *core.StoreInfo) bool 
 		return true
 	}
 
-	// only target consider the pending peers because pending more means the disk is slowler.
+	// only target consider the pending peers because pending more means the disk is slower.
 	if opt.GetMaxPendingPeerCount() > 0 && store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount()) {
 		return true
 	}
