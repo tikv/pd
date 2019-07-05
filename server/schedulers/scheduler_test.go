@@ -361,6 +361,34 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	c.Assert(op[0].Step(1).(schedule.PromoteLearner).ToStore, Not(Equals), 6)
 }
 
+var _ = Suite(&testHotRegionSchedulerSuite{})
+
+type testHotRegionSchedulerSuite struct{}
+
+func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	opt.LeaderScheduleLimit = 0
+	tc := mockcluster.NewCluster(opt)
+	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewOperatorController(nil, nil))
+	c.Assert(err, IsNil)
+
+	tc.AddRegionStore(1, 3)
+	tc.AddRegionStore(2, 2)
+	tc.AddRegionStore(3, 2)
+
+	// Report store read bytes.
+	tc.UpdateStorageReadBytes(1, 75*1024*1024)
+	tc.UpdateStorageReadBytes(2, 45*1024*1024)
+	tc.UpdateStorageReadBytes(3, 45*1024*1024)
+
+	tc.AddLeaderRegionWithReadInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2)
+	tc.AddLeaderRegionWithReadInfo(2, 2, 512*1024*statistics.RegionHeartBeatReportInterval, 1, 3)
+	tc.AddLeaderRegionWithReadInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	opt.HotRegionCacheHitsThreshold = 0
+	c.Assert(tc.IsRegionHot(1), IsTrue)
+	c.Assert(hb.Schedule(tc), IsNil)
+}
+
 var _ = Suite(&testEvictLeaderSuite{})
 
 type testEvictLeaderSuite struct{}

@@ -379,8 +379,8 @@ func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionI
 // UpdateStoreLabels updates a store's location labels.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel) error {
 	c.RLock()
-	defer c.RUnlock()
 	store := c.cachedCluster.GetStore(storeID)
+	c.RUnlock()
 	if store == nil {
 		return errors.Errorf("invalid store ID %d, not found", storeID)
 	}
