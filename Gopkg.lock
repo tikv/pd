@@ -326,6 +326,14 @@
   revision = "eec48234540b323cdfc3e92c4341d667fa245178"
 
 [[projects]]
+  branch = "master"
+  digest = "1:1c69e1f3a2fd78cfd7fb489411cb620c110f7aded247db5c9ca00a073c2971f7"
+  name = "github.com/pingcap/log"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "bd41d9273596826ed2cc8c70b3e8d307f459eca6"
+
+[[projects]]
   digest = "1:5cf3f025cbee5951a4ee961de067c8a89fc95a5adabead774f82822efabab121"
   name = "github.com/pkg/errors"
   packages = ["."]
@@ -467,7 +475,7 @@
   version = "v1.1.0"
 
 [[projects]]
-  digest = "1:25531f2a1f9e75b832a945c670bf84f8caf5bd0fe8d8ad5bab5f13e162680922"
+  digest = "1:4af5a022f8c5c97734c3c6fad58fdce078e2322ddc98d3102b225a729f03916e"
   name = "go.uber.org/zap"
   packages = [
     ".",
@@ -478,8 +486,8 @@
     "zapcore",
   ]
   pruneopts = "NUT"
-  revision = "eeedf312bc6c57391d84767a4cd413f02a917974"
-  version = "v1.8.0"
+  revision = "27376062155ad36be76b0f12cf1572a221d3a48c"
+  version = "v1.10.0"
 
 [[projects]]
   branch = "master"
@@ -643,6 +651,7 @@
     "github.com/pingcap/kvproto/pkg/eraftpb",
     "github.com/pingcap/kvproto/pkg/metapb",
     "github.com/pingcap/kvproto/pkg/pdpb",
+    "github.com/pingcap/log",
     "github.com/pkg/errors",
     "github.com/prometheus/client_golang/prometheus",
     "github.com/prometheus/client_golang/prometheus/push",

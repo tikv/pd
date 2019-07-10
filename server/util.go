@@ -26,9 +26,10 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 const (
@@ -55,11 +56,11 @@ var dialClient = &http.Client{
 
 // LogPDInfo prints the PD version information.
 func LogPDInfo() {
-	log.Infof("Welcome to Placement Driver (PD).")
-	log.Infof("Release Version: %s", PDReleaseVersion)
-	log.Infof("Git Commit Hash: %s", PDGitHash)
-	log.Infof("Git Branch: %s", PDGitBranch)
-	log.Infof("UTC Build Time:  %s", PDBuildTS)
+	log.Info("Welcome to Placement Driver (PD)")
+	log.Info("PD", zap.String("release-version", PDReleaseVersion))
+	log.Info("PD", zap.String("git-hash", PDGitHash))
+	log.Info("PD", zap.String("git-branch", PDGitBranch))
+	log.Info("PD", zap.String("utc-build-time", PDBuildTS))
 }
 
 // PrintPDInfo prints the PD version information without log info.
@@ -78,7 +79,10 @@ func CheckPDVersion(opt *scheduleOption) {
 	}
 	clusterVersion := opt.loadClusterVersion()
 	if pdVersion.LessThan(clusterVersion) {
-		log.Warnf("PD version %s less than cluster version: %s, please upgrade PD", pdVersion, clusterVersion)
+		log.Warn(
+			"PD version less than cluster version, please upgrade PD",
+			zap.String("PD-version", pdVersion.String()),
+			zap.String("cluster-version", clusterVersion.String()))
 	}
 }
 
@@ -213,7 +217,10 @@ func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 
 	cost := time.Since(start)
 	if cost > slowRequestTime {
-		log.Warnf("txn runs too slow, resp: %v, err: %v, cost: %s", resp, err, cost)
+		log.Warn("txn runs too slow",
+			zap.Error(err),
+			zap.Reflect("response", resp),
+			zap.Duration("cost", cost))
 	}
 	label := "success"
 	if err != nil {
