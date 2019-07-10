@@ -55,17 +55,50 @@ func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
 	return nil
 }
 
-func getRequest(cmd *cobra.Command, prefix string, method string, bodyType string, body io.Reader) (*http.Request, error) {
-	if method == "" {
-		method = http.MethodGet
+type bodyOption struct {
+	contentType string
+	body        io.Reader
+}
+
+// BodyOption sets the type and content of the body
+type BodyOption func(*bodyOption)
+
+// WithBody returns a BodyOption
+func WithBody(contentType string, body io.Reader) BodyOption {
+	return func(bo *bodyOption) {
+		bo.contentType = contentType
+		bo.body = body
 	}
-	url := getAddressFromCmd(cmd, prefix)
-	req, err := http.NewRequest(method, url, body)
-	if err != nil {
-		return nil, err
+}
+func doRequest(cmd *cobra.Command, prefix string, method string,
+	opts ...BodyOption) (string, error) {
+	b := &bodyOption{}
+	for _, o := range opts {
+		o(b)
 	}
-	req.Header.Set("Content-Type", bodyType)
-	return req, err
+	each := RoundRobinURLs(cmd)
+	var resp string
+	var err error
+	each(func(endpoint string) error {
+		url := endpoint + "/" + prefix
+		if method == "" {
+			method = http.MethodGet
+		}
+		req, err := http.NewRequest(method, url, b.body)
+		if err != nil {
+			return err
+		}
+		if b.contentType != "" {
+			req.Header.Set("Content-Type", b.contentType)
+		}
+		// the resp would be returned by the outer function
+		resp, err = dail(req)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return resp, err
 }
 
 func dail(req *http.Request) (string, error) {
@@ -87,37 +120,60 @@ func dail(req *http.Request) (string, error) {
 	return res, nil
 }
 
-func doRequest(cmd *cobra.Command, prefix string, method string) (string, error) {
-	req, err := getRequest(cmd, prefix, method, "", nil)
-	if err != nil {
-		return "", err
-	}
-	return dail(req)
-}
-
 func genResponseError(r *http.Response) error {
 	res, _ := ioutil.ReadAll(r.Body)
 	return errors.Errorf("[%d] %s", r.StatusCode, res)
 }
 
-func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
-	p, err := cmd.Flags().GetString("pd")
+// DoFunc receives an endpoint which you can issue request to
+type DoFunc func(endpoint string) error
+
+// RoundRobinURLs returns a closure which runs a DoFunc for each
+// url parsed from the command line
+func RoundRobinURLs(cmd *cobra.Command) func(f DoFunc) {
+	addrs, err := cmd.Flags().GetString("pd")
 	if err != nil {
-		cmd.Println("get pd address error, should set flag with '-u'")
+		cmd.Println("get pd address failed, should set flag with '-u'")
 		os.Exit(1)
 	}
+	endpoints := strings.Split(addrs, ",")
+	for i, endpoint := range endpoints {
+		u, err := url.Parse(endpoint)
+		if err != nil {
+			cmd.Println("address format is wrong, should like 'http://127.0.0.1:2379' or '127.0.0.1:2379'")
+			os.Exit(1)
+		}
+		// tolerate some schemes that will be used by users, the TiKV SDK
+		// use 'tikv' as the scheme, it is really confused if we do not
+		// support it by pdctl
+		if u.Scheme == "" || u.Scheme == "pd" || u.Scheme == "tikv" {
+			u.Scheme = "http"
+		}
 
-	if p != "" && !strings.HasPrefix(p, "http") {
-		p = "http://" + p
+		endpoints[i] = u.String()
 	}
 
-	u, err := url.Parse(p)
-	if err != nil {
-		cmd.Println("address format is wrong, should like 'http://127.0.0.1:2379' or '127.0.0.1:2379'")
+	total := len(endpoints)
+	next := 0
+	return func(f DoFunc) {
+		first := next
+		for {
+			endpoint := endpoints[next]
+			// when there is an error, try next endpoint, keep using
+			// the health endpoint otherwise.
+			if err := f(endpoint); err != nil {
+				next = (next + 1) % total
+				// we have tried all the endpoints, now print the error
+				// and break
+				if first == next {
+					cmd.Println(err)
+					break
+				}
+				continue
+			}
+			break
+		}
 	}
-
-	s := fmt.Sprintf("%s/%s", u, prefix)
-	return s
 }
 
 func printResponseError(r *http.Response) error {
@@ -133,21 +189,24 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 		return
 	}
 
-	url := getAddressFromCmd(cmd, prefix)
-	r, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	defer r.Body.Close()
-
-	if r.StatusCode != http.StatusOK {
-		if err := printResponseError(r); err != nil {
-			cmd.Println(err)
+	each := RoundRobinURLs(cmd)
+	each(func(endpoint string) error {
+		url := endpoint + "/" + prefix
+		r, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
+		if err != nil {
+			return err
 		}
-	} else {
+		defer r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			if err := printResponseError(r); err != nil {
+				cmd.Println(err)
+			}
+			return nil
+		}
 		cmd.Println("success!")
-	}
+		return nil
+	})
+
 }
 
 // UsageTemplate will used to generate a help information

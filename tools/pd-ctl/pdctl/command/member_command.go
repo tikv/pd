@@ -171,12 +171,7 @@ func setLeaderPriorityFunc(cmd *cobra.Command, args []string) {
 	}
 	data := map[string]interface{}{"leader-priority": priority}
 	reqData, _ := json.Marshal(data)
-	req, err := getRequest(cmd, prefix, http.MethodPost, "application/json", bytes.NewBuffer(reqData))
-	if err != nil {
-		cmd.Printf("failed to set leader priority: %v\n", err)
-		return
-	}
-	_, err = dail(req)
+	_, err = doRequest(cmd, prefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(reqData)))
 	if err != nil {
 		cmd.Printf("failed to set leader priority: %v\n", err)
 		return

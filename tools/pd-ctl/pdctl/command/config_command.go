@@ -270,11 +270,8 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 	if err != nil {
 		return err
 	}
-	req, err := getRequest(cmd, path, http.MethodPost, "application/json", bytes.NewBuffer(reqData))
-	if err != nil {
-		return err
-	}
-	_, err = dail(req)
+	_, err = doRequest(cmd, path, http.MethodPost,
+		WithBody("application/json", bytes.NewBuffer(reqData)))
 	if err != nil {
 		return err
 	}
