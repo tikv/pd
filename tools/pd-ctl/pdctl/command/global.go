@@ -102,27 +102,24 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 }
 
 func dail(req *http.Request) (string, error) {
-	var res string
-	reps, err := dialClient.Do(req)
+	resp, err := dialClient.Do(req)
 	if err != nil {
-		return res, err
+		return "", err
 	}
-	defer reps.Body.Close()
-	if reps.StatusCode != http.StatusOK {
-		return res, genResponseError(reps)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		msg, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("[%d] %s", resp.StatusCode, msg), nil
 	}
 
-	r, err := ioutil.ReadAll(reps.Body)
+	content, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return res, err
+		return "", err
 	}
-	res = string(r)
-	return res, nil
-}
-
-func genResponseError(r *http.Response) error {
-	res, _ := ioutil.ReadAll(r.Body)
-	return errors.Errorf("[%d] %s", r.StatusCode, res)
+	return string(content), nil
 }
 
 // DoFunc receives an endpoint which you can issue request to
