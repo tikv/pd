@@ -126,17 +126,18 @@ func dail(req *http.Request) (string, error) {
 // DoFunc receives an endpoint which you can issue request to
 type DoFunc func(endpoint string) error
 
-// roundRobinURLs returns a closure which runs a DoFunc for each
-// url parsed from the command line
-func roundRobinURLs(cmd *cobra.Command) func(f DoFunc) {
+// tryURLs issues requests to each URL and tries next one if there
+// is an error
+func tryURLs(cmd *cobra.Command, f DoFunc) {
 	addrs, err := cmd.Flags().GetString("pd")
 	if err != nil {
 		cmd.Println("get pd address failed, should set flag with '-u'")
 		os.Exit(1)
 	}
 	endpoints := strings.Split(addrs, ",")
-	for i, endpoint := range endpoints {
-		u, err := url.Parse(endpoint)
+	for _, endpoint := range endpoints {
+		var u *url.URL
+		u, err = url.Parse(endpoint)
 		if err != nil {
 			cmd.Println("address format is wrong, should like 'http://127.0.0.1:2379' or '127.0.0.1:2379'")
 			os.Exit(1)
@@ -148,35 +149,16 @@ func roundRobinURLs(cmd *cobra.Command) func(f DoFunc) {
 			u.Scheme = "http"
 		}
 
-		endpoints[i] = u.String()
-	}
-
-	total := len(endpoints)
-	next := 0
-	return func(f DoFunc) {
-		first := next
-		for {
-			endpoint := endpoints[next]
-			// when there is an error, try next endpoint, keep using
-			// the health endpoint otherwise.
-			if err := f(endpoint); err != nil {
-				next = (next + 1) % total
-				// we have tried all the endpoints, now print the error
-				// and break
-				if first == next {
-					cmd.Println("after trying all endpoints, no endpoint is available, the last error we met:", err)
-					break
-				}
-				continue
-			}
-			break
+		endpoint = u.String()
+		err = f(endpoint)
+		if err != nil {
+			continue
 		}
+		break
 	}
-}
-
-func tryURLs(cmd *cobra.Command, f DoFunc) {
-	each := roundRobinURLs(cmd)
-	each(f)
+	if err != nil {
+		cmd.Println("after trying all endpoints, no endpoint is available, the last error we met:", err)
+	}
 }
 
 func printResponseError(r *http.Response) error {
