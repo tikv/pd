@@ -76,10 +76,9 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 	for _, o := range opts {
 		o(b)
 	}
-	tryURLs := RoundRobinURLs(cmd)
 	var resp string
 	var err error
-	tryURLs(func(endpoint string) error {
+	tryURLs(cmd, func(endpoint string) error {
 		url := endpoint + "/" + prefix
 		if method == "" {
 			method = http.MethodGet
@@ -127,9 +126,9 @@ func dail(req *http.Request) (string, error) {
 // DoFunc receives an endpoint which you can issue request to
 type DoFunc func(endpoint string) error
 
-// RoundRobinURLs returns a closure which runs a DoFunc for each
+// roundRobinURLs returns a closure which runs a DoFunc for each
 // url parsed from the command line
-func RoundRobinURLs(cmd *cobra.Command) func(f DoFunc) {
+func roundRobinURLs(cmd *cobra.Command) func(f DoFunc) {
 	addrs, err := cmd.Flags().GetString("pd")
 	if err != nil {
 		cmd.Println("get pd address failed, should set flag with '-u'")
@@ -175,6 +174,11 @@ func RoundRobinURLs(cmd *cobra.Command) func(f DoFunc) {
 	}
 }
 
+func tryURLs(cmd *cobra.Command, f DoFunc) {
+	each := roundRobinURLs(cmd)
+	each(f)
+}
+
 func printResponseError(r *http.Response) error {
 	fmt.Printf("[%d]:", r.StatusCode)
 	_, err := io.Copy(os.Stdout, r.Body)
@@ -188,8 +192,7 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 		return
 	}
 
-	tryURLs := RoundRobinURLs(cmd)
-	tryURLs(func(endpoint string) error {
+	tryURLs(cmd, func(endpoint string) error {
 		url := endpoint + "/" + prefix
 		r, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
 		if err != nil {
