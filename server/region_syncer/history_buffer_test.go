@@ -19,6 +19,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 )
 
 var _ = Suite(&testHistoryBuffer{})
@@ -36,7 +37,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	}
 
 	// size equals 1
-	h := newHistoryBuffer(1, core.NewMemoryKV())
+	h := newHistoryBuffer(1, kv.NewMemoryKV())
 	c.Assert(h.len(), Equals, 0)
 	for _, r := range regions {
 		h.Record(r)
@@ -46,7 +47,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	c.Assert(h.get(99), IsNil)
 
 	// size equals 2
-	h = newHistoryBuffer(2, core.NewMemoryKV())
+	h = newHistoryBuffer(2, kv.NewMemoryKV())
 	for _, r := range regions {
 		h.Record(r)
 	}
@@ -55,9 +56,9 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	c.Assert(h.get(99), Equals, regions[h.nextIndex()-2])
 	c.Assert(h.get(98), IsNil)
 
-	// size eqauls 100
-	kv := core.NewMemoryKV()
-	h1 := newHistoryBuffer(100, kv)
+	// size equals 100
+	kvMem := kv.NewMemoryKV()
+	h1 := newHistoryBuffer(100, kvMem)
 	for i := 0; i < 6; i++ {
 		h1.Record(regions[i])
 	}
@@ -66,7 +67,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	h1.persist()
 
 	// restart the buffer
-	h2 := newHistoryBuffer(100, kv)
+	h2 := newHistoryBuffer(100, kvMem)
 	c.Assert(h2.nextIndex(), Equals, uint64(6))
 	c.Assert(h2.firstIndex(), Equals, uint64(6))
 	c.Assert(h2.get(h.nextIndex()-1), IsNil)

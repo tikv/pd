@@ -21,9 +21,9 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 )
 
 var _ = Suite(&testConfigSuite{})
@@ -46,19 +46,19 @@ func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
 func (s *testConfigSuite) TestReloadConfig(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	kv := core.NewKV(core.NewMemoryKV())
+	storage := core.NewStorage(kv.NewMemoryKV())
 	scheduleCfg := opt.load()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
 	opt.loadPDServerConfig().UseRegionStorage = true
-	c.Assert(opt.persist(kv), IsNil)
+	c.Assert(opt.persist(storage), IsNil)
 
 	// suppose we add a new default enable scheduler "adjacent-region"
 	defaultSchedulers := []string{"balance-region", "balance-leader", "hot-region", "label", "adjacent-region"}
 	_, newOpt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	newOpt.AddSchedulerCfg("adjacent-region", []string{})
-	c.Assert(newOpt.reload(kv), IsNil)
+	c.Assert(newOpt.reload(storage), IsNil)
 	schedulers := newOpt.GetSchedulers()
 	c.Assert(schedulers, HasLen, 5)
 	c.Assert(newOpt.loadPDServerConfig().UseRegionStorage, IsTrue)

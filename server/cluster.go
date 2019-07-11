@@ -109,7 +109,7 @@ func (c *RaftCluster) isInitialized() bool {
 // yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.s.kv.Load(c.s.kv.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.s.storage.Load(c.s.storage.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return t, err
 	}
@@ -128,7 +128,7 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 
-	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.kv, c.s.scheduleOpt)
+	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.storage, c.s.scheduleOpt)
 	if err != nil {
 		return err
 	}
@@ -379,8 +379,8 @@ func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionI
 // UpdateStoreLabels updates a store's location labels.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel) error {
 	c.RLock()
-	defer c.RUnlock()
 	store := c.cachedCluster.GetStore(storeID)
+	c.RUnlock()
 	if store == nil {
 		return errors.Errorf("invalid store ID %d, not found", storeID)
 	}
@@ -555,7 +555,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 		return core.NewStoreNotFoundErr(storeID)
 	}
 
-	if err := c.s.kv.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
+	if err := c.s.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
 		return err
 	}
 

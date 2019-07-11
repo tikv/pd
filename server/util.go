@@ -182,57 +182,6 @@ func uint64ToBytes(v uint64) []byte {
 	return b
 }
 
-// slowLogTxn wraps etcd transaction and log slow one.
-type slowLogTxn struct {
-	clientv3.Txn
-	cancel context.CancelFunc
-}
-
-func newSlowLogTxn(client *clientv3.Client) clientv3.Txn {
-	ctx, cancel := context.WithTimeout(client.Ctx(), requestTimeout)
-	return &slowLogTxn{
-		Txn:    client.Txn(ctx),
-		cancel: cancel,
-	}
-}
-
-func (t *slowLogTxn) If(cs ...clientv3.Cmp) clientv3.Txn {
-	return &slowLogTxn{
-		Txn:    t.Txn.If(cs...),
-		cancel: t.cancel,
-	}
-}
-
-func (t *slowLogTxn) Then(ops ...clientv3.Op) clientv3.Txn {
-	return &slowLogTxn{
-		Txn:    t.Txn.Then(ops...),
-		cancel: t.cancel,
-	}
-}
-
-// Commit implements Txn Commit interface.
-func (t *slowLogTxn) Commit() (*clientv3.TxnResponse, error) {
-	start := time.Now()
-	resp, err := t.Txn.Commit()
-	t.cancel()
-
-	cost := time.Since(start)
-	if cost > slowRequestTime {
-		log.Warn("txn runs too slow",
-			zap.Error(err),
-			zap.Reflect("response", resp),
-			zap.Duration("cost", cost))
-	}
-	label := "success"
-	if err != nil {
-		label = "failed"
-	}
-	txnCounter.WithLabelValues(label).Inc()
-	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
-
-	return resp, errors.WithStack(err)
-}
-
 // GetMembers return a slice of Members.
 func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 	listResp, err := etcdutil.ListEtcdMembers(etcdClient)

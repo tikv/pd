@@ -28,6 +28,13 @@ func HealthRegion() RegionOption {
 	}
 }
 
+// HealthRegionAllowPending checks if the region is healthy with allowing the pending peer.
+func HealthRegionAllowPending() RegionOption {
+	return func(region *RegionInfo) bool {
+		return len(region.downPeers) == 0 && len(region.learners) == 0
+	}
+}
+
 // RegionCreateOption used to create region.
 type RegionCreateOption func(region *RegionInfo)
 

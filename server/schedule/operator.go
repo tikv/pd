@@ -39,6 +39,11 @@ const (
 	RegionOperatorWaitTime = 10 * time.Minute
 	// RegionInfluence represents the influence of a operator step, which is used by ratelimit.
 	RegionInfluence int64 = 1000
+	// smallRegionInfluence represents the influence of a operator step
+	// when the region size is smaller than smallRegionThreshold, which is used by ratelimit.
+	smallRegionInfluence int64 = 200
+	// smallRegionThreshold is used to represent a region which can be regarded as a small region once the size is small than it.
+	smallRegionThreshold int64 = 20
 )
 
 // OperatorStep describes the basic scheduling steps that can not be subdivided.
@@ -98,9 +103,14 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
-	to.RegionSize += region.GetApproximateSize()
+	regionSize := region.GetApproximateSize()
+	to.RegionSize += regionSize
 	to.RegionCount++
-	to.StepCost += RegionInfluence
+	if regionSize > smallRegionThreshold {
+		to.StepCost += RegionInfluence
+	} else if regionSize <= smallRegionThreshold && regionSize > core.EmptyRegionApproximateSize {
+		to.StepCost += smallRegionInfluence
+	}
 }
 
 // AddLearner is an OperatorStep that adds a region learner peer.
@@ -128,9 +138,14 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(al.ToStore)
 
-	to.RegionSize += region.GetApproximateSize()
+	regionSize := region.GetApproximateSize()
+	to.RegionSize += regionSize
 	to.RegionCount++
-	to.StepCost += RegionInfluence
+	if regionSize > smallRegionThreshold {
+		to.StepCost += RegionInfluence
+	} else if regionSize <= smallRegionThreshold && regionSize > core.EmptyRegionApproximateSize {
+		to.StepCost += smallRegionInfluence
+	}
 }
 
 // PromoteLearner is an OperatorStep that promotes a region learner peer to normal voter.

@@ -25,22 +25,28 @@ import (
 	"go.uber.org/zap"
 )
 
-// Cluster provides an overview of a cluster's regions distribution.
-type Cluster interface {
+// RegionSetInformer provides access to a shared informer of regions.
+// TODO: move to core package
+type RegionSetInformer interface {
 	RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo
 	RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo
+	RandPendingRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo
 	GetAverageRegionSize() int64
 	GetStoreRegionCount(storeID uint64) int
+	GetRegion(id uint64) *core.RegionInfo
+	GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo)
+	ScanRegions(startKey []byte, limit int) []*core.RegionInfo
+}
 
+// Cluster provides an overview of a cluster's regions distribution.
+type Cluster interface {
+	RegionSetInformer
 	GetStores() []*core.StoreInfo
 	GetStore(id uint64) *core.StoreInfo
-	GetRegion(id uint64) *core.RegionInfo
+
 	GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
 	GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo
 	GetLeaderStore(region *core.RegionInfo) *core.StoreInfo
-	GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo)
-	ScanRegions(startKey []byte, limit int) []*core.RegionInfo
-
 	BlockStore(id uint64) error
 	UnblockStore(id uint64)
 

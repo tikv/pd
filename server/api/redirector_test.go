@@ -38,9 +38,12 @@ func (s *testRedirectorSuite) TearDownSuite(c *C) {
 func (s *testRedirectorSuite) TestRedirect(c *C) {
 	leader := mustWaitLeader(c, s.servers)
 	header := mustRequestSuccess(c, leader)
+	header.Del("Date")
 	for _, svr := range s.servers {
 		if svr != leader {
-			c.Assert(header, DeepEquals, mustRequestSuccess(c, svr))
+			h := mustRequestSuccess(c, svr)
+			h.Del("Date")
+			c.Assert(header, DeepEquals, h)
 		}
 	}
 }

@@ -19,6 +19,7 @@ import (
 
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 	"go.uber.org/zap"
 )
 
@@ -34,11 +35,11 @@ type historyBuffer struct {
 	head       int
 	tail       int
 	size       int
-	kv         core.KVBase
+	kv         kv.Base
 	flushCount int
 }
 
-func newHistoryBuffer(size int, kv core.KVBase) *historyBuffer {
+func newHistoryBuffer(size int, kv kv.Base) *historyBuffer {
 	// use an empty space to simplify operation
 	size++
 	if size < 2 {

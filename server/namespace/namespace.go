@@ -92,7 +92,7 @@ func (c defaultClassifier) IsStoreIDExist(storeID uint64) bool {
 }
 
 // CreateClassifierFunc is for creating namespace classifier.
-type CreateClassifierFunc func(*core.KV, core.IDAllocator) (Classifier, error)
+type CreateClassifierFunc func(*core.Storage, core.IDAllocator) (Classifier, error)
 
 var classifierMap = make(map[string]CreateClassifierFunc)
 
@@ -106,16 +106,16 @@ func RegisterClassifier(name string, createFn CreateClassifierFunc) {
 }
 
 // CreateClassifier creates a namespace classifier with registered creator func.
-func CreateClassifier(name string, kv *core.KV, idAlloc core.IDAllocator) (Classifier, error) {
+func CreateClassifier(name string, storage *core.Storage, idAlloc core.IDAllocator) (Classifier, error) {
 	fn, ok := classifierMap[name]
 	if !ok {
 		return nil, errors.Errorf("create func of %v is not registered", name)
 	}
-	return fn(kv, idAlloc)
+	return fn(storage, idAlloc)
 }
 
 func init() {
-	RegisterClassifier("default", func(*core.KV, core.IDAllocator) (Classifier, error) {
+	RegisterClassifier("default", func(*core.Storage, core.IDAllocator) (Classifier, error) {
 		return DefaultClassifier, nil
 	})
 }

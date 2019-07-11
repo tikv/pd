@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package kv
 
 import (
 	"sync"
@@ -19,21 +19,13 @@ import (
 	"github.com/google/btree"
 )
 
-// KVBase is an abstract interface for load/save pd cluster data.
-type KVBase interface {
-	Load(key string) (string, error)
-	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
-	Save(key, value string) error
-	Delete(key string) error
-}
-
 type memoryKV struct {
 	sync.RWMutex
 	tree *btree.BTree
 }
 
 // NewMemoryKV returns an in-memory kvBase for testing.
-func NewMemoryKV() KVBase {
+func NewMemoryKV() Base {
 	return &memoryKV{
 		tree: btree.New(2),
 	}
@@ -77,7 +69,7 @@ func (kv *memoryKV) Save(key, value string) error {
 	return nil
 }
 
-func (kv *memoryKV) Delete(key string) error {
+func (kv *memoryKV) Remove(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
 

@@ -99,6 +99,11 @@ func (bc *BasicCluster) RandLeaderRegion(storeID uint64, opts ...RegionOption) *
 	return bc.Regions.RandLeaderRegion(storeID, opts...)
 }
 
+// RandPendingRegion returns a random region that has a pending peer on the store.
+func (bc *BasicCluster) RandPendingRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
+	return bc.Regions.RandPendingRegion(storeID, opts...)
+}
+
 // GetAverageRegionSize returns the average region approximate size.
 func (bc *BasicCluster) GetAverageRegionSize() int64 {
 	return bc.Regions.GetAverageRegionSize()

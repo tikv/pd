@@ -668,12 +668,17 @@ func (r *RegionsInfo) RandRegion(opts ...RegionOption) *RegionInfo {
 	return randRegion(r.regions, opts...)
 }
 
-// RandLeaderRegion get a store's leader region by random
+// RandPendingRegion randomly gets a store's region with a pending peer.
+func (r *RegionsInfo) RandPendingRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
+	return randRegion(r.pendingPeers[storeID], opts...)
+}
+
+// RandLeaderRegion randomly gets a store's leader region.
 func (r *RegionsInfo) RandLeaderRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
 	return randRegion(r.leaders[storeID], opts...)
 }
 
-// RandFollowerRegion get a store's follower region by random
+// RandFollowerRegion randomly gets a store's follower region.
 func (r *RegionsInfo) RandFollowerRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
 	return randRegion(r.followers[storeID], opts...)
 }

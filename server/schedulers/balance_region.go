@@ -43,6 +43,7 @@ const (
 	// the total time spend  t = a1 * (1-pow(q,n)) / (1 - q), where a1 = 10,
 	// q = 1.3, and n = 30, so t = 87299ms ≈ 87s.
 	hitsStoreCountThreshold = 30 * balanceRegionRetryLimit
+	balanceRegionName       = "balance-region-scheduler"
 )
 
 type balanceRegionScheduler struct {
@@ -69,7 +70,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController) schedu
 }
 
 func (s *balanceRegionScheduler) GetName() string {
-	return "balance-region-scheduler"
+	return balanceRegionName
 }
 
 func (s *balanceRegionScheduler) GetType() string {
@@ -103,10 +104,15 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	for i := 0; i < balanceRegionRetryLimit; i++ {
-		// Priority the region that has a follower in the source store.
-		region := cluster.RandFollowerRegion(sourceID, core.HealthRegion())
+		// Priority picks the region that has a pending peer.
+		// Pending region may means the disk is overload, remove the pending region firstly.
+		region := cluster.RandPendingRegion(sourceID, core.HealthRegionAllowPending())
 		if region == nil {
-			// Then the region has the leader in the source store
+			// Then picks the region that has a follower in the source store.
+			region = cluster.RandFollowerRegion(sourceID, core.HealthRegion())
+		}
+		if region == nil {
+			// Last, picks the region has the leader in the source store.
 			region = cluster.RandLeaderRegion(sourceID, core.HealthRegion())
 		}
 		if region == nil {
@@ -234,6 +240,7 @@ func (h *hitsStoreBuilder) filter(source, target *core.StoreInfo) bool {
 			delete(h.hits, key)
 		}
 		if time.Since(item.lastTime) <= h.ttl && item.count >= h.threshold {
+			log.Debug("skip the the store", zap.String("scheduler", balanceRegionName), zap.String("filter-key", key))
 			return true
 		}
 	}

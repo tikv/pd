@@ -34,7 +34,7 @@ func NewBalanceSelector(kind core.ResourceKind, filters []Filter) *BalanceSelect
 	}
 }
 
-// SelectSource selects the store that can pass all filters and has the minimal
+// SelectSource selects the store that can pass all filters and has the maximal
 // resource score.
 func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
@@ -52,7 +52,7 @@ func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo, fi
 	return result
 }
 
-// SelectTarget selects the store that can pass all filters and has the maximal
+// SelectTarget selects the store that can pass all filters and has the minimal
 // resource score.
 func (s *BalanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)

@@ -18,6 +18,9 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/core"
 )
 
 func TestSchedulers(t *testing.T) {
@@ -44,4 +47,33 @@ func (s *testMinMaxSuite) TestMinDuration(c *C) {
 	c.Assert(minDuration(time.Minute, time.Second), Equals, time.Second)
 	c.Assert(minDuration(time.Second, time.Minute), Equals, time.Second)
 	c.Assert(minDuration(time.Second, time.Second), Equals, time.Second)
+}
+
+var _ = Suite(&testRegionUnhealthySuite{})
+
+type testRegionUnhealthySuite struct{}
+
+func (s *testRegionUnhealthySuite) TestIsRegionUnhealthy(c *C) {
+	peers := make([]*metapb.Peer, 0, 3)
+	for i := uint64(0); i < 2; i++ {
+		p := &metapb.Peer{
+			Id:      i,
+			StoreId: i,
+		}
+		peers = append(peers, p)
+	}
+	peers = append(peers, &metapb.Peer{
+		Id:        2,
+		StoreId:   2,
+		IsLearner: true,
+	})
+
+	r1 := core.NewRegionInfo(&metapb.Region{Peers: peers[:2]}, peers[0], core.WithDownPeers([]*pdpb.PeerStats{{Peer: peers[1]}}))
+	r2 := core.NewRegionInfo(&metapb.Region{Peers: peers[:2]}, peers[0], core.WithPendingPeers([]*metapb.Peer{peers[1]}))
+	r3 := core.NewRegionInfo(&metapb.Region{Peers: peers[:3]}, peers[0], core.WithLearners([]*metapb.Peer{peers[2]}))
+	r4 := core.NewRegionInfo(&metapb.Region{Peers: peers[:2]}, peers[0])
+	c.Assert(isRegionUnhealthy(r1), IsTrue)
+	c.Assert(isRegionUnhealthy(r2), IsFalse)
+	c.Assert(isRegionUnhealthy(r3), IsTrue)
+	c.Assert(isRegionUnhealthy(r4), IsFalse)
 }
