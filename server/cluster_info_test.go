@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 )
 
 var _ = Suite(&testStoresInfoSuite{})
@@ -197,11 +198,11 @@ func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
 	}
 }
 
-func checkRegionsKV(c *C, kv *core.KV, regions []*core.RegionInfo) {
-	if kv != nil {
+func checkRegionsKV(c *C, s *core.Storage, regions []*core.RegionInfo) {
+	if s != nil {
 		for _, region := range regions {
 			var meta metapb.Region
-			ok, err := kv.LoadRegion(region.GetID(), &meta)
+			ok, err := s.LoadRegion(region.GetID(), &meta)
 			c.Assert(ok, IsTrue)
 			c.Assert(err, IsNil)
 			c.Assert(&meta, DeepEquals, region.GetMeta())
@@ -253,23 +254,23 @@ func (s *testClusterInfoSuite) TestLoadClusterInfo(c *C) {
 	server, cleanup := mustRunTestServer(c)
 	defer cleanup()
 
-	kv := server.kv
+	storage := server.storage
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 
 	// Cluster is not bootstrapped.
-	cluster, err := loadClusterInfo(server.idAlloc, kv, opt)
+	cluster, err := loadClusterInfo(server.idAlloc, storage, opt)
 	c.Assert(err, IsNil)
 	c.Assert(cluster, IsNil)
 
 	// Save meta, stores and regions.
 	n := 10
 	meta := &metapb.Cluster{Id: 123}
-	c.Assert(kv.SaveMeta(meta), IsNil)
-	stores := mustSaveStores(c, kv, n)
-	regions := mustSaveRegions(c, kv, n)
+	c.Assert(storage.SaveMeta(meta), IsNil)
+	stores := mustSaveStores(c, storage, n)
+	regions := mustSaveRegions(c, storage, n)
 
-	cluster, err = loadClusterInfo(server.idAlloc, kv, opt)
+	cluster, err = loadClusterInfo(server.idAlloc, storage, opt)
 	c.Assert(err, IsNil)
 	c.Assert(cluster, NotNil)
 
@@ -288,7 +289,7 @@ func (s *testClusterInfoSuite) TestLoadClusterInfo(c *C) {
 func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newClusterInfo(mockid.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+	cluster := newClusterInfo(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()))
 
 	n, np := uint64(3), uint64(3)
 	stores := newTestStores(n)
@@ -324,7 +325,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 
 	for _, store := range stores {
 		tmp := &metapb.Store{}
-		ok, err := cluster.kv.LoadStore(store.GetID(), tmp)
+		ok, err := cluster.storage.LoadStore(store.GetID(), tmp)
 		c.Assert(ok, IsTrue)
 		c.Assert(err, IsNil)
 		c.Assert(tmp, DeepEquals, store.GetMeta())
@@ -334,7 +335,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cluster := newClusterInfo(mockid.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+	cluster := newClusterInfo(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()))
 
 	n, np := uint64(3), uint64(3)
 
@@ -349,25 +350,25 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		// region does not exist.
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is the same, not updated.
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 		origin := region
 		// region is updated.
 		region = origin.Clone(core.WithIncVersion())
 		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is stale (Version).
 		stale := origin.Clone(core.WithIncConfVer())
 		c.Assert(cluster.handleRegionHeartbeat(stale), NotNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is updated.
 		region = origin.Clone(
@@ -377,13 +378,13 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is stale (ConfVer).
 		stale = origin.Clone(core.WithIncConfVer())
 		c.Assert(cluster.handleRegionHeartbeat(stale), NotNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// Add a down peer.
 		region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
@@ -420,13 +421,13 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 		// Add peers.
 		region = origin
 		regions[i] = region
 		c.Assert(cluster.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
-		checkRegionsKV(c, cluster.kv, regions[:i+1])
+		checkRegionsKV(c, cluster.storage, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
@@ -463,11 +464,11 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(store.GetRegionSize(), Equals, cluster.core.Regions.GetStoreRegionSize(store.GetID()))
 	}
 
-	// Test with kv.
-	if kv := cluster.kv; kv != nil {
+	// Test with storage.
+	if storage := cluster.storage; storage != nil {
 		for _, region := range regions {
 			tmp := &metapb.Region{}
-			ok, err := kv.LoadRegion(region.GetID(), tmp)
+			ok, err := storage.LoadRegion(region.GetID(), tmp)
 			c.Assert(ok, IsTrue)
 			c.Assert(err, IsNil)
 			c.Assert(tmp, DeepEquals, region.GetMeta())
@@ -482,15 +483,15 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		)
 		c.Assert(cluster.handleRegionHeartbeat(overlapRegion), NotNil)
 		region := &metapb.Region{}
-		ok, err := kv.LoadRegion(regions[n-1].GetID(), region)
+		ok, err := storage.LoadRegion(regions[n-1].GetID(), region)
 		c.Assert(ok, IsTrue)
 		c.Assert(err, IsNil)
 		c.Assert(region, DeepEquals, regions[n-1].GetMeta())
-		ok, err = kv.LoadRegion(regions[n-2].GetID(), region)
+		ok, err = storage.LoadRegion(regions[n-2].GetID(), region)
 		c.Assert(ok, IsTrue)
 		c.Assert(err, IsNil)
 		c.Assert(region, DeepEquals, regions[n-2].GetMeta())
-		ok, err = kv.LoadRegion(overlapRegion.GetID(), region)
+		ok, err = storage.LoadRegion(overlapRegion.GetID(), region)
 		c.Assert(ok, IsFalse)
 		c.Assert(err, IsNil)
 
@@ -501,13 +502,13 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		)
 		c.Assert(cluster.handleRegionHeartbeat(overlapRegion), IsNil)
 		region = &metapb.Region{}
-		ok, err = kv.LoadRegion(regions[n-1].GetID(), region)
+		ok, err = storage.LoadRegion(regions[n-1].GetID(), region)
 		c.Assert(ok, IsFalse)
 		c.Assert(err, IsNil)
-		ok, err = kv.LoadRegion(regions[n-2].GetID(), region)
+		ok, err = storage.LoadRegion(regions[n-2].GetID(), region)
 		c.Assert(ok, IsFalse)
 		c.Assert(err, IsNil)
-		ok, err = kv.LoadRegion(overlapRegion.GetID(), region)
+		ok, err = storage.LoadRegion(overlapRegion.GetID(), region)
 		c.Assert(ok, IsTrue)
 		c.Assert(err, IsNil)
 		c.Assert(region, DeepEquals, overlapRegion.GetMeta())
@@ -693,7 +694,7 @@ func (s *testClusterUtilSuite) TestCheckStaleRegion(c *C) {
 	c.Assert(checkStaleRegion(region, origin), NotNil)
 }
 
-func mustSaveStores(c *C, kv *core.KV, n int) []*metapb.Store {
+func mustSaveStores(c *C, s *core.Storage, n int) []*metapb.Store {
 	stores := make([]*metapb.Store, 0, n)
 	for i := 0; i < n; i++ {
 		store := &metapb.Store{Id: uint64(i)}
@@ -701,13 +702,13 @@ func mustSaveStores(c *C, kv *core.KV, n int) []*metapb.Store {
 	}
 
 	for _, store := range stores {
-		c.Assert(kv.SaveStore(store), IsNil)
+		c.Assert(s.SaveStore(store), IsNil)
 	}
 
 	return stores
 }
 
-func mustSaveRegions(c *C, kv *core.KV, n int) []*metapb.Region {
+func mustSaveRegions(c *C, s *core.Storage, n int) []*metapb.Region {
 	regions := make([]*metapb.Region, 0, n)
 	for i := 0; i < n; i++ {
 		region := newTestRegionMeta(uint64(i))
@@ -715,9 +716,9 @@ func mustSaveRegions(c *C, kv *core.KV, n int) []*metapb.Region {
 	}
 
 	for _, region := range regions {
-		c.Assert(kv.SaveRegion(region), IsNil)
+		c.Assert(s.SaveRegion(region), IsNil)
 	}
-	c.Assert(kv.Flush(), IsNil)
+	c.Assert(s.Flush(), IsNil)
 
 	return regions
 }

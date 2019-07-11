@@ -444,3 +444,59 @@ func (f StoreStateFilter) filterMoveRegion(opt Options, store *core.StoreInfo) b
 	}
 	return false
 }
+
+// BlacklistType the type of BlackListStore Filter.
+type BlacklistType int
+
+// some flags about blacklist type.
+const (
+	// blacklist associated with the source.
+	BlacklistSource BlacklistType = 1 << iota
+	// blacklist associated with the target.
+	BlacklistTarget
+)
+
+// BlacklistStoreFilter filters the store according to the blacklist.
+type BlacklistStoreFilter struct {
+	blacklist map[uint64]struct{}
+	flag      BlacklistType
+}
+
+// NewBlacklistStoreFilter creates a blacklist filter.
+func NewBlacklistStoreFilter(typ BlacklistType) *BlacklistStoreFilter {
+	return &BlacklistStoreFilter{
+		blacklist: make(map[uint64]struct{}),
+		flag:      typ,
+	}
+}
+
+// Type implements the Filter.
+func (f *BlacklistStoreFilter) Type() string {
+	return "blacklist-store-filter"
+}
+
+// FilterSource implements the Filter.
+func (f *BlacklistStoreFilter) FilterSource(opt Options, store *core.StoreInfo) bool {
+	if f.flag&BlacklistSource != BlacklistSource {
+		return false
+	}
+	return f.filter(store)
+}
+
+// Add adds the store to the blacklist.
+func (f *BlacklistStoreFilter) Add(storeID uint64) {
+	f.blacklist[storeID] = struct{}{}
+}
+
+// FilterTarget implements the Filter.
+func (f *BlacklistStoreFilter) FilterTarget(opt Options, store *core.StoreInfo) bool {
+	if f.flag&BlacklistTarget != BlacklistTarget {
+		return false
+	}
+	return f.filter(store)
+}
+
+func (f *BlacklistStoreFilter) filter(store *core.StoreInfo) bool {
+	_, ok := f.blacklist[store.GetID()]
+	return ok
+}

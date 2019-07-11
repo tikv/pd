@@ -11,18 +11,44 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package kv
 
-import . "github.com/pingcap/check"
+import (
+	"fmt"
+	"io/ioutil"
+	"net/url"
+	"os"
+	"path"
+	"strconv"
+	"testing"
+
+	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/tempurl"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
+)
+
+func TestKV(t *testing.T) {
+	TestingT(t)
+}
 
 type testEtcdKVSuite struct{}
 
 var _ = Suite(&testEtcdKVSuite{})
 
 func (s *testEtcdKVSuite) TestEtcdKV(c *C) {
-	server, cleanup := mustRunTestServer(c)
-	defer cleanup()
-	kv := server.kv.KVBase
+	cfg := newTestSingleConfig()
+	etcd, err := embed.StartEtcd(cfg)
+	c.Assert(err, IsNil)
+
+	ep := cfg.LCUrls[0].String()
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: []string{ep},
+	})
+	c.Assert(err, IsNil)
+	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
+
+	kv := NewEtcdKVBase(client, rootPath)
 
 	keys := []string{"test/key1", "test/key2", "test/key3", "test/key4", "test/key5"}
 	vals := []string{"val1", "val2", "val3", "val4", "val5"}
@@ -56,8 +82,37 @@ func (s *testEtcdKVSuite) TestEtcdKV(c *C) {
 	v, err = kv.Load(keys[1])
 	c.Assert(err, IsNil)
 	c.Assert(v, Equals, "val2")
-	c.Assert(kv.Delete(keys[1]), IsNil)
+	c.Assert(kv.Remove(keys[1]), IsNil)
 	v, err = kv.Load(keys[1])
 	c.Assert(err, IsNil)
 	c.Assert(v, Equals, "")
+
+	etcd.Close()
+	cleanConfig(cfg)
+}
+
+func newTestSingleConfig() *embed.Config {
+	cfg := embed.NewConfig()
+	cfg.Name = "test_etcd"
+	cfg.Dir, _ = ioutil.TempDir("/tmp", "test_etcd")
+	cfg.WalDir = ""
+	cfg.Logger = "zap"
+	cfg.LogOutputs = []string{"stdout"}
+
+	pu, _ := url.Parse(tempurl.Alloc())
+	cfg.LPUrls = []url.URL{*pu}
+	cfg.APUrls = cfg.LPUrls
+	cu, _ := url.Parse(tempurl.Alloc())
+	cfg.LCUrls = []url.URL{*cu}
+	cfg.ACUrls = cfg.LCUrls
+
+	cfg.StrictReconfigCheck = false
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
+	cfg.ClusterState = embed.ClusterStateFlagNew
+	return cfg
+}
+
+func cleanConfig(cfg *embed.Config) {
+	// Clean data directory
+	os.RemoveAll(cfg.Dir)
 }

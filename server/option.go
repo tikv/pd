@@ -312,7 +312,7 @@ func (o *scheduleOption) loadPDServerConfig() *PDServerConfig {
 	return o.pdServerConfig.Load().(*PDServerConfig)
 }
 
-func (o *scheduleOption) persist(kv *core.KV) error {
+func (o *scheduleOption) persist(storage *core.Storage) error {
 	namespaces := o.loadNSConfig()
 
 	cfg := &Config{
@@ -323,11 +323,11 @@ func (o *scheduleOption) persist(kv *core.KV) error {
 		ClusterVersion: o.loadClusterVersion(),
 		PDServerCfg:    *o.loadPDServerConfig(),
 	}
-	err := kv.SaveConfig(cfg)
+	err := storage.SaveConfig(cfg)
 	return err
 }
 
-func (o *scheduleOption) reload(kv *core.KV) error {
+func (o *scheduleOption) reload(storage *core.Storage) error {
 	namespaces := o.loadNSConfig()
 
 	cfg := &Config{
@@ -338,7 +338,7 @@ func (o *scheduleOption) reload(kv *core.KV) error {
 		ClusterVersion: o.loadClusterVersion(),
 		PDServerCfg:    *o.loadPDServerConfig(),
 	}
-	isExist, err := kv.LoadConfig(cfg)
+	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
 		return err
 	}
