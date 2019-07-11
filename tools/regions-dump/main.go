@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"math"
@@ -21,8 +22,8 @@ import (
 var (
 	clusterID = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
 	endpoints = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
-	startID   = flag.Uint64("start-id", 0, "please make cluster ID match with tikv")
-	endID     = flag.Uint64("end-id", 0, "please make cluster ID match with tikv")
+	startID   = flag.Uint64("start-id", 0, "the id of the start region")
+	endID     = flag.Uint64("end-id", 0, "the id of the last region")
 	filePath  = flag.String("file", "regions.dump", "the dump file path and name")
 	caPath    = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
 	certPath  = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
@@ -92,6 +93,8 @@ func loadRegions(client *clientv3.Client, f *os.File) error {
 	if *endID != 0 {
 		endKey = regionPath(*endID)
 	}
+	w := bufio.NewWriter(f)
+	defer w.Flush()
 	// Since the region key may be very long, using a larger rangeLimit will cause
 	// the message packet to exceed the grpc message size limit (4MB). Here we use
 	// a variable rangeLimit to work around.
@@ -112,7 +115,7 @@ func loadRegions(client *clientv3.Client, f *os.File) error {
 				return errors.WithStack(err)
 			}
 			nextID = region.GetId() + 1
-			fmt.Fprintln(f, core.HexRegionMeta(region))
+			fmt.Fprintln(w, core.HexRegionMeta(region))
 		}
 
 		if len(res) < rangeLimit {
