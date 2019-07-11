@@ -76,10 +76,10 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 	for _, o := range opts {
 		o(b)
 	}
-	each := RoundRobinURLs(cmd)
+	tryURLs := RoundRobinURLs(cmd)
 	var resp string
 	var err error
-	each(func(endpoint string) error {
+	tryURLs(func(endpoint string) error {
 		url := endpoint + "/" + prefix
 		if method == "" {
 			method = http.MethodGet
@@ -188,8 +188,8 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 		return
 	}
 
-	each := RoundRobinURLs(cmd)
-	each(func(endpoint string) error {
+	tryURLs := RoundRobinURLs(cmd)
+	tryURLs(func(endpoint string) error {
 		url := endpoint + "/" + prefix
 		r, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
 		if err != nil {
