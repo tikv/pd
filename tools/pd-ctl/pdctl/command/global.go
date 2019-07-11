@@ -164,7 +164,7 @@ func roundRobinURLs(cmd *cobra.Command) func(f DoFunc) {
 				// we have tried all the endpoints, now print the error
 				// and break
 				if first == next {
-					cmd.Println(err)
+					cmd.Println("after trying all endpoints, no endpoint is available, the last error we met:", err)
 					break
 				}
 				continue
