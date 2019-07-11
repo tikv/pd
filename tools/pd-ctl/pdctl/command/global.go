@@ -84,7 +84,8 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 		if method == "" {
 			method = http.MethodGet
 		}
-		req, err := http.NewRequest(method, url, b.body)
+		var req *http.Request
+		req, err = http.NewRequest(method, url, b.body)
 		if err != nil {
 			return err
 		}
@@ -108,7 +109,8 @@ func dail(req *http.Request) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		msg, err := ioutil.ReadAll(resp.Body)
+		var msg []byte
+		msg, err = ioutil.ReadAll(resp.Body)
 		if err != nil {
 			return "", err
 		}
