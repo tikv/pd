@@ -44,6 +44,32 @@ var (
 		}, []string{"type"})
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	cmdDurationWait              = cmdDuration.WithLabelValues("wait")
+	cmdDurationTSO               = cmdDuration.WithLabelValues("tso")
+	cmdDurationTSOAsyncWait      = cmdDuration.WithLabelValues("tso_async_wait")
+	cmdDurationGetRegion         = cmdDuration.WithLabelValues("get_region")
+	cmdDurationGetPrevRegion     = cmdDuration.WithLabelValues("get_prev_region")
+	cmdDurationGetRegionByID     = cmdDuration.WithLabelValues("get_region_byid")
+	cmdDurationScanRegions       = cmdDuration.WithLabelValues("scan_regions")
+	cmdDurationGetStore          = cmdDuration.WithLabelValues("get_store")
+	cmdDurationGetAllStores      = cmdDuration.WithLabelValues("get_all_stores")
+	cmdDurationUpdateGCSafePoint = cmdDuration.WithLabelValues("update_gc_safe_point")
+	cmdDurationScatterRegion     = cmdDuration.WithLabelValues("scatter_region")
+	cmdDurationGetOperator       = cmdDuration.WithLabelValues("get_operator")
+
+	cmdFailDurationGetRegion           = cmdFailedDuration.WithLabelValues("get_region")
+	cmdFailDurationTSO                 = cmdFailedDuration.WithLabelValues("tso")
+	cmdFailDurationGetPrevRegion       = cmdFailedDuration.WithLabelValues("get_prev_region")
+	cmdFailedDurationGetRegionByID     = cmdFailedDuration.WithLabelValues("get_region_byid")
+	cmdFailedDurationScanRegions       = cmdFailedDuration.WithLabelValues("scan_regions")
+	cmdFailedDurationGetStore          = cmdFailedDuration.WithLabelValues("get_store")
+	cmdFailedDurationGetAllStores      = cmdFailedDuration.WithLabelValues("get_all_stores")
+	cmdFailedDurationUpdateGCSafePoint = cmdFailedDuration.WithLabelValues("update_gc_safe_point")
+	requestDurationTSO                 = requestDuration.WithLabelValues("tso")
+)
+
 func init() {
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
