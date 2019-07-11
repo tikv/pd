@@ -485,7 +485,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 		c.finishTSORequest(requests, 0, 0, err)
 		return err
 	}
-	requestDuration.WithLabelValues("tso").Observe(time.Since(start).Seconds())
+	requestDurationTSO.Observe(time.Since(start).Seconds())
 	if resp.GetCount() != uint32(len(requests)) {
 		err = errors.WithStack(errTSOLength)
 		c.finishTSORequest(requests, 0, 0, err)
@@ -595,17 +595,20 @@ type TSFuture interface {
 func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 	// If tso command duration is observed very high, the reason could be it
 	// takes too long for Wait() be called.
-	cmdDuration.WithLabelValues("tso_async_wait").Observe(time.Since(req.start).Seconds())
+	start := time.Now()
+	cmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err = <-req.done:
 		err = errors.WithStack(err)
 		defer tsoReqPool.Put(req)
 		if err != nil {
-			cmdFailedDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
+			cmdFailDurationTSO.Observe(time.Since(req.start).Seconds())
 			return 0, 0, err
 		}
 		physical, logical = req.physical, req.logical
-		cmdDuration.WithLabelValues("tso").Observe(time.Since(req.start).Seconds())
+		now := time.Now()
+		cmdDurationWait.Observe(now.Sub(start).Seconds())
+		cmdDurationTSO.Observe(now.Sub(req.start).Seconds())
 		return
 	case <-req.ctx.Done():
 		return 0, 0, errors.WithStack(req.ctx.Err())
@@ -623,7 +626,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetRegion(ctx, &pdpb.GetRegionRequest{
@@ -633,7 +636,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 	cancel()
 
 	if err != nil {
-		cmdFailedDuration.WithLabelValues("get_region").Observe(time.Since(start).Seconds())
+		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, nil, errors.WithStack(err)
 	}
@@ -646,7 +649,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region,
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDuration.WithLabelValues("get_prev_region").Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetPrevRegion(ctx, &pdpb.GetRegionRequest{
@@ -656,7 +659,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region,
 	cancel()
 
 	if err != nil {
-		cmdFailedDuration.WithLabelValues("get_prev_region").Observe(time.Since(start).Seconds())
+		cmdFailDurationGetPrevRegion.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, nil, errors.WithStack(err)
 	}
@@ -669,7 +672,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetRegionByID(ctx, &pdpb.GetRegionByIDRequest{
@@ -679,7 +682,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 	cancel()
 
 	if err != nil {
-		cmdFailedDuration.WithLabelValues("get_region_byid").Observe(time.Since(start).Seconds())
+		cmdFailedDurationGetRegionByID.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, nil, errors.WithStack(err)
 	}
@@ -692,7 +695,7 @@ func (c *client) ScanRegions(ctx context.Context, key []byte, limit int) ([]*met
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer cmdDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
+	defer cmdDurationScanRegions.Observe(time.Since(start).Seconds())
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().ScanRegions(ctx, &pdpb.ScanRegionsRequest{
 		Header:   c.requestHeader(),
@@ -701,7 +704,7 @@ func (c *client) ScanRegions(ctx context.Context, key []byte, limit int) ([]*met
 	})
 	cancel()
 	if err != nil {
-		cmdFailedDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
+		cmdFailedDurationScanRegions.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, nil, errors.WithStack(err)
 	}
@@ -714,7 +717,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationGetStore.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetStore(ctx, &pdpb.GetStoreRequest{
@@ -724,7 +727,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	cancel()
 
 	if err != nil {
-		cmdFailedDuration.WithLabelValues("get_store").Observe(time.Since(start).Seconds())
+		cmdFailedDurationGetStore.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
 	}
@@ -750,7 +753,7 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDuration.WithLabelValues("get_all_stores").Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().GetAllStores(ctx, &pdpb.GetAllStoresRequest{
@@ -760,7 +763,7 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 	cancel()
 
 	if err != nil {
-		cmdFailedDuration.WithLabelValues("get_all_stores").Observe(time.Since(start).Seconds())
+		cmdFailedDurationGetAllStores.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return nil, errors.WithStack(err)
 	}
@@ -774,7 +777,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().UpdateGCSafePoint(ctx, &pdpb.UpdateGCSafePointRequest{
@@ -784,7 +787,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 	cancel()
 
 	if err != nil {
-		cmdFailedDuration.WithLabelValues("update_gc_safe_point").Observe(time.Since(start).Seconds())
+		cmdFailedDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
 		return 0, errors.WithStack(err)
 	}
@@ -797,7 +800,7 @@ func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDuration.WithLabelValues("scatter_region").Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().ScatterRegion(ctx, &pdpb.ScatterRegionRequest{
@@ -820,7 +823,7 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDuration.WithLabelValues("get_operator").Observe(time.Since(start).Seconds()) }()
+	defer func() { cmdDurationGetOperator.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	defer cancel()
