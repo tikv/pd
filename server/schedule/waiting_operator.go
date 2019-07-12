@@ -90,7 +90,7 @@ func (b *RandBuckets) GetOperator() []*Operator {
 			var res []*Operator
 			res = append(res, bucket.ops[0])
 			// Merge operation has two operators, and thus it should be handled specifically.
-			if bucket.ops[0].Desc() == "merge-region" {
+			if bucket.ops[0].Kind()&OpMerge != 0 {
 				res = append(res, bucket.ops[1])
 				bucket.ops = bucket.ops[2:]
 			} else {

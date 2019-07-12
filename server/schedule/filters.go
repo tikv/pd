@@ -16,7 +16,7 @@ package schedule
 import (
 	"fmt"
 
-	"github.com/pingcap/pd/server/cache"
+	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 )
