@@ -55,69 +55,110 @@ func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
 	return nil
 }
 
-func getRequest(cmd *cobra.Command, prefix string, method string, bodyType string, body io.Reader) (*http.Request, error) {
-	if method == "" {
-		method = http.MethodGet
+type bodyOption struct {
+	contentType string
+	body        io.Reader
+}
+
+// BodyOption sets the type and content of the body
+type BodyOption func(*bodyOption)
+
+// WithBody returns a BodyOption
+func WithBody(contentType string, body io.Reader) BodyOption {
+	return func(bo *bodyOption) {
+		bo.contentType = contentType
+		bo.body = body
 	}
-	url := getAddressFromCmd(cmd, prefix)
-	req, err := http.NewRequest(method, url, body)
-	if err != nil {
-		return nil, err
+}
+func doRequest(cmd *cobra.Command, prefix string, method string,
+	opts ...BodyOption) (string, error) {
+	b := &bodyOption{}
+	for _, o := range opts {
+		o(b)
 	}
-	req.Header.Set("Content-Type", bodyType)
-	return req, err
+	var resp string
+	var err error
+	tryURLs(cmd, func(endpoint string) error {
+		url := endpoint + "/" + prefix
+		if method == "" {
+			method = http.MethodGet
+		}
+		var req *http.Request
+		req, err = http.NewRequest(method, url, b.body)
+		if err != nil {
+			return err
+		}
+		if b.contentType != "" {
+			req.Header.Set("Content-Type", b.contentType)
+		}
+		// the resp would be returned by the outer function
+		resp, err = dail(req)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return resp, err
 }
 
 func dail(req *http.Request) (string, error) {
-	var res string
-	reps, err := dialClient.Do(req)
-	if err != nil {
-		return res, err
-	}
-	defer reps.Body.Close()
-	if reps.StatusCode != http.StatusOK {
-		return res, genResponseError(reps)
-	}
-
-	r, err := ioutil.ReadAll(reps.Body)
-	if err != nil {
-		return res, err
-	}
-	res = string(r)
-	return res, nil
-}
-
-func doRequest(cmd *cobra.Command, prefix string, method string) (string, error) {
-	req, err := getRequest(cmd, prefix, method, "", nil)
+	resp, err := dialClient.Do(req)
 	if err != nil {
 		return "", err
 	}
-	return dail(req)
-}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		var msg []byte
+		msg, err = ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("[%d] %s", resp.StatusCode, msg), nil
+	}
 
-func genResponseError(r *http.Response) error {
-	res, _ := ioutil.ReadAll(r.Body)
-	return errors.Errorf("[%d] %s", r.StatusCode, res)
-}
-
-func getAddressFromCmd(cmd *cobra.Command, prefix string) string {
-	p, err := cmd.Flags().GetString("pd")
+	content, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		cmd.Println("get pd address error, should set flag with '-u'")
+		return "", err
+	}
+	return string(content), nil
+}
+
+// DoFunc receives an endpoint which you can issue request to
+type DoFunc func(endpoint string) error
+
+// tryURLs issues requests to each URL and tries next one if there
+// is an error
+func tryURLs(cmd *cobra.Command, f DoFunc) {
+	addrs, err := cmd.Flags().GetString("pd")
+	if err != nil {
+		cmd.Println("get pd address failed, should set flag with '-u'")
 		os.Exit(1)
 	}
+	endpoints := strings.Split(addrs, ",")
+	for _, endpoint := range endpoints {
+		var u *url.URL
+		u, err = url.Parse(endpoint)
+		if err != nil {
+			cmd.Println("address format is wrong, should like 'http://127.0.0.1:2379' or '127.0.0.1:2379'")
+			os.Exit(1)
+		}
+		// tolerate some schemes that will be used by users, the TiKV SDK
+		// use 'tikv' as the scheme, it is really confused if we do not
+		// support it by pdctl
+		if u.Scheme == "" || u.Scheme == "pd" || u.Scheme == "tikv" {
+			u.Scheme = "http"
+		}
 
-	if p != "" && !strings.HasPrefix(p, "http") {
-		p = "http://" + p
+		endpoint = u.String()
+		err = f(endpoint)
+		if err != nil {
+			continue
+		}
+		break
 	}
-
-	u, err := url.Parse(p)
 	if err != nil {
-		cmd.Println("address format is wrong, should like 'http://127.0.0.1:2379' or '127.0.0.1:2379'")
+		cmd.Println("after trying all endpoints, no endpoint is available, the last error we met:", err)
 	}
-
-	s := fmt.Sprintf("%s/%s", u, prefix)
-	return s
 }
 
 func printResponseError(r *http.Response) error {
@@ -133,21 +174,23 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 		return
 	}
 
-	url := getAddressFromCmd(cmd, prefix)
-	r, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	defer r.Body.Close()
-
-	if r.StatusCode != http.StatusOK {
-		if err := printResponseError(r); err != nil {
-			cmd.Println(err)
+	tryURLs(cmd, func(endpoint string) error {
+		url := endpoint + "/" + prefix
+		r, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
+		if err != nil {
+			return err
 		}
-	} else {
+		defer r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			if err := printResponseError(r); err != nil {
+				cmd.Println(err)
+			}
+			return nil
+		}
 		cmd.Println("success!")
-	}
+		return nil
+	})
+
 }
 
 // UsageTemplate will used to generate a help information
