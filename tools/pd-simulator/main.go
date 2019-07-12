@@ -96,7 +96,14 @@ func run(simCase string) {
 
 // NewSingleServer creates a pd server for simulator.
 func NewSingleServer(simConfig *simulator.SimConfig) (*server.Server, server.CleanupFunc) {
-	err := logutil.InitLogger(&simConfig.ServerConfig.Log)
+	err := simConfig.ServerConfig.SetupLogger()
+	if err == nil {
+		log.ReplaceGlobals(simConfig.ServerConfig.GetZapLogger(), simConfig.ServerConfig.GetZapLogProperties())
+	} else {
+		log.Fatal("setup logger error", zap.Error(err))
+	}
+
+	err = logutil.InitLogger(&simConfig.ServerConfig.Log)
 	if err != nil {
 		log.Fatal("initialize logger error", zap.Error(err))
 	}
