@@ -114,7 +114,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*schedule.Operator {
 		return nil
 	}
 
-	log.Debug("try to merge region", zap.Reflect("from", core.HexRegionMeta(region.GetMeta())), zap.Reflect("to", core.HexRegionMeta(target.GetMeta())))
+	log.Debug("try to merge region", zap.Stringer("from", core.RegionToHexMeta(region.GetMeta())), zap.Stringer("to", core.RegionToHexMeta(target.GetMeta())))
 	ops, err := schedule.CreateMergeRegionOperator("merge-region", m.cluster, region, target, schedule.OpMerge)
 	if err != nil {
 		return nil

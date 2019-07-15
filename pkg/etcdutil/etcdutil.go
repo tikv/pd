@@ -16,7 +16,6 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -61,7 +60,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Co
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
-			log.Error(fmt.Sprintf("%v", gerr))
+			log.Error("failed to get cluster from remote", zap.Error(gerr))
 			continue
 		}
 

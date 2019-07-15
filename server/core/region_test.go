@@ -118,7 +118,7 @@ func (*testRegionKey) TestRegionKey(c *C) {
 	for _, t := range testCase {
 		got, err := strconv.Unquote(t.key)
 		c.Assert(err, IsNil)
-		s := fmt.Sprintln(HexRegionMeta(&metapb.Region{StartKey: []byte(got)}))
+		s := fmt.Sprintln(RegionToHexMeta(&metapb.Region{StartKey: []byte(got)}))
 		c.Assert(strings.Contains(s, t.expect), IsTrue)
 
 		// start key changed

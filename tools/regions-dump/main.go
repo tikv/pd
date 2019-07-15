@@ -115,7 +115,7 @@ func loadRegions(client *clientv3.Client, f *os.File) error {
 				return errors.WithStack(err)
 			}
 			nextID = region.GetId() + 1
-			fmt.Fprintln(w, core.HexRegionMeta(region))
+			fmt.Fprintln(w, core.RegionToHexMeta(region).Region)
 		}
 
 		if len(res) < rangeLimit {

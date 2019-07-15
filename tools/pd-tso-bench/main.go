@@ -26,6 +26,7 @@ import (
 	log "github.com/pingcap/log"
 	pd "github.com/pingcap/pd/client"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 var (
@@ -55,7 +56,7 @@ func main() {
 	for i := 0; i < *concurrency; i++ {
 		_, _, err = pdCli.GetTS(ctx)
 		if err != nil {
-			log.Fatal(fmt.Sprintf("%v", err))
+			log.Fatal("get tso failed", zap.Error(err))
 		}
 	}
 

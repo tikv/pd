@@ -36,8 +36,8 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 
 	// If the region peer count is 0, then we should not handle this.
 	if len(region.GetPeers()) == 0 {
-		log.Warn("invalid region, zero region peer count", zap.Reflect("region-meta", core.HexRegionMeta(region.GetMeta())))
-		return errors.Errorf("invalid region, zero region peer count: %v", core.HexRegionMeta(region.GetMeta()))
+		log.Warn("invalid region, zero region peer count", zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
+		return errors.Errorf("invalid region, zero region peer count: %v", core.RegionToHexMeta(region.GetMeta()))
 	}
 
 	c.coordinator.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
@@ -81,7 +81,7 @@ func (c *RaftCluster) validRequestRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
 	region, _ := c.GetRegionByKey(startKey)
 	if region == nil {
-		return errors.Errorf("region not found, request region: %v", core.HexRegionMeta(reqRegion))
+		return errors.Errorf("region not found, request region: %v", core.RegionToHexMeta(reqRegion))
 	}
 	// If the request epoch is less than current region epoch, then returns an error.
 	reqRegionEpoch := reqRegion.GetRegionEpoch()
@@ -172,8 +172,8 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	err := c.checkSplitRegion(left, right)
 	if err != nil {
 		log.Warn("report split region is invalid",
-			zap.Reflect("left-region", core.HexRegionMeta(left)),
-			zap.Reflect("right-region", core.HexRegionMeta(right)),
+			zap.Stringer("left-region", core.RegionToHexMeta(left)),
+			zap.Stringer("right-region", core.RegionToHexMeta(right)),
 			zap.Error(err))
 		return nil, err
 	}
@@ -184,29 +184,27 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	originRegion.StartKey = left.GetStartKey()
 	log.Info("region split, generate new region",
 		zap.Uint64("region-id", originRegion.GetId()),
-		zap.Reflect("region-meta", core.HexRegionMeta(left)))
+		zap.Stringer("region-meta", core.RegionToHexMeta(left)))
 	return &pdpb.ReportSplitResponse{}, nil
 }
 
 func (c *RaftCluster) handleBatchReportSplit(request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
 	regions := request.GetRegions()
-	hexRegionMetas := make([]*metapb.Region, len(regions))
-	for i, region := range regions {
-		hexRegionMetas[i] = core.HexRegionMeta(region)
-	}
 
+	hrm := core.RegionsToHexMeta(regions)
 	err := c.checkSplitRegions(regions)
 	if err != nil {
 		log.Warn("report batch split region is invalid",
-			zap.Reflect("region-meta", hexRegionMetas),
+			zap.Stringer("region-meta", hrm),
 			zap.Error(err))
 		return nil, err
 	}
 	last := len(regions) - 1
 	originRegion := proto.Clone(regions[last]).(*metapb.Region)
+	hrm = core.RegionsToHexMeta(regions[:last])
 	log.Info("region batch split, generate new regions",
 		zap.Uint64("region-id", originRegion.GetId()),
-		zap.Reflect("origin", hexRegionMetas[:last]),
+		zap.Stringer("origin", hrm),
 		zap.Int("total", last))
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
