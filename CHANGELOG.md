@@ -1,6 +1,6 @@
 # PD Change Log
 
-## Unreleased
+## v3.0.1 
 
 + Fix the issue about the limit of the hot region [#1552](https://github.com/pingcap/pd/pull/1552)
 + Add a option about grpc gateway [#1596](https://github.com/pingcap/pd/pull/1596)
