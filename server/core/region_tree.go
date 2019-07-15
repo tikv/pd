@@ -92,8 +92,8 @@ func (t *regionTree) update(region *metapb.Region) []*metapb.Region {
 	for _, item := range overlaps {
 		log.Debug("overlapping region",
 			zap.Uint64("region-id", item.GetId()),
-			zap.Reflect("delete-region", HexRegionMeta(item)),
-			zap.Reflect("update-region", HexRegionMeta(region)))
+			zap.Stringer("delete-region", RegionToHexMeta(item)),
+			zap.Stringer("update-region", RegionToHexMeta(region)))
 		t.tree.Delete(&regionItem{item})
 	}
 
