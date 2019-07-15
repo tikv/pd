@@ -80,7 +80,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 		err = rc.HandleRegionHeartbeat(region)
 		c.Assert(err, IsNil)
 	}
-	// ensure flush to region kv
+	// ensure flush to region storage
 	time.Sleep(3 * time.Second)
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
@@ -125,7 +125,7 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 		err = rc.HandleRegionHeartbeat(region)
 		c.Assert(err, IsNil)
 	}
-	// ensure flush to region kv
+	// ensure flush to region storage
 	time.Sleep(3 * time.Second)
 	// restart pd1
 	err = leaderServer.Stop()

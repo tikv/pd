@@ -11,9 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package kv
 
 import (
+	"context"
 	"path"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ import (
 const (
 	kvRequestTimeout  = time.Second * 10
 	kvSlowRequestTime = time.Second * 1
+	requestTimeout    = 10 * time.Second
+	slowRequestTime   = 1 * time.Second
 )
 
 var (
@@ -35,23 +38,22 @@ var (
 )
 
 type etcdKVBase struct {
-	server   *Server
 	client   *clientv3.Client
 	rootPath string
 }
 
-func newEtcdKVBase(s *Server) *etcdKVBase {
+// NewEtcdKVBase creates a new etcd kv.
+func NewEtcdKVBase(client *clientv3.Client, rootPath string) *etcdKVBase {
 	return &etcdKVBase{
-		server:   s,
-		client:   s.client,
-		rootPath: s.rootPath,
+		client:   client,
+		rootPath: rootPath,
 	}
 }
 
 func (kv *etcdKVBase) Load(key string) (string, error) {
 	key = path.Join(kv.rootPath, key)
 
-	resp, err := etcdutil.EtcdKVGet(kv.server.client, key)
+	resp, err := etcdutil.EtcdKVGet(kv.client, key)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +71,7 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 
 	withRange := clientv3.WithRange(endKey)
 	withLimit := clientv3.WithLimit(int64(limit))
-	resp, err := etcdutil.EtcdKVGet(kv.server.client, key, withRange, withLimit)
+	resp, err := etcdutil.EtcdKVGet(kv.client, key, withRange, withLimit)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -85,7 +87,8 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 func (kv *etcdKVBase) Save(key, value string) error {
 	key = path.Join(kv.rootPath, key)
 
-	resp, err := kv.server.leaderTxn().Then(clientv3.OpPut(key, value)).Commit()
+	txn := NewSlowLogTxn(kv.client)
+	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
 		log.Error("save to etcd meet error", zap.Error(err))
 		return errors.WithStack(err)
@@ -96,16 +99,74 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	return nil
 }
 
-func (kv *etcdKVBase) Delete(key string) error {
+func (kv *etcdKVBase) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
 
-	resp, err := kv.server.leaderTxn().Then(clientv3.OpDelete(key)).Commit()
+	txn := NewSlowLogTxn(kv.client)
+	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
-		log.Error("delete from etcd meet error", zap.Error(err))
+		log.Error("remove from etcd meet error", zap.Error(err))
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
 		return errors.WithStack(errTxnFailed)
 	}
 	return nil
+}
+
+// SlowLogTxn wraps etcd transaction and log slow one.
+type SlowLogTxn struct {
+	clientv3.Txn
+	cancel context.CancelFunc
+}
+
+// NewSlowLogTxn create a SlowLogTxn.
+func NewSlowLogTxn(client *clientv3.Client) clientv3.Txn {
+	ctx, cancel := context.WithTimeout(client.Ctx(), requestTimeout)
+	return &SlowLogTxn{
+		Txn:    client.Txn(ctx),
+		cancel: cancel,
+	}
+}
+
+// If takes a list of comparison. If all comparisons passed in succeed,
+// the operations passed into Then() will be executed. Or the operations
+// passed into Else() will be executed.
+func (t *SlowLogTxn) If(cs ...clientv3.Cmp) clientv3.Txn {
+	return &SlowLogTxn{
+		Txn:    t.Txn.If(cs...),
+		cancel: t.cancel,
+	}
+}
+
+// Then takes a list of operations. The Ops list will be executed, if the
+// comparisons passed in If() succeed.
+func (t *SlowLogTxn) Then(ops ...clientv3.Op) clientv3.Txn {
+	return &SlowLogTxn{
+		Txn:    t.Txn.Then(ops...),
+		cancel: t.cancel,
+	}
+}
+
+// Commit implements Txn Commit interface.
+func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
+	start := time.Now()
+	resp, err := t.Txn.Commit()
+	t.cancel()
+
+	cost := time.Since(start)
+	if cost > slowRequestTime {
+		log.Warn("txn runs too slow",
+			zap.Error(err),
+			zap.Reflect("response", resp),
+			zap.Duration("cost", cost))
+	}
+	label := "success"
+	if err != nil {
+		label = "failed"
+	}
+	txnCounter.WithLabelValues(label).Inc()
+	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
+
+	return resp, errors.WithStack(err)
 }

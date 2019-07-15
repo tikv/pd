@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package kv
 
 import (
 	"github.com/gogo/protobuf/proto"
@@ -21,29 +21,32 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-type leveldbKV struct {
-	db *leveldb.DB
+// LeveldbKV is a kv store using leveldb.
+type LeveldbKV struct {
+	*leveldb.DB
 }
 
-// newLeveldbKV is used to store regions information.
-func newLeveldbKV(path string) (*leveldbKV, error) {
+// NewLeveldbKV is used to store regions information.
+func NewLeveldbKV(path string) (*LeveldbKV, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	return &leveldbKV{db: db}, nil
+	return &LeveldbKV{db}, nil
 }
 
-func (kv *leveldbKV) Load(key string) (string, error) {
-	v, err := kv.db.Get([]byte(key), nil)
+// Load gets a value for a given key.
+func (kv *LeveldbKV) Load(key string) (string, error) {
+	v, err := kv.Get([]byte(key), nil)
 	if err != nil {
 		return "", errors.WithStack(err)
 	}
 	return string(v), err
 }
 
-func (kv *leveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, []string, error) {
-	iter := kv.db.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
+// LoadRange gets a range of value for a given key range.
+func (kv *LeveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, []string, error) {
+	iter := kv.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
 	keys := make([]string, 0, limit)
 	values := make([]string, 0, limit)
 	count := 0
@@ -59,15 +62,18 @@ func (kv *leveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, []
 	return keys, values, nil
 }
 
-func (kv *leveldbKV) Save(key, value string) error {
-	return errors.WithStack(kv.db.Put([]byte(key), []byte(value), nil))
+// Save stores a key-value pair.
+func (kv *LeveldbKV) Save(key, value string) error {
+	return errors.WithStack(kv.Put([]byte(key), []byte(value), nil))
 }
 
-func (kv *leveldbKV) Delete(key string) error {
-	return errors.WithStack(kv.db.Delete([]byte(key), nil))
+// Remove deletes a key-value pair for a given key.
+func (kv *LeveldbKV) Remove(key string) error {
+	return errors.WithStack(kv.Delete([]byte(key), nil))
 }
 
-func (kv *leveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
+// SaveRegions stores some regions.
+func (kv *LeveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
 	batch := new(leveldb.Batch)
 
 	for key, r := range regions {
@@ -77,9 +83,5 @@ func (kv *leveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
 		}
 		batch.Put([]byte(key), value)
 	}
-	return errors.WithStack(kv.db.Write(batch, nil))
-}
-
-func (kv *leveldbKV) Close() error {
-	return errors.WithStack(kv.db.Close())
+	return errors.WithStack(kv.Write(batch, nil))
 }

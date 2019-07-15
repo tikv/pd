@@ -36,10 +36,11 @@ func NewBalanceSelector(kind core.ResourceKind, filters []Filter) *BalanceSelect
 
 // SelectSource selects the store that can pass all filters and has the maximal
 // resource score.
-func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo) *core.StoreInfo {
+func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+	filters = append(filters, s.filters...)
 	var result *core.StoreInfo
 	for _, store := range stores {
-		if FilterSource(opt, store, s.filters) {
+		if FilterSource(opt, store, filters) {
 			continue
 		}
 		if result == nil ||

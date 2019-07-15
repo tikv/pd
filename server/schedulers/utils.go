@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/montanaflynn/stats"
-	"github.com/pingcap/pd/server/cache"
+	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
