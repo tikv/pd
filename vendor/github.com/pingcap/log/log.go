@@ -39,13 +39,18 @@ func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, e
 		}
 		output = stdOut
 	}
+	return InitLoggerWithWriteSyncer(cfg, output, opts...)
+}
+
+// InitLoggerWithWriteSyncer initializes a zap logger with specified  write syncer.
+func InitLoggerWithWriteSyncer(cfg *Config, output zapcore.WriteSyncer, opts ...zap.Option) (*zap.Logger, *ZapProperties, error) {
 	level := zap.NewAtomicLevel()
 	err := level.UnmarshalText([]byte(cfg.Level))
 	if err != nil {
 		return nil, nil, err
 	}
 	core := NewTextCore(newZapTextEncoder(cfg).(*textEncoder), output, level)
-	opts = append(opts, cfg.buildOptions(output)...)
+	opts = append(cfg.buildOptions(output), opts...)
 	lg := zap.New(core, opts...)
 	r := &ZapProperties{
 		Core:   core,

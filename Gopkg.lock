@@ -327,11 +327,11 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:1c69e1f3a2fd78cfd7fb489411cb620c110f7aded247db5c9ca00a073c2971f7"
+  digest = "1:fa93713f641c5eba4afa18d139504c08d956b47cb5901bbd791c3bff69b4af7e"
   name = "github.com/pingcap/log"
   packages = ["."]
   pruneopts = "NUT"
-  revision = "bd41d9273596826ed2cc8c70b3e8d307f459eca6"
+  revision = "479153f07ebdcbb42a14c99d9c16cefbe531071d"
 
 [[projects]]
   digest = "1:5cf3f025cbee5951a4ee961de067c8a89fc95a5adabead774f82822efabab121"
@@ -630,7 +630,6 @@
     "github.com/coreos/etcd/embed",
     "github.com/coreos/etcd/etcdserver",
     "github.com/coreos/etcd/mvcc/mvccpb",
-    "github.com/coreos/etcd/pkg/logutil",
     "github.com/coreos/etcd/pkg/transport",
     "github.com/coreos/etcd/pkg/types",
     "github.com/coreos/etcd/raft",
@@ -661,6 +660,7 @@
     "github.com/unrolled/render",
     "github.com/urfave/negroni",
     "go.uber.org/zap",
+    "go.uber.org/zap/zapcore",
     "golang.org/x/net/context",
     "google.golang.org/grpc",
     "google.golang.org/grpc/codes",
