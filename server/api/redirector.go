@@ -14,7 +14,6 @@
 package api
 
 import (
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -95,21 +94,21 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error(fmt.Sprintf("%+v", err))
+			log.Error("request failed", zap.Error(err))
 			continue
 		}
 
 		b, err := ioutil.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			log.Error(fmt.Sprintf("%+v", err))
+			log.Error("request failed", zap.Error(err))
 			continue
 		}
 
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		if _, err := w.Write(b); err != nil {
-			log.Error(fmt.Sprintf("%+v", err))
+			log.Error("write failed", zap.Error(err))
 			continue
 		}
 
