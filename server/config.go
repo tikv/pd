@@ -198,9 +198,10 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage   = true
-	defaultStrictlyMatchLabel = false
-	defaultEnableGRPCGateway  = true
+	defaultUseRegionStorage    = true
+	defaultStrictlyMatchLabel  = false
+	defaultEnableGRPCGateway   = true
+	defaultDisableErrorVerbose = true
 )
 
 func adjustString(v *string, defValue string) {
@@ -422,6 +423,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		return err
 	}
 
+	c.adjustLog(configMetaData.Child("log"))
 	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
 	adjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
@@ -433,6 +435,12 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
 	}
 	return nil
+}
+
+func (c *Config) adjustLog(meta *configMetaData) {
+	if !meta.IsDefined("disable-error-verbose") {
+		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
+	}
 }
 
 func (c *Config) clone() *Config {
