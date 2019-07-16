@@ -92,8 +92,8 @@ func (s *StoresStats) TotalBytesReadRate() float64 {
 	return s.bytesReadRate
 }
 
-// GetStoreBytesWriteStat returns the bytes write stat of the specified store.
-func (s *StoresStats) GetStoreBytesWrite(storeID uint64) (uint64, uint64) {
+// GetStoreBytesWrite returns the bytes write stat of the specified store.
+func (s *StoresStats) GetStoreBytesWrite(storeID uint64) (writeRate float64, readRate float64) {
 	if storeStat, ok := s.rollingStoresStats[storeID]; ok {
 		storeStat.GetBytesRate()
 	}
