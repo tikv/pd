@@ -218,32 +218,26 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
-func calcScore(items []*statistics.RegionStat, cluster schedule.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
+func calcScore(storeItems map[uint64][]*statistics.RegionStat, cluster schedule.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
 	stats := make(statistics.StoreHotRegionsStat)
-	for _, r := range items {
+	for storeID, items := range storeItems {
 		// HotDegree is the update times on the hot cache. If the heartbeat report
 		// the flow of the region exceeds the threshold, the scheduler will update the region in
 		// the hot cache and the hotdegree of the region will increase.
-		if r.HotDegree < cluster.GetHotRegionCacheHitsThreshold() {
-			continue
-		}
 
-		regionInfo := cluster.GetRegion(r.RegionID)
-		if regionInfo == nil {
-			continue
-		}
-
-		var storeIDs []uint64
-		switch kind {
-		case core.RegionKind:
-			for id := range regionInfo.GetStoreIds() {
-				storeIDs = append(storeIDs, id)
+		for _, r := range items {
+			if kind == core.LeaderKind && !r.IsLeader() {
+				continue
 			}
-		case core.LeaderKind:
-			storeIDs = append(storeIDs, regionInfo.GetLeader().GetStoreId())
-		}
+			if r.HotDegree < cluster.GetHotRegionCacheHitsThreshold() {
+				continue
+			}
 
-		for _, storeID := range storeIDs {
+			regionInfo := cluster.GetRegion(r.RegionID)
+			if regionInfo == nil {
+				continue
+			}
+
 			storeStat, ok := stats[storeID]
 			if !ok {
 				storeStat = &statistics.HotRegionsStat{

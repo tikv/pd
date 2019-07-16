@@ -877,6 +877,7 @@ var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
 type testBalanceHotWriteRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
+	statistics.Simulating = true
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
@@ -1014,8 +1015,8 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	// lower than hot read flow rate, but higher than write flow rate
 	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
 	opt.HotRegionCacheHitsThreshold = 0
-	c.Assert(tc.IsRegionHot(1), IsTrue)
-	c.Assert(tc.IsRegionHot(11), IsFalse)
+	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
+	c.Assert(tc.IsRegionHot(tc.GetRegion(11)), IsFalse)
 	// check randomly pick hot region
 	r := tc.RandHotRegionFromStore(2, statistics.ReadFlow)
 	c.Assert(r, NotNil)
@@ -1023,8 +1024,10 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	// check hot items
 	stats := tc.HotSpotCache.RegionStats(statistics.ReadFlow)
 	c.Assert(len(stats), Equals, 3)
-	for _, s := range stats {
-		c.Assert(s.FlowBytes, Equals, uint64(512*1024))
+	for _, ss := range stats {
+		for _, s := range ss {
+			c.Assert(s.FlowBytes, Equals, uint64(512*1024))
+		}
 	}
 	// Will transfer a hot region leader from store 1 to store 3, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.

@@ -52,9 +52,9 @@ type Cluster interface {
 
 	AttachOverloadStatus(id uint64, f func() bool)
 
-	IsRegionHot(id uint64) bool
-	RegionWriteStats() []*statistics.RegionStat
-	RegionReadStats() []*statistics.RegionStat
+	IsRegionHot(region *core.RegionInfo) bool
+	RegionWriteStats() map[uint64][]*statistics.RegionStat
+	RegionReadStats() map[uint64][]*statistics.RegionStat
 	RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo
 
 	// get config methods

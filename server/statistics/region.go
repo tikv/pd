@@ -27,24 +27,36 @@ type RegionStat struct {
 	HotDegree int `json:"hot_degree"`
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
-	StoreID        uint64    `json:"-"`
+	StoreID        uint64    `json:"store_id"`
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int
 	// Version used to check the region split times
 	Version uint64
 	// Stats is a rolling statistics, recording some recently added records.
-	Stats *RollingStats
+	Stats      *RollingStats
+	NeedDelete bool `json:"-"`
+	isLeader   bool
+}
+
+// IsNeedDelete to delete the item in cache.
+func (stat RegionStat) IsNeedDelete() bool {
+	return stat.NeedDelete
+}
+
+// IsLeader indicaes the item belong to the leader.
+func (stat RegionStat) IsLeader() bool {
+	return stat.isLeader
 }
 
 // NewRegionStat returns a RegionStat.
-func NewRegionStat(region *core.RegionInfo, flowBytes uint64, antiCount int) *RegionStat {
+func NewRegionStat(region *core.RegionInfo, flowBytes uint64) *RegionStat {
 	return &RegionStat{
 		RegionID:       region.GetID(),
 		FlowBytes:      flowBytes,
 		LastUpdateTime: time.Now(),
 		StoreID:        region.GetLeader().GetStoreId(),
 		Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
-		AntiCount:      antiCount,
+		AntiCount:      hotRegionAntiCount,
 	}
 }
 

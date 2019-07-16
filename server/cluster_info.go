@@ -312,10 +312,10 @@ func (c *clusterInfo) GetRegion(regionID uint64) *core.RegionInfo {
 }
 
 // IsRegionHot checks if a region is in hot state.
-func (c *clusterInfo) IsRegionHot(id uint64) bool {
+func (c *clusterInfo) IsRegionHot(region *core.RegionInfo) bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.hotSpotCache.IsRegionHot(id, c.GetHotRegionCacheHitsThreshold())
+	return c.hotSpotCache.IsRegionHot(region, c.GetHotRegionCacheHitsThreshold())
 }
 
 // RandHotRegionFromStore randomly picks a hot region in specified store.
@@ -521,8 +521,8 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 			}
 		}
 	}
-	isWriteUpdate, writeItem := c.CheckWriteStatus(region)
-	isReadUpdate, readItem := c.CheckReadStatus(region)
+	writeItems := c.CheckWriteStatus(region)
+	readItems := c.CheckReadStatus(region)
 	c.RUnlock()
 
 	// Save to KV if meta is updated.
@@ -603,7 +603,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		default:
 		}
 	}
-	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
+	if len(writeItems) == 0 && len(readItems) == 0 && !saveCache && !isNew {
 		return nil
 	}
 
@@ -647,12 +647,11 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
 	}
 
-	key := region.GetID()
-	if isWriteUpdate {
-		c.hotSpotCache.Update(key, writeItem, statistics.WriteFlow)
+	for _, writeItem := range writeItems {
+		c.hotSpotCache.Update(writeItem, statistics.WriteFlow)
 	}
-	if isReadUpdate {
-		c.hotSpotCache.Update(key, readItem, statistics.ReadFlow)
+	for _, readItem := range readItems {
+		c.hotSpotCache.Update(readItem, statistics.ReadFlow)
 	}
 	return nil
 }
@@ -814,24 +813,24 @@ func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel
 }
 
 // RegionReadStats returns hot region's read stats.
-func (c *clusterInfo) RegionReadStats() []*statistics.RegionStat {
+func (c *clusterInfo) RegionReadStats() map[uint64][]*statistics.RegionStat {
 	// RegionStats is a thread-safe method
 	return c.hotSpotCache.RegionStats(statistics.ReadFlow)
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (c *clusterInfo) RegionWriteStats() []*statistics.RegionStat {
+func (c *clusterInfo) RegionWriteStats() map[uint64][]*statistics.RegionStat {
 	// RegionStats is a thread-safe method
 	return c.hotSpotCache.RegionStats(statistics.WriteFlow)
 }
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
-func (c *clusterInfo) CheckWriteStatus(region *core.RegionInfo) (bool, *statistics.RegionStat) {
+func (c *clusterInfo) CheckWriteStatus(region *core.RegionInfo) []*statistics.RegionStat {
 	return c.hotSpotCache.CheckWrite(region, c.storesStats)
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
-func (c *clusterInfo) CheckReadStatus(region *core.RegionInfo) (bool, *statistics.RegionStat) {
+func (c *clusterInfo) CheckReadStatus(region *core.RegionInfo) []*statistics.RegionStat {
 	return c.hotSpotCache.CheckRead(region, c.storesStats)
 }
 

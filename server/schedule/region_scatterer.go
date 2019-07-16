@@ -83,7 +83,7 @@ func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *Regio
 
 // Scatter relocates the region.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*Operator, error) {
-	if r.cluster.IsRegionHot(region.GetID()) {
+	if r.cluster.IsRegionHot(region) {
 		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
 

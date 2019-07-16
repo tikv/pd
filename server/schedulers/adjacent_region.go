@@ -244,7 +244,7 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster schedule.Cluste
 		return true
 	}
 	// Skip hot regions.
-	if cluster.IsRegionHot(region.GetID()) {
+	if cluster.IsRegionHot(region) {
 		schedulerCounter.WithLabelValues(l.GetName(), "region_hot").Inc()
 		return true
 	}

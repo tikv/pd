@@ -94,7 +94,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*schedule.Operator {
 	}
 
 	// skip hot region
-	if m.cluster.IsRegionHot(region.GetID()) {
+	if m.cluster.IsRegionHot(region) {
 		checkerCounter.WithLabelValues("merge_checker", "hot_region").Inc()
 		return nil
 	}
@@ -129,7 +129,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*schedule.Operator {
 
 func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *core.RegionInfo {
 	// if is not hot region and under same namespace
-	if adjacent != nil && !m.cluster.IsRegionHot(adjacent.GetID()) &&
+	if adjacent != nil && !m.cluster.IsRegionHot(adjacent) &&
 		m.classifier.AllowMerge(region, adjacent) &&
 		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 {
 		// if both region is not hot, prefer the one with smaller size
