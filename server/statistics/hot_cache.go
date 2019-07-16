@@ -101,20 +101,18 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) [
 	for _, storeID := range storeIDs {
 		WrittenBytesPerSec = uint64(float64(region.GetBytesWritten()) / float64(RegionHeartBeatReportInterval))
 		storeWriteFlow, ok := w.writeFlow[storeID]
-		if !ok {
-			storeWriteFlow = cache.NewCache(statCacheMaxLen, cache.TwoQueueCache)
-			w.writeFlow[storeID] = storeWriteFlow
-		}
-		regionID := region.GetID()
-		if v, isExist := storeWriteFlow.Peek(regionID); isExist {
-			value = v.(*RegionStat)
-			// This is used for the simulator.
-			if !Simulating {
-				interval := time.Since(value.LastUpdateTime).Seconds()
-				if interval < minHotRegionReportInterval {
-					return nil
+
+		if ok {
+			if v, isExist := storeWriteFlow.Peek(region.GetID()); isExist {
+				value = v.(*RegionStat)
+				// This is used for the simulator.
+				if !Simulating {
+					interval := time.Since(value.LastUpdateTime).Seconds()
+					if interval < minHotRegionReportInterval {
+						return nil
+					}
+					WrittenBytesPerSec = uint64(float64(region.GetBytesWritten()) / interval)
 				}
-				WrittenBytesPerSec = uint64(float64(region.GetBytesWritten()) / interval)
 			}
 		}
 		if peer := region.GetStorePeer(storeID); peer == nil {
@@ -158,19 +156,17 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []
 	for _, storeID := range storeIDs {
 		ReadBytesPerSec = uint64(float64(region.GetBytesRead()) / float64(RegionHeartBeatReportInterval))
 		storeReadFlow, ok := w.readFlow[storeID]
-		if !ok {
-			storeReadFlow = cache.NewCache(statCacheMaxLen, cache.TwoQueueCache)
-			w.readFlow[storeID] = storeReadFlow
-		}
-		if v, isExist := storeReadFlow.Peek(region.GetID()); isExist {
-			value = v.(*RegionStat)
-			// This is used for the simulator.
-			if !Simulating {
-				interval := time.Since(value.LastUpdateTime).Seconds()
-				if interval < minHotRegionReportInterval {
-					return nil
+		if ok {
+			if v, isExist := storeReadFlow.Peek(region.GetID()); isExist {
+				value = v.(*RegionStat)
+				// This is used for the simulator.
+				if !Simulating {
+					interval := time.Since(value.LastUpdateTime).Seconds()
+					if interval < minHotRegionReportInterval {
+						return nil
+					}
+					ReadBytesPerSec = uint64(float64(region.GetBytesRead()) / interval)
 				}
-				ReadBytesPerSec = uint64(float64(region.GetBytesRead()) / interval)
 			}
 		}
 		// Only leader has read flow
@@ -292,12 +288,19 @@ func (w *HotSpotCache) Update(item *RegionStat, kind FlowKind) {
 	switch kind {
 	case WriteFlow:
 		if item.IsNeedDelete() {
-			w.writeFlow[item.StoreID].Remove(item.RegionID)
+			if storeWriteFlow, ok := w.writeFlow[item.StoreID]; ok {
+				storeWriteFlow.Remove(item.RegionID)
+			}
 			if index, ok := w.indexWriteFlow[item.RegionID]; ok {
 				delete(index, item.StoreID)
 			}
 		} else {
-			w.writeFlow[item.StoreID].Put(item.RegionID, item)
+			storeWriteFlow, ok := w.writeFlow[item.StoreID]
+			if !ok {
+				storeWriteFlow = cache.NewCache(statCacheMaxLen, cache.TwoQueueCache)
+				w.writeFlow[item.StoreID] = storeWriteFlow
+			}
+			storeWriteFlow.Put(item.RegionID, item)
 			index, ok := w.indexWriteFlow[item.RegionID]
 			if !ok {
 				index = make(map[uint64]struct{})
@@ -308,12 +311,19 @@ func (w *HotSpotCache) Update(item *RegionStat, kind FlowKind) {
 		}
 	case ReadFlow:
 		if item.IsNeedDelete() {
-			w.readFlow[item.StoreID].Remove(item.RegionID)
+			if storeReadFlow, ok := w.readFlow[item.StoreID]; ok {
+				storeReadFlow.Remove(item.RegionID)
+			}
 			if index, ok := w.indexReadFlow[item.RegionID]; ok {
 				delete(index, item.StoreID)
 			}
 		} else {
-			w.readFlow[item.StoreID].Put(item.RegionID, item)
+			storeReadFlow, ok := w.readFlow[item.StoreID]
+			if !ok {
+				storeReadFlow = cache.NewCache(statCacheMaxLen, cache.TwoQueueCache)
+				w.readFlow[item.StoreID] = storeReadFlow
+			}
+			storeReadFlow.Put(item.RegionID, item)
 			index, ok := w.indexReadFlow[item.RegionID]
 			if !ok {
 				index = make(map[uint64]struct{})
