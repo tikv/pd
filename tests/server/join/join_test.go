@@ -17,10 +17,12 @@ import (
 	"context"
 	"os"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
@@ -177,4 +179,22 @@ func (s *serverTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 	err = pd2.Destroy()
 	c.Assert(err, IsNil)
 	c.Assert(server.PrepareJoinCluster(pd2.GetConfig()), NotNil)
+}
+
+func (s *serverTestSuite) TestFailedPDJoinInStep1(c *C) {
+	c.Parallel()
+
+	cluster, err := tests.NewTestCluster(1)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	// Join the second PD.
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/add-member-failed", `return`), IsNil)
+	_, err = cluster.Join()
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "join failed"), IsTrue)
 }
