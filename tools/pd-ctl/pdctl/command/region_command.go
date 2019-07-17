@@ -15,7 +15,6 @@ package command
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -204,11 +203,11 @@ func showRegionTopSizeCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithKeyCommand return a region with key subcommand of regionCmd
 func NewRegionWithKeyCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "key [--format=raw|encode|hex] <key>",
+		Use:   "key [--format=raw|encode] <key>",
 		Short: "show the region with key",
 		Run:   showRegionWithTableCommandFunc,
 	}
-	r.Flags().String("format", "hex", "the key format")
+	r.Flags().String("format", "raw", "the key format")
 	return r
 }
 
@@ -238,12 +237,6 @@ func parseKey(flags *pflag.FlagSet, key string) (string, error) {
 		return key, nil
 	case "encode":
 		return decodeKey(key)
-	case "hex":
-		key, err := hex.DecodeString(key)
-		if err != nil {
-			return "", errors.WithStack(err)
-		}
-		return string(key), nil
 	}
 	return "", errors.New("unknown format")
 }

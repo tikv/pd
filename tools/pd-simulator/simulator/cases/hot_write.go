@@ -16,11 +16,10 @@ package cases
 import (
 	"math/rand"
 
-	"go.uber.org/zap"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 func newHotWrite() *Case {

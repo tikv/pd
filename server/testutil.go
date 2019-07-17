@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/schedule"
+	"go.uber.org/zap"
 
 	// Register namespace classifiers.
 	_ "github.com/pingcap/pd/table"
@@ -84,7 +85,7 @@ func NewTestSingleConfig() *Config {
 	cfg.leaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
 	err := cfg.SetupLogger()
 	if err != nil {
-		log.Fatal("setup logger failed")
+		log.Fatal("setup logger failed", zap.Error(err))
 	}
 	zapLogOnce.Do(func() {
 		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())

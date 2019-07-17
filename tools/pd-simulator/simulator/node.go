@@ -19,12 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 const (

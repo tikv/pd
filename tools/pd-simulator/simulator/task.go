@@ -17,13 +17,12 @@ import (
 	"bytes"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 // Task running in node.
