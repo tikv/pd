@@ -151,7 +151,7 @@ func PrepareJoinCluster(cfg *Config) error {
 	// - A new PD joins an existing cluster.
 	// - A deleted PD joins to previous cluster.
 	{
-		// add member throught API firstly.
+		// First adds member through the API
 		addResp, err = etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
 		if err != nil {
 			return err
