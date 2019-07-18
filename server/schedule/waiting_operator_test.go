@@ -58,9 +58,11 @@ func (s *testWaitingOperatorSuite) TestListOperator(c *C) {
 
 func (s *testWaitingOperatorSuite) TestRandomBucketsWithMergeRegion(c *C) {
 	rb := NewRandBuckets()
+	descs := []string{"merge-region", "admin-merge-region", "random-merge"}
 	for j := 0; j < 100; j++ {
 		// adds operators
-		op := NewOperator("merge-region", uint64(1), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OperatorStep{
+		desc := descs[j%3]
+		op := NewOperator(desc, uint64(1), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OperatorStep{
 			MergeRegion{
 				FromRegion: &metapb.Region{
 					Id:          1,
@@ -75,7 +77,7 @@ func (s *testWaitingOperatorSuite) TestRandomBucketsWithMergeRegion(c *C) {
 			},
 		}...)
 		rb.PutOperator(op)
-		op = NewOperator("merge-region", uint64(2), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OperatorStep{
+		op = NewOperator(desc, uint64(2), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OperatorStep{
 			MergeRegion{
 				FromRegion: &metapb.Region{
 					Id:          1,

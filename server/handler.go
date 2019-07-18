@@ -183,7 +183,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 	if err = c.addScheduler(s, args...); err != nil {
 		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
-	} else if err = h.opt.persist(c.cluster.kv); err != nil {
+	} else if err = h.opt.persist(c.cluster.storage); err != nil {
 		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err
@@ -197,7 +197,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	}
 	if err = c.removeScheduler(name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
-	} else if err = h.opt.persist(c.cluster.kv); err != nil {
+	} else if err = h.opt.persist(c.cluster.storage); err != nil {
 		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err

@@ -117,6 +117,10 @@ simulator: export GO111MODULE=on
 simulator:
 	CGO_ENABLED=0 go build -o bin/pd-simulator tools/pd-simulator/main.go
 
+regions-dump: export GO111MODULE=on
+regions-dump:
+	CGO_ENABLED=0 go build -o bin/regions-dump tools/regions-dump/main.go
+
 clean-test:
 	rm -rf /tmp/test_pd*
 	rm -rf /tmp/pd-tests*

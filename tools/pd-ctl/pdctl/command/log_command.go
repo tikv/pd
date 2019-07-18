@@ -47,12 +47,8 @@ func logCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to set log level: %s\n", err)
 		return
 	}
-	req, err := getRequest(cmd, logPrefix, http.MethodPost, "application/json", bytes.NewBuffer(data))
-	if err != nil {
-		cmd.Printf("Failed to set log level: %s\n", err)
-		return
-	}
-	_, err = dail(req)
+	_, err = doRequest(cmd, logPrefix, http.MethodPost,
+		WithBody("application/json", bytes.NewBuffer(data)))
 	if err != nil {
 		cmd.Printf("Failed to set log level: %s\n", err)
 		return

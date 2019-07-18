@@ -820,14 +820,49 @@ func HexRegionKey(key []byte) []byte {
 	return []byte(strings.ToUpper(hex.EncodeToString(key)))
 }
 
-// HexRegionMeta converts a region meta's keys to hex format. Used for formating
+// RegionToHexMeta converts a region meta's keys to hex format. Used for formating
 // region in logs.
-func HexRegionMeta(meta *metapb.Region) *metapb.Region {
+func RegionToHexMeta(meta *metapb.Region) HexRegionMeta {
 	if meta == nil {
-		return nil
+		return HexRegionMeta{}
 	}
 	meta = proto.Clone(meta).(*metapb.Region)
 	meta.StartKey = HexRegionKey(meta.StartKey)
 	meta.EndKey = HexRegionKey(meta.EndKey)
-	return meta
+	return HexRegionMeta{meta}
+}
+
+// HexRegionMeta is a region meta in the hex format. Used for formating region in logs.
+type HexRegionMeta struct {
+	*metapb.Region
+}
+
+func (h HexRegionMeta) String() string {
+	return strings.TrimSpace(proto.CompactTextString(h.Region))
+}
+
+// RegionsToHexMeta converts regions' meta keys to hex format. Used for formating
+// region in logs.
+func RegionsToHexMeta(regions []*metapb.Region) HexRegionsMeta {
+	hexRegionMetas := make([]*metapb.Region, len(regions))
+	for i, region := range regions {
+		meta := proto.Clone(region).(*metapb.Region)
+		meta.StartKey = HexRegionKey(meta.StartKey)
+		meta.EndKey = HexRegionKey(meta.EndKey)
+
+		hexRegionMetas[i] = meta
+	}
+	return HexRegionsMeta(hexRegionMetas)
+}
+
+// HexRegionsMeta is a slice of regions' meta in the hex format. Used for formating
+// region in logs.
+type HexRegionsMeta []*metapb.Region
+
+func (h HexRegionsMeta) String() string {
+	var b strings.Builder
+	for _, r := range h {
+		b.WriteString(proto.CompactTextString(r))
+	}
+	return strings.TrimSpace(b.String())
 }

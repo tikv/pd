@@ -17,7 +17,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/pingcap/pd/server/cache"
+	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 )
 

@@ -92,7 +92,7 @@ func (ns *Namespace) AddStoreID(storeID uint64) {
 type tableNamespaceClassifier struct {
 	sync.RWMutex
 	nsInfo  *namespacesInfo
-	kv      *core.KV
+	storage *core.Storage
 	idAlloc core.IDAllocator
 	http.Handler
 }
@@ -101,14 +101,14 @@ const kvRangeLimit = 1000
 
 // NewTableNamespaceClassifier creates a new namespace classifier that
 // classifies stores and regions by table range.
-func NewTableNamespaceClassifier(kv *core.KV, idAlloc core.IDAllocator) (namespace.Classifier, error) {
+func NewTableNamespaceClassifier(storage *core.Storage, idAlloc core.IDAllocator) (namespace.Classifier, error) {
 	nsInfo := newNamespacesInfo()
-	if err := nsInfo.loadNamespaces(kv, kvRangeLimit); err != nil {
+	if err := nsInfo.loadNamespaces(storage, kvRangeLimit); err != nil {
 		return nil, err
 	}
 	c := &tableNamespaceClassifier{
 		nsInfo:  nsInfo,
-		kv:      kv,
+		storage: storage,
 		idAlloc: idAlloc,
 	}
 	c.Handler = newTableClassifierHandler(c)
@@ -331,13 +331,13 @@ func (c *tableNamespaceClassifier) RemoveNamespaceStoreID(name string, storeID u
 	return c.putNamespaceLocked(n)
 }
 
-// ReloadNamespaces reloads ns info from kv storage
+// ReloadNamespaces reloads ns info from storage.
 func (c *tableNamespaceClassifier) ReloadNamespaces() error {
 	nsInfo := newNamespacesInfo()
 	c.Lock()
 	defer c.Unlock()
 
-	if err := nsInfo.loadNamespaces(c.kv, kvRangeLimit); err != nil {
+	if err := nsInfo.loadNamespaces(c.storage, kvRangeLimit); err != nil {
 		return err
 	}
 
@@ -346,8 +346,8 @@ func (c *tableNamespaceClassifier) ReloadNamespaces() error {
 }
 
 func (c *tableNamespaceClassifier) putNamespaceLocked(ns *Namespace) error {
-	if c.kv != nil {
-		if err := c.nsInfo.saveNamespace(c.kv, ns); err != nil {
+	if c.storage != nil {
+		if err := c.nsInfo.saveNamespace(c.storage, ns); err != nil {
 			return err
 		}
 	}
@@ -425,16 +425,16 @@ func (namespaceInfo *namespacesInfo) namespacePath(nsID uint64) string {
 	return path.Join("namespace", fmt.Sprintf("%20d", nsID))
 }
 
-func (namespaceInfo *namespacesInfo) saveNamespace(kv *core.KV, ns *Namespace) error {
+func (namespaceInfo *namespacesInfo) saveNamespace(storage *core.Storage, ns *Namespace) error {
 	value, err := json.Marshal(ns)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	err = kv.Save(namespaceInfo.namespacePath(ns.GetID()), string(value))
+	err = storage.Save(namespaceInfo.namespacePath(ns.GetID()), string(value))
 	return err
 }
 
-func (namespaceInfo *namespacesInfo) loadNamespaces(kv *core.KV, rangeLimit int) error {
+func (namespaceInfo *namespacesInfo) loadNamespaces(storage *core.Storage, rangeLimit int) error {
 	start := time.Now()
 
 	nextID := uint64(0)
@@ -442,7 +442,7 @@ func (namespaceInfo *namespacesInfo) loadNamespaces(kv *core.KV, rangeLimit int)
 
 	for {
 		key := namespaceInfo.namespacePath(nextID)
-		_, res, err := kv.LoadRange(key, endKey, rangeLimit)
+		_, res, err := storage.LoadRange(key, endKey, rangeLimit)
 		if err != nil {
 			return err
 		}

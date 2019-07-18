@@ -657,7 +657,7 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	safePoint, err := s.kv.LoadGCSafePoint()
+	safePoint, err := s.storage.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
 	}
@@ -688,7 +688,7 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	oldSafePoint, err := s.kv.LoadGCSafePoint()
+	oldSafePoint, err := s.storage.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
 	}
@@ -697,7 +697,7 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 
 	// Only save the safe point if it's greater than the previous one
 	if newSafePoint > oldSafePoint {
-		if err := s.kv.SaveGCSafePoint(newSafePoint); err != nil {
+		if err := s.storage.SaveGCSafePoint(newSafePoint); err != nil {
 			return nil, err
 		}
 		log.Info("updated gc safe point",

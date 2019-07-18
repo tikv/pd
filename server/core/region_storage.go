@@ -21,15 +21,16 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	log "github.com/pingcap/log"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
 var dirtyFlushTick = time.Second
 
-// RegionKV is used to save regions.
-type RegionKV struct {
-	*leveldbKV
+// RegionStorage is used to save regions.
+type RegionStorage struct {
+	*kv.LeveldbKV
 	mu           sync.RWMutex
 	batchRegions map[string]*metapb.Region
 	batchSize    int
@@ -41,21 +42,21 @@ type RegionKV struct {
 }
 
 const (
-	//DefaultFlushRegionRate is the ttl to sync the regions to kv storage.
+	//DefaultFlushRegionRate is the ttl to sync the regions to region storage.
 	defaultFlushRegionRate = 3 * time.Second
-	//DefaultBatchSize is the batch size to save the regions to kv storage.
+	//DefaultBatchSize is the batch size to save the regions to region storage.
 	defaultBatchSize = 100
 )
 
-// NewRegionKV returns a kv storage that is used to save regions.
-func NewRegionKV(path string) (*RegionKV, error) {
-	levelDB, err := newLeveldbKV(path)
+// NewRegionStorage returns a region storage that is used to save regions.
+func NewRegionStorage(path string) (*RegionStorage, error) {
+	levelDB, err := kv.NewLeveldbKV(path)
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	kv := &RegionKV{
-		leveldbKV:    levelDB,
+	s := &RegionStorage{
+		LeveldbKV:    levelDB,
 		batchSize:    defaultBatchSize,
 		flushRate:    defaultFlushRegionRate,
 		batchRegions: make(map[string]*metapb.Region, defaultBatchSize),
@@ -63,11 +64,11 @@ func NewRegionKV(path string) (*RegionKV, error) {
 		ctx:          ctx,
 		cancel:       cancel,
 	}
-	kv.backgroundFlush()
-	return kv, nil
+	s.backgroundFlush()
+	return s, nil
 }
 
-func (kv *RegionKV) backgroundFlush() {
+func (s *RegionStorage) backgroundFlush() {
 	ticker := time.NewTicker(dirtyFlushTick)
 	var (
 		isFlush bool
@@ -78,35 +79,35 @@ func (kv *RegionKV) backgroundFlush() {
 		for {
 			select {
 			case <-ticker.C:
-				kv.mu.RLock()
-				isFlush = kv.flushTime.Before(time.Now())
-				kv.mu.RUnlock()
+				s.mu.RLock()
+				isFlush = s.flushTime.Before(time.Now())
+				s.mu.RUnlock()
 				if !isFlush {
 					continue
 				}
-				if err = kv.FlushRegion(); err != nil {
+				if err = s.FlushRegion(); err != nil {
 					log.Error("flush regions meet error", zap.Error(err))
 				}
-			case <-kv.ctx.Done():
+			case <-s.ctx.Done():
 				return
 			}
 		}
 	}()
 }
 
-// SaveRegion saves one region to KV.
-func (kv *RegionKV) SaveRegion(region *metapb.Region) error {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	if kv.cacheSize < kv.batchSize-1 {
-		kv.batchRegions[regionPath(region.GetId())] = region
-		kv.cacheSize++
+// SaveRegion saves one region to storage.
+func (s *RegionStorage) SaveRegion(region *metapb.Region) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cacheSize < s.batchSize-1 {
+		s.batchRegions[regionPath(region.GetId())] = region
+		s.cacheSize++
 
-		kv.flushTime = time.Now().Add(kv.flushRate)
+		s.flushTime = time.Now().Add(s.flushRate)
 		return nil
 	}
-	kv.batchRegions[regionPath(region.GetId())] = region
-	err := kv.flush()
+	s.batchRegions[regionPath(region.GetId())] = region
+	err := s.flush()
 
 	if err != nil {
 		return err
@@ -114,11 +115,11 @@ func (kv *RegionKV) SaveRegion(region *metapb.Region) error {
 	return nil
 }
 
-func deleteRegion(kv KVBase, region *metapb.Region) error {
-	return kv.Delete(regionPath(region.GetId()))
+func deleteRegion(kv kv.Base, region *metapb.Region) error {
+	return kv.Remove(regionPath(region.GetId()))
 }
 
-func loadRegions(kv KVBase, regions *RegionsInfo) error {
+func loadRegions(kv kv.Base, regions *RegionsInfo) error {
 	nextID := uint64(0)
 	endKey := regionPath(math.MaxUint64)
 
@@ -157,28 +158,28 @@ func loadRegions(kv KVBase, regions *RegionsInfo) error {
 	}
 }
 
-// FlushRegion saves the cache region to region kv storage.
-func (kv *RegionKV) FlushRegion() error {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	return kv.flush()
+// FlushRegion saves the cache region to region storage.
+func (s *RegionStorage) FlushRegion() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.flush()
 }
 
-func (kv *RegionKV) flush() error {
-	if err := kv.SaveRegions(kv.batchRegions); err != nil {
+func (s *RegionStorage) flush() error {
+	if err := s.SaveRegions(s.batchRegions); err != nil {
 		return err
 	}
-	kv.cacheSize = 0
-	kv.batchRegions = make(map[string]*metapb.Region, kv.batchSize)
+	s.cacheSize = 0
+	s.batchRegions = make(map[string]*metapb.Region, s.batchSize)
 	return nil
 }
 
 // Close closes the kv.
-func (kv *RegionKV) Close() error {
-	err := kv.FlushRegion()
+func (s *RegionStorage) Close() error {
+	err := s.FlushRegion()
 	if err != nil {
 		log.Error("meet error before close the region storage", zap.Error(err))
 	}
-	kv.cancel()
-	return kv.db.Close()
+	s.cancel()
+	return errors.WithStack(s.LeveldbKV.Close())
 }
