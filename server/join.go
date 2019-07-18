@@ -37,7 +37,7 @@ const (
 	privateDirMode = 0700
 )
 
-// listMemberRetryTimes the retry times of list member.
+// listMemberRetryTimes is the retry times of list member.
 var listMemberRetryTimes = 20
 
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
