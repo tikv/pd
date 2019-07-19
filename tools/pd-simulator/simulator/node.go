@@ -199,9 +199,9 @@ func (n *Node) reportRegionChange() {
 				zap.Uint64("region-id", region.GetID()),
 				zap.Error(err))
 		}
+		n.raftEngine.ResetRegionChange(n.Id, regionID)
 		cancel()
 	}
-	delete(n.raftEngine.regionChange, n.Id)
 }
 
 // AddTask adds task in this node.
