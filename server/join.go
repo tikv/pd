@@ -19,7 +19,9 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
+	"github.com/pingcap/failpoint"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pkg/errors"
@@ -34,6 +36,9 @@ const (
 	// privateDirMode grants owner to make/remove files inside the directory.
 	privateDirMode = 0700
 )
+
+// listMemberRetryTimes is the retry times of list member.
+var listMemberRetryTimes = 20
 
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
 // and returns the initial configuration of the PD cluster.
@@ -137,31 +142,58 @@ func PrepareJoinCluster(cfg *Config) error {
 		return errors.New("missing data or join a duplicated pd")
 	}
 
+	var addResp *clientv3.MemberAddResponse
+
+	failpoint.Inject("add-member-failed", func() {
+		listMemberRetryTimes = 2
+		failpoint.Goto("LabelSkipAddMember")
+	})
 	// - A new PD joins an existing cluster.
 	// - A deleted PD joins to previous cluster.
-	addResp, err := etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
-	if err != nil {
-		return err
+	{
+		// First adds member through the API
+		addResp, err = etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
+		if err != nil {
+			return err
+		}
+	}
+	failpoint.Label("LabelSkipAddMember")
+
+	var (
+		pds      []string
+		listSucc bool
+	)
+
+	for i := 0; i < listMemberRetryTimes; i++ {
+		listResp, err = etcdutil.ListEtcdMembers(client)
+		if err != nil {
+			return err
+		}
+
+		pds = []string{}
+		for _, memb := range listResp.Members {
+			n := memb.Name
+			if addResp != nil && memb.ID == addResp.Member.ID {
+				n = cfg.Name
+				listSucc = true
+			}
+			if len(n) == 0 {
+				return errors.New("there is a member that has not joined successfully")
+			}
+			for _, m := range memb.PeerURLs {
+				pds = append(pds, fmt.Sprintf("%s=%s", n, m))
+			}
+		}
+
+		if listSucc {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !listSucc {
+		return errors.Errorf("join failed, adds the new member %s may failed", cfg.Name)
 	}
 
-	listResp, err = etcdutil.ListEtcdMembers(client)
-	if err != nil {
-		return err
-	}
-
-	pds := []string{}
-	for _, memb := range listResp.Members {
-		n := memb.Name
-		if memb.ID == addResp.Member.ID {
-			n = cfg.Name
-		}
-		if len(n) == 0 {
-			return errors.New("there is a member that has not joined successfully")
-		}
-		for _, m := range memb.PeerURLs {
-			pds = append(pds, fmt.Sprintf("%s=%s", n, m))
-		}
-	}
 	initialCluster = strings.Join(pds, ",")
 	cfg.InitialCluster = initialCluster
 	cfg.InitialClusterState = embed.ClusterStateFlagExisting
