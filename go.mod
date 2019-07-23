@@ -7,10 +7,14 @@ require (
 	github.com/chzyer/logex v1.1.10 // indirect
 	github.com/chzyer/readline v0.0.0-20171208011716-f6d7a1f6fbf3
 	github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1 // indirect
+	github.com/coreos/etcd v3.3.13+incompatible // indirect
 	github.com/coreos/go-semver v0.2.0
 	github.com/coreos/pkg v0.0.0-20160727233714-3ac0863d7acf
+	github.com/cznic/mathutil v0.0.0-20181122101859-297441e03548 // indirect
+	github.com/cznic/sortutil v0.0.0-20181122101858-f5f958428db8 // indirect
 	github.com/dustin/go-humanize v0.0.0-20180421182945-02af3965c54e
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
+	github.com/etcd-io/gofail v0.0.0-20180808172546-51ce9a71510a // indirect
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32
 	github.com/gogo/protobuf v1.0.0
 	github.com/golang/groupcache v0.0.0-20181024230925-c65c006176ff // indirect
@@ -21,24 +25,36 @@ require (
 	github.com/gorilla/mux v1.6.1
 	github.com/gorilla/websocket v1.2.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
+	github.com/juju/errors v0.0.0-20190207033735-e65537c515d7 // indirect
 	github.com/juju/ratelimit v1.0.1
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/montanaflynn/stats v0.0.0-20151014174947-eeaced052adb
+	github.com/ngaut/pools v0.0.0-20180318154953-b7bc8c42aac7 // indirect
+	github.com/ngaut/sync2 v0.0.0-20141008032647-7a24ed77b2ef // indirect
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/failpoint v0.0.0-20190512135322-30cc7431d99c
+	github.com/pingcap/goleveldb v0.0.0-20171020122428-b9ff6c35079e // indirect
 	github.com/pingcap/kvproto v0.0.0-20190516013202-4cf58ad90b6c
 	github.com/pingcap/log v0.0.0-20190715063458-479153f07ebd
+	github.com/pingcap/parser v0.0.0-20190723083556-57e1f3b7a1c1 // indirect
+	github.com/pingcap/tidb v2.0.11+incompatible // indirect
+	github.com/pingcap/tipb v0.0.0-20190719111033-1b33604708b0 // indirect
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v0.8.0
 	github.com/prometheus/client_model v0.0.0-20171117100541-99fa1f4be8e5 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20190512091148-babf20351dd7 // indirect
 	github.com/sirupsen/logrus v1.0.5
+	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.1
 	github.com/syndtr/goleveldb v0.0.0-20180815032940-ae2bd5eed72d
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20171017195756-830351dc03c6 // indirect
+	github.com/twinj/uuid v1.0.0 // indirect
+	github.com/uber/jaeger-client-go v2.16.0+incompatible // indirect
+	github.com/uber/jaeger-lib v2.0.0+incompatible // indirect
 	github.com/unrolled/render v0.0.0-20171102162132-65450fb6b2d3
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.0.0-20190320044326-77d4b742cdbf

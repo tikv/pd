@@ -269,7 +269,7 @@ func (s *testGetRegionSuite) TestRegionKey(c *C) {
 func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
-	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("d"))
+	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("e"))
 	r := newTestRegionInfo(99, 1, []byte{0xFF, 0xFF, 0xAA}, []byte{0xFF, 0xFF, 0xCC}, core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(c, s.svr, r1)
 	mustRegionHeartbeat(c, s.svr, r2)
@@ -280,6 +280,15 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	regionIds := []uint64{3, 4, 99}
 	regions := &RegionsInfo{}
 	err := readJSONWithURL(url, regions)
+	c.Assert(err, IsNil)
+	c.Assert(len(regionIds), Equals, regions.Count)
+	for i, v := range regionIds {
+		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+	url = fmt.Sprintf("%s/regions/key?key=%s", s.urlPrefix, "d")
+	regionIds = []uint64{4, 99}
+	regions = &RegionsInfo{}
+	err = readJSONWithURL(url, regions)
 	c.Assert(err, IsNil)
 	c.Assert(len(regionIds), Equals, regions.Count)
 	for i, v := range regionIds {
