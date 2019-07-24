@@ -159,6 +159,8 @@ func (t *regionTree) find(region *metapb.Region) *regionItem {
 	return result
 }
 
+// scanRage scans from the first region containing or behind the start key
+// until f return false
 func (t *regionTree) scanRange(startKey []byte, f func(*metapb.Region) bool) {
 	region := &metapb.Region{StartKey: startKey}
 	// find if there is a region with key range [s, d), s < startKey < d
