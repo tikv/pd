@@ -75,8 +75,8 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 	regionSize := r.regions.GetStoreRegionSize(id)
 	pendingPeerCount := r.regions.GetStorePendingPeerCount(id)
 	newStats := proto.Clone(s.GetStoreStats()).(*pdpb.StoreStats)
-	newStats.UsedSize = uint64(float64(s.GetRegionSize())/amplification) * (1 << 20)
-	newStats.Available = s.GetCapacity() - s.GetUsedSize()
+	newStats.UsedSize = uint64(float64(regionSize)/amplification) * (1 << 20)
+	newStats.Available = s.GetCapacity() - newStats.UsedSize
 	newStore := s.Clone(
 		core.SetStoreStats(newStats),
 		core.SetLeaderCount(leaderCount),
@@ -92,7 +92,7 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 func (r *RangeCluster) GetStore(id uint64) *core.StoreInfo {
 	s := r.Cluster.GetStore(id)
 	if s != nil {
-		r.updateStoreInfo(s)
+		return r.updateStoreInfo(s)
 	}
 	return s
 }
@@ -138,26 +138,28 @@ func (r *RangeCluster) GetAverageRegionSize() int64 {
 // GetRegionStores returns all stores that contains the region's peer.
 func (r *RangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	stores := r.Cluster.GetRegionStores(region)
+	var newStores []*core.StoreInfo
 	for _, s := range stores {
-		r.updateStoreInfo(s)
+		newStores = append(newStores, r.updateStoreInfo(s))
 	}
-	return stores
+	return newStores
 }
 
 // GetFollowerStores returns all stores that contains the region's follower peer.
 func (r *RangeCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
 	stores := r.Cluster.GetFollowerStores(region)
+	var newStores []*core.StoreInfo
 	for _, s := range stores {
-		r.updateStoreInfo(s)
+		newStores = append(newStores, r.updateStoreInfo(s))
 	}
-	return stores
+	return newStores
 }
 
 // GetLeaderStore returns all stores that contains the region's leader peer.
 func (r *RangeCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
 	s := r.Cluster.GetLeaderStore(region)
 	if s != nil {
-		r.updateStoreInfo(s)
+		return r.updateStoreInfo(s)
 	}
 	return s
 }

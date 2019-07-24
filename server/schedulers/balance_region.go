@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
@@ -48,14 +49,16 @@ const (
 
 type balanceRegionScheduler struct {
 	*baseScheduler
+	name         string
 	selector     *schedule.BalanceSelector
 	opController *schedule.OperatorController
 	hitsCounter  *hitsStoreBuilder
+	counter      *prometheus.CounterVec
 }
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
-func newBalanceRegionScheduler(opController *schedule.OperatorController) schedule.Scheduler {
+func newBalanceRegionScheduler(opController *schedule.OperatorController, opts ...BalanceRegionCreateOption) schedule.Scheduler {
 	filters := []schedule.Filter{
 		schedule.StoreStateFilter{MoveRegion: true},
 	}
@@ -65,11 +68,35 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController) schedu
 		selector:      schedule.NewBalanceSelector(core.RegionKind, filters),
 		opController:  opController,
 		hitsCounter:   newHitsStoreBuilder(hitsStoreTTL, hitsStoreCountThreshold),
+		counter:       balanceRegionCounter,
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 	return s
 }
 
+// BalanceRegionCreateOption is used to create a scheduler with an option.
+type BalanceRegionCreateOption func(s *balanceRegionScheduler)
+
+// WithBalanceRegionCounter sets the counter for the scheduler.
+func WithBalanceRegionCounter(counter *prometheus.CounterVec) BalanceRegionCreateOption {
+	return func(s *balanceRegionScheduler) {
+		s.counter = counter
+	}
+}
+
+// WithBalanceRegionName sets the name for the scheduler.
+func WithBalanceRegionName(name string) BalanceRegionCreateOption {
+	return func(s *balanceRegionScheduler) {
+		s.name = name
+	}
+}
+
 func (s *balanceRegionScheduler) GetName() string {
+	if s.name != "" {
+		return s.name
+	}
 	return balanceRegionName
 }
 
@@ -100,7 +127,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 	log.Debug("store has the max region score", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", sourceID))
 	sourceAddress := source.GetAddress()
 	sourceLabel := strconv.FormatUint(sourceID, 10)
-	balanceRegionCounter.WithLabelValues("source_store", sourceAddress, sourceLabel).Inc()
+	s.counter.WithLabelValues("source_store", sourceAddress, sourceLabel).Inc()
 
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	for i := 0; i < balanceRegionRetryLimit; i++ {
@@ -195,9 +222,9 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	s.hitsCounter.remove(source, nil)
 	sourceLabel := strconv.FormatUint(sourceID, 10)
 	targetLabel := strconv.FormatUint(targetID, 10)
-	balanceRegionCounter.WithLabelValues("move_peer", source.GetAddress()+"-out", sourceLabel).Inc()
-	balanceRegionCounter.WithLabelValues("move_peer", target.GetAddress()+"-in", targetLabel).Inc()
-	balanceRegionCounter.WithLabelValues("direction", "from_to", sourceLabel+"-"+targetLabel).Inc()
+	s.counter.WithLabelValues("move_peer", source.GetAddress()+"-out", sourceLabel).Inc()
+	s.counter.WithLabelValues("move_peer", target.GetAddress()+"-in", targetLabel).Inc()
+	s.counter.WithLabelValues("direction", "from_to", sourceLabel+"-"+targetLabel).Inc()
 	return op
 }
 
