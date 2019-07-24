@@ -35,8 +35,8 @@ const (
 
 	statCacheMaxLen            = 1000
 	storeStatCacheMaxLen       = 200
-	hotWriteRegionMinFlowRate  = 1 * 1024
-	hotReadRegionMinFlowRate   = 4 * 1024
+	hotWriteRegionMinFlowRate  = 16 * 1024
+	hotReadRegionMinFlowRate   = 128 * 1024
 	minHotRegionReportInterval = 3
 	hotRegionAntiCount         = 1
 )
