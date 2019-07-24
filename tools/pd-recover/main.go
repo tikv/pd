@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/transport"
 )
@@ -79,10 +79,10 @@ func main() {
 
 	var ops []clientv3.Op
 	// recover cluster_id
-	ops = append(ops, clientv3.OpPut(pdClusterIDPath, string(uint64ToBytes(*clusterID))))
+	ops = append(ops, clientv3.OpPut(pdClusterIDPath, string(typeutil.Uint64ToBytes(*clusterID))))
 	// recover alloc_id
 	allocIDPath := path.Join(rootPath, "alloc_id")
-	ops = append(ops, clientv3.OpPut(allocIDPath, string(uint64ToBytes(*allocID))))
+	ops = append(ops, clientv3.OpPut(allocIDPath, string(typeutil.Uint64ToBytes(*allocID))))
 
 	// recover bootstrap
 	// recover meta of cluster
@@ -95,7 +95,7 @@ func main() {
 
 	// set raft bootstrap time
 	nano := time.Now().UnixNano()
-	timeData := uint64ToBytes(uint64(nano))
+	timeData := typeutil.Uint64ToBytes(uint64(nano))
 	ops = append(ops, clientv3.OpPut(raftBootstrapTimeKey, string(timeData)))
 
 	// the new pd cluster should not bootstrapped by tikv
@@ -109,10 +109,4 @@ func main() {
 		return
 	}
 	fmt.Println("recover success! please restart the PD cluster")
-}
-
-func uint64ToBytes(v uint64) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, v)
-	return b
 }

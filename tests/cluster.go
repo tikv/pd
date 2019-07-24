@@ -22,10 +22,11 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/id"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -138,6 +139,20 @@ func (s *TestServer) GetConfig() *server.Config {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetConfig()
+}
+
+// GetAllocator returns the current TestServer's ID allocator.
+func (s *TestServer) GetAllocator() *id.AllocatorImpl {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetAllocator()
+}
+
+// GetAddr returns the address of TestCluster.
+func (s *TestServer) GetAddr() string {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetAddr()
 }
 
 // GetServer returns the real server of TestServer.

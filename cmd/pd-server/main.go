@@ -21,7 +21,7 @@ import (
 	"syscall"
 
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"

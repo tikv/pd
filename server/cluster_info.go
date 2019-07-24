@@ -21,8 +21,9 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
@@ -31,7 +32,7 @@ import (
 type clusterInfo struct {
 	sync.RWMutex
 	core            *core.BasicCluster
-	id              core.IDAllocator
+	id              id.Allocator
 	storage         *core.Storage
 	meta            *metapb.Cluster
 	opt             *scheduleOption
@@ -45,7 +46,7 @@ type clusterInfo struct {
 
 var defaultChangedRegionsLimit = 10000
 
-func newClusterInfo(id core.IDAllocator, opt *scheduleOption, storage *core.Storage) *clusterInfo {
+func newClusterInfo(id id.Allocator, opt *scheduleOption, storage *core.Storage) *clusterInfo {
 	return &clusterInfo{
 		core:            core.NewBasicCluster(),
 		id:              id,
@@ -60,7 +61,7 @@ func newClusterInfo(id core.IDAllocator, opt *scheduleOption, storage *core.Stor
 }
 
 // Return nil if cluster is not bootstrapped.
-func loadClusterInfo(id core.IDAllocator, storage *core.Storage, opt *scheduleOption) (*clusterInfo, error) {
+func loadClusterInfo(id id.Allocator, storage *core.Storage, opt *scheduleOption) (*clusterInfo, error) {
 	c := newClusterInfo(id, opt, storage)
 
 	c.meta = &metapb.Cluster{}

@@ -18,7 +18,7 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"

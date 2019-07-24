@@ -21,7 +21,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pkg/errors"

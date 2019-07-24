@@ -16,7 +16,7 @@ package schedulers
 import (
 	"time"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/schedule"
 )
 

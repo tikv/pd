@@ -20,7 +20,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -47,7 +49,7 @@ func (s *Server) getTimestampPath() string {
 }
 
 func (s *Server) loadTimestamp() (time.Time, error) {
-	data, err := getValue(s.client, s.getTimestampPath())
+	data, err := etcdutil.GetValue(s.client, s.getTimestampPath())
 	if err != nil {
 		return zeroTime, err
 	}
@@ -60,7 +62,7 @@ func (s *Server) loadTimestamp() (time.Time, error) {
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
 // otherwise, update it.
 func (s *Server) saveTimestamp(ts time.Time) error {
-	data := uint64ToBytes(uint64(ts.UnixNano()))
+	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
 	key := s.getTimestampPath()
 
 	resp, err := s.LeaderTxn().Then(clientv3.OpPut(key, string(data))).Commit()

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/typeutil"
 )
 
 var _ = Suite(&testUtilSuite{})
@@ -27,7 +28,7 @@ type testUtilSuite struct{}
 func (s *testUtilSuite) TestParseTimestap(c *C) {
 	for i := 0; i < 3; i++ {
 		t := time.Now().Add(time.Second * time.Duration(rand.Int31n(1000)))
-		data := uint64ToBytes(uint64(t.UnixNano()))
+		data := typeutil.Uint64ToBytes(uint64(t.UnixNano()))
 		nt, err := parseTimestamp(data)
 		c.Assert(err, IsNil)
 		c.Assert(nt.Equal(t), IsTrue)

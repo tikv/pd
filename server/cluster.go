@@ -24,7 +24,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
@@ -128,7 +128,7 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 
-	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.storage, c.s.scheduleOpt)
+	cluster, err := loadClusterInfo(c.s.idAllocator, c.s.storage, c.s.scheduleOpt)
 	if err != nil {
 		return err
 	}

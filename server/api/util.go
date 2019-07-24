@@ -21,7 +21,7 @@ import (
 	"net/http"
 
 	"github.com/pingcap/errcode"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"

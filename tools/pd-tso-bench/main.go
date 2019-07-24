@@ -23,7 +23,7 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	pd "github.com/pingcap/pd/client"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"

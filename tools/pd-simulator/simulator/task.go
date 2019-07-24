@@ -185,6 +185,10 @@ func (t *transferLeader) Step(r *RaftEngine) {
 	var newRegion *core.RegionInfo
 	if region.GetPeer(t.peer.GetId()) != nil {
 		newRegion = region.Clone(core.WithLeader(t.peer))
+	} else {
+		// This branch will be executed
+		t.finished = true
+		return
 	}
 	t.finished = true
 	r.SetRegion(newRegion)

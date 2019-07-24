@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"

@@ -15,18 +15,17 @@ package server
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"regexp"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -87,48 +86,6 @@ func CheckPDVersion(opt *scheduleOption) {
 	}
 }
 
-// A helper function to get value with key from etcd.
-func getValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte, error) {
-	resp, err := get(c, key, opts...)
-	if err != nil {
-		return nil, err
-	}
-	if resp == nil {
-		return nil, nil
-	}
-	return resp.Kvs[0].Value, nil
-}
-
-func get(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	resp, err := etcdutil.EtcdKVGet(c, key, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	if n := len(resp.Kvs); n == 0 {
-		return nil, nil
-	} else if n > 1 {
-		return nil, errors.Errorf("invalid get value resp %v, must only one", resp.Kvs)
-	}
-	return resp, nil
-}
-
-// Return boolean to indicate whether the key exists or not.
-func getProtoMsgWithModRev(c *clientv3.Client, key string, msg proto.Message, opts ...clientv3.OpOption) (bool, int64, error) {
-	resp, err := get(c, key, opts...)
-	if err != nil {
-		return false, 0, err
-	}
-	if resp == nil {
-		return false, 0, nil
-	}
-	value := resp.Kvs[0].Value
-	if err = proto.Unmarshal(value, msg); err != nil {
-		return false, 0, errors.WithStack(err)
-	}
-	return true, resp.Kvs[0].ModRevision, nil
-}
-
 func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 	ctx, cancel := context.WithTimeout(c.Ctx(), requestTimeout)
 	defer cancel()
@@ -136,7 +93,7 @@ func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 	// Generate a random cluster ID.
 	ts := uint64(time.Now().Unix())
 	clusterID := (ts << 32) + uint64(rand.Uint32())
-	value := uint64ToBytes(clusterID)
+	value := typeutil.Uint64ToBytes(clusterID)
 
 	// Multiple PDs may try to init the cluster ID at the same time.
 	// Only one PD can commit this transaction, then other PDs can get
@@ -165,21 +122,7 @@ func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 		return 0, errors.Errorf("txn returns invalid range response: %v", resp)
 	}
 
-	return bytesToUint64(response.Kvs[0].Value)
-}
-
-func bytesToUint64(b []byte) (uint64, error) {
-	if len(b) != 8 {
-		return 0, errors.Errorf("invalid data, must 8 bytes, but %d", len(b))
-	}
-
-	return binary.BigEndian.Uint64(b), nil
-}
-
-func uint64ToBytes(v uint64) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, v)
-	return b
+	return typeutil.BytesToUint64(response.Kvs[0].Value)
 }
 
 // GetMembers return a slice of Members.
@@ -204,7 +147,7 @@ func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 }
 
 func parseTimestamp(data []byte) (time.Time, error) {
-	nano, err := bytesToUint64(data)
+	nano, err := typeutil.BytesToUint64(data)
 	if err != nil {
 		return zeroTime, err
 	}

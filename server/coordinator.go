@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"

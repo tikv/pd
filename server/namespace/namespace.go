@@ -17,6 +17,7 @@ import (
 	"fmt"
 
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/id"
 	"github.com/pkg/errors"
 )
 
@@ -92,7 +93,7 @@ func (c defaultClassifier) IsStoreIDExist(storeID uint64) bool {
 }
 
 // CreateClassifierFunc is for creating namespace classifier.
-type CreateClassifierFunc func(*core.Storage, core.IDAllocator) (Classifier, error)
+type CreateClassifierFunc func(*core.Storage, id.Allocator) (Classifier, error)
 
 var classifierMap = make(map[string]CreateClassifierFunc)
 
@@ -106,7 +107,7 @@ func RegisterClassifier(name string, createFn CreateClassifierFunc) {
 }
 
 // CreateClassifier creates a namespace classifier with registered creator func.
-func CreateClassifier(name string, storage *core.Storage, idAlloc core.IDAllocator) (Classifier, error) {
+func CreateClassifier(name string, storage *core.Storage, idAlloc id.Allocator) (Classifier, error) {
 	fn, ok := classifierMap[name]
 	if !ok {
 		return nil, errors.Errorf("create func of %v is not registered", name)
@@ -115,7 +116,7 @@ func CreateClassifier(name string, storage *core.Storage, idAlloc core.IDAllocat
 }
 
 func init() {
-	RegisterClassifier("default", func(*core.Storage, core.IDAllocator) (Classifier, error) {
+	RegisterClassifier("default", func(*core.Storage, id.Allocator) (Classifier, error) {
 		return DefaultClassifier, nil
 	})
 }

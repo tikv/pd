@@ -17,7 +17,7 @@ import (
 
 	"github.com/google/btree"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
 

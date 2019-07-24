@@ -23,7 +23,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -140,7 +140,7 @@ func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pd
 	}
 
 	// We can use an allocator for all types ID allocation.
-	id, err := s.idAlloc.Alloc()
+	id, err := s.idAllocator.Alloc()
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}

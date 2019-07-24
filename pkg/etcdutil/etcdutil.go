@@ -19,7 +19,8 @@ import (
 	"net/http"
 	"time"
 
-	log "github.com/pingcap/log"
+	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver"
@@ -111,4 +112,46 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	}
 
 	return resp, errors.WithStack(err)
+}
+
+// GetValue gets value with key from etcd.
+func GetValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte, error) {
+	resp, err := get(c, key, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+	return resp.Kvs[0].Value, nil
+}
+
+func get(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+	resp, err := EtcdKVGet(c, key, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	if n := len(resp.Kvs); n == 0 {
+		return nil, nil
+	} else if n > 1 {
+		return nil, errors.Errorf("invalid get value resp %v, must only one", resp.Kvs)
+	}
+	return resp, nil
+}
+
+// GetProtoMsgWithModRev returns boolean to indicate whether the key exists or not.
+func GetProtoMsgWithModRev(c *clientv3.Client, key string, msg proto.Message, opts ...clientv3.OpOption) (bool, int64, error) {
+	resp, err := get(c, key, opts...)
+	if err != nil {
+		return false, 0, err
+	}
+	if resp == nil {
+		return false, 0, nil
+	}
+	value := resp.Kvs[0].Value
+	if err = proto.Unmarshal(value, msg); err != nil {
+		return false, 0, errors.WithStack(err)
+	}
+	return true, resp.Kvs[0].ModRevision, nil
 }

@@ -19,7 +19,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
@@ -51,14 +51,14 @@ func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		return nil, err
 	}
 
-	newRegionID, err := c.s.idAlloc.Alloc()
+	newRegionID, err := c.s.idAllocator.Alloc()
 	if err != nil {
 		return nil, err
 	}
 
 	peerIDs := make([]uint64, len(request.Region.Peers))
 	for i := 0; i < len(peerIDs); i++ {
-		if peerIDs[i], err = c.s.idAlloc.Alloc(); err != nil {
+		if peerIDs[i], err = c.s.idAllocator.Alloc(); err != nil {
 			return nil, err
 		}
 	}
@@ -107,14 +107,14 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	// Disable merge the regions in a period of time.
 	c.coordinator.mergeChecker.RecordRegionSplit(reqRegion.GetId())
 	for i := 0; i < int(splitCount); i++ {
-		newRegionID, err := c.s.idAlloc.Alloc()
+		newRegionID, err := c.s.idAllocator.Alloc()
 		if err != nil {
 			return nil, errSchedulerNotFound
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
 		for i := 0; i < len(peerIDs); i++ {
-			if peerIDs[i], err = c.s.idAlloc.Alloc(); err != nil {
+			if peerIDs[i], err = c.s.idAllocator.Alloc(); err != nil {
 				return nil, err
 			}
 		}
