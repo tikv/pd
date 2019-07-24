@@ -693,7 +693,8 @@ func (r *RegionsInfo) GetFollower(storeID uint64, regionID uint64) *RegionInfo {
 	return r.followers[storeID].Get(regionID)
 }
 
-// ScanRange scans region with start key, until number greater than limit.
+// ScanRange scans from the first region containing or behind start key,
+// until number greater than limit.
 func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
 	res := make([]*RegionInfo, 0, limit)
 	r.tree.scanRange(startKey, func(metaRegion *metapb.Region) bool {
@@ -703,11 +704,11 @@ func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
 	return res
 }
 
-// ScanRangeWithEndKey scans region with start key and end key.
+// ScanRangeWithEndKey scans regions intersecting [start key, end key).
 func (r *RegionsInfo) ScanRangeWithEndKey(startKey, endKey []byte) []*RegionInfo {
 	var regions []*RegionInfo
 	r.tree.scanRange(startKey, func(meta *metapb.Region) bool {
-		if len(endKey) > 0 && (len(meta.EndKey) == 0 || bytes.Compare(meta.EndKey, endKey) >= 0) {
+		if len(endKey) > 0 && bytes.Compare(meta.StartKey, endKey) >= 0 {
 			return false
 		}
 		if region := r.GetRegion(meta.GetId()); region != nil {
@@ -718,7 +719,8 @@ func (r *RegionsInfo) ScanRangeWithEndKey(startKey, endKey []byte) []*RegionInfo
 	return regions
 }
 
-// ScanRangeWithIterator scans region with start key, until iterator returns false.
+// ScanRangeWithIterator scans from the first region containing or behind start key,
+// until iterator returns false.
 func (r *RegionsInfo) ScanRangeWithIterator(startKey []byte, iterator func(metaRegion *metapb.Region) bool) {
 	r.tree.scanRange(startKey, iterator)
 }
