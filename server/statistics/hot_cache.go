@@ -103,7 +103,7 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 		getKeysFlow = region.GetKeysRead
 	}
 
-	for storeID, _ := range storeIDs {
+	for storeID := range storeIDs {
 		bytesPerSec = uint64(float64(getBytesFlow()) / float64(RegionHeartBeatReportInterval))
 		keysPerSec = uint64(float64(getKeysFlow()) / float64(RegionHeartBeatReportInterval))
 		hotStoreStats, ok := f.hotStoreStats[storeID]
