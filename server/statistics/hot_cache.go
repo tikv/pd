@@ -50,7 +50,7 @@ const (
 	ReadFlow
 )
 
-// HotStroresStats saves the hotspot peer's statistics.
+// HotStoresStats saves the hotspot peer's statistics.
 type HotStoresStats struct {
 	hotStoreStats  map[uint64]cache.Cache         // storeID -> hot regions
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
@@ -64,7 +64,7 @@ func NewHotStoresStats() *HotStoresStats {
 	}
 }
 
-// CheckFlow checks the flow information of region.
+// CheckRegionFlow checks the flow information of region.
 func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind) []HotSpotPeerStatGenerator {
 	var (
 		generators    []HotSpotPeerStatGenerator
@@ -190,7 +190,7 @@ func (f *HotStoresStats) isRegionHotWithPeer(region *core.RegionInfo, peer *meta
 	return false
 }
 
-// HotSpotPeerStatBuilder used to produce new hotspot statistics.
+// HotSpotPeerStatGenerator used to produce new hotspot statistics.
 type HotSpotPeerStatGenerator interface {
 	GenHotSpotPeerStats(stats *StoresStats) *HotSpotPeerStat
 }
