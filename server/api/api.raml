@@ -2,7 +2,7 @@
 ---
 title: Placement Driver API
 version: v1
-baseUri: http://{pdAddr}/pd
+baseUri: http://{pdAddr}/pd/api/{version}
 baseUriParameters:
   pdAddr:
     description: The PD server address, formatted as 'host:port'.
@@ -381,16 +381,37 @@ types:
         enum: [ leader, region ]
       count: integer
 
-/health:
-  description: Health status of PD servers.
+/cluster/status:
+  description: Cluster status.
   get:
+    description: Get cluster status.
     responses:
       200:
         body:
           application/json:
-            type: MemberHealth[]
+            type: ClusterStatus
       500:
         description: PD server failed to proceed the request.
+
+/version:
+  description: The version of PD server.
+  get:
+    description: Get the version of PD server.
+    responses:
+      200:
+        body:
+          application/json:
+            type: Version
+
+/status:
+  description: The build info of PD server.
+  get:
+    description: Get the build info of PD server.
+    responses:
+      200:
+        body:
+          application/json:
+            type: BuildStatus
 
 /diagnose:
   description: Diagnostic information of the cluster.
@@ -403,137 +424,134 @@ types:
       500:
         description: PD server failed to proceed the request.
 
-/api/{version}:
-  /cluster/status:
-    description: Cluster status.
-    get:
-      description: Get cluster status.
-      responses:
-        200:
-          body:
-            application/json:
-              type: ClusterStatus
-        500:
-          description: PD server failed to proceed the request.
-
-  /version:
-    description: The version of PD server.
-    get:
-      description: Get the version of PD server.
-      responses:
-        200:
-          body:
-            application/json:
-              type: Version
-
-  /status:
-    description: The build info of PD server.
-    get:
-      description: Get the build info of PD server.
-      responses:
-        200:
-          body:
-            application/json:
-              type: BuildStatus
-
-
-  /members:
-    description: The PD servers in the cluster.
-    get:
-      description: List all PD servers in the cluster.
-      responses:
-        200:
-          body:
-            application/json:
-              type: Members
-        500:
-          description: PD server failed to proceed the request.
-    /name/{name}:
-      description: A specific PD server.
-      uriParameters:
-        name: string
-      delete:
-        description: Remove a PD server from the cluster.
-        responses:
-          200:
-            description: The PD server is successfully removed.
-          400:
-            description: The input is invalid.
-          404:
-            description: The member does not exist.
-          500:
-            description: PD server failed to proceed the request.
-      post:
-        description: Set leader priority of a PD member.
+/members:
+  description: The PD servers in the cluster.
+  get:
+    description: List all PD servers in the cluster.
+    responses:
+      200:
         body:
           application/json:
-            type: object
-            properties:
-              leader-priority: integer
-        responses:
-          200:
-            description: The leader priority is updated.
-          400:
-            description: The input is invalid.
-          404:
-            description: The member does not exist.
-          500:
-            description: PD server failed to proceed the request.
-    /id/{id}:
-      description: A specific PD server.
-      uriParameters:
-        id: integer
-      delete:
-        description: Remove a PD server from the cluster.
-        responses:
-          200:
-            description: The PD server is successfully removed.
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-
-  /leader:
-    description: The leader PD server of the cluster.
-    get:
-      description: Get the leader PD server of the cluster.
+            type: Members
+      500:
+        description: PD server failed to proceed the request.
+  /name/{name}:
+    description: A specific PD server.
+    uriParameters:
+      name: string
+    delete:
+      description: Remove a PD server from the cluster.
       responses:
         200:
-          body:
-            application/json:
-              type: Member
+          description: The PD server is successfully removed.
+        400:
+          description: The input is invalid.
+        404:
+          description: The member does not exist.
         500:
           description: PD server failed to proceed the request.
-    /resign:
-      post:
-        description: Transfer leadership to another PD server.
-        responses:
-          200:
-            description: The transfer command is submitted.
-          500:
-            description: PD server failed to proceed the request.
-    /transfer/{nextLeader}:
-      uriParameters:
-        nextLeader: string
-      post:
-        description: Transfer leadership to the specific PD server.
-        responses:
-          200:
-            description: The transfer command is submitted.
-          500:
-            description: PD server failed to proceed the request.
+    post:
+      description: Set leader priority of a PD member.
+      body:
+        application/json:
+          type: object
+          properties:
+            leader-priority: integer
+      responses:
+        200:
+          description: The leader priority is updated.
+        400:
+          description: The input is invalid.
+        404:
+          description: The member does not exist.
+        500:
+          description: PD server failed to proceed the request.
+  /id/{id}:
+    description: A specific PD server.
+    uriParameters:
+      id: integer
+    delete:
+      description: Remove a PD server from the cluster.
+      responses:
+        200:
+          description: The PD server is successfully removed.
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
 
-  /config:
-    description: PD cluster configuration.
+/leader:
+  description: The leader PD server of the cluster.
+  get:
+    description: Get the leader PD server of the cluster.
+    responses:
+      200:
+        body:
+          application/json:
+            type: Member
+      500:
+        description: PD server failed to proceed the request.
+  /resign:
+    post:
+      description: Transfer leadership to another PD server.
+      responses:
+        200:
+          description: The transfer command is submitted.
+        500:
+          description: PD server failed to proceed the request.
+  /transfer/{nextLeader}:
+    uriParameters:
+      nextLeader: string
+    post:
+      description: Transfer leadership to the specific PD server.
+      responses:
+        200:
+          description: The transfer command is submitted.
+        500:
+          description: PD server failed to proceed the request.
+
+/health:
+  description: Health status of PD servers.
+  get:
+    responses:
+      200:
+        body:
+          application/json:
+            type: MemberHealth[]
+      500:
+        description: PD server failed to proceed the request.
+
+/config:
+  description: PD cluster configuration.
+  get:
+    description: Get full config.
+    responses:
+      200:
+        body:
+          application/json:
+            type: Config
+  post:
+    description: Update a config item.
+    body:
+      application/json:
+        description: key-value pair.
+        type: object
+    responses:
+      200:
+        description: The config is updated.
+      500:
+        description: PD server failed to proceed the request.
+  /schedule:
+    description: Schedule configuration.
     get:
-      description: Get full config.
+      description: Get schedule config.
       responses:
         200:
           body:
             application/json:
-              type: Config
+              type: ScheduleConfig
     post:
-      description: Update a config item.
+      description: Update a schedule config item.
       body:
         application/json:
           description: key-value pair.
@@ -541,337 +559,381 @@ types:
       responses:
         200:
           description: The config is updated.
-        500:
-          description: PD server failed to proceed the request.
-    /schedule:
-      description: Schedule configuration.
-      get:
-        description: Get schedule config.
-        responses:
-          200:
-            body:
-              application/json:
-                type: ScheduleConfig
-      post:
-        description: Update a schedule config item.
-        body:
-          application/json:
-            description: key-value pair.
-            type: object
-        responses:
-          200:
-            description: The config is updated.
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-    /replicate:
-      description: Replication configuration.
-      get:
-        description: Get replication config.
-        responses:
-          200:
-            body:
-              application/json:
-                type: ReplicationConfig
-      post:
-        description: Update a replication config item.
-        body:
-          application/json:
-            description: key-value pair.
-            type: object
-        responses:
-          200:
-            description: The config is updated.
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-    /namespace/{namespaceName}:
-      description: The config of a namespace.
-      uriParameters:
-        namespaceName:
-          description: The name of the namespace.
-          type: string
-      get:
-        description: Get configuration of a namespace.
-        responses:
-          200:
-            body:
-              application/json:
-                type: NamespaceConfig
-          404:
-            description: The namespace does not exist.
-      post:
-        description: Update a namespace config item.
-        body:
-          application/json:
-            description: key-value pair.
-            type: object
-        responses:
-          200:
-            description: The config is updated.
-          400:
-            description: The input is invalid.
-          404:
-            description: The namespace does not exist.
-      delete:
-        description: Delete a namespace config.
-        responses:
-          200:
-            description: The config is removed.
-          404:
-            description: The namespace does not exist.
-    /label-property:
-      description: The label property configuration.
-      get:
-        description: Get label property config.
-        responses:
-          200:
-            body:
-              application/json:
-                type: LabelPropertyConfig
-          400:
-            description: The input is invalid.
-      post:
-        description: Update label property config item.
-        body:
-          application/json:
-            properties:
-              action:
-                type: string
-                enum: [ set, delete ]
-              type:
-                type: string
-                enum: [ reject-leader ]
-              label-key: string
-              label-value: string
-        responses:
-          200:
-            description: The config is updated.
-          500:
-            description: PD server failed to proceed the request.
-
-  /stores:
-    description: The stores in the cluster.
-    get:
-      description: Get stores in the cluster.
-      queryParameters:
-        state?:
-          description: Specify accepted store states.
-          # FIXME: Use string type instead of integers.
-          type: integer[]
-      responses:
-        200:
-          body:
-            application/json:
-              type: Stores
-        500:
-          description: PD server failed to proceed the request.
-
-    /limit:
-      description: The balance rate limit for all stores.
-      get:
-        description: Get all stores' balance rate limit.
-        responses:
-          200:
-            body:
-            application/json:
-              type: string
-          500:
-            description: PD server failed to proceed the request.
-      post:
-        description: Set all stores' balance rate limit.
-        body:
-          application/json:
-            description: key-value pair.
-            type: object
-        responses:
-          200:
-            description: All stores' balance rate limits are updated.
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-
-    /remove-tombstone:
-      description: Remove all tombstone stores.
-      delete:
-        description: Remove all tombstone stores.
-        responses:
-          200:
-            description: All tombstone stores are removed.
-          500:
-            description: PD server failed to proceed the request.
-
-  /store/{storeId}:
-    description: A specific store.
-    uriParameters:
-      storeId: integer
-    get:
-      description: Get a store's information.
-      responses:
-        200:
-          body:
-            application/json:
-              type: Store
         400:
           description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
-    delete:
-      description: Take down a store from the cluster.
-      queryParameters:
-        force?:
-          description: Set status to Tombstone directly.
+  /replicate:
+    description: Replication configuration.
+    get:
+      description: Get replication config.
       responses:
         200:
-          description: The store is set as Offline or Tombstone.
+          body:
+            application/json:
+              type: ReplicationConfig
+    post:
+      description: Update a replication config item.
+      body:
+        application/json:
+          description: key-value pair.
+          type: object
+      responses:
+        200:
+          description: The config is updated.
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+  /namespace/{namespaceName}:
+    description: The config of a namespace.
+    uriParameters:
+      namespaceName:
+        description: The name of the namespace.
+        type: string
+    get:
+      description: Get configuration of a namespace.
+      responses:
+        200:
+          body:
+            application/json:
+              type: NamespaceConfig
+        404:
+          description: The namespace does not exist.
+    post:
+      description: Update a namespace config item.
+      body:
+        application/json:
+          description: key-value pair.
+          type: object
+      responses:
+        200:
+          description: The config is updated.
+        400:
+          description: The input is invalid.
+        404:
+          description: The namespace does not exist.
+    delete:
+      description: Delete a namespace config.
+      responses:
+        200:
+          description: The config is removed.
+        404:
+          description: The namespace does not exist.
+  /label-property:
+    description: The label property configuration.
+    get:
+      description: Get label property config.
+      responses:
+        200:
+          body:
+            application/json:
+              type: LabelPropertyConfig
+        400:
+          description: The input is invalid.
+    post:
+      description: Update label property config item.
+      body:
+        application/json:
+          properties:
+            action:
+              type: string
+              enum: [ set, delete ]
+            type:
+              type: string
+              enum: [ reject-leader ]
+            label-key: string
+            label-value: string
+      responses:
+        200:
+          description: The config is updated.
+        500:
+          description: PD server failed to proceed the request.
+
+/stores:
+  description: The stores in the cluster.
+  get:
+    description: Get stores in the cluster.
+    queryParameters:
+      state?:
+        description: Specify accepted store states.
+        # FIXME: Use string type instead of integers.
+        type: integer[]
+    responses:
+      200:
+        body:
+          application/json:
+            type: Stores
+      500:
+        description: PD server failed to proceed the request.
+
+  /limit:
+    description: The balance rate limit for all stores.
+    get:
+      description: Get all stores' balance rate limit.
+      responses:
+        200:
+          body:
+          application/json:
+            type: string
+        500:
+          description: PD server failed to proceed the request.
+    post:
+      description: Set all stores' balance rate limit.
+      body:
+        application/json:
+          description: key-value pair.
+          type: object
+      responses:
+        200:
+          description: All stores' balance rate limits are updated.
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+
+  /remove-tombstone:
+    description: Remove all tombstone stores.
+    delete:
+      description: Remove all tombstone stores.
+      responses:
+        200:
+          description: All tombstone stores are removed.
+        500:
+          description: PD server failed to proceed the request.
+
+/store/{storeId}:
+  description: A specific store.
+  uriParameters:
+    storeId: integer
+  get:
+    description: Get a store's information.
+    responses:
+      200:
+        body:
+          application/json:
+            type: Store
+      400:
+        description: The input is invalid.
+      500:
+        description: PD server failed to proceed the request.
+  delete:
+    description: Take down a store from the cluster.
+    queryParameters:
+      force?:
+        description: Set status to Tombstone directly.
+    responses:
+      200:
+        description: The store is set as Offline or Tombstone.
+      400:
+        description: The input is invalid.
+      404:
+        description: The store does not exist.
+      410:
+        description: The store has already been removed.
+      500:
+        description: PD server failed to proceed the request.
+
+  /state:
+    description: The state for the specific store.
+    post:
+      description: Set the store's state.
+      queryParameters:
+        state:
+          type: string
+          enum: [ Up, Offline, Tombstone ]
+      responses:
+        200:
+          description: The store's state is updated.
         400:
           description: The input is invalid.
         404:
           description: The store does not exist.
-        410:
-          description: The store has already been removed.
         500:
           description: PD server failed to proceed the request.
 
-    /state:
-      description: The state for the specific store.
-      post:
-        description: Set the store's state.
-        queryParameters:
-          state:
-            type: string
-            enum: [ Up, Offline, Tombstone ]
-        responses:
-          200:
-            description: The store's state is updated.
-          400:
-            description: The input is invalid.
-          404:
-            description: The store does not exist.
-          500:
-            description: PD server failed to proceed the request.
+  /label:
+    description: The label for the specific store.
+    post:
+      description: Set the store's label.
+      body:
+        application/json:
+          description: key-value pair.
+          type: object
+      responses:
+        200:
+          description: The store's label is updated.
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
 
-    /label:
-      description: The label for the specific store.
-      post:
-        description: Set the store's label.
+  /weight:
+    description: The weight for the specific store.
+    post:
+      description: Set the store's leader/region weight.
+      body:
+        application/json:
+          description: key-value pair.
+          type: object
+          # FIXME: add example. {leader: 2} {region: 0.5}
+      responses:
+        200:
+          description: The store's weight is updated.
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+
+  /limit:
+    description: The balance rate limit for the specific store.
+    post:
+      description: Set the store's balance rate limit.
+      body:
+        application/json:
+          description: key-value pair.
+          type: object
+      responses:
+        200:
+          description: The store's balance rate limit is updated.
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+
+/labels:
+  description: The store label values in the cluster.
+  get:
+    description: List all label values.
+    responses:
+      200:
         body:
           application/json:
-            description: key-value pair.
-            type: object
-        responses:
-          200:
-            description: The store's label is updated.
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
+            type: StoreLabel[]
+      500:
+        description: PD server failed to proceed the request.
 
-    /weight:
-      description: The weight for the specific store.
-      post:
-        description: Set the store's leader/region weight.
-        body:
-          application/json:
-            description: key-value pair.
-            type: object
-            # FIXME: add example. {leader: 2} {region: 0.5}
-        responses:
-          200:
-            description: The store's weight is updated.
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-
-    /limit:
-      description: The balance rate limit for the specific store.
-      post:
-        description: Set the store's balance rate limit.
-        body:
-          application/json:
-            description: key-value pair.
-            type: object
-        responses:
-          200:
-            description: The store's balance rate limit is updated.
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-
-  /labels:
-    description: The store label values in the cluster.
+  /stores:
     get:
-      description: List all label values.
+      description: List stores that have specific label values.
+      queryParameters:
+        name: string
+        value: string
       responses:
         200:
           body:
             application/json:
-              type: StoreLabel[]
+              type: Store[]
         500:
           description: PD server failed to proceed the request.
 
-    /stores:
-      get:
-        description: List stores that have specific label values.
-        queryParameters:
-          name: string
-          value: string
-        responses:
-          200:
-            body:
-              application/json:
-                type: Store[]
-          500:
-            description: PD server failed to proceed the request.
-
-  /region:
-    description: A specific region in the cluster.
-    /id/{id}:
-      uriParameters:
-        id: integer
-      get:
-        description: Search for a region by region ID.
-        responses:
-          200:
-            body:
-              application/json:
-                type: Region
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-    /key/{key}:
-      uriParameters:
-        key: string
-      get:
-        description: Search for a region by a key.
-        responses:
-          200:
-            body:
-              application/json:
-                type: Region
-          500:
-            description: PD server failed to proceed the request.
-
-  /regions:
-    description: The regions in the cluster.
+/region:
+  description: A specific region in the cluster.
+  /id/{id}:
+    uriParameters:
+      id: integer
     get:
-      description: List all regions in the cluster.
+      description: Search for a region by region ID.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Region
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+  /key/{key}:
+    uriParameters:
+      key: string
+    get:
+      description: Search for a region by a key.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Region
+        500:
+          description: PD server failed to proceed the request.
+
+/regions:
+  description: The regions in the cluster.
+  get:
+    description: List all regions in the cluster.
+    responses:
+      200:
+        body:
+          application/json:
+            type: Regions
+      500:
+        description: PD server failed to proceed the request.
+  /writeflow:
+    get:
+      description: List regions with the highest write flow.
+      queryParameters:
+        limit?:
+          type: integer
+          default: 16
       responses:
         200:
           body:
             application/json:
               type: Regions
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
-    /writeflow:
+  /readflow:
+    get:
+      description: List regions with the highest read flow.
+      queryParameters:
+        limit?:
+          type: integer
+          default: 16
+      responses:
+        200:
+          body:
+            application/json:
+              type: Regions
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+  /confver:
+    get:
+      description: List regions with the largest conf version.
+      queryParameters:
+        limit?:
+          type: integer
+          default: 16
+      responses:
+        200:
+          body:
+            application/json:
+              type: Regions
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+  /version:
+    get:
+      description: List regions with the largest version.
+      queryParameters:
+        limit?:
+          type: integer
+          default: 16
+      responses:
+        200:
+          body:
+            application/json:
+              type: Regions
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+  /size:
       get:
-        description: List regions with the highest write flow.
+        description: List regions with the largest size.
         queryParameters:
           limit?:
             type: integer
@@ -885,58 +947,12 @@ types:
             description: The input is invalid.
           500:
             description: PD server failed to proceed the request.
-    /readflow:
-      get:
-        description: List regions with the highest read flow.
-        queryParameters:
-          limit?:
-            type: integer
-            default: 16
-        responses:
-          200:
-            body:
-              application/json:
-                type: Regions
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-    /confver:
-      get:
-        description: List regions with the largest conf version.
-        queryParameters:
-          limit?:
-            type: integer
-            default: 16
-        responses:
-          200:
-            body:
-              application/json:
-                type: Regions
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-    /version:
-      get:
-        description: List regions with the largest version.
-        queryParameters:
-          limit?:
-            type: integer
-            default: 16
-        responses:
-          200:
-            body:
-              application/json:
-                type: Regions
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-    /size:
+  /key:
         get:
-          description: List regions with the largest size.
+          description: List regions start from a key.
           queryParameters:
+            key:
+              type: string
             limit?:
               type: integer
               default: 16
@@ -949,251 +965,233 @@ types:
               description: The input is invalid.
             500:
               description: PD server failed to proceed the request.
-    /key:
-          get:
-            description: List regions start from a key.
-            queryParameters:
-              key:
-                type: string
-              limit?:
-                type: integer
-                default: 16
-            responses:
-              200:
-                body:
-                  application/json:
-                    type: Regions
-              400:
-                description: The input is invalid.
-              500:
-                description: PD server failed to proceed the request.
-    /check/{filter}:
-      uriParameters:
-        filter:
-          type: string
-          enum: [ miss-peer, extra-peer, pending-peer, down-peer, incorrect-ns ]
-      get:
-        description: List regions with unhealthy status.
-        responses:
-          200:
-            body:
-              application/json:
-                type: Regions
-          500:
-            description: PD server failed to proceed the request.
-    /sibling/{id}:
-      uriParameters:
-        id: integer
-      get:
-        description: List sibling regions of a specific region.
-        responses:
-          200:
-            body:
-              application/json:
-                type: Regions
-          400:
-            description: The input is invalid.
-          404:
-            description: The region does not exist.
-          500:
-            description: PD server failed to proceed the request.
-    /store/{id}:
-      uriParameters:
-        id: integer
-      get:
-        description: List all regions of a specific store.
-        responses:
-          200:
-            body:
-              application/json:
-                type: Regions
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-
-  /schedulers:
-    description: Running schedulers.
+  /check/{filter}:
+    uriParameters:
+      filter:
+        type: string
+        enum: [ miss-peer, extra-peer, pending-peer, down-peer, incorrect-ns ]
     get:
-      description: List running schedulers.
+      description: List regions with unhealthy status.
       responses:
         200:
           body:
             application/json:
-              type: string[]
+              type: Regions
         500:
           description: PD server failed to proceed the request.
-    post:
-      description: Create a scheduler.
-      body:
-        application/json:
-          type: Scheduler
+  /sibling/{id}:
+    uriParameters:
+      id: integer
+    get:
+      description: List sibling regions of a specific region.
       responses:
         200:
-          description: The scheduler is created.
+          body:
+            application/json:
+              type: Regions
         400:
-          description: Bad format request.
+          description: The input is invalid.
+        404:
+          description: The region does not exist.
         500:
           description: PD server failed to proceed the request.
-    /{name}:
-      description: A specific scheduler.
-      uriParameters:
-        name:
-          type: string
-          description: The name of the scheduler.
-      delete:
-        description: Delete a scheduler.
-        responses:
-          200:
-            description: The scheduler is removed.
-          500:
-            description: PD server failed to proceed the request.
-
-  /operators:
-    description: Pending operators.
+  /store/{id}:
+    uriParameters:
+      id: integer
     get:
-      description: List pending operators.
-      queryParameters:
-        kind?:
-          description: Specify the operator kind.
-          type: string
-          enum: [ admin, leader, region ]
+      description: List all regions of a specific store.
       responses:
         200:
           body:
             application/json:
-              type: string[]
-        500:
-          description: PD server failed to proceed the request.
-    post:
-      description: Create an operator.
-      body:
-        application/json:
-          type: Operator
-      responses:
-        200:
-          description: The operator is created.
+              type: Regions
         400:
           description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
-    /{regionId}:
-      description: A specific Region's pending operator.
-      uriParameters:
-        regionId:
-          description: A Region's Id.
-          type: integer
-      get:
-        description: Get a Region's pending operator.
-        responses:
-          200:
-            body:
-              application/json:
-                type: string
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
-      delete:
-        description: Cancel a Region's pending operator.
-        responses:
-          200:
-            description: The pending operator is cancelled.
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
 
-  /hotspot:
-    description: The hot spots status in the cluster.
-    /regions/write:
-      get:
-        description: List the hot write regions.
-        responses:
-          200:
-            body:
-              application/json:
-                type: HotRegions
-    /regions/read:
-      get:
-        description: List the hot read regions.
-        responses:
-          200:
-            body:
-              application/json:
-                type: HotRegions
-    /stores:
-      get:
-        description: List the hot stores.
-        responses:
-          200:
-            body:
-              application/json:
-                type: HotStores
+/schedulers:
+  description: Running schedulers.
+  get:
+    description: List running schedulers.
+    responses:
+      200:
+        body:
+          application/json:
+            type: string[]
+      500:
+        description: PD server failed to proceed the request.
+  post:
+    description: Create a scheduler.
+    body:
+      application/json:
+        type: Scheduler
+    responses:
+      200:
+        description: The scheduler is created.
+      400:
+        description: Bad format request.
+      500:
+        description: PD server failed to proceed the request.
+  /{name}:
+    description: A specific scheduler.
+    uriParameters:
+      name:
+        type: string
+        description: The name of the scheduler.
+    delete:
+      description: Delete a scheduler.
+      responses:
+        200:
+          description: The scheduler is removed.
+        500:
+          description: PD server failed to proceed the request.
 
-  /stats:
-    description: Statistics of the cluster.
-    /region:
-      get:
-        description: Get region statistics of a specified range.
-        queryParameters:
-          start_key?: string
-          end_key?: string
-        responses:
-          200:
-            body:
-              application/json:
-                type: RegionStats
-          500:
-            description: PD server failed to proceed the request.
-
-
-  /trend:
-    description: Trend of data growth and movements.
+/operators:
+  description: Pending operators.
+  get:
+    description: List pending operators.
+    queryParameters:
+      kind?:
+        description: Specify the operator kind.
+        type: string
+        enum: [ admin, leader, region ]
+    responses:
+      200:
+        body:
+          application/json:
+            type: string[]
+      500:
+        description: PD server failed to proceed the request.
+  post:
+    description: Create an operator.
+    body:
+      application/json:
+        type: Operator
+    responses:
+      200:
+        description: The operator is created.
+      400:
+        description: The input is invalid.
+      500:
+        description: PD server failed to proceed the request.
+  /{regionId}:
+    description: A specific Region's pending operator.
+    uriParameters:
+      regionId:
+        description: A Region's Id.
+        type: integer
     get:
-      description: Get the growth and changes of data in the most recent period of time.
-      queryParameters:
-        from: integer
+      description: Get a Region's pending operator.
       responses:
         200:
           body:
             application/json:
-              type: Trend
+              type: string
         400:
-          description: The request is invalid.
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+    delete:
+      description: Cancel a Region's pending operator.
+      responses:
+        200:
+          description: The pending operator is cancelled.
+        400:
+          description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
 
-  /admin:
-    /cache/region/{id}:
-      uriParameters:
-        id: integer
-      delete:
-        description: Drop a specific region from cache.
-        responses:
-                  200:
-                    description: The region is removed from server cache.
-                  400:
-                    description: The input is invalid.
-                  500:
-                    description: PD server failed to proceed the request.
+/hotspot:
+  description: The hot spots status in the cluster.
+  /regions/write:
+    get:
+      description: List the hot write regions.
+      responses:
+        200:
+          body:
+            application/json:
+              type: HotRegions
+  /regions/read:
+    get:
+      description: List the hot read regions.
+      responses:
+        200:
+          body:
+            application/json:
+              type: HotRegions
+  /stores:
+    get:
+      description: List the hot stores.
+      responses:
+        200:
+          body:
+            application/json:
+              type: HotStores
 
-    /log:
-      description: The log level of PD server.
-      post:
-        description: Set log level.
+/stats:
+  description: Statistics of the cluster.
+  /region:
+    get:
+      description: Get region statistics of a specified range.
+      queryParameters:
+        start_key?: string
+        end_key?: string
+      responses:
+        200:
+          body:
+            application/json:
+              type: RegionStats
+        500:
+          description: PD server failed to proceed the request.
+
+
+/trend:
+  description: Trend of data growth and movements.
+  get:
+    description: Get the growth and changes of data in the most recent period of time.
+    queryParameters:
+      from: integer
+    responses:
+      200:
         body:
           application/json:
-            type: string
-            enum: [ debug, info, warning, error, fatal ]
-        responses:
-          200:
-            description: The log level is updated.
-          400:
-            description: The input is invalid.
-          500:
-            description: PD server failed to proceed the request.
+            type: Trend
+      400:
+        description: The request is invalid.
+      500:
+        description: PD server failed to proceed the request.
+
+/admin:
+  /cache/region/{id}:
+    uriParameters:
+      id: integer
+    delete:
+      description: Drop a specific region from cache.
+      responses:
+                200:
+                  description: The region is removed from server cache.
+                400:
+                  description: The input is invalid.
+                500:
+                  description: PD server failed to proceed the request.
+
+  /log:
+    description: The log level of PD server.
+    post:
+      description: Set log level.
+      body:
+        application/json:
+          type: string
+          enum: [ debug, info, warning, error, fatal ]
+      responses:
+        200:
+          description: The log level is updated.
+        400:
+          description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
 
 
-  /classifier:
-    description: The namespace classifier. Methods depend on current classifier.
+/classifier:
+  description: The namespace classifier. Methods depend on current classifier.
