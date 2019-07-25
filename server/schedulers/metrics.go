@@ -47,9 +47,27 @@ var balanceRegionCounter = prometheus.NewCounterVec(
 		Help:      "Counter of balance region scheduler.",
 	}, []string{"type", "address", "store"})
 
+var scatterRangeLeaderCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "scatter_range_leader",
+		Help:      "Counter of scatter range leader scheduler.",
+	}, []string{"type", "address", "store"})
+
+var scatterRangeRegionCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "scatter_range_region",
+		Help:      "Counter of scatter range region scheduler.",
+	}, []string{"type", "address", "store"})
+
 func init() {
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(schedulerStatus)
 	prometheus.MustRegister(balanceLeaderCounter)
 	prometheus.MustRegister(balanceRegionCounter)
+	prometheus.MustRegister(scatterRangeLeaderCounter)
+	prometheus.MustRegister(scatterRangeRegionCounter)
 }

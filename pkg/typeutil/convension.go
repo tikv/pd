@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2016 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,21 +11,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mockid
+package typeutil
 
-import "sync/atomic"
+import (
+	"encoding/binary"
 
-// IDAllocator mocks IDAllocator and it is only used for test.
-type IDAllocator struct {
-	base uint64
+	"github.com/pkg/errors"
+)
+
+// BytesToUint64 converts a byte slice to uint64.
+func BytesToUint64(b []byte) (uint64, error) {
+	if len(b) != 8 {
+		return 0, errors.Errorf("invalid data, must 8 bytes, but %d", len(b))
+	}
+
+	return binary.BigEndian.Uint64(b), nil
 }
 
-// NewIDAllocator creates a new IDAllocator.
-func NewIDAllocator() *IDAllocator {
-	return &IDAllocator{base: 0}
-}
-
-// Alloc returns a new id.
-func (alloc *IDAllocator) Alloc() (uint64, error) {
-	return atomic.AddUint64(&alloc.base, 1), nil
+// Uint64ToBytes converts uint64 to a byte slice.
+func Uint64ToBytes(v uint64) []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, v)
+	return b
 }

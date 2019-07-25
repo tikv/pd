@@ -20,7 +20,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"

@@ -15,7 +15,7 @@ package server
 
 import (
 	"github.com/coreos/go-semver/semver"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )

@@ -63,7 +63,7 @@ func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
 }
 
 func (s *baseCluster) allocID(c *C) uint64 {
-	id, err := s.svr.idAlloc.Alloc()
+	id, err := s.svr.idAllocator.Alloc()
 	c.Assert(err, IsNil)
 	return id
 }

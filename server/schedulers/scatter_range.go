@@ -56,8 +56,16 @@ func newScatterRangeScheduler(opController *schedule.OperatorController, args []
 		startKey:      []byte(args[0]),
 		endKey:        []byte(args[1]),
 		rangeName:     args[2],
-		balanceLeader: newBalanceLeaderScheduler(opController),
-		balanceRegion: newBalanceRegionScheduler(opController),
+		balanceLeader: newBalanceLeaderScheduler(
+			opController,
+			WithBalanceLeaderName("scatter-range-leader"),
+			WithBalanceLeaderCounter(scatterRangeLeaderCounter),
+		),
+		balanceRegion: newBalanceRegionScheduler(
+			opController,
+			WithBalanceRegionName("scatter-range-region"),
+			WithBalanceRegionCounter(scatterRangeRegionCounter),
+		),
 	}
 }
 

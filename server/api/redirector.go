@@ -19,7 +19,7 @@ import (
 	"net/url"
 	"strings"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
 	"go.uber.org/zap"
 )

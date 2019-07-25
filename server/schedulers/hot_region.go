@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/statistics"

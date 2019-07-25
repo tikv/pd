@@ -11,30 +11,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package id
 
 import (
+	"path"
 	"sync"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
-const (
-	allocStep = uint64(1000)
-)
+// Allocator is the allocator to generate unique ID.
+type Allocator interface {
+	Alloc() (uint64, error)
+}
 
-type idAllocator struct {
+const allocStep = uint64(1000)
+
+// AllocatorImpl is used to allocate ID.
+type AllocatorImpl struct {
 	mu   sync.Mutex
 	base uint64
 	end  uint64
 
-	s *Server
+	client   *clientv3.Client
+	rootPath string
+	member   string
 }
 
-func (alloc *idAllocator) Alloc() (uint64, error) {
+// NewAllocatorImpl creates a new IDAllocator.
+func NewAllocatorImpl(client *clientv3.Client, rootPath string, member string) *AllocatorImpl {
+	return &AllocatorImpl{client: client, rootPath: rootPath, member: member}
+}
+
+// Alloc returns a new id.
+func (alloc *AllocatorImpl) Alloc() (uint64, error) {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
@@ -53,9 +69,9 @@ func (alloc *idAllocator) Alloc() (uint64, error) {
 	return alloc.base, nil
 }
 
-func (alloc *idAllocator) generate() (uint64, error) {
-	key := alloc.s.getAllocIDPath()
-	value, err := getValue(alloc.s.client, key)
+func (alloc *AllocatorImpl) generate() (uint64, error) {
+	key := alloc.getAllocIDPath()
+	value, err := etcdutil.GetValue(alloc.client, key)
 	if err != nil {
 		return 0, err
 	}
@@ -70,7 +86,7 @@ func (alloc *idAllocator) generate() (uint64, error) {
 		cmp = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
 	} else {
 		// update the key
-		end, err = bytesToUint64(value)
+		end, err = typeutil.BytesToUint64(value)
 		if err != nil {
 			return 0, err
 		}
@@ -79,8 +95,11 @@ func (alloc *idAllocator) generate() (uint64, error) {
 	}
 
 	end += allocStep
-	value = uint64ToBytes(end)
-	resp, err := alloc.s.LeaderTxn(cmp).Then(clientv3.OpPut(key, string(value))).Commit()
+	value = typeutil.Uint64ToBytes(end)
+	txn := kv.NewSlowLogTxn(alloc.client)
+	leaderPath := path.Join(alloc.rootPath, "leader")
+	t := txn.If(append([]clientv3.Cmp{cmp}, clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member))...)
+	resp, err := t.Then(clientv3.OpPut(key, string(value))).Commit()
 	if err != nil {
 		return 0, err
 	}
@@ -89,6 +108,10 @@ func (alloc *idAllocator) generate() (uint64, error) {
 	}
 
 	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
-	metadataGauge.WithLabelValues("idalloc").Set(float64(end))
+	idGauge.WithLabelValues("idalloc").Set(float64(end))
 	return end, nil
+}
+
+func (alloc *AllocatorImpl) getAllocIDPath() string {
+	return path.Join(alloc.rootPath, "alloc_id")
 }

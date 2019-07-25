@@ -17,7 +17,7 @@ import (
 
 	"github.com/google/btree"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
 
@@ -159,8 +159,15 @@ func (t *regionTree) find(region *metapb.Region) *regionItem {
 	return result
 }
 
+// scanRage scans from the first region containing or behind the start key
+// until f return false
 func (t *regionTree) scanRange(startKey []byte, f func(*metapb.Region) bool) {
-	startItem := &regionItem{region: &metapb.Region{StartKey: startKey}}
+	region := &metapb.Region{StartKey: startKey}
+	// find if there is a region with key range [s, d), s < startKey < d
+	startItem := t.find(region)
+	if startItem == nil {
+		startItem = &regionItem{region: &metapb.Region{StartKey: startKey}}
+	}
 	t.tree.AscendGreaterOrEqual(startItem, func(item btree.Item) bool {
 		return f(item.(*regionItem).region)
 	})

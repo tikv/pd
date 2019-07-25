@@ -16,7 +16,7 @@ package server
 import (
 	"time"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
 

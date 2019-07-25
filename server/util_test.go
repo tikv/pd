@@ -14,39 +14,12 @@
 package server
 
 import (
-	"math/rand"
-	"time"
-
 	. "github.com/pingcap/check"
 )
 
 var _ = Suite(&testUtilSuite{})
 
 type testUtilSuite struct{}
-
-func (s *testUtilSuite) TestParseTimestap(c *C) {
-	for i := 0; i < 3; i++ {
-		t := time.Now().Add(time.Second * time.Duration(rand.Int31n(1000)))
-		data := uint64ToBytes(uint64(t.UnixNano()))
-		nt, err := parseTimestamp(data)
-		c.Assert(err, IsNil)
-		c.Assert(nt.Equal(t), IsTrue)
-	}
-	data := []byte("pd")
-	nt, err := parseTimestamp(data)
-	c.Assert(err, NotNil)
-	c.Assert(nt.Equal(zeroTime), IsTrue)
-}
-
-func (s *testUtilSuite) TestSubTimeByWallClock(c *C) {
-	for i := 0; i < 3; i++ {
-		r := rand.Int31n(1000)
-		t1 := time.Now()
-		t2 := t1.Add(time.Second * time.Duration(r))
-		duration := subTimeByWallClock(t2, t1)
-		c.Assert(duration, Equals, time.Second*time.Duration(r))
-	}
-}
 
 func (s *testUtilSuite) TestVerifyLabels(c *C) {
 	tests := []struct {

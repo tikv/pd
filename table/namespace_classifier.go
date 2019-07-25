@@ -23,8 +23,9 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -93,7 +94,7 @@ type tableNamespaceClassifier struct {
 	sync.RWMutex
 	nsInfo  *namespacesInfo
 	storage *core.Storage
-	idAlloc core.IDAllocator
+	idAlloc id.Allocator
 	http.Handler
 }
 
@@ -101,10 +102,11 @@ const kvRangeLimit = 1000
 
 // NewTableNamespaceClassifier creates a new namespace classifier that
 // classifies stores and regions by table range.
-func NewTableNamespaceClassifier(storage *core.Storage, idAlloc core.IDAllocator) (namespace.Classifier, error) {
+func NewTableNamespaceClassifier(storage *core.Storage, idAlloc id.Allocator) (namespace.Classifier, error) {
 	nsInfo := newNamespacesInfo()
 	if err := nsInfo.loadNamespaces(storage, kvRangeLimit); err != nil {
 		return nil, err
+
 	}
 	c := &tableNamespaceClassifier{
 		nsInfo:  nsInfo,
