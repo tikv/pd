@@ -20,7 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"go.uber.org/zap"
@@ -49,7 +49,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	s.region = bootstrapReq.Region
 
 	// Add a new store and an addPeer operator.
-	storeID, err := s.svr.idAlloc.Alloc()
+	storeID, err := s.svr.idAllocator.Alloc()
 	c.Assert(err, IsNil)
 	_, err = putStore(c, s.grpcPDClient, s.svr.clusterID, &metapb.Store{Id: storeID, Address: "127.0.0.1:1"})
 	c.Assert(err, IsNil)

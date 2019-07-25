@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"

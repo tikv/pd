@@ -24,8 +24,9 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	syncer "github.com/pingcap/pd/server/region_syncer"
@@ -85,7 +86,7 @@ func (c *RaftCluster) loadClusterStatus() (*ClusterStatus, error) {
 		return nil, err
 	}
 	var isInitialized bool
-	if bootstrapTime != zeroTime {
+	if bootstrapTime != typeutil.ZeroTime {
 		isInitialized = c.isInitialized()
 	}
 	return &ClusterStatus{
@@ -109,14 +110,14 @@ func (c *RaftCluster) isInitialized() bool {
 // yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.s.kv.Load(c.s.kv.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.s.storage.Load(c.s.storage.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return t, err
 	}
 	if data == "" {
 		return t, nil
 	}
-	return parseTimestamp([]byte(data))
+	return typeutil.ParseTimestamp([]byte(data))
 }
 
 func (c *RaftCluster) start() error {
@@ -128,7 +129,7 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 
-	cluster, err := loadClusterInfo(c.s.idAlloc, c.s.kv, c.s.scheduleOpt)
+	cluster, err := loadClusterInfo(c.s.idAllocator, c.s.storage, c.s.scheduleOpt)
 	if err != nil {
 		return err
 	}
@@ -555,7 +556,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 		return core.NewStoreNotFoundErr(storeID)
 	}
 
-	if err := c.s.kv.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
+	if err := c.s.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
 		return err
 	}
 

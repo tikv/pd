@@ -11,46 +11,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package tso_test
 
 import (
 	"context"
+	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"go.etcd.io/etcd/clientv3"
+	"github.com/pingcap/pd/tests"
+	"google.golang.org/grpc"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testTsoSuite{})
 
 type testTsoSuite struct {
-	client       *clientv3.Client
-	svr          *Server
-	cleanup      CleanupFunc
-	grpcPDClient pdpb.PDClient
 }
 
 func (s *testTsoSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustRunTestServer(c)
-	s.client = s.svr.client
-	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-}
-
-func (s *testTsoSuite) TearDownSuite(c *C) {
-	s.cleanup()
 }
 
 func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
+	var err error
+	cluster, err := tests.NewTestCluster(1)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	grpcPDClient := mustNewGrpcClient(c, leaderServer.GetAddr())
+
+	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header: newRequestHeader(s.svr.clusterID),
+		Header: newRequestHeader(clusterID),
 		Count:  uint32(n),
 	}
 
-	tsoClient, err := s.grpcPDClient.Tso(context.Background())
+	tsoClient, err := grpcPDClient.Tso(context.Background())
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
 	err = tsoClient.Send(req)
@@ -66,6 +74,15 @@ func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 }
 
 func (s *testTsoSuite) TestTso(c *C) {
+	var err error
+	cluster, err := tests.NewTestCluster(1)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -93,8 +110,21 @@ func (s *testTsoSuite) TestTso(c *C) {
 }
 
 func (s *testTsoSuite) TestTsoCount0(c *C) {
-	req := &pdpb.TsoRequest{Header: newRequestHeader(s.svr.clusterID)}
-	tsoClient, err := s.grpcPDClient.Tso(context.Background())
+	var err error
+	cluster, err := tests.NewTestCluster(1)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	grpcPDClient := mustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+
+	req := &pdpb.TsoRequest{Header: newRequestHeader(clusterID)}
+	tsoClient, err := grpcPDClient.Tso(context.Background())
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
 	err = tsoClient.Send(req)
@@ -106,34 +136,41 @@ func (s *testTsoSuite) TestTsoCount0(c *C) {
 var _ = Suite(&testTimeFallBackSuite{})
 
 type testTimeFallBackSuite struct {
-	client       *clientv3.Client
-	svr          *Server
-	cleanup      CleanupFunc
+	cluster      *tests.TestCluster
 	grpcPDClient pdpb.PDClient
+	server       *tests.TestServer
 }
 
 func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/fallBackSync", `return(true)`), IsNil)
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/fallBackUpdate", `return(true)`), IsNil)
-	s.svr, s.cleanup = mustRunTestServer(c)
-	s.client = s.svr.client
-	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-	s.svr.Close()
-	failpoint.Disable("github.com/pingcap/pd/server/fallBackSync")
-	failpoint.Disable("github.com/pingcap/pd/server/fallBackUpdate")
-	err := s.svr.Run(context.TODO())
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/fallBackSync", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/fallBackUpdate", `return(true)`), IsNil)
+	var err error
+	s.cluster, err = tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
-	mustWaitLeader(c, []*Server{s.svr})
+
+	err = s.cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	s.cluster.WaitLeader()
+
+	s.server = s.cluster.GetServer(s.cluster.GetLeader())
+	s.grpcPDClient = mustNewGrpcClient(c, s.server.GetAddr())
+	svr := s.server.GetServer()
+	svr.Close()
+	failpoint.Disable("github.com/pingcap/pd/server/tso/fallBackSync")
+	failpoint.Disable("github.com/pingcap/pd/server/tso/fallBackUpdate")
+	err = svr.Run(context.TODO())
+	c.Assert(err, IsNil)
+	s.cluster.WaitLeader()
 }
 
 func (s *testTimeFallBackSuite) TearDownSuite(c *C) {
-	s.cleanup()
+	s.cluster.Destroy()
 }
 
 func (s *testTimeFallBackSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
+	clusterID := s.server.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header: newRequestHeader(s.svr.clusterID),
+		Header: newRequestHeader(clusterID),
 		Count:  uint32(n),
 	}
 
@@ -180,16 +217,15 @@ func (s *testTimeFallBackSuite) TestTimeFallBack(c *C) {
 	wg.Wait()
 }
 
-func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Member {
-	for i := 0; i < 20; i++ {
-		leader, _, err := getLeader(client, leaderPath)
-		c.Assert(err, IsNil)
-		if leader != nil {
-			return leader
-		}
-		time.Sleep(500 * time.Millisecond)
+func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
+	return &pdpb.RequestHeader{
+		ClusterId: clusterID,
 	}
+}
 
-	c.Fatal("get leader error")
-	return nil
+func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+
+	c.Assert(err, IsNil)
+	return pdpb.NewPDClient(conn)
 }

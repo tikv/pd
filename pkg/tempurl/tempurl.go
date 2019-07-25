@@ -19,7 +19,8 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 var (
@@ -42,12 +43,12 @@ func Alloc() string {
 func tryAllocTestURL() string {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		log.Fatal(fmt.Sprintf("%v", err))
+		log.Fatal("listen failed", zap.Error(err))
 	}
 	addr := fmt.Sprintf("http://%s", l.Addr())
 	err = l.Close()
 	if err != nil {
-		log.Fatal(fmt.Sprintf("%v", err))
+		log.Fatal("close failed", zap.Error(err))
 	}
 
 	testAddrMutex.Lock()

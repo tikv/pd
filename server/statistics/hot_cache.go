@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server/cache"
+	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 )
 

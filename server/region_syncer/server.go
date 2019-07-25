@@ -22,7 +22,7 @@ import (
 	"github.com/juju/ratelimit"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -56,7 +56,7 @@ type Server interface {
 	ClusterID() uint64
 	GetMemberInfo() *pdpb.Member
 	GetLeader() *pdpb.Member
-	GetStorage() *core.KV
+	GetStorage() *core.Storage
 	Name() string
 	GetMetaRegions() []*metapb.Region
 }
@@ -84,7 +84,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		streams: make(map[string]ServerStream),
 		server:  s,
 		closed:  make(chan struct{}),
-		history: newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionKV()),
+		history: newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
 		limit:   ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
 	}
 }

@@ -11,9 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package kv
 
-// IDAllocator is the allocator to generate unique ID.
-type IDAllocator interface {
-	Alloc() (uint64, error)
+// Base is an abstract interface for load/save pd cluster data.
+type Base interface {
+	Load(key string) (string, error)
+	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
+	Save(key, value string) error
+	Remove(key string) error
 }

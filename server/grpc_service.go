@@ -23,7 +23,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -79,7 +79,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return err
 		}
 		count := request.GetCount()
-		ts, err := s.getRespTS(count)
+		ts, err := s.tso.GetRespTS(count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
@@ -140,7 +140,7 @@ func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pd
 	}
 
 	// We can use an allocator for all types ID allocation.
-	id, err := s.idAlloc.Alloc()
+	id, err := s.idAllocator.Alloc()
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
@@ -657,7 +657,7 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	safePoint, err := s.kv.LoadGCSafePoint()
+	safePoint, err := s.storage.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
 	}
@@ -688,7 +688,7 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	oldSafePoint, err := s.kv.LoadGCSafePoint()
+	oldSafePoint, err := s.storage.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
 	}
@@ -697,7 +697,7 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 
 	// Only save the safe point if it's greater than the previous one
 	if newSafePoint > oldSafePoint {
-		if err := s.kv.SaveGCSafePoint(newSafePoint); err != nil {
+		if err := s.storage.SaveGCSafePoint(newSafePoint); err != nil {
 			return nil, err
 		}
 		log.Info("updated gc safe point",

@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
@@ -240,7 +240,7 @@ func (c *coordinator) run() {
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
 	c.cluster.opt.store(scheduleCfg)
-	if err := c.cluster.opt.persist(c.cluster.kv); err != nil {
+	if err := c.cluster.opt.persist(c.cluster.storage); err != nil {
 		log.Error("cannot persist schedule config", zap.Error(err))
 	}
 

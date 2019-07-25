@@ -21,8 +21,9 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
@@ -31,8 +32,8 @@ import (
 type clusterInfo struct {
 	sync.RWMutex
 	core            *core.BasicCluster
-	id              core.IDAllocator
-	kv              *core.KV
+	id              id.Allocator
+	storage         *core.Storage
 	meta            *metapb.Cluster
 	opt             *scheduleOption
 	regionStats     *statistics.RegionStatistics
@@ -45,12 +46,12 @@ type clusterInfo struct {
 
 var defaultChangedRegionsLimit = 10000
 
-func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clusterInfo {
+func newClusterInfo(id id.Allocator, opt *scheduleOption, storage *core.Storage) *clusterInfo {
 	return &clusterInfo{
 		core:            core.NewBasicCluster(),
 		id:              id,
 		opt:             opt,
-		kv:              kv,
+		storage:         storage,
 		labelLevelStats: statistics.NewLabelLevelStatistics(),
 		storesStats:     statistics.NewStoresStats(),
 		prepareChecker:  newPrepareChecker(),
@@ -60,11 +61,11 @@ func newClusterInfo(id core.IDAllocator, opt *scheduleOption, kv *core.KV) *clus
 }
 
 // Return nil if cluster is not bootstrapped.
-func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*clusterInfo, error) {
-	c := newClusterInfo(id, opt, kv)
+func loadClusterInfo(id id.Allocator, storage *core.Storage, opt *scheduleOption) (*clusterInfo, error) {
+	c := newClusterInfo(id, opt, storage)
 
 	c.meta = &metapb.Cluster{}
-	ok, err := kv.LoadMeta(c.meta)
+	ok, err := storage.LoadMeta(c.meta)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +74,7 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	}
 
 	start := time.Now()
-	if err := kv.LoadStores(c.core.Stores); err != nil {
+	if err := storage.LoadStores(c.core.Stores); err != nil {
 		return nil, err
 	}
 	log.Info("load stores",
@@ -82,7 +83,7 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	)
 
 	start = time.Now()
-	if err := kv.LoadRegions(c.core.Regions); err != nil {
+	if err := storage.LoadRegions(c.core.Regions); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -117,7 +118,7 @@ func (c *clusterInfo) OnStoreVersionChange() {
 	// it will update the cluster version.
 	if clusterVersion.LessThan(*minVersion) {
 		c.opt.SetClusterVersion(*minVersion)
-		err := c.opt.persist(c.kv)
+		err := c.opt.persist(c.storage)
 		if err != nil {
 			log.Error("persist cluster version meet error", zap.Error(err))
 		}
@@ -176,8 +177,8 @@ func (c *clusterInfo) putMeta(meta *metapb.Cluster) error {
 }
 
 func (c *clusterInfo) putMetaLocked(meta *metapb.Cluster) error {
-	if c.kv != nil {
-		if err := c.kv.SaveMeta(meta); err != nil {
+	if c.storage != nil {
+		if err := c.storage.SaveMeta(meta); err != nil {
 			return err
 		}
 	}
@@ -199,8 +200,8 @@ func (c *clusterInfo) putStore(store *core.StoreInfo) error {
 }
 
 func (c *clusterInfo) putStoreLocked(store *core.StoreInfo) error {
-	if c.kv != nil {
-		if err := c.kv.SaveStore(store.GetMeta()); err != nil {
+	if c.storage != nil {
+		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -216,8 +217,8 @@ func (c *clusterInfo) deleteStore(store *core.StoreInfo) error {
 }
 
 func (c *clusterInfo) deleteStoreLocked(store *core.StoreInfo) error {
-	if c.kv != nil {
-		if err := c.kv.DeleteStore(store.GetMeta()); err != nil {
+	if c.storage != nil {
+		if err := c.storage.DeleteStore(store.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -348,8 +349,8 @@ func (c *clusterInfo) putRegion(region *core.RegionInfo) error {
 }
 
 func (c *clusterInfo) putRegionLocked(region *core.RegionInfo) error {
-	if c.kv != nil {
-		if err := c.kv.SaveRegion(region.GetMeta()); err != nil {
+	if c.storage != nil {
+		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -525,14 +526,14 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	readItems := c.CheckReadStatus(region)
 	c.RUnlock()
 
-	// Save to KV if meta is updated.
+	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	var saveKV, saveCache, isNew bool
 	if origin == nil {
 		log.Debug("insert new region",
 			zap.Uint64("region-id", region.GetID()),
-			zap.Reflect("meta-region", core.HexRegionMeta(region.GetMeta())),
+			zap.Stringer("meta-region", core.RegionToHexMeta(region.GetMeta())),
 		)
 		saveKV, saveCache, isNew = true, true, true
 	} else {
@@ -589,13 +590,13 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	if saveKV && c.kv != nil {
-		if err := c.kv.SaveRegion(region.GetMeta()); err != nil {
-			// Not successfully saved to kv is not fatal, it only leads to longer warm-up
+	if saveKV && c.storage != nil {
+		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
+			// Not successfully saved to storage is not fatal, it only leads to longer warm-up
 			// after restart. Here we only log the error then go on updating cache.
-			log.Error("fail to save region to kv",
+			log.Error("fail to save region to storage",
 				zap.Uint64("region-id", region.GetID()),
-				zap.Reflect("region-meta", core.HexRegionMeta(region.GetMeta())),
+				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
 				zap.Error(err))
 		}
 		select {
@@ -615,12 +616,12 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 
 	if saveCache {
 		overlaps := c.core.Regions.SetRegion(region)
-		if c.kv != nil {
+		if c.storage != nil {
 			for _, item := range overlaps {
-				if err := c.kv.DeleteRegion(item); err != nil {
-					log.Error("fail to delete region from kv",
+				if err := c.storage.DeleteRegion(item); err != nil {
+					log.Error("fail to delete region from storage",
 						zap.Uint64("region-id", item.GetId()),
-						zap.Reflect("region-meta", core.HexRegionMeta(item)),
+						zap.Stringer("region-meta", core.RegionToHexMeta(item)),
 						zap.Error(err))
 				}
 			}

@@ -30,11 +30,15 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	log "github.com/pingcap/log"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/id"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/tso"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -88,16 +92,15 @@ type Server struct {
 	// for id allocator, we can use one allocator for
 	// store, region and peer, because we just need
 	// a unique ID.
-	idAlloc *idAllocator
-	// for kv operation.
-	kv *core.KV
+	idAllocator *id.AllocatorImpl
+	// for storage operation.
+	storage *core.Storage
+	// for tso.
+	tso *tso.TimestampOracle
 	// for namespace.
 	classifier namespace.Classifier
 	// for raft cluster
 	cluster *RaftCluster
-	// For tso, set after pd becomes leader.
-	ts            atomic.Value
-	lastSavedTime time.Time
 	// For async region heartbeat.
 	hbStreams *heartbeatStreams
 	// Zap logger
@@ -219,20 +222,20 @@ func (s *Server) startServer() error {
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.member, s.memberValue = s.memberInfo()
 
-	s.idAlloc = &idAllocator{s: s}
-	kvBase := newEtcdKVBase(s)
+	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.memberValue)
+	s.tso = tso.NewTimestampOracle(s.client, s.rootPath, s.memberValue, s.cfg.TsoSaveInterval.Duration)
+	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
-	regionKV, err := core.NewRegionKV(path)
+	regionStorage, err := core.NewRegionStorage(path)
 	if err != nil {
 		return err
 	}
-	s.kv = core.NewKV(kvBase).SetRegionKV(regionKV)
+	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.cluster = newRaftCluster(s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(s.clusterID, s.cluster)
-	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.kv, s.idAlloc); err != nil {
+	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.storage, s.idAllocator); err != nil {
 		return err
 	}
-
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
 	return nil
@@ -250,7 +253,7 @@ func (s *Server) initClusterID() error {
 		s.clusterID, err = initOrGetClusterID(s.client, pdClusterIDPath)
 		return err
 	}
-	s.clusterID, err = bytesToUint64(resp.Kvs[0].Value)
+	s.clusterID, err = typeutil.BytesToUint64(resp.Kvs[0].Value)
 	return err
 }
 
@@ -276,8 +279,8 @@ func (s *Server) Close() {
 	if s.hbStreams != nil {
 		s.hbStreams.Close()
 	}
-	if err := s.kv.Close(); err != nil {
-		log.Error("close kv meet error", zap.Error(err))
+	if err := s.storage.Close(); err != nil {
+		log.Error("close storage meet error", zap.Error(err))
 	}
 
 	log.Info("close server")
@@ -383,7 +386,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	bootstrapKey := makeBootstrapTimeKey(clusterRootPath)
 	nano := time.Now().UnixNano()
 
-	timeData := uint64ToBytes(uint64(nano))
+	timeData := typeutil.Uint64ToBytes(uint64(nano))
 	ops = append(ops, clientv3.OpPut(bootstrapKey, string(timeData)))
 
 	// Set store meta
@@ -406,7 +409,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
-	resp, err := s.txn().If(bootstrapCmp).Then(ops...).Commit()
+	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -416,11 +419,11 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
-	err = s.kv.SaveRegion(req.GetRegion())
+	err = s.storage.SaveRegion(req.GetRegion())
 	if err != nil {
 		log.Warn("save the bootstrap region failed", zap.Error(err))
 	}
-	err = s.kv.Flush()
+	err = s.storage.Flush()
 	if err != nil {
 		log.Warn("flush the bootstrap region failed", zap.Error(err))
 	}
@@ -469,8 +472,13 @@ func (s *Server) GetClient() *clientv3.Client {
 }
 
 // GetStorage returns the backend storage of server.
-func (s *Server) GetStorage() *core.KV {
-	return s.kv
+func (s *Server) GetStorage() *core.Storage {
+	return s.storage
+}
+
+// GetAllocator returns the ID allocator of server.
+func (s *Server) GetAllocator() *id.AllocatorImpl {
+	return s.idAllocator
 }
 
 // ID returns the unique etcd ID for this server in etcd cluster.
@@ -493,16 +501,11 @@ func (s *Server) GetClassifier() namespace.Classifier {
 	return s.classifier
 }
 
-// txn returns an etcd client transaction wrapper.
-// The wrapper will set a request timeout to the context and log slow transactions.
-func (s *Server) txn() clientv3.Txn {
-	return newSlowLogTxn(s.client)
-}
-
-// leaderTxn returns txn() with a leader comparison to guarantee that
+// LeaderTxn returns txn() with a leader comparison to guarantee that
 // the transaction can be executed only if the server is leader.
-func (s *Server) leaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
-	return s.txn().If(append(cs, s.leaderCmp())...)
+func (s *Server) LeaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
+	txn := kv.NewSlowLogTxn(s.client)
+	return txn.If(append(cs, s.leaderCmp())...)
 }
 
 // GetConfig gets the config information.
@@ -533,7 +536,7 @@ func (s *Server) SetScheduleConfig(cfg ScheduleConfig) error {
 	}
 	old := s.scheduleOpt.load()
 	s.scheduleOpt.store(&cfg)
-	if err := s.scheduleOpt.persist(s.kv); err != nil {
+	if err := s.scheduleOpt.persist(s.storage); err != nil {
 		s.scheduleOpt.store(old)
 		log.Error("failed to update schedule config",
 			zap.Reflect("new", cfg),
@@ -559,7 +562,7 @@ func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
 	}
 	old := s.scheduleOpt.rep.load()
 	s.scheduleOpt.rep.store(&cfg)
-	if err := s.scheduleOpt.persist(s.kv); err != nil {
+	if err := s.scheduleOpt.persist(s.storage); err != nil {
 		s.scheduleOpt.rep.store(old)
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
@@ -575,7 +578,7 @@ func (s *Server) SetReplicationConfig(cfg ReplicationConfig) error {
 func (s *Server) SetPDServerConfig(cfg PDServerConfig) error {
 	old := s.scheduleOpt.loadPDServerConfig()
 	s.scheduleOpt.pdServerConfig.Store(&cfg)
-	if err := s.scheduleOpt.persist(s.kv); err != nil {
+	if err := s.scheduleOpt.persist(s.storage); err != nil {
 		s.scheduleOpt.pdServerConfig.Store(old)
 		log.Error("failed to update PDServer config",
 			zap.Reflect("new", cfg),
@@ -617,7 +620,7 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 	if n, ok := s.scheduleOpt.getNS(name); ok {
 		old := n.load()
 		n.store(&cfg)
-		if err := s.scheduleOpt.persist(s.kv); err != nil {
+		if err := s.scheduleOpt.persist(s.storage); err != nil {
 			s.scheduleOpt.ns.Store(name, newNamespaceOption(old))
 			log.Error("failed to update namespace config",
 				zap.String("name", name),
@@ -629,7 +632,7 @@ func (s *Server) SetNamespaceConfig(name string, cfg NamespaceConfig) error {
 		log.Info("namespace config is updated", zap.String("name", name), zap.Reflect("new", cfg), zap.Reflect("old", old))
 	} else {
 		s.scheduleOpt.ns.Store(name, newNamespaceOption(&cfg))
-		if err := s.scheduleOpt.persist(s.kv); err != nil {
+		if err := s.scheduleOpt.persist(s.storage); err != nil {
 			s.scheduleOpt.ns.Delete(name)
 			log.Error("failed to add namespace config",
 				zap.String("name", name),
@@ -647,7 +650,7 @@ func (s *Server) DeleteNamespaceConfig(name string) error {
 	if n, ok := s.scheduleOpt.getNS(name); ok {
 		cfg := n.load()
 		s.scheduleOpt.ns.Delete(name)
-		if err := s.scheduleOpt.persist(s.kv); err != nil {
+		if err := s.scheduleOpt.persist(s.storage); err != nil {
 			s.scheduleOpt.ns.Store(name, newNamespaceOption(cfg))
 			log.Error("failed to delete namespace config",
 				zap.String("name", name),
@@ -662,7 +665,7 @@ func (s *Server) DeleteNamespaceConfig(name string) error {
 // SetLabelProperty inserts a label property config.
 func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
-	err := s.scheduleOpt.persist(s.kv)
+	err := s.scheduleOpt.persist(s.storage)
 	if err != nil {
 		s.scheduleOpt.DeleteLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to update label property config",
@@ -680,7 +683,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 // DeleteLabelProperty deletes a label property config.
 func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	s.scheduleOpt.DeleteLabelProperty(typ, labelKey, labelValue)
-	err := s.scheduleOpt.persist(s.kv)
+	err := s.scheduleOpt.persist(s.storage)
 	if err != nil {
 		s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to delete label property config",
@@ -708,7 +711,7 @@ func (s *Server) SetClusterVersion(v string) error {
 	}
 	old := s.scheduleOpt.loadClusterVersion()
 	s.scheduleOpt.SetClusterVersion(*version)
-	err = s.scheduleOpt.persist(s.kv)
+	err = s.scheduleOpt.persist(s.storage)
 	if err != nil {
 		s.scheduleOpt.SetClusterVersion(old)
 		log.Error("failed to update cluster version",
@@ -773,10 +776,6 @@ func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 	return s.cluster.loadClusterStatus()
 }
 
-func (s *Server) getAllocIDPath() string {
-	return path.Join(s.rootPath, "alloc_id")
-}
-
 func (s *Server) getMemberLeaderPriorityPath(id uint64) string {
 	return path.Join(s.rootPath, fmt.Sprintf("member/%d/leader_priority", id))
 }
@@ -784,7 +783,7 @@ func (s *Server) getMemberLeaderPriorityPath(id uint64) string {
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
 func (s *Server) SetMemberLeaderPriority(id uint64, priority int) error {
 	key := s.getMemberLeaderPriorityPath(id)
-	res, err := s.leaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
+	res, err := s.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -797,7 +796,7 @@ func (s *Server) SetMemberLeaderPriority(id uint64, priority int) error {
 // DeleteMemberLeaderPriority removes a member's priority config.
 func (s *Server) DeleteMemberLeaderPriority(id uint64) error {
 	key := s.getMemberLeaderPriorityPath(id)
-	res, err := s.leaderTxn().Then(clientv3.OpDelete(key)).Commit()
+	res, err := s.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}

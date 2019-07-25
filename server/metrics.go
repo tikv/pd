@@ -82,14 +82,6 @@ var (
 			Help:      "Status of the hotspot.",
 		}, []string{"address", "store", "type"})
 
-	tsoCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "tso",
-			Help:      "Counter of tso events",
-		}, []string{"type"})
-
 	metadataGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -126,14 +118,11 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(txnCounter)
-	prometheus.MustRegister(txnDuration)
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(regionHeartbeatCounter)
 	prometheus.MustRegister(regionHeartbeatLatency)
 	prometheus.MustRegister(hotSpotStatusGauge)
-	prometheus.MustRegister(tsoCounter)
 	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(patrolCheckRegionsHistogram)

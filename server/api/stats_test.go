@@ -147,6 +147,14 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(stats, DeepEquals, statsAll)
 
+	args := fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("\x01\x02"), url.QueryEscape("xyz\x00\x00"))
+	res, err = http.Get(statsURL + args)
+	c.Assert(err, IsNil)
+	stats = &statistics.RegionStats{}
+	err = apiutil.ReadJSON(res.Body, stats)
+	c.Assert(err, IsNil)
+	c.Assert(stats, DeepEquals, statsAll)
+
 	stats23 := &statistics.RegionStats{
 		Count:            2,
 		EmptyCount:       1,
@@ -159,7 +167,8 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 		StorePeerSize:    map[uint64]int64{1: 201, 4: 200, 5: 201},
 		StorePeerKeys:    map[uint64]int64{1: 151, 4: 150, 5: 151},
 	}
-	args := fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("\x01\x02"), url.QueryEscape("xyz\x00\x00"))
+
+	args = fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("a"), url.QueryEscape("x"))
 	res, err = http.Get(statsURL + args)
 	c.Assert(err, IsNil)
 	stats = &statistics.RegionStats{}

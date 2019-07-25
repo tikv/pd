@@ -11,47 +11,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package id_test
 
 import (
 	"context"
+	"strings"
 	"sync"
+	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"go.etcd.io/etcd/clientv3"
+	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/tests"
+	"google.golang.org/grpc"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+const allocStep = uint64(1000)
 
 var _ = Suite(&testAllocIDSuite{})
 
-type testAllocIDSuite struct {
-	client       *clientv3.Client
-	alloc        *idAllocator
-	svr          *Server
-	cleanup      CleanupFunc
-	grpcPDClient pdpb.PDClient
-}
+type testAllocIDSuite struct{}
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
-	var err error
-	_, s.svr, s.cleanup, err = NewTestServer(c)
-	c.Assert(err, IsNil)
-	s.client = s.svr.client
-	s.alloc = s.svr.idAlloc
-	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
-}
-
-func (s *testAllocIDSuite) TearDownSuite(c *C) {
-	s.cleanup()
+	server.EnableZap = true
 }
 
 func (s *testAllocIDSuite) TestID(c *C) {
-	mustGetLeader(c, s.client, s.svr.getLeaderPath())
+	var err error
+	cluster, err := tests.NewTestCluster(1)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
 
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
 	var last uint64
 	for i := uint64(0); i < allocStep; i++ {
-		id, err := s.alloc.Alloc()
+		id, err := leaderServer.GetAllocator().Alloc()
 		c.Assert(err, IsNil)
 		c.Assert(id, Greater, last)
 		last = id
@@ -68,7 +70,7 @@ func (s *testAllocIDSuite) TestID(c *C) {
 			defer wg.Done()
 
 			for i := 0; i < 200; i++ {
-				id, err := s.alloc.Alloc()
+				id, err := leaderServer.GetAllocator().Alloc()
 				c.Assert(err, IsNil)
 				m.Lock()
 				_, ok := ids[id]
@@ -83,15 +85,39 @@ func (s *testAllocIDSuite) TestID(c *C) {
 }
 
 func (s *testAllocIDSuite) TestCommand(c *C) {
+	var err error
+	cluster, err := tests.NewTestCluster(1)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
 	req := &pdpb.AllocIDRequest{
-		Header: newRequestHeader(s.svr.clusterID),
+		Header: newRequestHeader(leaderServer.GetClusterID()),
 	}
 
+	grpcPDClient := mustNewGrpcClient(c, leaderServer.GetAddr())
 	var last uint64
 	for i := uint64(0); i < 2*allocStep; i++ {
-		resp, err := s.grpcPDClient.AllocID(context.Background(), req)
+		resp, err := grpcPDClient.AllocID(context.Background(), req)
 		c.Assert(err, IsNil)
 		c.Assert(resp.GetId(), Greater, last)
 		last = resp.GetId()
 	}
+}
+
+func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
+	return &pdpb.RequestHeader{
+		ClusterId: clusterID,
+	}
+}
+
+func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+
+	c.Assert(err, IsNil)
+	return pdpb.NewPDClient(conn)
 }
