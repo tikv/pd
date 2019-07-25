@@ -77,12 +77,12 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 }
 
 // RegionReadStats returns hot region's read stats.
-func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.RegionStat {
+func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotSpotPeerStat {
 	return mc.HotSpotCache.RegionStats(statistics.ReadFlow)
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.RegionStat {
+func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotSpotPeerStat {
 	return mc.HotSpotCache.RegionStats(statistics.WriteFlow)
 }
 
@@ -233,7 +233,7 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64,
 	r = r.Clone(core.SetReadBytes(readBytes))
 	items := mc.HotSpotCache.CheckRead(r, mc.StoresStats)
 	for _, item := range items {
-		mc.HotSpotCache.Update(item, statistics.ReadFlow)
+		mc.HotSpotCache.Update(item)
 	}
 	mc.PutRegion(r)
 }
@@ -244,7 +244,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	items := mc.HotSpotCache.CheckWrite(r, mc.StoresStats)
 	for _, item := range items {
-		mc.HotSpotCache.Update(item, statistics.WriteFlow)
+		mc.HotSpotCache.Update(item)
 	}
 	mc.PutRegion(r)
 }

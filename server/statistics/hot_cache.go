@@ -15,10 +15,10 @@ package statistics
 
 import (
 	"fmt"
-	"math"
 	"math/rand"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/cache"
 	"github.com/pingcap/pd/server/core"
 )
@@ -50,77 +50,240 @@ const (
 	ReadFlow
 )
 
+// HotStroresStats saves the hotspot peer's statistics.
+type HotStoresStats struct {
+	hotStoreStats  map[uint64]cache.Cache         // storeID -> hot regions
+	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
+}
+
+// NewHotStoresStats creates a HotStoresStats
+func NewHotStoresStats() *HotStoresStats {
+	return &HotStoresStats{
+		hotStoreStats:  make(map[uint64]cache.Cache),
+		storesOfRegion: make(map[uint64]map[uint64]struct{}),
+	}
+}
+
+// CheckFlow checks the flow information of region.
+func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind) []HotSpotPeerStatGenerator {
+	var (
+		generators    []HotSpotPeerStatGenerator
+		getBytesFlow  func() uint64
+		getKeysFlow   func() uint64
+		bytesPerSec   uint64
+		keysPerSec    uint64
+		oldRegionStat *HotSpotPeerStat
+	)
+
+	storeIDs := make(map[uint64]struct{})
+	// got the storeIDs, including old region and new region
+	ids, ok := f.storesOfRegion[region.GetID()]
+	if ok {
+		for storeID := range ids {
+			storeIDs[storeID] = struct{}{}
+		}
+
+	}
+	for _, peer := range region.GetPeers() {
+		// ReadFlow no need consider the followers.
+		if kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
+			continue
+		}
+		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
+			storeIDs[peer.GetStoreId()] = struct{}{}
+		}
+	}
+
+	switch kind {
+	case WriteFlow:
+		getBytesFlow = region.GetBytesWritten
+		getKeysFlow = region.GetKeysWritten
+	case ReadFlow:
+		getBytesFlow = region.GetBytesRead
+		getKeysFlow = region.GetKeysRead
+	}
+
+	for storeID, _ := range storeIDs {
+		bytesPerSec = uint64(float64(getBytesFlow()) / float64(RegionHeartBeatReportInterval))
+		keysPerSec = uint64(float64(getKeysFlow()) / float64(RegionHeartBeatReportInterval))
+		hotStoreStats, ok := f.hotStoreStats[storeID]
+		if ok {
+			if v, isExist := hotStoreStats.Peek(region.GetID()); isExist {
+				oldRegionStat = v.(*HotSpotPeerStat)
+				// This is used for the simulator.
+				if !Simulating {
+					interval := time.Since(oldRegionStat.LastUpdateTime).Seconds()
+					if interval < minHotRegionReportInterval {
+						continue
+					}
+					bytesPerSec = uint64(float64(region.GetBytesWritten()) / interval)
+					keysPerSec = uint64(float64(region.GetKeysWritten()) / interval)
+				}
+			}
+		}
+
+		generator := &hotSpotPeerStatGenerator{
+			Region:    region,
+			StoreID:   storeID,
+			FlowBytes: bytesPerSec,
+			FlowKeys:  keysPerSec,
+			Kind:      kind,
+
+			lastHotSpotPeerStats: oldRegionStat,
+		}
+
+		if peer := region.GetStorePeer(storeID); peer == nil {
+			generator.Expired = true
+		}
+		generators = append(generators, generator)
+	}
+	return generators
+}
+
+// Update updates the items in statistics.
+func (f *HotStoresStats) Update(item *HotSpotPeerStat) {
+	if item.IsNeedDelete() {
+		if hotStoreStat, ok := f.hotStoreStats[item.StoreID]; ok {
+			hotStoreStat.Remove(item.RegionID)
+		}
+		if index, ok := f.storesOfRegion[item.RegionID]; ok {
+			delete(index, item.StoreID)
+		}
+	} else {
+		hotStoreStat, ok := f.hotStoreStats[item.StoreID]
+		if !ok {
+			hotStoreStat = cache.NewCache(statCacheMaxLen, cache.TwoQueueCache)
+			f.hotStoreStats[item.StoreID] = hotStoreStat
+		}
+		hotStoreStat.Put(item.RegionID, item)
+		index, ok := f.storesOfRegion[item.RegionID]
+		if !ok {
+			index = make(map[uint64]struct{})
+		}
+		index[item.StoreID] = struct{}{}
+		f.storesOfRegion[item.RegionID] = index
+	}
+}
+
+func (f *HotStoresStats) isRegionHotWithAllPeers(region *core.RegionInfo, hotThreshold int) bool {
+	for _, peer := range region.GetPeers() {
+		if f.isRegionHotWithPeer(region, peer, hotThreshold) {
+			return true
+		}
+	}
+	return false
+
+}
+
+func (f *HotStoresStats) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb.Peer, hotThreshold int) bool {
+	if peer == nil {
+		return false
+	}
+	storeID := peer.GetStoreId()
+	stats, ok := f.hotStoreStats[storeID]
+	if !ok {
+		return false
+	}
+	if stat, ok := stats.Peek(region.GetID()); ok {
+		return stat.(*HotSpotPeerStat).HotDegree >= hotThreshold
+	}
+	return false
+}
+
+// HotSpotPeerStatBuilder used to produce new hotspot statistics.
+type HotSpotPeerStatGenerator interface {
+	GenHotSpotPeerStats(stats *StoresStats) *HotSpotPeerStat
+}
+
+// hotSpotPeerStatBuilder used to produce new hotspot statistics.
+type hotSpotPeerStatGenerator struct {
+	Region    *core.RegionInfo
+	StoreID   uint64
+	FlowKeys  uint64
+	FlowBytes uint64
+	Expired   bool
+	Kind      FlowKind
+
+	lastHotSpotPeerStats *HotSpotPeerStat
+}
+
+const rollingWindowsSize = 5
+
+// GenHotSpotPeerStats implements HotSpotPeerStatsGenerator.
+func (flowStats *hotSpotPeerStatGenerator) GenHotSpotPeerStats(stats *StoresStats) *HotSpotPeerStat {
+	hotRegionThreshold := calculateWriteHotThresholdWithStore(stats, flowStats.StoreID)
+	flowBytes := flowStats.FlowBytes
+	oldItem := flowStats.lastHotSpotPeerStats
+	region := flowStats.Region
+	newItem := &HotSpotPeerStat{
+		RegionID:       region.GetID(),
+		FlowBytes:      flowStats.FlowBytes,
+		FlowKeys:       flowStats.FlowKeys,
+		LastUpdateTime: time.Now(),
+		StoreID:        flowStats.StoreID,
+		Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
+		AntiCount:      hotRegionAntiCount,
+		Kind:           flowStats.Kind,
+		needDelete:     flowStats.Expired,
+	}
+
+	if region.GetLeader().GetStoreId() == flowStats.StoreID {
+		newItem.isLeader = true
+	}
+
+	if newItem.IsNeedDelete() {
+		return newItem
+	}
+
+	if oldItem != nil {
+		newItem.HotDegree = oldItem.HotDegree + 1
+		newItem.Stats = oldItem.Stats
+	}
+
+	if flowBytes >= hotRegionThreshold {
+		if oldItem == nil {
+			newItem.Stats = NewRollingStats(rollingWindowsSize)
+		}
+		newItem.isNew = true
+		newItem.Stats.Add(float64(flowBytes))
+		return newItem
+	}
+
+	// smaller than hotRegionThreshold
+	if oldItem == nil {
+		return nil
+	}
+	if oldItem.AntiCount <= 0 {
+		newItem.needDelete = true
+		return newItem
+	}
+	// eliminate some noise
+	newItem.HotDegree = oldItem.HotDegree - 1
+	newItem.AntiCount = oldItem.AntiCount - 1
+	newItem.Stats.Add(float64(flowBytes))
+	return newItem
+}
+
 // HotSpotCache is a cache hold hot regions.
 type HotSpotCache struct {
-	writeFlow      map[uint64]cache.Cache
-	readFlow       map[uint64]cache.Cache
-	indexWriteFlow map[uint64]map[uint64]struct{}
-	indexReadFlow  map[uint64]map[uint64]struct{}
+	writeFlow *HotStoresStats
+	readFlow  *HotStoresStats
 }
 
 // NewHotSpotCache creates a new hot spot cache.
 func NewHotSpotCache() *HotSpotCache {
 	return &HotSpotCache{
-		writeFlow:      make(map[uint64]cache.Cache),
-		readFlow:       make(map[uint64]cache.Cache),
-		indexWriteFlow: make(map[uint64]map[uint64]struct{}),
-		indexReadFlow:  make(map[uint64]map[uint64]struct{}),
+		writeFlow: NewHotStoresStats(),
+		readFlow:  NewHotStoresStats(),
 	}
 }
 
 // CheckWrite checks the write status, returns whether need update statistics and item.
-func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*RegionStat {
-	var (
-		WrittenBytesPerSec uint64
-		value              *RegionStat
-	)
-
-	var updateItems []*RegionStat
-	var storeIDs []uint64
-	// got the storeIDs
-	{
-		ids, ok := w.indexWriteFlow[region.GetID()]
-		if ok {
-			for storeID := range ids {
-				storeIDs = append(storeIDs, storeID)
-			}
-
-		}
-		for _, peer := range region.GetPeers() {
-			if !ok {
-				storeIDs = append(storeIDs, peer.GetStoreId())
-				continue
-			}
-			if _, ook := ids[peer.GetStoreId()]; !ook {
-				storeIDs = append(storeIDs, peer.GetStoreId())
-
-			}
-		}
-	}
-
-	for _, storeID := range storeIDs {
-		WrittenBytesPerSec = uint64(float64(region.GetBytesWritten()) / float64(RegionHeartBeatReportInterval))
-		storeWriteFlow, ok := w.writeFlow[storeID]
-
-		if ok {
-			if v, isExist := storeWriteFlow.Peek(region.GetID()); isExist {
-				value = v.(*RegionStat)
-				// This is used for the simulator.
-				if !Simulating {
-					interval := time.Since(value.LastUpdateTime).Seconds()
-					if interval < minHotRegionReportInterval {
-						return nil
-					}
-					WrittenBytesPerSec = uint64(float64(region.GetBytesWritten()) / interval)
-				}
-			}
-		}
-		if peer := region.GetStorePeer(storeID); peer == nil {
-			// use maxUint64 to delete the no exist peer
-			WrittenBytesPerSec = math.MaxUint64
-		}
-		hotRegionThreshold := calculateWriteHotThresholdWithStore(stats, storeID)
-		item := w.isNeedUpdateStatCache(region, storeID, WrittenBytesPerSec, hotRegionThreshold, value, WriteFlow)
+func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*HotSpotPeerStat {
+	var updateItems []*HotSpotPeerStat
+	hotStatGenerators := w.writeFlow.CheckRegionFlow(region, WriteFlow)
+	for _, hotGen := range hotStatGenerators {
+		item := hotGen.GenHotSpotPeerStats(stats)
 		if item != nil {
 			updateItems = append(updateItems, item)
 		}
@@ -129,53 +292,11 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) [
 }
 
 // CheckRead checks the read status, returns whether need update statistics and item.
-func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*RegionStat {
-	var (
-		ReadBytesPerSec uint64
-		value           *RegionStat
-	)
-
-	leader := region.GetLeader()
-	if leader == nil {
-		return nil
-	}
-	var updateItems []*RegionStat
-	var storeIDs []uint64
-	ids, ok := w.indexReadFlow[region.GetID()]
-	if ok {
-		for storeID := range ids {
-			storeIDs = append(storeIDs, storeID)
-		}
-		if _, ok := ids[leader.GetStoreId()]; !ok {
-			storeIDs = append(storeIDs, leader.GetStoreId())
-		}
-	} else {
-		storeIDs = append(storeIDs, leader.GetStoreId())
-	}
-
-	for _, storeID := range storeIDs {
-		ReadBytesPerSec = uint64(float64(region.GetBytesRead()) / float64(RegionHeartBeatReportInterval))
-		storeReadFlow, ok := w.readFlow[storeID]
-		if ok {
-			if v, isExist := storeReadFlow.Peek(region.GetID()); isExist {
-				value = v.(*RegionStat)
-				// This is used for the simulator.
-				if !Simulating {
-					interval := time.Since(value.LastUpdateTime).Seconds()
-					if interval < minHotRegionReportInterval {
-						return nil
-					}
-					ReadBytesPerSec = uint64(float64(region.GetBytesRead()) / interval)
-				}
-			}
-		}
-		// Only leader has read flow
-		if region.GetStorePeer(storeID).GetId() != leader.GetId() {
-			ReadBytesPerSec = math.MaxUint64
-		}
-
-		hotRegionThreshold := calculateReadHotThresholdWithStore(stats, storeID)
-		item := w.isNeedUpdateStatCache(region, storeID, ReadBytesPerSec, hotRegionThreshold, value, ReadFlow)
+func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*HotSpotPeerStat {
+	var updateItems []*HotSpotPeerStat
+	hotStatGenerators := w.readFlow.CheckRegionFlow(region, ReadFlow)
+	for _, hotGen := range hotStatGenerators {
+		item := hotGen.GenHotSpotPeerStats(stats)
 		if item != nil {
 			updateItems = append(updateItems, item)
 		}
@@ -193,6 +314,104 @@ func (w *HotSpotCache) incMetrics(name string, storeID uint64, kind FlowKind) {
 	}
 }
 
+// Update updates the cache.
+func (w *HotSpotCache) Update(item *HotSpotPeerStat) {
+	var stats *HotStoresStats
+	switch item.Kind {
+	case WriteFlow:
+		stats = w.writeFlow
+	case ReadFlow:
+		stats = w.readFlow
+	}
+	stats.Update(item)
+	if item.IsNeedDelete() {
+		w.incMetrics("remove_item", item.StoreID, item.Kind)
+	} else if item.IsNew() {
+		w.incMetrics("add_item", item.StoreID, item.Kind)
+	} else {
+		w.incMetrics("update_item", item.StoreID, item.Kind)
+	}
+}
+
+// RegionStats returns hot items according to kind
+func (w *HotSpotCache) RegionStats(kind FlowKind) map[uint64][]*HotSpotPeerStat {
+	var flowMap map[uint64]cache.Cache
+	switch kind {
+	case WriteFlow:
+		flowMap = w.writeFlow.hotStoreStats
+	case ReadFlow:
+		flowMap = w.readFlow.hotStoreStats
+	}
+	res := make(map[uint64][]*HotSpotPeerStat)
+	for storeID, elements := range flowMap {
+		values := elements.Elems()
+		stat, ok := res[storeID]
+		if !ok {
+			stat = make([]*HotSpotPeerStat, len(values))
+			res[storeID] = stat
+		}
+		for i := range values {
+			stat[i] = values[i].Value.(*HotSpotPeerStat)
+		}
+	}
+	return res
+}
+
+// RandHotRegionFromStore random picks a hot region in specify store.
+func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotThreshold int) *HotSpotPeerStat {
+	stats, ok := w.RegionStats(kind)[storeID]
+	if !ok {
+		return nil
+	}
+	for _, i := range rand.Perm(len(stats)) {
+		if stats[i].HotDegree >= hotThreshold && stats[i].StoreID == storeID {
+			return stats[i]
+		}
+	}
+	return nil
+}
+
+// CollectMetrics collect the hot cache metrics
+func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
+	for storeID, flowStats := range w.writeFlow.hotStoreStats {
+		storeTag := fmt.Sprintf("store-%d", storeID)
+		threshold := calculateWriteHotThresholdWithStore(stats, storeID)
+		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "write").Set(float64(flowStats.Len()))
+		hotCacheStatusGauge.WithLabelValues("hotThreshold", storeTag, "write").Set(float64(threshold))
+		for _, elem := range flowStats.Elems() {
+			stats := elem.Value.(*HotSpotPeerStat)
+			regionTag := fmt.Sprintf("region-%d", stats.RegionID)
+			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, "write-bytes").Set(float64(stats.FlowBytes))
+			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, "write-keys").Set(float64(stats.FlowKeys))
+		}
+
+	}
+
+	for storeID, flowStats := range w.readFlow.hotStoreStats {
+		storeTag := fmt.Sprintf("store-%d", storeID)
+		threshold := calculateReadHotThresholdWithStore(stats, storeID)
+		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "read").Set(float64(flowStats.Len()))
+		hotCacheStatusGauge.WithLabelValues("hotThreshold", storeTag, "read").Set(float64(threshold))
+		for _, elem := range flowStats.Elems() {
+			stats := elem.Value.(*HotSpotPeerStat)
+			regionTag := fmt.Sprintf("region-%d", stats.RegionID)
+			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, "read-bytes").Set(float64(stats.FlowBytes))
+			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, "read-keys").Set(float64(stats.FlowKeys))
+		}
+	}
+}
+
+// IsRegionHot checks if the region is hot.
+func (w *HotSpotCache) IsRegionHot(region *core.RegionInfo, hotThreshold int) bool {
+	stats := w.writeFlow
+	if stats.isRegionHotWithAllPeers(region, hotThreshold) {
+		return true
+	}
+	stats = w.readFlow
+	return stats.isRegionHotWithPeer(region, region.GetLeader(), hotThreshold)
+}
+
+// Utils
 func calculateWriteHotThreshold(stats *StoresStats) uint64 {
 	// hotRegionThreshold is used to pick hot region
 	// suppose the number of the hot Regions is statCacheMaxLen
@@ -240,174 +459,4 @@ func calculateReadHotThreshold(stats *StoresStats) uint64 {
 		hotRegionThreshold = hotReadRegionMinFlowRate
 	}
 	return hotRegionThreshold
-}
-
-const rollingWindowsSize = 5
-
-func (w *HotSpotCache) isNeedUpdateStatCache(region *core.RegionInfo, storeID uint64, flowBytes uint64, hotRegionThreshold uint64, oldItem *RegionStat, kind FlowKind) *RegionStat {
-	newItem := NewRegionStat(region, flowBytes)
-	newItem.StoreID = storeID
-	if flowBytes == math.MaxUint64 {
-		w.incMetrics("remove_item", storeID, kind)
-		newItem.NeedDelete = true
-		return newItem
-	}
-	if region.GetLeader().GetStoreId() == storeID {
-		newItem.isLeader = true
-	}
-	if oldItem != nil {
-		newItem.HotDegree = oldItem.HotDegree + 1
-		newItem.Stats = oldItem.Stats
-	}
-	if flowBytes >= hotRegionThreshold {
-		if oldItem == nil {
-			w.incMetrics("add_item", storeID, kind)
-			newItem.Stats = NewRollingStats(rollingWindowsSize)
-		}
-		newItem.Stats.Add(float64(flowBytes))
-		return newItem
-	}
-	// smaller than hotRegionThreshold
-	if oldItem == nil {
-		return nil
-	}
-	if oldItem.AntiCount <= 0 {
-		w.incMetrics("remove_item", storeID, kind)
-		newItem.NeedDelete = true
-		return newItem
-	}
-	// eliminate some noise
-	newItem.HotDegree = oldItem.HotDegree - 1
-	newItem.AntiCount = oldItem.AntiCount - 1
-	newItem.Stats.Add(float64(flowBytes))
-	return newItem
-}
-
-// Update updates the cache.
-func (w *HotSpotCache) Update(item *RegionStat, kind FlowKind) {
-	switch kind {
-	case WriteFlow:
-		if item.IsNeedDelete() {
-			if storeWriteFlow, ok := w.writeFlow[item.StoreID]; ok {
-				storeWriteFlow.Remove(item.RegionID)
-			}
-			if index, ok := w.indexWriteFlow[item.RegionID]; ok {
-				delete(index, item.StoreID)
-			}
-		} else {
-			storeWriteFlow, ok := w.writeFlow[item.StoreID]
-			if !ok {
-				storeWriteFlow = cache.NewCache(statCacheMaxLen, cache.TwoQueueCache)
-				w.writeFlow[item.StoreID] = storeWriteFlow
-			}
-			storeWriteFlow.Put(item.RegionID, item)
-			index, ok := w.indexWriteFlow[item.RegionID]
-			if !ok {
-				index = make(map[uint64]struct{})
-			}
-			index[item.StoreID] = struct{}{}
-			w.indexWriteFlow[item.RegionID] = index
-			w.incMetrics("update_item", item.StoreID, kind)
-		}
-	case ReadFlow:
-		if item.IsNeedDelete() {
-			if storeReadFlow, ok := w.readFlow[item.StoreID]; ok {
-				storeReadFlow.Remove(item.RegionID)
-			}
-			if index, ok := w.indexReadFlow[item.RegionID]; ok {
-				delete(index, item.StoreID)
-			}
-		} else {
-			storeReadFlow, ok := w.readFlow[item.StoreID]
-			if !ok {
-				storeReadFlow = cache.NewCache(statCacheMaxLen, cache.TwoQueueCache)
-				w.readFlow[item.StoreID] = storeReadFlow
-			}
-			storeReadFlow.Put(item.RegionID, item)
-			index, ok := w.indexReadFlow[item.RegionID]
-			if !ok {
-				index = make(map[uint64]struct{})
-			}
-			index[item.StoreID] = struct{}{}
-			w.indexReadFlow[item.RegionID] = index
-			w.incMetrics("update_item", item.StoreID, kind)
-		}
-	}
-}
-
-// RegionStats returns hot items according to kind
-func (w *HotSpotCache) RegionStats(kind FlowKind) map[uint64][]*RegionStat {
-	var flowMap map[uint64]cache.Cache
-	switch kind {
-	case WriteFlow:
-		flowMap = w.writeFlow
-	case ReadFlow:
-		flowMap = w.readFlow
-	}
-	res := make(map[uint64][]*RegionStat)
-	for storeID, elements := range flowMap {
-		values := elements.Elems()
-		stat, ok := res[storeID]
-		if !ok {
-			stat = make([]*RegionStat, len(values))
-			res[storeID] = stat
-		}
-		for i := range values {
-			stat[i] = values[i].Value.(*RegionStat)
-		}
-	}
-	return res
-}
-
-// RandHotRegionFromStore random picks a hot region in specify store.
-func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotThreshold int) *RegionStat {
-	stats, ok := w.RegionStats(kind)[storeID]
-	if !ok {
-		return nil
-	}
-	for _, i := range rand.Perm(len(stats)) {
-		if stats[i].HotDegree >= hotThreshold && stats[i].StoreID == storeID {
-			return stats[i]
-		}
-	}
-	return nil
-}
-
-// CollectMetrics collect the hot cache metrics
-func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
-	for storeID, flowStats := range w.writeFlow {
-		storeTag := fmt.Sprintf("store-%d", storeID)
-		threshold := calculateWriteHotThresholdWithStore(stats, storeID)
-		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "write").Set(float64(flowStats.Len()))
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", storeTag, "write").Set(float64(threshold))
-	}
-
-	for storeID, flowStats := range w.readFlow {
-		storeTag := fmt.Sprintf("store-%d", storeID)
-		threshold := calculateReadHotThresholdWithStore(stats, storeID)
-		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "read").Set(float64(flowStats.Len()))
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", storeTag, "read").Set(float64(threshold))
-	}
-}
-
-// IsRegionHot checks if the region is hot.
-func (w *HotSpotCache) IsRegionHot(region *core.RegionInfo, hotThreshold int) bool {
-	for _, peer := range region.GetPeers() {
-		if storeWriteFlow, ok := w.writeFlow[peer.GetStoreId()]; ok {
-			if stat, ok := storeWriteFlow.Peek(region.GetID()); ok {
-				if stat.(*RegionStat).HotDegree >= hotThreshold {
-					return true
-				}
-			}
-		}
-	}
-	storeID := region.GetLeader().GetStoreId()
-	storeReadFlow, ok := w.readFlow[storeID]
-	if !ok {
-		return false
-	}
-	if stat, ok := storeReadFlow.Peek(region.GetID()); ok {
-		return stat.(*RegionStat).HotDegree >= hotThreshold
-	}
-	return false
 }

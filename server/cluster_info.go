@@ -648,10 +648,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	for _, writeItem := range writeItems {
-		c.hotSpotCache.Update(writeItem, statistics.WriteFlow)
+		c.hotSpotCache.Update(writeItem)
 	}
 	for _, readItem := range readItems {
-		c.hotSpotCache.Update(readItem, statistics.ReadFlow)
+		c.hotSpotCache.Update(readItem)
 	}
 	return nil
 }
@@ -813,24 +813,24 @@ func (c *clusterInfo) CheckLabelProperty(typ string, labels []*metapb.StoreLabel
 }
 
 // RegionReadStats returns hot region's read stats.
-func (c *clusterInfo) RegionReadStats() map[uint64][]*statistics.RegionStat {
+func (c *clusterInfo) RegionReadStats() map[uint64][]*statistics.HotSpotPeerStat {
 	// RegionStats is a thread-safe method
 	return c.hotSpotCache.RegionStats(statistics.ReadFlow)
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (c *clusterInfo) RegionWriteStats() map[uint64][]*statistics.RegionStat {
+func (c *clusterInfo) RegionWriteStats() map[uint64][]*statistics.HotSpotPeerStat {
 	// RegionStats is a thread-safe method
 	return c.hotSpotCache.RegionStats(statistics.WriteFlow)
 }
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
-func (c *clusterInfo) CheckWriteStatus(region *core.RegionInfo) []*statistics.RegionStat {
+func (c *clusterInfo) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotSpotPeerStat {
 	return c.hotSpotCache.CheckWrite(region, c.storesStats)
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
-func (c *clusterInfo) CheckReadStatus(region *core.RegionInfo) []*statistics.RegionStat {
+func (c *clusterInfo) CheckReadStatus(region *core.RegionInfo) []*statistics.HotSpotPeerStat {
 	return c.hotSpotCache.CheckRead(region, c.storesStats)
 }
 

@@ -218,7 +218,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
-func calcScore(storeItems map[uint64][]*statistics.RegionStat, cluster schedule.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
+func calcScore(storeItems map[uint64][]*statistics.HotSpotPeerStat, cluster schedule.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
 	stats := make(statistics.StoreHotRegionsStat)
 	for storeID, items := range storeItems {
 		// HotDegree is the update times on the hot cache. If the heartbeat report
@@ -246,7 +246,7 @@ func calcScore(storeItems map[uint64][]*statistics.RegionStat, cluster schedule.
 				stats[storeID] = storeStat
 			}
 
-			s := statistics.RegionStat{
+			s := statistics.HotSpotPeerStat{
 				RegionID:       r.RegionID,
 				FlowBytes:      uint64(r.Stats.Median()),
 				HotDegree:      r.HotDegree,

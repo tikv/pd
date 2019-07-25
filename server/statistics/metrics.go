@@ -24,6 +24,14 @@ var (
 			Help:      "Status of the hotspot.",
 		}, []string{"name", "store", "type"})
 
+	hotCacheRegionFlowGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "hotcache",
+			Name:      "region_flow",
+			Help:      "Flows of the region in hot cache.",
+		}, []string{"name", "store", "type"})
+
 	storeStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
