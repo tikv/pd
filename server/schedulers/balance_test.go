@@ -1166,7 +1166,12 @@ func (s *testBalanceHotCacheSuite) TestUpdateCache(c *C) {
 	tc.AddLeaderRegionWithWriteInfo(4, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
 	tc.AddLeaderRegionWithWriteInfo(5, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
 	tc.AddLeaderRegionWithWriteInfo(6, 1, 12*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+
 	stats = tc.RegionStats(statistics.WriteFlow)
+	c.Assert(len(stats[1]), Equals, 2)
+	c.Assert(len(stats[2]), Equals, 2)
+	c.Assert(len(stats[3]), Equals, 2)
+
 	tc.AddLeaderRegionWithWriteInfo(5, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 5)
 	stats = tc.RegionStats(statistics.WriteFlow)
 

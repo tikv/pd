@@ -110,10 +110,13 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 		}
 	}
 
+	bytesPerSecInit := uint64(float64(getBytesFlow()) / float64(RegionHeartBeatReportInterval))
+	keysPerSecInit := uint64(float64(getKeysFlow()) / float64(RegionHeartBeatReportInterval))
 	for storeID := range storeIDs {
-		bytesPerSec = uint64(float64(getBytesFlow()) / float64(RegionHeartBeatReportInterval))
-		keysPerSec = uint64(float64(getKeysFlow()) / float64(RegionHeartBeatReportInterval))
+		bytesPerSec = bytesPerSecInit
+		keysPerSec = keysPerSecInit
 		var oldRegionStat *HotSpotPeerStat
+
 		hotStoreStats, ok := f.hotStoreStats[storeID]
 		if ok {
 			if v, isExist := hotStoreStats.Peek(region.GetID()); isExist {
@@ -292,7 +295,7 @@ func NewHotSpotCache() *HotSpotCache {
 	}
 }
 
-// CheckWrite checks the write status, returns whether need update statistics and item.
+// CheckWrite checks the write status, returns update items.
 func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*HotSpotPeerStat {
 	var updateItems []*HotSpotPeerStat
 	hotStatGenerators := w.writeFlow.CheckRegionFlow(region, WriteFlow)
@@ -305,7 +308,7 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) [
 	return updateItems
 }
 
-// CheckRead checks the read status, returns whether need update statistics and item.
+// CheckRead checks the read status, returns update items.
 func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*HotSpotPeerStat {
 	var updateItems []*HotSpotPeerStat
 	hotStatGenerators := w.readFlow.CheckRegionFlow(region, ReadFlow)
@@ -378,7 +381,7 @@ func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hot
 		return nil
 	}
 	for _, i := range rand.Perm(len(stats)) {
-		if stats[i].HotDegree >= hotThreshold && stats[i].StoreID == storeID {
+		if stats[i].HotDegree >= hotThreshold {
 			return stats[i]
 		}
 	}
@@ -441,7 +444,7 @@ func calculateWriteHotThreshold(stats *StoresStats) uint64 {
 }
 
 func calculateWriteHotThresholdWithStore(stats *StoresStats, storeID uint64) uint64 {
-	writeBytes, _ := stats.GetStoreBytesWrite(storeID)
+	writeBytes, _ := stats.GetStoreBytesRate(storeID)
 	divisor := float64(storeStatCacheMaxLen) * 2
 	hotRegionThreshold := uint64(float64(writeBytes) / divisor)
 
@@ -452,7 +455,7 @@ func calculateWriteHotThresholdWithStore(stats *StoresStats, storeID uint64) uin
 }
 
 func calculateReadHotThresholdWithStore(stats *StoresStats, storeID uint64) uint64 {
-	_, readBytes := stats.GetStoreBytesWrite(storeID)
+	_, readBytes := stats.GetStoreBytesRate(storeID)
 	divisor := float64(storeStatCacheMaxLen) * 2
 	hotRegionThreshold := uint64(float64(readBytes) / divisor)
 
