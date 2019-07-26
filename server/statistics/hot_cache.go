@@ -67,12 +67,13 @@ func NewHotStoresStats() *HotStoresStats {
 // CheckRegionFlow checks the flow information of region.
 func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind) []HotSpotPeerStatGenerator {
 	var (
-		generators    []HotSpotPeerStatGenerator
-		getBytesFlow  func() uint64
-		getKeysFlow   func() uint64
-		bytesPerSec   uint64
-		keysPerSec    uint64
-		oldRegionStat *HotSpotPeerStat
+		generators   []HotSpotPeerStatGenerator
+		getBytesFlow func() uint64
+		getKeysFlow  func() uint64
+		bytesPerSec  uint64
+		keysPerSec   uint64
+
+		isExpiredInStore func(region *core.RegionInfo, storeID uint64) bool
 	)
 
 	storeIDs := make(map[uint64]struct{})
@@ -82,8 +83,8 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 		for storeID := range ids {
 			storeIDs[storeID] = struct{}{}
 		}
-
 	}
+
 	for _, peer := range region.GetPeers() {
 		// ReadFlow no need consider the followers.
 		if kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
@@ -98,14 +99,21 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 	case WriteFlow:
 		getBytesFlow = region.GetBytesWritten
 		getKeysFlow = region.GetKeysWritten
+		isExpiredInStore = func(region *core.RegionInfo, storeID uint64) bool {
+			return region.GetStorePeer(storeID) == nil
+		}
 	case ReadFlow:
 		getBytesFlow = region.GetBytesRead
 		getKeysFlow = region.GetKeysRead
+		isExpiredInStore = func(region *core.RegionInfo, storeID uint64) bool {
+			return region.GetLeader().GetStoreId() != storeID
+		}
 	}
 
 	for storeID := range storeIDs {
 		bytesPerSec = uint64(float64(getBytesFlow()) / float64(RegionHeartBeatReportInterval))
 		keysPerSec = uint64(float64(getKeysFlow()) / float64(RegionHeartBeatReportInterval))
+		var oldRegionStat *HotSpotPeerStat
 		hotStoreStats, ok := f.hotStoreStats[storeID]
 		if ok {
 			if v, isExist := hotStoreStats.Peek(region.GetID()); isExist {
@@ -113,11 +121,11 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 				// This is used for the simulator.
 				if !Simulating {
 					interval := time.Since(oldRegionStat.LastUpdateTime).Seconds()
-					if interval < minHotRegionReportInterval {
+					if interval < minHotRegionReportInterval && !isExpiredInStore(region, storeID) {
 						continue
 					}
-					bytesPerSec = uint64(float64(region.GetBytesWritten()) / interval)
-					keysPerSec = uint64(float64(region.GetKeysWritten()) / interval)
+					bytesPerSec = uint64(float64(getBytesFlow()) / interval)
+					keysPerSec = uint64(float64(getKeysFlow()) / interval)
 				}
 			}
 		}
@@ -132,7 +140,7 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 			lastHotSpotPeerStats: oldRegionStat,
 		}
 
-		if peer := region.GetStorePeer(storeID); peer == nil {
+		if isExpiredInStore(region, storeID) {
 			generator.Expired = true
 		}
 		generators = append(generators, generator)
@@ -211,7 +219,13 @@ const rollingWindowsSize = 5
 
 // GenHotSpotPeerStats implements HotSpotPeerStatsGenerator.
 func (flowStats *hotSpotPeerStatGenerator) GenHotSpotPeerStats(stats *StoresStats) *HotSpotPeerStat {
-	hotRegionThreshold := calculateWriteHotThresholdWithStore(stats, flowStats.StoreID)
+	var hotRegionThreshold uint64
+	switch flowStats.Kind {
+	case WriteFlow:
+		hotRegionThreshold = calculateWriteHotThresholdWithStore(stats, flowStats.StoreID)
+	case ReadFlow:
+		hotRegionThreshold = calculateReadHotThresholdWithStore(stats, flowStats.StoreID)
+	}
 	flowBytes := flowStats.FlowBytes
 	oldItem := flowStats.lastHotSpotPeerStats
 	region := flowStats.Region
