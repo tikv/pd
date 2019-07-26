@@ -36,7 +36,7 @@ type testOperatorSuite struct {
 }
 
 func (s *testOperatorSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *server.Config) { cfg.Replication.MaxReplicas = 1 })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -104,7 +104,32 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	c.Assert(err, NotNil)
 	err = postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`))
 	c.Assert(err, NotNil)
+}
 
+func (s *testOperatorSuite) TestMergeRegionOperator(c *C) {
+	r1 := newTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
+	mustRegionHeartbeat(c, s.svr, r1)
+	r2 := newTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
+	mustRegionHeartbeat(c, s.svr, r2)
+	r3 := newTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	mustRegionHeartbeat(c, s.svr, r3)
+
+	err := postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`))
+	c.Assert(err, IsNil)
+
+	s.svr.GetHandler().RemoveOperator(10)
+	s.svr.GetHandler().RemoveOperator(20)
+	err = postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 20, "target_region_id": 10}`))
+	c.Assert(err, IsNil)
+	s.svr.GetHandler().RemoveOperator(10)
+	s.svr.GetHandler().RemoveOperator(20)
+	err = postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`))
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "not adjacent"), IsTrue)
+	err = postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`))
+
+	c.Assert(strings.Contains(err.Error(), "not adjacent"), IsTrue)
+	c.Assert(err, NotNil)
 }
 
 func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {

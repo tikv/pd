@@ -618,8 +618,8 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 	}
 
 	// for the case first region (start key is nil) with the last region (end key is nil) but not adjacent
-	if (bytes.Equal(region.GetStartKey(), target.GetEndKey()) || len(region.GetStartKey()) == 0) &&
-		(bytes.Equal(region.GetEndKey(), target.GetStartKey()) || len(region.GetEndKey()) == 0) {
+	if (!bytes.Equal(region.GetStartKey(), target.GetEndKey()) || len(region.GetStartKey()) == 0) &&
+		(!bytes.Equal(region.GetEndKey(), target.GetStartKey()) || len(region.GetEndKey()) == 0) {
 		return ErrRegionNotAdjacent
 	}
 
