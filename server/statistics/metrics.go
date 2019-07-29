@@ -89,4 +89,5 @@ func init() {
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
+	prometheus.MustRegister(hotCacheRegionFlowGauge)
 }
