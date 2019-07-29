@@ -176,7 +176,7 @@ func (f *HotStoresStats) Update(item *HotSpotPeerStat) {
 	}
 }
 
-func (f *HotStoresStats) isRegionHotWithAllPeers(region *core.RegionInfo, hotThreshold int) bool {
+func (f *HotStoresStats) isRegionHotWithAnyPeers(region *core.RegionInfo, hotThreshold int) bool {
 	for _, peer := range region.GetPeers() {
 		if f.isRegionHotWithPeer(region, peer, hotThreshold) {
 			return true
@@ -421,7 +421,7 @@ func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
 // IsRegionHot checks if the region is hot.
 func (w *HotSpotCache) IsRegionHot(region *core.RegionInfo, hotThreshold int) bool {
 	stats := w.writeFlow
-	if stats.isRegionHotWithAllPeers(region, hotThreshold) {
+	if stats.isRegionHotWithAnyPeers(region, hotThreshold) {
 		return true
 	}
 	stats = w.readFlow
