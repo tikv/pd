@@ -189,8 +189,11 @@ func (f *HotStoresStats) Update(item *HotSpotPeerStat) {
 		}
 		index[item.StoreID] = struct{}{}
 		f.storesOfRegion[item.RegionID] = index
-		hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindBytesTag).Set(float64(item.FlowBytes))
-		hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindKeysTag).Set(float64(item.FlowKeys))
+		// for testing.
+		if item.HotDegree >= 3 {
+			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindBytesTag).Set(float64(item.FlowBytes))
+			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindKeysTag).Set(float64(item.FlowKeys))
+		}
 	}
 }
 
