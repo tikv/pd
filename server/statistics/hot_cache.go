@@ -50,6 +50,16 @@ const (
 	ReadFlow
 )
 
+func (k FlowKind) String() string {
+	switch k {
+	case WriteFlow:
+		return "write"
+	case ReadFlow:
+		return "read"
+	}
+	return "unimplemente"
+}
+
 // HotStoresStats saves the hotspot peer's statistics.
 type HotStoresStats struct {
 	hotStoreStats  map[uint64]cache.Cache         // storeID -> hot regions
@@ -153,6 +163,10 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 
 // Update updates the items in statistics.
 func (f *HotStoresStats) Update(item *HotSpotPeerStat) {
+	regionTag := fmt.Sprintf("region-%d", item.RegionID)
+	storeTag := fmt.Sprintf("store-%d", item.StoreID)
+	kindBytesTag := fmt.Sprintf("%s-bytes", item.Kind.String())
+	kindKeysTag := fmt.Sprintf("%s-keys", item.Kind.String())
 	if item.IsNeedDelete() {
 		if hotStoreStat, ok := f.hotStoreStats[item.StoreID]; ok {
 			hotStoreStat.Remove(item.RegionID)
@@ -160,6 +174,8 @@ func (f *HotStoresStats) Update(item *HotSpotPeerStat) {
 		if index, ok := f.storesOfRegion[item.RegionID]; ok {
 			delete(index, item.StoreID)
 		}
+		hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindBytesTag).Set(0)
+		hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindKeysTag).Set(0)
 	} else {
 		hotStoreStat, ok := f.hotStoreStats[item.StoreID]
 		if !ok {
@@ -173,6 +189,8 @@ func (f *HotStoresStats) Update(item *HotSpotPeerStat) {
 		}
 		index[item.StoreID] = struct{}{}
 		f.storesOfRegion[item.RegionID] = index
+		hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindBytesTag).Set(float64(item.FlowBytes))
+		hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindKeysTag).Set(float64(item.FlowKeys))
 	}
 }
 
@@ -395,13 +413,6 @@ func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
 		threshold := calculateWriteHotThresholdWithStore(stats, storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "write").Set(float64(flowStats.Len()))
 		hotCacheStatusGauge.WithLabelValues("hotThreshold", storeTag, "write").Set(float64(threshold))
-		for _, elem := range flowStats.Elems() {
-			stats := elem.Value.(*HotSpotPeerStat)
-			regionTag := fmt.Sprintf("region-%d", stats.RegionID)
-			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, "write-bytes").Set(float64(stats.FlowBytes))
-			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, "write-keys").Set(float64(stats.FlowKeys))
-		}
-
 	}
 
 	for storeID, flowStats := range w.readFlow.hotStoreStats {
@@ -409,12 +420,6 @@ func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
 		threshold := calculateReadHotThresholdWithStore(stats, storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "read").Set(float64(flowStats.Len()))
 		hotCacheStatusGauge.WithLabelValues("hotThreshold", storeTag, "read").Set(float64(threshold))
-		for _, elem := range flowStats.Elems() {
-			stats := elem.Value.(*HotSpotPeerStat)
-			regionTag := fmt.Sprintf("region-%d", stats.RegionID)
-			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, "read-bytes").Set(float64(stats.FlowBytes))
-			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, "read-keys").Set(float64(stats.FlowKeys))
-		}
 	}
 }
 
