@@ -101,6 +101,7 @@ func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
 // OpStep describes the basic scheduling steps that can not be subdivided.
 type OpStep interface {
 	fmt.Stringer
+	ConsumeConfVer() int
 	IsFinish(region *core.RegionInfo) bool
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
@@ -108,6 +109,12 @@ type OpStep interface {
 // TransferLeader is an OpStep that transfers a region's leader.
 type TransferLeader struct {
 	FromStore, ToStore uint64
+}
+
+// ConsumeConfVer returns if the epoch of a region should be increased after
+// this step
+func (tl TransferLeader) ConsumeConfVer() int {
+	return 0
 }
 
 func (tl TransferLeader) String() string {
@@ -135,6 +142,11 @@ type AddPeer struct {
 	ToStore, PeerID uint64
 }
 
+// ConsumeConfVer returns if the epoch of a region should be increased after
+// this step
+func (ap AddPeer) ConsumeConfVer() int {
+	return 1
+}
 func (ap AddPeer) String() string {
 	return fmt.Sprintf("add peer %v on store %v", ap.PeerID, ap.ToStore)
 }
@@ -168,6 +180,12 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 // AddLearner is an OpStep that adds a region learner peer.
 type AddLearner struct {
 	ToStore, PeerID uint64
+}
+
+// ConsumeConfVer returns if the epoch of a region should be increased after
+// this step
+func (al AddLearner) ConsumeConfVer() int {
+	return 1
 }
 
 func (al AddLearner) String() string {
@@ -205,6 +223,12 @@ type PromoteLearner struct {
 	ToStore, PeerID uint64
 }
 
+// ConsumeConfVer returns if the epoch of a region should be increased after
+// this step
+func (pl PromoteLearner) ConsumeConfVer() int {
+	return 1
+}
+
 func (pl PromoteLearner) String() string {
 	return fmt.Sprintf("promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
 }
@@ -226,6 +250,12 @@ func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionI
 // RemovePeer is an OpStep that removes a region peer.
 type RemovePeer struct {
 	FromStore uint64
+}
+
+// ConsumeConfVer returns if the epoch of a region should be increased after
+// this step
+func (rp RemovePeer) ConsumeConfVer() int {
+	return 1
 }
 
 func (rp RemovePeer) String() string {
@@ -256,6 +286,12 @@ type MergeRegion struct {
 	// thus use a IsPassive mark to indicate that
 	// this region doesn't need to send merge request to TiKV.
 	IsPassive bool
+}
+
+// ConsumeConfVer returns if the epoch of a region should be increased after
+// this step
+func (mr MergeRegion) ConsumeConfVer() int {
+	return 0
 }
 
 func (mr MergeRegion) String() string {
@@ -289,6 +325,12 @@ type SplitRegion struct {
 	Policy           pdpb.CheckPolicy
 }
 
+// ConsumeConfVer returns if the epoch of a region should be increased after
+// this step
+func (sr SplitRegion) ConsumeConfVer() int {
+	return 0
+}
+
 func (sr SplitRegion) String() string {
 	return fmt.Sprintf("split region with policy %s", sr.Policy.String())
 }
@@ -312,6 +354,12 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 // AddLightPeer is an OpStep that adds a region peer without considering the influence.
 type AddLightPeer struct {
 	ToStore, PeerID uint64
+}
+
+// ConsumeConfVer returns if the epoch of a region should be increased after
+// this step
+func (ap AddLightPeer) ConsumeConfVer() int {
+	return 1
 }
 
 func (ap AddLightPeer) String() string {
@@ -341,6 +389,12 @@ func (ap AddLightPeer) Influence(opInfluence OpInfluence, region *core.RegionInf
 // AddLightLearner is an OpStep that adds a region learner peer without considering the influence.
 type AddLightLearner struct {
 	ToStore, PeerID uint64
+}
+
+// ConsumeConfVer returns if the epoch of a region should be increased after
+// this step
+func (al AddLightLearner) ConsumeConfVer() int {
+	return 1
 }
 
 func (al AddLightLearner) String() string {
@@ -491,9 +545,14 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	return nil
 }
 
-// CurrentStep returns the which step is the operator executed
-func (o *Operator) CurrentStep() int {
-	return int(atomic.LoadInt32(&o.currentStep))
+// ConfVerConsumed returns the number of confver has consumed by steps
+func (o *Operator) ConfVerConsumed() int {
+	total := 0
+	current := atomic.LoadInt32(&o.currentStep)
+	for _, step := range o.steps[0:current] {
+		total += step.ConsumeConfVer()
+	}
+	return total
 }
 
 // SetPriorityLevel sets the priority level for operator.

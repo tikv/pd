@@ -382,7 +382,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 }
 
 func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIDs ...uint64) *core.RegionInfo {
-	return mc.mockRegionInfo(regionID, leaderID, followerIDs, nil)
+	return mc.MockRegionInfo(regionID, leaderID, followerIDs, nil)
 }
 
 // GetOpt mocks method.
@@ -450,7 +450,8 @@ func (mc *Cluster) PutStoreWithLabels(id uint64, labelPairs ...string) {
 	mc.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Labels: labels}))
 }
 
-func (mc *Cluster) mockRegionInfo(regionID uint64, leaderID uint64,
+// MockRegionInfo returns a mock region
+func (mc *Cluster) MockRegionInfo(regionID uint64, leaderID uint64,
 	followerIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
 
 	region := &metapb.Region{
@@ -466,10 +467,4 @@ func (mc *Cluster) mockRegionInfo(regionID uint64, leaderID uint64,
 		region.Peers = append(region.Peers, peer)
 	}
 	return core.NewRegionInfo(region, leader)
-}
-
-// MockRegionInfo returns a mock region
-func (mc *Cluster) MockRegionInfo(regionID uint64, leaderID uint64,
-	followerIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
-	return mc.mockRegionInfo(regionID, leaderID, followerIDs, epoch)
 }

@@ -188,25 +188,48 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	controller := NewOperatorController(cluster, stream)
 
 	cluster.AddLeaderStore(1, 2)
-	cluster.AddLeaderRegion(1, 1, 2, 3)
+	cluster.AddLeaderStore(2, 0)
+	cluster.AddLeaderRegion(1, 1, 2)
 	steps := []operator.OpStep{
+		operator.TransferLeader{FromStore: 1, ToStore: 2},
 		operator.RemovePeer{FromStore: 1},
 	}
 
 	op := operator.NewOperator("test", 1, &metapb.RegionEpoch{ConfVer: 0,
 		Version: 0},
 		operator.OpRegion, steps...)
-
 	c.Assert(controller.AddOperator(op), Equals, true)
+	c.Assert(len(stream.MsgCh()), Equals, 1)
 
-	region := cluster.MockRegionInfo(1, 1, []uint64{2, 3},
-		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
-	c.Assert(region.GetRegionEpoch().GetConfVer(), Equals, uint64(1))
+	// report the result of transfering leader
+	region := cluster.MockRegionInfo(1, 2, []uint64{1, 2},
+		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
+	c.Assert(op.ConfVerConsumed(), Equals, 0)
+	c.Assert(len(stream.MsgCh()), Equals, 2)
 
-	ch := stream.MsgCh()
-	c.Assert(len(ch), Equals, 1)
-	msg := <-ch
-	c.Assert(msg.RegionEpoch.GetConfVer(), Equals, uint64(0))
+	// report the result of removing perr
+	region = cluster.MockRegionInfo(1, 2, []uint64{2},
+		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
+
+	controller.Dispatch(region, DispatchFromHeartBeat)
+	c.Assert(op.ConfVerConsumed(), Equals, 1)
+	c.Assert(len(stream.MsgCh()), Equals, 2)
+
+	// add and disaptch op again, the op should be stale
+	op = operator.NewOperator("test", 1, &metapb.RegionEpoch{ConfVer: 0,
+		Version: 0},
+		operator.OpRegion, steps...)
+	c.Assert(controller.AddOperator(op), Equals, true)
+	c.Assert(op.ConfVerConsumed(), Equals, 0)
+	c.Assert(len(stream.MsgCh()), Equals, 3)
+
+	// report region with an abnormal confver
+	region = cluster.MockRegionInfo(1, 1, []uint64{1, 2},
+		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
+	controller.Dispatch(region, DispatchFromHeartBeat)
+	c.Assert(op.ConfVerConsumed(), Equals, 0)
+	// no new step sended
+	c.Assert(len(stream.MsgCh()), Equals, 3)
 }
