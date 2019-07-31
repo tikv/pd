@@ -180,3 +180,33 @@ func (t *testOperatorControllerSuite) TestStorelimit(c *C) {
 	c.Assert(oc.AddOperator(op), IsFalse)
 	oc.RemoveOperator(op)
 }
+
+// #1652
+func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
+	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	stream := mockhbstream.NewHeartbeatStreams(cluster.ID)
+	controller := NewOperatorController(cluster, stream)
+
+	cluster.AddLeaderStore(1, 2)
+	cluster.AddLeaderRegion(1, 1, 2, 3)
+	steps := []operator.OpStep{
+		operator.RemovePeer{FromStore: 1},
+	}
+
+	op := operator.NewOperator("test", 1, &metapb.RegionEpoch{ConfVer: 0,
+		Version: 0},
+		operator.OpRegion, steps...)
+
+	c.Assert(controller.AddOperator(op), Equals, true)
+
+	region := cluster.MockRegionInfo(1, 1, []uint64{2, 3},
+		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
+	c.Assert(region.GetRegionEpoch().GetConfVer(), Equals, uint64(1))
+
+	controller.Dispatch(region, "test")
+
+	ch := stream.MsgCh()
+	c.Assert(len(ch), Equals, 1)
+	msg := <-ch
+	c.Assert(msg.RegionEpoch.GetConfVer(), Equals, uint64(0))
+}
