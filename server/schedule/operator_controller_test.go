@@ -203,7 +203,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
 	c.Assert(region.GetRegionEpoch().GetConfVer(), Equals, uint64(1))
 
-	controller.Dispatch(region, "test")
+	controller.Dispatch(region, DispatchFromHeartBeat)
 
 	ch := stream.MsgCh()
 	c.Assert(len(ch), Equals, 1)
