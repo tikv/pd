@@ -90,25 +90,29 @@ func NewOperatorController(cluster Cluster, hbStreams HeartbeatStreams) *Operato
 func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 	// Check existed operator.
 	if op := oc.GetOperator(region.GetID()); op != nil {
-		// When the source is heartbeat, the region may have a newer epoch than
-		// the region that the operator holds. In this case, the operator is
-		// stale, and will not be executed even we would have sent it to TiKV
-		// servers. Here, we just cancle it.
-		epoch := op.RegionEpoch()
-		if epoch.GetConfVer() < region.GetRegionEpoch().GetConfVer() ||
-			epoch.GetVersion() < region.GetRegionEpoch().GetVersion() {
-			log.Info("stale operator", zap.Uint64("region-id", region.GetID()),
-				zap.Reflect("operator", op))
-			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
-			oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
-			oc.RemoveOperator(op)
-			oc.PromoteWaitingOperator()
-			return
-		}
-
 		timeout := op.IsTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
+
+			// When the source is heartbeat, the region may have a newer
+			// epoch than the region that the operator holds. In this case,
+			// the operator is stale, and will not be executed even we would
+			// have sent it to TiKV servers. Here, we just cancle it.
+			origin := op.RegionEpoch()
+			latest := region.GetRegionEpoch()
+			changes := (latest.GetVersion() - origin.GetVersion()) +
+				(latest.GetConfVer() - origin.GetConfVer())
+			if source == DispatchFromHeartBeat &&
+				changes > uint64(op.CurrentStep()) {
+				log.Info("stale operator", zap.Uint64("region-id", region.GetID()),
+					zap.Reflect("operator", op), zap.Uint64("diff", changes))
+				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
+				oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
+				oc.RemoveOperator(op)
+				oc.PromoteWaitingOperator()
+				return
+			}
+
 			oc.SendScheduleCommand(region, step, source)
 			return
 		}

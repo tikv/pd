@@ -491,6 +491,11 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	return nil
 }
 
+// CurrentStep returns the which step is the operator executed
+func (o *Operator) CurrentStep() int {
+	return int(atomic.LoadInt32(&o.currentStep))
+}
+
 // SetPriorityLevel sets the priority level for operator.
 func (o *Operator) SetPriorityLevel(level core.PriorityLevel) {
 	o.level = level
