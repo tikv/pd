@@ -17,6 +17,10 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/server/schedule/selector"
 	"go.uber.org/zap"
 )
 
@@ -28,19 +32,19 @@ func init() {
 
 type labelScheduler struct {
 	*baseScheduler
-	selector *schedule.BalanceSelector
+	selector *selector.BalanceSelector
 }
 
 // LabelScheduler is mainly based on the store's label information for scheduling.
 // Now only used for reject leader schedule, that will move the leader out of
 // the store with the specific label.
 func newLabelScheduler(opController *schedule.OperatorController) schedule.Scheduler {
-	filters := []schedule.Filter{
-		schedule.StoreStateFilter{TransferLeader: true},
+	filters := []filter.Filter{
+		filter.StoreStateFilter{TransferLeader: true},
 	}
 	return &labelScheduler{
 		baseScheduler: newBaseScheduler(opController),
-		selector:      schedule.NewBalanceSelector(core.LeaderKind, filters),
+		selector:      selector.NewBalanceSelector(core.LeaderKind, filters),
 	}
 }
 
@@ -53,15 +57,15 @@ func (s *labelScheduler) GetType() string {
 }
 
 func (s *labelScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
+func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
 	for _, s := range stores {
-		if cluster.CheckLabelProperty(schedule.RejectLeader, s.GetLabels()) {
+		if cluster.CheckLabelProperty(opt.RejectLeader, s.GetLabels()) {
 			rejectLeaderStores[s.GetID()] = struct{}{}
 		}
 	}
@@ -80,8 +84,8 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator
 			for _, p := range region.GetPendingPeers() {
 				excludeStores[p.GetStoreId()] = struct{}{}
 			}
-			filter := schedule.NewExcludedFilter(nil, excludeStores)
-			target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region), filter)
+			f := filter.NewExcludedFilter(nil, excludeStores)
+			target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region), f)
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))
 				schedulerCounter.WithLabelValues(s.GetName(), "no_target").Inc()
@@ -89,8 +93,8 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator
 			}
 
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-			op := schedule.CreateTransferLeaderOperator("label-reject-leader", region, id, target.GetID(), schedule.OpLeader)
-			return []*schedule.Operator{op}
+			op := operator.CreateTransferLeaderOperator("label-reject-leader", region, id, target.GetID(), operator.OpLeader)
+			return []*operator.Operator{op}
 		}
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()

@@ -18,6 +18,9 @@ import (
 
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/selector"
 )
 
 func init() {
@@ -28,19 +31,19 @@ func init() {
 
 type randomMergeScheduler struct {
 	*baseScheduler
-	selector *schedule.RandomSelector
+	selector *selector.RandomSelector
 }
 
 // newRandomMergeScheduler creates an admin scheduler that randomly picks two adjacent regions
 // then merges them.
 func newRandomMergeScheduler(opController *schedule.OperatorController) schedule.Scheduler {
-	filters := []schedule.Filter{
-		schedule.StoreStateFilter{MoveRegion: true},
+	filters := []filter.Filter{
+		filter.StoreStateFilter{MoveRegion: true},
 	}
 	base := newBaseScheduler(opController)
 	return &randomMergeScheduler{
 		baseScheduler: base,
-		selector:      schedule.NewRandomSelector(filters),
+		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
@@ -53,10 +56,10 @@ func (s *randomMergeScheduler) GetType() string {
 }
 
 func (s *randomMergeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.opController.OperatorCount(schedule.OpMerge) < cluster.GetMergeScheduleLimit()
+	return s.opController.OperatorCount(operator.OpMerge) < cluster.GetMergeScheduleLimit()
 }
 
-func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
+func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	stores := cluster.GetStores()
@@ -80,7 +83,7 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Op
 		return nil
 	}
 
-	ops, err := schedule.CreateMergeRegionOperator("random-merge", cluster, region, target, schedule.OpAdmin)
+	ops, err := operator.CreateMergeRegionOperator("random-merge", cluster, region, target, operator.OpAdmin)
 	if err != nil {
 		return nil
 	}

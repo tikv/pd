@@ -17,15 +17,16 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule/operator"
 )
 
 // ApplyOperatorStep applies operator step. Only for test purpose.
-func ApplyOperatorStep(region *core.RegionInfo, op *Operator) *core.RegionInfo {
+func ApplyOperatorStep(region *core.RegionInfo, op *operator.Operator) *core.RegionInfo {
 	if step := op.Check(region); step != nil {
 		switch s := step.(type) {
-		case TransferLeader:
+		case operator.TransferLeader:
 			region = region.Clone(core.WithLeader(region.GetStorePeer(s.ToStore)))
-		case AddPeer:
+		case operator.AddPeer:
 			if region.GetStorePeer(s.ToStore) != nil {
 				panic("Add peer that exists")
 			}
@@ -34,7 +35,7 @@ func ApplyOperatorStep(region *core.RegionInfo, op *Operator) *core.RegionInfo {
 				StoreId: s.ToStore,
 			}
 			region = region.Clone(core.WithAddPeer(peer))
-		case AddLightPeer:
+		case operator.AddLightPeer:
 			if region.GetStorePeer(s.ToStore) != nil {
 				panic("Add peer that exists")
 			}
@@ -43,7 +44,7 @@ func ApplyOperatorStep(region *core.RegionInfo, op *Operator) *core.RegionInfo {
 				StoreId: s.ToStore,
 			}
 			region = region.Clone(core.WithAddPeer(peer))
-		case RemovePeer:
+		case operator.RemovePeer:
 			if region.GetStorePeer(s.FromStore) == nil {
 				panic("Remove peer that doesn't exist")
 			}
@@ -51,7 +52,7 @@ func ApplyOperatorStep(region *core.RegionInfo, op *Operator) *core.RegionInfo {
 				panic("Cannot remove the leader peer")
 			}
 			region = region.Clone(core.WithRemoveStorePeer(s.FromStore))
-		case AddLearner:
+		case operator.AddLearner:
 			if region.GetStorePeer(s.ToStore) != nil {
 				panic("Add learner that exists")
 			}
@@ -61,7 +62,7 @@ func ApplyOperatorStep(region *core.RegionInfo, op *Operator) *core.RegionInfo {
 				IsLearner: true,
 			}
 			region = region.Clone(core.WithAddPeer(peer))
-		case AddLightLearner:
+		case operator.AddLightLearner:
 			if region.GetStorePeer(s.ToStore) != nil {
 				panic("Add learner that exists")
 			}
@@ -71,7 +72,7 @@ func ApplyOperatorStep(region *core.RegionInfo, op *Operator) *core.RegionInfo {
 				IsLearner: true,
 			}
 			region = region.Clone(core.WithAddPeer(peer))
-		case PromoteLearner:
+		case operator.PromoteLearner:
 			if region.GetStoreLearner(s.ToStore) == nil {
 				panic("Promote peer that doesn't exist")
 			}
@@ -88,7 +89,7 @@ func ApplyOperatorStep(region *core.RegionInfo, op *Operator) *core.RegionInfo {
 }
 
 // ApplyOperator applies operator. Only for test purpose.
-func ApplyOperator(mc *mockcluster.Cluster, op *Operator) {
+func ApplyOperator(mc *mockcluster.Cluster, op *operator.Operator) {
 	origin := mc.GetRegion(op.RegionID())
 	region := origin
 	for !op.IsFinish() {

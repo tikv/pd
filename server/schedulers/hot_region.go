@@ -23,6 +23,8 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -129,20 +131,20 @@ func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster schedule.Cluster)
 }
 
 func (h *balanceHotRegionsScheduler) allowBalanceLeader(cluster schedule.Cluster) bool {
-	return h.opController.OperatorCount(schedule.OpHotRegion) < minUint64(h.leaderLimit, cluster.GetHotRegionScheduleLimit()) &&
-		h.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return h.opController.OperatorCount(operator.OpHotRegion) < minUint64(h.leaderLimit, cluster.GetHotRegionScheduleLimit()) &&
+		h.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (h *balanceHotRegionsScheduler) allowBalanceRegion(cluster schedule.Cluster) bool {
-	return h.opController.OperatorCount(schedule.OpHotRegion) < minUint64(h.peerLimit, cluster.GetHotRegionScheduleLimit())
+	return h.opController.OperatorCount(operator.OpHotRegion) < minUint64(h.peerLimit, cluster.GetHotRegionScheduleLimit())
 }
 
-func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
+func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }
 
-func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*schedule.Operator {
+func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 	switch typ {
@@ -157,27 +159,27 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.
 	return nil
 }
 
-func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*schedule.Operator {
+func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operator.Operator {
 	// balance by leader
 	srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
-		op := schedule.CreateTransferLeaderOperator("transfer-hot-read-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), schedule.OpHotRegion)
+		op := operator.CreateTransferLeaderOperator("transfer-hot-read-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 		op.SetPriorityLevel(core.HighPriority)
-		return []*schedule.Operator{op}
+		return []*operator.Operator{op}
 	}
 
 	// balance by peer
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
-		op, err := schedule.CreateMovePeerOperator("move-hot-read-region", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
+		op, err := operator.CreateMovePeerOperator("move-hot-read-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 		if err != nil {
 			schedulerCounter.WithLabelValues(h.GetName(), "create_operator_fail").Inc()
 			return nil
 		}
 		op.SetPriorityLevel(core.HighPriority)
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		return []*schedule.Operator{op}
+		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
@@ -186,30 +188,30 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 // balanceHotRetryLimit is the limit to retry schedule for selected balance strategy.
 const balanceHotRetryLimit = 10
 
-func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*schedule.Operator {
+func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*operator.Operator {
 	for i := 0; i < balanceHotRetryLimit; i++ {
 		switch h.r.Int() % 2 {
 		case 0:
 			// balance by peer
 			srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 			if srcRegion != nil {
-				op, err := schedule.CreateMovePeerOperator("move-hot-write-region", cluster, srcRegion, schedule.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
+				op, err := operator.CreateMovePeerOperator("move-hot-write-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 				if err != nil {
 					schedulerCounter.WithLabelValues(h.GetName(), "create_operator_fail").Inc()
 					return nil
 				}
 				op.SetPriorityLevel(core.HighPriority)
 				schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-				return []*schedule.Operator{op}
+				return []*operator.Operator{op}
 			}
 		case 1:
 			// balance by leader
 			srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
 			if srcRegion != nil {
 				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
-				op := schedule.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), schedule.OpHotRegion)
+				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 				op.SetPriorityLevel(core.HighPriority)
-				return []*schedule.Operator{op}
+				return []*operator.Operator{op}
 			}
 		}
 	}
@@ -305,14 +307,14 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 		}
 
 		srcStore := cluster.GetStore(srcStoreID)
-		filters := []schedule.Filter{
-			schedule.StoreStateFilter{MoveRegion: true},
-			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
+		filters := []filter.Filter{
+			filter.StoreStateFilter{MoveRegion: true},
+			filter.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
 		}
 		candidateStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
-			if schedule.FilterTarget(cluster, store, filters) {
+			if filter.Target(cluster, store, filters) {
 				continue
 			}
 			candidateStoreIDs = append(candidateStoreIDs, store.GetID())
@@ -367,10 +369,10 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 			continue
 		}
 
-		filters := []schedule.Filter{schedule.StoreStateFilter{TransferLeader: true}}
+		filters := []filter.Filter{filter.StoreStateFilter{TransferLeader: true}}
 		candidateStoreIDs := make([]uint64, 0, len(srcRegion.GetPeers())-1)
 		for _, store := range cluster.GetFollowerStores(srcRegion) {
-			if !schedule.FilterTarget(cluster, store, filters) {
+			if !filter.Target(cluster, store, filters) {
 				candidateStoreIDs = append(candidateStoreIDs, store.GetID())
 			}
 		}

@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"go.uber.org/zap"
 )
 
@@ -53,7 +54,7 @@ func (m *MergeChecker) RecordRegionSplit(regionID uint64) {
 }
 
 // Check verifies a region's replicas, creating an Operator if need.
-func (m *MergeChecker) Check(region *core.RegionInfo) []*schedule.Operator {
+func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	if m.splitCache.Exists(mergeBlockMarker) {
 		checkerCounter.WithLabelValues("merge_checker", "recently_start").Inc()
 		return nil
@@ -115,7 +116,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*schedule.Operator {
 	}
 
 	log.Debug("try to merge region", zap.Stringer("from", core.RegionToHexMeta(region.GetMeta())), zap.Stringer("to", core.RegionToHexMeta(target.GetMeta())))
-	ops, err := schedule.CreateMergeRegionOperator("merge-region", m.cluster, region, target, schedule.OpMerge)
+	ops, err := operator.CreateMergeRegionOperator("merge-region", m.cluster, region, target, operator.OpMerge)
 	if err != nil {
 		return nil
 	}

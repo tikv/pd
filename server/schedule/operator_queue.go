@@ -13,10 +13,14 @@
 
 package schedule
 
-import "time"
+import (
+	"time"
+
+	"github.com/pingcap/pd/server/schedule/operator"
+)
 
 type operatorWithTime struct {
-	op   *Operator
+	op   *operator.Operator
 	time time.Time
 }
 

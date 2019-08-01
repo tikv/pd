@@ -249,3 +249,11 @@ func (w *HotSpotCache) IsRegionHot(id uint64, hotThreshold int) bool {
 	}
 	return false
 }
+
+// RegionStatInformer provides access to a shared informer of statistics.
+type RegionStatInformer interface {
+	IsRegionHot(id uint64) bool
+	RegionWriteStats() []*RegionStat
+	RegionReadStats() []*RegionStat
+	RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo
+}

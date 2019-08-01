@@ -20,51 +20,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
-
-// RegionSetInformer provides access to a shared informer of regions.
-// TODO: move to core package
-type RegionSetInformer interface {
-	RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo
-	RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo
-	RandPendingRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo
-	GetAverageRegionSize() int64
-	GetStoreRegionCount(storeID uint64) int
-	GetRegion(id uint64) *core.RegionInfo
-	GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo)
-	ScanRegions(startKey []byte, limit int) []*core.RegionInfo
-}
-
-// Cluster provides an overview of a cluster's regions distribution.
-type Cluster interface {
-	RegionSetInformer
-	GetStores() []*core.StoreInfo
-	GetStore(id uint64) *core.StoreInfo
-
-	GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
-	GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo
-	GetLeaderStore(region *core.RegionInfo) *core.StoreInfo
-	BlockStore(id uint64) error
-	UnblockStore(id uint64)
-
-	AttachOverloadStatus(id uint64, f func() bool)
-
-	IsRegionHot(id uint64) bool
-	RegionWriteStats() []*statistics.RegionStat
-	RegionReadStats() []*statistics.RegionStat
-	RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo
-
-	// get config methods
-	GetOpt() namespace.ScheduleOptions
-	Options
-
-	// TODO: it should be removed. Schedulers don't need to know anything
-	// about peers.
-	AllocPeer(storeID uint64) (*metapb.Peer, error)
-}
 
 // Scheduler is an interface to schedule resources.
 type Scheduler interface {
@@ -75,7 +36,7 @@ type Scheduler interface {
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster) []*Operator
+	Schedule(cluster Cluster) []*operator.Operator
 	IsScheduleAllowed(cluster Cluster) bool
 }
 
@@ -106,4 +67,20 @@ func CreateScheduler(name string, opController *OperatorController, args ...stri
 		return nil, errors.Errorf("create func of %v is not registered", name)
 	}
 	return fn(opController, args)
+}
+
+// Cluster provides an overview of a cluster's regions distribution.
+type Cluster interface {
+	core.RegionSetInformer
+	core.StoreSetInformer
+	core.StoreSetController
+
+	statistics.RegionStatInformer
+	opt.Options
+
+	// get config methods
+	GetOpt() namespace.ScheduleOptions
+	// TODO: it should be removed. Schedulers don't need to know anything
+	// about peers.
+	AllocPeer(storeID uint64) (*metapb.Peer, error)
 }

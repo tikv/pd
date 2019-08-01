@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package operator
 
 import (
 	"strings"
@@ -19,24 +19,24 @@ import (
 	"github.com/pkg/errors"
 )
 
-// OperatorKind is a bit field to identify operator types.
-type OperatorKind uint32
+// OpKind is a bit field to identify operator types.
+type OpKind uint32
 
 // Flags for operators.
 const (
-	OpLeader    OperatorKind = 1 << iota // Include leader transfer.
-	OpRegion                             // Include peer movement.
-	OpAdmin                              // Initiated by admin.
-	OpHotRegion                          // Initiated by hot region scheduler.
-	OpAdjacent                           // Initiated by adjacent region scheduler.
-	OpReplica                            // Initiated by replica checkers.
-	OpBalance                            // Initiated by balancers.
-	OpMerge                              // Initiated by merge checkers or merge schedulers.
-	OpRange                              // Initiated by range scheduler.
+	OpLeader    OpKind = 1 << iota // Include leader transfer.
+	OpRegion                       // Include peer movement.
+	OpAdmin                        // Initiated by admin.
+	OpHotRegion                    // Initiated by hot region scheduler.
+	OpAdjacent                     // Initiated by adjacent region scheduler.
+	OpReplica                      // Initiated by replica checkers.
+	OpBalance                      // Initiated by balancers.
+	OpMerge                        // Initiated by merge checkers or merge schedulers.
+	OpRange                        // Initiated by range scheduler.
 	opMax
 )
 
-var flagToName = map[OperatorKind]string{
+var flagToName = map[OpKind]string{
 	OpLeader:    "leader",
 	OpRegion:    "region",
 	OpAdmin:     "admin",
@@ -48,7 +48,7 @@ var flagToName = map[OperatorKind]string{
 	OpRange:     "range",
 }
 
-var nameToFlag = map[string]OperatorKind{
+var nameToFlag = map[string]OpKind{
 	"leader":     OpLeader,
 	"region":     OpRegion,
 	"admin":      OpAdmin,
@@ -60,9 +60,9 @@ var nameToFlag = map[string]OperatorKind{
 	"range":      OpRange,
 }
 
-func (k OperatorKind) String() string {
+func (k OpKind) String() string {
 	var flagNames []string
-	for flag := OperatorKind(1); flag < opMax; flag <<= 1 {
+	for flag := OpKind(1); flag < opMax; flag <<= 1 {
 		if k&flag != 0 {
 			flagNames = append(flagNames, flagToName[flag])
 		}
@@ -73,9 +73,9 @@ func (k OperatorKind) String() string {
 	return strings.Join(flagNames, ",")
 }
 
-// ParseOperatorKind converts string (flag name list concat by ',') to OperatorKind.
-func ParseOperatorKind(str string) (OperatorKind, error) {
-	var k OperatorKind
+// ParseOperatorKind converts string (flag name list concat by ',') to OpKind.
+func ParseOperatorKind(str string) (OpKind, error) {
+	var k OpKind
 	for _, flagName := range strings.Split(str, ",") {
 		flag, ok := nameToFlag[flagName]
 		if !ok {

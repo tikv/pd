@@ -21,6 +21,8 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -73,18 +75,18 @@ func (s *shuffleHotRegionScheduler) GetType() string {
 }
 
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.opController.OperatorCount(schedule.OpHotRegion) < s.limit &&
-		s.opController.OperatorCount(schedule.OpRegion) < cluster.GetRegionScheduleLimit() &&
-		s.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.opController.OperatorCount(operator.OpHotRegion) < s.limit &&
+		s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit() &&
+		s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
+func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	i := s.r.Int() % len(s.types)
 	return s.dispatch(s.types[i], cluster)
 }
 
-func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*schedule.Operator {
+func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*operator.Operator {
 	switch typ {
 	case hotReadRegionBalance:
 		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
@@ -96,7 +98,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster schedule.C
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, storeStats statistics.StoreHotRegionsStat) []*schedule.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, storeStats statistics.StoreHotRegionsStat) []*operator.Operator {
 	for _, stats := range storeStats {
 		i := s.r.Intn(stats.RegionsStat.Len())
 		r := stats.RegionsStat[i]
@@ -107,15 +109,15 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, sto
 		}
 		srcStoreID := srcRegion.GetLeader().GetStoreId()
 		srcStore := cluster.GetStore(srcStoreID)
-		filters := []schedule.Filter{
-			schedule.StoreStateFilter{MoveRegion: true},
-			schedule.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			schedule.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
+		filters := []filter.Filter{
+			filter.StoreStateFilter{MoveRegion: true},
+			filter.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
 		}
 		stores := cluster.GetStores()
 		destStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
-			if schedule.FilterTarget(cluster, store, filters) {
+			if filter.Target(cluster, store, filters) {
 				continue
 			}
 			destStoreIDs = append(destStoreIDs, store.GetID())
@@ -137,12 +139,12 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, sto
 			log.Error("failed to allocate peer", zap.Error(err))
 			return nil
 		}
-		op, err := schedule.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, schedule.OpRegion|schedule.OpLeader, srcStoreID, destStoreID, destPeer.GetId())
+		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destStoreID, destPeer.GetId())
 		if err != nil {
 			return nil
 		}
 		schedulerCounter.WithLabelValues(s.GetName(), "create_operator").Inc()
-		return []*schedule.Operator{op}
+		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 	return nil

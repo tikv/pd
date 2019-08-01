@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -165,9 +166,9 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		}
 	}
 
-	if opController.OperatorCount(schedule.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
-		opController.OperatorCount(schedule.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
-		opController.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+	if opController.OperatorCount(operator.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
+		opController.OperatorCount(operator.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
+		opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.namespaceChecker.Check(region); op != nil {
 			if opController.AddWaitingOperator(op) {
 				return true
@@ -175,14 +176,14 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
 		}
 	}
 
-	if opController.OperatorCount(schedule.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+	if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
 			if opController.AddWaitingOperator(op) {
 				return true
 			}
 		}
 	}
-	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(schedule.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
 			if opController.AddWaitingOperator(ops...) {
@@ -474,7 +475,7 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule() []*schedule.Operator {
+func (s *scheduleController) Schedule() []*operator.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
 		if op := scheduleByNamespace(s.cluster, s.classifier, s.Scheduler); op != nil {

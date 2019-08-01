@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/statistics"
 )
 
@@ -136,7 +137,7 @@ func (c *namespaceCluster) RegionWriteStats() []*statistics.RegionStat {
 	return stats
 }
 
-func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifier, scheduler schedule.Scheduler) []*schedule.Operator {
+func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifier, scheduler schedule.Scheduler) []*operator.Operator {
 	namespaces := classifier.GetAllNamespaces()
 	for _, i := range rand.Perm(len(namespaces)) {
 		nc := newNamespaceCluster(cluster, classifier, namespaces[i])

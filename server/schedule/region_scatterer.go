@@ -20,6 +20,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pkg/errors"
 )
 
@@ -50,21 +52,21 @@ func (s *selectedStores) reset() {
 	s.stores = make(map[uint64]struct{})
 }
 
-func (s *selectedStores) newFilter() Filter {
+func (s *selectedStores) newFilter() filter.Filter {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cloned := make(map[uint64]struct{})
 	for id := range s.stores {
 		cloned[id] = struct{}{}
 	}
-	return NewExcludedFilter(nil, cloned)
+	return filter.NewExcludedFilter(nil, cloned)
 }
 
 // RegionScatterer scatters regions.
 type RegionScatterer struct {
 	cluster    Cluster
 	classifier namespace.Classifier
-	filters    []Filter
+	filters    []filter.Filter
 	selected   *selectedStores
 }
 
@@ -74,15 +76,15 @@ func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *Regio
 	return &RegionScatterer{
 		cluster:    cluster,
 		classifier: classifier,
-		filters: []Filter{
-			StoreStateFilter{},
+		filters: []filter.Filter{
+			filter.StoreStateFilter{},
 		},
 		selected: newSelectedStores(),
 	}
 }
 
 // Scatter relocates the region.
-func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*Operator, error) {
+func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*operator.Operator, error) {
 	if r.cluster.IsRegionHot(region.GetID()) {
 		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
@@ -98,7 +100,7 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*Operator, error) {
 	return r.scatterRegion(region), nil
 }
 
-func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
+func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Operator {
 	stores := r.collectAvailableStores(region)
 	var (
 		targetPeers   []*metapb.Peer
@@ -129,7 +131,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *Operator {
 		targetPeers = append(targetPeers, newPeer)
 		replacedPeers = append(replacedPeers, peer)
 	}
-	op := CreateScatterRegionOperator("scatter-region", r.cluster, region, replacedPeers, targetPeers)
+	op := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, replacedPeers, targetPeers)
 	if op != nil {
 		op.SetPriorityLevel(core.HighPriority)
 	}
@@ -140,11 +142,11 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 	// scoreGuard guarantees that the distinct score will not decrease.
 	regionStores := r.cluster.GetRegionStores(region)
 	sourceStore := r.cluster.GetStore(oldPeer.GetStoreId())
-	scoreGuard := NewDistinctScoreFilter(r.cluster.GetLocationLabels(), regionStores, sourceStore)
+	scoreGuard := filter.NewDistinctScoreFilter(r.cluster.GetLocationLabels(), regionStores, sourceStore)
 
 	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {
-		if scoreGuard.FilterTarget(r.cluster, store) {
+		if scoreGuard.Target(r.cluster, store) {
 			continue
 		}
 		candidates = append(candidates, store)
@@ -164,17 +166,17 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 
 func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo) map[uint64]*core.StoreInfo {
 	namespace := r.classifier.GetRegionNamespace(region)
-	filters := []Filter{
+	filters := []filter.Filter{
 		r.selected.newFilter(),
-		NewExcludedFilter(nil, region.GetStoreIds()),
-		NewNamespaceFilter(r.classifier, namespace),
+		filter.NewExcludedFilter(nil, region.GetStoreIds()),
+		filter.NewNamespaceFilter(r.classifier, namespace),
 	}
 	filters = append(filters, r.filters...)
 
 	stores := r.cluster.GetStores()
 	targets := make(map[uint64]*core.StoreInfo, len(stores))
 	for _, store := range stores {
-		if !FilterTarget(r.cluster, store, filters) && !store.GetIsBusy() {
+		if !filter.Target(r.cluster, store, filters) && !store.GetIsBusy() {
 			targets[store.GetID()] = store
 		}
 	}

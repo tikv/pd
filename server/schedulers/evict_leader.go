@@ -19,6 +19,9 @@ import (
 
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/selector"
 	"github.com/pkg/errors"
 )
 
@@ -39,21 +42,21 @@ type evictLeaderScheduler struct {
 	*baseScheduler
 	name     string
 	storeID  uint64
-	selector *schedule.RandomSelector
+	selector *selector.RandomSelector
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
-	filters := []schedule.Filter{
-		schedule.StoreStateFilter{TransferLeader: true},
+	filters := []filter.Filter{
+		filter.StoreStateFilter{TransferLeader: true},
 	}
 	base := newBaseScheduler(opController)
 	return &evictLeaderScheduler{
 		baseScheduler: base,
 		name:          fmt.Sprintf("evict-leader-scheduler-%d", storeID),
 		storeID:       storeID,
-		selector:      schedule.NewRandomSelector(filters),
+		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
@@ -74,10 +77,10 @@ func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 }
 
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
+func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.RandLeaderRegion(s.storeID, core.HealthRegion())
 	if region == nil {
@@ -90,7 +93,7 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.Op
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	op := schedule.CreateTransferLeaderOperator("evict-leader", region, region.GetLeader().GetStoreId(), target.GetID(), schedule.OpLeader)
+	op := operator.CreateTransferLeaderOperator("evict-leader", region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
-	return []*schedule.Operator{op}
+	return []*operator.Operator{op}
 }

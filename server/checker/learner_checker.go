@@ -15,7 +15,7 @@ package checker
 
 import (
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 )
 
 // LearnerChecker ensures region has a learner will be promoted.
@@ -25,16 +25,16 @@ type LearnerChecker struct{}
 func NewLearnerChecker() *LearnerChecker { return &LearnerChecker{} }
 
 // Check verifies a region's namespace, creating an Operator if need.
-func (l *LearnerChecker) Check(region *core.RegionInfo) *schedule.Operator {
+func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
 	for _, p := range region.GetLearners() {
 		if region.GetPendingLearner(p.GetId()) != nil {
 			continue
 		}
-		step := schedule.PromoteLearner{
+		step := operator.PromoteLearner{
 			ToStore: p.GetStoreId(),
 			PeerID:  p.GetId(),
 		}
-		op := schedule.NewOperator("promote-learner", region.GetID(), region.GetRegionEpoch(), schedule.OpRegion, step)
+		op := operator.NewOperator("promote-learner", region.GetID(), region.GetRegionEpoch(), operator.OpRegion, step)
 		return op
 	}
 	return nil

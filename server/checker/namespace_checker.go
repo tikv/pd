@@ -19,20 +19,23 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/selector"
 	"go.uber.org/zap"
 )
 
 // NamespaceChecker ensures region to go to the right place.
 type NamespaceChecker struct {
 	cluster    schedule.Cluster
-	filters    []schedule.Filter
+	filters    []filter.Filter
 	classifier namespace.Classifier
 }
 
 // NewNamespaceChecker creates a namespace checker.
 func NewNamespaceChecker(cluster schedule.Cluster, classifier namespace.Classifier) *NamespaceChecker {
-	filters := []schedule.Filter{
-		schedule.StoreStateFilter{MoveRegion: true},
+	filters := []filter.Filter{
+		filter.StoreStateFilter{MoveRegion: true},
 	}
 
 	return &NamespaceChecker{
@@ -43,7 +46,7 @@ func NewNamespaceChecker(cluster schedule.Cluster, classifier namespace.Classifi
 }
 
 // Check verifies a region's namespace, creating an Operator if need.
-func (n *NamespaceChecker) Check(region *core.RegionInfo) *schedule.Operator {
+func (n *NamespaceChecker) Check(region *core.RegionInfo) *operator.Operator {
 	if !n.cluster.IsNamespaceRelocationEnabled() {
 		return nil
 	}
@@ -73,7 +76,7 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *schedule.Operator {
 			checkerCounter.WithLabelValues("namespace_checker", "no_target_peer").Inc()
 			return nil
 		}
-		op, err := schedule.CreateMovePeerOperator("make-namespace-relocation", n.cluster, region, schedule.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		op, err := operator.CreateMovePeerOperator("make-namespace-relocation", n.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 		if err != nil {
 			checkerCounter.WithLabelValues("namespace_checker", "create_operator_fail").Inc()
 			return nil
@@ -102,8 +105,8 @@ func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, tar
 
 // SelectBestStoreToRelocate randomly returns the store to relocate
 func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, targets []*core.StoreInfo) uint64 {
-	selector := schedule.NewRandomSelector(n.filters)
-	target := selector.SelectTarget(n.cluster, targets, schedule.NewExcludedFilter(nil, region.GetStoreIds()))
+	selector := selector.NewRandomSelector(n.filters)
+	target := selector.SelectTarget(n.cluster, targets, filter.NewExcludedFilter(nil, region.GetStoreIds()))
 	if target == nil {
 		return 0
 	}
@@ -121,16 +124,16 @@ func (n *NamespaceChecker) isExists(stores []*core.StoreInfo, storeID uint64) bo
 
 func (n *NamespaceChecker) getNamespaceStores(region *core.RegionInfo) []*core.StoreInfo {
 	ns := n.classifier.GetRegionNamespace(region)
-	filteredStores := n.filter(n.cluster.GetStores(), schedule.NewNamespaceFilter(n.classifier, ns))
+	filteredStores := n.filter(n.cluster.GetStores(), filter.NewNamespaceFilter(n.classifier, ns))
 
 	return filteredStores
 }
 
-func (n *NamespaceChecker) filter(stores []*core.StoreInfo, filters ...schedule.Filter) []*core.StoreInfo {
+func (n *NamespaceChecker) filter(stores []*core.StoreInfo, filters ...filter.Filter) []*core.StoreInfo {
 	result := make([]*core.StoreInfo, 0)
 
 	for _, store := range stores {
-		if schedule.FilterTarget(n.cluster, store, filters) {
+		if filter.Target(n.cluster, store, filters) {
 			continue
 		}
 		result = append(result, store)

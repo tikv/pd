@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pkg/errors"
 )
 
@@ -69,10 +70,10 @@ func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 }
 
 func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
+func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.RandFollowerRegion(s.storeID, core.HealthRegion())
 	if region == nil {
@@ -80,7 +81,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.Op
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	op := schedule.CreateTransferLeaderOperator("grant-leader", region, region.GetLeader().GetStoreId(), s.storeID, schedule.OpLeader)
+	op := operator.CreateTransferLeaderOperator("grant-leader", region, region.GetLeader().GetStoreId(), s.storeID, operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
-	return []*schedule.Operator{op}
+	return []*operator.Operator{op}
 }

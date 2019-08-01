@@ -16,6 +16,9 @@ package schedulers
 import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/selector"
 )
 
 func init() {
@@ -26,19 +29,19 @@ func init() {
 
 type shuffleLeaderScheduler struct {
 	*baseScheduler
-	selector *schedule.RandomSelector
+	selector *selector.RandomSelector
 }
 
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
 func newShuffleLeaderScheduler(opController *schedule.OperatorController) schedule.Scheduler {
-	filters := []schedule.Filter{
-		schedule.StoreStateFilter{TransferLeader: true},
+	filters := []filter.Filter{
+		filter.StoreStateFilter{TransferLeader: true},
 	}
 	base := newBaseScheduler(opController)
 	return &shuffleLeaderScheduler{
 		baseScheduler: base,
-		selector:      schedule.NewRandomSelector(filters),
+		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
@@ -51,10 +54,10 @@ func (s *shuffleLeaderScheduler) GetType() string {
 }
 
 func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.opController.OperatorCount(schedule.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
+func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	// We shuffle leaders between stores by:
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.
@@ -71,7 +74,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
-	op := schedule.CreateTransferLeaderOperator("shuffle-leader", region, region.GetLeader().GetId(), targetStore.GetID(), schedule.OpAdmin)
+	op := operator.CreateTransferLeaderOperator("shuffle-leader", region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
 	op.SetPriorityLevel(core.HighPriority)
-	return []*schedule.Operator{op}
+	return []*operator.Operator{op}
 }
