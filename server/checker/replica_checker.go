@@ -44,6 +44,7 @@ func NewReplicaChecker(cluster schedule.Cluster, classifier namespace.Classifier
 		filter.NewOverloadFilter(),
 		filter.NewHealthFilter(),
 		filter.NewSnapshotCountFilter(),
+		filter.NewPendingPeerCountFilter(),
 	}
 
 	return &ReplicaChecker{
@@ -125,7 +126,6 @@ func (r *ReplicaChecker) selectBestStoreToAddReplica(region *core.RegionInfo, fi
 	// Add some must have filters.
 	newFilters := []filter.Filter{
 		filter.NewStateFilter(),
-		filter.NewPendingPeerCountFilter(),
 		filter.NewExcludedFilter(nil, region.GetStoreIds()),
 	}
 	filters = append(filters, r.filters...)
