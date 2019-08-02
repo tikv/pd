@@ -5,6 +5,8 @@ jobs:
     docker:
       - image: golang:1.12
     working_directory: /go/src/github.com/pingcap/pd
+    environment:
+      GOFLAGS: -p=8
     steps:
       - checkout
       - restore_cache:

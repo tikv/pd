@@ -485,3 +485,11 @@ func calculateReadHotThreshold(stats *StoresStats) uint64 {
 	}
 	return hotRegionThreshold
 }
+
+// RegionStatInformer provides access to a shared informer of statistics.
+type RegionStatInformer interface {
+	IsRegionHot(region *core.RegionInfo) bool
+	RegionWriteStats() map[uint64][]*HotSpotPeerStat
+	RegionReadStats() map[uint64][]*HotSpotPeerStat
+	RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo
+}

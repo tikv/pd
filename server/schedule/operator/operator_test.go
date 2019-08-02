@@ -11,17 +11,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package operator
 
 import (
 	"encoding/json"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testOperatorSuite{})
 
@@ -57,11 +62,11 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 	c.Assert(RemovePeer{FromStore: 3}.IsFinish(region), IsTrue)
 }
 
-func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OperatorKind, steps ...OperatorStep) *Operator {
+func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
 	return NewOperator("test", regionID, &metapb.RegionEpoch{}, OpAdmin|kind, steps...)
 }
 
-func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep) {
+func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OpStep) {
 	c.Assert(op.Len(), Equals, len(steps))
 	for i := range steps {
 		c.Assert(op.Step(i), Equals, steps[i])
@@ -71,7 +76,7 @@ func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OperatorStep)
 func (s *testOperatorSuite) TestOperator(c *C) {
 	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	// addPeer1, transferLeader1, removePeer3
-	steps := []OperatorStep{
+	steps := []OpStep{
 		AddPeer{ToStore: 1, PeerID: 1},
 		TransferLeader{FromStore: 3, ToStore: 1},
 		RemovePeer{FromStore: 3},
@@ -85,7 +90,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	c.Assert(op.IsTimeout(), IsFalse)
 
 	// addPeer1, transferLeader1, removePeer2
-	steps = []OperatorStep{
+	steps = []OpStep{
 		AddPeer{ToStore: 1, PeerID: 1},
 		TransferLeader{FromStore: 2, ToStore: 1},
 		RemovePeer{FromStore: 2},
@@ -105,7 +110,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	c.Assert(len(res), Equals, len(op.String())+2)
 
 	// check short timeout for transfer leader only operators.
-	steps = []OperatorStep{TransferLeader{FromStore: 2, ToStore: 1}}
+	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
 	op = s.newTestOperator(1, OpLeader, steps...)
 	op.startTime = time.Now()
 	c.Assert(op.IsTimeout(), IsFalse)
@@ -115,8 +120,8 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 
 func (s *testOperatorSuite) TestInfluence(c *C) {
 	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
-	opInfluence := OpInfluence{storesInfluence: make(map[uint64]*StoreInfluence)}
-	storeOpInfluence := opInfluence.storesInfluence
+	opInfluence := OpInfluence{StoresInfluence: make(map[uint64]*StoreInfluence)}
+	storeOpInfluence := opInfluence.StoresInfluence
 	storeOpInfluence[1] = &StoreInfluence{}
 	storeOpInfluence[2] = &StoreInfluence{}
 
@@ -196,7 +201,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 
 func (s *testOperatorSuite) TestOperatorKind(c *C) {
 	c.Assert((OpLeader | OpReplica).String(), Equals, "leader,replica")
-	c.Assert(OperatorKind(0).String(), Equals, "unknown")
+	c.Assert(OpKind(0).String(), Equals, "unknown")
 	k, err := ParseOperatorKind("balance,region,leader")
 	c.Assert(err, IsNil)
 	c.Assert(k, Equals, OpBalance|OpRegion|OpLeader)

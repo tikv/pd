@@ -434,6 +434,23 @@ func (s *StoreInfo) CompareLocation(other *StoreInfo, labels []string) int {
 	return -1
 }
 
+const replicaBaseScore = 100
+
+// DistinctScore returns the score that the other is distinct from the stores.
+// A higher score means the other store is more different from the existed stores.
+func DistinctScore(labels []string, stores []*StoreInfo, other *StoreInfo) float64 {
+	var score float64
+	for _, s := range stores {
+		if s.GetID() == other.GetID() {
+			continue
+		}
+		if index := s.CompareLocation(other, labels); index != -1 {
+			score += math.Pow(replicaBaseScore, float64(len(labels)-index-1))
+		}
+	}
+	return score
+}
+
 // MergeLabels merges the passed in labels with origins, overriding duplicated
 // ones.
 func (s *StoreInfo) MergeLabels(labels []*metapb.StoreLabel) []*metapb.StoreLabel {

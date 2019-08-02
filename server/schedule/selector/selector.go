@@ -11,23 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package selector
 
 import (
 	"math/rand"
 
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/opt"
 )
 
 // BalanceSelector selects source/target from store candidates based on their
 // resource scores.
 type BalanceSelector struct {
 	kind    core.ResourceKind
-	filters []Filter
+	filters []filter.Filter
 }
 
 // NewBalanceSelector creates a BalanceSelector instance.
-func NewBalanceSelector(kind core.ResourceKind, filters []Filter) *BalanceSelector {
+func NewBalanceSelector(kind core.ResourceKind, filters []filter.Filter) *BalanceSelector {
 	return &BalanceSelector{
 		kind:    kind,
 		filters: filters,
@@ -36,11 +38,11 @@ func NewBalanceSelector(kind core.ResourceKind, filters []Filter) *BalanceSelect
 
 // SelectSource selects the store that can pass all filters and has the maximal
 // resource score.
-func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *BalanceSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo, filters ...filter.Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 	var result *core.StoreInfo
 	for _, store := range stores {
-		if FilterSource(opt, store, filters) {
+		if filter.Source(opt, store, filters) {
 			continue
 		}
 		if result == nil ||
@@ -54,11 +56,11 @@ func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo, fi
 
 // SelectTarget selects the store that can pass all filters and has the minimal
 // resource score.
-func (s *BalanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *BalanceSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo, filters ...filter.Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 	var result *core.StoreInfo
 	for _, store := range stores {
-		if FilterTarget(opt, store, filters) {
+		if filter.Target(opt, store, filters) {
 			continue
 		}
 		if result == nil ||
@@ -75,11 +77,11 @@ func (s *BalanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fi
 type ReplicaSelector struct {
 	regionStores []*core.StoreInfo
 	labels       []string
-	filters      []Filter
+	filters      []filter.Filter
 }
 
 // NewReplicaSelector creates a ReplicaSelector instance.
-func NewReplicaSelector(regionStores []*core.StoreInfo, labels []string, filters ...Filter) *ReplicaSelector {
+func NewReplicaSelector(regionStores []*core.StoreInfo, labels []string, filters ...filter.Filter) *ReplicaSelector {
 	return &ReplicaSelector{
 		regionStores: regionStores,
 		labels:       labels,
@@ -89,18 +91,18 @@ func NewReplicaSelector(regionStores []*core.StoreInfo, labels []string, filters
 
 // SelectSource selects the store that can pass all filters and has the minimal
 // distinct score.
-func (s *ReplicaSelector) SelectSource(opt Options, stores []*core.StoreInfo) *core.StoreInfo {
+func (s *ReplicaSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo) *core.StoreInfo {
 	var (
 		best      *core.StoreInfo
 		bestScore float64
 	)
 	for _, store := range stores {
-		score := DistinctScore(s.labels, s.regionStores, store)
+		score := core.DistinctScore(s.labels, s.regionStores, store)
 		if best == nil || compareStoreScore(opt, store, score, best, bestScore) < 0 {
 			best, bestScore = store, score
 		}
 	}
-	if best == nil || FilterSource(opt, best, s.filters) {
+	if best == nil || filter.Source(opt, best, s.filters) {
 		return nil
 	}
 	return best
@@ -108,33 +110,57 @@ func (s *ReplicaSelector) SelectSource(opt Options, stores []*core.StoreInfo) *c
 
 // SelectTarget selects the store that can pass all filters and has the maximal
 // distinct score.
-func (s *ReplicaSelector) SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *ReplicaSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo, filters ...filter.Filter) *core.StoreInfo {
 	var (
 		best      *core.StoreInfo
 		bestScore float64
 	)
 	for _, store := range stores {
-		if FilterTarget(opt, store, filters) {
+		if filter.Target(opt, store, filters) {
 			continue
 		}
-		score := DistinctScore(s.labels, s.regionStores, store)
+		score := core.DistinctScore(s.labels, s.regionStores, store)
 		if best == nil || compareStoreScore(opt, store, score, best, bestScore) > 0 {
 			best, bestScore = store, score
 		}
 	}
-	if best == nil || FilterTarget(opt, best, s.filters) {
+	if best == nil || filter.Target(opt, best, s.filters) {
 		return nil
 	}
 	return best
 }
 
+// compareStoreScore compares which store is better for replication.
+// Returns 0 if store A is as good as store B.
+// Returns 1 if store A is better than store B.
+// Returns -1 if store B is better than store A.
+func compareStoreScore(opt opt.Options, storeA *core.StoreInfo, scoreA float64, storeB *core.StoreInfo, scoreB float64) int {
+	// The store with higher score is better.
+	if scoreA > scoreB {
+		return 1
+	}
+	if scoreA < scoreB {
+		return -1
+	}
+	// The store with lower region score is better.
+	if storeA.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) <
+		storeB.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
+		return 1
+	}
+	if storeA.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) >
+		storeB.RegionScore(opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
+		return -1
+	}
+	return 0
+}
+
 // RandomSelector selects source/target store randomly.
 type RandomSelector struct {
-	filters []Filter
+	filters []filter.Filter
 }
 
 // NewRandomSelector creates a RandomSelector instance.
-func NewRandomSelector(filters []Filter) *RandomSelector {
+func NewRandomSelector(filters []filter.Filter) *RandomSelector {
 	return &RandomSelector{filters: filters}
 }
 
@@ -146,10 +172,10 @@ func (s *RandomSelector) randStore(stores []*core.StoreInfo) *core.StoreInfo {
 }
 
 // SelectSource randomly selects a source store from those can pass all filters.
-func (s *RandomSelector) SelectSource(opt Options, stores []*core.StoreInfo) *core.StoreInfo {
+func (s *RandomSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo) *core.StoreInfo {
 	var candidates []*core.StoreInfo
 	for _, store := range stores {
-		if FilterSource(opt, store, s.filters) {
+		if filter.Source(opt, store, s.filters) {
 			continue
 		}
 		candidates = append(candidates, store)
@@ -158,12 +184,12 @@ func (s *RandomSelector) SelectSource(opt Options, stores []*core.StoreInfo) *co
 }
 
 // SelectTarget randomly selects a target store from those can pass all filters.
-func (s *RandomSelector) SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+func (s *RandomSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo, filters ...filter.Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
 	var candidates []*core.StoreInfo
 	for _, store := range stores {
-		if FilterTarget(opt, store, filters) {
+		if filter.Target(opt, store, filters) {
 			continue
 		}
 		candidates = append(candidates, store)

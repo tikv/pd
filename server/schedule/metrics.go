@@ -16,23 +16,6 @@ package schedule
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	operatorStepDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "finish_operator_steps_duration_seconds",
-			Help:      "Bucketed histogram of processing time (s) of finished operator step.",
-			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
-		}, []string{"type"})
-
-	filterCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "filter",
-			Help:      "Counter of the filter",
-		}, []string{"action", "address", "store", "type"})
-
 	operatorCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -77,8 +60,6 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(operatorStepDuration)
-	prometheus.MustRegister(filterCounter)
 	prometheus.MustRegister(operatorCounter)
 	prometheus.MustRegister(operatorDuration)
 	prometheus.MustRegister(operatorWaitDuration)

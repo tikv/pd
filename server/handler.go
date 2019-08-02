@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -264,7 +265,7 @@ func (h *Handler) AddRandomMergeScheduler() error {
 }
 
 // GetOperator returns the region operator.
-func (h *Handler) GetOperator(regionID uint64) (*schedule.Operator, error) {
+func (h *Handler) GetOperator(regionID uint64) (*operator.Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, err
@@ -310,7 +311,7 @@ func (h *Handler) RemoveOperator(regionID uint64) error {
 }
 
 // GetOperators returns the running operators.
-func (h *Handler) GetOperators() ([]*schedule.Operator, error) {
+func (h *Handler) GetOperators() ([]*operator.Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, err
@@ -319,7 +320,7 @@ func (h *Handler) GetOperators() ([]*schedule.Operator, error) {
 }
 
 // GetWaitingOperators returns the waiting operators.
-func (h *Handler) GetWaitingOperators() ([]*schedule.Operator, error) {
+func (h *Handler) GetWaitingOperators() ([]*operator.Operator, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, err
@@ -328,27 +329,27 @@ func (h *Handler) GetWaitingOperators() ([]*schedule.Operator, error) {
 }
 
 // GetAdminOperators returns the running admin operators.
-func (h *Handler) GetAdminOperators() ([]*schedule.Operator, error) {
-	return h.GetOperatorsOfKind(schedule.OpAdmin)
+func (h *Handler) GetAdminOperators() ([]*operator.Operator, error) {
+	return h.GetOperatorsOfKind(operator.OpAdmin)
 }
 
 // GetLeaderOperators returns the running leader operators.
-func (h *Handler) GetLeaderOperators() ([]*schedule.Operator, error) {
-	return h.GetOperatorsOfKind(schedule.OpLeader)
+func (h *Handler) GetLeaderOperators() ([]*operator.Operator, error) {
+	return h.GetOperatorsOfKind(operator.OpLeader)
 }
 
 // GetRegionOperators returns the running region operators.
-func (h *Handler) GetRegionOperators() ([]*schedule.Operator, error) {
-	return h.GetOperatorsOfKind(schedule.OpRegion)
+func (h *Handler) GetRegionOperators() ([]*operator.Operator, error) {
+	return h.GetOperatorsOfKind(operator.OpRegion)
 }
 
 // GetOperatorsOfKind returns the running operators of the kind.
-func (h *Handler) GetOperatorsOfKind(mask schedule.OperatorKind) ([]*schedule.Operator, error) {
+func (h *Handler) GetOperatorsOfKind(mask operator.OpKind) ([]*operator.Operator, error) {
 	ops, err := h.GetOperators()
 	if err != nil {
 		return nil, err
 	}
-	var results []*schedule.Operator
+	var results []*operator.Operator
 	for _, op := range ops {
 		if op.Kind()&mask != 0 {
 			results = append(results, op)
@@ -358,7 +359,7 @@ func (h *Handler) GetOperatorsOfKind(mask schedule.OperatorKind) ([]*schedule.Op
 }
 
 // GetHistory returns finished operators' history since start.
-func (h *Handler) GetHistory(start time.Time) ([]schedule.OperatorHistory, error) {
+func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, err
@@ -412,7 +413,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
-	op := schedule.CreateTransferLeaderOperator("admin-transfer-leader", region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), schedule.OpAdmin)
+	op := operator.CreateTransferLeaderOperator("admin-transfer-leader", region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -445,7 +446,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		}
 	}
 
-	op, err := schedule.CreateMoveRegionOperator("admin-move-region", c.cluster, region, schedule.OpAdmin, storeIDs)
+	op, err := operator.CreateMoveRegionOperator("admin-move-region", c.cluster, region, operator.OpAdmin, storeIDs)
 	if err != nil {
 		return err
 	}
@@ -485,7 +486,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return err
 	}
 
-	op, err := schedule.CreateMovePeerOperator("admin-move-peer", c.cluster, region, schedule.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
+	op, err := operator.CreateMovePeerOperator("admin-move-peer", c.cluster, region, operator.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
 	if err != nil {
 		return err
 	}
@@ -534,7 +535,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return err
 	}
 
-	op := schedule.CreateAddPeerOperator("admin-add-peer", c.cluster, region, newPeer.GetId(), toStoreID, schedule.OpAdmin)
+	op := operator.CreateAddPeerOperator("admin-add-peer", c.cluster, region, newPeer.GetId(), toStoreID, operator.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -557,7 +558,7 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 		return err
 	}
 
-	op := schedule.CreateAddLearnerOperator("admin-add-learner", c.cluster, region, newPeer.GetId(), toStoreID, schedule.OpAdmin)
+	op := operator.CreateAddLearnerOperator("admin-add-learner", c.cluster, region, newPeer.GetId(), toStoreID, operator.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -580,7 +581,7 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 		return errors.Errorf("region has no peer in store %v", fromStoreID)
 	}
 
-	op, err := schedule.CreateRemovePeerOperator("admin-remove-peer", c.cluster, schedule.OpAdmin, region, fromStoreID)
+	op, err := operator.CreateRemovePeerOperator("admin-remove-peer", c.cluster, operator.OpAdmin, region, fromStoreID)
 	if err != nil {
 		return err
 	}
@@ -623,7 +624,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotAdjacent
 	}
 
-	ops, err := schedule.CreateMergeRegionOperator("admin-merge-region", c.cluster, region, target, schedule.OpAdmin)
+	ops, err := operator.CreateMergeRegionOperator("admin-merge-region", c.cluster, region, target, operator.OpAdmin)
 	if err != nil {
 		return err
 	}
@@ -645,7 +646,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
 		return ErrRegionNotFound(regionID)
 	}
 
-	op := schedule.CreateSplitRegionOperator("admin-split-region", region, schedule.OpAdmin, policy)
+	op := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, policy)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}

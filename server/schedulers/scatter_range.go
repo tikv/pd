@@ -18,6 +18,7 @@ import (
 	"net/url"
 
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pkg/errors"
 )
 
@@ -78,10 +79,10 @@ func (l *scatterRangeScheduler) GetType() string {
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return l.opController.OperatorCount(schedule.OpRange) < cluster.GetRegionScheduleLimit()
+	return l.opController.OperatorCount(operator.OpRange) < cluster.GetRegionScheduleLimit()
 }
 
-func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
+func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	// isolate a new cluster according to the key range
 	c := schedule.GenRangeCluster(cluster, l.startKey, l.endKey)
@@ -89,14 +90,14 @@ func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*schedule.O
 	ops := l.balanceLeader.Schedule(c)
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-leader-%s", l.rangeName))
-		ops[0].AttachKind(schedule.OpRange)
+		ops[0].AttachKind(operator.OpRange)
 		schedulerCounter.WithLabelValues(l.GetName(), "new-leader-operator").Inc()
 		return ops
 	}
 	ops = l.balanceRegion.Schedule(c)
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-region-%s", l.rangeName))
-		ops[0].AttachKind(schedule.OpRange)
+		ops[0].AttachKind(operator.OpRange)
 		schedulerCounter.WithLabelValues(l.GetName(), "new-region-operator").Inc()
 		return ops
 	}

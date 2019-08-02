@@ -16,6 +16,8 @@ package schedule
 import (
 	"math/rand"
 	"time"
+
+	"github.com/pingcap/pd/server/schedule/operator"
 )
 
 // PriorityWeight is used to represent the weight of different priorities of operators.
@@ -23,15 +25,15 @@ var PriorityWeight = []float64{1.0, 4.0, 9.0}
 
 // WaitingOperator is an interface of waiting operators.
 type WaitingOperator interface {
-	PutOperator(op *Operator)
-	GetOperator() []*Operator
-	ListOperator() []*Operator
+	PutOperator(op *operator.Operator)
+	GetOperator() []*operator.Operator
+	ListOperator() []*operator.Operator
 }
 
 // Bucket is used to maintain the operators created by a specific scheduler.
 type Bucket struct {
 	weight float64
-	ops    []*Operator
+	ops    []*operator.Operator
 }
 
 // RandBuckets is an implementation of waiting operators
@@ -52,7 +54,7 @@ func NewRandBuckets() *RandBuckets {
 }
 
 // PutOperator puts an operator into the random buckets.
-func (b *RandBuckets) PutOperator(op *Operator) {
+func (b *RandBuckets) PutOperator(op *operator.Operator) {
 	priority := op.GetPriorityLevel()
 	bucket := b.buckets[priority]
 	if len(bucket.ops) == 0 {
@@ -62,8 +64,8 @@ func (b *RandBuckets) PutOperator(op *Operator) {
 }
 
 // ListOperator lists all operator in the random buckets.
-func (b *RandBuckets) ListOperator() []*Operator {
-	var ops []*Operator
+func (b *RandBuckets) ListOperator() []*operator.Operator {
+	var ops []*operator.Operator
 	for i := range b.buckets {
 		bucket := b.buckets[i]
 		for j := range bucket.ops {
@@ -74,7 +76,7 @@ func (b *RandBuckets) ListOperator() []*Operator {
 }
 
 // GetOperator gets an operator from the random buckets.
-func (b *RandBuckets) GetOperator() []*Operator {
+func (b *RandBuckets) GetOperator() []*operator.Operator {
 	if b.totalWeight == 0 {
 		return nil
 	}
@@ -87,10 +89,10 @@ func (b *RandBuckets) GetOperator() []*Operator {
 		}
 		proportion := bucket.weight / b.totalWeight
 		if r >= sum && r < sum+proportion {
-			var res []*Operator
+			var res []*operator.Operator
 			res = append(res, bucket.ops[0])
 			// Merge operation has two operators, and thus it should be handled specifically.
-			if bucket.ops[0].Kind()&OpMerge != 0 {
+			if bucket.ops[0].Kind()&operator.OpMerge != 0 {
 				res = append(res, bucket.ops[1])
 				bucket.ops = bucket.ops[2:]
 			} else {

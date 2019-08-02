@@ -10,9 +10,11 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package schedule
+package filter
 
 import (
+	"testing"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
@@ -20,21 +22,25 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
 var _ = Suite(&testFiltersSuite{})
 
 type testFiltersSuite struct{}
 
-func (s *testReplicationSuite) TestPendingPeerFilter(c *C) {
+func (s *testFiltersSuite) TestPendingPeerFilter(c *C) {
 	filter := NewPendingPeerCountFilter()
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	store := core.NewStoreInfo(&metapb.Store{Id: 1})
-	c.Assert(filter.FilterSource(tc, store), IsFalse)
+	c.Assert(filter.Source(tc, store), IsFalse)
 	newStore := store.Clone(core.SetPendingPeerCount(30))
-	c.Assert(filter.FilterSource(tc, newStore), IsTrue)
-	c.Assert(filter.FilterTarget(tc, newStore), IsTrue)
+	c.Assert(filter.Source(tc, newStore), IsTrue)
+	c.Assert(filter.Target(tc, newStore), IsTrue)
 	// set to 0 means no limit
 	opt.MaxPendingPeerCount = 0
-	c.Assert(filter.FilterSource(tc, newStore), IsFalse)
-	c.Assert(filter.FilterTarget(tc, newStore), IsFalse)
+	c.Assert(filter.Source(tc, newStore), IsFalse)
+	c.Assert(filter.Target(tc, newStore), IsFalse)
 }

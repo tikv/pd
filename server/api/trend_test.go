@@ -21,7 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 )
 
 var _ = Suite(&testTrendSuite{})
@@ -58,7 +58,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	op, err := svr.GetHandler().GetOperator(5)
 	c.Assert(err, IsNil)
 	c.Assert(op, NotNil)
-	newPeerID := op.Step(0).(schedule.AddLearner).PeerID
+	newPeerID := op.Step(0).(operator.AddLearner).PeerID
 	region5 = region5.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, IsLearner: true}), core.WithIncConfVer())
 	mustRegionHeartbeat(c, svr, region5)
 	region5 = region5.Clone(core.WithPromoteLearner(newPeerID), core.WithRemoveStorePeer(2), core.WithIncConfVer())
@@ -67,7 +67,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	op, err = svr.GetHandler().GetOperator(6)
 	c.Assert(err, IsNil)
 	c.Assert(op, NotNil)
-	newPeerID = op.Step(0).(schedule.AddLearner).PeerID
+	newPeerID = op.Step(0).(operator.AddLearner).PeerID
 	region6 = region6.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, IsLearner: true}), core.WithIncConfVer())
 	mustRegionHeartbeat(c, svr, region6)
 	region6 = region6.Clone(core.WithPromoteLearner(newPeerID), core.WithLeader(region6.GetStorePeer(2)), core.WithRemoveStorePeer(1), core.WithIncConfVer())

@@ -123,3 +123,33 @@ func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 func (bc *BasicCluster) PutRegion(region *RegionInfo) {
 	bc.Regions.SetRegion(region)
 }
+
+// RegionSetInformer provides access to a shared informer of regions.
+type RegionSetInformer interface {
+	RandFollowerRegion(storeID uint64, opts ...RegionOption) *RegionInfo
+	RandLeaderRegion(storeID uint64, opts ...RegionOption) *RegionInfo
+	RandPendingRegion(storeID uint64, opts ...RegionOption) *RegionInfo
+	GetAverageRegionSize() int64
+	GetStoreRegionCount(storeID uint64) int
+	GetRegion(id uint64) *RegionInfo
+	GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo)
+	ScanRegions(startKey []byte, limit int) []*RegionInfo
+}
+
+// StoreSetInformer provides access to a shared informer of stores.
+type StoreSetInformer interface {
+	GetStores() []*StoreInfo
+	GetStore(id uint64) *StoreInfo
+
+	GetRegionStores(region *RegionInfo) []*StoreInfo
+	GetFollowerStores(region *RegionInfo) []*StoreInfo
+	GetLeaderStore(region *RegionInfo) *StoreInfo
+}
+
+// StoreSetController is used to control stores' status.
+type StoreSetController interface {
+	BlockStore(id uint64) error
+	UnblockStore(id uint64)
+
+	AttachOverloadStatus(id uint64, f func() bool)
+}

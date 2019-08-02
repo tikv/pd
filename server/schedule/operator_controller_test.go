@@ -15,6 +15,7 @@ package schedule
 
 import (
 	"container/heap"
+	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -23,7 +24,12 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
+	"github.com/pingcap/pd/server/schedule/operator"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testOperatorControllerSuite{})
 
@@ -37,11 +43,11 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
-	steps := []OperatorStep{
-		RemovePeer{FromStore: 2},
+	steps := []operator.OpStep{
+		operator.RemovePeer{FromStore: 2},
 	}
-	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, steps...)
-	op2 := NewOperator("test", 2, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op1 := operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op2 := operator.NewOperator("test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	oc.SetOperator(op1)
 	oc.SetOperator(op2)
 	go func() {
@@ -66,21 +72,21 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
-	steps := []OperatorStep{
-		RemovePeer{FromStore: 2},
-		AddPeer{ToStore: 2, PeerID: 4},
+	steps := []operator.OpStep{
+		operator.RemovePeer{FromStore: 2},
+		operator.AddPeer{ToStore: 2, PeerID: 4},
 	}
-	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, steps...)
-	op2 := NewOperator("test", 2, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op1 := operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op2 := operator.NewOperator("test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
-	op1.startTime = time.Now()
+	op1.SetStartTime(time.Now())
 	oc.SetOperator(op1)
-	op2.startTime = time.Now()
+	op2.SetStartTime(time.Now())
 	oc.SetOperator(op2)
 	c.Assert(oc.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_RUNNING)
 	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_RUNNING)
-	op1.startTime = time.Now().Add(-10 * time.Minute)
+	op1.SetStartTime(time.Now().Add(-10 * time.Minute))
 	region2 = ApplyOperatorStep(region2, op2)
 	tc.PutRegion(region2)
 	oc.Dispatch(region1, "test")
@@ -100,12 +106,12 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
-	steps := []OperatorStep{
-		RemovePeer{FromStore: 2},
-		AddPeer{ToStore: 2, PeerID: 4},
+	steps := []operator.OpStep{
+		operator.RemovePeer{FromStore: 2},
+		operator.AddPeer{ToStore: 2, PeerID: 4},
 	}
-	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
-	op2 := NewOperator("test", 2, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op1 := operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+	op2 := operator.NewOperator("test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
 	// Adds operator and pushes to the notifier queue.

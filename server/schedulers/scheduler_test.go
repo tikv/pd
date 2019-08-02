@@ -23,6 +23,8 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/statistics"
 )
 
@@ -52,7 +54,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	for i := 0; i < 4; i++ {
 		op := sl.Schedule(tc)
 		c.Assert(op, NotNil)
-		c.Assert(op[0].Kind(), Equals, schedule.OpLeader|schedule.OpAdmin)
+		c.Assert(op[0].Kind(), Equals, operator.OpLeader|operator.OpAdmin)
 	}
 }
 
@@ -101,27 +103,27 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	// transfer peer from store 1 to 4 for region 1 because the distribution of
 	// the two regions is same, we will transfer the peer, which is leader now,
 	// to a new store
-	testutil.CheckTransferPeerWithLeaderTransfer(c, sc.Schedule(tc)[0], schedule.OpAdjacent, 1, 4)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, sc.Schedule(tc)[0], operator.OpAdjacent, 1, 4)
 	// suppose we add peer in store 4, transfer leader to store 2, remove peer in store 1
 	tc.AddLeaderRegionWithRange(1, "", "a", 2, 3, 4)
 
 	// transfer leader from store 1 to store 2 for region 2 because we have a different peer location,
 	// we can directly transfer leader to peer 2. we priority to transfer leader because less overhead
-	testutil.CheckTransferLeader(c, sc.Schedule(tc)[0], schedule.OpAdjacent, 1, 2)
+	testutil.CheckTransferLeader(c, sc.Schedule(tc)[0], operator.OpAdjacent, 1, 2)
 	tc.AddLeaderRegionWithRange(2, "a", "b", 2, 1, 3)
 
 	// transfer leader from store 1 to store 2 for region 3
-	testutil.CheckTransferLeader(c, sc.Schedule(tc)[0], schedule.OpAdjacent, 1, 4)
+	testutil.CheckTransferLeader(c, sc.Schedule(tc)[0], operator.OpAdjacent, 1, 4)
 	tc.AddLeaderRegionWithRange(3, "b", "c", 4, 1, 3)
 
 	// transfer peer from store 1 to store 4 for region 5
 	// the region 5 just adjacent the region 6
-	testutil.CheckTransferPeerWithLeaderTransfer(c, sc.Schedule(tc)[0], schedule.OpAdjacent, 1, 4)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, sc.Schedule(tc)[0], operator.OpAdjacent, 1, 4)
 	tc.AddLeaderRegionWithRange(5, "e", "f", 2, 3, 4)
 
 	c.Assert(sc.Schedule(tc), IsNil)
 	c.Assert(sc.Schedule(tc), IsNil)
-	testutil.CheckTransferLeader(c, sc.Schedule(tc)[0], schedule.OpAdjacent, 2, 4)
+	testutil.CheckTransferLeader(c, sc.Schedule(tc)[0], operator.OpAdjacent, 2, 4)
 	tc.AddLeaderRegionWithRange(1, "", "a", 4, 2, 3)
 	for i := 0; i < 10; i++ {
 		c.Assert(sc.Schedule(tc), IsNil)
@@ -178,8 +180,8 @@ func (s *testScatterRegionSuite) TestFiveStores(c *C) {
 	s.scatter(c, 5, 5)
 }
 
-func (s *testScatterRegionSuite) checkOperator(op *schedule.Operator, c *C) {
-	c.Assert(schedule.CheckOperatorValid(op), IsTrue)
+func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
+	c.Assert(operator.CheckOperatorValid(op), IsTrue)
 }
 
 func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
@@ -256,11 +258,11 @@ var _ = Suite(&testRejectLeaderSuite{})
 type testRejectLeaderSuite struct{}
 
 func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
-	opt := mockoption.NewScheduleOptions()
-	opt.LabelProperties = map[string][]*metapb.StoreLabel{
-		schedule.RejectLeader: {{Key: "noleader", Value: "true"}},
+	opts := mockoption.NewScheduleOptions()
+	opts.LabelProperties = map[string][]*metapb.StoreLabel{
+		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
 	}
-	tc := mockcluster.NewCluster(opt)
+	tc := mockcluster.NewCluster(opts)
 
 	// Add 3 stores 1,2,3.
 	tc.AddLabelsStore(1, 1, map[string]string{"noleader": "true"})
@@ -276,12 +278,12 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	sl, err := schedule.CreateScheduler("label", oc)
 	c.Assert(err, IsNil)
 	op := sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 3)
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 3)
 
 	// If store3 is disconnected, transfer leader to store 2 instead.
 	tc.SetStoreDisconnect(3)
 	op = sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
@@ -307,7 +309,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	}
 	tc.Regions.AddRegion(region)
 	op = sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
 }
 
 var _ = Suite(&testShuffleHotRegionSchedulerSuite{})
@@ -349,7 +351,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	opt.HotRegionCacheHitsThreshold = 0
 
 	// try to get an operator
-	var op []*schedule.Operator
+	var op []*operator.Operator
 	for i := 0; i < 100; i++ {
 		op = hb.Schedule(tc)
 		if op != nil {
@@ -357,8 +359,8 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 		}
 	}
 	c.Assert(op, NotNil)
-	c.Assert(op[0].Step(1).(schedule.PromoteLearner).ToStore, Equals, op[0].Step(2).(schedule.TransferLeader).ToStore)
-	c.Assert(op[0].Step(1).(schedule.PromoteLearner).ToStore, Not(Equals), 6)
+	c.Assert(op[0].Step(1).(operator.PromoteLearner).ToStore, Equals, op[0].Step(2).(operator.TransferLeader).ToStore)
+	c.Assert(op[0].Step(1).(operator.PromoteLearner).ToStore, Not(Equals), 6)
 }
 
 var _ = Suite(&testHotRegionSchedulerSuite{})
@@ -410,7 +412,7 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	op := sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], schedule.OpLeader, 1, 2)
+	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
 }
 
 var _ = Suite(&testShuffleRegionSuite{})
@@ -440,6 +442,6 @@ func (s *testShuffleRegionSuite) TestShuffle(c *C) {
 	for i := 0; i < 4; i++ {
 		op := sl.Schedule(tc)
 		c.Assert(op, NotNil)
-		c.Assert(op[0].Kind(), Equals, schedule.OpRegion|schedule.OpAdmin)
+		c.Assert(op[0].Kind(), Equals, operator.OpRegion|operator.OpAdmin)
 	}
 }
