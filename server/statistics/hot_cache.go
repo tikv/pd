@@ -57,7 +57,7 @@ func (k FlowKind) String() string {
 	case ReadFlow:
 		return "read"
 	}
-	return "unimplemente"
+	return "unimplemented"
 }
 
 // HotStoresStats saves the hotspot peer's statistics.
@@ -87,7 +87,7 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 	)
 
 	storeIDs := make(map[uint64]struct{})
-	// got the storeIDs, including old region and new region
+	// gets the storeIDs, including old region and new region
 	ids, ok := f.storesOfRegion[region.GetID()]
 	if ok {
 		for storeID := range ids {
