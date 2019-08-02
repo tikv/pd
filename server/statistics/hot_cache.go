@@ -163,10 +163,6 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 
 // Update updates the items in statistics.
 func (f *HotStoresStats) Update(item *HotSpotPeerStat) {
-	regionTag := fmt.Sprintf("region-%d", item.RegionID)
-	storeTag := fmt.Sprintf("store-%d", item.StoreID)
-	kindBytesTag := fmt.Sprintf("%s-bytes", item.Kind.String())
-	kindKeysTag := fmt.Sprintf("%s-keys", item.Kind.String())
 	if item.IsNeedDelete() {
 		if hotStoreStat, ok := f.hotStoreStats[item.StoreID]; ok {
 			hotStoreStat.Remove(item.RegionID)
@@ -174,8 +170,6 @@ func (f *HotStoresStats) Update(item *HotSpotPeerStat) {
 		if index, ok := f.storesOfRegion[item.RegionID]; ok {
 			delete(index, item.StoreID)
 		}
-		hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindBytesTag).Set(0)
-		hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindKeysTag).Set(0)
 	} else {
 		hotStoreStat, ok := f.hotStoreStats[item.StoreID]
 		if !ok {
@@ -189,11 +183,6 @@ func (f *HotStoresStats) Update(item *HotSpotPeerStat) {
 		}
 		index[item.StoreID] = struct{}{}
 		f.storesOfRegion[item.RegionID] = index
-		// for testing.
-		if item.HotDegree >= 3 {
-			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindBytesTag).Set(float64(item.Stats.Median()))
-			hotCacheRegionFlowGauge.WithLabelValues(regionTag, storeTag, kindKeysTag).Set(float64(item.FlowKeys))
-		}
 	}
 }
 
