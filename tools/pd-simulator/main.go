@@ -51,7 +51,7 @@ func main() {
 	flag.Parse()
 
 	simutil.InitLogger(*simLogLevel)
-	statistics.Simulating = true
+	statistics.Denoising = false
 
 	if *caseName == "" {
 		if *pdAddr != "" {

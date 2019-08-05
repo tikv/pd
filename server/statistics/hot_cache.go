@@ -23,9 +23,9 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-// Simulating is an option to overpass the impact of accelerated time. Should
-// only turned on by the simulator.
-var Simulating bool
+// Denoising is an option to calculate flow base on the real heartbeats. Should
+// only turned off by the simulator and the test.
+var Denoising = true
 
 const (
 	// RegionHeartBeatReportInterval is the heartbeat report interval of a region.
@@ -132,7 +132,7 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 			if v, isExist := hotStoreStats.Peek(region.GetID()); isExist {
 				oldRegionStat = v.(*HotSpotPeerStat)
 				// This is used for the simulator.
-				if !Simulating {
+				if Denoising {
 					interval := time.Since(oldRegionStat.LastUpdateTime).Seconds()
 					if interval < minHotRegionReportInterval && !isExpiredInStore(region, storeID) {
 						continue
