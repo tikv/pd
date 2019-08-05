@@ -94,6 +94,8 @@ func (s *StoresStats) TotalBytesReadRate() float64 {
 
 // GetStoreBytesRate returns the bytes write stat of the specified store.
 func (s *StoresStats) GetStoreBytesRate(storeID uint64) (writeRate float64, readRate float64) {
+	s.RLock()
+	defer s.RUnlock()
 	if storeStat, ok := s.rollingStoresStats[storeID]; ok {
 		return storeStat.GetBytesRate()
 	}
