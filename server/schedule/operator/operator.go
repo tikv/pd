@@ -658,10 +658,11 @@ func CreateTransferLeaderOperator(desc string, region *core.RegionInfo, sourceSt
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
 func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, storeIDs map[uint64]struct{}) (*Operator, error) {
-	kind, steps, err := moveRegionSteps(region, storeIDs, false, cluster)
+	mvkind, steps, err := moveRegionSteps(region, storeIDs, false, cluster)
 	if err != nil {
 		return nil, err
 	}
+	kind |= mvkind
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), kind, steps...), nil
 }
 
