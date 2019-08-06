@@ -686,7 +686,7 @@ func moveRegionSteps(region *core.RegionInfo, storeIDs map[uint64]struct{}, forc
 		kind |= OpRegion
 	}
 
-	// Transfering leader to a new follower may be refused by TiKV if the
+	// Transferring leader to a new follower may be refused by TiKV if the
 	//  apply process is slow (the new follower haven't been promoted).
 	// So, the new leader should be an old follower if it is possible,
 	//  otherwise the first suitable new follower.
