@@ -1,6 +1,14 @@
 # PD Change Log
 
-## v3.0.1 
+## v3.0.2
+
++ Fix the bug that the Scatter Region scheduler cannot work [#1642](https://github.com/pingcap/pd/pull/1642)
++ Fix the bug that the merge region operation cannot be performed in PD Control [#1653](https://github.com/pingcap/pd/pull/1653)
++ Fix the bug that the remove-tombstone operation cannot be performed in PD Control [#1651](https://github.com/pingcap/pd/pull/1651)
++ Fix the issue that the Region intersecting with the key scope cannot be found when performing the scan region operation [#1648](https://github.com/pingcap/pd/pull/1648)
++ Add the retrying mechanism to make sure that the members are added successfully in PD [#1643](https://github.com/pingcap/pd/pull/1643)
+
+## v3.0.1
 
 + Fix the issue about the limit of the hot region [#1552](https://github.com/pingcap/pd/pull/1552)
 + Add a option about grpc gateway [#1596](https://github.com/pingcap/pd/pull/1596)
@@ -14,18 +22,18 @@
 
 ## v3.0.0
 
-+ Support re-creating a cluster from a single node 
-+ Migrate Region metadata from etcd to the go-leveldb storage engine to solve the storage bottleneck in etcd for large-scale clusters 
-+ API 
++ Support re-creating a cluster from a single node
++ Migrate Region metadata from etcd to the go-leveldb storage engine to solve the storage bottleneck in etcd for large-scale clusters
++ API
   - Add the `remove-tombstone` API to clear Tombstone stores
   - Add the `ScanRegions` API to batch query Region information
   - Add the `GetOperator` API to query running operators
   - Optimize the performance of the `GetStores` API
 + Configurations
   - Optimize configuration check logic to avoid configuration item errors
-  - Add `enable-one-way-merge` to control the direction of Region merge 
-  - Add `hot-region-schedule-limit` to control the scheduling rate for hot Regions 
-  - Add `hot-region-cache-hits-threshold` to identify hotspot when hitting multiple thresholds consecutively 
+  - Add `enable-one-way-merge` to control the direction of Region merge
+  - Add `hot-region-schedule-limit` to control the scheduling rate for hot Regions
+  - Add `hot-region-cache-hits-threshold` to identify hotspot when hitting multiple thresholds consecutively
   - Add the `store-balance-rate` configuration item to control the maximum numbers of balance Region operators allowed per minute
 + Scheduler Optimizations
   - Add the store limit mechanism for separately controlling the speed of operators for each store
@@ -35,9 +43,9 @@
   - Add the `shuffle-hot-region` scheduler to facilitate TiKV stability test in scenarios of poor hotspot scheduling
 + Simulator
   - Add simulator for data import scenarios
-  - Support setting different heartbeats intervals for the Store 
+  - Support setting different heartbeats intervals for the Store
 + Others
-  - Upgrade etcd to solve the issues of inconsistent log output formats, Leader selection failure in prevote, and lease deadlocking. 
+  - Upgrade etcd to solve the issues of inconsistent log output formats, Leader selection failure in prevote, and lease deadlocking.
   - Develop a unified log format specification with restructured log system to facilitate collection and analysis by tools
   - Add monitoring metrics including scheduling parameters, cluster label information, time consumed by PD to process TSO requests, Store ID and address information, etc.
 
