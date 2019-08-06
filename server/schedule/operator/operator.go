@@ -658,25 +658,40 @@ func CreateTransferLeaderOperator(desc string, region *core.RegionInfo, sourceSt
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
 func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, storeIDs map[uint64]struct{}) (*Operator, error) {
+	// FIXME: maybe should not use force
+	kind, steps, err := moveRegionSteps(region, storeIDs, true, cluster)
+	if err != nil {
+		return nil, err
+	}
+	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), kind, steps...), nil
+}
+
+func moveRegionSteps(region *core.RegionInfo, storeIDs map[uint64]struct{}, force bool, cluster Cluster) (OpKind, []OpStep, error) {
 	var steps []OpStep
+	var kind OpKind
+	oldStores := make([]uint64, 0, len(storeIDs))
+	newStores := make([]uint64, 0, len(storeIDs))
 	// Add missing peers.
 	for id := range storeIDs {
 		if region.GetStorePeer(id) != nil {
+			oldStores = append(oldStores, id)
 			continue
 		}
+		newStores = append(newStores, id)
 		peer, err := cluster.AllocPeer(id)
 		if err != nil {
-			return nil, err
+			log.Debug("peer alloc failed", zap.Error(err))
+			return kind, nil, err
 		}
-		if cluster.IsRaftLearnerEnabled() {
-			steps = append(steps,
-				AddLearner{ToStore: id, PeerID: peer.Id},
-				PromoteLearner{ToStore: id, PeerID: peer.Id},
-			)
-		} else {
-			steps = append(steps, AddPeer{ToStore: id, PeerID: peer.Id})
-		}
+		steps = append(steps, CreateAddPeerSteps(id, peer.Id, cluster)...)
+		kind |= OpRegion
 	}
+
+	// Transfering leader to a new follower may be refused by TiKV if the
+	//  apply process is slow (the new follower haven't been promoted).
+	// So, the new leader should be an old follower if it is possible,
+	//  otherwise the first suitable new follower.
+	storeIDsVec := append(oldStores, newStores...)
 
 	// Remove redundant peers.
 	for _, peer := range region.GetPeers() {
@@ -684,14 +699,18 @@ func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionI
 			continue
 		}
 		if region.GetLeader().GetId() == peer.GetId() {
-			for targetID := range storeIDs {
-				steps = append(steps, TransferLeader{FromStore: peer.GetStoreId(), ToStore: targetID})
-				break
+			tlkind, tlsteps := transferLeaderToAnySteps(peer.GetStoreId(), storeIDsVec, force, cluster)
+			if tlsteps == nil {
+				log.Debug("select new leader failed", zap.Uint64s("store IDs", storeIDsVec))
+				return kind, nil, errors.New("select suitable store to become leader failed")
 			}
+			steps = append(steps, tlsteps...)
+			kind |= tlkind
 		}
 		steps = append(steps, RemovePeer{FromStore: peer.GetStoreId()})
+		kind |= OpRegion
 	}
-	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, steps...), nil
+	return kind, steps, nil
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
@@ -738,15 +757,8 @@ func getRegionFollowerIDs(region *core.RegionInfo) []uint64 {
 // removePeerSteps returns the steps to safely remove a peer. It prevents removing leader by transfer its leadership first.
 func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64, followerIDs []uint64) (kind OpKind, steps []OpStep, err error) {
 	if region.GetLeader() != nil && region.GetLeader().GetStoreId() == storeID {
-		for _, id := range followerIDs {
-			follower := cluster.GetStore(id)
-			if follower != nil && !cluster.CheckLabelProperty(opt.RejectLeader, follower.GetLabels()) {
-				steps = append(steps, TransferLeader{FromStore: storeID, ToStore: id})
-				kind = OpLeader
-				break
-			}
-		}
-		if len(steps) == 0 {
+		kind, steps = transferLeaderToAnySteps(storeID, followerIDs, false, cluster)
+		if steps == nil {
 			err = errors.New("no suitable follower to become region leader")
 			log.Debug("fail to create remove peer operator", zap.Uint64("region-id", region.GetID()), zap.Error(err))
 			return
@@ -757,9 +769,21 @@ func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64, f
 	return
 }
 
+// transferLeaderToAnySteps returns the first suitable store to become region leader,
+//   ignoring RejectLeader label if force is true.
+func transferLeaderToAnySteps(leaderID uint64, storeIDs []uint64, force bool, cluster Cluster) (OpKind, []OpStep) {
+	for _, id := range storeIDs {
+		store := cluster.GetStore(id)
+		if store != nil && (force || !cluster.CheckLabelProperty(opt.RejectLeader, store.GetLabels())) {
+			return OpLeader, []OpStep{TransferLeader{FromStore: leaderID, ToStore: id}}
+		}
+	}
+	return 0, nil
+}
+
 // CreateMergeRegionOperator creates an operator that merge two region into one.
 func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OpKind) ([]*Operator, error) {
-	steps, kinds, err := matchPeerSteps(cluster, source, target)
+	kinds, steps, err := matchPeerSteps(source, target, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -781,8 +805,7 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 }
 
 // matchPeerSteps returns the steps to match the location of peer stores of source region with target's.
-func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.RegionInfo) ([]OpStep, OpKind, error) {
-	var steps []OpStep
+func matchPeerSteps(source *core.RegionInfo, target *core.RegionInfo, cluster Cluster) (OpKind, []OpStep, error) {
 	var kind OpKind
 
 	sourcePeers := source.GetPeers()
@@ -790,115 +813,16 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 
 	// make sure the peer count is same
 	if len(sourcePeers) != len(targetPeers) {
-		return nil, kind, errors.New("mismatch count of peer")
+		return kind, nil, errors.New("mismatch count of peer")
 	}
 
-	// There is a case that a follower is added and transfer leader to it,
-	// and the apply process of it is slow so leader regards it as voter
-	// but actually it is still learner. Once that, the follower can't be leader,
-	// but old leader can't know that so there is no leader to serve for a while.
-	// So target leader should be the first added follower if there is no transection stores.
-	var targetLeader uint64
-	var toAdds [][]OpStep
+	targetStores := make(map[uint64]struct{}, len(targetPeers))
 
-	// get overlapped part of the peers of two regions
-	intersection := getIntersectionStores(sourcePeers, targetPeers)
 	for _, peer := range targetPeers {
-		storeID := peer.GetStoreId()
-		// find missing peers.
-		if _, found := intersection[storeID]; !found {
-			var addSteps []OpStep
-
-			peer, err := cluster.AllocPeer(storeID)
-			if err != nil {
-				log.Debug("peer alloc failed", zap.Error(err))
-				return nil, kind, err
-			}
-			if cluster.IsRaftLearnerEnabled() {
-				addSteps = append(addSteps,
-					AddLearner{ToStore: storeID, PeerID: peer.Id},
-					PromoteLearner{ToStore: storeID, PeerID: peer.Id},
-				)
-			} else {
-				addSteps = append(addSteps, AddPeer{ToStore: storeID, PeerID: peer.Id})
-			}
-			toAdds = append(toAdds, addSteps)
-
-			// record the first added peer
-			if targetLeader == 0 {
-				targetLeader = storeID
-			}
-			kind |= OpRegion
-		}
+		targetStores[peer.GetStoreId()] = struct{}{}
 	}
 
-	leaderID := source.GetLeader().GetStoreId()
-	for storeID := range intersection {
-		// if leader belongs to overlapped part, no need to transfer
-		if storeID == leaderID {
-			targetLeader = 0
-			break
-		}
-		targetLeader = storeID
-	}
-
-	// if intersection is not empty and leader doesn't belong to intersection, transfer leader to store in overlapped part
-	if len(intersection) != 0 && targetLeader != 0 {
-		steps = append(steps, TransferLeader{FromStore: source.GetLeader().GetStoreId(), ToStore: targetLeader})
-		kind |= OpLeader
-		targetLeader = 0
-	}
-
-	index := 0
-	// remove redundant peers.
-	for _, peer := range sourcePeers {
-		if _, found := intersection[peer.GetStoreId()]; found {
-			continue
-		}
-
-		// the leader should be the last to remove
-		if targetLeader != 0 && peer.GetStoreId() == leaderID {
-			continue
-		}
-
-		steps = append(steps, toAdds[index]...)
-		steps = append(steps, RemovePeer{FromStore: peer.GetStoreId()})
-		kind |= OpRegion
-		index++
-	}
-
-	// transfer leader before remove leader
-	if targetLeader != 0 {
-		steps = append(steps, toAdds[index]...)
-		steps = append(steps, TransferLeader{FromStore: leaderID, ToStore: targetLeader})
-		steps = append(steps, RemovePeer{FromStore: leaderID})
-		kind |= OpLeader | OpRegion
-		index++
-	}
-
-	if index != len(toAdds) {
-		return nil, kind, errors.New("wrong count of add steps")
-	}
-
-	return steps, kind, nil
-}
-
-// getIntersectionStores returns the stores included in two region's peers.
-func getIntersectionStores(a []*metapb.Peer, b []*metapb.Peer) map[uint64]struct{} {
-	intersection := make(map[uint64]struct{})
-	hash := make(map[uint64]struct{})
-
-	for _, peer := range a {
-		hash[peer.GetStoreId()] = struct{}{}
-	}
-
-	for _, peer := range b {
-		if _, found := hash[peer.GetStoreId()]; found {
-			intersection[peer.GetStoreId()] = struct{}{}
-		}
-	}
-
-	return intersection
+	return moveRegionSteps(source, targetStores, true, cluster)
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
