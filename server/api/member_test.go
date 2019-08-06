@@ -24,13 +24,14 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 )
 
 var _ = Suite(&testMemberAPISuite{})
 
 type testMemberAPISuite struct {
 	hc      *http.Client
-	cfgs    []*server.Config
+	cfgs    []*config.Config
 	servers []*server.Server
 	clean   func()
 }
@@ -54,7 +55,7 @@ func relaxEqualStings(c *C, a, b []string) {
 	c.Assert(sortedStringA, Equals, sortedStringB)
 }
 
-func checkListResponse(c *C, body []byte, cfgs []*server.Config) {
+func checkListResponse(c *C, body []byte, cfgs []*config.Config) {
 	got := make(map[string][]*pdpb.Member)
 	json.Unmarshal(body, &got)
 

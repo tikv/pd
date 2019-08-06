@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
@@ -55,7 +56,7 @@ var (
 // Handler is a helper to export methods to handle API/RPC requests.
 type Handler struct {
 	s   *Server
-	opt *scheduleOption
+	opt *config.ScheduleOption
 }
 
 func newHandler(s *Server) *Handler {
@@ -68,7 +69,7 @@ func (h *Handler) GetRaftCluster() *RaftCluster {
 }
 
 // GetScheduleConfig returns ScheduleConfig.
-func (h *Handler) GetScheduleConfig() *ScheduleConfig {
+func (h *Handler) GetScheduleConfig() *config.ScheduleConfig {
 	return h.s.GetScheduleConfig()
 }
 
@@ -184,7 +185,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 	if err = c.addScheduler(s, args...); err != nil {
 		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
-	} else if err = h.opt.persist(c.cluster.storage); err != nil {
+	} else if err = h.opt.Persist(c.cluster.storage); err != nil {
 		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err
@@ -198,7 +199,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	}
 	if err = c.removeScheduler(name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
-	} else if err = h.opt.persist(c.cluster.storage); err != nil {
+	} else if err = h.opt.Persist(c.cluster.storage); err != nil {
 		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err

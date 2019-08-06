@@ -38,7 +38,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.svr.cfg.heartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
+	s.svr.cfg.HeartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()

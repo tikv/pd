@@ -20,12 +20,13 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 )
 
 var _ = Suite(&testConfigSuite{})
 
 type testConfigSuite struct {
-	cfgs    []*server.Config
+	cfgs    []*config.Config
 	servers []*server.Server
 	clean   func()
 }
@@ -42,7 +43,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config"
 	resp, err := doGet(addr)
 	c.Assert(err, IsNil)
-	cfg := &server.Config{}
+	cfg := &config.Config{}
 	err = readJSON(resp.Body, cfg)
 	c.Assert(err, IsNil)
 
@@ -62,7 +63,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 
 	resp, err = doGet(addr)
 	c.Assert(err, IsNil)
-	newCfg := &server.Config{}
+	newCfg := &config.Config{}
 	err = readJSON(resp.Body, newCfg)
 	c.Assert(err, IsNil)
 	cfg.Replication.MaxReplicas = 5
@@ -75,7 +76,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
 	resp, err := doGet(addr)
 	c.Assert(err, IsNil)
-	sc := &server.ScheduleConfig{}
+	sc := &config.ScheduleConfig{}
 	c.Assert(readJSON(resp.Body, sc), IsNil)
 
 	sc.MaxStoreDownTime.Duration = time.Second
@@ -87,7 +88,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 
 	resp, err = doGet(addr)
 	c.Assert(err, IsNil)
-	sc1 := &server.ScheduleConfig{}
+	sc1 := &config.ScheduleConfig{}
 	c.Assert(readJSON(resp.Body, sc1), IsNil)
 
 	c.Assert(*sc, DeepEquals, *sc1)
@@ -98,7 +99,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	resp, err := doGet(addr)
 	c.Assert(err, IsNil)
 
-	rc := &server.ReplicationConfig{}
+	rc := &config.ReplicationConfig{}
 	err = readJSON(resp.Body, rc)
 	c.Assert(err, IsNil)
 
@@ -120,7 +121,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 
 	resp, err = doGet(addr)
 	c.Assert(err, IsNil)
-	rc3 := &server.ReplicationConfig{}
+	rc3 := &config.ReplicationConfig{}
 
 	err = readJSON(resp.Body, rc3)
 	c.Assert(err, IsNil)
@@ -131,10 +132,10 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 	addr := s.servers[0].GetAddr() + apiPrefix + "/api/v1/config/label-property"
 
-	loadProperties := func() server.LabelPropertyConfig {
+	loadProperties := func() config.LabelPropertyConfig {
 		res, err := doGet(addr)
 		c.Assert(err, IsNil)
-		var cfg server.LabelPropertyConfig
+		var cfg config.LabelPropertyConfig
 		err = readJSON(res.Body, &cfg)
 		c.Assert(err, IsNil)
 		return cfg
@@ -154,11 +155,11 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 	}
 	cfg = loadProperties()
 	c.Assert(cfg, HasLen, 2)
-	c.Assert(cfg["foo"], DeepEquals, []server.StoreLabel{
+	c.Assert(cfg["foo"], DeepEquals, []config.StoreLabel{
 		{Key: "zone", Value: "cn1"},
 		{Key: "zone", Value: "cn2"},
 	})
-	c.Assert(cfg["bar"], DeepEquals, []server.StoreLabel{{Key: "host", Value: "h1"}})
+	c.Assert(cfg["bar"], DeepEquals, []config.StoreLabel{{Key: "host", Value: "h1"}})
 
 	cmds = []string{
 		`{"type": "foo", "action": "delete", "label-key": "zone", "label-value": "cn1"}`,
@@ -170,5 +171,5 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 	}
 	cfg = loadProperties()
 	c.Assert(cfg, HasLen, 1)
-	c.Assert(cfg["foo"], DeepEquals, []server.StoreLabel{{Key: "zone", Value: "cn2"}})
+	c.Assert(cfg["foo"], DeepEquals, []config.StoreLabel{{Key: "zone", Value: "cn2"}})
 }

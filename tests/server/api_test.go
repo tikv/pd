@@ -20,14 +20,14 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/tests"
 )
 
 func (s *serverTestSuite) TestReconnect(c *C) {
 	c.Parallel()
 
-	cluster, err := tests.NewTestCluster(3, func(conf *server.Config) {
+	cluster, err := tests.NewTestCluster(3, func(conf *config.Config) {
 		conf.TickInterval = typeutil.Duration{50 * time.Millisecond}
 		conf.ElectionInterval = typeutil.Duration{250 * time.Millisecond}
 	})

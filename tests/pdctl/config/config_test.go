@@ -21,6 +21,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
 )
@@ -62,8 +63,8 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args := []string{"-u", pdAddr, "config", "show"}
 	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	scheduleCfg := server.ScheduleConfig{}
-	cfg := server.Config{}
+	scheduleCfg := config.ScheduleConfig{}
+	cfg := config.Config{}
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	c.Assert(&cfg.Schedule, DeepEquals, svr.GetScheduleConfig())
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
@@ -72,7 +73,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	replicationCfg := server.ReplicationConfig{}
+	replicationCfg := config.ReplicationConfig{}
 	c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
 	c.Assert(&replicationCfg, DeepEquals, svr.GetReplicationConfig())
 
@@ -105,7 +106,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args1 = []string{"-u", pdAddr, "config", "show", "namespace", "ts1"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
-	namespaceCfg := server.NamespaceConfig{}
+	namespaceCfg := config.NamespaceConfig{}
 	c.Assert(json.Unmarshal(output, &namespaceCfg), IsNil)
 	args2 = []string{"-u", pdAddr, "config", "set", "namespace", "ts1", "region-schedule-limit", "128"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
@@ -113,7 +114,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
-	namespaceCfg = server.NamespaceConfig{}
+	namespaceCfg = config.NamespaceConfig{}
 	c.Assert(json.Unmarshal(output, &namespaceCfg), IsNil)
 	c.Assert(namespaceCfg.RegionScheduleLimit, Equals, svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
 
@@ -123,7 +124,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
-	namespaceCfg = server.NamespaceConfig{}
+	namespaceCfg = config.NamespaceConfig{}
 	c.Assert(json.Unmarshal(output, &namespaceCfg), IsNil)
 	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
 
@@ -131,7 +132,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args1 = []string{"-u", pdAddr, "config", "show", "label-property"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
-	labelPropertyCfg := server.LabelPropertyConfig{}
+	labelPropertyCfg := config.LabelPropertyConfig{}
 	c.Assert(json.Unmarshal(output, &labelPropertyCfg), IsNil)
 	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
@@ -142,7 +143,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(labelPropertyCfg, Not(DeepEquals), svr.GetLabelProperty())
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
-	labelPropertyCfg = server.LabelPropertyConfig{}
+	labelPropertyCfg = config.LabelPropertyConfig{}
 	c.Assert(json.Unmarshal(output, &labelPropertyCfg), IsNil)
 	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
@@ -153,7 +154,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(labelPropertyCfg, Not(DeepEquals), svr.GetLabelProperty())
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
-	labelPropertyCfg = server.LabelPropertyConfig{}
+	labelPropertyCfg = config.LabelPropertyConfig{}
 	c.Assert(json.Unmarshal(output, &labelPropertyCfg), IsNil)
 	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
@@ -170,7 +171,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args2 = []string{"-u", pdAddr, "config", "show"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
-	cfg = server.Config{}
+	cfg = config.Config{}
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	scheduleCfg = cfg.Schedule
 	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, svr.GetScheduleConfig().LeaderScheduleLimit)
@@ -185,7 +186,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args2 = []string{"-u", pdAddr, "config", "show"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
-	cfg = server.Config{}
+	cfg = config.Config{}
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	scheduleCfg = cfg.Schedule
 	c.Assert(scheduleCfg.DisableLearner, Equals, svr.GetScheduleConfig().DisableLearner)

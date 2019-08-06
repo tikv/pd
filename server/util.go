@@ -18,14 +18,13 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
-	"regexp"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -71,12 +70,12 @@ func PrintPDInfo() {
 }
 
 // CheckPDVersion checks if PD needs to be upgraded.
-func CheckPDVersion(opt *scheduleOption) {
+func CheckPDVersion(opt *config.ScheduleOption) {
 	pdVersion := MinSupportedVersion(Base)
 	if PDReleaseVersion != "None" {
 		pdVersion = *MustParseVersion(PDReleaseVersion)
 	}
-	clusterVersion := opt.loadClusterVersion()
+	clusterVersion := opt.LoadClusterVersion()
 	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))
 	if pdVersion.LessThan(clusterVersion) {
 		log.Warn(
@@ -159,34 +158,6 @@ func InitHTTPClient(svr *Server) error {
 			TLSClientConfig:   tlsConfig,
 			DisableKeepAlives: true,
 		},
-	}
-	return nil
-}
-
-const matchRule = "^[A-Za-z0-9]([-A-Za-z0-9_./]*[A-Za-z0-9])?$"
-
-// ValidateLabelString checks the legality of the label string.
-// The valid label consists of alphanumeric characters, '-', '_', '.' or '/',
-// and must start and end with an alphanumeric character.
-func ValidateLabelString(s string) error {
-	isValid, _ := regexp.MatchString(matchRule, s)
-	if !isValid {
-		return errors.Errorf("invalid label: %s", s)
-	}
-	return nil
-}
-
-// ValidateLabels checks the legality of the labels.
-func ValidateLabels(labels []*metapb.StoreLabel) error {
-	for _, label := range labels {
-		err := ValidateLabelString(label.Key)
-		if err != nil {
-			return err
-		}
-		err = ValidateLabelString(label.Value)
-		if err != nil {
-			return err
-		}
 	}
 	return nil
 }

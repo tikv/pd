@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tests"
 )
@@ -49,7 +50,7 @@ func (alloc *idAllocator) Alloc() uint64 {
 
 func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	c.Parallel()
-	cluster, err := tests.NewTestCluster(3, func(conf *server.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -93,7 +94,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 
 func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Parallel()
-	cluster, err := tests.NewTestCluster(1, func(conf *server.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
 
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()

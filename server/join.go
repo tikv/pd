@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -77,7 +78,7 @@ var listMemberRetryTimes = 20
 //      What join does: return "" (as etcd will read data directory and find
 //                      that the PD itself has been removed, so an empty string
 //                      is fine.)
-func PrepareJoinCluster(cfg *Config) error {
+func PrepareJoinCluster(cfg *config.Config) error {
 	// - A PD tries to join itself.
 	if cfg.Join == "" {
 		return nil

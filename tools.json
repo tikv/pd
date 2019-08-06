@@ -18,7 +18,7 @@
     },
     {
       "Repository": "github.com/golangci/golangci-lint/cmd/golangci-lint",
-      "Commit": "901cf25e20f86b7e9dc6f73eaba5afbd0cbdc257"
+      "Commit": "4ba2155996359eabd8800d1fbf3e3a9777c80490"
     }
   ],
   "RetoolVersion": "1.3.7"

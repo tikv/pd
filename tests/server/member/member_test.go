@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/tests"
 	"github.com/pkg/errors"
 )
@@ -66,12 +67,12 @@ func (s *serverTestSuite) TestMemberDelete(c *C) {
 	var table = []struct {
 		path    string
 		status  int
-		members []*server.Config
+		members []*config.Config
 	}{
 		{path: "name/foobar", status: http.StatusNotFound},
-		{path: "name/" + members[0].GetConfig().Name, members: []*server.Config{leader.GetConfig(), members[1].GetConfig()}},
+		{path: "name/" + members[0].GetConfig().Name, members: []*config.Config{leader.GetConfig(), members[1].GetConfig()}},
 		{path: "name/" + members[0].GetConfig().Name, status: http.StatusNotFound},
-		{path: fmt.Sprintf("id/%d", members[1].GetServerID()), members: []*server.Config{leader.GetConfig()}},
+		{path: fmt.Sprintf("id/%d", members[1].GetServerID()), members: []*config.Config{leader.GetConfig()}},
 	}
 
 	httpClient := &http.Client{Timeout: 15 * time.Second}
@@ -104,7 +105,7 @@ func (s *serverTestSuite) TestMemberDelete(c *C) {
 	}
 }
 
-func (s *serverTestSuite) checkMemberList(c *C, clientURL string, configs []*server.Config) error {
+func (s *serverTestSuite) checkMemberList(c *C, clientURL string, configs []*config.Config) error {
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 	addr := clientURL + "/pd/api/v1/members"
 	res, err := httpClient.Get(addr)

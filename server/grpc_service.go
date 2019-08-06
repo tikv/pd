@@ -364,7 +364,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		hbStreams := cluster.coordinator.hbStreams
 		cluster.RUnlock()
 
-		if time.Since(lastBind) > s.cfg.heartbeatStreamBindInterval.Duration {
+		if time.Since(lastBind) > s.cfg.HeartbeatStreamBindInterval.Duration {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
 			hbStreams.bindStream(storeID, server)
 			lastBind = time.Now()
@@ -777,7 +777,7 @@ func (s *Server) notBootstrappedHeader() *pdpb.ResponseHeader {
 }
 
 func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
-	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.scheduleOpt.loadClusterVersion())
+	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.scheduleOpt.LoadClusterVersion())
 	return s.errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
 		Message: msg,

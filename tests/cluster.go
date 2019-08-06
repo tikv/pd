@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pkg/errors"
@@ -52,7 +53,7 @@ var initHTTPClientOnce sync.Once
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
-func NewTestServer(cfg *server.Config) (*TestServer, error) {
+func NewTestServer(cfg *config.Config) (*TestServer, error) {
 	err := cfg.SetupLogger()
 	if err != nil {
 		return nil, err
@@ -135,7 +136,7 @@ func (s *TestServer) State() int32 {
 }
 
 // GetConfig returns the current TestServer's configuration.
-func (s *TestServer) GetConfig() *server.Config {
+func (s *TestServer) GetConfig() *config.Config {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetConfig()
@@ -321,7 +322,7 @@ type TestCluster struct {
 }
 
 // ConfigOption is used to define customize settings in test.
-type ConfigOption func(conf *server.Config)
+type ConfigOption func(conf *config.Config)
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {

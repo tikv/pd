@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/config"
 	"go.etcd.io/etcd/embed"
 
 	// Register namespace classifiers.
@@ -37,13 +38,13 @@ import (
 // CleanupFunc closes test pd server(s) and deletes any files left behind.
 type CleanupFunc func()
 
-func cleanServer(cfg *Config) {
+func cleanServer(cfg *config.Config) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
 }
 
 // NewTestServer creates a pd server for testing.
-func NewTestServer(c *check.C) (*Config, *Server, CleanupFunc, error) {
+func NewTestServer(c *check.C) (*config.Config, *Server, CleanupFunc, error) {
 	cfg := NewTestSingleConfig(c)
 	s, err := CreateServer(cfg, nil)
 	if err != nil {
@@ -64,8 +65,8 @@ var zapLogOnce sync.Once
 
 // NewTestSingleConfig is only for test to create one pd.
 // Because PD client also needs this, so export here.
-func NewTestSingleConfig(c *check.C) *Config {
-	cfg := &Config{
+func NewTestSingleConfig(c *check.C) *config.Config {
+	cfg := &config.Config{
 		Name:       "pd",
 		ClientUrls: tempurl.Alloc(),
 		PeerUrls:   tempurl.Alloc(),
@@ -80,7 +81,7 @@ func NewTestSingleConfig(c *check.C) *Config {
 	cfg.AdvertisePeerUrls = cfg.PeerUrls
 	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
-	cfg.disableStrictReconfigCheck = true
+	cfg.DisableStrictReconfigCheck = true
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
 	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
 	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
@@ -97,8 +98,8 @@ func NewTestSingleConfig(c *check.C) *Config {
 
 // NewTestMultiConfig is only for test to create multiple pd configurations.
 // Because PD client also needs this, so export here.
-func NewTestMultiConfig(c *check.C, count int) []*Config {
-	cfgs := make([]*Config, count)
+func NewTestMultiConfig(c *check.C, count int) []*config.Config {
+	cfgs := make([]*config.Config, count)
 
 	clusters := []string{}
 	for i := 1; i <= count; i++ {

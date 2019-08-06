@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -36,7 +37,7 @@ import (
 )
 
 func main() {
-	cfg := server.NewConfig()
+	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 
 	if cfg.Version {

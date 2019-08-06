@@ -404,7 +404,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 	if err != nil {
 		return errors.Errorf("invalid put store %v, error: %s", store, err)
 	}
-	clusterVersion := c.cachedCluster.opt.loadClusterVersion()
+	clusterVersion := c.cachedCluster.opt.LoadClusterVersion()
 	if !IsCompatible(clusterVersion, *v) {
 		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
 	}

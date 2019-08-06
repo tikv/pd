@@ -17,6 +17,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/checker"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -28,8 +29,8 @@ var _ = Suite(&testNamespaceSuite{})
 type testNamespaceSuite struct {
 	classifier     *mapClassifer
 	tc             *testClusterInfo
-	opt            *scheduleOption
-	scheduleConfig *ScheduleConfig
+	opt            *config.ScheduleOption
+	scheduleConfig *config.ScheduleConfig
 }
 
 func (s *testNamespaceSuite) SetUpTest(c *C) {

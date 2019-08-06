@@ -20,6 +20,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 )
 
 var _ = Suite(&testStatusAPISuite{})
@@ -32,7 +33,7 @@ func (s *testStatusAPISuite) SetUpSuite(c *C) {
 	s.hc = newHTTPClient()
 }
 
-func checkStatusResponse(c *C, body []byte, cfgs []*server.Config) {
+func checkStatusResponse(c *C, body []byte, cfgs []*config.Config) {
 	got := status{}
 	c.Assert(json.Unmarshal(body, &got), IsNil)
 

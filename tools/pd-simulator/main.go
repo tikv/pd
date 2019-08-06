@@ -120,7 +120,7 @@ func NewSingleServer(simConfig *simulator.SimConfig) (*server.Server, server.Cle
 	return s, cleanup
 }
 
-func cleanServer(cfg *server.Config) {
+func cleanServer(cfg *config.Config) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
 }

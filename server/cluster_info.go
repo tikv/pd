@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/namespace"
@@ -35,7 +36,7 @@ type clusterInfo struct {
 	id              id.Allocator
 	storage         *core.Storage
 	meta            *metapb.Cluster
-	opt             *scheduleOption
+	opt             *config.ScheduleOption
 	regionStats     *statistics.RegionStatistics
 	labelLevelStats *statistics.LabelLevelStatistics
 	storesStats     *statistics.StoresStats
@@ -46,7 +47,7 @@ type clusterInfo struct {
 
 var defaultChangedRegionsLimit = 10000
 
-func newClusterInfo(id id.Allocator, opt *scheduleOption, storage *core.Storage) *clusterInfo {
+func newClusterInfo(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage) *clusterInfo {
 	return &clusterInfo{
 		core:            core.NewBasicCluster(),
 		id:              id,
@@ -61,7 +62,7 @@ func newClusterInfo(id id.Allocator, opt *scheduleOption, storage *core.Storage)
 }
 
 // Return nil if cluster is not bootstrapped.
-func loadClusterInfo(id id.Allocator, storage *core.Storage, opt *scheduleOption) (*clusterInfo, error) {
+func loadClusterInfo(id id.Allocator, storage *core.Storage, opt *config.ScheduleOption) (*clusterInfo, error) {
 	c := newClusterInfo(id, opt, storage)
 
 	c.meta = &metapb.Cluster{}
@@ -102,7 +103,7 @@ func (c *clusterInfo) OnStoreVersionChange() {
 		clusterVersion semver.Version
 	)
 
-	clusterVersion = c.opt.loadClusterVersion()
+	clusterVersion = c.opt.LoadClusterVersion()
 	stores := c.GetStores()
 	for _, s := range stores {
 		if s.IsTombstone() {
@@ -118,7 +119,7 @@ func (c *clusterInfo) OnStoreVersionChange() {
 	// it will update the cluster version.
 	if clusterVersion.LessThan(*minVersion) {
 		c.opt.SetClusterVersion(*minVersion)
-		err := c.opt.persist(c.storage)
+		err := c.opt.Persist(c.storage)
 		if err != nil {
 			log.Error("persist cluster version meet error", zap.Error(err))
 		}
@@ -135,7 +136,7 @@ func (c *clusterInfo) changedRegionNotifier() <-chan *core.RegionInfo {
 
 // IsFeatureSupported checks if the feature is supported by current cluster.
 func (c *clusterInfo) IsFeatureSupported(f Feature) bool {
-	clusterVersion := c.opt.loadClusterVersion()
+	clusterVersion := c.opt.LoadClusterVersion()
 	minSupportVersion := MinSupportedVersion(f)
 	return !clusterVersion.LessThan(minSupportVersion)
 }
@@ -771,7 +772,7 @@ func (c *clusterInfo) GetLocationLabels() []string {
 }
 
 func (c *clusterInfo) GetStrictlyMatchLabel() bool {
-	return c.opt.rep.GetStrictlyMatchLabel()
+	return c.opt.GetReplication().GetStrictlyMatchLabel()
 }
 
 func (c *clusterInfo) GetHotRegionCacheHitsThreshold() int {

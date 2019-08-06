@@ -11,20 +11,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package config
 
 import (
 	"fmt"
 	"os"
 	"path"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
+
+	// Register schedulers.
+	_ "github.com/pingcap/pd/server/schedulers"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testConfigSuite{})
 
@@ -38,30 +46,30 @@ func (s *testConfigSuite) TestTLS(c *C) {
 }
 
 func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
-	cfg := NewTestSingleConfig(c)
+	cfg := NewConfig()
 	cfg.Join = "127.0.0.1:2379" // Wrong join addr without scheme.
 	c.Assert(cfg.Adjust(nil), NotNil)
 }
 
 func (s *testConfigSuite) TestReloadConfig(c *C) {
-	_, opt, err := newTestScheduleConfig()
+	opt, err := newTestScheduleOption()
 	c.Assert(err, IsNil)
 	storage := core.NewStorage(kv.NewMemoryKV())
-	scheduleCfg := opt.load()
+	scheduleCfg := opt.Load()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
-	opt.loadPDServerConfig().UseRegionStorage = true
-	c.Assert(opt.persist(storage), IsNil)
+	opt.LoadPDServerConfig().UseRegionStorage = true
+	c.Assert(opt.Persist(storage), IsNil)
 
 	// suppose we add a new default enable scheduler "adjacent-region"
 	defaultSchedulers := []string{"balance-region", "balance-leader", "hot-region", "label", "adjacent-region"}
-	_, newOpt, err := newTestScheduleConfig()
+	newOpt, err := newTestScheduleOption()
 	c.Assert(err, IsNil)
 	newOpt.AddSchedulerCfg("adjacent-region", []string{})
-	c.Assert(newOpt.reload(storage), IsNil)
+	c.Assert(newOpt.Reload(storage), IsNil)
 	schedulers := newOpt.GetSchedulers()
 	c.Assert(schedulers, HasLen, 5)
-	c.Assert(newOpt.loadPDServerConfig().UseRegionStorage, IsTrue)
+	c.Assert(newOpt.LoadPDServerConfig().UseRegionStorage, IsTrue)
 	for i, s := range schedulers {
 		c.Assert(s.Type, Equals, defaultSchedulers[i])
 		c.Assert(s.Disable, IsFalse)
@@ -75,21 +83,21 @@ func (s *testConfigSuite) TestValidation(c *C) {
 	c.Assert(cfg.Adjust(nil), IsNil)
 
 	cfg.Log.File.Filename = path.Join(cfg.DataDir, "test")
-	c.Assert(cfg.validate(), NotNil)
+	c.Assert(cfg.Validate(), NotNil)
 
 	// check schedule config
 	cfg.Schedule.HighSpaceRatio = -0.1
-	c.Assert(cfg.Schedule.validate(), NotNil)
+	c.Assert(cfg.Schedule.Validate(), NotNil)
 	cfg.Schedule.HighSpaceRatio = 0.6
-	c.Assert(cfg.Schedule.validate(), IsNil)
+	c.Assert(cfg.Schedule.Validate(), IsNil)
 	cfg.Schedule.LowSpaceRatio = 1.1
-	c.Assert(cfg.Schedule.validate(), NotNil)
+	c.Assert(cfg.Schedule.Validate(), NotNil)
 	cfg.Schedule.LowSpaceRatio = 0.4
-	c.Assert(cfg.Schedule.validate(), NotNil)
+	c.Assert(cfg.Schedule.Validate(), NotNil)
 	cfg.Schedule.LowSpaceRatio = 0.8
-	c.Assert(cfg.Schedule.validate(), IsNil)
+	c.Assert(cfg.Schedule.Validate(), IsNil)
 	cfg.Schedule.TolerantSizeRatio = -0.6
-	c.Assert(cfg.Schedule.validate(), NotNil)
+	c.Assert(cfg.Schedule.Validate(), NotNil)
 }
 
 func (s *testConfigSuite) TestAdjust(c *C) {
@@ -178,4 +186,13 @@ address = "localhost:9090"
 
 	c.Assert(cfg.Metric.PushInterval.Duration, Equals, 35*time.Second)
 	c.Assert(cfg.Metric.PushAddress, Equals, "localhost:9090")
+}
+
+func newTestScheduleOption() (*ScheduleOption, error) {
+	cfg := NewConfig()
+	if err := cfg.Adjust(nil); err != nil {
+		return nil, err
+	}
+	opt := NewScheduleOption(cfg)
+	return opt, nil
 }

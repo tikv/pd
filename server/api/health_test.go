@@ -21,6 +21,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 )
 
 var _ = Suite(&testHealthAPISuite{})
@@ -33,7 +34,7 @@ func (s *testHealthAPISuite) SetUpSuite(c *C) {
 	s.hc = newHTTPClient()
 }
 
-func checkSliceResponse(c *C, body []byte, cfgs []*server.Config, unhealth string) {
+func checkSliceResponse(c *C, body []byte, cfgs []*config.Config, unhealth string) {
 	got := []Health{}
 	c.Assert(json.Unmarshal(body, &got), IsNil)
 

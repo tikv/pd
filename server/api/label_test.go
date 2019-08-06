@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 )
 
 var _ = Suite(&testLabelsStoreSuite{})
@@ -106,7 +107,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 		},
 	}
 
-	s.svr, s.cleanup = mustNewServer(c, func(cfg *server.Config) { cfg.Replication.StrictlyMatchLabel = false })
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.Replication.StrictlyMatchLabel = false })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -182,7 +183,7 @@ type testStrictlyLabelsStoreSuite struct {
 }
 
 func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c, func(cfg *server.Config) {
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.LocationLabels = []string{"zone", "disk"}
 		cfg.Replication.StrictlyMatchLabel = true
 	})

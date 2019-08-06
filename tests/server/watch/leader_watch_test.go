@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/tests"
 )
 
@@ -39,7 +40,7 @@ func (s *serverTestSuite) SetUpSuite(c *C) {
 
 func (s *serverTestSuite) TestWatcher(c *C) {
 	c.Parallel()
-	cluster, err := tests.NewTestCluster(1, func(conf *server.Config) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.AutoCompactionRetention = "1s" })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -76,7 +77,7 @@ func (s *serverTestSuite) TestWatcher(c *C) {
 
 func (s *serverTestSuite) TestWatcherCompacted(c *C) {
 	c.Parallel()
-	cluster, err := tests.NewTestCluster(1, func(conf *server.Config) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.AutoCompactionRetention = "1s" })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 

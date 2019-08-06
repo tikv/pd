@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
 )
@@ -41,7 +42,7 @@ func (s *labelTestSuite) SetUpSuite(c *C) {
 func (s *labelTestSuite) TestLabel(c *C) {
 	c.Parallel()
 
-	cluster, err := tests.NewTestCluster(1, func(cfg *server.Config) { cfg.Replication.StrictlyMatchLabel = false })
+	cluster, err := tests.NewTestCluster(1, func(cfg *config.Config) { cfg.Replication.StrictlyMatchLabel = false })
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

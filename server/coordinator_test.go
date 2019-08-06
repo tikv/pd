@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/namespace"
@@ -34,27 +35,27 @@ import (
 	"github.com/pingcap/pd/server/schedulers"
 )
 
-func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
-	return operator.NewOperator("test", regionID, regionEpoch, kind, steps...)
-}
-
-func newTestScheduleConfig() (*ScheduleConfig, *scheduleOption, error) {
-	cfg := NewConfig()
+func newTestScheduleConfig() (*config.ScheduleConfig, *config.ScheduleOption, error) {
+	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
 	cfg.Schedule.StoreBalanceRate = 60
 	if err := cfg.Adjust(nil); err != nil {
 		return nil, nil, err
 	}
-	opt := newScheduleOption(cfg)
+	opt := config.NewScheduleOption(cfg)
 	opt.SetClusterVersion(MinSupportedVersion(Version2_0))
 	return &cfg.Schedule, opt, nil
+}
+
+func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
+	return operator.NewOperator("test", regionID, regionEpoch, kind, steps...)
 }
 
 type testClusterInfo struct {
 	*clusterInfo
 }
 
-func newTestClusterInfo(opt *scheduleOption) *testClusterInfo {
+func newTestClusterInfo(opt *config.ScheduleOption) *testClusterInfo {
 	return &testClusterInfo{clusterInfo: newClusterInfo(
 		mockid.NewIDAllocator(),
 		opt,
@@ -624,7 +625,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("label-scheduler"), IsNil)
 	c.Assert(co.schedulers, HasLen, 2)
-	c.Assert(co.cluster.opt.persist(co.cluster.storage), IsNil)
+	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
 	co.stop()
 	co.wg.Wait()
 	// make a new coordinator for testing
@@ -636,7 +637,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// suppose we add a new default enable scheduler
 	newOpt.AddSchedulerCfg("adjacent-region", []string{})
 	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
-	c.Assert(newOpt.reload(co.cluster.storage), IsNil)
+	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
 	c.Assert(newOpt.GetSchedulers(), HasLen, 7)
 	tc.clusterInfo.opt = newOpt
 
@@ -648,7 +649,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// suppose restart PD again
 	_, newOpt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(newOpt.reload(tc.storage), IsNil)
+	c.Assert(newOpt.Reload(tc.storage), IsNil)
 	tc.clusterInfo.opt = newOpt
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 	co.run()
@@ -667,13 +668,13 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// the scheduler that is not enable by default will be completely deleted
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 6)
 	c.Assert(co.schedulers, HasLen, 4)
-	c.Assert(co.cluster.opt.persist(co.cluster.storage), IsNil)
+	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
 	co.stop()
 	co.wg.Wait()
 
 	_, newOpt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(newOpt.reload(co.cluster.storage), IsNil)
+	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
 	tc.clusterInfo.opt = newOpt
 	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
 

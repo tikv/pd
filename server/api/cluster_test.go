@@ -20,6 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 )
 
 var _ = Suite(&testClusterInfo{})
@@ -49,7 +50,7 @@ func (s *testClusterInfo) TestCluster(c *C) {
 	c.Assert(err, IsNil)
 
 	c2 := &metapb.Cluster{}
-	r := server.ReplicationConfig{MaxReplicas: 6}
+	r := config.ReplicationConfig{MaxReplicas: 6}
 	c.Assert(s.svr.SetReplicationConfig(r), IsNil)
 	err = readJSONWithURL(url, c2)
 	c.Assert(err, IsNil)
@@ -71,7 +72,7 @@ func (s *testClusterInfo) TestGetClusterStatus(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.After(now), IsTrue)
 	c.Assert(status.IsInitialized, IsFalse)
-	s.svr.SetReplicationConfig(server.ReplicationConfig{MaxReplicas: 1})
+	s.svr.SetReplicationConfig(config.ReplicationConfig{MaxReplicas: 1})
 	err = readJSONWithURL(url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.After(now), IsTrue)

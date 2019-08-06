@@ -19,7 +19,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/pd/pkg/tempurl"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 )
 
 type serverConfig struct {
@@ -45,7 +45,7 @@ func newServerConfig(name string, cc *clusterConfig, join bool) *serverConfig {
 	}
 }
 
-func (c *serverConfig) Generate(opts ...ConfigOption) (*server.Config, error) {
+func (c *serverConfig) Generate(opts ...ConfigOption) (*config.Config, error) {
 	arguments := []string{
 		"--name=" + c.Name,
 		"--data-dir=" + c.DataDir,
@@ -60,7 +60,7 @@ func (c *serverConfig) Generate(opts ...ConfigOption) (*server.Config, error) {
 		arguments = append(arguments, "--initial-cluster="+c.ClusterConfig.GetServerAddrs())
 	}
 
-	cfg := server.NewConfig()
+	cfg := config.NewConfig()
 	err := cfg.Parse(arguments)
 	if err != nil {
 		return nil, err

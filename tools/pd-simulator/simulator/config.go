@@ -7,7 +7,7 @@ import (
 
 	"github.com/pingcap/pd/pkg/tempurl"
 	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 )
 
 const (
@@ -36,12 +36,12 @@ type SimConfig struct {
 	StoreIOMBPerSecond int64  `toml:"store-io-per-second"`
 	StoreVersion       string `toml:"store-version"`
 	// server
-	ServerConfig *server.Config `toml:"server"`
+	ServerConfig *config.Config `toml:"server"`
 }
 
 // NewSimConfig create a new configuration of the simulator.
 func NewSimConfig(serverLogLevel string) *SimConfig {
-	cfg := &server.Config{
+	cfg := &config.Config{
 		Name:       "pd",
 		ClientUrls: tempurl.Alloc(),
 		PeerUrls:   tempurl.Alloc(),

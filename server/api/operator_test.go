@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -36,7 +37,7 @@ type testOperatorSuite struct {
 }
 
 func (s *testOperatorSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c, func(cfg *server.Config) { cfg.Replication.MaxReplicas = 1 })
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 1 })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()

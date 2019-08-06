@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package config
 
 import (
 	"crypto/tls"
@@ -126,9 +126,9 @@ type Config struct {
 
 	// Only test can change them.
 	nextRetryDelay             time.Duration
-	disableStrictReconfigCheck bool
+	DisableStrictReconfigCheck bool
 
-	heartbeatStreamBindInterval typeutil.Duration
+	HeartbeatStreamBindInterval typeutil.Duration
 
 	LeaderPriorityCheckInterval typeutil.Duration
 
@@ -283,7 +283,8 @@ func (c *Config) Parse(arguments []string) error {
 	return err
 }
 
-func (c *Config) validate() error {
+// Validate is used to validate if some configurations are right.
+func (c *Config) Validate() error {
 	if c.Join != "" && c.InitialCluster != "" {
 		return errors.New("-initial-cluster and -join can not be provided at the same time")
 	}
@@ -365,7 +366,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 
-	if err := c.validate(); err != nil {
+	if err := c.Validate(); err != nil {
 		return err
 	}
 
@@ -424,7 +425,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
-	adjustDuration(&c.heartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
+	adjustDuration(&c.HeartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
 	adjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
@@ -443,7 +444,8 @@ func (c *Config) adjustLog(meta *configMetaData) {
 	}
 }
 
-func (c *Config) clone() *Config {
+// Clone returns a cloned configuration.
+func (c *Config) Clone() *Config {
 	cfg := &Config{}
 	*cfg = *c
 	return cfg
@@ -541,7 +543,8 @@ type ScheduleConfig struct {
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 }
 
-func (c *ScheduleConfig) clone() *ScheduleConfig {
+// Clone returns a cloned scheduling configuration.
+func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	schedulers := make(SchedulerConfigs, len(c.Schedulers))
 	copy(schedulers, c.Schedulers)
 	return &ScheduleConfig{
@@ -644,10 +647,11 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 
-	return c.validate()
+	return c.Validate()
 }
 
-func (c *ScheduleConfig) validate() error {
+// Validate is used to validate if some scheduling configurations are right.
+func (c *ScheduleConfig) Validate() error {
 	if c.TolerantSizeRatio < 0 {
 		return errors.New("tolerant-size-ratio should be nonnegative")
 	}
@@ -719,7 +723,8 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 	}
 }
 
-func (c *ReplicationConfig) validate() error {
+// Validate is used to validate if some replication configurations are right.
+func (c *ReplicationConfig) Validate() error {
 	for _, label := range c.LocationLabels {
 		err := ValidateLabelString(label)
 		if err != nil {
@@ -734,7 +739,7 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("strictly-match-label") {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
 	}
-	return c.validate()
+	return c.Validate()
 }
 
 // NamespaceConfig is to overwrite the global setting for specific namespace
@@ -753,7 +758,8 @@ type NamespaceConfig struct {
 	MaxReplicas uint64 `json:"max-replicas"`
 }
 
-func (c *NamespaceConfig) adjust(opt *scheduleOption) {
+// Adjust is used to adjust the namespace configurations.
+func (c *NamespaceConfig) Adjust(opt *ScheduleOption) {
 	adjustUint64(&c.LeaderScheduleLimit, opt.GetLeaderScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.RegionScheduleLimit, opt.GetRegionScheduleLimit(namespace.DefaultNamespace))
 	adjustUint64(&c.ReplicaScheduleLimit, opt.GetReplicaScheduleLimit(namespace.DefaultNamespace))
@@ -811,7 +817,8 @@ type StoreLabel struct {
 // LabelPropertyConfig is the config section to set properties to store labels.
 type LabelPropertyConfig map[string][]StoreLabel
 
-func (c LabelPropertyConfig) clone() LabelPropertyConfig {
+// Clone returns a cloned label property configuration.
+func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	m := make(map[string][]StoreLabel, len(c))
 	for k, sl := range c {
 		sl2 := make([]StoreLabel, 0, len(sl))
@@ -859,8 +866,8 @@ func (c *Config) GetZapLogProperties() *log.ZapProperties {
 	return c.logProps
 }
 
-// generates a configuration for embedded etcd.
-func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
+// GenEmbedEtcdConfig generates a configuration for embedded etcd.
+func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg := embed.NewConfig()
 	cfg.Name = c.Name
 	cfg.Dir = c.DataDir
@@ -869,7 +876,7 @@ func (c *Config) genEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ClusterState = c.InitialClusterState
 	cfg.EnablePprof = true
 	cfg.PreVote = c.PreVote
-	cfg.StrictReconfigCheck = !c.disableStrictReconfigCheck
+	cfg.StrictReconfigCheck = !c.DisableStrictReconfigCheck
 	cfg.TickMs = uint(c.TickInterval.Duration / time.Millisecond)
 	cfg.ElectionMs = uint(c.ElectionInterval.Duration / time.Millisecond)
 	cfg.AutoCompactionMode = c.AutoCompactionMode

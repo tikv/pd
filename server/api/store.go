@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
@@ -69,7 +70,7 @@ const (
 	downStateName    = "Down"
 )
 
-func newStoreInfo(opt *server.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
+func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 	s := &StoreInfo{
 		Store: &MetaStore{
 			Store:     store.GetMeta(),
@@ -244,7 +245,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if err := server.ValidateLabels(labels); err != nil {
+	if err := config.ValidateLabels(labels); err != nil {
 		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}

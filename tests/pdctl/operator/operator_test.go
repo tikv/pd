@@ -21,6 +21,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
@@ -45,9 +46,9 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	var t time.Time
 	t = t.Add(time.Hour)
 	cluster, err := tests.NewTestCluster(1,
-		func(conf *server.Config) { conf.Replication.MaxReplicas = 2 },
-		func(conf *server.Config) { conf.Schedule.MaxStoreDownTime.Duration = time.Since(t) },
-		func(conf *server.Config) { conf.Schedule.StoreBalanceRate = 240 },
+		func(conf *config.Config) { conf.Replication.MaxReplicas = 2 },
+		func(conf *config.Config) { conf.Schedule.MaxStoreDownTime.Duration = time.Since(t) },
+		func(conf *config.Config) { conf.Schedule.StoreBalanceRate = 240 },
 	)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()

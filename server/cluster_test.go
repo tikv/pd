@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockid"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pkg/errors"
@@ -626,16 +627,16 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 
-	scheduleCfg := opt.load()
+	scheduleCfg := opt.Load()
 	replicateCfg := s.svr.GetReplicationConfig()
-	pdServerCfg := s.svr.scheduleOpt.loadPDServerConfig()
+	pdServerCfg := s.svr.scheduleOpt.LoadPDServerConfig()
 
-	//PUT GET DELETE successed
+	//PUT GET DELETE succeed
 	replicateCfg.MaxReplicas = 5
 	scheduleCfg.MaxSnapshotCount = 10
 	pdServerCfg.UseRegionStorage = true
 	typ, labelKey, labelValue := "testTyp", "testKey", "testValue"
-	nsConfig := NamespaceConfig{LeaderScheduleLimit: uint64(200)}
+	nsConfig := config.NamespaceConfig{LeaderScheduleLimit: uint64(200)}
 
 	c.Assert(s.svr.SetScheduleConfig(*scheduleCfg), IsNil)
 	c.Assert(s.svr.SetPDServerConfig(*pdServerCfg), IsNil)
@@ -645,16 +646,16 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 
 	c.Assert(s.svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
 	c.Assert(s.svr.scheduleOpt.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(s.svr.scheduleOpt.loadPDServerConfig().UseRegionStorage, Equals, true)
-	c.Assert(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
-	c.Assert(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
+	c.Assert(s.svr.scheduleOpt.LoadPDServerConfig().UseRegionStorage, Equals, true)
+	c.Assert(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
+	c.Assert(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
 	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(200))
 
 	c.Assert(s.svr.DeleteNamespaceConfig("testNS"), IsNil)
 	c.Assert(s.svr.DeleteLabelProperty(typ, labelKey, labelValue), IsNil)
 
 	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(0))
-	c.Assert(len(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ]), Equals, 0)
+	c.Assert(len(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ]), Equals, 0)
 
 	//PUT GET failed
 	oldStorage := s.svr.storage
@@ -671,9 +672,9 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 
 	c.Assert(s.svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
 	c.Assert(s.svr.scheduleOpt.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(s.svr.scheduleOpt.loadPDServerConfig().UseRegionStorage, Equals, true)
+	c.Assert(s.svr.scheduleOpt.LoadPDServerConfig().UseRegionStorage, Equals, true)
 	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(0))
-	c.Assert(len(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ]), Equals, 0)
+	c.Assert(len(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ]), Equals, 0)
 
 	//DELETE failed
 	s.svr.storage = oldStorage
@@ -686,6 +687,6 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(s.svr.DeleteNamespaceConfig("testNS"), NotNil)
 
 	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(200))
-	c.Assert(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
-	c.Assert(s.svr.scheduleOpt.loadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
+	c.Assert(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
+	c.Assert(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
 }

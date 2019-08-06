@@ -20,6 +20,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server/config"
 )
 
 func TestServer(t *testing.T) {
@@ -92,12 +93,12 @@ var _ = Suite(&testServerSuite{})
 
 type testServerSuite struct{}
 
-func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, CleanupFunc) {
+func newTestServersWithCfgs(c *C, cfgs []*config.Config) ([]*Server, CleanupFunc) {
 	svrs := make([]*Server, 0, len(cfgs))
 
 	ch := make(chan *Server)
 	for _, cfg := range cfgs {
-		go func(cfg *Config) {
+		go func(cfg *config.Config) {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
 			err = svr.Run(context.TODO())
@@ -139,14 +140,14 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	// Start a standalone cluster
 	// TODO: clean up. For now tests failed because:
 	//    etcdserver: failed to purge snap file ...
-	svrsA, _ := newTestServersWithCfgs(c, []*Config{cfgA})
+	svrsA, _ := newTestServersWithCfgs(c, []*config.Config{cfgA})
 	// Close it.
 	for _, svr := range svrsA {
 		svr.Close()
 	}
 
 	// Start another cluster.
-	_, cleanB := newTestServersWithCfgs(c, []*Config{cfgB})
+	_, cleanB := newTestServersWithCfgs(c, []*config.Config{cfgB})
 	defer cleanB()
 
 	// Start previous cluster, expect an error.

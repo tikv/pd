@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"google.golang.org/grpc"
 )
 
@@ -63,27 +64,27 @@ func newHTTPClient() *http.Client {
 	}
 }
 
-func cleanServer(cfg *server.Config) {
+func cleanServer(cfg *config.Config) {
 	// Clean data directory
 	os.RemoveAll(cfg.DataDir)
 }
 
 type cleanUpFunc func()
 
-func mustNewServer(c *C, opts ...func(cfg *server.Config)) (*server.Server, cleanUpFunc) {
+func mustNewServer(c *C, opts ...func(cfg *config.Config)) (*server.Server, cleanUpFunc) {
 	_, svrs, cleanup := mustNewCluster(c, 1, opts...)
 	return svrs[0], cleanup
 }
 
 var zapLogOnce sync.Once
 
-func mustNewCluster(c *C, num int, opts ...func(cfg *server.Config)) ([]*server.Config, []*server.Server, cleanUpFunc) {
+func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, cleanUpFunc) {
 	svrs := make([]*server.Server, 0, num)
 	cfgs := server.NewTestMultiConfig(c, num)
 
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
-		go func(cfg *server.Config) {
+		go func(cfg *config.Config) {
 			err := cfg.SetupLogger()
 			c.Assert(err, IsNil)
 			zapLogOnce.Do(func() {
