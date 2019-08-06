@@ -658,8 +658,7 @@ func CreateTransferLeaderOperator(desc string, region *core.RegionInfo, sourceSt
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
 func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, storeIDs map[uint64]struct{}) (*Operator, error) {
-	// FIXME: maybe should not use force
-	kind, steps, err := moveRegionSteps(region, storeIDs, true, cluster)
+	kind, steps, err := moveRegionSteps(region, storeIDs, false, cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -822,7 +821,7 @@ func matchPeerSteps(source *core.RegionInfo, target *core.RegionInfo, cluster Cl
 		targetStores[peer.GetStoreId()] = struct{}{}
 	}
 
-	return moveRegionSteps(source, targetStores, true, cluster)
+	return moveRegionSteps(source, targetStores, false, cluster)
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
