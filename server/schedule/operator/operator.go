@@ -679,10 +679,10 @@ func moveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs []uint64
 	return orderedMoveRegionSteps(cluster, region, storeIDs)
 }
 
-// orderedMoveRegionSteps returns steps to move peers of a region to specific stores.
+// orderedMoveRegionSteps returns steps to move peers of a region to specific stores in order.
 //
-// If the current leader is not in storeIDs, it will be transferred to an old
-// follower if possible, otherwise the first suitable new follower.
+// If the current leader is not in storeIDs, it will be transferred to a follower which
+//  do not need to move if there is one, otherwise the first suitable new added follower.
 // New peers will be added in the same order in storeIDs.
 func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs []uint64) (OpKind, []OpStep, error) {
 	var kind OpKind
@@ -713,8 +713,8 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 
 	// Transferring leader to a new added follower may be refused by TiKV.
 	// Ref: https://github.com/tikv/tikv/issues/3819
-	// So, the new leader should be an old follower if it is possible,
-	// otherwise the first suitable new follower.
+	// So, the new leader should be a follower that do not need to move if there is one,
+	// otherwise the first suitable new added follower.
 	storeIDs = append(oldStores, newStores...)
 
 	// Remove redundant peers.
@@ -739,7 +739,9 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 		kind |= OpRegion
 	}
 
-	// The following 3 for loop interleave addPeers and rmPeers.
+	// The following 3 'for' loop interleave addPeers and rmPeers.
+	// This makes the operator add and remove peers one by one, so that there won't have
+	//  too many additional peers if the operator fails in the half.
 	var steps = make([]OpStep, 0, len(addPeerSteps)*2+len(rmPeerSteps)+len(mvLeaderSteps))
 	i, j := 0, 0
 	for ; i < len(addPeerSteps) && j < len(rmPeerSteps); i, j = i+1, j+1 {
