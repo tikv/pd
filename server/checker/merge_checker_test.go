@@ -173,11 +173,15 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.checkSteps(c, ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1, PeerID: 1},
 		operator.PromoteLearner{ToStore: 1, PeerID: 1},
+
+		operator.RemovePeer{FromStore: 2},
+
 		operator.AddLearner{ToStore: 4, PeerID: 2},
 		operator.PromoteLearner{ToStore: 4, PeerID: 2},
-		operator.RemovePeer{FromStore: 2},
+
 		operator.TransferLeader{FromStore: 6, ToStore: 5},
 		operator.RemovePeer{FromStore: 6},
+
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
@@ -256,14 +260,20 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.checkSteps(c, ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1, PeerID: 4},
 		operator.PromoteLearner{ToStore: 1, PeerID: 4},
+
+		operator.RemovePeer{FromStore: 3},
+
 		operator.AddLearner{ToStore: 4, PeerID: 5},
 		operator.PromoteLearner{ToStore: 4, PeerID: 5},
+
+		operator.RemovePeer{FromStore: 6},
+
 		operator.AddLearner{ToStore: 5, PeerID: 6},
 		operator.PromoteLearner{ToStore: 5, PeerID: 6},
+
 		operator.TransferLeader{FromStore: 2, ToStore: 1},
 		operator.RemovePeer{FromStore: 2},
-		operator.RemovePeer{FromStore: 3},
-		operator.RemovePeer{FromStore: 6},
+
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
@@ -292,14 +302,20 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.checkSteps(c, ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1, PeerID: 7},
 		operator.PromoteLearner{ToStore: 1, PeerID: 7},
+
+		operator.RemovePeer{FromStore: 3},
+
 		operator.AddLearner{ToStore: 8, PeerID: 8},
 		operator.PromoteLearner{ToStore: 8, PeerID: 8},
+
+		operator.RemovePeer{FromStore: 6},
+
 		operator.AddLearner{ToStore: 7, PeerID: 9},
 		operator.PromoteLearner{ToStore: 7, PeerID: 9},
+
 		operator.TransferLeader{FromStore: 2, ToStore: 1},
 		operator.RemovePeer{FromStore: 2},
-		operator.RemovePeer{FromStore: 3},
-		operator.RemovePeer{FromStore: 6},
+
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
@@ -336,11 +352,15 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.checkSteps(c, ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1, PeerID: 10},
 		operator.PromoteLearner{ToStore: 1, PeerID: 10},
+
+		operator.RemovePeer{FromStore: 3},
+
 		operator.AddLearner{ToStore: 8, PeerID: 11},
 		operator.PromoteLearner{ToStore: 8, PeerID: 11},
-		operator.RemovePeer{FromStore: 3},
+
 		operator.TransferLeader{FromStore: 2, ToStore: 1},
 		operator.RemovePeer{FromStore: 2},
+
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),

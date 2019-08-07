@@ -689,15 +689,23 @@ func moveRegionSteps(region *core.RegionInfo, storeIDs []uint64, cluster Cluster
 // follower if possible, otherwise the first suitable new follower.
 // New peers will be added in the same order in storeIDs.
 func orderedMoveRegionSteps(region *core.RegionInfo, storeIDs []uint64, cluster Cluster) (OpKind, []OpStep, error) {
-	var steps []OpStep
 	var kind OpKind
+
 	oldStores := make([]uint64, 0, len(storeIDs))
 	newStores := make([]uint64, 0, len(storeIDs))
-	stores := make(map[uint64]struct{})
+
+	srcStores := make(map[uint64]struct{}, len(region.GetPeers()))
+	for _, peer := range region.GetPeers() {
+		srcStores[peer.GetStoreId()] = struct{}{}
+	}
+
+	tgtStores := make(map[uint64]struct{}, len(storeIDs))
+
 	// Add missing peers.
+	var addPeerSteps [][]OpStep
 	for _, id := range storeIDs {
-		stores[id] = struct{}{}
-		if region.GetStorePeer(id) != nil {
+		tgtStores[id] = struct{}{}
+		if _, ok := srcStores[id]; ok {
 			oldStores = append(oldStores, id)
 			continue
 		}
@@ -707,7 +715,7 @@ func orderedMoveRegionSteps(region *core.RegionInfo, storeIDs []uint64, cluster 
 			log.Debug("peer alloc failed", zap.Error(err))
 			return kind, nil, err
 		}
-		steps = append(steps, CreateAddPeerSteps(id, peer.Id, cluster)...)
+		addPeerSteps = append(addPeerSteps, CreateAddPeerSteps(id, peer.Id, cluster))
 		kind |= OpRegion
 	}
 
@@ -718,8 +726,10 @@ func orderedMoveRegionSteps(region *core.RegionInfo, storeIDs []uint64, cluster 
 	storeIDsVec := append(oldStores, newStores...)
 
 	// Remove redundant peers.
+	var rmPeerSteps []OpStep
+	var tlSteps []OpStep
 	for _, peer := range region.GetPeers() {
-		if _, ok := stores[peer.GetStoreId()]; ok {
+		if _, ok := tgtStores[peer.GetStoreId()]; ok {
 			continue
 		}
 		if region.GetLeader().GetId() == peer.GetId() {
@@ -728,12 +738,28 @@ func orderedMoveRegionSteps(region *core.RegionInfo, storeIDs []uint64, cluster 
 				log.Debug("select new leader failed", zap.Uint64s("store IDs", storeIDsVec))
 				return kind, nil, errors.New("select suitable store to become leader failed")
 			}
-			steps = append(steps, tlsteps...)
+			tlSteps = append(tlsteps, RemovePeer{FromStore: peer.GetStoreId()})
 			kind |= tlkind
+		} else {
+			rmPeerSteps = append(rmPeerSteps, RemovePeer{FromStore: peer.GetStoreId()})
 		}
-		steps = append(steps, RemovePeer{FromStore: peer.GetStoreId()})
 		kind |= OpRegion
 	}
+
+	var steps = make([]OpStep, 0, len(addPeerSteps)*2+len(rmPeerSteps)+len(tlSteps))
+	i, j := 0, 0
+	for ; i < len(addPeerSteps) && j < len(rmPeerSteps); i, j = i+1, j+1 {
+		steps = append(steps, addPeerSteps[i]...)
+		steps = append(steps, rmPeerSteps[j])
+	}
+	for ; i < len(addPeerSteps); i++ {
+		steps = append(steps, addPeerSteps[i]...)
+	}
+	for ; j < len(rmPeerSteps); j++ {
+		steps = append(steps, rmPeerSteps[j])
+	}
+	steps = append(steps, tlSteps...)
+
 	return kind, steps, nil
 }
 
