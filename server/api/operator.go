@@ -267,18 +267,18 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, nil)
 }
 
-func parseStoreIDs(v interface{}) (map[uint64]struct{}, bool) {
+func parseStoreIDs(v interface{}) ([]uint64, bool) {
 	items, ok := v.([]interface{})
 	if !ok {
 		return nil, false
 	}
-	ids := make(map[uint64]struct{})
+	ids := make([]uint64, 0, len(items))
 	for _, item := range items {
 		id, ok := item.(float64)
 		if !ok {
 			return nil, false
 		}
-		ids[uint64(id)] = struct{}{}
+		ids = append(ids, uint64(id))
 	}
 	return ids, true
 }
