@@ -813,9 +813,8 @@ func transferLeaderToAnySteps(leaderID uint64, storeIDs []uint64, cluster Cluste
 	_, id := findNoRejectLeader(storeIDs, cluster)
 	if id != 0 {
 		return OpLeader, []OpStep{TransferLeader{FromStore: leaderID, ToStore: id}}
-	} else {
-		return 0, nil
 	}
+	return 0, nil
 }
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
