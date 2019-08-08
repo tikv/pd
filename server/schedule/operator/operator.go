@@ -657,7 +657,7 @@ func CreateTransferLeaderOperator(desc string, region *core.RegionInfo, sourceSt
 }
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
-func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, storeIDs []uint64) (*Operator, error) {
+func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, storeIDs map[uint64]struct{}) (*Operator, error) {
 	mvkind, steps, err := moveRegionSteps(cluster, region, storeIDs)
 	if err != nil {
 		return nil, err
@@ -666,15 +666,21 @@ func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionI
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), kind, steps...), nil
 }
 
-// moveRegionSteps reorders the storeIDs then calls orderedMoveRegionSteps.
+// moveRegionSteps returns steps to move a region to specific stores.
 //
-// After reordering, the first store will not have RejectLeader label.
+// The first store in the slice will not have RejectLeader label.
 // If all of the stores have RejectLeader label, it returns an error.
-func moveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs []uint64) (OpKind, []OpStep, error) {
+func moveRegionSteps(cluster Cluster, region *core.RegionInfo, stores map[uint64]struct{}) (OpKind, []OpStep, error) {
+	storeIDs := make([]uint64, 0, len(stores))
+	for id := range stores {
+		storeIDs = append(storeIDs, id)
+	}
+
 	i, _ := findNoLabelProperty(cluster, opt.RejectLeader, storeIDs)
 	if i < 0 {
 		return 0, nil, errors.New("all of the stores have RejectLeader label")
 	}
+
 	storeIDs[0], storeIDs[i] = storeIDs[i], storeIDs[0]
 	return orderedMoveRegionSteps(cluster, region, storeIDs)
 }
@@ -684,6 +690,7 @@ func moveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs []uint64
 // If the current leader is not in storeIDs, it will be transferred to a follower which
 //  do not need to move if there is one, otherwise the first suitable new added follower.
 // New peers will be added in the same order in storeIDs.
+// NOTE: orderedMoveRegionSteps does NOT check duplicate stores.
 func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs []uint64) (OpKind, []OpStep, error) {
 	var kind OpKind
 
@@ -875,13 +882,23 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		return kind, nil, errors.New("mismatch count of peer")
 	}
 
-	targetStores := make([]uint64, len(targetPeers))
-
-	for i, peer := range targetPeers {
-		targetStores[i] = peer.GetStoreId()
+	targetLeader := target.GetLeader().GetStoreId()
+	if targetLeader == 0 {
+		return kind, nil, errors.New("target does not have a leader")
 	}
 
-	return moveRegionSteps(cluster, source, targetStores)
+	// The target leader store must not have RejctLeader.
+	targetStores := make([]uint64, 1, len(targetPeers))
+	targetStores[0] = targetLeader
+
+	for _, peer := range targetPeers {
+		id := peer.GetStoreId()
+		if id != targetLeader {
+			targetStores = append(targetStores, id)
+		}
+	}
+
+	return orderedMoveRegionSteps(cluster, source, targetStores)
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.

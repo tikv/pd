@@ -171,13 +171,13 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	ops := s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	s.checkSteps(c, ops[0], []operator.OpStep{
-		operator.AddLearner{ToStore: 1, PeerID: 1},
-		operator.PromoteLearner{ToStore: 1, PeerID: 1},
+		operator.AddLearner{ToStore: 4, PeerID: 1},
+		operator.PromoteLearner{ToStore: 4, PeerID: 1},
 
 		operator.RemovePeer{FromStore: 2},
 
-		operator.AddLearner{ToStore: 4, PeerID: 2},
-		operator.PromoteLearner{ToStore: 4, PeerID: 2},
+		operator.AddLearner{ToStore: 1, PeerID: 2},
+		operator.PromoteLearner{ToStore: 1, PeerID: 2},
 
 		operator.TransferLeader{FromStore: 6, ToStore: 5},
 		operator.RemovePeer{FromStore: 6},
@@ -258,20 +258,20 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []operator.OpStep{
-		operator.AddLearner{ToStore: 1, PeerID: 4},
-		operator.PromoteLearner{ToStore: 1, PeerID: 4},
+		operator.AddLearner{ToStore: 4, PeerID: 4},
+		operator.PromoteLearner{ToStore: 4, PeerID: 4},
 
 		operator.RemovePeer{FromStore: 3},
 
-		operator.AddLearner{ToStore: 4, PeerID: 5},
-		operator.PromoteLearner{ToStore: 4, PeerID: 5},
+		operator.AddLearner{ToStore: 1, PeerID: 5},
+		operator.PromoteLearner{ToStore: 1, PeerID: 5},
 
 		operator.RemovePeer{FromStore: 6},
 
 		operator.AddLearner{ToStore: 5, PeerID: 6},
 		operator.PromoteLearner{ToStore: 5, PeerID: 6},
 
-		operator.TransferLeader{FromStore: 2, ToStore: 1},
+		operator.TransferLeader{FromStore: 2, ToStore: 4},
 		operator.RemovePeer{FromStore: 2},
 
 		operator.MergeRegion{
@@ -305,13 +305,13 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 
 		operator.RemovePeer{FromStore: 3},
 
-		operator.AddLearner{ToStore: 8, PeerID: 8},
-		operator.PromoteLearner{ToStore: 8, PeerID: 8},
+		operator.AddLearner{ToStore: 7, PeerID: 8},
+		operator.PromoteLearner{ToStore: 7, PeerID: 8},
 
 		operator.RemovePeer{FromStore: 6},
 
-		operator.AddLearner{ToStore: 7, PeerID: 9},
-		operator.PromoteLearner{ToStore: 7, PeerID: 9},
+		operator.AddLearner{ToStore: 8, PeerID: 9},
+		operator.PromoteLearner{ToStore: 8, PeerID: 9},
 
 		operator.TransferLeader{FromStore: 2, ToStore: 1},
 		operator.RemovePeer{FromStore: 2},

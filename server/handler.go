@@ -422,7 +422,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 }
 
 // AddTransferRegionOperator adds an operator to transfer region to the stores.
-func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs []uint64) error {
+func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]struct{}) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return err
@@ -437,7 +437,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs []uint64) 
 		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDs))
 	}
 
-	for _, id := range storeIDs {
+	for id := range storeIDs {
 		store := c.cluster.GetStore(id)
 		if store == nil {
 			return core.NewStoreNotFoundErr(id)
