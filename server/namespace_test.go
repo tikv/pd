@@ -28,7 +28,7 @@ var _ = Suite(&testNamespaceSuite{})
 
 type testNamespaceSuite struct {
 	classifier     *mapClassifer
-	tc             *testClusterInfo
+	tc             *testCluster
 	opt            *config.ScheduleOption
 	scheduleConfig *config.ScheduleConfig
 }
@@ -38,7 +38,7 @@ func (s *testNamespaceSuite) SetUpTest(c *C) {
 	s.classifier = newMapClassifer()
 	s.scheduleConfig, s.opt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	s.tc = newTestClusterInfo(s.opt)
+	s.tc = newTestCluster(s.opt)
 }
 
 func (s *testNamespaceSuite) TestReplica(c *C) {

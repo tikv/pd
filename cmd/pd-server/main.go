@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/server/join"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -81,7 +82,7 @@ func main() {
 
 	metricutil.Push(&cfg.Metric)
 
-	err = server.PrepareJoinCluster(cfg)
+	err = join.PrepareJoinCluster(cfg)
 	if err != nil {
 		log.Fatal("join meet error", zap.Error(err))
 	}

@@ -11,11 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package join
 
 import (
+	"testing"
+
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/server"
 )
+
+func TestJoin(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testJoinServerSuite{})
 
@@ -23,7 +30,7 @@ type testJoinServerSuite struct{}
 
 // A PD joins itself.
 func (s *testJoinServerSuite) TestPDJoinsItself(c *C) {
-	cfg := NewTestSingleConfig(c)
+	cfg := server.NewTestSingleConfig(c)
 	cfg.Join = cfg.AdvertiseClientUrls
 	c.Assert(PrepareJoinCluster(cfg), NotNil)
 }

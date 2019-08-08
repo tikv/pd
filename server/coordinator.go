@@ -56,7 +56,7 @@ type coordinator struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	cluster          *clusterInfo
+	cluster          *RaftCluster
 	learnerChecker   *checker.LearnerChecker
 	replicaChecker   *checker.ReplicaChecker
 	namespaceChecker *checker.NamespaceChecker
@@ -69,7 +69,7 @@ type coordinator struct {
 }
 
 // newCoordinator creates a new coordinator.
-func newCoordinator(cluster *clusterInfo, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
+func newCoordinator(cluster *RaftCluster, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &coordinator{
 		ctx:              ctx,
@@ -445,7 +445,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 // scheduleController is used to manage a scheduler to schedule.
 type scheduleController struct {
 	schedule.Scheduler
-	cluster      *clusterInfo
+	cluster      *RaftCluster
 	opController *schedule.OperatorController
 	classifier   namespace.Classifier
 	nextInterval time.Duration

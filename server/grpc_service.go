@@ -162,7 +162,7 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 		return &pdpb.GetStoreResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	store, err := cluster.GetStore(request.GetStoreId())
+	store, err := cluster.TryGetStore(request.GetStoreId())
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
@@ -177,7 +177,7 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 // It returns nil if it can't get the store.
 // Copied from server/command.go
 func checkStore2(cluster *RaftCluster, storeID uint64) *pdpb.Error {
-	store, err := cluster.GetStore(storeID)
+	store, err := cluster.TryGetStore(storeID)
 	if err == nil && store != nil {
 		if store.GetState() == metapb.StoreState_Tombstone {
 			return &pdpb.Error{
@@ -212,9 +212,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	cluster.RLock()
-	defer cluster.RUnlock()
-	cluster.cachedCluster.OnStoreVersionChange()
+	cluster.OnStoreVersionChange()
 
 	return &pdpb.PutStoreResponse{
 		Header: s.header(),
@@ -235,13 +233,13 @@ func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresReq
 	// Don't return tombstone stores.
 	var stores []*metapb.Store
 	if request.GetExcludeTombstoneStores() {
-		for _, store := range cluster.GetStores() {
+		for _, store := range cluster.GetMetaStores() {
 			if store.GetState() != metapb.StoreState_Tombstone {
 				stores = append(stores, store)
 			}
 		}
 	} else {
-		stores = cluster.GetStores()
+		stores = cluster.GetMetaStores()
 	}
 
 	return &pdpb.GetAllStoresResponse{
@@ -270,9 +268,7 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		}, nil
 	}
 
-	cluster.RLock()
-	defer cluster.RUnlock()
-	err := cluster.cachedCluster.handleStoreHeartbeat(request.Stats)
+	err := cluster.handleStoreHeartbeat(request.Stats)
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
@@ -351,7 +347,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		storeID := request.GetLeader().GetStoreId()
 		storeLabel := strconv.FormatUint(storeID, 10)
-		store, err := cluster.GetStore(storeID)
+		store, err := cluster.TryGetStore(storeID)
 		if err != nil {
 			return err
 		}
@@ -511,7 +507,7 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 
 	cluster.RLock()
 	defer cluster.RUnlock()
-	if !cluster.cachedCluster.IsFeatureSupported(BatchSplit) {
+	if !cluster.IsFeatureSupported(BatchSplit) {
 		return &pdpb.AskBatchSplitResponse{Header: s.incompatibleVersion("batch_split")}, nil
 	}
 	if request.GetRegion() == nil {
@@ -622,7 +618,7 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	region := cluster.GetRegionInfoByID(request.GetRegionId())
+	region := cluster.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
 			return nil, errors.Errorf("region %d not found", request.GetRegionId())

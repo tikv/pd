@@ -23,15 +23,15 @@ import (
 	"github.com/pingcap/pd/server/config"
 )
 
-var _ = Suite(&testClusterInfo{})
+var _ = Suite(&testCluster{})
 
-type testClusterInfo struct {
+type testCluster struct {
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *testClusterInfo) SetUpSuite(c *C) {
+func (s *testCluster) SetUpSuite(c *C) {
 	s.svr, s.cleanup = mustNewServer(c)
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -39,11 +39,11 @@ func (s *testClusterInfo) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 }
 
-func (s *testClusterInfo) TearDownSuite(c *C) {
+func (s *testCluster) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testClusterInfo) TestCluster(c *C) {
+func (s *testCluster) TestCluster(c *C) {
 	url := fmt.Sprintf("%s/cluster", s.urlPrefix)
 	c1 := &metapb.Cluster{}
 	err := readJSONWithURL(url, c1)
@@ -59,7 +59,7 @@ func (s *testClusterInfo) TestCluster(c *C) {
 	c.Assert(c1, DeepEquals, c2)
 }
 
-func (s *testClusterInfo) TestGetClusterStatus(c *C) {
+func (s *testCluster) TestGetClusterStatus(c *C) {
 	url := fmt.Sprintf("%s/cluster/status", s.urlPrefix)
 	status := server.ClusterStatus{}
 	err := readJSONWithURL(url, &status)
