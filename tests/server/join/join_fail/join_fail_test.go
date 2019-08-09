@@ -27,15 +27,15 @@ func Test(t *testing.T) {
 	TestingT(t)
 }
 
-var _ = Suite(&serverTestSuite{})
+var _ = Suite(&joinTestSuite{})
 
-type serverTestSuite struct{}
+type joinTestSuite struct{}
 
-func (s *serverTestSuite) SetUpSuite(c *C) {
+func (s *joinTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
 }
 
-func (s *serverTestSuite) TestFailedPDJoinInStep1(c *C) {
+func (s *joinTestSuite) TestFailedPDJoinInStep1(c *C) {
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -45,9 +45,9 @@ func (s *serverTestSuite) TestFailedPDJoinInStep1(c *C) {
 	cluster.WaitLeader()
 
 	// Join the second PD.
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/add-member-failed", `return`), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/join/add-member-failed", `return`), IsNil)
 	_, err = cluster.Join()
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "join failed"), IsTrue)
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/add-member-failed"), IsNil)
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/join/add-member-failed"), IsNil)
 }

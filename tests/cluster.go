@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
+	"github.com/pingcap/pd/server/join"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -61,7 +62,7 @@ func NewTestServer(cfg *config.Config) (*TestServer, error) {
 	zapLogOnce.Do(func() {
 		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
 	})
-	err = server.PrepareJoinCluster(cfg)
+	err = join.PrepareJoinCluster(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -247,14 +248,14 @@ func (s *TestServer) GetEtcdClient() *clientv3.Client {
 func (s *TestServer) GetStores() []*metapb.Store {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.GetRaftCluster().GetStores()
+	return s.server.GetRaftCluster().GetMetaStores()
 }
 
 // GetStore returns the store with a given store ID.
 func (s *TestServer) GetStore(storeID uint64) (*core.StoreInfo, error) {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.GetRaftCluster().GetStore(storeID)
+	return s.server.GetRaftCluster().TryGetStore(storeID)
 }
 
 // GetRaftCluster returns Raft cluster.
@@ -276,7 +277,7 @@ func (s *TestServer) GetRegions() []*core.RegionInfo {
 func (s *TestServer) GetRegionInfoByID(regionID uint64) *core.RegionInfo {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.GetRaftCluster().GetRegionInfoByID(regionID)
+	return s.server.GetRaftCluster().GetRegion(regionID)
 }
 
 // GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.

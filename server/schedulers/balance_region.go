@@ -161,7 +161,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 		}
 
 		// Skip hot regions.
-		if cluster.IsRegionHot(region.GetID()) {
+		if cluster.IsRegionHot(region) {
 			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 			schedulerCounter.WithLabelValues(s.GetName(), "region_hot").Inc()
 			s.hitsCounter.put(source, nil)

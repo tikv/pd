@@ -935,6 +935,7 @@ var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
 type testBalanceHotWriteRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
+	statistics.Denoising = false
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
@@ -1038,6 +1039,8 @@ func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
 	hb.Schedule(tc)
 }
 
+var _ = Suite(&testBalanceHotReadRegionSchedulerSuite{})
+
 type testBalanceHotReadRegionSchedulerSuite struct{}
 
 func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
@@ -1072,17 +1075,19 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	// lower than hot read flow rate, but higher than write flow rate
 	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
 	opt.HotRegionCacheHitsThreshold = 0
-	c.Assert(tc.IsRegionHot(1), IsTrue)
-	c.Assert(tc.IsRegionHot(11), IsFalse)
+	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
+	c.Assert(tc.IsRegionHot(tc.GetRegion(11)), IsFalse)
 	// check randomly pick hot region
 	r := tc.RandHotRegionFromStore(2, statistics.ReadFlow)
 	c.Assert(r, NotNil)
 	c.Assert(r.GetID(), Equals, uint64(2))
 	// check hot items
 	stats := tc.HotSpotCache.RegionStats(statistics.ReadFlow)
-	c.Assert(len(stats), Equals, 3)
-	for _, s := range stats {
-		c.Assert(s.FlowBytes, Equals, uint64(512*1024))
+	c.Assert(len(stats), Equals, 2)
+	for _, ss := range stats {
+		for _, s := range ss {
+			c.Assert(s.FlowBytes, Equals, uint64(512*1024))
+		}
 	}
 	// Will transfer a hot region leader from store 1 to store 3, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
@@ -1109,6 +1114,72 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 		tc.Regions.RemoveRegion(tc.GetRegion(i))
 	}
 	hb.Schedule(tc)
+}
+
+var _ = Suite(&testBalanceHotCacheSuite{})
+
+type testBalanceHotCacheSuite struct{}
+
+func (s *testBalanceHotCacheSuite) TestUpdateCache(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+
+	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
+	tc.AddRegionStore(1, 3)
+	tc.AddRegionStore(2, 2)
+	tc.AddRegionStore(3, 2)
+	tc.AddRegionStore(4, 2)
+	tc.AddRegionStore(5, 0)
+
+	// Report store read bytes.
+	tc.UpdateStorageReadBytes(1, 75*1024*1024)
+	tc.UpdateStorageReadBytes(2, 45*1024*1024)
+	tc.UpdateStorageReadBytes(3, 45*1024*1024)
+	tc.UpdateStorageReadBytes(4, 60*1024*1024)
+	tc.UpdateStorageReadBytes(5, 0)
+
+	/// For read flow
+	tc.AddLeaderRegionWithReadInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(2, 2, 512*1024*statistics.RegionHeartBeatReportInterval, 1, 3)
+	tc.AddLeaderRegionWithReadInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	// lower than hot read flow rate, but higher than write flow rate
+	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	opt.HotRegionCacheHitsThreshold = 0
+	stats := tc.RegionStats(statistics.ReadFlow)
+	c.Assert(len(stats[1]), Equals, 2)
+	c.Assert(len(stats[2]), Equals, 1)
+	c.Assert(len(stats[3]), Equals, 0)
+
+	tc.AddLeaderRegionWithReadInfo(3, 2, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	stats = tc.RegionStats(statistics.ReadFlow)
+
+	c.Assert(len(stats[1]), Equals, 1)
+	c.Assert(len(stats[2]), Equals, 2)
+	c.Assert(len(stats[3]), Equals, 0)
+
+	// For write flow
+	tc.UpdateStorageWrittenBytes(1, 60*1024*1024)
+	tc.UpdateStorageWrittenBytes(2, 30*1024*1024)
+	tc.UpdateStorageWrittenBytes(3, 60*1024*1024)
+	tc.UpdateStorageWrittenBytes(4, 30*1024*1024)
+	tc.UpdateStorageWrittenBytes(5, 0*1024*1024)
+	tc.AddLeaderRegionWithWriteInfo(4, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(5, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(6, 1, 12*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
+
+	stats = tc.RegionStats(statistics.WriteFlow)
+	c.Assert(len(stats[1]), Equals, 2)
+	c.Assert(len(stats[2]), Equals, 2)
+	c.Assert(len(stats[3]), Equals, 2)
+
+	tc.AddLeaderRegionWithWriteInfo(5, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 5)
+	stats = tc.RegionStats(statistics.WriteFlow)
+
+	c.Assert(len(stats[1]), Equals, 2)
+	c.Assert(len(stats[2]), Equals, 2)
+	c.Assert(len(stats[3]), Equals, 1)
+	c.Assert(len(stats[5]), Equals, 1)
 }
 
 var _ = Suite(&testScatterRangeLeaderSuite{})

@@ -39,6 +39,8 @@ type RegionInfo struct {
 	PendingPeers    []*metapb.Peer    `json:"pending_peers,omitempty"`
 	WrittenBytes    uint64            `json:"written_bytes,omitempty"`
 	ReadBytes       uint64            `json:"read_bytes,omitempty"`
+	WrittenKeys     uint64            `json:"written_keys,omitempty"`
+	ReadKeys        uint64            `json:"read_keys,omitempty"`
 	ApproximateSize int64             `json:"approximate_size,omitempty"`
 	ApproximateKeys int64             `json:"approximate_keys,omitempty"`
 }
@@ -97,7 +99,7 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	regionInfo := cluster.GetRegionInfoByID(regionID)
+	regionInfo := cluster.GetRegion(regionID)
 	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
 }
 
@@ -259,7 +261,7 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	region := cluster.GetRegionInfoByID(uint64(id))
+	region := cluster.GetRegion(uint64(id))
 	if region == nil {
 		h.rd.JSON(w, http.StatusNotFound, server.ErrRegionNotFound(uint64(id)).Error())
 		return

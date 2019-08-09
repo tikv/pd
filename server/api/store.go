@@ -148,7 +148,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store, err := cluster.GetStore(storeID)
+	store, err := cluster.TryGetStore(storeID)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -414,7 +414,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stores := cluster.GetStores()
+	stores := cluster.GetMetaStores()
 	StoresInfo := &StoresInfo{
 		Stores: make([]*StoreInfo, 0, len(stores)),
 	}
@@ -425,9 +425,9 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stores = urlFilter.filter(cluster.GetStores())
+	stores = urlFilter.filter(cluster.GetMetaStores())
 	for _, s := range stores {
-		store, err := cluster.GetStore(s.GetId())
+		store, err := cluster.TryGetStore(s.GetId())
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return

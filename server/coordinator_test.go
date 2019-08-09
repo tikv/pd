@@ -28,8 +28,10 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/namespace"
+	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedulers"
@@ -51,16 +53,13 @@ func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind oper
 	return operator.NewOperator("test", regionID, regionEpoch, kind, steps...)
 }
 
-type testClusterInfo struct {
-	*clusterInfo
+type testCluster struct {
+	*RaftCluster
 }
 
-func newTestClusterInfo(opt *config.ScheduleOption) *testClusterInfo {
-	return &testClusterInfo{clusterInfo: newClusterInfo(
-		mockid.NewIDAllocator(),
-		opt,
-		core.NewStorage(kv.NewMemoryKV()),
-	)}
+func newTestCluster(opt *config.ScheduleOption) *testCluster {
+	cluster := createTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()))
+	return &testCluster{RaftCluster: cluster}
 }
 
 func newTestRegionMeta(regionID uint64) *metapb.Region {
@@ -72,20 +71,22 @@ func newTestRegionMeta(regionID uint64) *metapb.Region {
 	}
 }
 
-func (c *testClusterInfo) addRegionStore(storeID uint64, regionCount int) error {
+func (c *testCluster) addRegionStore(storeID uint64, regionCount int) error {
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = 1000 * (1 << 20)
 	stats.Available = stats.Capacity - uint64(regionCount)*10
-	store := core.NewStoreInfo(&metapb.Store{Id: storeID},
+	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
 		core.SetRegionSize(int64(regionCount)*10),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
-	return c.putStore(store)
+	c.Lock()
+	defer c.Unlock()
+	return c.putStoreLocked(newStore)
 }
 
-func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) error {
+func (c *testCluster) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) error {
 	region := newTestRegionMeta(regionID)
 	leader, _ := c.AllocPeer(leaderID)
 	region.Peers = []*metapb.Peer{leader}
@@ -97,42 +98,50 @@ func (c *testClusterInfo) addLeaderRegion(regionID uint64, leaderID uint64, foll
 	return c.putRegion(regionInfo)
 }
 
-func (c *testClusterInfo) updateLeaderCount(storeID uint64, leaderCount int) error {
+func (c *testCluster) updateLeaderCount(storeID uint64, leaderCount int) error {
 	store := c.GetStore(storeID)
 	newStore := store.Clone(
 		core.SetLeaderCount(leaderCount),
 		core.SetLeaderSize(int64(leaderCount)*10),
 	)
-	return c.putStore(newStore)
+	c.Lock()
+	defer c.Unlock()
+	return c.putStoreLocked(newStore)
 }
 
-func (c *testClusterInfo) addLeaderStore(storeID uint64, leaderCount int) error {
+func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 	stats := &pdpb.StoreStats{}
-	store := core.NewStoreInfo(&metapb.Store{Id: storeID},
+	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),
 		core.SetLeaderCount(leaderCount),
 		core.SetLeaderSize(int64(leaderCount)*10),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
-	return c.putStore(store)
+	c.Lock()
+	defer c.Unlock()
+	return c.putStoreLocked(newStore)
 }
 
-func (c *testClusterInfo) setStoreDown(storeID uint64) error {
+func (c *testCluster) setStoreDown(storeID uint64) error {
 	store := c.GetStore(storeID)
 	newStore := store.Clone(
 		core.SetStoreState(metapb.StoreState_Up),
 		core.SetLastHeartbeatTS(time.Time{}),
 	)
-	return c.putStore(newStore)
+	c.Lock()
+	defer c.Unlock()
+	return c.putStoreLocked(newStore)
 }
 
-func (c *testClusterInfo) setStoreOffline(storeID uint64) error {
+func (c *testCluster) setStoreOffline(storeID uint64) error {
 	store := c.GetStore(storeID)
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))
-	return c.putStore(newStore)
+	c.Lock()
+	defer c.Unlock()
+	return c.putStoreLocked(newStore)
 }
 
-func (c *testClusterInfo) LoadRegion(regionID uint64, followerIds ...uint64) error {
+func (c *testCluster) LoadRegion(regionID uint64, followerIds ...uint64) error {
 	//  regions load from etcd will have no leader
 	region := newTestRegionMeta(regionID)
 	region.Peers = []*metapb.Peer{}
@@ -150,11 +159,11 @@ type testCoordinatorSuite struct{}
 func (s *testCoordinatorSuite) TestBasic(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	oc := co.opController
 
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
@@ -179,11 +188,11 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.wg.Wait()
 	defer co.stop()
@@ -244,11 +253,11 @@ func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream mo
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	// Make sure there are no problem when concurrent write and read
 	for i := 0; i <= 10; i++ {
@@ -261,7 +270,7 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	for i := 0; i < 1000; i++ {
 		co.collectHotSpotMetrics()
 		co.collectSchedulerMetrics()
-		co.cluster.collectMetrics()
+		co.cluster.collectClusterMetrics()
 	}
 }
 
@@ -269,11 +278,11 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cfg.DisableLearner = false
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 
 	c.Assert(tc.addRegionStore(4, 4), IsNil)
@@ -299,8 +308,8 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 
 	// new cluster with learner disabled
 	cfg.DisableLearner = true
-	tc = newTestClusterInfo(opt)
-	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	tc = newTestCluster(opt)
+	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.wg.Wait()
 	defer co.stop()
@@ -328,11 +337,11 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	cfg.LeaderScheduleLimit = 0
 	cfg.RegionScheduleLimit = 0
 
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.wg.Wait()
 	defer co.stop()
@@ -391,11 +400,11 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.wg.Wait()
 	defer co.stop()
@@ -441,11 +450,11 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 
 	c.Assert(tc.addLeaderStore(1, 5), IsNil)
 	c.Assert(tc.addLeaderStore(2, 2), IsNil)
@@ -478,23 +487,23 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	for _, t := range tbl {
 		r := tc.GetRegion(t.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
-		c.Assert(tc.handleRegionHeartbeat(nr), IsNil)
+		c.Assert(tc.processRegionHeartbeat(nr), IsNil)
 		c.Assert(co.shouldRun(), Equals, t.shouldRun)
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
-	c.Assert(tc.handleRegionHeartbeat(newRegion), NotNil)
+	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
 	c.Assert(co.cluster.prepareChecker.sum, Equals, 7)
 
 }
 func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 
 	c.Assert(tc.addLeaderStore(1, 10), IsNil)
 	c.Assert(tc.addLeaderStore(2, 0), IsNil)
@@ -522,12 +531,12 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 	for _, t := range tbl {
 		r := tc.GetRegion(t.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
-		c.Assert(tc.handleRegionHeartbeat(nr), IsNil)
+		c.Assert(tc.processRegionHeartbeat(nr), IsNil)
 		c.Assert(co.shouldRun(), Equals, t.shouldRun)
 	}
 	nr := &metapb.Region{Id: 8, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
-	c.Assert(tc.handleRegionHeartbeat(newRegion), NotNil)
+	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
 	c.Assert(co.cluster.prepareChecker.sum, Equals, 8)
 
 	// Now, after server is prepared, there exist some regions with no leader.
@@ -540,10 +549,10 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(err, IsNil)
 	cfg.ReplicaScheduleLimit = 0
 
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	defer co.wg.Wait()
 	defer co.stop()
@@ -599,11 +608,11 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(err, IsNil)
 	cfg.ReplicaScheduleLimit = 0
 
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 
 	// Add stores 1,2
@@ -619,7 +628,6 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls2, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 6)
-	fmt.Println(opt)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
@@ -639,9 +647,9 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
 	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
 	c.Assert(newOpt.GetSchedulers(), HasLen, 7)
-	tc.clusterInfo.opt = newOpt
+	tc.RaftCluster.opt = newOpt
 
-	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	c.Assert(co.schedulers, HasLen, 3)
 	co.stop()
@@ -650,8 +658,8 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	_, newOpt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(newOpt.Reload(tc.storage), IsNil)
-	tc.clusterInfo.opt = newOpt
-	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	tc.RaftCluster.opt = newOpt
+	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	c.Assert(co.schedulers, HasLen, 3)
 	bls, err := schedule.CreateScheduler("balance-leader", oc)
@@ -675,8 +683,8 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	_, newOpt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
-	tc.clusterInfo.opt = newOpt
-	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	tc.RaftCluster.opt = newOpt
+	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 
 	co.run()
 	defer co.wg.Wait()
@@ -693,7 +701,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	cfg.LeaderScheduleLimit = 0
 	cfg.RegionScheduleLimit = 0
 
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
@@ -706,7 +714,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	tc.prepareChecker.collect(region)
 
 	// Add 1 replica on store 2.
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	stream := mockhbstream.NewHeartbeatStream()
 	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
@@ -717,7 +725,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co.wg.Wait()
 
 	// Recreate coodinator then add another replica on store 3.
-	co = newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 3)
@@ -740,10 +748,10 @@ type testOperatorControllerSuite struct{}
 func (s *testOperatorControllerSuite) TestOperatorCount(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
-	hbStreams := mockhbstream.NewHeartbeatStreams(tc.clusterInfo.getClusterID())
+	tc := newTestCluster(opt)
+	hbStreams := mockhbstream.NewHeartbeatStreams(tc.RaftCluster.getClusterID())
 
-	oc := schedule.NewOperatorController(tc.clusterInfo, hbStreams)
+	oc := schedule.NewOperatorController(tc.RaftCluster, hbStreams)
 	c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(0))
 	c.Assert(oc.OperatorCount(operator.OpRegion), Equals, uint64(0))
 
@@ -772,10 +780,10 @@ func (s *testOperatorControllerSuite) TestOperatorCount(c *C) {
 func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
-	oc := schedule.NewOperatorController(tc.clusterInfo, hbStreams)
+	oc := schedule.NewOperatorController(tc.RaftCluster, hbStreams)
 	lb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
 
@@ -800,10 +808,10 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
-	oc := schedule.NewOperatorController(tc.clusterInfo, hbStreams)
+	oc := schedule.NewOperatorController(tc.RaftCluster, hbStreams)
 	lb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
 
@@ -844,14 +852,14 @@ func (s *mockLimitScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 func (s *testScheduleControllerSuite) TestController(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 2), IsNil)
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	oc := co.opController
 	scheduler, err := schedule.CreateScheduler("balance-leader", oc)
 	c.Assert(err, IsNil)
@@ -922,11 +930,11 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc := newTestClusterInfo(opt)
+	tc := newTestCluster(opt)
 	hbStreams := getHeartBeatStreams(c, tc)
 	defer hbStreams.Close()
 
-	co := newCoordinator(tc.clusterInfo, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	lb, err := schedule.CreateScheduler("balance-leader", co.opController)
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
@@ -1011,7 +1019,7 @@ func waitNoResponse(c *C, stream mockhbstream.HeartbeatStream) {
 	})
 }
 
-func getHeartBeatStreams(c *C, tc *testClusterInfo) *heartbeatStreams {
+func getHeartBeatStreams(c *C, tc *testCluster) *heartbeatStreams {
 	config := NewTestSingleConfig(c)
 	svr, err := CreateServer(config, nil)
 	c.Assert(err, IsNil)
@@ -1020,8 +1028,18 @@ func getHeartBeatStreams(c *C, tc *testClusterInfo) *heartbeatStreams {
 	regionStorage, err := core.NewRegionStorage(path)
 	c.Assert(err, IsNil)
 	svr.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
-	cluster := newRaftCluster(svr, tc.getClusterID())
-	cluster.cachedCluster = tc.clusterInfo
+	cluster := tc.RaftCluster
+	cluster.s = svr
+	cluster.running = false
+	cluster.clusterID = tc.getClusterID()
+	cluster.clusterRoot = svr.getClusterRootPath()
+	cluster.regionSyncer = syncer.NewRegionSyncer(svr)
 	hbStreams := newHeartbeatStreams(tc.getClusterID(), cluster)
 	return hbStreams
+}
+
+func createTestRaftCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage) *RaftCluster {
+	cluster := &RaftCluster{}
+	cluster.initCluster(id, opt, storage)
+	return cluster
 }
