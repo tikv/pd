@@ -735,7 +735,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 		if region.GetLeader().GetStoreId() == id {
 			tlkind, tlsteps, err := transferLeaderToAnySteps(cluster, id, storeIDs)
 			if err != nil {
-				log.Debug("move region to stores failed", zap.Uint64("region id", region.GetID()), zap.Uint64s("store IDs", storeIDs), zap.Error(err))
+				log.Debug("move region to stores failed", zap.Uint64("region-id", region.GetID()), zap.Uint64s("store-ids", storeIDs), zap.Error(err))
 				return kind, nil, err
 			}
 			mvLeaderSteps = append(tlsteps, RemovePeer{FromStore: id})
@@ -831,7 +831,7 @@ func findNoLabelProperty(cluster Cluster, prop string, storeIDs []uint64) (int, 
 				return i, id
 			}
 		} else {
-			log.Debug("nil store", zap.Uint64("store id", id))
+			log.Debug("nil store", zap.Uint64("store-id", id))
 		}
 	}
 	return -1, 0
