@@ -748,7 +748,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 
 	// The following 3 'for' loop interleave addPeers and rmPeers.
 	// This makes the operator add and remove peers one by one, so that there won't have
-	//  too many additional peers if the operator fails in the half.
+	// too many additional peers if the operator fails in the half.
 	var steps = make([]OpStep, 0, len(addPeerSteps)*2+len(rmPeerSteps)+len(mvLeaderSteps))
 	i, j := 0, 0
 	for ; i < len(addPeerSteps) && j < len(rmPeerSteps); i, j = i+1, j+1 {
