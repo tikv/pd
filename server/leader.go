@@ -216,21 +216,13 @@ func (s *Server) memberInfo() (member *pdpb.Member, marshalStr string) {
 func (s *Server) campaignLeader() error {
 	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
 
-	lessor := clientv3.NewLease(s.client)
+	lease := NewLeaderLease(s.client)
 	defer func() {
-		lessor.Close()
+		lease.Close()
 		log.Info("exit campaign leader")
 	}()
 
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(s.client.Ctx(), requestTimeout)
-	leaseResp, err := lessor.Grant(ctx, s.cfg.LeaderLease)
-	cancel()
-
-	if cost := time.Since(start); cost > slowRequestTime {
-		log.Warn("lessor grants too slow", zap.Duration("cost", cost))
-	}
-
+	err := lease.Grant(s.cfg.LeaderLease)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -239,7 +231,7 @@ func (s *Server) campaignLeader() error {
 	// The leader key must not exist, so the CreateRevision is 0.
 	resp, err := kv.NewSlowLogTxn(s.client).
 		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
-		Then(clientv3.OpPut(leaderKey, s.memberValue, clientv3.WithLease(leaseResp.ID))).
+		Then(clientv3.OpPut(leaderKey, s.memberValue, clientv3.WithLease(lease.ID))).
 		Commit()
 	if err != nil {
 		return errors.WithStack(err)
@@ -249,10 +241,10 @@ func (s *Server) campaignLeader() error {
 	}
 
 	// Make the leader keepalived.
-	ctx, cancel = context.WithCancel(s.serverLoopCtx)
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
-	ch, err := lessor.KeepAlive(ctx, leaseResp.ID)
+	ch, err := lease.KeepAlive(ctx)
 	if err != nil {
 		return errors.WithStack(err)
 	}
