@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package simulator
+package simutil
 
 import (
 	"testing"
@@ -31,7 +31,7 @@ type testTableKeySuite struct{}
 func (t *testTableKeySuite) TestGenerateTableKeys(c *C) {
 	tableCount := 3
 	size := 10
-	keys := generateTableKeys(tableCount, size)
+	keys := GenerateTableKeys(tableCount, size)
 	c.Assert(len(keys), Equals, size)
 
 	for i := 1; i < len(keys); i++ {
@@ -39,7 +39,8 @@ func (t *testTableKeySuite) TestGenerateTableKeys(c *C) {
 		s := []byte(keys[i-1])
 		e := []byte(keys[i])
 		for j := 0; j < 1000; j++ {
-			split := generateTiDBEncodedSplitKey(s, e)
+			split, err := GenerateTiDBEncodedSplitKey(s, e)
+			c.Assert(err, IsNil)
 			c.Assert(s, Less, split)
 			c.Assert(split, Less, e)
 			e = split
@@ -52,7 +53,8 @@ func (t *testTableKeySuite) TestGenerateSplitKey(c *C) {
 	s := []byte(table.EncodeBytes([]byte("a")))
 	e := []byte(table.EncodeBytes([]byte("ab")))
 	for i := 0; i <= 1000; i++ {
-		cc := generateTiDBEncodedSplitKey(s, e)
+		cc, err := GenerateTiDBEncodedSplitKey(s, e)
+		c.Assert(err, IsNil)
 		c.Assert(s, Less, cc)
 		c.Assert(cc, Less, e)
 		e = cc
@@ -61,7 +63,8 @@ func (t *testTableKeySuite) TestGenerateSplitKey(c *C) {
 	// empty key
 	s = []byte("")
 	e = []byte{116, 128, 0, 0, 0, 0, 0, 0, 255, 1, 0, 0, 0, 0, 0, 0, 0, 248}
-	splitKey := generateTiDBEncodedSplitKey(s, e)
+	splitKey, err := GenerateTiDBEncodedSplitKey(s, e)
+	c.Assert(err, IsNil)
 	c.Assert(s, Less, splitKey)
 	c.Assert(splitKey, Less, e)
 
@@ -70,7 +73,8 @@ func (t *testTableKeySuite) TestGenerateSplitKey(c *C) {
 	e = table.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1, 1})
 	for i := 0; i <= 1000; i++ {
 		c.Assert(s, Less, e)
-		splitKey = generateTiDBEncodedSplitKey(s, e)
+		splitKey, err = GenerateTiDBEncodedSplitKey(s, e)
+		c.Assert(err, IsNil)
 		c.Assert(s, Less, splitKey)
 		c.Assert(splitKey, Less, e)
 		e = splitKey
