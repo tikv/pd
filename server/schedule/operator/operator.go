@@ -887,7 +887,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		return kind, nil, errors.New("target does not have a leader")
 	}
 
-	// The target leader store must not have RejctLeader.
+	// The target leader store must not have RejectLeader.
 	targetStores := make([]uint64, 1, len(targetPeers))
 	targetStores[0] = targetLeader
 
