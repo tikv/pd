@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/log"
@@ -23,12 +24,17 @@ import (
 	"go.uber.org/zap"
 )
 
+// LeaderLease is used for renewing leadership of PD server.
 type LeaderLease struct {
-	client *clientv3.Client
-	lease  clientv3.Lease
-	ID     clientv3.LeaseID
+	client       *clientv3.Client
+	lease        clientv3.Lease
+	ID           clientv3.LeaseID
+	leaseTimeout time.Duration
+
+	expireTime atomic.Value
 }
 
+// NewLeaderLease creates a lease.
 func NewLeaderLease(client *clientv3.Client) *LeaderLease {
 	return &LeaderLease{
 		client: client,
@@ -36,10 +42,11 @@ func NewLeaderLease(client *clientv3.Client) *LeaderLease {
 	}
 }
 
-func (l *LeaderLease) Grant(seconds int64) error {
+// Grant uses `lease.Grant` to initialize the lease and expireTime.
+func (l *LeaderLease) Grant(leaseTimeout int64) error {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), requestTimeout)
-	leaseResp, err := l.lease.Grant(ctx, seconds)
+	leaseResp, err := l.lease.Grant(ctx, leaseTimeout)
 	cancel()
 	if cost := time.Since(start); cost > slowRequestTime {
 		log.Warn("lease grants too slow", zap.Duration("cost", cost))
@@ -48,13 +55,78 @@ func (l *LeaderLease) Grant(seconds int64) error {
 		return errors.WithStack(err)
 	}
 	l.ID = leaseResp.ID
+	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
+	l.expireTime.Store(start.Add(time.Duration(leaseResp.TTL) * time.Second))
 	return nil
 }
 
+// Close releases the lease.
 func (l *LeaderLease) Close() error {
 	return l.lease.Close()
 }
 
-func (l *LeaderLease) KeepAlive(ctx context.Context) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
-	return l.lease.KeepAlive(ctx, l.ID)
+// IsExpired checks if the lease is expired. If it returns true, current PD
+// server should step down and try to re-elect again.
+func (l *LeaderLease) IsExpired() bool {
+	return time.Now().After(l.expireTime.Load().(time.Time))
+}
+
+// KeepAlive auto renews the lease and update expireTime.
+func (l *LeaderLease) KeepAlive(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
+
+	var maxExpire time.Time
+	for {
+		select {
+		case t := <-timeCh:
+			if t.After(maxExpire) {
+				maxExpire = t
+				l.expireTime.Store(t)
+			}
+		case <-time.After(l.leaseTimeout):
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.
+func (l *LeaderLease) keepAliveWorker(ctx context.Context, interval time.Duration) <-chan time.Time {
+	ch := make(chan time.Time)
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			go func() {
+				start := time.Now()
+				ctx1, cancel := context.WithTimeout(ctx, time.Duration(l.leaseTimeout))
+				defer cancel()
+				res, err := l.lease.KeepAliveOnce(ctx1, l.ID)
+				if err != nil {
+					log.Warn("leader lease keep alive failed", zap.Error(err))
+					return
+				}
+				if res.TTL > 0 {
+					expire := start.Add(time.Duration(res.TTL) * time.Second)
+					select {
+					case ch <- expire:
+					case <-ctx1.Done():
+					}
+				}
+			}()
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+
+	return ch
 }

@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/tso"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
@@ -35,6 +34,8 @@ import (
 
 // The timeout to wait transfer etcd leader to complete.
 const moveLeaderTimeout = 5 * time.Second
+
+const leaderTickInterval = 50 * time.Millisecond
 
 // IsLeader returns whether the server is leader or not.
 func (s *Server) IsLeader() bool {
@@ -240,15 +241,21 @@ func (s *Server) campaignLeader() error {
 		return errors.New("failed to campaign leader, other server may campaign ok")
 	}
 
-	// Make the leader keepalived.
+	// Start keepalive and enable TSO service.
+	// TSO service is strictly enabled/disabled by leader lease for 2 reasons:
+	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
+	//   2. load region could be slow. Based on lease we can recover TSO service faster.
+
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-
-	ch, err := lease.KeepAlive(ctx)
-	if err != nil {
-		return errors.WithStack(err)
-	}
+	go lease.KeepAlive(ctx)
 	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
+
+	log.Debug("sync timestamp for tso")
+	if err = s.tso.SyncTimestamp(lease); err != nil {
+		return err
+	}
+	defer s.tso.ResetTimestamp()
 
 	err = s.reloadConfigFromKV()
 	if err != nil {
@@ -261,29 +268,22 @@ func (s *Server) campaignLeader() error {
 	}
 	defer s.stopRaftCluster()
 
-	log.Debug("sync timestamp for tso")
-	if err = s.tso.SyncTimestamp(); err != nil {
-		return err
-	}
-	defer s.tso.ResetTimestamp()
-
 	s.enableLeader()
 	defer s.disableLeader()
 
 	CheckPDVersion(s.scheduleOpt)
 	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
 
-	tsTicker := time.NewTicker(tso.UpdateTimestampStep)
-	defer tsTicker.Stop()
+	leaderTicker := time.NewTicker(leaderTickInterval)
+	defer leaderTicker.Stop()
 
 	for {
 		select {
-		case _, ok := <-ch:
-			if !ok {
-				log.Info("keep alive channel is closed")
+		case <-leaderTicker.C:
+			if lease.IsExpired() {
+				log.Info("lease expired, leader step down")
 				return nil
 			}
-		case <-tsTicker.C:
 			if err = s.tso.UpdateTimestamp(); err != nil {
 				log.Info("failed to update timestamp")
 				return err
