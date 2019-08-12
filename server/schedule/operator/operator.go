@@ -747,11 +747,11 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 		kind |= OpRegion
 	}
 
-	// The following 3 'for' loop interleave addPeers and rmPeers.
-	// This makes the operator add and remove peers one by one, so that there won't have
+	// Interleaving makes the operator add and remove peers one by one, so that there won't have
 	// too many additional peers if the operator fails in the half.
 	hint := len(addPeerSteps)*2 + len(rmPeerSteps) + len(mvLeaderSteps)
 	steps := interleaveStepGroups(addPeerSteps, rmPeerSteps, hint)
+
 	steps = append(steps, mvLeaderSteps...)
 
 	return kind, steps, nil
