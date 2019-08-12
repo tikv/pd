@@ -725,7 +725,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 	storeIDs = append(oldStores, newStores...)
 
 	// Remove redundant peers.
-	var rmPeerSteps []OpStep
+	var rmPeerSteps [][]OpStep
 	// Transfer leader as late as possible to prevent transferring to a new added follower.
 	var mvLeaderSteps []OpStep
 	for _, peer := range region.GetPeers() {
@@ -742,7 +742,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 			mvLeaderSteps = append(tlsteps, RemovePeer{FromStore: id})
 			kind |= tlkind
 		} else {
-			rmPeerSteps = append(rmPeerSteps, RemovePeer{FromStore: id})
+			rmPeerSteps = append(rmPeerSteps, []OpStep{RemovePeer{FromStore: id}})
 		}
 		kind |= OpRegion
 	}
@@ -750,22 +750,35 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 	// The following 3 'for' loop interleave addPeers and rmPeers.
 	// This makes the operator add and remove peers one by one, so that there won't have
 	// too many additional peers if the operator fails in the half.
-	var steps = make([]OpStep, 0, len(addPeerSteps)*2+len(rmPeerSteps)+len(mvLeaderSteps))
-	i, j := 0, 0
-	for ; i < len(addPeerSteps) && j < len(rmPeerSteps); i, j = i+1, j+1 {
-		steps = append(steps, addPeerSteps[i]...)
-		steps = append(steps, rmPeerSteps[j])
-	}
-	for ; i < len(addPeerSteps); i++ {
-		steps = append(steps, addPeerSteps[i]...)
-	}
-	for ; j < len(rmPeerSteps); j++ {
-		steps = append(steps, rmPeerSteps[j])
-	}
-
+	hint := len(addPeerSteps)*2 + len(rmPeerSteps) + len(mvLeaderSteps)
+	steps := interleaveStepGroups(addPeerSteps, rmPeerSteps, hint)
 	steps = append(steps, mvLeaderSteps...)
 
 	return kind, steps, nil
+}
+
+// interleaveStepGroups interleaves two slice of step groups. For example:
+//
+//  a = [[opA1, opA2], [opA3], [opA4, opA5, opA6]]
+//  b = [[opB1], [opB2], [opB3, opB4], [opB5, opB6]]
+//  c = interleaveStepGroups(a, b, 0)
+//  c == [opA1, opA2, opB1, opA3, opB2, opA4, opA5, opA6, opB3, opB4, opB5, opB6]
+//
+// sizeHint is a hint for the length of returned slice.
+func interleaveStepGroups(a, b [][]OpStep, sizeHint int) []OpStep {
+	steps := make([]OpStep, 0, sizeHint)
+	i, j := 0, 0
+	for ; i < len(a) && j < len(b); i, j = i+1, j+1 {
+		steps = append(steps, a[i]...)
+		steps = append(steps, b[j]...)
+	}
+	for ; i < len(a); i++ {
+		steps = append(steps, a[i]...)
+	}
+	for ; j < len(b); j++ {
+		steps = append(steps, b[j]...)
+	}
+	return steps
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
