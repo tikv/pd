@@ -726,6 +726,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 
 	// Remove redundant peers.
 	var rmPeerSteps []OpStep
+	// Transfer leader as late as possible to prevent transferring to a new added follower.
 	var mvLeaderSteps []OpStep
 	for _, peer := range region.GetPeers() {
 		id := peer.GetStoreId()
