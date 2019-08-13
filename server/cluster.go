@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/namespace"
 	syncer "github.com/pingcap/pd/server/region_syncer"
+	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -281,8 +282,14 @@ func (c *RaftCluster) stop() {
 func (c *RaftCluster) isRunning() bool {
 	c.RLock()
 	defer c.RUnlock()
-
 	return c.running
+}
+
+// GetOperatorController returns the operator controller.
+func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.opController
 }
 
 // handleStoreHeartbeat updates the store status.
