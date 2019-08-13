@@ -384,7 +384,7 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerI
 		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
 	}
 	peerID, _ := mc.AllocID()
-	region.Peers = []*metapb.Peer{&metapb.Peer{StoreId: leaderID, Id: peerID}}
+	region.Peers = []*metapb.Peer{{StoreId: leaderID, Id: peerID}}
 	for _, id := range followerIds {
 		pID, _ := mc.AllocID()
 		region.Peers = append(region.Peers, &metapb.Peer{StoreId: id, Id: pID})
