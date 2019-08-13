@@ -96,11 +96,11 @@ func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, tar
 		log.Debug("has no best store to relocate", zap.Uint64("region-id", region.GetID()))
 		return nil
 	}
-	newPeer, err := n.cluster.AllocPeer(storeID)
+	id, err := n.cluster.Alloc()
 	if err != nil {
 		return nil
 	}
-	return newPeer
+	return &metapb.Peer{StoreId: storeID, Id: id}
 }
 
 // SelectBestStoreToRelocate randomly returns the store to relocate

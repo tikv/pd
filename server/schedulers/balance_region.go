@@ -211,12 +211,12 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 		return nil
 	}
 
-	newPeer, err := cluster.AllocPeer(storeID)
+	peerID, err := cluster.Alloc()
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil
 	}
-	op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpBalance, oldPeer.GetStoreId(), storeID, peerID)
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "create_operator_fail").Inc()
 		return nil

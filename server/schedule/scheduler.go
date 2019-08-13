@@ -16,9 +16,9 @@ package schedule
 import (
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
@@ -80,7 +80,5 @@ type Cluster interface {
 
 	// get config methods
 	GetOpt() namespace.ScheduleOptions
-	// TODO: it should be removed. Schedulers don't need to know anything
-	// about peers.
-	AllocPeer(storeID uint64) (*metapb.Peer, error)
+	id.Allocator
 }

@@ -157,11 +157,11 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 	}
 
 	target := candidates[rand.Intn(len(candidates))]
-	newPeer, err := r.cluster.AllocPeer(target.GetID())
+	id, err := r.cluster.Alloc()
 	if err != nil {
 		return nil
 	}
-	return newPeer
+	return &metapb.Peer{Id: id, StoreId: target.GetID()}
 }
 
 func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo) map[uint64]*core.StoreInfo {

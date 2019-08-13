@@ -325,13 +325,13 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 
 			// When the target store is decided, we allocate a peer ID to hold the source region,
 			// because it doesn't exist in the system right now.
-			destPeer, err := cluster.AllocPeer(destStoreID)
+			peerID, err := cluster.Alloc()
 			if err != nil {
 				log.Error("failed to allocate peer", zap.Error(err))
 				return nil, nil, nil
 			}
 
-			return srcRegion, srcPeer, destPeer
+			return srcRegion, srcPeer, &metapb.Peer{Id: peerID, StoreId: destStoreID}
 		}
 	}
 

@@ -88,11 +88,12 @@ func (c *testCluster) addRegionStore(storeID uint64, regionCount int) error {
 
 func (c *testCluster) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) error {
 	region := newTestRegionMeta(regionID)
-	leader, _ := c.AllocPeer(leaderID)
+	leaderPeerID, _ := c.Alloc()
+	leader := &metapb.Peer{Id: leaderPeerID, StoreId: leaderID}
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIds {
-		peer, _ := c.AllocPeer(id)
-		region.Peers = append(region.Peers, peer)
+		peerID, _ := c.Alloc()
+		region.Peers = append(region.Peers, &metapb.Peer{Id: peerID, StoreId: id})
 	}
 	regionInfo := core.NewRegionInfo(region, leader, core.SetApproximateSize(10), core.SetApproximateKeys(10))
 	return c.putRegion(regionInfo)
@@ -145,9 +146,9 @@ func (c *testCluster) LoadRegion(regionID uint64, followerIds ...uint64) error {
 	//  regions load from etcd will have no leader
 	region := newTestRegionMeta(regionID)
 	region.Peers = []*metapb.Peer{}
-	for _, id := range followerIds {
-		peer, _ := c.AllocPeer(id)
-		region.Peers = append(region.Peers, peer)
+	for _, storeID := range followerIds {
+		peerID, _ := c.Alloc()
+		region.Peers = append(region.Peers, &metapb.Peer{Id: peerID, StoreId: storeID})
 	}
 	return c.putRegion(core.NewRegionInfo(region, nil))
 }

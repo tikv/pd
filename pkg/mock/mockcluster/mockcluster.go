@@ -50,10 +50,6 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 	}
 }
 
-func (mc *Cluster) allocID() (uint64, error) {
-	return mc.Alloc()
-}
-
 // ScanRegions scans region with start key, until number greater than limit.
 func (mc *Cluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
 	return mc.Regions.ScanRange(startKey, limit)
@@ -97,7 +93,7 @@ func (mc *Cluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind
 
 // AllocPeer allocs a new peer on a store.
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := mc.allocID()
+	peerID, err := mc.Alloc()
 	if err != nil {
 		log.Error("failed to alloc peer", zap.Error(err))
 		return nil, err
@@ -387,14 +383,14 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerI
 		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
 		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
 	}
-	leader, _ := mc.AllocPeer(leaderID)
-	region.Peers = []*metapb.Peer{leader}
+	peerID, _ := mc.Alloc()
+	region.Peers = []*metapb.Peer{&metapb.Peer{StoreId: leaderID, Id: peerID}}
 	for _, id := range followerIds {
-		peer, _ := mc.AllocPeer(id)
-		region.Peers = append(region.Peers, peer)
+		pID, _ := mc.Alloc()
+		region.Peers = append(region.Peers, &metapb.Peer{StoreId: id, Id: pID})
 	}
 
-	return core.NewRegionInfo(region, leader)
+	return core.NewRegionInfo(region, region.Peers[0])
 }
 
 // GetOpt mocks method.

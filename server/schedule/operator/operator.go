@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
@@ -57,9 +58,7 @@ type Cluster interface {
 	statistics.RegionStatInformer
 	opt.Options
 
-	// TODO: it should be removed. Schedulers don't need to know anything
-	// about peers.
-	AllocPeer(storeID uint64) (*metapb.Peer, error)
+	id.Allocator
 }
 
 // OpInfluence records the influence of the cluster.
@@ -664,17 +663,17 @@ func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionI
 		if region.GetStorePeer(id) != nil {
 			continue
 		}
-		peer, err := cluster.AllocPeer(id)
+		peerID, err := cluster.Alloc()
 		if err != nil {
 			return nil, err
 		}
 		if cluster.IsRaftLearnerEnabled() {
 			steps = append(steps,
-				AddLearner{ToStore: id, PeerID: peer.Id},
-				PromoteLearner{ToStore: id, PeerID: peer.Id},
+				AddLearner{ToStore: id, PeerID: peerID},
+				PromoteLearner{ToStore: id, PeerID: peerID},
 			)
 		} else {
-			steps = append(steps, AddPeer{ToStore: id, PeerID: peer.Id})
+			steps = append(steps, AddPeer{ToStore: id, PeerID: peerID})
 		}
 	}
 
@@ -809,18 +808,18 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		if _, found := intersection[storeID]; !found {
 			var addSteps []OpStep
 
-			peer, err := cluster.AllocPeer(storeID)
+			peerID, err := cluster.Alloc()
 			if err != nil {
 				log.Debug("peer alloc failed", zap.Error(err))
 				return nil, kind, err
 			}
 			if cluster.IsRaftLearnerEnabled() {
 				addSteps = append(addSteps,
-					AddLearner{ToStore: storeID, PeerID: peer.Id},
-					PromoteLearner{ToStore: storeID, PeerID: peer.Id},
+					AddLearner{ToStore: storeID, PeerID: peerID},
+					PromoteLearner{ToStore: storeID, PeerID: peerID},
 				)
 			} else {
-				addSteps = append(addSteps, AddPeer{ToStore: storeID, PeerID: peer.Id})
+				addSteps = append(addSteps, AddPeer{ToStore: storeID, PeerID: peerID})
 			}
 			toAdds = append(toAdds, addSteps)
 

@@ -474,12 +474,12 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
 	}
 
-	newPeer, err := c.cluster.AllocPeer(toStoreID)
+	peerID, err := c.cluster.Alloc()
 	if err != nil {
 		return err
 	}
 
-	op, err := operator.CreateMovePeerOperator("admin-move-peer", c.cluster, region, operator.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
+	op, err := operator.CreateMovePeerOperator("admin-move-peer", c.cluster, region, operator.OpAdmin, fromStoreID, toStoreID, peerID)
 	if err != nil {
 		return err
 	}
@@ -523,12 +523,12 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return err
 	}
 
-	newPeer, err := c.cluster.AllocPeer(toStoreID)
+	newPeerID, err := c.cluster.Alloc()
 	if err != nil {
 		return err
 	}
 
-	op := operator.CreateAddPeerOperator("admin-add-peer", c.cluster, region, newPeer.GetId(), toStoreID, operator.OpAdmin)
+	op := operator.CreateAddPeerOperator("admin-add-peer", c.cluster, region, newPeerID, toStoreID, operator.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -546,12 +546,12 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 		return ErrOperatorNotFound
 	}
 
-	newPeer, err := c.cluster.AllocPeer(toStoreID)
+	newPeerID, err := c.cluster.Alloc()
 	if err != nil {
 		return err
 	}
 
-	op := operator.CreateAddLearnerOperator("admin-add-learner", c.cluster, region, newPeer.GetId(), toStoreID, operator.OpAdmin)
+	op := operator.CreateAddLearnerOperator("admin-add-learner", c.cluster, region, newPeerID, toStoreID, operator.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}

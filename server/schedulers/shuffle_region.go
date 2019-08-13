@@ -114,11 +114,11 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, filte
 		return nil
 	}
 
-	newPeer, err := cluster.AllocPeer(target.GetID())
+	peerID, err := cluster.Alloc()
 	if err != nil {
 		log.Error("failed to allocate peer", zap.Error(err))
 		return nil
 	}
 
-	return newPeer
+	return &metapb.Peer{Id: peerID, StoreId: target.GetID()}
 }

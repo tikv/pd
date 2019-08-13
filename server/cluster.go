@@ -1156,22 +1156,13 @@ func (c *RaftCluster) takeRegionStoresLocked(region *core.RegionInfo) []*core.St
 	return stores
 }
 
-func (c *RaftCluster) allocID() (uint64, error) {
-	return c.id.Alloc()
-}
-
-// AllocPeer allocs a new peer on a store.
-func (c *RaftCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := c.allocID()
+// Alloc returns a new uniqe ID.
+func (c *RaftCluster) Alloc() (uint64, error) {
+	id, err := c.id.Alloc()
 	if err != nil {
-		log.Error("failed to alloc peer", zap.Error(err))
-		return nil, err
+		log.Error("failed to alloc id", zap.Error(err))
 	}
-	peer := &metapb.Peer{
-		Id:      peerID,
-		StoreId: storeID,
-	}
-	return peer, nil
+	return id, err
 }
 
 // OnStoreVersionChange changes the version of the cluster when needed.
