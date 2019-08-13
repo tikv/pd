@@ -83,7 +83,7 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		return nil
 	}
 
-	ops, err := operator.CreateMergeRegionOperator("random-merge", cluster, region, target, operator.OpAdmin)
+	ops, err := operator.CreateMergeRegionOperator("random-merge", cluster, cluster, region, target, operator.OpAdmin)
 	if err != nil {
 		return nil
 	}

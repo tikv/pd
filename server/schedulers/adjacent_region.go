@@ -314,7 +314,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	// record the store id and exclude it in next time
 	l.cacheRegions.assignedStoreIds = append(l.cacheRegions.assignedStoreIds, target.GetID())
 
-	op, err := operator.CreateMovePeerOperator("balance-adjacent-peer", cluster, region, operator.OpAdjacent, leaderStoreID, target.GetID(), peerID)
+	op, err := operator.CreateMovePeerOperator("balance-adjacent-peer", cluster, cluster, region, operator.OpAdjacent, leaderStoreID, target.GetID(), peerID)
 	if err != nil {
 		schedulerCounter.WithLabelValues(l.GetName(), "create_operator_fail").Inc()
 		return nil

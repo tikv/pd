@@ -439,7 +439,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		}
 	}
 
-	op, err := operator.CreateMoveRegionOperator("admin-move-region", c.cluster, region, operator.OpAdmin, storeIDs)
+	op, err := operator.CreateMoveRegionOperator("admin-move-region", c.cluster, c.cluster, region, operator.OpAdmin, storeIDs)
 	if err != nil {
 		return err
 	}
@@ -479,7 +479,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return err
 	}
 
-	op, err := operator.CreateMovePeerOperator("admin-move-peer", c.cluster, region, operator.OpAdmin, fromStoreID, toStoreID, peerID)
+	op, err := operator.CreateMovePeerOperator("admin-move-peer", c.cluster, c.cluster, region, operator.OpAdmin, fromStoreID, toStoreID, peerID)
 	if err != nil {
 		return err
 	}
@@ -551,7 +551,7 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 		return err
 	}
 
-	op := operator.CreateAddLearnerOperator("admin-add-learner", c.cluster, region, newPeerID, toStoreID, operator.OpAdmin)
+	op := operator.CreateAddLearnerOperator("admin-add-learner", region, newPeerID, toStoreID, operator.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -574,7 +574,7 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 		return errors.Errorf("region has no peer in store %v", fromStoreID)
 	}
 
-	op, err := operator.CreateRemovePeerOperator("admin-remove-peer", c.cluster, operator.OpAdmin, region, fromStoreID)
+	op, err := operator.CreateRemovePeerOperator("admin-remove-peer", c.cluster, c.cluster, operator.OpAdmin, region, fromStoreID)
 	if err != nil {
 		return err
 	}
@@ -617,7 +617,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotAdjacent
 	}
 
-	ops, err := operator.CreateMergeRegionOperator("admin-merge-region", c.cluster, region, target, operator.OpAdmin)
+	ops, err := operator.CreateMergeRegionOperator("admin-merge-region", c.cluster, c.cluster, region, target, operator.OpAdmin)
 	if err != nil {
 		return err
 	}

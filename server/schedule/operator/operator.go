@@ -29,7 +29,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -48,18 +47,6 @@ const (
 	// smallRegionThreshold is used to represent a region which can be regarded as a small region once the size is small than it.
 	smallRegionThreshold int64 = 20
 )
-
-// Cluster provides an overview of a cluster's regions distribution.
-type Cluster interface {
-	core.RegionSetInformer
-	core.StoreSetInformer
-	core.StoreSetController
-
-	statistics.RegionStatInformer
-	opt.Options
-
-	id.Allocator
-}
 
 // OpInfluence records the influence of the cluster.
 type OpInfluence struct {
@@ -588,13 +575,13 @@ func (o *Operator) History() []OpHistory {
 }
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
-func CreateAddPeerOperator(desc string, cluster Cluster, region *core.RegionInfo, peerID uint64, toStoreID uint64, kind OpKind) *Operator {
-	steps := CreateAddPeerSteps(toStoreID, peerID, cluster)
+func CreateAddPeerOperator(desc string, opts opt.Options, region *core.RegionInfo, peerID uint64, toStoreID uint64, kind OpKind) *Operator {
+	steps := CreateAddPeerSteps(toStoreID, peerID, opts)
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, steps...)
 }
 
 // CreateAddLearnerOperator creates an operator that adds a new learner.
-func CreateAddLearnerOperator(desc string, cluster Cluster, region *core.RegionInfo, peerID uint64, toStoreID uint64, kind OpKind) *Operator {
+func CreateAddLearnerOperator(desc string, region *core.RegionInfo, peerID uint64, toStoreID uint64, kind OpKind) *Operator {
 	step := AddLearner{ToStore: toStoreID, PeerID: peerID}
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, step)
 }
@@ -609,8 +596,8 @@ func CreatePromoteLearnerOperator(desc string, region *core.RegionInfo, peer *me
 }
 
 // CreateRemovePeerOperator creates an operator that removes a peer from region.
-func CreateRemovePeerOperator(desc string, cluster Cluster, kind OpKind, region *core.RegionInfo, storeID uint64) (*Operator, error) {
-	removeKind, steps, err := removePeerSteps(cluster, region, storeID, getRegionFollowerIDs(region))
+func CreateRemovePeerOperator(desc string, opts opt.Options, stores core.StoreSetInformer, kind OpKind, region *core.RegionInfo, storeID uint64) (*Operator, error) {
+	removeKind, steps, err := removePeerSteps(opts, stores, region, storeID, getRegionFollowerIDs(region))
 	if err != nil {
 		return nil, err
 	}
@@ -618,9 +605,9 @@ func CreateRemovePeerOperator(desc string, cluster Cluster, kind OpKind, region 
 }
 
 // CreateAddPeerSteps creates an OpStep list that add a new peer.
-func CreateAddPeerSteps(newStore uint64, peerID uint64, cluster Cluster) []OpStep {
+func CreateAddPeerSteps(newStore uint64, peerID uint64, opts opt.Options) []OpStep {
 	var st []OpStep
-	if cluster.IsRaftLearnerEnabled() {
+	if opts.IsRaftLearnerEnabled() {
 		st = []OpStep{
 			AddLearner{ToStore: newStore, PeerID: peerID},
 			PromoteLearner{ToStore: newStore, PeerID: peerID},
@@ -634,9 +621,9 @@ func CreateAddPeerSteps(newStore uint64, peerID uint64, cluster Cluster) []OpSte
 }
 
 // CreateAddLightPeerSteps creates an OpStep list that add a new peer without considering the influence.
-func CreateAddLightPeerSteps(newStore uint64, peerID uint64, cluster Cluster) []OpStep {
+func CreateAddLightPeerSteps(newStore uint64, peerID uint64, opts opt.Options) []OpStep {
 	var st []OpStep
-	if cluster.IsRaftLearnerEnabled() {
+	if opts.IsRaftLearnerEnabled() {
 		st = []OpStep{
 			AddLightLearner{ToStore: newStore, PeerID: peerID},
 			PromoteLearner{ToStore: newStore, PeerID: peerID},
@@ -656,18 +643,18 @@ func CreateTransferLeaderOperator(desc string, region *core.RegionInfo, sourceSt
 }
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
-func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, storeIDs map[uint64]struct{}) (*Operator, error) {
+func CreateMoveRegionOperator(desc string, opts opt.Options, idAlloc id.Allocator, region *core.RegionInfo, kind OpKind, storeIDs map[uint64]struct{}) (*Operator, error) {
 	var steps []OpStep
 	// Add missing peers.
 	for id := range storeIDs {
 		if region.GetStorePeer(id) != nil {
 			continue
 		}
-		peerID, err := cluster.AllocID()
+		peerID, err := idAlloc.AllocID()
 		if err != nil {
 			return nil, err
 		}
-		if cluster.IsRaftLearnerEnabled() {
+		if opts.IsRaftLearnerEnabled() {
 			steps = append(steps,
 				AddLearner{ToStore: id, PeerID: peerID},
 				PromoteLearner{ToStore: id, PeerID: peerID},
@@ -694,23 +681,23 @@ func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionI
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
-func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
-	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, append(getRegionFollowerIDs(region), newStore))
+func CreateMovePeerOperator(desc string, opts opt.Options, stores core.StoreSetInformer, region *core.RegionInfo, kind OpKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
+	removeKind, steps, err := removePeerSteps(opts, stores, region, oldStore, append(getRegionFollowerIDs(region), newStore))
 	if err != nil {
 		return nil, err
 	}
-	st := CreateAddPeerSteps(newStore, peerID, cluster)
+	st := CreateAddPeerSteps(newStore, peerID, opts)
 	steps = append(st, steps...)
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...), nil
 }
 
 // CreateMoveLeaderOperator creates an operator that replaces an old leader with a new leader.
-func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
-	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, []uint64{newStore})
+func CreateMoveLeaderOperator(desc string, opts opt.Options, stores core.StoreSetInformer, region *core.RegionInfo, kind OpKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
+	removeKind, steps, err := removePeerSteps(opts, stores, region, oldStore, []uint64{newStore})
 	if err != nil {
 		return nil, err
 	}
-	st := CreateAddPeerSteps(newStore, peerID, cluster)
+	st := CreateAddPeerSteps(newStore, peerID, opts)
 	st = append(st, TransferLeader{ToStore: newStore, FromStore: oldStore})
 	steps = append(st, steps...)
 	return NewOperator(desc, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpLeader|OpRegion, steps...), nil
@@ -735,11 +722,11 @@ func getRegionFollowerIDs(region *core.RegionInfo) []uint64 {
 }
 
 // removePeerSteps returns the steps to safely remove a peer. It prevents removing leader by transfer its leadership first.
-func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64, followerIDs []uint64) (kind OpKind, steps []OpStep, err error) {
+func removePeerSteps(opts opt.Options, stores core.StoreSetInformer, region *core.RegionInfo, storeID uint64, followerIDs []uint64) (kind OpKind, steps []OpStep, err error) {
 	if region.GetLeader() != nil && region.GetLeader().GetStoreId() == storeID {
 		for _, id := range followerIDs {
-			follower := cluster.GetStore(id)
-			if follower != nil && !cluster.CheckLabelProperty(opt.RejectLeader, follower.GetLabels()) {
+			follower := stores.GetStore(id)
+			if follower != nil && !opts.CheckLabelProperty(opt.RejectLeader, follower.GetLabels()) {
 				steps = append(steps, TransferLeader{FromStore: storeID, ToStore: id})
 				kind = OpLeader
 				break
@@ -757,8 +744,8 @@ func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64, f
 }
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
-func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OpKind) ([]*Operator, error) {
-	steps, kinds, err := matchPeerSteps(cluster, source, target)
+func CreateMergeRegionOperator(desc string, opts opt.Options, idAlloc id.Allocator, source *core.RegionInfo, target *core.RegionInfo, kind OpKind) ([]*Operator, error) {
+	steps, kinds, err := matchPeerSteps(opts, idAlloc, source, target)
 	if err != nil {
 		return nil, err
 	}
@@ -780,7 +767,7 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 }
 
 // matchPeerSteps returns the steps to match the location of peer stores of source region with target's.
-func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.RegionInfo) ([]OpStep, OpKind, error) {
+func matchPeerSteps(opts opt.Options, idAlloc id.Allocator, source *core.RegionInfo, target *core.RegionInfo) ([]OpStep, OpKind, error) {
 	var steps []OpStep
 	var kind OpKind
 
@@ -808,12 +795,12 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		if _, found := intersection[storeID]; !found {
 			var addSteps []OpStep
 
-			peerID, err := cluster.AllocID()
+			peerID, err := idAlloc.AllocID()
 			if err != nil {
 				log.Debug("peer alloc failed", zap.Error(err))
 				return nil, kind, err
 			}
-			if cluster.IsRaftLearnerEnabled() {
+			if opts.IsRaftLearnerEnabled() {
 				addSteps = append(addSteps,
 					AddLearner{ToStore: storeID, PeerID: peerID},
 					PromoteLearner{ToStore: storeID, PeerID: peerID},
@@ -901,7 +888,7 @@ func getIntersectionStores(a []*metapb.Peer, b []*metapb.Peer) map[uint64]struct
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
-func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.RegionInfo, replacedPeers, targetPeers []*metapb.Peer) *Operator {
+func CreateScatterRegionOperator(desc string, opts opt.Options, origin *core.RegionInfo, replacedPeers, targetPeers []*metapb.Peer) *Operator {
 	// Randomly pick a leader
 	i := rand.Intn(len(targetPeers))
 	targetLeaderPeer := targetPeers[i]
@@ -929,7 +916,7 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 
 	// Creates the first step
 	if _, ok := originStoreIDs[targetLeaderPeer.GetStoreId()]; !ok {
-		st := CreateAddLightPeerSteps(targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId(), cluster)
+		st := CreateAddLightPeerSteps(targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId(), opts)
 		steps = append(steps, st...)
 		// Do not transfer leader to the newly added peer
 		// Ref: https://github.com/tikv/tikv/issues/3819
@@ -953,13 +940,13 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 			continue
 		}
 		if replacedPeers[j].GetStoreId() == originLeaderStoreID {
-			st := CreateAddLightPeerSteps(peer.GetStoreId(), peer.GetId(), cluster)
+			st := CreateAddLightPeerSteps(peer.GetStoreId(), peer.GetId(), opts)
 			st = append(st, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
 			deferSteps = append(deferSteps, st...)
 			kind |= OpRegion | OpLeader
 			continue
 		}
-		st := CreateAddLightPeerSteps(peer.GetStoreId(), peer.GetId(), cluster)
+		st := CreateAddLightPeerSteps(peer.GetStoreId(), peer.GetId(), opts)
 		steps = append(steps, st...)
 		steps = append(steps, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
 		kind |= OpRegion

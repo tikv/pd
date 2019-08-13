@@ -88,7 +88,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 			checkerCounter.WithLabelValues("replica_checker", "no_worst_peer").Inc()
 			return nil
 		}
-		op, err := operator.CreateRemovePeerOperator("remove-extra-replica", r.cluster, operator.OpReplica, region, oldPeer.GetStoreId())
+		op, err := operator.CreateRemovePeerOperator("remove-extra-replica", r.cluster, r.cluster, operator.OpReplica, region, oldPeer.GetStoreId())
 		if err != nil {
 			checkerCounter.WithLabelValues("replica_checker", "create_operator_fail").Inc()
 			return nil
@@ -232,7 +232,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *operator
 	if err != nil {
 		return nil
 	}
-	op, err := operator.CreateMovePeerOperator("move-to-better-location", r.cluster, region, operator.OpReplica, oldPeer.GetStoreId(), storeID, id)
+	op, err := operator.CreateMovePeerOperator("move-to-better-location", r.cluster, r.cluster, region, operator.OpReplica, oldPeer.GetStoreId(), storeID, id)
 	if err != nil {
 		checkerCounter.WithLabelValues("replica_checker", "create_operator_fail").Inc()
 		return nil
@@ -245,7 +245,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 	removeExtra := fmt.Sprintf("remove-extra-%s-replica", status)
 	// Check the number of replicas first.
 	if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
-		op, err := operator.CreateRemovePeerOperator(removeExtra, r.cluster, operator.OpReplica, region, peer.GetStoreId())
+		op, err := operator.CreateRemovePeerOperator(removeExtra, r.cluster, r.cluster, operator.OpReplica, region, peer.GetStoreId())
 		if err != nil {
 			checkerCounter.WithLabelValues("replica_checker", "create_operator_fail").Inc()
 			return nil
@@ -259,7 +259,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 	// D then removes C, D will not be successfully added util C is normal again.
 	// So it's better to remove C directly.
 	if region.GetPendingPeer(peer.GetId()) != nil {
-		op, err := operator.CreateRemovePeerOperator(removePending, r.cluster, operator.OpReplica, region, peer.GetStoreId())
+		op, err := operator.CreateRemovePeerOperator(removePending, r.cluster, r.cluster, operator.OpReplica, region, peer.GetStoreId())
 		if err != nil {
 			checkerCounter.WithLabelValues("replica_checker", "create_operator_fail").Inc()
 			return nil
@@ -278,7 +278,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 	}
 
 	replace := fmt.Sprintf("replace-%s-replica", status)
-	op, err := operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), storeID, id)
+	op, err := operator.CreateMovePeerOperator(replace, r.cluster, r.cluster, region, operator.OpReplica, peer.GetStoreId(), storeID, id)
 	if err != nil {
 		return nil
 	}
