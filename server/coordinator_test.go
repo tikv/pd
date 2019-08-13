@@ -88,11 +88,11 @@ func (c *testCluster) addRegionStore(storeID uint64, regionCount int) error {
 
 func (c *testCluster) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) error {
 	region := newTestRegionMeta(regionID)
-	leaderPeerID, _ := c.Alloc()
+	leaderPeerID, _ := c.AllocID()
 	leader := &metapb.Peer{Id: leaderPeerID, StoreId: leaderID}
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIds {
-		peerID, _ := c.Alloc()
+		peerID, _ := c.AllocID()
 		region.Peers = append(region.Peers, &metapb.Peer{Id: peerID, StoreId: id})
 	}
 	regionInfo := core.NewRegionInfo(region, leader, core.SetApproximateSize(10), core.SetApproximateKeys(10))
@@ -147,7 +147,7 @@ func (c *testCluster) LoadRegion(regionID uint64, followerIds ...uint64) error {
 	region := newTestRegionMeta(regionID)
 	region.Peers = []*metapb.Peer{}
 	for _, storeID := range followerIds {
-		peerID, _ := c.Alloc()
+		peerID, _ := c.AllocID()
 		region.Peers = append(region.Peers, &metapb.Peer{Id: peerID, StoreId: storeID})
 	}
 	return c.putRegion(core.NewRegionInfo(region, nil))

@@ -28,7 +28,7 @@ import (
 
 // Allocator is the allocator to generate unique ID.
 type Allocator interface {
-	Alloc() (uint64, error)
+	AllocID() (uint64, error)
 }
 
 const allocStep = uint64(1000)
@@ -49,8 +49,8 @@ func NewAllocatorImpl(client *clientv3.Client, rootPath string, member string) *
 	return &AllocatorImpl{client: client, rootPath: rootPath, member: member}
 }
 
-// Alloc returns a new id.
-func (alloc *AllocatorImpl) Alloc() (uint64, error) {
+// AllocID returns a new id.
+func (alloc *AllocatorImpl) AllocID() (uint64, error) {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 

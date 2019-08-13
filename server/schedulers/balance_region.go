@@ -211,7 +211,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 		return nil
 	}
 
-	peerID, err := cluster.Alloc()
+	peerID, err := cluster.AllocID()
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
 		return nil

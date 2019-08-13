@@ -53,7 +53,7 @@ func (s *testAllocIDSuite) TestID(c *C) {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	var last uint64
 	for i := uint64(0); i < allocStep; i++ {
-		id, err := leaderServer.GetAllocator().Alloc()
+		id, err := leaderServer.GetAllocator().AllocID()
 		c.Assert(err, IsNil)
 		c.Assert(id, Greater, last)
 		last = id
@@ -70,7 +70,7 @@ func (s *testAllocIDSuite) TestID(c *C) {
 			defer wg.Done()
 
 			for i := 0; i < 200; i++ {
-				id, err := leaderServer.GetAllocator().Alloc()
+				id, err := leaderServer.GetAllocator().AllocID()
 				c.Assert(err, IsNil)
 				m.Lock()
 				_, ok := ids[id]

@@ -43,7 +43,7 @@ type idAllocator struct {
 	id uint64
 }
 
-func (alloc *idAllocator) Alloc() uint64 {
+func (alloc *idAllocator) AllocID() uint64 {
 	alloc.id++
 	return alloc.id
 }
@@ -66,14 +66,14 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	regions := make([]*core.RegionInfo, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
 		r := &metapb.Region{
-			Id: id.Alloc(),
+			Id: id.AllocID(),
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: 1,
 				Version: 1,
 			},
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
-			Peers:    []*metapb.Peer{{Id: id.Alloc(), StoreId: uint64(0)}},
+			Peers:    []*metapb.Peer{{Id: id.AllocID(), StoreId: uint64(0)}},
 		}
 		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
 	}
@@ -111,14 +111,14 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	regions := make([]*core.RegionInfo, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
 		r := &metapb.Region{
-			Id: id.Alloc(),
+			Id: id.AllocID(),
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: 1,
 				Version: 1,
 			},
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
-			Peers:    []*metapb.Peer{{Id: id.Alloc(), StoreId: uint64(0)}},
+			Peers:    []*metapb.Peer{{Id: id.AllocID(), StoreId: uint64(0)}},
 		}
 		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
 	}

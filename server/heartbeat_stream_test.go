@@ -49,7 +49,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	s.region = bootstrapReq.Region
 
 	// Add a new store and an addPeer operator.
-	storeID, err := s.svr.idAllocator.Alloc()
+	storeID, err := s.svr.idAllocator.AllocID()
 	c.Assert(err, IsNil)
 	_, err = putStore(c, s.grpcPDClient, s.svr.clusterID, &metapb.Store{Id: storeID, Address: "127.0.0.1:1"})
 	c.Assert(err, IsNil)

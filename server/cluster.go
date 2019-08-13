@@ -1156,9 +1156,9 @@ func (c *RaftCluster) takeRegionStoresLocked(region *core.RegionInfo) []*core.St
 	return stores
 }
 
-// Alloc returns a new uniqe ID.
-func (c *RaftCluster) Alloc() (uint64, error) {
-	id, err := c.id.Alloc()
+// AllocID returns a new uniqe ID.
+func (c *RaftCluster) AllocID() (uint64, error) {
+	id, err := c.id.AllocID()
 	if err != nil {
 		log.Error("failed to alloc id", zap.Error(err))
 	}

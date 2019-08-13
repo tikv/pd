@@ -114,7 +114,7 @@ func (r *ReplicaChecker) selectBestPeerToAddReplica(region *core.RegionInfo, fil
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		return nil, 0
 	}
-	id, err := r.cluster.Alloc()
+	id, err := r.cluster.AllocID()
 	if err != nil {
 		return nil, 0
 	}
@@ -228,7 +228,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *operator
 		checkerCounter.WithLabelValues("replica_checker", "not_better").Inc()
 		return nil
 	}
-	id, err := r.cluster.Alloc()
+	id, err := r.cluster.AllocID()
 	if err != nil {
 		return nil
 	}
@@ -272,7 +272,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		return nil
 	}
-	id, err := r.cluster.Alloc()
+	id, err := r.cluster.AllocID()
 	if err != nil {
 		return nil
 	}

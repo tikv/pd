@@ -134,7 +134,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, sto
 		if srcPeer == nil {
 			return nil
 		}
-		peerID, err := cluster.Alloc()
+		peerID, err := cluster.AllocID()
 		if err != nil {
 			log.Error("failed to allocate peer", zap.Error(err))
 			return nil

@@ -218,7 +218,7 @@ func (c *tableNamespaceClassifier) CreateNamespace(name string) error {
 		return errors.New("Duplicate namespace Name")
 	}
 
-	id, err := c.idAlloc.Alloc()
+	id, err := c.idAlloc.AllocID()
 	if err != nil {
 		return err
 	}

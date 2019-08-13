@@ -93,7 +93,7 @@ func (mc *Cluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind
 
 // AllocPeer allocs a new peer on a store.
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := mc.Alloc()
+	peerID, err := mc.AllocID()
 	if err != nil {
 		log.Error("failed to alloc peer", zap.Error(err))
 		return nil, err
@@ -383,10 +383,10 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerI
 		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
 		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
 	}
-	peerID, _ := mc.Alloc()
+	peerID, _ := mc.AllocID()
 	region.Peers = []*metapb.Peer{&metapb.Peer{StoreId: leaderID, Id: peerID}}
 	for _, id := range followerIds {
-		pID, _ := mc.Alloc()
+		pID, _ := mc.AllocID()
 		region.Peers = append(region.Peers, &metapb.Peer{StoreId: id, Id: pID})
 	}
 

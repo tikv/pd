@@ -114,7 +114,7 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, filte
 		return nil
 	}
 
-	peerID, err := cluster.Alloc()
+	peerID, err := cluster.AllocID()
 	if err != nil {
 		log.Error("failed to allocate peer", zap.Error(err))
 		return nil

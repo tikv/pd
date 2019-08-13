@@ -663,7 +663,7 @@ func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionI
 		if region.GetStorePeer(id) != nil {
 			continue
 		}
-		peerID, err := cluster.Alloc()
+		peerID, err := cluster.AllocID()
 		if err != nil {
 			return nil, err
 		}
@@ -808,7 +808,7 @@ func matchPeerSteps(cluster Cluster, source *core.RegionInfo, target *core.Regio
 		if _, found := intersection[storeID]; !found {
 			var addSteps []OpStep
 
-			peerID, err := cluster.Alloc()
+			peerID, err := cluster.AllocID()
 			if err != nil {
 				log.Debug("peer alloc failed", zap.Error(err))
 				return nil, kind, err

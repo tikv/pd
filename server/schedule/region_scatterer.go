@@ -157,7 +157,7 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 	}
 
 	target := candidates[rand.Intn(len(candidates))]
-	id, err := r.cluster.Alloc()
+	id, err := r.cluster.AllocID()
 	if err != nil {
 		return nil
 	}

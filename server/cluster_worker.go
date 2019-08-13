@@ -51,14 +51,14 @@ func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		return nil, err
 	}
 
-	newRegionID, err := c.s.idAllocator.Alloc()
+	newRegionID, err := c.s.idAllocator.AllocID()
 	if err != nil {
 		return nil, err
 	}
 
 	peerIDs := make([]uint64, len(request.Region.Peers))
 	for i := 0; i < len(peerIDs); i++ {
-		if peerIDs[i], err = c.s.idAllocator.Alloc(); err != nil {
+		if peerIDs[i], err = c.s.idAllocator.AllocID(); err != nil {
 			return nil, err
 		}
 	}
@@ -107,14 +107,14 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	// Disable merge the regions in a period of time.
 	c.coordinator.mergeChecker.RecordRegionSplit(reqRegion.GetId())
 	for i := 0; i < int(splitCount); i++ {
-		newRegionID, err := c.s.idAllocator.Alloc()
+		newRegionID, err := c.s.idAllocator.AllocID()
 		if err != nil {
 			return nil, errSchedulerNotFound
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
 		for i := 0; i < len(peerIDs); i++ {
-			if peerIDs[i], err = c.s.idAllocator.Alloc(); err != nil {
+			if peerIDs[i], err = c.s.idAllocator.AllocID(); err != nil {
 				return nil, err
 			}
 		}

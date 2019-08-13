@@ -306,7 +306,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	if target == nil {
 		return nil
 	}
-	peerID, err := cluster.Alloc()
+	peerID, err := cluster.AllocID()
 	if err != nil {
 		return nil
 	}
