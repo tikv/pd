@@ -101,7 +101,7 @@ func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
 // OpStep describes the basic scheduling steps that can not be subdivided.
 type OpStep interface {
 	fmt.Stringer
-	ConsumeConfVer() int
+	ExpectConfVerChange() bool
 	IsFinish(region *core.RegionInfo) bool
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
@@ -111,10 +111,10 @@ type TransferLeader struct {
 	FromStore, ToStore uint64
 }
 
-// ConsumeConfVer returns if the epoch of a region should be increased after
-// this step
-func (tl TransferLeader) ConsumeConfVer() int {
-	return 0
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (tl TransferLeader) ExpectConfVerChange() bool {
+	return false
 }
 
 func (tl TransferLeader) String() string {
@@ -142,10 +142,10 @@ type AddPeer struct {
 	ToStore, PeerID uint64
 }
 
-// ConsumeConfVer returns if the epoch of a region should be increased after
-// this step
-func (ap AddPeer) ConsumeConfVer() int {
-	return 1
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (ap AddPeer) ExpectConfVerChange() bool {
+	return true
 }
 func (ap AddPeer) String() string {
 	return fmt.Sprintf("add peer %v on store %v", ap.PeerID, ap.ToStore)
@@ -182,10 +182,10 @@ type AddLearner struct {
 	ToStore, PeerID uint64
 }
 
-// ConsumeConfVer returns if the epoch of a region should be increased after
-// this step
-func (al AddLearner) ConsumeConfVer() int {
-	return 1
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (al AddLearner) ExpectConfVerChange() bool {
+	return true
 }
 
 func (al AddLearner) String() string {
@@ -223,10 +223,10 @@ type PromoteLearner struct {
 	ToStore, PeerID uint64
 }
 
-// ConsumeConfVer returns if the epoch of a region should be increased after
-// this step
-func (pl PromoteLearner) ConsumeConfVer() int {
-	return 1
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (pl PromoteLearner) ExpectConfVerChange() bool {
+	return true
 }
 
 func (pl PromoteLearner) String() string {
@@ -252,10 +252,10 @@ type RemovePeer struct {
 	FromStore uint64
 }
 
-// ConsumeConfVer returns if the epoch of a region should be increased after
-// this step
-func (rp RemovePeer) ConsumeConfVer() int {
-	return 1
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (rp RemovePeer) ExpectConfVerChange() bool {
+	return true
 }
 
 func (rp RemovePeer) String() string {
@@ -288,10 +288,10 @@ type MergeRegion struct {
 	IsPassive bool
 }
 
-// ConsumeConfVer returns if the epoch of a region should be increased after
-// this step
-func (mr MergeRegion) ConsumeConfVer() int {
-	return 0
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (mr MergeRegion) ExpectConfVerChange() bool {
+	return false
 }
 
 func (mr MergeRegion) String() string {
@@ -325,10 +325,10 @@ type SplitRegion struct {
 	Policy           pdpb.CheckPolicy
 }
 
-// ConsumeConfVer returns if the epoch of a region should be increased after
-// this step
-func (sr SplitRegion) ConsumeConfVer() int {
-	return 0
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (sr SplitRegion) ExpectConfVerChange() bool {
+	return false
 }
 
 func (sr SplitRegion) String() string {
@@ -356,10 +356,10 @@ type AddLightPeer struct {
 	ToStore, PeerID uint64
 }
 
-// ConsumeConfVer returns if the epoch of a region should be increased after
-// this step
-func (ap AddLightPeer) ConsumeConfVer() int {
-	return 1
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (ap AddLightPeer) ExpectConfVerChange() bool {
+	return true
 }
 
 func (ap AddLightPeer) String() string {
@@ -391,10 +391,10 @@ type AddLightLearner struct {
 	ToStore, PeerID uint64
 }
 
-// ConsumeConfVer returns if the epoch of a region should be increased after
-// this step
-func (al AddLightLearner) ConsumeConfVer() int {
-	return 1
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (al AddLightLearner) ExpectConfVerChange() bool {
+	return true
 }
 
 func (al AddLightLearner) String() string {
@@ -545,12 +545,14 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	return nil
 }
 
-// ConfVerConsumed returns the number of confver has consumed by steps
-func (o *Operator) ConfVerConsumed() int {
+// ConfVerChanged returns the number of confver has consumed by steps
+func (o *Operator) ConfVerChanged() int {
 	total := 0
 	current := atomic.LoadInt32(&o.currentStep)
 	for _, step := range o.steps[0:current] {
-		total += step.ConsumeConfVer()
+		if step.ExpectConfVerChange() {
+			total++
+		}
 	}
 	return total
 }

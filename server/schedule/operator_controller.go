@@ -102,7 +102,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			latest := region.GetRegionEpoch()
 			changes := latest.GetConfVer() - origin.GetConfVer()
 			if source == DispatchFromHeartBeat &&
-				changes > uint64(op.ConfVerConsumed()) {
+				changes > uint64(op.ConfVerChanged()) {
 				log.Info("stale operator", zap.Uint64("region-id", region.GetID()),
 					zap.Reflect("operator", op), zap.Uint64("diff", changes))
 				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()

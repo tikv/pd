@@ -206,7 +206,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerConsumed(), Equals, 0)
+	c.Assert(op.ConfVerChanged(), Equals, 0)
 	c.Assert(len(stream.MsgCh()), Equals, 2)
 
 	// report the result of removing perr
@@ -214,7 +214,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerConsumed(), Equals, 1)
+	c.Assert(op.ConfVerChanged(), Equals, 1)
 	c.Assert(len(stream.MsgCh()), Equals, 2)
 
 	// add and disaptch op again, the op should be stale
@@ -222,14 +222,14 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		Version: 0},
 		operator.OpRegion, steps...)
 	c.Assert(controller.AddOperator(op), Equals, true)
-	c.Assert(op.ConfVerConsumed(), Equals, 0)
+	c.Assert(op.ConfVerChanged(), Equals, 0)
 	c.Assert(len(stream.MsgCh()), Equals, 3)
 
 	// report region with an abnormal confver
 	region = cluster.MockRegionInfo(1, 1, []uint64{1, 2},
 		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
 	controller.Dispatch(region, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerConsumed(), Equals, 0)
+	c.Assert(op.ConfVerChanged(), Equals, 0)
 	// no new step sended
 	c.Assert(len(stream.MsgCh()), Equals, 3)
 }
