@@ -58,6 +58,16 @@ func (stat HotSpotPeerStat) IsNew() bool {
 	return stat.isNew
 }
 
+// ID returns region ID (implementing TopNItem).
+func (stat *HotSpotPeerStat) ID() uint64 {
+	return stat.RegionID
+}
+
+// Less compares FlowBytes (implementing TopNItem).
+func (stat *HotSpotPeerStat) Less(than TopNItem) bool {
+	return stat.FlowBytes < than.(*HotSpotPeerStat).FlowBytes
+}
+
 // RegionsStat is a list of a group region state type
 type RegionsStat []HotSpotPeerStat
 

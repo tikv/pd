@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -62,14 +61,14 @@ func (k FlowKind) String() string {
 
 // HotStoresStats saves the hotspot peer's statistics.
 type HotStoresStats struct {
-	hotStoreStats  map[uint64]cache.Cache         // storeID -> hot regions
+	hotStoreStats  map[uint64]*TopN               // storeID -> hot regions
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
 }
 
 // NewHotStoresStats creates a HotStoresStats
 func NewHotStoresStats() *HotStoresStats {
 	return &HotStoresStats{
-		hotStoreStats:  make(map[uint64]cache.Cache),
+		hotStoreStats:  make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 	}
 }
@@ -129,7 +128,7 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 
 		hotStoreStats, ok := f.hotStoreStats[storeID]
 		if ok {
-			if v, isExist := hotStoreStats.Peek(region.GetID()); isExist {
+			if v := hotStoreStats.GetTopN(region.GetID()); v != nil {
 				oldRegionStat = v.(*HotSpotPeerStat)
 				// This is used for the simulator.
 				if Denoising {
@@ -173,10 +172,10 @@ func (f *HotStoresStats) Update(item *HotSpotPeerStat) {
 	} else {
 		hotStoreStat, ok := f.hotStoreStats[item.StoreID]
 		if !ok {
-			hotStoreStat = cache.NewCache(statCacheMaxLen, cache.TwoQueueCache)
+			hotStoreStat = NewTopN(storeStatCacheMaxLen)
 			f.hotStoreStats[item.StoreID] = hotStoreStat
 		}
-		hotStoreStat.Put(item.RegionID, item)
+		hotStoreStat.Put(item)
 		index, ok := f.storesOfRegion[item.RegionID]
 		if !ok {
 			index = make(map[uint64]struct{})
@@ -205,7 +204,7 @@ func (f *HotStoresStats) isRegionHotWithPeer(region *core.RegionInfo, peer *meta
 	if !ok {
 		return false
 	}
-	if stat, ok := stats.Peek(region.GetID()); ok {
+	if stat := stats.GetTopN(region.GetID()); stat != nil {
 		return stat.(*HotSpotPeerStat).HotDegree >= hotThreshold
 	}
 	return false
@@ -362,7 +361,7 @@ func (w *HotSpotCache) Update(item *HotSpotPeerStat) {
 
 // RegionStats returns hot items according to kind
 func (w *HotSpotCache) RegionStats(kind FlowKind) map[uint64][]*HotSpotPeerStat {
-	var flowMap map[uint64]cache.Cache
+	var flowMap map[uint64]*TopN
 	switch kind {
 	case WriteFlow:
 		flowMap = w.writeFlow.hotStoreStats
@@ -370,15 +369,15 @@ func (w *HotSpotCache) RegionStats(kind FlowKind) map[uint64][]*HotSpotPeerStat 
 		flowMap = w.readFlow.hotStoreStats
 	}
 	res := make(map[uint64][]*HotSpotPeerStat)
-	for storeID, elements := range flowMap {
-		values := elements.Elems()
+	for storeID, tn := range flowMap {
+		topn := tn.GetAllTopN()
 		stat, ok := res[storeID]
 		if !ok {
-			stat = make([]*HotSpotPeerStat, len(values))
+			stat = make([]*HotSpotPeerStat, len(topn))
 			res[storeID] = stat
 		}
-		for i := range values {
-			stat[i] = values[i].Value.(*HotSpotPeerStat)
+		for i := range topn {
+			stat[i] = topn[i].(*HotSpotPeerStat)
 		}
 	}
 	return res
