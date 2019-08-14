@@ -32,10 +32,15 @@ const (
 	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
 	StoreHeartBeatReportInterval = 10
 
-	statCacheMaxLen            = 1000
-	storeStatCacheMaxLen       = 200
-	hotWriteRegionMinFlowRate  = 16 * 1024
-	hotReadRegionMinFlowRate   = 128 * 1024
+	statCacheMaxLen      = 1000
+	storeStatCacheMaxLen = 200
+
+	hotWriteRegionMinFlowRate = 16 * 1024
+	hotReadRegionMinFlowRate  = 128 * 1024
+
+	activeWriteRegionMinFlowRate = 0
+	activeReadRegionMinFlowRate  = 0
+
 	minHotRegionReportInterval = 3
 	hotRegionAntiCount         = 1
 )
@@ -230,30 +235,30 @@ type hotSpotPeerStatGenerator struct {
 const rollingWindowsSize = 5
 
 // GenHotSpotPeerStats implements HotSpotPeerStatsGenerator.
-func (flowStats *hotSpotPeerStatGenerator) GenHotSpotPeerStats(stats *StoresStats) *HotSpotPeerStat {
+func (statGen *hotSpotPeerStatGenerator) GenHotSpotPeerStats(stats *StoresStats) *HotSpotPeerStat {
 	var hotRegionThreshold uint64
-	switch flowStats.Kind {
+	switch statGen.Kind {
 	case WriteFlow:
-		hotRegionThreshold = calculateWriteHotThresholdWithStore(stats, flowStats.StoreID)
+		hotRegionThreshold = activeWriteRegionMinFlowRate
 	case ReadFlow:
-		hotRegionThreshold = calculateReadHotThresholdWithStore(stats, flowStats.StoreID)
+		hotRegionThreshold = activeReadRegionMinFlowRate
 	}
-	flowBytes := flowStats.FlowBytes
-	oldItem := flowStats.lastHotSpotPeerStats
-	region := flowStats.Region
+	flowBytes := statGen.FlowBytes
+	oldItem := statGen.lastHotSpotPeerStats
+	region := statGen.Region
 	newItem := &HotSpotPeerStat{
 		RegionID:       region.GetID(),
-		FlowBytes:      flowStats.FlowBytes,
-		FlowKeys:       flowStats.FlowKeys,
+		FlowBytes:      statGen.FlowBytes,
+		FlowKeys:       statGen.FlowKeys,
 		LastUpdateTime: time.Now(),
-		StoreID:        flowStats.StoreID,
+		StoreID:        statGen.StoreID,
 		Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
 		AntiCount:      hotRegionAntiCount,
-		Kind:           flowStats.Kind,
-		needDelete:     flowStats.Expired,
+		Kind:           statGen.Kind,
+		needDelete:     statGen.Expired,
 	}
 
-	if region.GetLeader().GetStoreId() == flowStats.StoreID {
+	if region.GetLeader().GetStoreId() == statGen.StoreID {
 		newItem.isLeader = true
 	}
 
@@ -401,16 +406,12 @@ func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hot
 func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
 	for storeID, flowStats := range w.writeFlow.hotStoreStats {
 		storeTag := fmt.Sprintf("store-%d", storeID)
-		threshold := calculateWriteHotThresholdWithStore(stats, storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "write").Set(float64(flowStats.Len()))
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", storeTag, "write").Set(float64(threshold))
 	}
 
 	for storeID, flowStats := range w.readFlow.hotStoreStats {
 		storeTag := fmt.Sprintf("store-%d", storeID)
-		threshold := calculateReadHotThresholdWithStore(stats, storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "read").Set(float64(flowStats.Len()))
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", storeTag, "read").Set(float64(threshold))
 	}
 }
 
