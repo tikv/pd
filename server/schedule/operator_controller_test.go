@@ -201,7 +201,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	c.Assert(controller.AddOperator(op), Equals, true)
 	c.Assert(len(stream.MsgCh()), Equals, 1)
 
-	// report the result of transfering leader
+	// report the result of transferring leader
 	region := cluster.MockRegionInfo(1, 2, []uint64{1, 2},
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
