@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"strings"
 	"sync"
 	"time"
 
@@ -27,11 +26,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockid"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pkg/errors"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -58,23 +57,10 @@ func (kv *testErrorKV) Save(key, value string) error {
 	return errors.New("save failed")
 }
 
-func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
-
-	c.Assert(err, IsNil)
-	return pdpb.NewPDClient(conn)
-}
-
 func (s *baseCluster) allocID(c *C) uint64 {
 	id, err := s.svr.idAllocator.Alloc()
 	c.Assert(err, IsNil)
 	return id
-}
-
-func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
-	return &pdpb.RequestHeader{
-		ClusterId: clusterID,
-	}
 }
 
 func (s *baseCluster) newPeer(c *C, storeID uint64, peerID uint64) *metapb.Peer {
@@ -135,7 +121,7 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 	clusterID := s.svr.clusterID
 
@@ -166,7 +152,7 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 
 func (s *baseCluster) newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
 	req := &pdpb.IsBootstrappedRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 	}
 
 	return req
@@ -178,7 +164,7 @@ func (s *baseCluster) newBootstrapRequest(c *C, clusterID uint64, storeAddr stri
 	region := s.newRegion(c, 0, []byte{}, []byte{}, []*metapb.Peer{peer}, nil)
 
 	req := &pdpb.BootstrapRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 		Store:  store,
 		Region: region,
 	}
@@ -195,7 +181,7 @@ func (s *baseCluster) bootstrapCluster(c *C, clusterID uint64, storeAddr string)
 
 func (s *baseCluster) getStore(c *C, clusterID uint64, storeID uint64) *metapb.Store {
 	req := &pdpb.GetStoreRequest{
-		Header:  newRequestHeader(clusterID),
+		Header:  testutil.NewRequestHeader(clusterID),
 		StoreId: storeID,
 	}
 	resp, err := s.grpcPDClient.GetStore(context.Background(), req)
@@ -207,7 +193,7 @@ func (s *baseCluster) getStore(c *C, clusterID uint64, storeID uint64) *metapb.S
 
 func (s *baseCluster) getRegion(c *C, clusterID uint64, regionKey []byte) *metapb.Region {
 	req := &pdpb.GetRegionRequest{
-		Header:    newRequestHeader(clusterID),
+		Header:    testutil.NewRequestHeader(clusterID),
 		RegionKey: regionKey,
 	}
 
@@ -220,7 +206,7 @@ func (s *baseCluster) getRegion(c *C, clusterID uint64, regionKey []byte) *metap
 
 func (s *baseCluster) getRegionByID(c *C, clusterID uint64, regionID uint64) *metapb.Region {
 	req := &pdpb.GetRegionByIDRequest{
-		Header:   newRequestHeader(clusterID),
+		Header:   testutil.NewRequestHeader(clusterID),
 		RegionId: regionID,
 	}
 
@@ -239,7 +225,7 @@ func (s *baseCluster) getRaftCluster(c *C) *RaftCluster {
 
 func (s *baseCluster) getClusterConfig(c *C, clusterID uint64) *metapb.Cluster {
 	req := &pdpb.GetClusterConfigRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 	}
 
 	resp, err := s.grpcPDClient.GetClusterConfig(context.Background(), req)
@@ -255,7 +241,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 	clusterID := s.svr.clusterID
 
@@ -285,7 +271,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 
 	// Update cluster config.
 	req := &pdpb.PutClusterConfigRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 		Cluster: &metapb.Cluster{
 			Id:           clusterID,
 			MaxPeerCount: 5,
@@ -300,7 +286,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 
 func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.Store) (*pdpb.PutStoreResponse, error) {
 	req := &pdpb.PutStoreRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 		Store:  store,
 	}
 	resp, err := grpcPDClient.PutStore(context.Background(), req)
@@ -416,7 +402,7 @@ func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Stor
 	{
 		// Update after removed should return tombstone error.
 		req := &pdpb.StoreHeartbeatRequest{
-			Header: newRequestHeader(clusterID),
+			Header: testutil.NewRequestHeader(clusterID),
 			Stats:  &pdpb.StoreStats{StoreId: store.GetId()},
 		}
 		resp, err := s.grpcPDClient.StoreHeartbeat(context.Background(), req)
@@ -484,10 +470,10 @@ func (s *testClusterSuite) TestGetPDMembers(c *C) {
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 	req := &pdpb.GetMembersRequest{
-		Header: newRequestHeader(s.svr.ClusterID()),
+		Header: testutil.NewRequestHeader(s.svr.ClusterID()),
 	}
 
 	resp, err := s.grpcPDClient.GetMembers(context.Background(), req)
@@ -502,7 +488,7 @@ func (s *testClusterSuite) TestStoreVersionChange(c *C) {
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
@@ -530,7 +516,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	_, s.svr, _, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
@@ -549,7 +535,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	// register store and bind stream
 	for i, store := range stores {
 		req := &pdpb.StoreHeartbeatRequest{
-			Header: newRequestHeader(s.svr.clusterID),
+			Header: testutil.NewRequestHeader(s.svr.clusterID),
 			Stats: &pdpb.StoreStats{
 				StoreId:   store.GetId(),
 				Capacity:  1000 * (1 << 20),
@@ -562,7 +548,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		c.Assert(err, IsNil)
 		peer := &metapb.Peer{Id: s.allocID(c), StoreId: store.GetId()}
 		regionReq := &pdpb.RegionHeartbeatRequest{
-			Header: newRequestHeader(s.svr.clusterID),
+			Header: testutil.NewRequestHeader(s.svr.clusterID),
 			Region: &metapb.Region{
 				Id:    s.allocID(c),
 				Peers: []*metapb.Peer{peer},
@@ -647,7 +633,7 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 	clusterID := s.svr.clusterID
 

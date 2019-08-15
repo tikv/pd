@@ -89,7 +89,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	args = []string{"-u", pdAddr, "member", "leader_priority", name, "100"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	priority, err := svr.GetServer().GetMemberLeaderPriority(id)
+	priority, err := svr.GetServer().GetMember().GetMemberLeaderPriority(id)
 	c.Assert(err, IsNil)
 	c.Assert(priority, Equals, 100)
 

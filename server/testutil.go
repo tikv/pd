@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"github.com/pingcap/check"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/tempurl"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/config"
 	"go.etcd.io/etcd/embed"
@@ -37,11 +37,6 @@ import (
 
 // CleanupFunc closes test pd server(s) and deletes any files left behind.
 type CleanupFunc func()
-
-func cleanServer(cfg *config.Config) {
-	// Clean data directory
-	os.RemoveAll(cfg.DataDir)
-}
 
 // NewTestServer creates a pd server for testing.
 func NewTestServer(c *check.C) (*config.Config, *Server, CleanupFunc, error) {
@@ -56,7 +51,7 @@ func NewTestServer(c *check.C) (*config.Config, *Server, CleanupFunc, error) {
 
 	cleanup := func() {
 		s.Close()
-		cleanServer(cfg)
+		testutil.CleanServer(cfg)
 	}
 	return cfg, s, cleanup, nil
 }

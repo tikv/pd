@@ -39,7 +39,7 @@ var notLeaderError = status.Errorf(codes.Unavailable, "not leader")
 
 // GetMembers implements gRPC PDServer.
 func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
-	if s.isClosed() {
+	if s.IsClosed() {
 		return nil, status.Errorf(codes.Unknown, "server not started")
 	}
 	members, err := GetMembers(s.GetClient())
@@ -48,7 +48,7 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 	}
 
 	var etcdLeader *pdpb.Member
-	leadID := s.GetEtcdLeader()
+	leadID := s.member.GetEtcdLeader()
 	for _, m := range members {
 		if m.MemberId == leadID {
 			etcdLeader = m
@@ -59,7 +59,7 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 	return &pdpb.GetMembersResponse{
 		Header:     s.header(),
 		Members:    members,
-		Leader:     s.GetLeader(),
+		Leader:     s.member.GetLeader(),
 		EtcdLeader: etcdLeader,
 	}, nil
 }
@@ -747,7 +747,7 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 // validateRequest checks if Server is leader and clusterID is matched.
 // TODO: Call it in gRPC intercepter.
 func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
-	if !s.IsLeader() {
+	if s.IsClosed() || !s.member.IsLeader() {
 		return errors.WithStack(notLeaderError)
 	}
 	if header.GetClusterId() != s.clusterID {

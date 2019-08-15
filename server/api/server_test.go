@@ -16,8 +16,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,7 +27,6 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/config"
-	"google.golang.org/grpc"
 )
 
 var (
@@ -62,11 +59,6 @@ func newHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 15 * time.Second,
 	}
-}
-
-func cleanServer(cfg *config.Config) {
-	// Clean data directory
-	os.RemoveAll(cfg.DataDir)
 }
 
 type cleanUpFunc func()
@@ -116,7 +108,7 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 			s.Close()
 		}
 		for _, cfg := range cfgs {
-			cleanServer(cfg)
+			testutil.CleanServer(cfg)
 		}
 	}
 
@@ -136,7 +128,7 @@ func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
 			if leader == nil {
 				leader = l
 			}
-			if leader.GetMemberId() == svr.ID() {
+			if leader.GetMemberId() == svr.GetMember().ID() {
 				leaderServer = svr
 			}
 		}
@@ -145,22 +137,10 @@ func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
 	return leaderServer
 }
 
-func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
-	return &pdpb.RequestHeader{
-		ClusterId: clusterID,
-	}
-}
-
-func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
-
-	c.Assert(err, IsNil)
-	return pdpb.NewPDClient(conn)
-}
 func mustBootstrapCluster(c *C, s *server.Server) {
-	grpcPDClient := mustNewGrpcClient(c, s.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(c, s.GetAddr())
 	req := &pdpb.BootstrapRequest{
-		Header: newRequestHeader(s.ClusterID()),
+		Header: testutil.NewRequestHeader(s.ClusterID()),
 		Store:  store,
 		Region: region,
 	}

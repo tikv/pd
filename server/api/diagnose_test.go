@@ -49,7 +49,7 @@ func (s *testDiagnoseAPISuite) TestDiagnoseSlice(c *C) {
 	var leader, follow *server.Server
 
 	for _, svr := range svrs {
-		if svr.IsLeader() {
+		if !svr.IsClosed() && svr.GetMember().IsLeader() {
 			leader = svr
 		} else {
 			follow = svr
