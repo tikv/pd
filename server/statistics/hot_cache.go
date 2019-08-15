@@ -28,18 +28,19 @@ var Denoising = true
 
 const (
 	// RegionHeartBeatReportInterval is the heartbeat report interval of a region.
-	RegionHeartBeatReportInterval = 60
+	RegionHeartBeatReportInterval = 60 // seconds
 	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
-	StoreHeartBeatReportInterval = 10
+	StoreHeartBeatReportInterval = 10 // seconds
 
 	statCacheMaxLen      = 1000
-	storeStatCacheMaxLen = 200
+	//storeStatCacheMaxLen = 200
+	storeStatCacheMaxLen = 50
 
 	hotWriteRegionMinFlowRate = 16 * 1024
 	hotReadRegionMinFlowRate  = 128 * 1024
 
-	activeWriteRegionMinFlowRate = 0
-	activeReadRegionMinFlowRate  = 0
+	activeWriteRegionMinFlowRate = 100 // B/s
+	activeReadRegionMinFlowRate  = 100 // B/s
 
 	minHotRegionReportInterval = 3
 	hotRegionAntiCount         = 1
