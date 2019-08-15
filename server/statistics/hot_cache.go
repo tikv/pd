@@ -397,7 +397,7 @@ func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hot
 	}
 	//for _, i := range rand.Perm(len(stats)) {
 	var first *HotSpotPeerStat = nil
-	for i := 0; i < len(stats); i++ {
+	for i := len(stats) - 1; i >= 0; i-- {
 		if stats[i].HotDegree >= hotThreshold {
 			if first == nil {
 				first = stats[i]
