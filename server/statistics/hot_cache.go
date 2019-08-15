@@ -408,15 +408,29 @@ func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
 	for storeID, flowStats := range w.writeFlow.hotStoreStats {
 		storeTag := fmt.Sprintf("store-%d", storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "write").Set(float64(flowStats.Len()))
-		hotCacheStatusGauge.WithLabelValues("topn_min", storeTag, "write").Set(float64(flowStats.GetTopNMin().(*HotSpotPeerStat).FlowBytes))
-		hotCacheStatusGauge.WithLabelValues("rest_max", storeTag, "write").Set(float64(flowStats.GetRestMax().(*HotSpotPeerStat).FlowBytes))
+    var topMin, restMax uint64
+    if stat := flowStats.GetTopNMin(); stat != nil {
+      topMin = stat.(*HotSpotPeerStat).FlowBytes
+    }
+    if stat := flowStats.GetRestMax(); stat != nil {
+      restMax = stat.(*HotSpotPeerStat).FlowBytes
+    }
+		hotCacheStatusGauge.WithLabelValues("topn_min", storeTag, "write").Set(float64(topMin))
+		hotCacheStatusGauge.WithLabelValues("rest_max", storeTag, "write").Set(float64(restMax))
 	}
 
 	for storeID, flowStats := range w.readFlow.hotStoreStats {
 		storeTag := fmt.Sprintf("store-%d", storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "read").Set(float64(flowStats.Len()))
-		hotCacheStatusGauge.WithLabelValues("topn_min", storeTag, "read").Set(float64(flowStats.GetTopNMin().(*HotSpotPeerStat).FlowBytes))
-		hotCacheStatusGauge.WithLabelValues("rest_max", storeTag, "read").Set(float64(flowStats.GetRestMax().(*HotSpotPeerStat).FlowBytes))
+    var topMin, restMax uint64
+    if stat := flowStats.GetTopNMin(); stat != nil {
+      topMin = stat.(*HotSpotPeerStat).FlowBytes
+    }
+    if stat := flowStats.GetRestMax(); stat != nil {
+      restMax = stat.(*HotSpotPeerStat).FlowBytes
+    }
+		hotCacheStatusGauge.WithLabelValues("topn_min", storeTag, "read").Set(float64(topMin))
+		hotCacheStatusGauge.WithLabelValues("rest_max", storeTag, "read").Set(float64(restMax))
 	}
 }
 
