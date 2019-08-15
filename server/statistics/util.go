@@ -247,6 +247,20 @@ func (tn *TopN) GetRest(id uint64) TopNItem {
 	return tn.rest.Get(id)
 }
 
+// GetTopNMin returns the min item in top N.
+func (tn *TopN) GetTopNMin() TopNItem {
+	tn.rLock()
+	defer tn.rUnlock()
+	return tn.topn.Top()
+}
+
+// GetRestMax returns the mx item in rest.
+func (tn *TopN) GetRestMax() TopNItem {
+	tn.rLock()
+	defer tn.rUnlock()
+	return tn.rest.Top()
+}
+
 // GetAllTopN returns the top N items.
 func (tn *TopN) GetAllTopN() []TopNItem {
 	tn.rLock()

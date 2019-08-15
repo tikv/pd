@@ -32,7 +32,7 @@ const (
 	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
 	StoreHeartBeatReportInterval = 10 // seconds
 
-	statCacheMaxLen      = 1000
+	statCacheMaxLen = 1000
 	//storeStatCacheMaxLen = 200
 	storeStatCacheMaxLen = 50
 
@@ -408,11 +408,15 @@ func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
 	for storeID, flowStats := range w.writeFlow.hotStoreStats {
 		storeTag := fmt.Sprintf("store-%d", storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "write").Set(float64(flowStats.Len()))
+		hotCacheStatusGauge.WithLabelValues("topn_min", storeTag, "write").Set(float64(flowStats.GetTopNMin().(*HotSpotPeerStat).FlowBytes))
+		hotCacheStatusGauge.WithLabelValues("rest_max", storeTag, "write").Set(float64(flowStats.GetRestMax().(*HotSpotPeerStat).FlowBytes))
 	}
 
 	for storeID, flowStats := range w.readFlow.hotStoreStats {
 		storeTag := fmt.Sprintf("store-%d", storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "read").Set(float64(flowStats.Len()))
+		hotCacheStatusGauge.WithLabelValues("topn_min", storeTag, "read").Set(float64(flowStats.GetTopNMin().(*HotSpotPeerStat).FlowBytes))
+		hotCacheStatusGauge.WithLabelValues("rest_max", storeTag, "read").Set(float64(flowStats.GetRestMax().(*HotSpotPeerStat).FlowBytes))
 	}
 }
 
