@@ -658,6 +658,10 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
 		return ErrRegionNotFound(regionID)
 	}
 
+	if c.cluster.IsRegionHot(region) {
+		return errors.Errorf("region %d is a hot region", regionID)
+	}
+
 	op, err := c.regionScatterer.Scatter(region)
 	if err != nil {
 		return err

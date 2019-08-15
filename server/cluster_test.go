@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -89,7 +90,7 @@ func (s *baseCluster) newPeer(c *C, storeID uint64, peerID uint64) *metapb.Peer 
 	}
 }
 
-func (s *baseCluster) newStore(c *C, storeID uint64, addr string) *metapb.Store {
+func (s *baseCluster) newStore(c *C, storeID uint64, addr string, version string) *metapb.Store {
 	if storeID == 0 {
 		storeID = s.allocID(c)
 	}
@@ -97,6 +98,7 @@ func (s *baseCluster) newStore(c *C, storeID uint64, addr string) *metapb.Store 
 	return &metapb.Store{
 		Id:      storeID,
 		Address: addr,
+		Version: version,
 	}
 }
 
@@ -171,7 +173,7 @@ func (s *baseCluster) newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrapp
 }
 
 func (s *baseCluster) newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.BootstrapRequest {
-	store := s.newStore(c, 0, storeAddr)
+	store := s.newStore(c, 0, storeAddr, "2.1.0")
 	peer := s.newPeer(c, store.GetId(), 0)
 	region := s.newRegion(c, 0, []byte{}, []byte{}, []*metapb.Peer{peer}, nil)
 
@@ -317,26 +319,26 @@ func (s *baseCluster) testPutStore(c *C, clusterID uint64, store *metapb.Store) 
 	c.Assert(err, IsNil)
 
 	// Put new store with a duplicated address when old store is up will fail.
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
 	c.Assert(err, NotNil)
 
 	// Put new store with a duplicated address when old store is offline will fail.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
 	c.Assert(err, NotNil)
 
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
 	c.Assert(err, IsNil)
 
 	// Put a new store.
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, "127.0.0.1:12345"))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, "127.0.0.1:12345", "2.1.0"))
 	c.Assert(err, IsNil)
 
 	// Put an existed store with duplicated address with other old stores.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345"))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345", "2.1.0"))
 	c.Assert(err, NotNil)
 }
 
@@ -457,7 +459,7 @@ func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
 	// add an offline store
-	store := s.newStore(c, s.allocID(c), "127.0.0.1:4")
+	store := s.newStore(c, s.allocID(c), "127.0.0.1:4", "2.1.0")
 	store.State = metapb.StoreState_Offline
 	cluster := s.svr.GetRaftCluster()
 	err = cluster.putStore(store)
@@ -494,6 +496,35 @@ func (s *testClusterSuite) TestGetPDMembers(c *C) {
 	c.Assert(len(resp.GetMembers()), Not(Equals), 0)
 }
 
+func (s *testClusterSuite) TestStoreVersionChange(c *C) {
+	var err error
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
+	c.Assert(err, IsNil)
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	defer cleanup()
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	c.Assert(err, IsNil)
+	s.svr.SetClusterVersion("2.0.0")
+	store := s.newStore(c, s.allocID(c), "127.0.0.1:4", "2.1.0")
+	store.State = metapb.StoreState_Up
+	var wg sync.WaitGroup
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/versionChangeConcurrency", `return(true)`), IsNil)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, err = putStore(c, s.grpcPDClient, s.svr.clusterID, store)
+		c.Assert(err, IsNil)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	s.svr.SetClusterVersion("1.0.0")
+	wg.Wait()
+	v, err := semver.NewVersion("1.0.0")
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.GetClusterVersion(), Equals, *v)
+}
+
 func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	var err error
 	_, s.svr, _, err = NewTestServer(c)
@@ -508,7 +539,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	s.svr.cluster.Unlock()
 	var stores []*metapb.Store
 	for _, addr := range storeAddrs {
-		store := s.newStore(c, 0, addr)
+		store := s.newStore(c, 0, addr, "2.1.0")
 		stores = append(stores, store)
 		_, err := putStore(c, s.grpcPDClient, s.svr.clusterID, store)
 		c.Assert(err, IsNil)

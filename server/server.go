@@ -518,7 +518,7 @@ func (s *Server) GetConfig() *config.Config {
 
 	cfg.Namespace = namespaces
 	cfg.LabelProperty = s.scheduleOpt.LoadLabelPropertyConfig().Clone()
-	cfg.ClusterVersion = s.scheduleOpt.LoadClusterVersion()
+	cfg.ClusterVersion = *s.scheduleOpt.LoadClusterVersion()
 	cfg.PDServerCfg = *s.scheduleOpt.LoadPDServerConfig()
 	return cfg
 }
@@ -711,7 +711,7 @@ func (s *Server) SetClusterVersion(v string) error {
 		return err
 	}
 	old := s.scheduleOpt.LoadClusterVersion()
-	s.scheduleOpt.SetClusterVersion(*version)
+	s.scheduleOpt.SetClusterVersion(version)
 	err = s.scheduleOpt.Persist(s.storage)
 	if err != nil {
 		s.scheduleOpt.SetClusterVersion(old)
@@ -727,7 +727,7 @@ func (s *Server) SetClusterVersion(v string) error {
 
 // GetClusterVersion returns the version of cluster.
 func (s *Server) GetClusterVersion() semver.Version {
-	return s.scheduleOpt.LoadClusterVersion()
+	return *s.scheduleOpt.LoadClusterVersion()
 }
 
 // GetSecurityConfig get the security config.

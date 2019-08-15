@@ -505,8 +505,6 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	cluster.RLock()
-	defer cluster.RUnlock()
 	if !cluster.IsFeatureSupported(BatchSplit) {
 		return &pdpb.AskBatchSplitResponse{Header: s.incompatibleVersion("batch_split")}, nil
 	}
@@ -624,6 +622,10 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 			return nil, errors.Errorf("region %d not found", request.GetRegionId())
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
+	}
+
+	if cluster.IsRegionHot(region) {
+		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
 
 	cluster.RLock()
