@@ -210,61 +210,45 @@ func NewTopN(n int) *TopN {
 	}
 }
 
-func (tn *TopN) lock() {
-	tn.rw.Lock()
-}
-
-func (tn *TopN) unlock() {
-	tn.rw.Unlock()
-}
-
-func (tn *TopN) rLock() {
-	tn.rw.RLock()
-}
-
-func (tn *TopN) rUnlock() {
-	tn.rw.RUnlock()
-}
-
 // Len returns number of all items.
 func (tn *TopN) Len() int {
-	tn.rLock()
-	defer tn.rUnlock()
+	tn.rw.RLock()
+	defer tn.rw.RUnlock()
 	return tn.topn.Len() + tn.rest.Len()
 }
 
 // GetTopN returns the item with the given ID if it's in top N.
 func (tn *TopN) GetTopN(id uint64) TopNItem {
-	tn.rLock()
-	defer tn.rUnlock()
+	tn.rw.RLock()
+	defer tn.rw.RUnlock()
 	return tn.topn.Get(id)
 }
 
 // GetRest returns the item with the given ID if it's in the rest.
 func (tn *TopN) GetRest(id uint64) TopNItem {
-	tn.rLock()
-	defer tn.rUnlock()
+	tn.rw.RLock()
+	defer tn.rw.RUnlock()
 	return tn.rest.Get(id)
 }
 
 // GetTopNMin returns the min item in top N.
 func (tn *TopN) GetTopNMin() TopNItem {
-	tn.rLock()
-	defer tn.rUnlock()
+	tn.rw.RLock()
+	defer tn.rw.RUnlock()
 	return tn.topn.Top()
 }
 
 // GetRestMax returns the mx item in rest.
 func (tn *TopN) GetRestMax() TopNItem {
-	tn.rLock()
-	defer tn.rUnlock()
+	tn.rw.RLock()
+	defer tn.rw.RUnlock()
 	return tn.rest.Top()
 }
 
 // GetAllTopN returns the top N items.
 func (tn *TopN) GetAllTopN() []TopNItem {
-	tn.rLock()
-	defer tn.rUnlock()
+	tn.rw.RLock()
+	defer tn.rw.RUnlock()
 	topn := tn.topn.GetAll()
 	res := make([]TopNItem, len(topn))
 	copy(res, topn)
@@ -273,8 +257,8 @@ func (tn *TopN) GetAllTopN() []TopNItem {
 
 // GetAllRest returns the rest items.
 func (tn *TopN) GetAllRest() []TopNItem {
-	tn.rLock()
-	defer tn.rUnlock()
+	tn.rw.RLock()
+	defer tn.rw.RUnlock()
 	rest := tn.rest.GetAll()
 	res := make([]TopNItem, len(rest))
 	copy(res, rest)
@@ -283,8 +267,8 @@ func (tn *TopN) GetAllRest() []TopNItem {
 
 // Put inserts item or updates the old item if it exists.
 func (tn *TopN) Put(item TopNItem) (isNew bool) {
-	tn.lock()
-	defer tn.unlock()
+	tn.rw.Lock()
+	defer tn.rw.Unlock()
 	if tn.topn.Get(item.ID()) != nil {
 		isNew = false
 		tn.topn.Put(item)
@@ -297,8 +281,8 @@ func (tn *TopN) Put(item TopNItem) (isNew bool) {
 
 // Fix fixes the heaps, returns false if there is no item has the given ID.
 func (tn *TopN) Fix(id uint64) (ok bool) {
-	tn.lock()
-	defer tn.unlock()
+	tn.rw.Lock()
+	defer tn.rw.Unlock()
 	ok = tn.topn.Fix(id) || tn.rest.Fix(id)
 	if ok {
 		tn.maintain()
@@ -308,8 +292,8 @@ func (tn *TopN) Fix(id uint64) (ok bool) {
 
 // Remove deletes the item by given ID and returns it.
 func (tn *TopN) Remove(id uint64) TopNItem {
-	tn.lock()
-	defer tn.unlock()
+	tn.rw.Lock()
+	defer tn.rw.Unlock()
 	item := tn.topn.Remove(id)
 	if item == nil {
 		return tn.rest.Remove(id)
