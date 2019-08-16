@@ -722,7 +722,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 	// Ref: https://github.com/tikv/tikv/issues/3819
 	// So, the new leader should be a follower that do not need to move if there is one,
 	// otherwise the first suitable new added follower.
-  orderedStoreIDs := append(oldStores, newStores...)
+	orderedStoreIDs := append(oldStores, newStores...)
 
 	// Remove redundant peers.
 	var rmPeerSteps [][]OpStep
