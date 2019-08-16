@@ -688,21 +688,21 @@ func moveRegionSteps(cluster Cluster, region *core.RegionInfo, stores map[uint64
 // orderedMoveRegionSteps returns steps to move peers of a region to specific stores in order.
 //
 // If the current leader is not in storeIDs, it will be transferred to a follower which
-//  do not need to move if there is one, otherwise the first suitable new added follower.
+// do not need to move if there is one, otherwise the first suitable new added follower.
 // New peers will be added in the same order in storeIDs.
 // NOTE: orderedMoveRegionSteps does NOT check duplicate stores.
-func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs []uint64) (OpKind, []OpStep, error) {
+func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, orderedStoreIDs []uint64) (OpKind, []OpStep, error) {
 	var kind OpKind
 
-	oldStores := make([]uint64, 0, len(storeIDs))
-	newStores := make([]uint64, 0, len(storeIDs))
+	oldStores := make([]uint64, 0, len(orderedStoreIDs))
+	newStores := make([]uint64, 0, len(orderedStoreIDs))
 
 	sourceStores := region.GetStoreIds()
-	targetStores := make(map[uint64]struct{}, len(storeIDs))
+	targetStores := make(map[uint64]struct{}, len(orderedStoreIDs))
 
 	// Add missing peers.
 	var addPeerSteps [][]OpStep
-	for _, id := range storeIDs {
+	for _, id := range orderedStoreIDs {
 		targetStores[id] = struct{}{}
 		if _, ok := sourceStores[id]; ok {
 			oldStores = append(oldStores, id)
@@ -722,7 +722,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 	// Ref: https://github.com/tikv/tikv/issues/3819
 	// So, the new leader should be a follower that do not need to move if there is one,
 	// otherwise the first suitable new added follower.
-	storeIDs = append(oldStores, newStores...)
+	orderedStoreIDs = append(oldStores, newStores...)
 
 	// Remove redundant peers.
 	var rmPeerSteps [][]OpStep
@@ -734,9 +734,9 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 			continue
 		}
 		if region.GetLeader().GetStoreId() == id {
-			tlkind, tlsteps, err := transferLeaderToAnySteps(cluster, id, storeIDs)
+			tlkind, tlsteps, err := transferLeaderToSuitableSteps(cluster, id, orderedStoreIDs)
 			if err != nil {
-				log.Debug("move region to stores failed", zap.Uint64("region-id", region.GetID()), zap.Uint64s("store-ids", storeIDs), zap.Error(err))
+				log.Debug("move region to stores failed", zap.Uint64("region-id", region.GetID()), zap.Uint64s("store-ids", orderedStoreIDs), zap.Error(err))
 				return kind, nil, err
 			}
 			mvLeaderSteps = append(tlsteps, RemovePeer{FromStore: id})
@@ -825,7 +825,7 @@ func getRegionFollowerIDs(region *core.RegionInfo) []uint64 {
 // removePeerSteps returns the steps to safely remove a peer. It prevents removing leader by transfer its leadership first.
 func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64, followerIDs []uint64) (kind OpKind, steps []OpStep, err error) {
 	if region.GetLeader() != nil && region.GetLeader().GetStoreId() == storeID {
-		kind, steps, err = transferLeaderToAnySteps(cluster, storeID, followerIDs)
+		kind, steps, err = transferLeaderToSuitableSteps(cluster, storeID, followerIDs)
 		if err != nil {
 			log.Debug("fail to create remove peer operator", zap.Uint64("region-id", region.GetID()), zap.Error(err))
 			return
@@ -851,9 +851,9 @@ func findNoLabelProperty(cluster Cluster, prop string, storeIDs []uint64) (int, 
 	return -1, 0
 }
 
-// transferLeaderToAnySteps returns the first suitable store to become region leader.
-//   Return an error if there is no suitable store.
-func transferLeaderToAnySteps(cluster Cluster, leaderID uint64, storeIDs []uint64) (OpKind, []OpStep, error) {
+// transferLeaderToSuitableSteps returns the first suitable store to become region leader.
+// Returns an error if there is no suitable store.
+func transferLeaderToSuitableSteps(cluster Cluster, leaderID uint64, storeIDs []uint64) (OpKind, []OpStep, error) {
 	_, id := findNoLabelProperty(cluster, opt.RejectLeader, storeIDs)
 	if id != 0 {
 		return OpLeader, []OpStep{TransferLeader{FromStore: leaderID, ToStore: id}}, nil
