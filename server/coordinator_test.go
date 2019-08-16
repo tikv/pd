@@ -243,16 +243,8 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream *mockHeartbeatStream) {
 	co.hbStreams.bindStream(region.GetLeader().GetStoreId(), stream)
-<<<<<<< HEAD
 	co.cluster.putRegion(region.Clone())
-	co.dispatch(region)
-=======
-	if err := co.cluster.putRegion(region.Clone()); err != nil {
-		return err
-	}
-	co.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
-	return nil
->>>>>>> b6150ca1... schedule: actively push operator  (#1536)
+	co.dispatch(region, DispatchFromHeartBeat)
 }
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
@@ -850,11 +842,11 @@ func (s *testScheduleControllerSuite) TestOperatorStatus(c *C) {
 	region := tc.GetRegion(1)
 	co.addOperator(op)
 	c.Assert(co.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_RUNNING)
-	co.dispatch(region)
+	co.dispatch(region, DispatchFromCreate)
 	c.Assert(co.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_RUNNING)
 	// apply the operator
 	region = region.Clone(core.WithRemoveStorePeer(2))
-	co.dispatch(region)
+	co.dispatch(region, DispatchFromCreate)
 	c.Assert(co.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_SUCCESS)
 }
 
