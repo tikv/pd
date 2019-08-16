@@ -413,7 +413,7 @@ func (o *Operator) String() string {
 	for i := range o.steps {
 		stepStrs[i] = o.steps[i].String()
 	}
-	s := fmt.Sprintf("%s [%s] (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, steps:%s)", o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.createTime, o.startTime, atomic.LoadInt32(&o.currentStep), strings.Join(stepStrs, ", "))
+	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, steps:[%s])", o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.createTime, o.startTime, atomic.LoadInt32(&o.currentStep), strings.Join(stepStrs, ", "))
 	if o.IsTimeout() {
 		s = s + " timeout"
 	}
