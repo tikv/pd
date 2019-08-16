@@ -250,14 +250,14 @@ func calcScore(storeItems map[uint64][]*statistics.HotSpotPeerStat, cluster sche
 
 			s := statistics.HotSpotPeerStat{
 				RegionID:       r.RegionID,
-				FlowBytes:      uint64(r.Stats.Median()),
+				FlowBytes:      r.GetFlowBytes(),
 				HotDegree:      r.HotDegree,
 				LastUpdateTime: r.LastUpdateTime,
 				StoreID:        storeID,
 				AntiCount:      r.AntiCount,
 				Version:        r.Version,
 			}
-			storeStat.TotalFlowBytes += r.FlowBytes
+			storeStat.TotalFlowBytes += r.GetFlowBytes()
 			storeStat.RegionsCount++
 			storeStat.RegionsStat = append(storeStat.RegionsStat, s)
 		}
@@ -314,7 +314,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			candidateStoreIDs = append(candidateStoreIDs, store.GetID())
 		}
 
-		destStoreID = h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
+		destStoreID = h.selectDestStore(candidateStoreIDs, rs.GetFlowBytes(), srcStoreID, storesStat)
 		if destStoreID != 0 {
 			h.peerLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
 
@@ -373,7 +373,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		if len(candidateStoreIDs) == 0 {
 			continue
 		}
-		destStoreID := h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
+		destStoreID := h.selectDestStore(candidateStoreIDs, rs.GetFlowBytes(), srcStoreID, storesStat)
 		if destStoreID == 0 {
 			continue
 		}

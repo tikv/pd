@@ -410,10 +410,10 @@ func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "write").Set(float64(flowStats.Len()))
 		var topnMin, restMax uint64
 		if stat := flowStats.GetTopNMin(); stat != nil {
-			topnMin = stat.(*HotSpotPeerStat).FlowBytes
+			topnMin = stat.(*HotSpotPeerStat).GetFlowBytes()
 		}
 		if stat := flowStats.GetRestMax(); stat != nil {
-			restMax = stat.(*HotSpotPeerStat).FlowBytes
+			restMax = stat.(*HotSpotPeerStat).GetFlowBytes()
 		}
 		hotCacheStatusGauge.WithLabelValues("topn_min", storeTag, "write").Set(float64(topnMin))
 		hotCacheStatusGauge.WithLabelValues("rest_max", storeTag, "write").Set(float64(restMax))
@@ -424,10 +424,10 @@ func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "read").Set(float64(flowStats.Len()))
 		var topnMin, restMax uint64
 		if stat := flowStats.GetTopNMin(); stat != nil {
-			topnMin = stat.(*HotSpotPeerStat).FlowBytes
+			topnMin = stat.(*HotSpotPeerStat).GetFlowBytes()
 		}
 		if stat := flowStats.GetRestMax(); stat != nil {
-			restMax = stat.(*HotSpotPeerStat).FlowBytes
+			restMax = stat.(*HotSpotPeerStat).GetFlowBytes()
 		}
 		hotCacheStatusGauge.WithLabelValues("topn_min", storeTag, "read").Set(float64(topnMin))
 		hotCacheStatusGauge.WithLabelValues("rest_max", storeTag, "read").Set(float64(restMax))
