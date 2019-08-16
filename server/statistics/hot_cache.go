@@ -86,6 +86,11 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 		isExpiredInStore func(region *core.RegionInfo, storeID uint64) bool
 	)
 
+	// ignores this region flow information if the report time interval is too short or too long.
+	if region.GetReportInterval() < minHotRegionReportInterval || region.GetReportInterval() > 3*RegionHeartBeatReportInterval {
+		return generators
+	}
+
 	storeIDs := make(map[uint64]struct{})
 	// gets the storeIDs, including old region and new region
 	ids, ok := f.storesOfRegion[region.GetID()]
@@ -120,11 +125,9 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 		}
 	}
 
-	bytesPerSecInit := uint64(float64(getBytesFlow()) / float64(RegionHeartBeatReportInterval))
-	keysPerSecInit := uint64(float64(getKeysFlow()) / float64(RegionHeartBeatReportInterval))
+	bytesPerSec = uint64(float64(getBytesFlow()) / float64(region.GetReportInterval()))
+	keysPerSec = uint64(float64(getKeysFlow()) / float64(region.GetReportInterval()))
 	for storeID := range storeIDs {
-		bytesPerSec = bytesPerSecInit
-		keysPerSec = keysPerSecInit
 		var oldRegionStat *HotSpotPeerStat
 
 		hotStoreStats, ok := f.hotStoreStats[storeID]
@@ -137,8 +140,6 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 					if interval < minHotRegionReportInterval && !isExpiredInStore(region, storeID) {
 						continue
 					}
-					bytesPerSec = uint64(float64(getBytesFlow()) / interval)
-					keysPerSec = uint64(float64(getKeysFlow()) / interval)
 				}
 			}
 		}
