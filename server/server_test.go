@@ -40,7 +40,7 @@ func mustWaitLeader(c *C, svrs []*Server) *Server {
 	var leader *Server
 	testutil.WaitUntil(c, func(c *C) bool {
 		for _, s := range svrs {
-			if s.IsLeader() {
+			if !s.IsClosed() && s.member.IsLeader() {
 				leader = s
 				return true
 			}
@@ -78,14 +78,14 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 	for i := 0; i < 3; i++ {
 		svr := <-ch
 		s.svrs[svr.GetAddr()] = svr
-		s.leaderPath = svr.getLeaderPath()
+		s.leaderPath = svr.GetMember().GetLeaderPath()
 	}
 }
 
 func (s *testLeaderServerSuite) TearDownSuite(c *C) {
 	for _, svr := range s.svrs {
 		svr.Close()
-		cleanServer(svr.cfg)
+		testutil.CleanServer(svr.cfg)
 	}
 }
 
@@ -117,7 +117,7 @@ func newTestServersWithCfgs(c *C, cfgs []*config.Config) ([]*Server, CleanupFunc
 			svr.Close()
 		}
 		for _, cfg := range cfgs {
-			cleanServer(cfg)
+			testutil.CleanServer(cfg)
 		}
 	}
 
@@ -129,7 +129,7 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	for i, cfg := range cfgs {
 		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_check_clusterID_%d", i)
 		// Clean up before testing.
-		cleanServer(cfg)
+		testutil.CleanServer(cfg)
 	}
 	originInitial := cfgs[0].InitialCluster
 	for _, cfg := range cfgs {

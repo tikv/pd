@@ -17,6 +17,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -54,7 +55,7 @@ func (s *testClusterWorkerSuite) TestValidRequestRegion(c *C) {
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)

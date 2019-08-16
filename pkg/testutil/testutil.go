@@ -14,9 +14,14 @@
 package testutil
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	check "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/server/config"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -38,4 +43,25 @@ func WaitUntil(c *check.C, f CheckFunc) {
 		time.Sleep(waitRetrySleep)
 	}
 	c.Fatal("wait timeout")
+}
+
+// NewRequestHeader creates a new request header.
+func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
+	return &pdpb.RequestHeader{
+		ClusterId: clusterID,
+	}
+}
+
+// MustNewGrpcClient must create a new grpc client.
+func MustNewGrpcClient(c *check.C, addr string) pdpb.PDClient {
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+
+	c.Assert(err, check.IsNil)
+	return pdpb.NewPDClient(conn)
+}
+
+// CleanServer is used to clean data directory.
+func CleanServer(cfg *config.Config) {
+	// Clean data directory
+	os.RemoveAll(cfg.DataDir)
 }

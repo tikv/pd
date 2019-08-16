@@ -15,6 +15,7 @@ package member_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -262,4 +263,80 @@ func (s *serverTestSuite) TestMoveLeader(c *C) {
 	case <-time.After(10 * time.Second):
 		c.Fatal("move etcd leader does not return in 10 seconds")
 	}
+}
+
+var _ = Suite(&leaderTestSuite{})
+
+type leaderTestSuite struct {
+	svr  *server.Server
+	wg   sync.WaitGroup
+	done chan bool
+	cfg  *config.Config
+}
+
+func (s *leaderTestSuite) SetUpSuite(c *C) {
+	s.cfg = server.NewTestSingleConfig(c)
+	s.wg.Add(1)
+	s.done = make(chan bool)
+	svr, err := server.CreateServer(s.cfg, nil)
+	c.Assert(err, IsNil)
+	err = svr.Run(context.TODO())
+	// Send requests after server has started.
+	go s.sendRequest(c, s.cfg.ClientUrls)
+	time.Sleep(100 * time.Millisecond)
+	c.Assert(err, IsNil)
+
+	s.svr = svr
+}
+
+func (s *leaderTestSuite) TearDownSuite(c *C) {
+	s.svr.Close()
+	testutil.CleanServer(s.cfg)
+}
+
+func (s *leaderTestSuite) TestGetLeader(c *C) {
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	leader := s.svr.GetLeader()
+	c.Assert(leader, NotNil)
+
+	s.done <- true
+	s.wg.Wait()
+}
+
+func (s *leaderTestSuite) sendRequest(c *C, addr string) {
+	defer s.wg.Done()
+
+	req := &pdpb.AllocIDRequest{
+		Header: testutil.NewRequestHeader(0),
+	}
+
+	for {
+		select {
+		case <-s.done:
+			return
+		default:
+			// We don't need to check the response and error,
+			// just make sure the server will not panic.
+			grpcPDClient := testutil.MustNewGrpcClient(c, addr)
+			if grpcPDClient != nil {
+				_, _ = grpcPDClient.AllocID(context.Background(), req)
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
+	var leader *server.Server
+	testutil.WaitUntil(c, func(c *C) bool {
+		for _, s := range svrs {
+			if !s.IsClosed() && s.GetMember().IsLeader() {
+				leader = s
+				return true
+			}
+		}
+		return false
+	})
+	return leader
 }

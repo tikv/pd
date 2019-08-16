@@ -125,9 +125,9 @@ func (s *RegionStats) Observe(r *core.RegionInfo) {
 
 // GetRegionStats scans regions that intersect range [startKey, endKey) and sums up
 // their statistics.
-func GetRegionStats(r *core.RegionsInfo, startKey, endKey []byte) *RegionStats {
+func GetRegionStats(f func(startKey, endKey []byte) []*core.RegionInfo, startKey, endKey []byte) *RegionStats {
 	stats := newRegionStats()
-	regions := r.ScanRangeWithEndKey(startKey, endKey)
+	regions := f(startKey, endKey)
 	for _, region := range regions {
 		stats.Observe(region)
 	}

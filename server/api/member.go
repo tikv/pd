@@ -58,11 +58,11 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 	}
 	// Fill leader priorities.
 	for _, m := range members.GetMembers() {
-		if h.svr.GetEtcdLeader() == 0 {
+		if h.svr.GetMember().GetEtcdLeader() == 0 {
 			log.Warn("no etcd leader, skip get leader priority", zap.Uint64("member", m.GetMemberId()))
 			continue
 		}
-		leaderPriority, e := h.svr.GetMemberLeaderPriority(m.GetMemberId())
+		leaderPriority, e := h.svr.GetMember().GetMemberLeaderPriority(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
 			continue
@@ -95,7 +95,7 @@ func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Delete config.
-	err = h.svr.DeleteMemberLeaderPriority(id)
+	err = h.svr.GetMember().DeleteMemberLeaderPriority(id)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -119,7 +119,7 @@ func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Delete config.
-	err = h.svr.DeleteMemberLeaderPriority(id)
+	err = h.svr.GetMember().DeleteMemberLeaderPriority(id)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -166,7 +166,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 				h.rd.JSON(w, http.StatusBadRequest, "bad format leader priority")
 				return
 			}
-			err := h.svr.SetMemberLeaderPriority(memberID, int(priority))
+			err := h.svr.GetMember().SetMemberLeaderPriority(memberID, int(priority))
 			if err != nil {
 				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
@@ -193,7 +193,7 @@ func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
-	err := h.svr.ResignLeader("")
+	err := h.svr.GetMember().ResignLeader(h.svr.Context(), h.svr.Name(), "")
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -203,7 +203,7 @@ func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *leaderHandler) Transfer(w http.ResponseWriter, r *http.Request) {
-	err := h.svr.ResignLeader(mux.Vars(r)["next_leader"])
+	err := h.svr.GetMember().ResignLeader(h.svr.Context(), h.svr.Name(), mux.Vars(r)["next_leader"])
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
