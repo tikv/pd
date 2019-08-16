@@ -395,19 +395,12 @@ func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hot
 	if !ok {
 		return nil
 	}
-	//for _, i := range rand.Perm(len(stats)) {
-	var first *HotSpotPeerStat = nil
-	for i := len(stats) - 1; i >= 0; i-- {
+	for _, i := range rand.Perm(len(stats)) {
 		if stats[i].HotDegree >= hotThreshold {
-			if first == nil {
-				first = stats[i]
-			}
-			if rand.Intn(10) <= 5 {
-				return stats[i]
-			}
+			return stats[i]
 		}
 	}
-	return first
+	return nil
 }
 
 // CollectMetrics collect the hot cache metrics
