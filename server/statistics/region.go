@@ -63,6 +63,7 @@ func (stat *HotSpotPeerStat) ID() uint64 {
 	return stat.RegionID
 }
 
+// GetFlowBytes returns denoised flow bytes if possible.
 func (stat *HotSpotPeerStat) GetFlowBytes() uint64 {
 	if stat.Stats == nil {
 		return stat.FlowBytes
@@ -84,6 +85,7 @@ func (m RegionsStat) Less(i, j int) bool { return m[i].GetFlowBytes() < m[j].Get
 
 // HotRegionsStat records all hot regions statistics
 type HotRegionsStat struct {
+	StoreFlowBytes uint64      `json:"store_flow_bytes"`
 	TotalFlowBytes uint64      `json:"total_flow_bytes"`
 	RegionsCount   int         `json:"regions_count"`
 	RegionsStat    RegionsStat `json:"statistics"`

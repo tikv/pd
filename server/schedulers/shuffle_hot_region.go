@@ -89,10 +89,10 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operat
 func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*operator.Operator {
 	switch typ {
 	case hotReadRegionBalance:
-		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
+		s.stats.readStatAsLeader = calcScore(cluster, typ, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stats.readStatAsLeader)
 	case hotWriteRegionBalance:
-		s.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), cluster, core.LeaderKind)
+		s.stats.writeStatAsLeader = calcScore(cluster, typ, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stats.writeStatAsLeader)
 	}
 	return nil

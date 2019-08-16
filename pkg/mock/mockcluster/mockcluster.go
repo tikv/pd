@@ -39,7 +39,7 @@ type Cluster struct {
 	ID uint64
 }
 
-// NewCluster creates a new Cluster
+// NewCluster creates a new Cluster.
 func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 	return &Cluster{
 		BasicCluster:    core.NewBasicCluster(),
@@ -48,6 +48,11 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 		HotSpotCache:    statistics.NewHotSpotCache(),
 		StoresStats:     statistics.NewStoresStats(),
 	}
+}
+
+// GetStoresStats returns StoresStats.
+func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
+	return mc.StoresStats
 }
 
 func (mc *Cluster) allocID() (uint64, error) {

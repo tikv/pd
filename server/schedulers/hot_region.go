@@ -149,11 +149,11 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.
 	defer h.Unlock()
 	switch typ {
 	case hotReadRegionBalance:
-		h.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
+		h.stats.readStatAsLeader = calcScore(cluster, typ, core.LeaderKind)
 		return h.balanceHotReadRegions(cluster)
 	case hotWriteRegionBalance:
-		h.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), cluster, core.LeaderKind)
-		h.stats.writeStatAsPeer = calcScore(cluster.RegionWriteStats(), cluster, core.RegionKind)
+		h.stats.writeStatAsLeader = calcScore(cluster, typ, core.LeaderKind)
+		h.stats.writeStatAsPeer = calcScore(cluster, typ, core.RegionKind)
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
@@ -220,12 +220,31 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
-func calcScore(storeItems map[uint64][]*statistics.HotSpotPeerStat, cluster schedule.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
+func calcScore(cluster schedule.Cluster, typ BalanceType, kind core.ResourceKind) statistics.StoreHotRegionsStat {
+	var storeItems map[uint64][]*statistics.HotSpotPeerStat
+	switch typ {
+	case hotWriteRegionBalance:
+		{
+			storeItems = cluster.RegionWriteStats()
+		}
+	case hotReadRegionBalance:
+		{
+			storeItems = cluster.RegionReadStats()
+		}
+	}
 	stats := make(statistics.StoreHotRegionsStat)
+	storesStats := cluster.GetStoresStats()
 	for storeID, items := range storeItems {
 		// HotDegree is the update times on the hot cache. If the heartbeat report
 		// the flow of the region exceeds the threshold, the scheduler will update the region in
 		// the hot cache and the hotdegree of the region will increase.
+		storeStat, ok := stats[storeID]
+		if !ok {
+			storeStat = &statistics.HotRegionsStat{
+				RegionsStat: make(statistics.RegionsStat, 0, storeHotRegionsDefaultLen),
+			}
+			stats[storeID] = storeStat
+		}
 
 		for _, r := range items {
 			if kind == core.LeaderKind && !r.IsLeader() {
@@ -240,14 +259,6 @@ func calcScore(storeItems map[uint64][]*statistics.HotSpotPeerStat, cluster sche
 				continue
 			}
 
-			storeStat, ok := stats[storeID]
-			if !ok {
-				storeStat = &statistics.HotRegionsStat{
-					RegionsStat: make(statistics.RegionsStat, 0, storeHotRegionsDefaultLen),
-				}
-				stats[storeID] = storeStat
-			}
-
 			s := statistics.HotSpotPeerStat{
 				RegionID:       r.RegionID,
 				FlowBytes:      r.GetFlowBytes(),
@@ -260,6 +271,19 @@ func calcScore(storeItems map[uint64][]*statistics.HotSpotPeerStat, cluster sche
 			storeStat.TotalFlowBytes += r.GetFlowBytes()
 			storeStat.RegionsCount++
 			storeStat.RegionsStat = append(storeStat.RegionsStat, s)
+		}
+
+		if len(storeStat.RegionsStat) > 0 {
+			var storeFlowBytes float64
+			switch typ {
+			case hotWriteRegionBalance:
+				storeFlowBytes, _ = storesStats.GetStoreBytesRate(storeID)
+			case hotReadRegionBalance:
+				_, storeFlowBytes = storesStats.GetStoreBytesRate(storeID)
+			}
+			storeStat.StoreFlowBytes = uint64(storeFlowBytes)
+		} else {
+			delete(stats, storeID)
 		}
 	}
 	return stats

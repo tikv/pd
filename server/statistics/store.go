@@ -213,3 +213,8 @@ func (r *RollingStoreStats) GetKeysReadRate() float64 {
 	defer r.RUnlock()
 	return r.keysReadRate.Median()
 }
+
+// StoreStatInformer provides access to a shared informer of stores statistics.
+type StoreStatInformer interface {
+	GetStoresStats() *StoresStats
+}
