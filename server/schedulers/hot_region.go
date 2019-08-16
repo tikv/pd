@@ -393,14 +393,17 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 // Inside these stores, we choose the one with maximum flow bytes.
 func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotRegionsStat) (srcStoreID uint64) {
 	var (
-		maxFlowBytes           uint64
-		maxHotStoreRegionCount int
+		maxFlowBytes uint64
+		maxCount     int
 	)
 
-	for storeID, statistics := range stats {
-		count, flowBytes := statistics.RegionsStat.Len(), statistics.TotalFlowBytes
-		if count >= 2 && (count > maxHotStoreRegionCount || (count == maxHotStoreRegionCount && flowBytes > maxFlowBytes)) {
-			maxHotStoreRegionCount = count
+	for storeID, stat := range stats {
+		count, flowBytes := stat.RegionsStat.Len(), stat.TotalFlowBytes
+		if count < 2 {
+			continue
+		}
+		if flowBytes > maxFlowBytes || (flowBytes == maxFlowBytes && count > maxCount) {
+			maxCount = count
 			maxFlowBytes = flowBytes
 			srcStoreID = storeID
 		}
@@ -413,24 +416,17 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes uint64, srcStoreID uint64, storesStat statistics.StoreHotRegionsStat) (destStoreID uint64) {
 	sr := storesStat[srcStoreID]
 	srcFlowBytes := sr.TotalFlowBytes
-	srcHotRegionsCount := sr.RegionsStat.Len()
 
 	var (
-		minFlowBytes    uint64 = math.MaxUint64
-		minRegionsCount        = int(math.MaxInt32)
+		minFlowBytes uint64 = uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) - regionFlowBytes
+		minCount            = int(math.MaxInt32)
 	)
 	for _, storeID := range candidateStoreIDs {
 		if s, ok := storesStat[storeID]; ok {
-			if srcHotRegionsCount-s.RegionsStat.Len() > 1 && minRegionsCount > s.RegionsStat.Len() {
+			if minFlowBytes > s.TotalFlowBytes || (minFlowBytes == s.TotalFlowBytes && s.RegionsStat.Len() < minCount) {
 				destStoreID = storeID
 				minFlowBytes = s.TotalFlowBytes
-				minRegionsCount = s.RegionsStat.Len()
-				continue
-			}
-			if minRegionsCount == s.RegionsStat.Len() && minFlowBytes > s.TotalFlowBytes &&
-				uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) > s.TotalFlowBytes+2*regionFlowBytes {
-				minFlowBytes = s.TotalFlowBytes
-				destStoreID = storeID
+				minCount = s.RegionsStat.Len()
 			}
 		} else {
 			destStoreID = storeID
