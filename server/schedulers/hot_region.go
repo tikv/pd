@@ -422,7 +422,7 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 	)
 
 	for storeID, stat := range stats {
-		count, flowBytes := stat.RegionsStat.Len(), stat.TotalFlowBytes
+		count, flowBytes := stat.RegionsStat.Len(), stat.StoreFlowBytes
 		if count < 2 {
 			continue
 		}
@@ -439,7 +439,7 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 // We choose a target store based on the hot region number and flow bytes of this store.
 func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes uint64, srcStoreID uint64, storesStat statistics.StoreHotRegionsStat) (destStoreID uint64) {
 	sr := storesStat[srcStoreID]
-	srcFlowBytes := sr.TotalFlowBytes
+	srcFlowBytes := sr.StoreFlowBytes
 
 	var (
 		minFlowBytes uint64 = uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) - regionFlowBytes
@@ -447,9 +447,9 @@ func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64,
 	)
 	for _, storeID := range candidateStoreIDs {
 		if s, ok := storesStat[storeID]; ok {
-			if minFlowBytes > s.TotalFlowBytes || (minFlowBytes == s.TotalFlowBytes && s.RegionsStat.Len() < minCount) {
+			if minFlowBytes > s.StoreFlowBytes || (minFlowBytes == s.StoreFlowBytes && s.RegionsStat.Len() < minCount) {
 				destStoreID = storeID
-				minFlowBytes = s.TotalFlowBytes
+				minFlowBytes = s.StoreFlowBytes
 				minCount = s.RegionsStat.Len()
 			}
 		} else {
