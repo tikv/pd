@@ -691,18 +691,18 @@ func moveRegionSteps(cluster Cluster, region *core.RegionInfo, stores map[uint64
 // do not need to move if there is one, otherwise the first suitable new added follower.
 // New peers will be added in the same order in storeIDs.
 // NOTE: orderedMoveRegionSteps does NOT check duplicate stores.
-func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, orderedStoreIDs []uint64) (OpKind, []OpStep, error) {
+func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs []uint64) (OpKind, []OpStep, error) {
 	var kind OpKind
 
-	oldStores := make([]uint64, 0, len(orderedStoreIDs))
-	newStores := make([]uint64, 0, len(orderedStoreIDs))
+	oldStores := make([]uint64, 0, len(storeIDs))
+	newStores := make([]uint64, 0, len(storeIDs))
 
 	sourceStores := region.GetStoreIds()
-	targetStores := make(map[uint64]struct{}, len(orderedStoreIDs))
+	targetStores := make(map[uint64]struct{}, len(storeIDs))
 
 	// Add missing peers.
 	var addPeerSteps [][]OpStep
-	for _, id := range orderedStoreIDs {
+	for _, id := range storeIDs {
 		targetStores[id] = struct{}{}
 		if _, ok := sourceStores[id]; ok {
 			oldStores = append(oldStores, id)
@@ -722,7 +722,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, orderedSto
 	// Ref: https://github.com/tikv/tikv/issues/3819
 	// So, the new leader should be a follower that do not need to move if there is one,
 	// otherwise the first suitable new added follower.
-	orderedStoreIDs = append(oldStores, newStores...)
+  orderedStoreIDs := append(oldStores, newStores...)
 
 	// Remove redundant peers.
 	var rmPeerSteps [][]OpStep
