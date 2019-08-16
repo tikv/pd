@@ -34,6 +34,7 @@ import (
 	"go.uber.org/zap"
 )
 
+//
 const (
 	runSchedulerCheckInterval = 3 * time.Second
 	collectFactor             = 0.8
@@ -46,13 +47,17 @@ const (
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 
+	slowNotifyInterval = 5 * time.Second
+	fastNotifyInterval = 2 * time.Second
+	// PushOperatorTickInterval is the interval try to push the operator.
+	PushOperatorTickInterval = 500 * time.Millisecond
+)
+
+// The source of dispatched region.
+const (
 	DispatchFromHeartBeat     = "heartbeat"
 	DispatchFromNotifierQueue = "active push"
 	DispatchFromCreate        = "create"
-	slowNotifyInterval        = 5 * time.Second
-	fastNotifyInterval        = 2 * time.Second
-	// PushOperatorTickInterval is the interval try to push the operator.
-	PushOperatorTickInterval = 500 * time.Millisecond
 )
 
 var (
@@ -708,7 +713,7 @@ func (c *coordinator) GetOperatorStatus(id uint64) *OperatorWithStatus {
 	return c.opRecords.Get(id)
 }
 
-func (oc *coordinator) getNextPushOperatorTime(step schedule.OperatorStep, now time.Time) time.Time {
+func (c *coordinator) getNextPushOperatorTime(step schedule.OperatorStep, now time.Time) time.Time {
 	nextTime := slowNotifyInterval
 	switch step.(type) {
 	case schedule.TransferLeader, schedule.PromoteLearner:
@@ -720,19 +725,19 @@ func (oc *coordinator) getNextPushOperatorTime(step schedule.OperatorStep, now t
 // pollNeedDispatchRegion returns the region need to dispatch,
 // "next" is true to indicate that it may exist in next attempt,
 // and false is the end for the poll.
-func (oc *coordinator) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
-	oc.Lock()
-	defer oc.Unlock()
-	if oc.opNotifierQueue.Len() == 0 {
+func (c *coordinator) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
+	c.Lock()
+	defer c.Unlock()
+	if c.opNotifierQueue.Len() == 0 {
 		return nil, false
 	}
-	item := heap.Pop(&oc.opNotifierQueue).(*operatorWithTime)
+	item := heap.Pop(&c.opNotifierQueue).(*operatorWithTime)
 	regionID := item.op.RegionID()
-	op, ok := oc.operators[regionID]
+	op, ok := c.operators[regionID]
 	if !ok || op == nil {
 		return nil, true
 	}
-	r = oc.cluster.GetRegion(regionID)
+	r = c.cluster.GetRegion(regionID)
 	if r == nil {
 		return nil, true
 	}
@@ -742,20 +747,20 @@ func (oc *coordinator) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) 
 	}
 	now := time.Now()
 	if now.Before(item.time) {
-		heap.Push(&oc.opNotifierQueue, item)
+		heap.Push(&c.opNotifierQueue, item)
 		return nil, false
 	}
 
 	// pushes with new notify time.
-	item.time = oc.getNextPushOperatorTime(step, now)
-	heap.Push(&oc.opNotifierQueue, item)
+	item.time = c.getNextPushOperatorTime(step, now)
+	heap.Push(&c.opNotifierQueue, item)
 	return r, true
 }
 
 // PushOperators periodically pushes the unfinished operator to the executor(TiKV).
-func (oc *coordinator) PushOperators() {
+func (c *coordinator) PushOperators() {
 	for {
-		r, next := oc.pollNeedDispatchRegion()
+		r, next := c.pollNeedDispatchRegion()
 		if !next {
 			break
 		}
@@ -763,7 +768,7 @@ func (oc *coordinator) PushOperators() {
 			continue
 		}
 
-		oc.dispatch(r, DispatchFromNotifierQueue)
+		c.dispatch(r, DispatchFromNotifierQueue)
 	}
 }
 
