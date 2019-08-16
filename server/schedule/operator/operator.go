@@ -673,7 +673,7 @@ func CreateAddLightPeerSteps(newStore uint64, peerID uint64, cluster Cluster) []
 // CreateTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store.
 func CreateTransferLeaderOperator(desc string, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) *Operator {
 	step := TransferLeader{FromStore: sourceStoreID, ToStore: targetStoreID}
-	brief := fmt.Sprintf("transfer leader: store %v -> %v", sourceStoreID, targetStoreID)
+	brief := fmt.Sprintf("transfer leader: store %v to %v", sourceStoreID, targetStoreID)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpLeader, step)
 }
 
@@ -712,7 +712,7 @@ func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionI
 		}
 		steps = append(steps, RemovePeer{FromStore: peer.GetStoreId()})
 	}
-	brief := fmt.Sprintf("mv region: stores %v -> %v", u64Set(region.GetStoreIds()), u64Set(storeIDs))
+	brief := fmt.Sprintf("mv region: stores %v to %v", u64Set(region.GetStoreIds()), u64Set(storeIDs))
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, steps...), nil
 }
 
@@ -724,7 +724,7 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 	}
 	st := CreateAddPeerSteps(newStore, peerID, cluster)
 	steps = append(st, steps...)
-	brief := fmt.Sprintf("mv peer: store %v -> %v", oldStore, newStore)
+	brief := fmt.Sprintf("mv peer: store %v to %v", oldStore, newStore)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...), nil
 }
 
@@ -737,7 +737,7 @@ func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionI
 	st := CreateAddPeerSteps(newStore, peerID, cluster)
 	st = append(st, TransferLeader{ToStore: newStore, FromStore: oldStore})
 	steps = append(st, steps...)
-	brief := fmt.Sprintf("mv leader: store %v -> %v", oldStore, newStore)
+	brief := fmt.Sprintf("mv leader: store %v to %v", oldStore, newStore)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpLeader|OpRegion, steps...), nil
 }
 
@@ -795,7 +795,7 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 		IsPassive:  false,
 	})
 
-	brief := fmt.Sprintf("merge region: store %v -> %v", u64Set(source.GetStoreIds()), u64Set(target.GetStoreIds()))
+	brief := fmt.Sprintf("merge region: store %v to %v", u64Set(source.GetStoreIds()), u64Set(target.GetStoreIds()))
 	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kinds|kind|OpMerge, steps...)
 	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kinds|kind|OpMerge, MergeRegion{
 		FromRegion: source.GetMeta(),
@@ -998,7 +998,7 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 	for i := range targetPeers {
 		targetStores[i] = targetPeers[i].GetStoreId()
 	}
-	brief := fmt.Sprintf("scatter region: stores %v -> %v", u64Set(origin.GetStoreIds()), targetStores)
+	brief := fmt.Sprintf("scatter region: stores %v to %v", u64Set(origin.GetStoreIds()), targetStores)
 	op := NewOperator(desc, brief, origin.GetID(), origin.GetRegionEpoch(), kind, steps...)
 	return op
 }
