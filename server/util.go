@@ -31,9 +31,8 @@ import (
 )
 
 const (
-	requestTimeout  = etcdutil.DefaultRequestTimeout
-	slowRequestTime = etcdutil.DefaultSlowRequestTime
-	clientTimeout   = 3 * time.Second
+	clientTimeout  = 3 * time.Second
+	requestTimeout = etcdutil.DefaultRequestTimeout
 )
 
 // Version information.

@@ -15,7 +15,6 @@ package tso_test
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,8 +22,8 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/tests"
-	"google.golang.org/grpc"
 )
 
 func Test(t *testing.T) {
@@ -50,11 +49,11 @@ func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 	cluster.WaitLeader()
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := mustNewGrpcClient(c, leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 		Count:  uint32(n),
 	}
 
@@ -120,10 +119,10 @@ func (s *testTsoSuite) TestTsoCount0(c *C) {
 	cluster.WaitLeader()
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := mustNewGrpcClient(c, leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 
-	req := &pdpb.TsoRequest{Header: newRequestHeader(clusterID)}
+	req := &pdpb.TsoRequest{Header: testutil.NewRequestHeader(clusterID)}
 	tsoClient, err := grpcPDClient.Tso(context.Background())
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
@@ -153,7 +152,7 @@ func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	s.cluster.WaitLeader()
 
 	s.server = s.cluster.GetServer(s.cluster.GetLeader())
-	s.grpcPDClient = mustNewGrpcClient(c, s.server.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.server.GetAddr())
 	svr := s.server.GetServer()
 	svr.Close()
 	failpoint.Disable("github.com/pingcap/pd/server/tso/fallBackSync")
@@ -170,7 +169,7 @@ func (s *testTimeFallBackSuite) TearDownSuite(c *C) {
 func (s *testTimeFallBackSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 	clusterID := s.server.GetClusterID()
 	req := &pdpb.TsoRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 		Count:  uint32(n),
 	}
 
@@ -215,17 +214,4 @@ func (s *testTimeFallBackSuite) TestTimeFallBack(c *C) {
 	}
 
 	wg.Wait()
-}
-
-func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
-	return &pdpb.RequestHeader{
-		ClusterId: clusterID,
-	}
-}
-
-func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
-
-	c.Assert(err, IsNil)
-	return pdpb.NewPDClient(conn)
 }

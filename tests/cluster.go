@@ -126,7 +126,7 @@ func (s *TestServer) Destroy() error {
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
-	return s.server.ResignLeader("")
+	return s.server.GetMember().ResignLeader(s.server.Context(), s.server.Name(), "")
 }
 
 // State returns the current TestServer's state.
@@ -196,14 +196,14 @@ func (s *TestServer) GetClusterVersion() semver.Version {
 func (s *TestServer) GetServerID() uint64 {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.ID()
+	return s.server.GetMember().ID()
 }
 
 // IsLeader returns whether the server is leader or not.
 func (s *TestServer) IsLeader() bool {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.IsLeader()
+	return !s.server.IsClosed() && s.server.GetMember().IsLeader()
 }
 
 // GetEtcdLeader returns the builtin etcd leader.
@@ -234,7 +234,7 @@ func (s *TestServer) GetEtcdLeaderID() (uint64, error) {
 func (s *TestServer) MoveEtcdLeader(old, new uint64) error {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.MoveEtcdLeader(context.Background(), old, new)
+	return s.server.GetMember().MoveEtcdLeader(context.Background(), old, new)
 }
 
 // GetEtcdClient returns the builtin etcd client.
@@ -416,8 +416,9 @@ func (c *TestCluster) WaitLeader() string {
 			if s.state == Running {
 				running++
 			}
-			if s.GetLeader().GetName() != "" {
-				counter[s.GetLeader().GetName()]++
+			n := s.GetLeader().GetName()
+			if n != "" {
+				counter[n]++
 			}
 		}
 		for name, num := range counter {
