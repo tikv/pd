@@ -82,14 +82,22 @@ func NewHotStoresStats() *HotStoresStats {
 // CheckRegionFlow checks the flow information of region.
 func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind) []HotSpotPeerStatGenerator {
 	var (
-		generators   []HotSpotPeerStatGenerator
-		getBytesFlow func() uint64
-		getKeysFlow  func() uint64
-		bytesPerSec  uint64
-		keysPerSec   uint64
+		generators     []HotSpotPeerStatGenerator
+		getBytesFlow   func() uint64
+		getKeysFlow    func() uint64
+		bytesPerSec    uint64
+		keysPerSec     uint64
+		reportInterval uint64
 
 		isExpiredInStore func(region *core.RegionInfo, storeID uint64) bool
 	)
+
+	reportInterval = region.GetInterval().GetEndTimestamp() - region.GetInterval().GetStartTimestamp()
+
+	// ignores this region flow information if the report time interval is too short or too long.
+	if reportInterval < minHotRegionReportInterval || reportInterval > 3*RegionHeartBeatReportInterval {
+		return generators
+	}
 
 	storeIDs := make(map[uint64]struct{})
 	// gets the storeIDs, including old region and new region
@@ -125,11 +133,9 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 		}
 	}
 
-	bytesPerSecInit := uint64(float64(getBytesFlow()) / float64(RegionHeartBeatReportInterval))
-	keysPerSecInit := uint64(float64(getKeysFlow()) / float64(RegionHeartBeatReportInterval))
+	bytesPerSec = uint64(float64(getBytesFlow()) / float64(reportInterval))
+	keysPerSec = uint64(float64(getKeysFlow()) / float64(reportInterval))
 	for storeID := range storeIDs {
-		bytesPerSec = bytesPerSecInit
-		keysPerSec = keysPerSecInit
 		var oldRegionStat *HotSpotPeerStat
 
 		hotStoreStats, ok := f.hotStoreStats[storeID]
@@ -142,8 +148,6 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 					if interval < minHotRegionReportInterval && !isExpiredInStore(region, storeID) {
 						continue
 					}
-					bytesPerSec = uint64(float64(getBytesFlow()) / interval)
-					keysPerSec = uint64(float64(getKeysFlow()) / interval)
 				}
 			}
 		}
