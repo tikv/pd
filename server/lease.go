@@ -48,11 +48,11 @@ func (l *LeaderLease) Grant(leaseTimeout int64) error {
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), requestTimeout)
 	leaseResp, err := l.lease.Grant(ctx, leaseTimeout)
 	cancel()
-	if cost := time.Since(start); cost > slowRequestTime {
-		log.Warn("lease grants too slow", zap.Duration("cost", cost))
-	}
 	if err != nil {
 		return errors.WithStack(err)
+	}
+	if cost := time.Since(start); cost > slowRequestTime {
+		log.Warn("lease grants too slow", zap.Duration("cost", cost))
 	}
 	l.ID = leaseResp.ID
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
