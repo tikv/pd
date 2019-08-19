@@ -224,13 +224,9 @@ func calcScore(cluster schedule.Cluster, typ BalanceType, kind core.ResourceKind
 	var storeItems map[uint64][]*statistics.HotSpotPeerStat
 	switch typ {
 	case hotWriteRegionBalance:
-		{
-			storeItems = cluster.RegionWriteStats()
-		}
+		storeItems = cluster.RegionWriteStats()
 	case hotReadRegionBalance:
-		{
-			storeItems = cluster.RegionReadStats()
-		}
+		storeItems = cluster.RegionReadStats()
 	}
 	stats := make(statistics.StoreHotRegionsStat)
 	storesStats := cluster.GetStoresStats()
