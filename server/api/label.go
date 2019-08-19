@@ -72,14 +72,14 @@ func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stores := cluster.GetStores()
+	stores := cluster.GetMetaStores()
 	storesInfo := &StoresInfo{
 		Stores: make([]*StoreInfo, 0, len(stores)),
 	}
 
 	stores = filter.filter(stores)
 	for _, s := range stores {
-		store, err := cluster.GetStore(s.GetId())
+		store, err := cluster.TryGetStore(s.GetId())
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return

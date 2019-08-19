@@ -36,7 +36,9 @@ type RegionInfo struct {
 	downPeers       []*pdpb.PeerStats
 	pendingPeers    []*metapb.Peer
 	writtenBytes    uint64
+	writtenKeys     uint64
 	readBytes       uint64
+	readKeys        uint64
 	approximateSize int64
 	approximateKeys int64
 }
@@ -89,7 +91,9 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		downPeers:       heartbeat.GetDownPeers(),
 		pendingPeers:    heartbeat.GetPendingPeers(),
 		writtenBytes:    heartbeat.GetBytesWritten(),
+		writtenKeys:     heartbeat.GetKeysWritten(),
 		readBytes:       heartbeat.GetBytesRead(),
+		readKeys:        heartbeat.GetKeysRead(),
 		approximateSize: int64(regionSize),
 		approximateKeys: int64(heartbeat.GetApproximateKeys()),
 	}
@@ -115,7 +119,9 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		downPeers:       downPeers,
 		pendingPeers:    pendingPeers,
 		writtenBytes:    r.writtenBytes,
+		writtenKeys:     r.writtenKeys,
 		readBytes:       r.readBytes,
+		readKeys:        r.readKeys,
 		approximateSize: r.approximateSize,
 		approximateKeys: r.approximateKeys,
 	}
@@ -326,6 +332,16 @@ func (r *RegionInfo) GetBytesRead() uint64 {
 // GetBytesWritten returns the written bytes of the region.
 func (r *RegionInfo) GetBytesWritten() uint64 {
 	return r.writtenBytes
+}
+
+// GetKeysWritten returns the written keys of the region.
+func (r *RegionInfo) GetKeysWritten() uint64 {
+	return r.writtenKeys
+}
+
+// GetKeysRead returns the read keys of the region.
+func (r *RegionInfo) GetKeysRead() uint64 {
+	return r.readKeys
 }
 
 // GetLeader returns the leader of the region.

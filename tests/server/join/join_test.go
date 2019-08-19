@@ -23,6 +23,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/join"
 	"github.com/pingcap/pd/tests"
 )
 
@@ -30,15 +31,15 @@ func Test(t *testing.T) {
 	TestingT(t)
 }
 
-var _ = Suite(&serverTestSuite{})
+var _ = Suite(&joinTestSuite{})
 
-type serverTestSuite struct{}
+type joinTestSuite struct{}
 
-func (s *serverTestSuite) SetUpSuite(c *C) {
+func (s *joinTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
 }
 
-func (s *serverTestSuite) TestSimpleJoin(c *C) {
+func (s *joinTestSuite) TestSimpleJoin(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(1)
@@ -85,7 +86,7 @@ func (s *serverTestSuite) TestSimpleJoin(c *C) {
 
 // A failed PD tries to join the previous cluster but it has been deleted
 // during its downtime.
-func (s *serverTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
+func (s *joinTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(3)
@@ -121,7 +122,7 @@ func (s *serverTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 }
 
 // A deleted PD joins the previous cluster.
-func (s *serverTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
+func (s *joinTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(3)
@@ -156,7 +157,7 @@ func (s *serverTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	c.Assert(members.Members, HasLen, 2)
 }
 
-func (s *serverTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
+func (s *joinTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(1)
@@ -176,5 +177,5 @@ func (s *serverTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 	c.Assert(err, IsNil)
 	err = pd2.Destroy()
 	c.Assert(err, IsNil)
-	c.Assert(server.PrepareJoinCluster(pd2.GetConfig()), NotNil)
+	c.Assert(join.PrepareJoinCluster(pd2.GetConfig()), NotNil)
 }

@@ -126,15 +126,8 @@ func (c *namespaceCluster) GetRegion(id uint64) *core.RegionInfo {
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (c *namespaceCluster) RegionWriteStats() []*statistics.RegionStat {
-	allStats := c.Cluster.RegionWriteStats()
-	stats := make([]*statistics.RegionStat, 0, len(allStats))
-	for _, s := range allStats {
-		if c.GetRegion(s.RegionID) != nil {
-			stats = append(stats, s)
-		}
-	}
-	return stats
+func (c *namespaceCluster) RegionWriteStats() map[uint64][]*statistics.HotSpotPeerStat {
+	return c.Cluster.RegionWriteStats()
 }
 
 func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifier, scheduler schedule.Scheduler) []*operator.Operator {

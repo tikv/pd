@@ -28,9 +28,7 @@ import (
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
 func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
-	c.RLock()
-	defer c.RUnlock()
-	if err := c.cachedCluster.handleRegionHeartbeat(region); err != nil {
+	if err := c.processRegionHeartbeat(region); err != nil {
 		return err
 	}
 
@@ -40,6 +38,8 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return errors.Errorf("invalid region, zero region peer count: %v", core.RegionToHexMeta(region.GetMeta()))
 	}
 
+	c.RLock()
+	defer c.RUnlock()
 	c.coordinator.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
 	return nil
 }

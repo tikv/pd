@@ -72,17 +72,17 @@ func (mc *Cluster) GetStoreRegionCount(storeID uint64) int {
 }
 
 // IsRegionHot checks if the region is hot.
-func (mc *Cluster) IsRegionHot(id uint64) bool {
-	return mc.HotSpotCache.IsRegionHot(id, mc.GetHotRegionCacheHitsThreshold())
+func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
+	return mc.HotSpotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // RegionReadStats returns hot region's read stats.
-func (mc *Cluster) RegionReadStats() []*statistics.RegionStat {
+func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotSpotPeerStat {
 	return mc.HotSpotCache.RegionStats(statistics.ReadFlow)
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (mc *Cluster) RegionWriteStats() []*statistics.RegionStat {
+func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotSpotPeerStat {
 	return mc.HotSpotCache.RegionStats(statistics.WriteFlow)
 }
 
@@ -231,9 +231,9 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetReadBytes(readBytes))
-	isUpdate, item := mc.HotSpotCache.CheckRead(r, mc.StoresStats)
-	if isUpdate {
-		mc.HotSpotCache.Update(regionID, item, statistics.ReadFlow)
+	items := mc.HotSpotCache.CheckRead(r, mc.StoresStats)
+	for _, item := range items {
+		mc.HotSpotCache.Update(item)
 	}
 	mc.PutRegion(r)
 }
@@ -242,9 +242,9 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64,
 func (mc *Cluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
-	isUpdate, item := mc.HotSpotCache.CheckWrite(r, mc.StoresStats)
-	if isUpdate {
-		mc.HotSpotCache.Update(regionID, item, statistics.WriteFlow)
+	items := mc.HotSpotCache.CheckWrite(r, mc.StoresStats)
+	for _, item := range items {
+		mc.HotSpotCache.Update(item)
 	}
 	mc.PutRegion(r)
 }

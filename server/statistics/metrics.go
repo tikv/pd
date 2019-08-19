@@ -22,7 +22,7 @@ var (
 			Subsystem: "hotcache",
 			Name:      "status",
 			Help:      "Status of the hotspot.",
-		}, []string{"name", "type"})
+		}, []string{"name", "store", "type"})
 
 	storeStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
