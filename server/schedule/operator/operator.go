@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -100,11 +101,26 @@ func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
 
 type u64Set map[uint64]struct{}
 
+type u64Slice []uint64
+
+func (s u64Slice) Len() int {
+	return len(s)
+}
+
+func (s u64Slice) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+func (s u64Slice) Less(i, j int) bool {
+	return s[i] < s[j]
+}
+
 func (s u64Set) String() string {
 	v := make([]uint64, 0, len(s))
 	for x := range s {
 		v = append(v, x)
 	}
+	sort.Sort(u64Slice(v))
 	return fmt.Sprintf("%v", v)
 }
 
@@ -998,6 +1014,7 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 	for i := range targetPeers {
 		targetStores[i] = targetPeers[i].GetStoreId()
 	}
+	sort.Sort(u64Slice(targetStores))
 	brief := fmt.Sprintf("scatter region: stores %v to %v", u64Set(origin.GetStoreIds()), targetStores)
 	op := NewOperator(desc, brief, origin.GetID(), origin.GetRegionEpoch(), kind, steps...)
 	return op
