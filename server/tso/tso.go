@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/kv"
+	"github.com/pingcap/pd/server/member"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -36,17 +37,12 @@ const (
 	maxLogical           = int64(1 << 18)
 )
 
-// Lease is an interface to determine if tso is in lease of providing service.
-type Lease interface {
-	IsExpired() bool
-}
-
 // TimestampOracle is used to maintain the logic of tso.
 type TimestampOracle struct {
 	// For tso, set after pd becomes leader.
 	ts            atomic.Value
 	lastSavedTime time.Time
-	lease         Lease
+	lease         *member.LeaderLease
 
 	rootPath     string
 	member       string
@@ -106,7 +102,7 @@ func (t *TimestampOracle) saveTimestamp(ts time.Time) error {
 }
 
 // SyncTimestamp is used to synchronize the timestamp.
-func (t *TimestampOracle) SyncTimestamp(lease Lease) error {
+func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 	tsoCounter.WithLabelValues("sync").Inc()
 
 	last, err := t.loadTimestamp()

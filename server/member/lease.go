@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package member
 
 import (
 	"context"
@@ -69,7 +69,7 @@ func (l *LeaderLease) Close() error {
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
-	l.lease.Revoke(ctx)
+	l.lease.Revoke(ctx, l.ID)
 	return l.lease.Close()
 }
 
