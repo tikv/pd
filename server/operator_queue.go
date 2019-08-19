@@ -14,8 +14,9 @@
 package server
 
 import (
-	"github.com/pingcap/pd/server/schedule"
 	"time"
+
+	"github.com/pingcap/pd/server/schedule"
 )
 
 type operatorWithTime struct {
