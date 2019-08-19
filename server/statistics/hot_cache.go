@@ -77,17 +77,20 @@ func NewHotStoresStats() *HotStoresStats {
 // CheckRegionFlow checks the flow information of region.
 func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind) []HotSpotPeerStatGenerator {
 	var (
-		generators   []HotSpotPeerStatGenerator
-		getBytesFlow func() uint64
-		getKeysFlow  func() uint64
-		bytesPerSec  uint64
-		keysPerSec   uint64
+		generators     []HotSpotPeerStatGenerator
+		getBytesFlow   func() uint64
+		getKeysFlow    func() uint64
+		bytesPerSec    uint64
+		keysPerSec     uint64
+		reportInterval uint64
 
 		isExpiredInStore func(region *core.RegionInfo, storeID uint64) bool
 	)
 
+	reportInterval = region.GetInterval().GetEndTimestamp() - region.GetInterval().GetStartTimestamp()
+
 	// ignores this region flow information if the report time interval is too short or too long.
-	if region.GetReportInterval() < minHotRegionReportInterval || region.GetReportInterval() > 3*RegionHeartBeatReportInterval {
+	if reportInterval < minHotRegionReportInterval || reportInterval > 3*RegionHeartBeatReportInterval {
 		return generators
 	}
 
@@ -125,8 +128,8 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 		}
 	}
 
-	bytesPerSec = uint64(float64(getBytesFlow()) / float64(region.GetReportInterval()))
-	keysPerSec = uint64(float64(getKeysFlow()) / float64(region.GetReportInterval()))
+	bytesPerSec = uint64(float64(getBytesFlow()) / float64(reportInterval))
+	keysPerSec = uint64(float64(getKeysFlow()) / float64(reportInterval))
 	for storeID := range storeIDs {
 		var oldRegionStat *HotSpotPeerStat
 
