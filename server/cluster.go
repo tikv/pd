@@ -394,7 +394,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
 			// Not successfully saved to storage is not fatal, it only leads to longer warm-up
 			// after restart. Here we only log the error then go on updating cache.
-			log.Error("fail to save region to storage",
+			log.Error("failed to save region to storage",
 				zap.Uint64("region-id", region.GetID()),
 				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
 				zap.Error(err))
@@ -419,7 +419,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if c.storage != nil {
 			for _, item := range overlaps {
 				if err := c.storage.DeleteRegion(item); err != nil {
-					log.Error("fail to delete region from storage",
+					log.Error("failed to delete region from storage",
 						zap.Uint64("region-id", item.GetId()),
 						zap.Stringer("region-meta", core.RegionToHexMeta(item)),
 						zap.Error(err))
@@ -687,18 +687,6 @@ func (c *RaftCluster) GetMetaStores() []*metapb.Store {
 // GetStores returns all stores in the cluster.
 func (c *RaftCluster) GetStores() []*core.StoreInfo {
 	return c.core.GetStores()
-}
-
-// TryGetStore gets store from cluster.
-func (c *RaftCluster) TryGetStore(storeID uint64) (*core.StoreInfo, error) {
-	if storeID == 0 {
-		return nil, errors.New("invalid zero store id")
-	}
-	store := c.GetStore(storeID)
-	if store == nil {
-		return nil, errors.Errorf("invalid store ID %d, not found", storeID)
-	}
-	return store, nil
 }
 
 // GetStore gets store from cluster.

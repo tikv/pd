@@ -183,9 +183,14 @@ func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluste
 		schedulerCounter.WithLabelValues(l.GetName(), "no_follower_region").Inc()
 		return nil
 	}
-	source := cluster.GetStore(region.GetLeader().GetStoreId())
+	leaderStoreID := region.GetLeader().GetStoreId()
+	source := cluster.GetStore(leaderStoreID)
 	if source == nil {
-		log.Debug("region has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
+		log.Debug("region has no leader or leader store cannot be found",
+			zap.String("scheduler", l.GetName()),
+			zap.Uint64("region-id", region.GetID()),
+			zap.Uint64("store-id", leaderStoreID),
+		)
 		schedulerCounter.WithLabelValues(l.GetName(), "no_leader").Inc()
 		return nil
 	}
