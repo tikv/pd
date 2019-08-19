@@ -748,7 +748,7 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		EndKey:   region.GetEndKey(),
 		Policy:   pdpb.CheckPolicy(pdpb.CheckPolicy_value[strings.ToUpper(policy)]),
 	}
-	brief := fmt.Sprintf("split region")
+	brief := fmt.Sprintf("split region: stores %v", u64Set(region.GetStoreIds()))
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind, step)
 }
 
@@ -795,7 +795,7 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 		IsPassive:  false,
 	})
 
-	brief := fmt.Sprintf("merge region: store %v to %v", u64Set(source.GetStoreIds()), u64Set(target.GetStoreIds()))
+	brief := fmt.Sprintf("merge region: stores %v to %v", u64Set(source.GetStoreIds()), u64Set(target.GetStoreIds()))
 	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kinds|kind|OpMerge, steps...)
 	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kinds|kind|OpMerge, MergeRegion{
 		FromRegion: source.GetMeta(),
