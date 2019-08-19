@@ -129,11 +129,11 @@ func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (bool, erro
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (s *Storage) LoadRegions(regions *RegionsInfo) error {
+func (s *Storage) LoadRegions(f func(region *RegionInfo) []*metapb.Region) error {
 	if atomic.LoadInt32(&s.useRegionStorage) > 0 {
-		return loadRegions(s.regionStorage, regions)
+		return loadRegions(s.regionStorage, f)
 	}
-	return loadRegions(s.Base, regions)
+	return loadRegions(s.Base, f)
 }
 
 // SaveRegion saves one region to storage.
@@ -178,7 +178,7 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 }
 
 // LoadStores loads all stores from storage to StoresInfo.
-func (s *Storage) LoadStores(stores *StoresInfo) error {
+func (s *Storage) LoadStores(f func(store *StoreInfo)) error {
 	nextID := uint64(0)
 	endKey := s.storePath(math.MaxUint64)
 	for {
@@ -203,7 +203,7 @@ func (s *Storage) LoadStores(stores *StoresInfo) error {
 			newStoreInfo := NewStoreInfo(store, SetLeaderWeight(leaderWeight), SetRegionWeight(regionWeight))
 
 			nextID = store.GetId() + 1
-			stores.SetStore(newStoreInfo)
+			f(newStoreInfo)
 		}
 		if len(res) < minKVRangeLimit {
 			return nil

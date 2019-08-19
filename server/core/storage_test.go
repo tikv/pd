@@ -93,7 +93,7 @@ func (s *testKVSuite) TestLoadStores(c *C) {
 
 	n := 10
 	stores := mustSaveStores(c, storage, n)
-	c.Assert(storage.LoadStores(cache), IsNil)
+	c.Assert(storage.LoadStores(cache.SetStore), IsNil)
 
 	c.Assert(cache.GetStoreCount(), Equals, n)
 	for _, store := range cache.GetMetaStores() {
@@ -109,7 +109,7 @@ func (s *testKVSuite) TestStoreWeight(c *C) {
 	mustSaveStores(c, storage, n)
 	c.Assert(storage.SaveStoreWeight(1, 2.0, 3.0), IsNil)
 	c.Assert(storage.SaveStoreWeight(2, 0.2, 0.3), IsNil)
-	c.Assert(storage.LoadStores(cache), IsNil)
+	c.Assert(storage.LoadStores(cache.SetStore), IsNil)
 	leaderWeights := []float64{1.0, 2.0, 0.2}
 	regionWeights := []float64{1.0, 3.0, 0.3}
 	for i := 0; i < n; i++ {
@@ -138,7 +138,7 @@ func (s *testKVSuite) TestLoadRegions(c *C) {
 
 	n := 10
 	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegions(cache), IsNil)
+	c.Assert(storage.LoadRegions(cache.SetRegion), IsNil)
 
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
@@ -152,7 +152,7 @@ func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
 
 	n := 1000
 	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegions(cache), IsNil)
+	c.Assert(storage.LoadRegions(cache.SetRegion), IsNil)
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])

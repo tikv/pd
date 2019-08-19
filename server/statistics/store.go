@@ -64,13 +64,13 @@ func (s *StoresStats) Observe(storeID uint64, stats *pdpb.StoreStats) {
 }
 
 // UpdateTotalBytesRate updates the total bytes write rate and read rate.
-func (s *StoresStats) UpdateTotalBytesRate(stores *core.StoresInfo) {
+func (s *StoresStats) UpdateTotalBytesRate(f func() []*core.StoreInfo) {
 	s.RLock()
 	defer s.RUnlock()
 	var totalBytesWriteRate float64
 	var totalBytesReadRate float64
 	var writeRate, readRate float64
-	ss := stores.GetStores()
+	ss := f()
 	for _, store := range ss {
 		if store.IsUp() {
 			writeRate, readRate = s.rollingStoresStats[store.GetID()].GetBytesRate()

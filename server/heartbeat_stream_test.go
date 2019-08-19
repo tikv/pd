@@ -40,7 +40,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	c.Assert(err, IsNil)
 	s.svr.cfg.HeartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 
 	bootstrapReq := s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0")
@@ -79,13 +79,13 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 		}
 	}
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newRequestHeader(s.svr.clusterID),
+		Header: testutil.NewRequestHeader(s.svr.clusterID),
 		Leader: s.region.Peers[0],
 		Region: s.region,
 	}
 	invalidRegion := &metapb.Region{Id: 0}
 	invalidReq := &pdpb.RegionHeartbeatRequest{
-		Header: newRequestHeader(s.svr.clusterID),
+		Header: testutil.NewRequestHeader(s.svr.clusterID),
 		Leader: s.region.Peers[0],
 		Region: invalidRegion,
 	}

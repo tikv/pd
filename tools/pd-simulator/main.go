@@ -70,11 +70,11 @@ func run(simCase string) {
 	simConfig := simulator.NewSimConfig(*serverLogLevel)
 	if *configFile != "" {
 		if _, err := toml.DecodeFile(*configFile, simConfig); err != nil {
-			simutil.Logger.Fatal("fail to decode file ", zap.Error(err))
+			simutil.Logger.Fatal("failed to decode file ", zap.Error(err))
 		}
 	}
 	if err := simConfig.Adjust(); err != nil {
-		simutil.Logger.Fatal("fail to adjust simulator configuration", zap.Error(err))
+		simutil.Logger.Fatal("failed to adjust simulator configuration", zap.Error(err))
 	}
 
 	if *pdAddr != "" {
@@ -86,7 +86,7 @@ func run(simCase string) {
 			simutil.Logger.Fatal("run server error", zap.Error(err))
 		}
 		for {
-			if local.IsLeader() {
+			if !local.IsClosed() && local.GetMember().IsLeader() {
 				break
 			}
 			time.Sleep(100 * time.Millisecond)

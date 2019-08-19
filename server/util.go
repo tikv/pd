@@ -31,9 +31,8 @@ import (
 )
 
 const (
-	requestTimeout  = etcdutil.DefaultRequestTimeout
-	slowRequestTime = etcdutil.DefaultSlowRequestTime
-	clientTimeout   = 3 * time.Second
+	clientTimeout  = 3 * time.Second
+	requestTimeout = etcdutil.DefaultRequestTimeout
 )
 
 // Version information.
@@ -71,11 +70,11 @@ func PrintPDInfo() {
 
 // CheckPDVersion checks if PD needs to be upgraded.
 func CheckPDVersion(opt *config.ScheduleOption) {
-	pdVersion := MinSupportedVersion(Base)
+	pdVersion := *MinSupportedVersion(Base)
 	if PDReleaseVersion != "None" {
 		pdVersion = *MustParseVersion(PDReleaseVersion)
 	}
-	clusterVersion := opt.LoadClusterVersion()
+	clusterVersion := *opt.LoadClusterVersion()
 	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))
 	if pdVersion.LessThan(clusterVersion) {
 		log.Warn(

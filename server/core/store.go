@@ -610,8 +610,8 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 	}
 }
 
-// UpdateStoreStatusLocked updates the information of the store.
-func (s *StoresInfo) UpdateStoreStatusLocked(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
+// UpdateStoreStatus updates the information of the store.
+func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.Clone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),

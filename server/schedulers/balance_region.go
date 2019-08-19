@@ -181,7 +181,11 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer, opInfluence operator.OpInfluence) *operator.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.GetRegionStores(region)
-	source := cluster.GetStore(oldPeer.GetStoreId())
+	sourceStoreID := oldPeer.GetStoreId()
+	source := cluster.GetStore(sourceStoreID)
+	if source == nil {
+		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
+	}
 	scoreGuard := filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
 	hitsFilter := s.hitsCounter.buildTargetFilter(cluster, source)
 	checker := checker.NewReplicaChecker(cluster, nil)
@@ -193,6 +197,9 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	}
 
 	target := cluster.GetStore(storeID)
+	if target == nil {
+		log.Error("failed to get the target store", zap.Uint64("store-id", storeID))
+	}
 	regionID := region.GetID()
 	sourceID := source.GetID()
 	targetID := target.GetID()
