@@ -60,8 +60,16 @@ func (l *LeaderLease) Grant(leaseTimeout int64) error {
 	return nil
 }
 
+const revokeLeaseTimeout = time.Second
+
 // Close releases the lease.
 func (l *LeaderLease) Close() error {
+	// Reset expire time.
+	l.expireTime.Store(time.Time{})
+	// Try to revoke lease to make subsequent elections faster.
+	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
+	defer cancel()
+	l.lease.Revoke(ctx)
 	return l.lease.Close()
 }
 
