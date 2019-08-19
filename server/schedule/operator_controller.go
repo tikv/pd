@@ -679,8 +679,9 @@ func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
 func (oc *OperatorController) SetAllStoresLimit(rate float64) {
 	oc.Lock()
 	defer oc.Unlock()
-	for storeID := range oc.storesLimit {
-		oc.newStoreLimit(storeID, rate)
+	stores := oc.cluster.GetStores()
+	for _, s := range stores {
+		oc.newStoreLimit(s.GetID(), rate)
 	}
 }
 

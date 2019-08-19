@@ -43,7 +43,7 @@ func newRedirector(s *server.Server) *redirector {
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if h.s.IsLeader() {
+	if !h.s.IsClosed() && h.s.GetMember().IsLeader() {
 		next(w, r)
 		return
 	}
@@ -57,7 +57,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 
 	r.Header.Set(redirectorHeader, h.s.Name())
 
-	leader := h.s.GetLeader()
+	leader := h.s.GetMember().GetLeader()
 	if leader == nil {
 		http.Error(w, "no leader", http.StatusServiceUnavailable)
 		return

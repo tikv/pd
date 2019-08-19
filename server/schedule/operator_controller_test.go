@@ -143,3 +143,40 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	c.Assert(next, IsTrue)
 	c.Assert(r.GetID(), Equals, region2.GetID())
 }
+
+func (t *testOperatorControllerSuite) TestStorelimit(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
+	tc.AddLeaderStore(1, 0)
+	tc.UpdateLeaderCount(1, 1000)
+	tc.AddLeaderStore(2, 0)
+	for i := uint64(1); i <= 1000; i++ {
+		tc.AddLeaderRegion(i, i)
+	}
+	oc.SetStoreLimit(2, 1)
+	for i := uint64(1); i <= 5; i++ {
+		op := operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		oc.RemoveOperator(op)
+	}
+	op := operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	oc.RemoveOperator(op)
+
+	oc.SetStoreLimit(2, 2)
+	for i := uint64(1); i <= 10; i++ {
+		op = operator.NewOperator("test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		oc.RemoveOperator(op)
+	}
+	oc.SetAllStoresLimit(1)
+	for i := uint64(1); i <= 5; i++ {
+		op = operator.NewOperator("test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		oc.RemoveOperator(op)
+	}
+	op = operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	oc.RemoveOperator(op)
+}

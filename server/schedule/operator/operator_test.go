@@ -82,6 +82,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 		RemovePeer{FromStore: 3},
 	}
 	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), IsNil)
 	c.Assert(op.IsFinish(), IsTrue)

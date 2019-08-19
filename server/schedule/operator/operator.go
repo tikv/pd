@@ -384,6 +384,10 @@ type Operator struct {
 
 // NewOperator creates a new operator.
 func NewOperator(desc string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, steps ...OpStep) *Operator {
+	level := core.NormalPriority
+	if kind&OpAdmin != 0 {
+		level = core.HighPriority
+	}
 	return &Operator{
 		desc:        desc,
 		regionID:    regionID,
@@ -392,7 +396,7 @@ func NewOperator(desc string, regionID uint64, regionEpoch *metapb.RegionEpoch, 
 		steps:       steps,
 		createTime:  time.Now(),
 		stepTime:    time.Now().UnixNano(),
-		level:       core.NormalPriority,
+		level:       level,
 	}
 }
 
