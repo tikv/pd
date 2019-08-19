@@ -30,11 +30,7 @@ func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
 		if region.GetPendingLearner(p.GetId()) != nil {
 			continue
 		}
-		step := operator.PromoteLearner{
-			ToStore: p.GetStoreId(),
-			PeerID:  p.GetId(),
-		}
-		op := operator.NewOperator("promote-learner", region.GetID(), region.GetRegionEpoch(), operator.OpRegion, step)
+		op := operator.CreatePromoteLearnerOperator("promote-learner", region, p)
 		return op
 	}
 	return nil
