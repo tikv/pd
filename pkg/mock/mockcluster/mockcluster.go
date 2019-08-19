@@ -76,6 +76,11 @@ func (mc *Cluster) GetStoreRegionCount(storeID uint64) int {
 	return mc.Regions.GetStoreRegionCount(storeID)
 }
 
+// GetStore gets a store with a given store ID.
+func (mc *Cluster) GetStore(storeID uint64) *core.StoreInfo {
+	return mc.Stores.GetStore(storeID)
+}
+
 // IsRegionHot checks if the region is hot.
 func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return mc.HotSpotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())

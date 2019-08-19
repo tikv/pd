@@ -162,9 +162,10 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 		return &pdpb.GetStoreResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	store, err := cluster.TryGetStore(request.GetStoreId())
-	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+	storeID := request.GetStoreId()
+	store := cluster.GetStore(storeID)
+	if store == nil {
+		return nil, status.Errorf(codes.Unknown, "invalid store ID %d, not found", storeID)
 	}
 	return &pdpb.GetStoreResponse{
 		Header: s.header(),
@@ -177,8 +178,8 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 // It returns nil if it can't get the store.
 // Copied from server/command.go
 func checkStore2(cluster *RaftCluster, storeID uint64) *pdpb.Error {
-	store, err := cluster.TryGetStore(storeID)
-	if err == nil && store != nil {
+	store := cluster.GetStore(storeID)
+	if store != nil {
 		if store.GetState() == metapb.StoreState_Tombstone {
 			return &pdpb.Error{
 				Type:    pdpb.ErrorType_STORE_TOMBSTONE,
@@ -347,9 +348,9 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		storeID := request.GetLeader().GetStoreId()
 		storeLabel := strconv.FormatUint(storeID, 10)
-		store, err := cluster.TryGetStore(storeID)
-		if err != nil {
-			return err
+		store := cluster.GetStore(storeID)
+		if store == nil {
+			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
 		storeAddress := store.GetAddress()
 

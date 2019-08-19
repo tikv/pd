@@ -325,6 +325,9 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 		}
 
 		srcStore := cluster.GetStore(srcStoreID)
+		if srcStore == nil {
+			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
+		}
 		filters := []filter.Filter{
 			filter.StoreStateFilter{MoveRegion: true},
 			filter.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
