@@ -967,9 +967,9 @@ type testBalanceHotWriteRegionSchedulerSuite struct{}
 //	//|     1     |       1      |        2       |       3        |      512KB    |
 //	//|     2     |       1      |        3       |       4        |      512KB    |
 //	//|     3     |       1      |        2       |       4        |      512KB    |
-//	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
-//	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 3, 4)
-//	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 4)
+//	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+//	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 3, 4)
+//	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 4)
 //	opt.HotRegionCacheHitsThreshold = 0
 //
 //	// Will transfer a hot region from store 1, because the total count of peers
@@ -1015,11 +1015,11 @@ type testBalanceHotWriteRegionSchedulerSuite struct{}
 //	tc.UpdateStorageWrittenBytes(4, 30*1024*1024)
 //	tc.UpdateStorageWrittenBytes(5, 0*1024*1024)
 //	tc.UpdateStorageWrittenBytes(6, 30*1024*1024)
-//	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
-//	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, 2, 3)
-//	tc.AddLeaderRegionWithWriteInfo(3, 6, 512*1024*statistics.RegionHeartBeatReportInterval, 1, 4)
-//	tc.AddLeaderRegionWithWriteInfo(4, 5, 512*1024*statistics.RegionHeartBeatReportInterval, 6, 4)
-//	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*1024*statistics.RegionHeartBeatReportInterval, 4, 5)
+//	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+//	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+//	tc.AddLeaderRegionWithWriteInfo(3, 6, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 4)
+//	tc.AddLeaderRegionWithWriteInfo(4, 5, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 6, 4)
+//	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 4, 5)
 //	// We can find that the leader of all hot regions are on store 1,
 //	// so one of the leader will transfer to another store.
 //	op = hb.Schedule(tc)

@@ -41,6 +41,7 @@ type RegionInfo struct {
 	readKeys        uint64
 	approximateSize int64
 	approximateKeys int64
+	interval        *pdpb.TimeInterval
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -96,6 +97,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		readKeys:        heartbeat.GetKeysRead(),
 		approximateSize: int64(regionSize),
 		approximateKeys: int64(heartbeat.GetApproximateKeys()),
+		interval:        heartbeat.GetInterval(),
 	}
 
 	classifyVoterAndLearner(region)
@@ -124,6 +126,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		readKeys:        r.readKeys,
 		approximateSize: r.approximateSize,
 		approximateKeys: r.approximateKeys,
+		interval:        proto.Clone(r.interval).(*pdpb.TimeInterval),
 	}
 
 	for _, opt := range opts {
@@ -312,6 +315,11 @@ func (r *RegionInfo) GetApproximateSize() int64 {
 // GetApproximateKeys returns the approximate keys of the region.
 func (r *RegionInfo) GetApproximateKeys() int64 {
 	return r.approximateKeys
+}
+
+// GetInterval returns the interval information of the region.
+func (r *RegionInfo) GetInterval() *pdpb.TimeInterval {
+	return r.interval
 }
 
 // GetDownPeers returns the down peers of the region.
