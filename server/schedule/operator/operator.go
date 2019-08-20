@@ -806,7 +806,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 //  c = interleaveStepGroups(a, b, 0)
 //  c == [opA1, opA2, opB1, opA3, opB2, opA4, opA5, opA6, opB3, opB4, opB5, opB6]
 //
-// sizeHint is a hint for the length of returned slice.
+// sizeHint is a hint for the capacity of returned slice.
 func interleaveStepGroups(a, b [][]OpStep, sizeHint int) []OpStep {
 	steps := make([]OpStep, 0, sizeHint)
 	i, j := 0, 0
