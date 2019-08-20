@@ -426,20 +426,6 @@ func (w *HotSpotCache) IsRegionHot(region *core.RegionInfo, hotThreshold int) bo
 }
 
 // Utils
-func calculateWriteHotThreshold(stats *StoresStats) uint64 {
-	// hotRegionThreshold is used to pick hot region
-	// suppose the number of the hot Regions is statCacheMaxLen
-	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	// divide 2 because the store reports data about two times than the region record write to rocksdb
-	divisor := float64(statCacheMaxLen) * 2
-	hotRegionThreshold := uint64(stats.TotalBytesWriteRate() / divisor)
-
-	if hotRegionThreshold < hotWriteRegionMinFlowRate {
-		hotRegionThreshold = hotWriteRegionMinFlowRate
-	}
-	return hotRegionThreshold
-}
-
 func calculateWriteHotThresholdWithStore(stats *StoresStats, storeID uint64) uint64 {
 	writeBytes, _ := stats.GetStoreBytesRate(storeID)
 	divisor := float64(storeStatCacheMaxLen) * 2
@@ -455,19 +441,6 @@ func calculateReadHotThresholdWithStore(stats *StoresStats, storeID uint64) uint
 	_, readBytes := stats.GetStoreBytesRate(storeID)
 	divisor := float64(storeStatCacheMaxLen) * 2
 	hotRegionThreshold := uint64(float64(readBytes) / divisor)
-
-	if hotRegionThreshold < hotReadRegionMinFlowRate {
-		hotRegionThreshold = hotReadRegionMinFlowRate
-	}
-	return hotRegionThreshold
-}
-
-func calculateReadHotThreshold(stats *StoresStats) uint64 {
-	// hotRegionThreshold is used to pick hot region
-	// suppose the number of the hot Regions is statCacheMaxLen
-	// and we use total Read Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	divisor := float64(statCacheMaxLen)
-	hotRegionThreshold := uint64(stats.TotalBytesReadRate() / divisor)
 
 	if hotRegionThreshold < hotReadRegionMinFlowRate {
 		hotRegionThreshold = hotReadRegionMinFlowRate
