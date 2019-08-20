@@ -16,7 +16,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -58,7 +57,7 @@ func main() {
 	}
 
 	if cfg.ConfigCheck {
-		fmt.Println("config check successful")
+		server.PrintConfigCheckMsg(cfg)
 		exit(0)
 	}
 
