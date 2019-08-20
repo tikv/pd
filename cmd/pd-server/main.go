@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -55,6 +56,12 @@ func main() {
 	default:
 		log.Fatal("parse cmd flags error", zap.Error(err))
 	}
+
+	if cfg.ConfigCheck {
+		fmt.Println("config check successful")
+		exit(0)
+	}
+
 	// New zap logger
 	err = cfg.SetupLogger()
 	if err == nil {
