@@ -223,24 +223,24 @@ func (s *ScorePairSlice) StdDeviation() float64 {
 }
 
 // MeanStoresStats returns the mean of stores' stats.
-func MeanStoresStats(storesStats map[uint64]uint64) float64 {
+func MeanStoresStats(storesStats map[uint64]float64) float64 {
 	if len(storesStats) == 0 {
 		return 0.0
 	}
 
-	var sum uint64
+	var sum float64
 	for _, stats := range storesStats {
 		sum += stats
 	}
-	return float64(sum) / float64(len(storesStats))
+	return sum / float64(len(storesStats))
 }
 
 // NormalizeStoresStats returns the normalized score pairs. Normolize: x_i => (x_i - x_min)/x_avg.
-func NormalizeStoresStats(storesStats map[uint64]uint64) *ScorePairSlice {
+func NormalizeStoresStats(storesStats map[uint64]float64) *ScorePairSlice {
 	scorePairSlice := NewScorePairSlice()
 
 	for storeID, stats := range storesStats {
-		pair := NewScorePair(storeID, float64(stats))
+		pair := NewScorePair(storeID, stats)
 		scorePairSlice.Add(pair)
 	}
 

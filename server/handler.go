@@ -133,13 +133,26 @@ func (h *Handler) GetHotReadRegions() *statistics.StoreHotRegionInfos {
 	return c.getHotReadRegions()
 }
 
+func floatMapToUintMap(m map[uint64]float64) map[uint64]uint64 {
+	res := make(map[uint64]uint64, len(m))
+	for k, v := range m {
+		if v < 0 {
+			res[k] = 0
+			log.Warn("Trying to convert negetive float64 to uint64", zap.Float64("float64", v))
+		} else {
+			res[k] = uint64(v)
+		}
+	}
+	return res
+}
+
 // GetHotBytesWriteStores gets all hot write stores stats.
 func (h *Handler) GetHotBytesWriteStores() map[uint64]uint64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
 	}
-	return cluster.getStoresBytesWriteStat()
+	return floatMapToUintMap(cluster.getStoresBytesWriteStat())
 }
 
 // GetHotBytesReadStores gets all hot write stores stats.
@@ -148,7 +161,7 @@ func (h *Handler) GetHotBytesReadStores() map[uint64]uint64 {
 	if cluster == nil {
 		return nil
 	}
-	return cluster.getStoresBytesReadStat()
+	return floatMapToUintMap(cluster.getStoresBytesReadStat())
 }
 
 // GetHotKeysWriteStores gets all hot write stores stats.
@@ -157,7 +170,7 @@ func (h *Handler) GetHotKeysWriteStores() map[uint64]uint64 {
 	if cluster == nil {
 		return nil
 	}
-	return cluster.getStoresKeysWriteStat()
+	return floatMapToUintMap(cluster.getStoresKeysWriteStat())
 }
 
 // GetHotKeysReadStores gets all hot write stores stats.
@@ -166,7 +179,7 @@ func (h *Handler) GetHotKeysReadStores() map[uint64]uint64 {
 	if cluster == nil {
 		return nil
 	}
-	return cluster.getStoresKeysReadStat()
+	return floatMapToUintMap(cluster.getStoresKeysReadStat())
 }
 
 // AddScheduler adds a scheduler.

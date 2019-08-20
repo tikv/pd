@@ -166,10 +166,13 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.
 }
 
 func (h *balanceHotRegionsScheduler) analyzeStoreLoad(storesStats *statistics.StoresStats) {
-	readFlowScorePairs := NormalizeStoresStats(storesStats.GetStoresBytesReadStat())
-	writeFlowScorePairs := NormalizeStoresStats(storesStats.GetStoresBytesWriteStat())
-	readFlowMean := MeanStoresStats(storesStats.GetStoresBytesReadStat())
-	writeFlowMean := MeanStoresStats(storesStats.GetStoresBytesWriteStat())
+	bytesReadStat := storesStats.GetStoresBytesReadStat()
+	bytesWriteStat := storesStats.GetStoresBytesWriteStat()
+
+	readFlowMean := MeanStoresStats(bytesReadStat)
+	writeFlowMean := MeanStoresStats(bytesWriteStat)
+	readFlowScorePairs := NormalizeStoresStats(bytesReadStat)
+	writeFlowScorePairs := NormalizeStoresStats(bytesWriteStat)
 
 	weights := []float64{}
 	means := readFlowMean + writeFlowMean
