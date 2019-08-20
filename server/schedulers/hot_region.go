@@ -72,6 +72,42 @@ func newStoreStaticstics() *storeStatistics {
 	}
 }
 
+type opInfluence struct {
+	bytesRead  map[uint64]float64
+	bytesWrite map[uint64]float64
+}
+
+func newOpInfluence() opInfluence {
+	return opInfluence{
+		bytesRead:  map[uint64]float64{},
+		bytesWrite: map[uint64]float64{},
+	}
+}
+
+func (oi *opInfluence) Add(other *opInfluence) {
+	mapAdd(oi.bytesRead, other.bytesRead)
+	mapAdd(oi.bytesWrite, other.bytesWrite)
+}
+
+func mapAdd(a, b map[uint64]float64) {
+	for k, v := range b {
+		a[k] += v
+	}
+}
+
+type pendingOp struct {
+	op        *operator.Operator
+	Influence opInfluence
+}
+
+func newPendingOp(op *operator.Operator, inf opInfluence) pendingOp {
+	return pendingOp{op, inf}
+}
+
+func (po *pendingOp) IsFinish() bool {
+	return po.op.IsFinish() || po.op.IsTimeout()
+}
+
 type balanceHotRegionsScheduler struct {
 	*baseScheduler
 	sync.RWMutex
@@ -80,8 +116,9 @@ type balanceHotRegionsScheduler struct {
 	types       []BalanceType
 
 	// store id -> hot regions statistics as the role of leader
-	stats *storeStatistics
-	r     *rand.Rand
+	stats      *storeStatistics
+	r          *rand.Rand
+	pendingOps []pendingOp
 
 	storesScore *ScorePairSlice
 }
@@ -149,17 +186,34 @@ func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*opera
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }
 
+func (h *balanceHotRegionsScheduler) getPendingInfluence() opInfluence {
+	res := newOpInfluence()
+	var first int = 0
+	for i := 0; i < len(h.pendingOps); i++ {
+		if h.pendingOps[i].IsFinish() {
+			if first == i {
+				first++
+			}
+			continue
+		}
+		res.Add(&h.pendingOps[i].Influence)
+	}
+	h.pendingOps = h.pendingOps[first:]
+	return res
+}
+
 func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 	h.analyzeStoreLoad(cluster.GetStoresStats())
+	pendingInfluence := h.getPendingInfluence()
 	switch typ {
 	case hotReadRegionBalance:
-		h.stats.readStatAsLeader = calcScore(cluster, typ, core.LeaderKind)
+		h.stats.readStatAsLeader = calcScore(cluster, pendingInfluence, typ, core.LeaderKind)
 		return h.balanceHotReadRegions(cluster)
 	case hotWriteRegionBalance:
-		h.stats.writeStatAsLeader = calcScore(cluster, typ, core.LeaderKind)
-		h.stats.writeStatAsPeer = calcScore(cluster, typ, core.RegionKind)
+		h.stats.writeStatAsLeader = calcScore(cluster, pendingInfluence, typ, core.LeaderKind)
+		h.stats.writeStatAsPeer = calcScore(cluster, pendingInfluence, typ, core.RegionKind)
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
@@ -188,16 +242,19 @@ func (h *balanceHotRegionsScheduler) analyzeStoreLoad(storesStats *statistics.St
 
 func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operator.Operator {
 	// balance by leader
-	srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.readStatAsLeader)
+	srcRegion, newLeader, influence := h.balanceByLeader(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
 		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		op := operator.CreateTransferLeaderOperator("transfer-hot-read-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 		op.SetPriorityLevel(core.HighPriority)
+		opInf := newOpInfluence()
+		opInf.bytesRead = influence
+		h.pendingOps = append(h.pendingOps, newPendingOp(op, opInf))
 		return []*operator.Operator{op}
 	}
 
 	// balance by peer
-	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
+	srcRegion, srcPeer, destPeer, influence := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
 		op, err := operator.CreateMovePeerOperator("move-hot-read-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 		if err != nil {
@@ -206,6 +263,9 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 		}
 		op.SetPriorityLevel(core.HighPriority)
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
+		opInf := newOpInfluence()
+		opInf.bytesRead = influence
+		h.pendingOps = append(h.pendingOps, newPendingOp(op, opInf))
 		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -220,7 +280,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 		switch h.r.Int() % 2 {
 		case 0:
 			// balance by peer
-			srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
+			srcRegion, srcPeer, destPeer, influence := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 			if srcRegion != nil {
 				op, err := operator.CreateMovePeerOperator("move-hot-write-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 				if err != nil {
@@ -229,15 +289,21 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 				}
 				op.SetPriorityLevel(core.HighPriority)
 				schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
+				opInf := newOpInfluence()
+				opInf.bytesWrite = influence
+				h.pendingOps = append(h.pendingOps, newPendingOp(op, opInf))
 				return []*operator.Operator{op}
 			}
 		case 1:
 			// balance by leader
-			srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
+			srcRegion, newLeader, influence := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
 			if srcRegion != nil {
 				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 				op.SetPriorityLevel(core.HighPriority)
+				opInf := newOpInfluence()
+				opInf.bytesWrite = influence
+				h.pendingOps = append(h.pendingOps, newPendingOp(op, opInf))
 				return []*operator.Operator{op}
 			}
 		}
@@ -247,7 +313,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
-func calcScore(cluster schedule.Cluster, typ BalanceType, kind core.ResourceKind) statistics.StoreHotRegionsStat {
+func calcScore(cluster schedule.Cluster, pendingInf opInfluence, typ BalanceType, kind core.ResourceKind) statistics.StoreHotRegionsStat {
 	var storeItems map[uint64][]*statistics.HotSpotPeerStat
 	switch typ {
 	case hotWriteRegionBalance:
@@ -299,10 +365,16 @@ func calcScore(cluster schedule.Cluster, typ BalanceType, kind core.ResourceKind
 		if len(storeStat.RegionsStat) > 0 {
 			var storeFlowBytes float64
 			switch typ {
-			case hotWriteRegionBalance:
-				storeFlowBytes, _ = storesStats.GetStoreBytesRate(storeID)
 			case hotReadRegionBalance:
-				_, storeFlowBytes = storesStats.GetStoreBytesRate(storeID)
+				{
+					_, storeFlowBytes = storesStats.GetStoreBytesRate(storeID)
+					storeFlowBytes += pendingInf.bytesRead[storeID]
+				}
+			case hotWriteRegionBalance:
+				{
+					storeFlowBytes, _ = storesStats.GetStoreBytesRate(storeID)
+					storeFlowBytes += pendingInf.bytesWrite[storeID]
+				}
 			}
 			storeStat.StoreFlowBytes = uint64(storeFlowBytes)
 		} else {
@@ -313,14 +385,14 @@ func calcScore(cluster schedule.Cluster, typ BalanceType, kind core.ResourceKind
 }
 
 // balanceByPeer balances the peer distribution of hot regions.
-func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, storesStat statistics.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
+func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, storesStat statistics.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer, map[uint64]float64) {
 	if !h.allowBalanceRegion(cluster) {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	// get one source region and a target store.
@@ -370,7 +442,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 
 			srcPeer := srcRegion.GetStorePeer(srcStoreID)
 			if srcPeer == nil {
-				return nil, nil, nil
+				return nil, nil, nil, nil
 			}
 
 			// When the target store is decided, we allocate a peer ID to hold the source region,
@@ -378,25 +450,30 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			destPeer, err := cluster.AllocPeer(destStoreID)
 			if err != nil {
 				log.Error("failed to allocate peer", zap.Error(err))
-				return nil, nil, nil
+				return nil, nil, nil, nil
 			}
 
-			return srcRegion, srcPeer, destPeer
+			influence := map[uint64]float64{
+				srcPeer.GetStoreId():  -float64(rs.GetFlowBytes()),
+				destPeer.GetStoreId(): float64(rs.GetFlowBytes()),
+			}
+
+			return srcRegion, srcPeer, destPeer, influence
 		}
 	}
 
-	return nil, nil, nil
+	return nil, nil, nil, nil
 }
 
 // balanceByLeader balances the leader distribution of hot regions.
-func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, storesStat statistics.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer) {
+func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, storesStat statistics.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, map[uint64]float64) {
 	if !h.allowBalanceLeader(cluster) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// select destPeer
@@ -431,11 +508,14 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		destPeer := srcRegion.GetStoreVoter(destStoreID)
 		if destPeer != nil {
 			h.leaderLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
-
-			return srcRegion, destPeer
+			influence := map[uint64]float64{
+				srcRegion.GetLeader().GetStoreId(): -float64(rs.GetFlowBytes()),
+				destPeer.GetStoreId():              float64(rs.GetFlowBytes()),
+			}
+			return srcRegion, destPeer, influence
 		}
 	}
-	return nil, nil
+	return nil, nil, nil
 }
 
 // Select the store to move hot regions from.
