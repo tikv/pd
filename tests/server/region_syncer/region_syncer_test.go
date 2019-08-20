@@ -81,8 +81,9 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 		err = rc.HandleRegionHeartbeat(region)
 		c.Assert(err, IsNil)
 	}
-	// ensure flush to region storage
-	time.Sleep(3 * time.Second)
+	// ensure flush to region storage, we use a duration larger than the
+	// region storage flush rate limit (3s).
+	time.Sleep(4 * time.Second)
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
