@@ -220,7 +220,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
-func calcScore(storeItems map[uint64][]*statistics.HotSpotPeerStat, cluster schedule.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
+func calcScore(storeItems map[uint64][]*statistics.HotPeerStat, cluster schedule.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
 	stats := make(statistics.StoreHotRegionsStat)
 	for storeID, items := range storeItems {
 		// HotDegree is the update times on the hot cache. If the heartbeat report
@@ -248,16 +248,16 @@ func calcScore(storeItems map[uint64][]*statistics.HotSpotPeerStat, cluster sche
 				stats[storeID] = storeStat
 			}
 
-			s := statistics.HotSpotPeerStat{
-				RegionID:       r.RegionID,
-				FlowBytes:      uint64(r.Stats.Median()),
-				HotDegree:      r.HotDegree,
-				LastUpdateTime: r.LastUpdateTime,
+			s := statistics.HotPeerStat{
 				StoreID:        storeID,
+				RegionID:       r.RegionID,
+				HotDegree:      r.HotDegree,
 				AntiCount:      r.AntiCount,
+				BytesRate:      uint64(r.RollingBytesRate.Median()),
+				LastUpdateTime: r.LastUpdateTime,
 				Version:        r.Version,
 			}
-			storeStat.TotalFlowBytes += r.FlowBytes
+			storeStat.TotalFlowBytes += r.BytesRate
 			storeStat.RegionsCount++
 			storeStat.RegionsStat = append(storeStat.RegionsStat, s)
 		}
@@ -317,7 +317,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			candidateStoreIDs = append(candidateStoreIDs, store.GetID())
 		}
 
-		destStoreID = h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
+		destStoreID = h.selectDestStore(candidateStoreIDs, rs.BytesRate, srcStoreID, storesStat)
 		if destStoreID != 0 {
 			h.peerLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
 
@@ -376,7 +376,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		if len(candidateStoreIDs) == 0 {
 			continue
 		}
-		destStoreID := h.selectDestStore(candidateStoreIDs, rs.FlowBytes, srcStoreID, storesStat)
+		destStoreID := h.selectDestStore(candidateStoreIDs, rs.BytesRate, srcStoreID, storesStat)
 		if destStoreID == 0 {
 			continue
 		}

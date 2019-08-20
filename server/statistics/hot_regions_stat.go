@@ -8,8 +8,8 @@ type HotRegionsStat struct {
 }
 
 // RegionsStat is a list of a group region state type
-type RegionsStat []HotSpotPeerStat
+type RegionsStat []HotPeerStat
 
 func (m RegionsStat) Len() int           { return len(m) }
 func (m RegionsStat) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
-func (m RegionsStat) Less(i, j int) bool { return m[i].FlowBytes < m[j].FlowBytes }
+func (m RegionsStat) Less(i, j int) bool { return m[i].BytesRate < m[j].BytesRate }

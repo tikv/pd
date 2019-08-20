@@ -54,8 +54,8 @@ func NewHotSpotCache() *HotSpotCache {
 }
 
 // CheckWrite checks the write status, returns update items.
-func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*HotSpotPeerStat {
-	var updateItems []*HotSpotPeerStat
+func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
+	var updateItems []*HotPeerStat
 	hotStatGenerators := w.writeFlow.CheckRegionFlow(region, WriteFlow)
 	for _, hotGen := range hotStatGenerators {
 		item := hotGen.GenHotSpotPeerStats(stats)
@@ -67,8 +67,8 @@ func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) [
 }
 
 // CheckRead checks the read status, returns update items.
-func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*HotSpotPeerStat {
-	var updateItems []*HotSpotPeerStat
+func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
+	var updateItems []*HotPeerStat
 	hotStatGenerators := w.readFlow.CheckRegionFlow(region, ReadFlow)
 	for _, hotGen := range hotStatGenerators {
 		item := hotGen.GenHotSpotPeerStats(stats)
@@ -80,7 +80,7 @@ func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []
 }
 
 // Update updates the cache.
-func (w *HotSpotCache) Update(item *HotSpotPeerStat) {
+func (w *HotSpotCache) Update(item *HotPeerStat) {
 	var stats *hotStoresStats
 	switch item.Kind {
 	case WriteFlow:
@@ -99,7 +99,7 @@ func (w *HotSpotCache) Update(item *HotSpotPeerStat) {
 }
 
 // RegionStats returns hot items according to kind
-func (w *HotSpotCache) RegionStats(kind FlowKind) map[uint64][]*HotSpotPeerStat {
+func (w *HotSpotCache) RegionStats(kind FlowKind) map[uint64][]*HotPeerStat {
 	var flowMap map[uint64]cache.Cache
 	switch kind {
 	case WriteFlow:
@@ -107,23 +107,23 @@ func (w *HotSpotCache) RegionStats(kind FlowKind) map[uint64][]*HotSpotPeerStat 
 	case ReadFlow:
 		flowMap = w.readFlow.hotStoreStats
 	}
-	res := make(map[uint64][]*HotSpotPeerStat)
+	res := make(map[uint64][]*HotPeerStat)
 	for storeID, elements := range flowMap {
 		values := elements.Elems()
 		stat, ok := res[storeID]
 		if !ok {
-			stat = make([]*HotSpotPeerStat, len(values))
+			stat = make([]*HotPeerStat, len(values))
 			res[storeID] = stat
 		}
 		for i := range values {
-			stat[i] = values[i].Value.(*HotSpotPeerStat)
+			stat[i] = values[i].Value.(*HotPeerStat)
 		}
 	}
 	return res
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.
-func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotThreshold int) *HotSpotPeerStat {
+func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotThreshold int) *HotPeerStat {
 	stats, ok := w.RegionStats(kind)[storeID]
 	if !ok {
 		return nil

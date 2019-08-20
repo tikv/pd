@@ -8,7 +8,7 @@ import (
 
 // HotSpotPeerStatGenerator used to produce new hotspot statistics.
 type HotSpotPeerStatGenerator interface {
-	GenHotSpotPeerStats(stats *StoresStats) *HotSpotPeerStat
+	GenHotSpotPeerStats(stats *StoresStats) *HotPeerStat
 }
 
 // hotSpotPeerStatBuilder used to produce new hotspot statistics.
@@ -20,13 +20,13 @@ type hotSpotPeerStatGenerator struct {
 	Expired   bool
 	Kind      FlowKind
 
-	lastHotSpotPeerStats *HotSpotPeerStat
+	lastHotSpotPeerStats *HotPeerStat
 }
 
 const rollingWindowsSize = 5
 
 // GenHotSpotPeerStats implements HotSpotPeerStatsGenerator.
-func (flowStats *hotSpotPeerStatGenerator) GenHotSpotPeerStats(stats *StoresStats) *HotSpotPeerStat {
+func (flowStats *hotSpotPeerStatGenerator) GenHotSpotPeerStats(stats *StoresStats) *HotPeerStat {
 	var hotRegionThreshold uint64
 	switch flowStats.Kind {
 	case WriteFlow:
@@ -37,12 +37,12 @@ func (flowStats *hotSpotPeerStatGenerator) GenHotSpotPeerStats(stats *StoresStat
 	flowBytes := flowStats.FlowBytes
 	oldItem := flowStats.lastHotSpotPeerStats
 	region := flowStats.Region
-	newItem := &HotSpotPeerStat{
-		RegionID:       region.GetID(),
-		FlowBytes:      flowStats.FlowBytes,
-		FlowKeys:       flowStats.FlowKeys,
-		LastUpdateTime: time.Now(),
+	newItem := &HotPeerStat{
 		StoreID:        flowStats.StoreID,
+		RegionID:       region.GetID(),
+		BytesRate:      flowStats.FlowBytes,
+		KeysRate:       flowStats.FlowKeys,
+		LastUpdateTime: time.Now(),
 		Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
 		AntiCount:      hotRegionAntiCount,
 		Kind:           flowStats.Kind,
@@ -59,15 +59,15 @@ func (flowStats *hotSpotPeerStatGenerator) GenHotSpotPeerStats(stats *StoresStat
 
 	if oldItem != nil {
 		newItem.HotDegree = oldItem.HotDegree + 1
-		newItem.Stats = oldItem.Stats
+		newItem.RollingBytesRate = oldItem.RollingBytesRate
 	}
 
 	if flowBytes >= hotRegionThreshold {
 		if oldItem == nil {
-			newItem.Stats = NewRollingStats(rollingWindowsSize)
+			newItem.RollingBytesRate = NewRollingStats(rollingWindowsSize)
 		}
 		newItem.isNew = true
-		newItem.Stats.Add(float64(flowBytes))
+		newItem.RollingBytesRate.Add(float64(flowBytes))
 		return newItem
 	}
 
@@ -82,6 +82,6 @@ func (flowStats *hotSpotPeerStatGenerator) GenHotSpotPeerStats(stats *StoresStat
 	// eliminate some noise
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
-	newItem.Stats.Add(float64(flowBytes))
+	newItem.RollingBytesRate.Add(float64(flowBytes))
 	return newItem
 }

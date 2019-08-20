@@ -73,12 +73,12 @@ func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 	for storeID := range storeIDs {
 		bytesPerSec = bytesPerSecInit
 		keysPerSec = keysPerSecInit
-		var oldRegionStat *HotSpotPeerStat
+		var oldRegionStat *HotPeerStat
 
 		hotStoreStats, ok := f.hotStoreStats[storeID]
 		if ok {
 			if v, isExist := hotStoreStats.Peek(region.GetID()); isExist {
-				oldRegionStat = v.(*HotSpotPeerStat)
+				oldRegionStat = v.(*HotPeerStat)
 				// This is used for the simulator.
 				if Denoising {
 					interval := time.Since(oldRegionStat.LastUpdateTime).Seconds()
@@ -110,7 +110,7 @@ func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 }
 
 // Update updates the items in statistics.
-func (f *hotStoresStats) Update(item *HotSpotPeerStat) {
+func (f *hotStoresStats) Update(item *HotPeerStat) {
 	if item.IsNeedDelete() {
 		if hotStoreStat, ok := f.hotStoreStats[item.StoreID]; ok {
 			hotStoreStat.Remove(item.RegionID)
@@ -154,7 +154,7 @@ func (f *hotStoresStats) isRegionHotWithPeer(region *core.RegionInfo, peer *meta
 		return false
 	}
 	if stat, ok := stats.Peek(region.GetID()); ok {
-		return stat.(*HotSpotPeerStat).HotDegree >= hotThreshold
+		return stat.(*HotPeerStat).HotDegree >= hotThreshold
 	}
 	return false
 }
