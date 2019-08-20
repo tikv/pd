@@ -47,3 +47,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+replace github.com/pingcap/kvproto v0.0.0-20190516013202-4cf58ad90b6c => github.com/jiyingtk/kvproto v0.0.0-20190808054623-6ca6e1aa3cb9

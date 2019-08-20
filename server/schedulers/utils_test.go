@@ -77,3 +77,21 @@ func (s *testRegionUnhealthySuite) TestIsRegionUnhealthy(c *C) {
 	c.Assert(isRegionUnhealthy(r3), IsTrue)
 	c.Assert(isRegionUnhealthy(r4), IsFalse)
 }
+
+var _ = Suite(&testScorePairSuite{})
+
+type testScorePairSuite struct{}
+
+func (s *testScorePairSuite) TestSortScorePairSlice(c *C) {
+	scorePairSlice := NewScorePairSlice()
+	scorePairSlice.Add(NewScorePair(1, 0.5))
+	scorePairSlice.Add(NewScorePair(2, 0.25))
+	scorePairSlice.Add(NewScorePair(3, 0.15))
+	scorePairSlice.Add(NewScorePair(4, 0.35))
+
+	expectedScores := []float64{0.15, 0.25, 0.35, 0.5}
+	scorePairSlice.Sort()
+	for i, pair := range scorePairSlice.GetPairs() {
+		c.Assert(pair.GetScore(), Equals, expectedScores[i])
+	}
+}
