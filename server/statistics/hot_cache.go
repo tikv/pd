@@ -55,28 +55,12 @@ func NewHotSpotCache() *HotSpotCache {
 
 // CheckWrite checks the write status, returns update items.
 func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
-	var updateItems []*HotPeerStat
-	hotStatGenerators := w.writeFlow.CheckRegionFlow(region, WriteFlow)
-	for _, hotGen := range hotStatGenerators {
-		item := hotGen.GenHotSpotPeerStats(stats)
-		if item != nil {
-			updateItems = append(updateItems, item)
-		}
-	}
-	return updateItems
+	return w.writeFlow.CheckRegionFlow(region, WriteFlow, stats)
 }
 
 // CheckRead checks the read status, returns update items.
 func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
-	var updateItems []*HotPeerStat
-	hotStatGenerators := w.readFlow.CheckRegionFlow(region, ReadFlow)
-	for _, hotGen := range hotStatGenerators {
-		item := hotGen.GenHotSpotPeerStats(stats)
-		if item != nil {
-			updateItems = append(updateItems, item)
-		}
-	}
-	return updateItems
+	return w.readFlow.CheckRegionFlow(region, ReadFlow, stats)
 }
 
 // Update updates the cache.
