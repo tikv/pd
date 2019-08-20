@@ -46,6 +46,8 @@ const (
 	hotRegionLimitFactor      = 0.75
 	storeHotRegionsDefaultLen = 100
 	hotRegionScheduleFactor   = 0.9
+	minFlowBytes              = 128 * 1024
+	minScoreLimit             = 0.35
 )
 
 // BalanceType : the perspective of balance
@@ -80,6 +82,8 @@ type balanceHotRegionsScheduler struct {
 	// store id -> hot regions statistics as the role of leader
 	stats *storeStatistics
 	r     *rand.Rand
+
+	storesScore *ScorePairSlice
 }
 
 func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
@@ -91,6 +95,7 @@ func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *b
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
+		storesScore:   NewScorePairSlice(),
 	}
 }
 
@@ -147,6 +152,7 @@ func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*opera
 func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
+	h.analyzeStoreLoad(cluster.GetStoresStats())
 	switch typ {
 	case hotReadRegionBalance:
 		h.stats.readStatAsLeader = calcScore(cluster, typ, core.LeaderKind)
@@ -157,6 +163,24 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
+}
+
+func (h *balanceHotRegionsScheduler) analyzeStoreLoad(storesStats *statistics.StoresStats) {
+	readFlowScorePairs := NormalizeStoresStats(storesStats.GetStoresBytesReadStat())
+	writeFlowScorePairs := NormalizeStoresStats(storesStats.GetStoresBytesWriteStat())
+	readFlowMean := MeanStoresStats(storesStats.GetStoresBytesReadStat())
+	writeFlowMean := MeanStoresStats(storesStats.GetStoresBytesWriteStat())
+
+	weights := []float64{}
+	means := readFlowMean + writeFlowMean
+	if means <= minFlowBytes {
+		weights = append(weights, 0, 0)
+	} else {
+		weights = append(weights, readFlowMean/means, writeFlowMean/means)
+	}
+
+	scorePairSliceVec := []*ScorePairSlice{readFlowScorePairs, writeFlowScorePairs}
+	h.storesScore = AggregateScores(scorePairSliceVec, weights)
 }
 
 func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operator.Operator {
@@ -507,4 +531,14 @@ func (h *balanceHotRegionsScheduler) GetHotWriteStatus() *statistics.StoreHotReg
 		AsLeader: asLeader,
 		AsPeer:   asPeer,
 	}
+}
+
+func (h *balanceHotRegionsScheduler) GetStoresScore() map[uint64]float64 {
+	h.RLock()
+	defer h.RUnlock()
+	storesScore := make(map[uint64]float64, 0)
+	for _, pair := range h.storesScore.GetPairs() {
+		storesScore[pair.GetStoreID()] = pair.GetScore()
+	}
+	return storesScore
 }
