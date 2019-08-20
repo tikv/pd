@@ -23,9 +23,9 @@ func NewHotStoresStats() *hotStoresStats {
 }
 
 // CheckRegionFlow checks the flow information of region.
-func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind) []HotSpotPeerStatGenerator {
+func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind) []*hotSpotPeerStatGenerator {
 	var (
-		generators   []HotSpotPeerStatGenerator
+		generators   []*hotSpotPeerStatGenerator
 		getBytesFlow func() uint64
 		getKeysFlow  func() uint64
 		bytesPerSec  uint64

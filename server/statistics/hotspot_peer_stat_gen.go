@@ -6,11 +6,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
-// HotSpotPeerStatGenerator used to produce new hotspot statistics.
-type HotSpotPeerStatGenerator interface {
-	GenHotSpotPeerStats(stats *StoresStats) *HotPeerStat
-}
-
 // hotSpotPeerStatBuilder used to produce new hotspot statistics.
 type hotSpotPeerStatGenerator struct {
 	Region    *core.RegionInfo
