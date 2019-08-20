@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -199,6 +200,12 @@ func (h *balanceHotRegionsScheduler) getPendingInfluence() opInfluence {
 		res.Add(&h.pendingOps[i].Influence)
 	}
 	h.pendingOps = h.pendingOps[first:]
+	for store, value := range res.bytesRead {
+		pendingInfluenceGauge.WithLabelValues("bytes_read", fmt.Sprintf("store-%d", store)).Set(value)
+	}
+	for store, value := range res.bytesWrite {
+		pendingInfluenceGauge.WithLabelValues("bytes_write", fmt.Sprintf("store-%d", store)).Set(value)
+	}
 	return res
 }
 
