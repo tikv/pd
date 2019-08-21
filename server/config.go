@@ -42,6 +42,8 @@ type Config struct {
 
 	Version bool `json:"-"`
 
+	ConfigCheck bool `json:"-"`
+
 	ClientUrls          string `toml:"client-urls" json:"client-urls"`
 	PeerUrls            string `toml:"peer-urls" json:"peer-urls"`
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
@@ -139,6 +141,7 @@ func NewConfig() *Config {
 	fs.BoolVar(&cfg.Version, "V", false, "print version information and exit")
 	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
 	fs.StringVar(&cfg.configFile, "config", "", "Config file")
+	fs.BoolVar(&cfg.ConfigCheck, "config-check", false, "check config file validity and exit")
 
 	fs.StringVar(&cfg.Name, "name", defaultName, "human-readable name for this pd member")
 
