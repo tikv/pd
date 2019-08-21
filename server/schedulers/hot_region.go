@@ -407,11 +407,13 @@ func calcScore(cluster schedule.Cluster, pendingInf opInfluence, typ BalanceType
 // balanceByPeer balances the peer distribution of hot regions.
 func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, storesStat statistics.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer, map[uint64]float64) {
 	if !h.allowBalanceRegion(cluster) {
+		log.Info("hotspot scheduler balance by peer: not allowed balance region")
 		return nil, nil, nil, nil
 	}
 
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
+		log.Info("hotspot scheduler balance by peer: source store not found", zap.Uint64("store-id", srcStoreID))
 		return nil, nil, nil, nil
 	}
 
@@ -462,6 +464,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 
 			srcPeer := srcRegion.GetStorePeer(srcStoreID)
 			if srcPeer == nil {
+				log.Info("hotspot scheduler balance by peer: source peer not found", zap.Uint64("region id", srcRegion.GetID()), zap.Uint64("store id", srcStoreID))
 				return nil, nil, nil, nil
 			}
 
@@ -478,10 +481,12 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 				destPeer.GetStoreId(): float64(rs.GetFlowBytes()),
 			}
 
+			log.Info("hotspot scheduler balance by peer: success")
 			return srcRegion, srcPeer, destPeer, influence
 		}
 	}
 
+	log.Info("hotspot scheduler balance by peer: no available hot region")
 	return nil, nil, nil, nil
 }
 
