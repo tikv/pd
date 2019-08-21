@@ -191,7 +191,7 @@ func (h *balanceHotRegionsScheduler) getPendingInfluence() opInfluence {
 			delete(h.pendingOps, op)
 			continue
 		}
-		res.Add(&infl, 1.0)
+		res.Add(&infl, 0.666)
 	}
 	for store, value := range res.bytesRead {
 		pendingInfluenceGauge.WithLabelValues("bytes_read", fmt.Sprintf("store-%d", store)).Set(value)
