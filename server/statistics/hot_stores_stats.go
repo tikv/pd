@@ -25,20 +25,121 @@ func NewHotStoresStats() *hotStoresStats {
 }
 
 // CheckRegionFlow checks the flow information of region.
-func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind, stats *StoresStats) []*HotPeerStat {
+func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind, stats *StoresStats) (ret []*HotPeerStat) {
 	var (
-		ret          []*HotPeerStat
-		getBytesFlow func() uint64
-		getKeysFlow  func() uint64
-		bytesPerSec  uint64
-		keysPerSec   uint64
-
-		isExpiredInStore func(region *core.RegionInfo, storeID uint64) bool
+		bytesFlow        uint64
+		keysFlow         uint64
+		isExpiredInStore func(storeID uint64) bool
 		calcHotThreshold func(storeID uint64) uint64
 	)
 
+	switch kind {
+	case WriteFlow:
+		bytesFlow = region.GetBytesWritten()
+		keysFlow = region.GetKeysWritten()
+		isExpiredInStore = func(storeID uint64) bool {
+			return region.GetStorePeer(storeID) == nil
+		}
+		calcHotThreshold = func(storeID uint64) uint64 {
+			return calculateWriteHotThresholdWithStore(stats, storeID)
+		}
+	case ReadFlow:
+		bytesFlow = region.GetBytesRead()
+		keysFlow = region.GetKeysRead()
+		isExpiredInStore = func(storeID uint64) bool {
+			return region.GetLeader().GetStoreId() != storeID
+		}
+		calcHotThreshold = func(storeID uint64) uint64 {
+			return calculateReadHotThresholdWithStore(stats, storeID)
+		}
+	}
+
+	storeIDs := f.getAllStoreIDs(region, kind)
+
+	bytesPerSecInit := uint64(float64(bytesFlow) / float64(RegionHeartBeatReportInterval))
+	keysPerSecInit := uint64(float64(keysFlow) / float64(RegionHeartBeatReportInterval))
+
+	for storeID := range storeIDs {
+		bytesPerSec := bytesPerSecInit
+		keysPerSec := keysPerSecInit
+		var oldItem *HotPeerStat
+
+		hotStoreStats, ok := f.hotStoreStats[storeID]
+		if ok {
+			if v, isExist := hotStoreStats.Peek(region.GetID()); isExist {
+				oldItem = v.(*HotPeerStat)
+				// This is used for the simulator.
+				if Denoising {
+					interval := time.Since(oldItem.LastUpdateTime).Seconds()
+					// ignore if report too fast
+					if interval < minHotRegionReportInterval && !isExpiredInStore(storeID) {
+						continue
+					}
+					bytesPerSec = uint64(float64(bytesFlow) / interval)
+					keysPerSec = uint64(float64(keysFlow) / interval)
+				}
+			}
+		}
+
+		isExpried := isExpiredInStore(storeID)
+		isLeader := region.GetLeader().GetStoreId() == storeID
+		isHot := bytesPerSec >= calcHotThreshold(storeID)
+
+		newItem := newHotPeerStat(storeID, region, kind, bytesPerSec, keysPerSec, isExpried, isLeader, isHot, oldItem)
+		if newItem != nil {
+			ret = append(ret, newItem)
+		}
+	}
+
+	return ret
+}
+
+func newHotPeerStat(storeID uint64, region *core.RegionInfo, kind FlowKind, bytesRate, keysRate uint64, isExpired, isLeader, isHot bool, oldItem *HotPeerStat) *HotPeerStat {
+	newItem := &HotPeerStat{
+		StoreID:        storeID,
+		RegionID:       region.GetID(),
+		Kind:           kind,
+		BytesRate:      bytesRate,
+		KeysRate:       keysRate,
+		LastUpdateTime: time.Now(),
+		Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
+		needDelete:     isExpired,
+		isLeader:       isLeader,
+	}
+
+	if isExpired {
+		return newItem
+	}
+
+	if oldItem != nil {
+		newItem.RollingBytesRate = oldItem.RollingBytesRate
+		if isHot {
+			newItem.HotDegree = oldItem.HotDegree + 1
+			newItem.AntiCount = hotRegionAntiCount
+		} else {
+			newItem.HotDegree = oldItem.HotDegree - 1
+			newItem.AntiCount = oldItem.AntiCount - 1
+			if newItem.AntiCount < 0 {
+				newItem.needDelete = true
+			}
+		}
+	} else {
+		if !isHot {
+			return nil
+		}
+		newItem.RollingBytesRate = NewRollingStats(rollingWindowsSize)
+		newItem.AntiCount = hotRegionAntiCount
+		newItem.isNew = true
+	}
+	newItem.RollingBytesRate.Add(float64(bytesRate))
+
+	return newItem
+}
+
+// gets the storeIDs, including old region and new region
+func (f *hotStoresStats) getAllStoreIDs(region *core.RegionInfo, kind FlowKind) map[uint64]struct{} {
 	storeIDs := make(map[uint64]struct{})
-	// gets the storeIDs, including old region and new region
+	// old stores
 	ids, ok := f.storesOfRegion[region.GetID()]
 	if ok {
 		for storeID := range ids {
@@ -46,6 +147,7 @@ func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind,
 		}
 	}
 
+	// new stores
 	for _, peer := range region.GetPeers() {
 		// ReadFlow no need consider the followers.
 		if kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
@@ -56,104 +158,7 @@ func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind,
 		}
 	}
 
-	switch kind {
-	case WriteFlow:
-		getBytesFlow = region.GetBytesWritten
-		getKeysFlow = region.GetKeysWritten
-		isExpiredInStore = func(region *core.RegionInfo, storeID uint64) bool {
-			return region.GetStorePeer(storeID) == nil
-		}
-		calcHotThreshold = func(storeID uint64) uint64 {
-			return calculateWriteHotThresholdWithStore(stats, storeID)
-		}
-	case ReadFlow:
-		getBytesFlow = region.GetBytesRead
-		getKeysFlow = region.GetKeysRead
-		isExpiredInStore = func(region *core.RegionInfo, storeID uint64) bool {
-			return region.GetLeader().GetStoreId() != storeID
-		}
-		calcHotThreshold = func(storeID uint64) uint64 {
-			return calculateReadHotThresholdWithStore(stats, storeID)
-		}
-	}
-
-	bytesPerSecInit := uint64(float64(getBytesFlow()) / float64(RegionHeartBeatReportInterval))
-	keysPerSecInit := uint64(float64(getKeysFlow()) / float64(RegionHeartBeatReportInterval))
-
-	for storeID := range storeIDs {
-		bytesPerSec = bytesPerSecInit
-		keysPerSec = keysPerSecInit
-		var oldItem *HotPeerStat
-
-		hotStoreStats, ok := f.hotStoreStats[storeID]
-		if ok {
-			if v, isExist := hotStoreStats.Peek(region.GetID()); isExist {
-				oldItem = v.(*HotPeerStat)
-				// This is used for the simulator.
-				if Denoising {
-					interval := time.Since(oldItem.LastUpdateTime).Seconds()
-					if interval < minHotRegionReportInterval && !isExpiredInStore(region, storeID) {
-						continue
-					}
-					bytesPerSec = uint64(float64(getBytesFlow()) / interval)
-					keysPerSec = uint64(float64(getKeysFlow()) / interval)
-				}
-			}
-		}
-
-		newItem := &HotPeerStat{
-			StoreID:        storeID,
-			RegionID:       region.GetID(),
-			BytesRate:      bytesPerSec,
-			KeysRate:       keysPerSec,
-			LastUpdateTime: time.Now(),
-			Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
-			AntiCount:      hotRegionAntiCount,
-			Kind:           kind,
-			needDelete:     isExpiredInStore(region, storeID),
-		}
-
-		if region.GetLeader().GetStoreId() == storeID {
-			newItem.isLeader = true
-		}
-
-		if newItem.IsNeedDelete() {
-			ret = append(ret, newItem)
-			continue
-		}
-
-		if oldItem != nil {
-			newItem.HotDegree = oldItem.HotDegree + 1
-			newItem.RollingBytesRate = oldItem.RollingBytesRate
-		}
-
-		if bytesPerSec >= calcHotThreshold(storeID) {
-			if oldItem == nil {
-				newItem.RollingBytesRate = NewRollingStats(rollingWindowsSize)
-			}
-			newItem.isNew = true
-			newItem.RollingBytesRate.Add(float64(bytesPerSec))
-			ret = append(ret, newItem)
-			continue
-		}
-
-		// smaller than hotRegionThreshold
-		if oldItem == nil {
-			continue
-		}
-		if oldItem.AntiCount <= 0 {
-			newItem.needDelete = true
-			ret = append(ret, newItem)
-			continue
-		}
-		// eliminate some noise
-		newItem.HotDegree = oldItem.HotDegree - 1
-		newItem.AntiCount = oldItem.AntiCount - 1
-		newItem.RollingBytesRate.Add(float64(bytesPerSec))
-		ret = append(ret, newItem)
-		continue
-	}
-	return ret
+	return storeIDs
 }
 
 // Update updates the items in statistics.
