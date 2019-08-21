@@ -10,51 +10,68 @@ import (
 
 const rollingWindowsSize = 5
 
-// hotStoresStats saves the hotspot peer's statistics.
-type hotStoresStats struct {
+// hotPeerCache saves the hotspot peer's statistics.
+type hotPeerCache struct {
+	kind           FlowKind
 	hotStoreStats  map[uint64]cache.Cache         // storeID -> hot regions
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
 }
 
 // NewHotStoresStats creates a HotStoresStats
-func NewHotStoresStats() *hotStoresStats {
-	return &hotStoresStats{
+func NewHotStoresStats(kind FlowKind) *hotPeerCache {
+	return &hotPeerCache{
+		kind:           kind,
 		hotStoreStats:  make(map[uint64]cache.Cache),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 	}
 }
 
-// CheckRegionFlow checks the flow information of region.
-func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind, stats *StoresStats) (ret []*HotPeerStat) {
-	var (
-		bytesFlow        uint64
-		keysFlow         uint64
-		isExpiredInStore func(storeID uint64) bool
-		calcHotThreshold func(storeID uint64) uint64
-	)
-
-	switch kind {
+func (f *hotPeerCache) getBytesFlow(region *core.RegionInfo) uint64 {
+	switch f.kind {
 	case WriteFlow:
-		bytesFlow = region.GetBytesWritten()
-		keysFlow = region.GetKeysWritten()
-		isExpiredInStore = func(storeID uint64) bool {
-			return region.GetStorePeer(storeID) == nil
-		}
-		calcHotThreshold = func(storeID uint64) uint64 {
-			return calculateWriteHotThresholdWithStore(stats, storeID)
-		}
+		return region.GetBytesWritten()
 	case ReadFlow:
-		bytesFlow = region.GetBytesRead()
-		keysFlow = region.GetKeysRead()
-		isExpiredInStore = func(storeID uint64) bool {
-			return region.GetLeader().GetStoreId() != storeID
-		}
-		calcHotThreshold = func(storeID uint64) uint64 {
-			return calculateReadHotThresholdWithStore(stats, storeID)
-		}
+		return region.GetBytesRead()
 	}
+	return 0
+}
 
-	storeIDs := f.getAllStoreIDs(region, kind)
+func (f *hotPeerCache) getKeysFlow(region *core.RegionInfo) uint64 {
+	switch f.kind {
+	case WriteFlow:
+		return region.GetKeysWritten()
+	case ReadFlow:
+		return region.GetKeysRead()
+	}
+	return 0
+}
+
+func (f *hotPeerCache) isRegionExpired(region *core.RegionInfo, storeID uint64) bool {
+	switch f.kind {
+	case WriteFlow:
+		return region.GetStorePeer(storeID) == nil
+	case ReadFlow:
+		return region.GetLeader().GetStoreId() != storeID
+	}
+	return false
+}
+
+func (f *hotPeerCache) calcHotThreshold(storeID uint64, stats *StoresStats) uint64 {
+	switch f.kind {
+	case WriteFlow:
+		return calculateWriteHotThresholdWithStore(stats, storeID)
+	case ReadFlow:
+		return calculateReadHotThresholdWithStore(stats, storeID)
+	}
+	return 0
+}
+
+// CheckRegionFlow checks the flow information of region.
+func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresStats) (ret []*HotPeerStat) {
+	storeIDs := f.getAllStoreIDs(region)
+
+	bytesFlow := f.getBytesFlow(region)
+	keysFlow := f.getKeysFlow(region)
 
 	bytesPerSecInit := uint64(float64(bytesFlow) / float64(RegionHeartBeatReportInterval))
 	keysPerSecInit := uint64(float64(keysFlow) / float64(RegionHeartBeatReportInterval))
@@ -72,7 +89,7 @@ func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind,
 				if Denoising {
 					interval := time.Since(oldItem.LastUpdateTime).Seconds()
 					// ignore if report too fast
-					if interval < minHotRegionReportInterval && !isExpiredInStore(storeID) {
+					if interval < minHotRegionReportInterval && !f.isRegionExpired(region, storeID) {
 						continue
 					}
 					bytesPerSec = uint64(float64(bytesFlow) / interval)
@@ -81,11 +98,11 @@ func (f *hotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind,
 			}
 		}
 
-		isExpried := isExpiredInStore(storeID)
+		isExpried := f.isRegionExpired(region, storeID)
 		isLeader := region.GetLeader().GetStoreId() == storeID
-		isHot := bytesPerSec >= calcHotThreshold(storeID)
+		isHot := bytesPerSec >= f.calcHotThreshold(storeID, stats)
 
-		newItem := newHotPeerStat(storeID, region, kind, bytesPerSec, keysPerSec, isExpried, isLeader, isHot, oldItem)
+		newItem := newHotPeerStat(storeID, region, f.kind, bytesPerSec, keysPerSec, isExpried, isLeader, isHot, oldItem)
 		if newItem != nil {
 			ret = append(ret, newItem)
 		}
@@ -137,7 +154,7 @@ func newHotPeerStat(storeID uint64, region *core.RegionInfo, kind FlowKind, byte
 }
 
 // gets the storeIDs, including old region and new region
-func (f *hotStoresStats) getAllStoreIDs(region *core.RegionInfo, kind FlowKind) map[uint64]struct{} {
+func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) map[uint64]struct{} {
 	storeIDs := make(map[uint64]struct{})
 	// old stores
 	ids, ok := f.storesOfRegion[region.GetID()]
@@ -150,7 +167,7 @@ func (f *hotStoresStats) getAllStoreIDs(region *core.RegionInfo, kind FlowKind) 
 	// new stores
 	for _, peer := range region.GetPeers() {
 		// ReadFlow no need consider the followers.
-		if kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
+		if f.kind == ReadFlow && peer.GetStoreId() != region.GetLeader().GetStoreId() {
 			continue
 		}
 		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
@@ -162,7 +179,7 @@ func (f *hotStoresStats) getAllStoreIDs(region *core.RegionInfo, kind FlowKind) 
 }
 
 // Update updates the items in statistics.
-func (f *hotStoresStats) Update(item *HotPeerStat) {
+func (f *hotPeerCache) Update(item *HotPeerStat) {
 	if item.IsNeedDelete() {
 		if hotStoreStat, ok := f.hotStoreStats[item.StoreID]; ok {
 			hotStoreStat.Remove(item.RegionID)
@@ -186,7 +203,7 @@ func (f *hotStoresStats) Update(item *HotPeerStat) {
 	}
 }
 
-func (f *hotStoresStats) isRegionHotWithAnyPeers(region *core.RegionInfo, hotThreshold int) bool {
+func (f *hotPeerCache) isRegionHotWithAnyPeers(region *core.RegionInfo, hotThreshold int) bool {
 	for _, peer := range region.GetPeers() {
 		if f.isRegionHotWithPeer(region, peer, hotThreshold) {
 			return true
@@ -196,7 +213,7 @@ func (f *hotStoresStats) isRegionHotWithAnyPeers(region *core.RegionInfo, hotThr
 
 }
 
-func (f *hotStoresStats) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb.Peer, hotThreshold int) bool {
+func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb.Peer, hotThreshold int) bool {
 	if peer == nil {
 		return false
 	}

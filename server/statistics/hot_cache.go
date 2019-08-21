@@ -41,31 +41,31 @@ const (
 
 // HotSpotCache is a cache hold hot regions.
 type HotSpotCache struct {
-	writeFlow *hotStoresStats
-	readFlow  *hotStoresStats
+	writeFlow *hotPeerCache
+	readFlow  *hotPeerCache
 }
 
 // NewHotSpotCache creates a new hot spot cache.
 func NewHotSpotCache() *HotSpotCache {
 	return &HotSpotCache{
-		writeFlow: NewHotStoresStats(),
-		readFlow:  NewHotStoresStats(),
+		writeFlow: NewHotStoresStats(WriteFlow),
+		readFlow:  NewHotStoresStats(ReadFlow),
 	}
 }
 
 // CheckWrite checks the write status, returns update items.
 func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
-	return w.writeFlow.CheckRegionFlow(region, WriteFlow, stats)
+	return w.writeFlow.CheckRegionFlow(region, stats)
 }
 
 // CheckRead checks the read status, returns update items.
 func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
-	return w.readFlow.CheckRegionFlow(region, ReadFlow, stats)
+	return w.readFlow.CheckRegionFlow(region, stats)
 }
 
 // Update updates the cache.
 func (w *HotSpotCache) Update(item *HotPeerStat) {
-	var stats *hotStoresStats
+	var stats *hotPeerCache
 	switch item.Kind {
 	case WriteFlow:
 		stats = w.writeFlow
