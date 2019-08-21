@@ -197,13 +197,13 @@ func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*opera
 }
 
 func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
-	h.influence.multWeight(0.0)
+	h.influence.multWeight(0.1)
 	for op, infl := range h.pendingOps {
 		if isFinish(op) {
 			delete(h.pendingOps, op)
 			continue
 		}
-		h.influence.Add(&infl, 0.666)
+		h.influence.Add(&infl, 0.7)
 	}
 	for store, value := range h.influence.bytesRead {
 		pendingInfluenceGauge.WithLabelValues("bytes_read", fmt.Sprintf("store-%d", store)).Set(value)
