@@ -85,28 +85,19 @@ func newOpInfluence() opInfluence {
 	}
 }
 
-func (oi *opInfluence) Add(other *opInfluence) {
-	mapAdd(oi.bytesRead, other.bytesRead)
-	mapAdd(oi.bytesWrite, other.bytesWrite)
+func (oi *opInfluence) Add(other *opInfluence, w float64) {
+	mapAddWeight(oi.bytesRead, other.bytesRead, w)
+	mapAddWeight(oi.bytesWrite, other.bytesWrite, w)
 }
 
-func mapAdd(a, b map[uint64]float64) {
+func mapAddWeight(a, b map[uint64]float64, w float64) {
 	for k, v := range b {
-		a[k] += v
+		a[k] += v * w
 	}
 }
 
-type pendingOp struct {
-	op        *operator.Operator
-	Influence opInfluence
-}
-
-func newPendingOp(op *operator.Operator, inf opInfluence) pendingOp {
-	return pendingOp{op, inf}
-}
-
-func (po *pendingOp) IsFinish() bool {
-	return po.op.IsFinish() || po.op.IsTimeout()
+func isFinish(op *operator.Operator) bool {
+	return op.IsFinish() || op.IsTimeout()
 }
 
 type balanceHotRegionsScheduler struct {
@@ -119,7 +110,7 @@ type balanceHotRegionsScheduler struct {
 	// store id -> hot regions statistics as the role of leader
 	stats      *storeStatistics
 	r          *rand.Rand
-	pendingOps []pendingOp
+	pendingOps map[*operator.Operator]opInfluence
 
 	storesScore *ScorePairSlice
 }
@@ -189,17 +180,14 @@ func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*opera
 
 func (h *balanceHotRegionsScheduler) getPendingInfluence() opInfluence {
 	res := newOpInfluence()
-	var first int = 0
-	for i := 0; i < len(h.pendingOps); i++ {
-		if h.pendingOps[i].IsFinish() {
-			if first == i {
-				first++
-			}
+	for op, infl := range h.pendingOps {
+		if isFinish(op) {
+			res.Add(&infl, 0)
+			delete(h.pendingOps, op)
 			continue
 		}
-		res.Add(&h.pendingOps[i].Influence)
+		res.Add(&infl, 1.0)
 	}
-	h.pendingOps = h.pendingOps[first:]
 	for store, value := range res.bytesRead {
 		pendingInfluenceGauge.WithLabelValues("bytes_read", fmt.Sprintf("store-%d", store)).Set(value)
 	}
@@ -256,7 +244,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 		op.SetPriorityLevel(core.HighPriority)
 		opInf := newOpInfluence()
 		opInf.bytesRead = influence
-		h.pendingOps = append(h.pendingOps, newPendingOp(op, opInf))
+		h.pendingOps[op] = opInf
 		return []*operator.Operator{op}
 	}
 
@@ -272,7 +260,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
 		opInf := newOpInfluence()
 		opInf.bytesRead = influence
-		h.pendingOps = append(h.pendingOps, newPendingOp(op, opInf))
+		h.pendingOps[op] = opInf
 		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -298,7 +286,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 				schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
 				opInf := newOpInfluence()
 				opInf.bytesWrite = influence
-				h.pendingOps = append(h.pendingOps, newPendingOp(op, opInf))
+				h.pendingOps[op] = opInf
 				return []*operator.Operator{op}
 			}
 		case 1:
@@ -310,7 +298,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 				op.SetPriorityLevel(core.HighPriority)
 				opInf := newOpInfluence()
 				opInf.bytesWrite = influence
-				h.pendingOps = append(h.pendingOps, newPendingOp(op, opInf))
+				h.pendingOps[op] = opInf
 				return []*operator.Operator{op}
 			}
 		}
