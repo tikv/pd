@@ -109,6 +109,10 @@ func isFinish(op *operator.Operator) bool {
 	return op.IsFinish() || op.IsTimeout()
 }
 
+func isStarted(op *operator.Operator) bool {
+	return op.GetStartTime().IsZero()
+}
+
 type balanceHotRegionsScheduler struct {
 	*baseScheduler
 	sync.RWMutex
@@ -198,13 +202,21 @@ func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*opera
 
 func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
 	h.influence.multWeight(0.1)
+	var unstarted_cnt uint = 0
+	var unstarted_sum time.Duration = 0
 	for op, infl := range h.pendingOps {
 		if isFinish(op) {
 			delete(h.pendingOps, op)
 			continue
 		}
+		if !isStarted(op) {
+			unstarted_cnt++
+			unstarted_sum += op.ElapsedTime()
+		}
 		h.influence.Add(&infl, 0.7)
 	}
+	pendingInfluenceGauge.WithLabelValues("unstarted_cnt", "--").Set(float64(unstarted_cnt))
+	pendingInfluenceGauge.WithLabelValues("unstarted_sum", "--").Set(float64(unstarted_sum) / float64(time.Millisecond))
 	for store, value := range h.influence.bytesRead {
 		pendingInfluenceGauge.WithLabelValues("bytes_read", fmt.Sprintf("store-%d", store)).Set(value)
 	}
