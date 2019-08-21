@@ -288,8 +288,17 @@ const balanceHotRetryLimit = 10
 
 func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*operator.Operator {
 	for i := 0; i < balanceHotRetryLimit; i++ {
-		switch h.r.Int() % 2 {
+		switch h.r.Int() % cluster.GetMaxReplicas() {
 		case 0:
+			// balance by leader
+			srcRegion, newLeader, _ := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
+			if srcRegion != nil {
+				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
+				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
+				op.SetPriorityLevel(core.HighPriority)
+				return []*operator.Operator{op}
+			}
+		default:
 			// balance by peer
 			srcRegion, srcPeer, destPeer, influence := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 			if srcRegion != nil {
@@ -303,15 +312,6 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 				opInf := newOpInfluence()
 				opInf.bytesWrite = influence
 				h.pendingOps[op] = opInf
-				return []*operator.Operator{op}
-			}
-		case 1:
-			// balance by leader
-			srcRegion, newLeader, _ := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
-			if srcRegion != nil {
-				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
-				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
-				op.SetPriorityLevel(core.HighPriority)
 				return []*operator.Operator{op}
 			}
 		}
