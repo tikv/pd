@@ -124,6 +124,7 @@ func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *b
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
+		pendingOps:    map[*operator.Operator]opInfluence{},
 		storesScore:   NewScorePairSlice(),
 	}
 }
@@ -137,6 +138,8 @@ func newBalanceHotReadRegionsScheduler(opController *schedule.OperatorController
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
+		pendingOps:    map[*operator.Operator]opInfluence{},
+		storesScore:   NewScorePairSlice(),
 	}
 }
 
@@ -149,6 +152,8 @@ func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorControlle
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
+		pendingOps:    map[*operator.Operator]opInfluence{},
+		storesScore:   NewScorePairSlice(),
 	}
 }
 
