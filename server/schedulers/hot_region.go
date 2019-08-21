@@ -312,6 +312,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 			}
 		default:
 			// balance by peer
+			log.Info("balance hot write")
 			srcRegion, srcPeer, destPeer, influence := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 			if srcRegion != nil {
 				op, err := operator.CreateMovePeerOperator("move-hot-write-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
@@ -413,7 +414,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
-		log.Info("hotspot scheduler balance by peer: source store not found", zap.Uint64("store-id", srcStoreID))
+		log.Info("hotspot scheduler balance by peer: source store not found", zap.Reflect("stores-stat", storesStat))
 		return nil, nil, nil, nil
 	}
 
