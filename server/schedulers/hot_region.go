@@ -85,6 +85,15 @@ func newOpInfluence() opInfluence {
 	}
 }
 
+func (oi *opInfluence) multWeight(w float64) {
+	for k, v := range oi.bytesRead {
+		oi.bytesRead[k] = v * w
+	}
+	for k, v := range oi.bytesWrite {
+		oi.bytesWrite[k] = v * w
+	}
+}
+
 func (oi *opInfluence) Add(other *opInfluence, w float64) {
 	mapAddWeight(oi.bytesRead, other.bytesRead, w)
 	mapAddWeight(oi.bytesWrite, other.bytesWrite, w)
@@ -111,6 +120,7 @@ type balanceHotRegionsScheduler struct {
 	stats      *storeStatistics
 	r          *rand.Rand
 	pendingOps map[*operator.Operator]opInfluence
+	influence  opInfluence
 
 	storesScore *ScorePairSlice
 }
@@ -125,6 +135,7 @@ func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *b
 		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 		pendingOps:    map[*operator.Operator]opInfluence{},
+		influence:     newOpInfluence(),
 		storesScore:   NewScorePairSlice(),
 	}
 }
@@ -139,6 +150,7 @@ func newBalanceHotReadRegionsScheduler(opController *schedule.OperatorController
 		types:         []BalanceType{hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 		pendingOps:    map[*operator.Operator]opInfluence{},
+		influence:     newOpInfluence(),
 		storesScore:   NewScorePairSlice(),
 	}
 }
@@ -153,6 +165,7 @@ func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorControlle
 		types:         []BalanceType{hotWriteRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 		pendingOps:    map[*operator.Operator]opInfluence{},
+		influence:     newOpInfluence(),
 		storesScore:   NewScorePairSlice(),
 	}
 }
@@ -183,37 +196,35 @@ func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*opera
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }
 
-func (h *balanceHotRegionsScheduler) getPendingInfluence() opInfluence {
-	res := newOpInfluence()
+func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
+	h.influence.multWeight(0.0)
 	for op, infl := range h.pendingOps {
 		if isFinish(op) {
-			res.Add(&infl, 0)
 			delete(h.pendingOps, op)
 			continue
 		}
-		res.Add(&infl, 0.666)
+		h.influence.Add(&infl, 0.666)
 	}
-	for store, value := range res.bytesRead {
+	for store, value := range h.influence.bytesRead {
 		pendingInfluenceGauge.WithLabelValues("bytes_read", fmt.Sprintf("store-%d", store)).Set(value)
 	}
-	for store, value := range res.bytesWrite {
+	for store, value := range h.influence.bytesWrite {
 		pendingInfluenceGauge.WithLabelValues("bytes_write", fmt.Sprintf("store-%d", store)).Set(value)
 	}
-	return res
 }
 
 func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 	h.analyzeStoreLoad(cluster.GetStoresStats())
-	pendingInfluence := h.getPendingInfluence()
+	h.updatePendingInfluence()
 	switch typ {
 	case hotReadRegionBalance:
-		h.stats.readStatAsLeader = calcScore(cluster, pendingInfluence, typ, core.LeaderKind)
+		h.stats.readStatAsLeader = calcScore(cluster, h.influence, typ, core.LeaderKind)
 		return h.balanceHotReadRegions(cluster)
 	case hotWriteRegionBalance:
-		h.stats.writeStatAsLeader = calcScore(cluster, pendingInfluence, typ, core.LeaderKind)
-		h.stats.writeStatAsPeer = calcScore(cluster, pendingInfluence, typ, core.RegionKind)
+		h.stats.writeStatAsLeader = calcScore(cluster, h.influence, typ, core.LeaderKind)
+		h.stats.writeStatAsPeer = calcScore(cluster, h.influence, typ, core.RegionKind)
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil

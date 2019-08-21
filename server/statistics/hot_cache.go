@@ -237,7 +237,7 @@ type hotSpotPeerStatGenerator struct {
 	lastHotSpotPeerStats *HotSpotPeerStat
 }
 
-const rollingWindowsSize = 5
+const rollingWindowsSize = 3
 
 // GenHotSpotPeerStats implements HotSpotPeerStatsGenerator.
 func (statGen *hotSpotPeerStatGenerator) GenHotSpotPeerStats(stats *StoresStats) *HotSpotPeerStat {
