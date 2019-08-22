@@ -74,14 +74,53 @@ func newStoreStaticstics() *storeStatistics {
 }
 
 type opInfluence struct {
-	bytesRead  map[uint64]float64
-	bytesWrite map[uint64]float64
+	typ, status string
+	from, to    uint64
+	bytesRead   map[uint64]float64
+	bytesWrite  map[uint64]float64
 }
 
-func newOpInfluence() opInfluence {
+func newOpInfluence(typ string, from, to uint64) opInfluence {
 	return opInfluence{
+		typ:        typ,
+		status:     "new",
+		from:       from,
+		to:         to,
 		bytesRead:  map[uint64]float64{},
 		bytesWrite: map[uint64]float64{},
+	}
+}
+
+func (oi *opInfluence) incMetric() {
+	hotspotPendingOpGauge.WithLabelValues(oi.typ, oi.status, u64Str(oi.from), u64Str(oi.to)).Inc()
+}
+
+func (oi *opInfluence) decMetric() {
+	hotspotPendingOpGauge.WithLabelValues(oi.typ, oi.status, u64Str(oi.from), u64Str(oi.to)).Dec()
+}
+
+func (oi *opInfluence) unstarted() {
+	if oi.status == "new" {
+		oi.status = "unstarted"
+		oi.incMetric()
+	}
+}
+
+func (oi *opInfluence) started() {
+	if oi.status == "new" {
+		oi.status = "started"
+		oi.incMetric()
+	} else if oi.status == "unstarted" {
+		oi.decMetric()
+		oi.status = "started"
+		oi.incMetric()
+	}
+}
+
+func (oi *opInfluence) finished() {
+	if oi.status != "new" && oi.status != "finish" {
+		oi.decMetric()
+		oi.status = "finished"
 	}
 }
 
@@ -139,7 +178,7 @@ func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *b
 		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 		pendingOps:    map[*operator.Operator]opInfluence{},
-		influence:     newOpInfluence(),
+		influence:     newOpInfluence("hotspot-summary", 0, 0),
 		storesScore:   NewScorePairSlice(),
 	}
 }
@@ -154,7 +193,7 @@ func newBalanceHotReadRegionsScheduler(opController *schedule.OperatorController
 		types:         []BalanceType{hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 		pendingOps:    map[*operator.Operator]opInfluence{},
-		influence:     newOpInfluence(),
+		influence:     newOpInfluence("hotspot-read-summary", 0, 0),
 		storesScore:   NewScorePairSlice(),
 	}
 }
@@ -169,7 +208,7 @@ func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorControlle
 		types:         []BalanceType{hotWriteRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 		pendingOps:    map[*operator.Operator]opInfluence{},
-		influence:     newOpInfluence(),
+		influence:     newOpInfluence("hotspot-write-summary", 0, 0),
 		storesScore:   NewScorePairSlice(),
 	}
 }
@@ -200,28 +239,42 @@ func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*opera
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }
 
-func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
-	h.influence.multWeight(0.1)
+func (h *balanceHotRegionsScheduler) observePendingOps() {
+	h.RLock()
+	defer h.RUnlock()
 	var unstarted_cnt uint = 0
 	var unstarted_sum time.Duration = 0
+	for op, infl := range h.pendingOps {
+		if isFinish(op) {
+			infl.finished()
+			continue
+		}
+		if !isStarted(op) {
+			infl.unstarted()
+			unstarted_cnt++
+			unstarted_sum += op.ElapsedTime()
+		} else {
+			infl.started()
+		}
+	}
+	pendingInfluenceGauge.WithLabelValues("unstarted_cnt", "--").Set(float64(unstarted_cnt))
+	pendingInfluenceGauge.WithLabelValues("unstarted_sum", "--").Set(float64(unstarted_sum) / float64(time.Millisecond))
+}
+
+func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
+	h.influence.multWeight(0.1)
 	for op, infl := range h.pendingOps {
 		if isFinish(op) {
 			delete(h.pendingOps, op)
 			continue
 		}
-		if !isStarted(op) {
-			unstarted_cnt++
-			unstarted_sum += op.ElapsedTime()
-		}
 		h.influence.Add(&infl, 0.7)
 	}
-	pendingInfluenceGauge.WithLabelValues("unstarted_cnt", "--").Set(float64(unstarted_cnt))
-	pendingInfluenceGauge.WithLabelValues("unstarted_sum", "--").Set(float64(unstarted_sum) / float64(time.Millisecond))
 	for store, value := range h.influence.bytesRead {
-		pendingInfluenceGauge.WithLabelValues("bytes_read", fmt.Sprintf("store-%d", store)).Set(value)
+		pendingInfluenceGauge.WithLabelValues("bytes_read", storeStr(store)).Set(value)
 	}
 	for store, value := range h.influence.bytesWrite {
-		pendingInfluenceGauge.WithLabelValues("bytes_write", fmt.Sprintf("store-%d", store)).Set(value)
+		pendingInfluenceGauge.WithLabelValues("bytes_write", storeStr(store)).Set(value)
 	}
 }
 
@@ -267,13 +320,15 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 	// balance by leader
 	srcRegion, newLeader, influence := h.balanceByLeader(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
-		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 		op := operator.CreateTransferLeaderOperator("transfer-hot-read-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 		op.SetPriorityLevel(core.HighPriority)
-		opInf := newOpInfluence()
+		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
+
+		opInf := newOpInfluence(op.Desc(), srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId())
 		opInf.bytesRead = influence
 		h.pendingOps[op] = opInf
-		hotspotOpCounter.WithLabelValues("hot_read_trans_leader", fmt.Sprintf("%d", srcRegion.GetLeader().GetStoreId()), fmt.Sprintf("%d", newLeader.GetStoreId())).Inc()
+		hotspotOpCounter.WithLabelValues(op.Desc(), u64Str(srcRegion.GetLeader().GetStoreId()), u64Str(newLeader.GetStoreId())).Inc()
+
 		return []*operator.Operator{op}
 	}
 
@@ -287,10 +342,12 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 		}
 		op.SetPriorityLevel(core.HighPriority)
 		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-		opInf := newOpInfluence()
+
+		opInf := newOpInfluence(op.Desc(), srcPeer.GetStoreId(), destPeer.GetStoreId())
 		opInf.bytesRead = influence
 		h.pendingOps[op] = opInf
-		hotspotOpCounter.WithLabelValues("hot_read_move_region", fmt.Sprintf("%d", srcPeer.GetStoreId()), fmt.Sprintf("%d", destPeer.GetStoreId())).Inc()
+		hotspotOpCounter.WithLabelValues(op.Desc(), u64Str(srcPeer.GetStoreId()), u64Str(destPeer.GetStoreId())).Inc()
+
 		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -307,10 +364,14 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 			// balance by leader
 			srcRegion, newLeader, _ := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
 			if srcRegion != nil {
-				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 				op.SetPriorityLevel(core.HighPriority)
-				hotspotOpCounter.WithLabelValues("hot_write_trans_leader", fmt.Sprintf("%d", srcRegion.GetLeader().GetStoreId()), fmt.Sprintf("%d", newLeader.GetStoreId())).Inc()
+				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
+
+				opInf := newOpInfluence(op.Desc(), srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId())
+				h.pendingOps[op] = opInf
+				hotspotOpCounter.WithLabelValues(op.Desc(), u64Str(srcRegion.GetLeader().GetStoreId()), u64Str(newLeader.GetStoreId())).Inc()
+
 				return []*operator.Operator{op}
 			}
 		default:
@@ -324,10 +385,12 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 				}
 				op.SetPriorityLevel(core.HighPriority)
 				schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
-				opInf := newOpInfluence()
+
+				opInf := newOpInfluence(op.Desc(), srcPeer.GetStoreId(), destPeer.GetStoreId())
 				opInf.bytesWrite = influence
 				h.pendingOps[op] = opInf
-				hotspotOpCounter.WithLabelValues("hot_write_move_peer", fmt.Sprintf("%d", srcPeer.GetStoreId()), fmt.Sprintf("%d", destPeer.GetStoreId())).Inc()
+				hotspotOpCounter.WithLabelValues(op.Desc(), u64Str(srcPeer.GetStoreId()), u64Str(destPeer.GetStoreId())).Inc()
+
 				return []*operator.Operator{op}
 			}
 		}
@@ -644,4 +707,12 @@ func (h *balanceHotRegionsScheduler) GetStoresScore() map[uint64]float64 {
 		storesScore[pair.GetStoreID()] = pair.GetScore()
 	}
 	return storesScore
+}
+
+func u64Str(x uint64) string {
+	return fmt.Sprintf("%d", x)
+}
+
+func storeStr(x uint64) string {
+	return fmt.Sprintf("store-%d", x)
 }

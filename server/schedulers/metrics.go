@@ -71,6 +71,14 @@ var hotspotOpCounter = prometheus.NewCounterVec(
 		Help:      "Counter of hotspot operators.",
 	}, []string{"type", "from_store", "to_store"})
 
+var hotspotPendingOpGauge = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "hotspot_pending_ops",
+		Help:      "Pending Operators of hotspot scheduler.",
+	}, []string{"type", "status", "from_store", "to_store"})
+
 var pendingInfluenceGauge = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Namespace: "pd",
@@ -87,5 +95,6 @@ func init() {
 	prometheus.MustRegister(scatterRangeLeaderCounter)
 	prometheus.MustRegister(scatterRangeRegionCounter)
 	prometheus.MustRegister(hotspotOpCounter)
+	prometheus.MustRegister(hotspotPendingOpGauge)
 	prometheus.MustRegister(pendingInfluenceGauge)
 }
