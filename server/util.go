@@ -68,6 +68,18 @@ func PrintPDInfo() {
 	fmt.Println("UTC Build Time: ", PDBuildTS)
 }
 
+// PrintConfigCheckMsg prints the message about configuration checks.
+func PrintConfigCheckMsg(cfg *config.Config) {
+	if len(cfg.WarningMsgs) == 0 {
+		fmt.Println("config check successful")
+		return
+	}
+
+	for _, msg := range cfg.WarningMsgs {
+		fmt.Println(msg)
+	}
+}
+
 // CheckPDVersion checks if PD needs to be upgraded.
 func CheckPDVersion(opt *config.ScheduleOption) {
 	pdVersion := *MinSupportedVersion(Base)

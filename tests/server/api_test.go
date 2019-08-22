@@ -75,7 +75,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 			testutil.WaitUntil(c, func(c *C) bool {
 				res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(err, IsNil)
-				return res.StatusCode == http.StatusInternalServerError
+				return res.StatusCode == http.StatusServiceUnavailable
 			})
 		}
 	}

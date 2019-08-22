@@ -55,6 +55,12 @@ func main() {
 	default:
 		log.Fatal("parse cmd flags error", zap.Error(err))
 	}
+
+	if cfg.ConfigCheck {
+		server.PrintConfigCheckMsg(cfg)
+		exit(0)
+	}
+
 	// New zap logger
 	err = cfg.SetupLogger()
 	if err == nil {
