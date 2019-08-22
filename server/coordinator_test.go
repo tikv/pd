@@ -50,7 +50,7 @@ func newTestScheduleConfig() (*config.ScheduleConfig, *config.ScheduleOption, er
 }
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
-	return operator.NewOperator("test", regionID, regionEpoch, kind, steps...)
+	return operator.NewOperator("test", "test", regionID, regionEpoch, kind, steps...)
 }
 
 type testCluster struct {

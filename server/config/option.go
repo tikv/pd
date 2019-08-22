@@ -18,6 +18,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -31,7 +32,7 @@ type ScheduleOption struct {
 	rep            *Replication
 	ns             sync.Map // concurrent map[string]*namespaceOption
 	labelProperty  atomic.Value
-	clusterVersion atomic.Value
+	clusterVersion unsafe.Pointer
 	pdServerConfig atomic.Value
 }
 
@@ -47,7 +48,7 @@ func NewScheduleOption(cfg *Config) *ScheduleOption {
 	o.rep = newReplication(&cfg.Replication)
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
 	o.labelProperty.Store(cfg.LabelProperty)
-	o.clusterVersion.Store(cfg.ClusterVersion)
+	o.SetClusterVersion(&cfg.ClusterVersion)
 	return o
 }
 
@@ -356,13 +357,18 @@ func (o *ScheduleOption) LoadLabelPropertyConfig() LabelPropertyConfig {
 }
 
 // SetClusterVersion sets the cluster version.
-func (o *ScheduleOption) SetClusterVersion(v semver.Version) {
-	o.clusterVersion.Store(v)
+func (o *ScheduleOption) SetClusterVersion(v *semver.Version) {
+	atomic.StorePointer(&o.clusterVersion, unsafe.Pointer(v))
+}
+
+// CASClusterVersion sets the cluster version.
+func (o *ScheduleOption) CASClusterVersion(old, new *semver.Version) bool {
+	return atomic.CompareAndSwapPointer(&o.clusterVersion, unsafe.Pointer(old), unsafe.Pointer(new))
 }
 
 // LoadClusterVersion returns the cluster version.
-func (o *ScheduleOption) LoadClusterVersion() semver.Version {
-	return o.clusterVersion.Load().(semver.Version)
+func (o *ScheduleOption) LoadClusterVersion() *semver.Version {
+	return (*semver.Version)(atomic.LoadPointer(&o.clusterVersion))
 }
 
 // LoadPDServerConfig returns PD server configurations.
@@ -379,7 +385,7 @@ func (o *ScheduleOption) Persist(storage *core.Storage) error {
 		Replication:    *o.rep.Load(),
 		Namespace:      namespaces,
 		LabelProperty:  o.LoadLabelPropertyConfig(),
-		ClusterVersion: o.LoadClusterVersion(),
+		ClusterVersion: *o.LoadClusterVersion(),
 		PDServerCfg:    *o.LoadPDServerConfig(),
 	}
 	err := storage.SaveConfig(cfg)
@@ -395,7 +401,7 @@ func (o *ScheduleOption) Reload(storage *core.Storage) error {
 		Replication:    *o.rep.Load(),
 		Namespace:      namespaces,
 		LabelProperty:  o.LoadLabelPropertyConfig().Clone(),
-		ClusterVersion: o.LoadClusterVersion(),
+		ClusterVersion: *o.LoadClusterVersion(),
 		PDServerCfg:    *o.LoadPDServerConfig(),
 	}
 	isExist, err := storage.LoadConfig(cfg)
@@ -411,7 +417,7 @@ func (o *ScheduleOption) Reload(storage *core.Storage) error {
 			o.ns.Store(name, NewNamespaceOption(&nsCfg))
 		}
 		o.labelProperty.Store(cfg.LabelProperty)
-		o.clusterVersion.Store(cfg.ClusterVersion)
+		o.SetClusterVersion(&cfg.ClusterVersion)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
 	}
 	return nil

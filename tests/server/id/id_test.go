@@ -15,15 +15,14 @@ package id_test
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
-	"google.golang.org/grpc"
 )
 
 func Test(t *testing.T) {
@@ -96,10 +95,10 @@ func (s *testAllocIDSuite) TestCommand(c *C) {
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	req := &pdpb.AllocIDRequest{
-		Header: newRequestHeader(leaderServer.GetClusterID()),
+		Header: testutil.NewRequestHeader(leaderServer.GetClusterID()),
 	}
 
-	grpcPDClient := mustNewGrpcClient(c, leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	var last uint64
 	for i := uint64(0); i < 2*allocStep; i++ {
 		resp, err := grpcPDClient.AllocID(context.Background(), req)
@@ -107,17 +106,4 @@ func (s *testAllocIDSuite) TestCommand(c *C) {
 		c.Assert(resp.GetId(), Greater, last)
 		last = resp.GetId()
 	}
-}
-
-func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
-	return &pdpb.RequestHeader{
-		ClusterId: clusterID,
-	}
-}
-
-func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
-
-	c.Assert(err, IsNil)
-	return pdpb.NewPDClient(conn)
 }

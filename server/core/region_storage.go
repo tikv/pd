@@ -119,7 +119,7 @@ func deleteRegion(kv kv.Base, region *metapb.Region) error {
 	return kv.Remove(regionPath(region.GetId()))
 }
 
-func loadRegions(kv kv.Base, regions *RegionsInfo) error {
+func loadRegions(kv kv.Base, f func(region *RegionInfo) []*metapb.Region) error {
 	nextID := uint64(0)
 	endKey := regionPath(math.MaxUint64)
 
@@ -144,7 +144,7 @@ func loadRegions(kv kv.Base, regions *RegionsInfo) error {
 			}
 
 			nextID = region.GetId() + 1
-			overlaps := regions.SetRegion(NewRegionInfo(region, nil))
+			overlaps := f(NewRegionInfo(region, nil))
 			for _, item := range overlaps {
 				if err := deleteRegion(kv, item); err != nil {
 					return err

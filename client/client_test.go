@@ -16,7 +16,6 @@ package pd
 import (
 	"context"
 	"math"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,7 +28,6 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
-	"google.golang.org/grpc"
 )
 
 func TestClient(t *testing.T) {
@@ -94,7 +92,7 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	var err error
 	_, s.srv, s.cleanup, err = server.NewTestServer(c)
 	c.Assert(err, IsNil)
-	s.grpcPDClient = mustNewGrpcClient(c, s.srv.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.srv.GetAddr())
 
 	mustWaitLeader(c, map[string]*server.Server{s.srv.GetAddr(): s.srv})
 	bootstrapServer(c, newHeader(s.srv), s.grpcPDClient)
@@ -116,17 +114,10 @@ func (s *testClientSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
-
-	c.Assert(err, IsNil)
-	return pdpb.NewPDClient(conn)
-}
-
 func mustWaitLeader(c *C, svrs map[string]*server.Server) *server.Server {
 	for i := 0; i < 500; i++ {
 		for _, s := range svrs {
-			if s.IsLeader() {
+			if !s.IsClosed() && s.GetMember().IsLeader() {
 				return s
 			}
 		}
@@ -288,7 +279,7 @@ func (s *testClientSuite) TestScanRegions(c *C) {
 
 	// Wait for region heartbeats.
 	testutil.WaitUntil(c, func(c *C) bool {
-		scanRegions, _, err := s.client.ScanRegions(context.Background(), []byte{0}, 10)
+		scanRegions, _, err := s.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
 		return err == nil && len(scanRegions) == 10
 	})
 
@@ -296,8 +287,8 @@ func (s *testClientSuite) TestScanRegions(c *C) {
 	region3 := core.NewRegionInfo(regions[3], nil)
 	s.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
 
-	check := func(start []byte, limit int, expect []*metapb.Region) {
-		scanRegions, leaders, err := s.client.ScanRegions(context.Background(), start, limit)
+	check := func(start, end []byte, limit int, expect []*metapb.Region) {
+		scanRegions, leaders, err := s.client.ScanRegions(context.Background(), start, end, limit)
 		c.Assert(err, IsNil)
 		c.Assert(scanRegions, HasLen, len(expect))
 		c.Assert(leaders, HasLen, len(expect))
@@ -314,9 +305,11 @@ func (s *testClientSuite) TestScanRegions(c *C) {
 		}
 	}
 
-	check([]byte{0}, 10, regions)
-	check([]byte{1}, 5, regions[1:6])
-	check([]byte{100}, 1, nil)
+	check([]byte{0}, nil, 10, regions)
+	check([]byte{1}, nil, 5, regions[1:6])
+	check([]byte{100}, nil, 1, nil)
+	check([]byte{1}, []byte{6}, 0, regions[1:6])
+	check([]byte{1}, []byte{6}, 2, regions[1:3])
 }
 
 func (s *testClientSuite) TestGetRegionByID(c *C) {

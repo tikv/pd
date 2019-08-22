@@ -20,6 +20,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	_ "github.com/pingcap/pd/table"
 )
@@ -68,7 +69,7 @@ func (s *testStoreNsSuite) SetUpSuite(c *C) {
 	s.svr = svr
 	s.cleanup = func() {
 		svr.Close()
-		cleanServer(cfg)
+		testutil.CleanServer(cfg)
 	}
 
 	mustWaitLeader(c, []*server.Server{s.svr})

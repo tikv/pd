@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
+	"github.com/pingcap/pd/server/member"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/tso"
 	"github.com/pkg/errors"
@@ -52,6 +53,7 @@ const (
 	etcdTimeout           = time.Second * 3
 	etcdStartTimeout      = time.Minute * 5
 	serverMetricsInterval = time.Minute
+	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
@@ -65,7 +67,6 @@ var EnableZap = false
 type Server struct {
 	// Server state.
 	isServing int64
-	leader    atomic.Value
 
 	// Configs and initial fields.
 	cfg         *config.Config
@@ -77,17 +78,10 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	// Etcd and cluster informations.
-	etcd      *embed.Etcd
+	member    *member.Member
 	client    *clientv3.Client
-	id        uint64 // etcd server id.
 	clusterID uint64 // pd cluster id.
 	rootPath  string
-	member    *pdpb.Member // current PD's info.
-	// memberValue is the serialized string of `member`. It will be save in
-	// etcd leader key when the PD node is successfully elected as the leader
-	// of the cluster. Every write will use it to check leadership.
-	memberValue string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -203,10 +197,8 @@ func (s *Server) startEtcd(ctx context.Context) error {
 			}
 		}
 	}
-
-	s.etcd = etcd
 	s.client = client
-	s.id = etcdServerID
+	s.member = member.NewMember(etcd, client, etcdServerID)
 	return nil
 }
 
@@ -221,10 +213,10 @@ func (s *Server) startServer() error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
-	s.member, s.memberValue = s.memberInfo()
+	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
 
-	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.memberValue)
-	s.tso = tso.NewTimestampOracle(s.client, s.rootPath, s.memberValue, s.cfg.TsoSaveInterval.Duration)
+	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
+	s.tso = tso.NewTimestampOracle(s.client, s.rootPath, s.member.MemberValue(), s.cfg.TsoSaveInterval.Duration)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
 	regionStorage, err := core.NewRegionStorage(path)
@@ -273,8 +265,8 @@ func (s *Server) Close() {
 		s.client.Close()
 	}
 
-	if s.etcd != nil {
-		s.etcd.Close()
+	if s.member.Etcd() != nil {
+		s.member.Close()
 	}
 
 	if s.hbStreams != nil {
@@ -287,8 +279,8 @@ func (s *Server) Close() {
 	log.Info("close server")
 }
 
-// isClosed checks whether server is closed or not.
-func (s *Server) isClosed() bool {
+// IsClosed checks whether server is closed or not.
+func (s *Server) IsClosed() bool {
 	return atomic.LoadInt64(&s.isServing) == 0
 }
 
@@ -352,9 +344,9 @@ func (s *Server) serverMetricsLoop() {
 }
 
 func (s *Server) collectEtcdStateMetrics() {
-	etcdStateGauge.WithLabelValues("term").Set(float64(s.etcd.Server.Term()))
-	etcdStateGauge.WithLabelValues("appliedIndex").Set(float64(s.etcd.Server.AppliedIndex()))
-	etcdStateGauge.WithLabelValues("committedIndex").Set(float64(s.etcd.Server.CommittedIndex()))
+	etcdStateGauge.WithLabelValues("term").Set(float64(s.member.Etcd().Server.Term()))
+	etcdStateGauge.WithLabelValues("appliedIndex").Set(float64(s.member.Etcd().Server.AppliedIndex()))
+	etcdStateGauge.WithLabelValues("committedIndex").Set(float64(s.member.Etcd().Server.CommittedIndex()))
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
@@ -454,7 +446,7 @@ func (s *Server) GetAddr() string {
 
 // GetMemberInfo returns the server member information.
 func (s *Server) GetMemberInfo() *pdpb.Member {
-	return proto.Clone(s.member).(*pdpb.Member)
+	return proto.Clone(s.member.Member()).(*pdpb.Member)
 }
 
 // GetHandler returns the handler for API.
@@ -472,6 +464,16 @@ func (s *Server) GetClient() *clientv3.Client {
 	return s.client
 }
 
+// GetLeader returns leader of etcd.
+func (s *Server) GetLeader() *pdpb.Member {
+	return s.member.GetLeader()
+}
+
+// GetMember returns the member of server.
+func (s *Server) GetMember() *member.Member {
+	return s.member
+}
+
 // GetStorage returns the backend storage of server.
 func (s *Server) GetStorage() *core.Storage {
 	return s.storage
@@ -480,11 +482,6 @@ func (s *Server) GetStorage() *core.Storage {
 // GetAllocator returns the ID allocator of server.
 func (s *Server) GetAllocator() *id.AllocatorImpl {
 	return s.idAllocator
-}
-
-// ID returns the unique etcd ID for this server in etcd cluster.
-func (s *Server) ID() uint64 {
-	return s.id
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.
@@ -502,13 +499,6 @@ func (s *Server) GetClassifier() namespace.Classifier {
 	return s.classifier
 }
 
-// LeaderTxn returns txn() with a leader comparison to guarantee that
-// the transaction can be executed only if the server is leader.
-func (s *Server) LeaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
-	txn := kv.NewSlowLogTxn(s.client)
-	return txn.If(append(cs, s.leaderCmp())...)
-}
-
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
@@ -518,7 +508,7 @@ func (s *Server) GetConfig() *config.Config {
 
 	cfg.Namespace = namespaces
 	cfg.LabelProperty = s.scheduleOpt.LoadLabelPropertyConfig().Clone()
-	cfg.ClusterVersion = s.scheduleOpt.LoadClusterVersion()
+	cfg.ClusterVersion = *s.scheduleOpt.LoadClusterVersion()
 	cfg.PDServerCfg = *s.scheduleOpt.LoadPDServerConfig()
 	return cfg
 }
@@ -711,7 +701,7 @@ func (s *Server) SetClusterVersion(v string) error {
 		return err
 	}
 	old := s.scheduleOpt.LoadClusterVersion()
-	s.scheduleOpt.SetClusterVersion(*version)
+	s.scheduleOpt.SetClusterVersion(version)
 	err = s.scheduleOpt.Persist(s.storage)
 	if err != nil {
 		s.scheduleOpt.SetClusterVersion(old)
@@ -727,7 +717,7 @@ func (s *Server) SetClusterVersion(v string) error {
 
 // GetClusterVersion returns the version of cluster.
 func (s *Server) GetClusterVersion() semver.Version {
-	return s.scheduleOpt.LoadClusterVersion()
+	return *s.scheduleOpt.LoadClusterVersion()
 }
 
 // GetSecurityConfig get the security config.
@@ -747,7 +737,7 @@ func (s *Server) getClusterRootPath() string {
 // GetRaftCluster gets Raft cluster.
 // If cluster has not been bootstrapped, return nil.
 func (s *Server) GetRaftCluster() *RaftCluster {
-	if s.isClosed() || !s.cluster.isRunning() {
+	if s.IsClosed() || !s.cluster.isRunning() {
 		return nil
 	}
 	return s.cluster
@@ -777,53 +767,6 @@ func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
 	return s.cluster.loadClusterStatus()
 }
 
-func (s *Server) getMemberLeaderPriorityPath(id uint64) string {
-	return path.Join(s.rootPath, fmt.Sprintf("member/%d/leader_priority", id))
-}
-
-// SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
-func (s *Server) SetMemberLeaderPriority(id uint64, priority int) error {
-	key := s.getMemberLeaderPriorityPath(id)
-	res, err := s.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !res.Succeeded {
-		return errors.New("save leader priority failed, maybe not leader")
-	}
-	return nil
-}
-
-// DeleteMemberLeaderPriority removes a member's priority config.
-func (s *Server) DeleteMemberLeaderPriority(id uint64) error {
-	key := s.getMemberLeaderPriorityPath(id)
-	res, err := s.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !res.Succeeded {
-		return errors.New("delete leader priority failed, maybe not leader")
-	}
-	return nil
-}
-
-// GetMemberLeaderPriority loads a member's priority to be elected as the etcd leader.
-func (s *Server) GetMemberLeaderPriority(id uint64) (int, error) {
-	key := s.getMemberLeaderPriorityPath(id)
-	res, err := etcdutil.EtcdKVGet(s.client, key)
-	if err != nil {
-		return 0, err
-	}
-	if len(res.Kvs) == 0 {
-		return 0, nil
-	}
-	priority, err := strconv.ParseInt(string(res.Kvs[0].Value), 10, 32)
-	if err != nil {
-		return 0, errors.WithStack(err)
-	}
-	return int(priority), nil
-}
-
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) {
 	s.cfg.Log.Level = level
@@ -849,4 +792,153 @@ func (s *Server) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 		}
 	}
 	return unhealthMembers
+}
+
+func (s *Server) leaderLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	for {
+		if s.IsClosed() {
+			log.Info("server is closed, return leader loop")
+			return
+		}
+
+		leader, rev, checkAgain := s.member.CheckLeader(s.Name())
+		if checkAgain {
+			continue
+		}
+		if leader != nil {
+			err := s.reloadConfigFromKV()
+			if err != nil {
+				log.Error("reload config failed", zap.Error(err))
+				continue
+			}
+			if s.scheduleOpt.LoadPDServerConfig().UseRegionStorage {
+				s.cluster.regionSyncer.StartSyncWithLeader(leader.GetClientUrls()[0])
+			}
+			log.Info("start watch leader", zap.Stringer("leader", leader))
+			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
+			s.cluster.regionSyncer.StopSyncWithLeader()
+			log.Info("leader changed, try to campaign leader")
+		}
+
+		etcdLeader := s.member.GetEtcdLeader()
+		if etcdLeader != s.member.ID() {
+			log.Info("skip campaign leader and check later",
+				zap.String("server-name", s.Name()),
+				zap.Uint64("etcd-leader-id", etcdLeader))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		s.campaignLeader()
+	}
+}
+
+func (s *Server) campaignLeader() {
+	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
+
+	lease := member.NewLeaderLease(s.client)
+	defer lease.Close()
+	if err := s.member.CampaignLeader(lease, s.cfg.LeaderLease); err != nil {
+		log.Error("campaign leader meet error", zap.Error(err))
+		return
+	}
+
+	// Start keepalive and enable TSO service.
+	// TSO service is strictly enabled/disabled by leader lease for 2 reasons:
+	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
+	//   2. load region could be slow. Based on lease we can recover TSO service faster.
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	go lease.KeepAlive(ctx)
+	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
+
+	log.Debug("sync timestamp for tso")
+	if err := s.tso.SyncTimestamp(lease); err != nil {
+		log.Error("failed to sync timestamp", zap.Error(err))
+		return
+	}
+	defer s.tso.ResetTimestamp()
+
+	err := s.reloadConfigFromKV()
+	if err != nil {
+		log.Error("failed to reload configuration", zap.Error(err))
+		return
+	}
+	// Try to create raft cluster.
+	err = s.createRaftCluster()
+	if err != nil {
+		log.Error("failed to create raft cluster", zap.Error(err))
+		return
+	}
+	defer s.stopRaftCluster()
+
+	s.member.EnableLeader()
+	defer s.member.DisableLeader()
+
+	CheckPDVersion(s.scheduleOpt)
+	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
+
+	tsTicker := time.NewTicker(tso.UpdateTimestampStep)
+	defer tsTicker.Stop()
+	leaderTicker := time.NewTicker(leaderTickInterval)
+	defer leaderTicker.Stop()
+
+	for {
+		select {
+		case <-leaderTicker.C:
+			if lease.IsExpired() {
+				log.Info("lease expired, leader step down")
+				return
+			}
+			etcdLeader := s.member.GetEtcdLeader()
+			if etcdLeader != s.member.ID() {
+				log.Info("etcd leader changed, resigns leadership", zap.String("old-leader-name", s.Name()))
+				return
+			}
+		case <-tsTicker.C:
+			if err = s.tso.UpdateTimestamp(); err != nil {
+				log.Error("failed to update timestamp", zap.Error(err))
+				return
+			}
+		case <-ctx.Done():
+			// Server is closed and it should return nil.
+			log.Info("server is closed")
+			return
+		}
+	}
+}
+
+func (s *Server) etcdLeaderLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	for {
+		select {
+		case <-time.After(s.cfg.LeaderPriorityCheckInterval.Duration):
+			s.member.CheckPriority(ctx)
+		case <-ctx.Done():
+			log.Info("server is closed, exit etcd leader loop")
+			return
+		}
+	}
+}
+
+func (s *Server) reloadConfigFromKV() error {
+	err := s.scheduleOpt.Reload(s.storage)
+	if err != nil {
+		return err
+	}
+	if s.scheduleOpt.LoadPDServerConfig().UseRegionStorage {
+		s.storage.SwitchToRegionStorage()
+		log.Info("server enable region storage")
+	} else {
+		s.storage.SwitchToDefaultStorage()
+		log.Info("server disable region storage")
+	}
+	return nil
 }

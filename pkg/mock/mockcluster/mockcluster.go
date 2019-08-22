@@ -55,8 +55,8 @@ func (mc *Cluster) allocID() (uint64, error) {
 }
 
 // ScanRegions scans region with start key, until number greater than limit.
-func (mc *Cluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
-	return mc.Regions.ScanRange(startKey, limit)
+func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
+	return mc.Regions.ScanRange(startKey, endKey, limit)
 }
 
 // LoadRegion puts region info without leader
@@ -69,6 +69,11 @@ func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 // GetStoreRegionCount gets region count with a given store.
 func (mc *Cluster) GetStoreRegionCount(storeID uint64) int {
 	return mc.Regions.GetStoreRegionCount(storeID)
+}
+
+// GetStore gets a store with a given store ID.
+func (mc *Cluster) GetStore(storeID uint64) *core.StoreInfo {
+	return mc.Stores.GetStore(storeID)
 }
 
 // IsRegionHot checks if the region is hot.

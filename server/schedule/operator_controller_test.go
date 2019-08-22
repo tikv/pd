@@ -46,8 +46,8 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	steps := []operator.OpStep{
 		operator.RemovePeer{FromStore: 2},
 	}
-	op1 := operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
-	op2 := operator.NewOperator("test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op2 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	oc.SetOperator(op1)
 	oc.SetOperator(op2)
 	go func() {
@@ -76,8 +76,8 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 		operator.RemovePeer{FromStore: 2},
 		operator.AddPeer{ToStore: 2, PeerID: 4},
 	}
-	op1 := operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
-	op2 := operator.NewOperator("test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op2 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
 	op1.SetStartTime(time.Now())
@@ -110,8 +110,8 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 		operator.RemovePeer{FromStore: 2},
 		operator.AddPeer{ToStore: 2, PeerID: 4},
 	}
-	op1 := operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
-	op2 := operator.NewOperator("test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+	op2 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
 	// Adds operator and pushes to the notifier queue.
@@ -156,27 +156,27 @@ func (t *testOperatorControllerSuite) TestStorelimit(c *C) {
 	}
 	oc.SetStoreLimit(2, 1)
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		oc.RemoveOperator(op)
 	}
-	op := operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
+	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	oc.RemoveOperator(op)
 
 	oc.SetStoreLimit(2, 2)
 	for i := uint64(1); i <= 10; i++ {
-		op = operator.NewOperator("test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
+		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		oc.RemoveOperator(op)
 	}
 	oc.SetAllStoresLimit(1)
 	for i := uint64(1); i <= 5; i++ {
-		op = operator.NewOperator("test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
+		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		oc.RemoveOperator(op)
 	}
-	op = operator.NewOperator("test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
+	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	oc.RemoveOperator(op)
 }

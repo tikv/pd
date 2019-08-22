@@ -82,12 +82,11 @@ func (s *heartbeatStreams) run() {
 		case msg := <-s.msgCh:
 			storeID := msg.GetTargetPeer().GetStoreId()
 			storeLabel := strconv.FormatUint(storeID, 10)
-			store, err := s.cluster.TryGetStore(storeID)
-			if err != nil {
-				log.Error("fail to get store",
+			store := s.cluster.GetStore(storeID)
+			if store == nil {
+				log.Error("failed to get store",
 					zap.Uint64("region-id", msg.RegionId),
-					zap.Uint64("store-id", storeID),
-					zap.Error(err))
+					zap.Uint64("store-id", storeID))
 				delete(s.streams, storeID)
 				continue
 			}
@@ -109,9 +108,9 @@ func (s *heartbeatStreams) run() {
 			}
 		case <-keepAliveTicker.C:
 			for storeID, stream := range s.streams {
-				store, err := s.cluster.TryGetStore(storeID)
-				if err != nil {
-					log.Error("fail to get store", zap.Uint64("store-id", storeID), zap.Error(err))
+				store := s.cluster.GetStore(storeID)
+				if store == nil {
+					log.Error("failed to get store", zap.Uint64("store-id", storeID))
 					delete(s.streams, storeID)
 					continue
 				}

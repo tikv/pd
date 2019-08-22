@@ -39,8 +39,9 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	c.RLock()
-	defer c.RUnlock()
-	c.coordinator.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
+	co := c.coordinator
+	c.RUnlock()
+	co.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
 	return nil
 }
 

@@ -17,20 +17,20 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockid"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pkg/errors"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -57,23 +57,10 @@ func (kv *testErrorKV) Save(key, value string) error {
 	return errors.New("save failed")
 }
 
-func mustNewGrpcClient(c *C, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
-
-	c.Assert(err, IsNil)
-	return pdpb.NewPDClient(conn)
-}
-
 func (s *baseCluster) allocID(c *C) uint64 {
 	id, err := s.svr.idAllocator.Alloc()
 	c.Assert(err, IsNil)
 	return id
-}
-
-func newRequestHeader(clusterID uint64) *pdpb.RequestHeader {
-	return &pdpb.RequestHeader{
-		ClusterId: clusterID,
-	}
 }
 
 func (s *baseCluster) newPeer(c *C, storeID uint64, peerID uint64) *metapb.Peer {
@@ -89,7 +76,7 @@ func (s *baseCluster) newPeer(c *C, storeID uint64, peerID uint64) *metapb.Peer 
 	}
 }
 
-func (s *baseCluster) newStore(c *C, storeID uint64, addr string) *metapb.Store {
+func (s *baseCluster) newStore(c *C, storeID uint64, addr string, version string) *metapb.Store {
 	if storeID == 0 {
 		storeID = s.allocID(c)
 	}
@@ -97,6 +84,7 @@ func (s *baseCluster) newStore(c *C, storeID uint64, addr string) *metapb.Store 
 	return &metapb.Store{
 		Id:      storeID,
 		Address: addr,
+		Version: version,
 	}
 }
 
@@ -133,7 +121,7 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 	clusterID := s.svr.clusterID
 
@@ -164,19 +152,19 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 
 func (s *baseCluster) newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
 	req := &pdpb.IsBootstrappedRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 	}
 
 	return req
 }
 
 func (s *baseCluster) newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.BootstrapRequest {
-	store := s.newStore(c, 0, storeAddr)
+	store := s.newStore(c, 0, storeAddr, "2.1.0")
 	peer := s.newPeer(c, store.GetId(), 0)
 	region := s.newRegion(c, 0, []byte{}, []byte{}, []*metapb.Peer{peer}, nil)
 
 	req := &pdpb.BootstrapRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 		Store:  store,
 		Region: region,
 	}
@@ -193,7 +181,7 @@ func (s *baseCluster) bootstrapCluster(c *C, clusterID uint64, storeAddr string)
 
 func (s *baseCluster) getStore(c *C, clusterID uint64, storeID uint64) *metapb.Store {
 	req := &pdpb.GetStoreRequest{
-		Header:  newRequestHeader(clusterID),
+		Header:  testutil.NewRequestHeader(clusterID),
 		StoreId: storeID,
 	}
 	resp, err := s.grpcPDClient.GetStore(context.Background(), req)
@@ -205,7 +193,7 @@ func (s *baseCluster) getStore(c *C, clusterID uint64, storeID uint64) *metapb.S
 
 func (s *baseCluster) getRegion(c *C, clusterID uint64, regionKey []byte) *metapb.Region {
 	req := &pdpb.GetRegionRequest{
-		Header:    newRequestHeader(clusterID),
+		Header:    testutil.NewRequestHeader(clusterID),
 		RegionKey: regionKey,
 	}
 
@@ -218,7 +206,7 @@ func (s *baseCluster) getRegion(c *C, clusterID uint64, regionKey []byte) *metap
 
 func (s *baseCluster) getRegionByID(c *C, clusterID uint64, regionID uint64) *metapb.Region {
 	req := &pdpb.GetRegionByIDRequest{
-		Header:   newRequestHeader(clusterID),
+		Header:   testutil.NewRequestHeader(clusterID),
 		RegionId: regionID,
 	}
 
@@ -237,7 +225,7 @@ func (s *baseCluster) getRaftCluster(c *C) *RaftCluster {
 
 func (s *baseCluster) getClusterConfig(c *C, clusterID uint64) *metapb.Cluster {
 	req := &pdpb.GetClusterConfigRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 	}
 
 	resp, err := s.grpcPDClient.GetClusterConfig(context.Background(), req)
@@ -253,7 +241,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 	clusterID := s.svr.clusterID
 
@@ -283,7 +271,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 
 	// Update cluster config.
 	req := &pdpb.PutClusterConfigRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 		Cluster: &metapb.Cluster{
 			Id:           clusterID,
 			MaxPeerCount: 5,
@@ -298,7 +286,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 
 func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.Store) (*pdpb.PutStoreResponse, error) {
 	req := &pdpb.PutStoreRequest{
-		Header: newRequestHeader(clusterID),
+		Header: testutil.NewRequestHeader(clusterID),
 		Store:  store,
 	}
 	resp, err := grpcPDClient.PutStore(context.Background(), req)
@@ -317,26 +305,26 @@ func (s *baseCluster) testPutStore(c *C, clusterID uint64, store *metapb.Store) 
 	c.Assert(err, IsNil)
 
 	// Put new store with a duplicated address when old store is up will fail.
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
 	c.Assert(err, NotNil)
 
 	// Put new store with a duplicated address when old store is offline will fail.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
 	c.Assert(err, NotNil)
 
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress()))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
 	c.Assert(err, IsNil)
 
 	// Put a new store.
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, "127.0.0.1:12345"))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, "127.0.0.1:12345", "2.1.0"))
 	c.Assert(err, IsNil)
 
 	// Put an existed store with duplicated address with other old stores.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345"))
+	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345", "2.1.0"))
 	c.Assert(err, NotNil)
 }
 
@@ -414,7 +402,7 @@ func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Stor
 	{
 		// Update after removed should return tombstone error.
 		req := &pdpb.StoreHeartbeatRequest{
-			Header: newRequestHeader(clusterID),
+			Header: testutil.NewRequestHeader(clusterID),
 			Stats:  &pdpb.StoreStats{StoreId: store.GetId()},
 		}
 		resp, err := s.grpcPDClient.StoreHeartbeat(context.Background(), req)
@@ -457,7 +445,7 @@ func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
 	// add an offline store
-	store := s.newStore(c, s.allocID(c), "127.0.0.1:4")
+	store := s.newStore(c, s.allocID(c), "127.0.0.1:4", "2.1.0")
 	store.State = metapb.StoreState_Offline
 	cluster := s.svr.GetRaftCluster()
 	err = cluster.putStore(store)
@@ -482,10 +470,10 @@ func (s *testClusterSuite) TestGetPDMembers(c *C) {
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 	req := &pdpb.GetMembersRequest{
-		Header: newRequestHeader(s.svr.ClusterID()),
+		Header: testutil.NewRequestHeader(s.svr.ClusterID()),
 	}
 
 	resp, err := s.grpcPDClient.GetMembers(context.Background(), req)
@@ -494,12 +482,41 @@ func (s *testClusterSuite) TestGetPDMembers(c *C) {
 	c.Assert(len(resp.GetMembers()), Not(Equals), 0)
 }
 
+func (s *testClusterSuite) TestStoreVersionChange(c *C) {
+	var err error
+	var cleanup func()
+	_, s.svr, cleanup, err = NewTestServer(c)
+	c.Assert(err, IsNil)
+	mustWaitLeader(c, []*Server{s.svr})
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
+	defer cleanup()
+	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
+	c.Assert(err, IsNil)
+	s.svr.SetClusterVersion("2.0.0")
+	store := s.newStore(c, s.allocID(c), "127.0.0.1:4", "2.1.0")
+	store.State = metapb.StoreState_Up
+	var wg sync.WaitGroup
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/versionChangeConcurrency", `return(true)`), IsNil)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, err = putStore(c, s.grpcPDClient, s.svr.clusterID, store)
+		c.Assert(err, IsNil)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	s.svr.SetClusterVersion("1.0.0")
+	wg.Wait()
+	v, err := semver.NewVersion("1.0.0")
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.GetClusterVersion(), Equals, *v)
+}
+
 func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	var err error
 	_, s.svr, _, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
@@ -508,7 +525,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	s.svr.cluster.Unlock()
 	var stores []*metapb.Store
 	for _, addr := range storeAddrs {
-		store := s.newStore(c, 0, addr)
+		store := s.newStore(c, 0, addr, "2.1.0")
 		stores = append(stores, store)
 		_, err := putStore(c, s.grpcPDClient, s.svr.clusterID, store)
 		c.Assert(err, IsNil)
@@ -518,7 +535,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	// register store and bind stream
 	for i, store := range stores {
 		req := &pdpb.StoreHeartbeatRequest{
-			Header: newRequestHeader(s.svr.clusterID),
+			Header: testutil.NewRequestHeader(s.svr.clusterID),
 			Stats: &pdpb.StoreStats{
 				StoreId:   store.GetId(),
 				Capacity:  1000 * (1 << 20),
@@ -531,7 +548,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		c.Assert(err, IsNil)
 		peer := &metapb.Peer{Id: s.allocID(c), StoreId: store.GetId()}
 		regionReq := &pdpb.RegionHeartbeatRequest{
-			Header: newRequestHeader(s.svr.clusterID),
+			Header: testutil.NewRequestHeader(s.svr.clusterID),
 			Region: &metapb.Region{
 				Id:    s.allocID(c),
 				Peers: []*metapb.Peer{peer},
@@ -616,7 +633,7 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	_, s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
-	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
+	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 	defer cleanup()
 	clusterID := s.svr.clusterID
 
