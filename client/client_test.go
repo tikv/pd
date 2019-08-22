@@ -279,7 +279,7 @@ func (s *testClientSuite) TestScanRegions(c *C) {
 
 	// Wait for region heartbeats.
 	testutil.WaitUntil(c, func(c *C) bool {
-		scanRegions, _, err := s.client.ScanRegions(context.Background(), []byte{0}, 10)
+		scanRegions, _, err := s.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
 		return err == nil && len(scanRegions) == 10
 	})
 
