@@ -451,18 +451,25 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
 		}
 		log.Info("src reg stores", zap.Reflect("ids", srcRegion.GetStoreIds()))
-		filters := []filter.Filter{
-			filter.StoreStateFilter{MoveRegion: true},
-			filter.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-		}
-		fff := filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore)
+		filters := []filter.Filter{}
+		fff0 := filter.StoreStateFilter{MoveRegion: true}
+		fff1 := filter.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds())
+		fff2 := filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore)
 		candidateStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
 			if filter.Target(cluster, store, filters) {
 				continue
 			}
-			if fff.Target(cluster, store) {
-				log.Info("filtered by ffff")
+			if fff0.Target(cluster, store) {
+				log.Info("filtered by ffff0")
+				continue
+			}
+			if fff1.Target(cluster, store) {
+				log.Info("filtered by ffff1")
+				continue
+			}
+			if fff2.Target(cluster, store) {
+				log.Info("filtered by ffff2")
 				continue
 			}
 			candidateStoreIDs = append(candidateStoreIDs, store.GetID())
