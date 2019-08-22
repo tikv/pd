@@ -117,7 +117,7 @@ func (s *RegionStats) Observe(r *core.RegionInfo) {
 // their statistics.
 func GetRegionStats(r *core.RegionsInfo, startKey, endKey []byte) *RegionStats {
 	stats := newRegionStats()
-	regions := r.ScanRangeWithEndKey(startKey, endKey)
+	regions := r.ScanRange(startKey, endKey, 0 /* no limit */)
 	for _, region := range regions {
 		stats.Observe(region)
 	}

@@ -291,10 +291,10 @@ func (c *clusterInfo) getStoresKeysReadStat() map[uint64]uint64 {
 }
 
 // ScanRegions scans region with start key, until number greater than limit.
-func (c *clusterInfo) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
+func (c *clusterInfo) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.core.Regions.ScanRange(startKey, limit)
+	return c.core.Regions.ScanRange(startKey, endKey, limit)
 }
 
 // GetAdjacentRegions returns region's info that is adjacent with specific region

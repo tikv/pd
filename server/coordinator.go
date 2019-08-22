@@ -104,7 +104,7 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
-		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
+		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// Resets the scan key.
 			key = nil

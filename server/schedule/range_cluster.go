@@ -14,8 +14,6 @@
 package schedule
 
 import (
-	"bytes"
-
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
@@ -34,26 +32,8 @@ const scanLimit = 128
 // The cluster can only know the regions within [startKey, endKey].
 func GenRangeCluster(cluster Cluster, startKey, endKey []byte) *RangeCluster {
 	regions := core.NewRegionsInfo()
-	scanKey := startKey
-	loopEnd := false
-	for !loopEnd {
-		collect := cluster.ScanRegions(scanKey, scanLimit)
-		if len(collect) == 0 {
-			break
-		}
-		for _, r := range collect {
-			if bytes.Compare(r.GetStartKey(), endKey) < 0 {
-				regions.SetRegion(r)
-			} else {
-				loopEnd = true
-				break
-			}
-			if string(r.GetEndKey()) == "" {
-				loopEnd = true
-				break
-			}
-			scanKey = r.GetEndKey()
-		}
+	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
+		regions.AddRegion(r)
 	}
 	return &RangeCluster{
 		Cluster: cluster,

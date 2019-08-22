@@ -279,11 +279,12 @@ func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *core.RegionInfo {
 	return c.cachedCluster.searchRegion(regionKey)
 }
 
-// ScanRegionsByKey scans region with start key, until number greater than limit.
-func (c *RaftCluster) ScanRegionsByKey(startKey []byte, limit int) []*core.RegionInfo {
+// ScanRegions scans region with start key, until the region contains endKey, or
+// total number greater than limit.
+func (c *RaftCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
 	c.RLock()
 	defer c.RUnlock()
-	return c.cachedCluster.ScanRegions(startKey, limit)
+	return c.cachedCluster.ScanRegions(startKey, endKey, limit)
 }
 
 // GetRegionByID gets region and leader peer by regionID from cluster.

@@ -147,7 +147,7 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
-func (h *regionsHandler) ScanRegionsByKey(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
 		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
@@ -168,7 +168,7 @@ func (h *regionsHandler) ScanRegionsByKey(w http.ResponseWriter, r *http.Request
 	if limit > maxRegionLimit {
 		limit = maxRegionLimit
 	}
-	regions := cluster.ScanRegionsByKey([]byte(startKey), limit)
+	regions := cluster.ScanRegions([]byte(startKey), nil, limit)
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }

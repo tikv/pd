@@ -55,8 +55,8 @@ func (mc *Cluster) allocID() (uint64, error) {
 }
 
 // ScanRegions scans region with start key, until number greater than limit.
-func (mc *Cluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
-	return mc.Regions.ScanRange(startKey, limit)
+func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
+	return mc.Regions.ScanRange(startKey, endKey, limit)
 }
 
 // LoadRegion puts region info without leader

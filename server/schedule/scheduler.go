@@ -35,7 +35,7 @@ type RegionSetInformer interface {
 	GetStoreRegionCount(storeID uint64) int
 	GetRegion(id uint64) *core.RegionInfo
 	GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo)
-	ScanRegions(startKey []byte, limit int) []*core.RegionInfo
+	ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo
 }
 
 // Cluster provides an overview of a cluster's regions distribution.

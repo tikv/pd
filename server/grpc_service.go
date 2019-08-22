@@ -457,7 +457,7 @@ func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsReque
 	if cluster == nil {
 		return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	regions := cluster.ScanRegionsByKey(request.GetStartKey(), int(request.GetLimit()))
+	regions := cluster.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
 	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
 	for _, r := range regions {
 		leader := r.GetLeader()
