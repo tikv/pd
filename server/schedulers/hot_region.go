@@ -314,6 +314,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 			// balance by peer
 			log.Info("balance hot write ---------------------------------------------")
 			srcRegion, srcPeer, destPeer, influence := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
+			log.Info("balance hot write =============================================")
 			if srcRegion != nil {
 				op, err := operator.CreateMovePeerOperator("move-hot-write-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 				if err != nil {
