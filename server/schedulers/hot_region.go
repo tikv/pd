@@ -170,7 +170,7 @@ func isFinish(op *operator.Operator) bool {
 }
 
 func isStarted(op *operator.Operator) bool {
-	return op.GetStartTime().IsZero()
+	return !op.GetStartTime().IsZero()
 }
 
 type balanceHotRegionsScheduler struct {
@@ -271,12 +271,12 @@ func (h *balanceHotRegionsScheduler) observePendingOps() {
 			infl.finished()
 			continue
 		}
-		if !isStarted(op) {
+		if isStarted(op) {
+			infl.started()
+		} else {
 			infl.unstarted()
 			unstarted_cnt++
 			unstarted_sum += op.ElapsedTime()
-		} else {
-			infl.started()
 		}
 	}
 	pendingInfluenceGauge.WithLabelValues("unstarted_cnt", "--").Set(float64(unstarted_cnt))
@@ -291,10 +291,10 @@ func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
 			delete(h.pendingOps, op)
 			continue
 		}
-		if !isStarted(op) {
-			infl.unstarted()
-		} else {
+		if isStarted(op) {
 			infl.started()
+		} else {
+			infl.unstarted()
 		}
 		h.influence.Add(infl, 0.7)
 	}
