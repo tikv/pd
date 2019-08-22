@@ -29,7 +29,7 @@ require (
 	github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/failpoint v0.0.0-20190512135322-30cc7431d99c
-	github.com/pingcap/kvproto v0.0.0-20190516013202-4cf58ad90b6c
+	github.com/pingcap/kvproto v0.0.0-20190822090350-11ea838aedf7
 	github.com/pingcap/log v0.0.0-20190715063458-479153f07ebd
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v0.8.0
@@ -47,5 +47,3 @@ require (
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
-
-replace github.com/pingcap/kvproto => github.com/disksing/kvproto v0.0.0-20190822071505-1c5b11a4e77a
