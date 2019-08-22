@@ -700,8 +700,8 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 	resp, err := c.leaderClient().ScanRegions(ctx, &pdpb.ScanRegionsRequest{
 		Header:   c.requestHeader(),
 		StartKey: key,
-		Limit:    int32(limit),
 		EndKey:   endKey,
+		Limit:    int32(limit),
 	})
 	cancel()
 	if err != nil {
