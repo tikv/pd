@@ -80,8 +80,8 @@ type opInfluence struct {
 	bytesWrite  map[uint64]float64
 }
 
-func newOpInfluence(typ string, from, to uint64) opInfluence {
-	return opInfluence{
+func newOpInfluence(typ string, from, to uint64) *opInfluence {
+	return &opInfluence{
 		typ:        typ,
 		status:     "new",
 		from:       from,
@@ -162,8 +162,8 @@ type balanceHotRegionsScheduler struct {
 	// store id -> hot regions statistics as the role of leader
 	stats      *storeStatistics
 	r          *rand.Rand
-	pendingOps map[*operator.Operator]opInfluence
-	influence  opInfluence
+	pendingOps map[*operator.Operator]*opInfluence
+	influence  *opInfluence
 
 	storesScore *ScorePairSlice
 }
@@ -177,7 +177,7 @@ func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *b
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
-		pendingOps:    map[*operator.Operator]opInfluence{},
+		pendingOps:    map[*operator.Operator]*opInfluence{},
 		influence:     newOpInfluence("hotspot-summary", 0, 0),
 		storesScore:   NewScorePairSlice(),
 	}
@@ -192,7 +192,7 @@ func newBalanceHotReadRegionsScheduler(opController *schedule.OperatorController
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
-		pendingOps:    map[*operator.Operator]opInfluence{},
+		pendingOps:    map[*operator.Operator]*opInfluence{},
 		influence:     newOpInfluence("hotspot-read-summary", 0, 0),
 		storesScore:   NewScorePairSlice(),
 	}
@@ -207,7 +207,7 @@ func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorControlle
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
-		pendingOps:    map[*operator.Operator]opInfluence{},
+		pendingOps:    map[*operator.Operator]*opInfluence{},
 		influence:     newOpInfluence("hotspot-write-summary", 0, 0),
 		storesScore:   NewScorePairSlice(),
 	}
@@ -269,7 +269,7 @@ func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
 			delete(h.pendingOps, op)
 			continue
 		}
-		h.influence.Add(&infl, 0.7)
+		h.influence.Add(infl, 0.7)
 	}
 	for store, value := range h.influence.bytesRead {
 		pendingInfluenceGauge.WithLabelValues("bytes_read", storeStr(store)).Set(value)
@@ -401,7 +401,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
-func calcScore(cluster schedule.Cluster, pendingInf opInfluence, typ BalanceType, kind core.ResourceKind) statistics.StoreHotRegionsStat {
+func calcScore(cluster schedule.Cluster, pendingInf *opInfluence, typ BalanceType, kind core.ResourceKind) statistics.StoreHotRegionsStat {
 	var storeItems map[uint64][]*statistics.HotSpotPeerStat
 	switch typ {
 	case hotWriteRegionBalance:
