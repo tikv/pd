@@ -18,6 +18,7 @@ import (
 	"math"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -74,17 +75,32 @@ func newStoreStaticstics() *storeStatistics {
 }
 
 const (
-	NEW       = "new"
-	UNSTARTED = "unstarted"
-	STARTED   = "started"
-	FINISHED  = "finished"
+	NEW = iota
+	UNSTARTED
+	STARTED
+	FINISHED
 )
 
+func statusStr(status uint32) string {
+	switch status {
+	case NEW:
+		return "new"
+	case UNSTARTED:
+		return "unstarted"
+	case STARTED:
+		return "started"
+	case FINISHED:
+		return "finished"
+	}
+	return ""
+}
+
 type opInfluence struct {
-	typ, status string
-	from, to    uint64
-	bytesRead   map[uint64]float64
-	bytesWrite  map[uint64]float64
+	typ        string
+	status     uint32
+	from, to   uint64
+	bytesRead  map[uint64]float64
+	bytesWrite map[uint64]float64
 }
 
 func newOpInfluence(typ string, from, to uint64) *opInfluence {
@@ -98,36 +114,34 @@ func newOpInfluence(typ string, from, to uint64) *opInfluence {
 	}
 }
 
-func (oi *opInfluence) incMetric() {
-	hotspotPendingOpGauge.WithLabelValues(oi.typ, oi.status, u64Str(oi.from), u64Str(oi.to)).Inc()
+func (oi *opInfluence) incMetric(status uint32) {
+	hotspotPendingOpGauge.WithLabelValues(oi.typ, statusStr(status), u64Str(oi.from), u64Str(oi.to)).Inc()
 }
 
-func (oi *opInfluence) decMetric() {
-	hotspotPendingOpGauge.WithLabelValues(oi.typ, oi.status, u64Str(oi.from), u64Str(oi.to)).Dec()
+func (oi *opInfluence) decMetric(status uint32) {
+	hotspotPendingOpGauge.WithLabelValues(oi.typ, statusStr(status), u64Str(oi.from), u64Str(oi.to)).Dec()
 }
 
 func (oi *opInfluence) unstarted() {
-	if oi.status == NEW {
-		oi.status = UNSTARTED
-		oi.incMetric()
+	if atomic.CompareAndSwapUint32(&oi.status, NEW, UNSTARTED) {
+		oi.incMetric(UNSTARTED)
 	}
 }
 
 func (oi *opInfluence) started() {
-	if oi.status == NEW {
-		oi.status = STARTED
-		oi.incMetric()
-	} else if oi.status == UNSTARTED {
-		oi.decMetric()
-		oi.status = STARTED
-		oi.incMetric()
+	if atomic.CompareAndSwapUint32(&oi.status, NEW, STARTED) {
+		oi.incMetric(STARTED)
+	} else if atomic.CompareAndSwapUint32(&oi.status, UNSTARTED, STARTED) {
+		oi.decMetric(UNSTARTED)
+		oi.incMetric(STARTED)
 	}
 }
 
 func (oi *opInfluence) finished() {
-	if oi.status != NEW && oi.status != FINISHED {
-		oi.decMetric()
-		oi.status = FINISHED
+	if atomic.CompareAndSwapUint32(&oi.status, UNSTARTED, FINISHED) {
+		oi.decMetric(UNSTARTED)
+	} else if atomic.CompareAndSwapUint32(&oi.status, STARTED, FINISHED) {
+		oi.decMetric(STARTED)
 	}
 }
 
@@ -273,8 +287,14 @@ func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
 	h.influence.multWeight(0.1)
 	for op, infl := range h.pendingOps {
 		if isFinish(op) {
+			infl.finished()
 			delete(h.pendingOps, op)
 			continue
+		}
+		if !isStarted(op) {
+			infl.unstarted()
+		} else {
+			infl.started()
 		}
 		h.influence.Add(infl, 0.7)
 	}
