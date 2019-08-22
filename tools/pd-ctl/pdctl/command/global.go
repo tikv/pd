@@ -139,7 +139,7 @@ func tryURLs(cmd *cobra.Command, f DoFunc) {
 		var u *url.URL
 		u, err = url.Parse(endpoint)
 		if err != nil {
-			cmd.Println("address format is wrong, should like 'http://127.0.0.1:2379' or '127.0.0.1:2379'", err)
+			cmd.Println("address format is wrong, should like 'http://127.0.0.1:2379' or '127.0.0.1:2379'")
 			os.Exit(1)
 		}
 		// tolerate some schemes that will be used by users, the TiKV SDK
