@@ -557,19 +557,10 @@ func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *core.RegionInfo {
 	return c.core.SearchRegion(regionKey)
 }
 
-// ScanRegionsByKey scans region with start key, until number greater than limit.
-func (c *RaftCluster) ScanRegionsByKey(startKey []byte, limit int) []*core.RegionInfo {
-	return c.core.ScanRange(startKey, limit)
-}
-
-// ScanRegions scans region with start key, until number greater than limit.
-func (c *RaftCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
-	return c.core.ScanRange(startKey, limit)
-}
-
-// ScanRangeWithEndKey scans regions intersecting [start key, end key).
-func (c *RaftCluster) ScanRangeWithEndKey(startKey, endKey []byte) []*core.RegionInfo {
-	return c.core.ScanRangeWithEndKey(startKey, endKey)
+// ScanRegions scans region with start key, until the region contains endKey, or
+// total number greater than limit.
+func (c *RaftCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
+	return c.core.ScanRange(startKey, endKey, limit)
 }
 
 // GetRegionByID gets region and leader peer by regionID from cluster.
@@ -660,7 +651,7 @@ func (c *RaftCluster) GetAverageRegionSize() int64 {
 func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
 	c.RLock()
 	defer c.RUnlock()
-	return statistics.GetRegionStats(c.core.ScanRangeWithEndKey, startKey, endKey)
+	return statistics.GetRegionStats(c.core.ScanRange(startKey, endKey, -1))
 }
 
 // GetStoresStats returns stores' statistics from cluster.
