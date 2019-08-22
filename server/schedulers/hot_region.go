@@ -273,6 +273,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 		opInf := newOpInfluence()
 		opInf.bytesRead = influence
 		h.pendingOps[op] = opInf
+		hotspotOpCounter.WithLabelValues("hot_read_trans_leader", fmt.Sprintf("%d", srcRegion.GetLeader().GetStoreId()), fmt.Sprintf("%d", newLeader.GetStoreId())).Inc()
 		return []*operator.Operator{op}
 	}
 
@@ -289,6 +290,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 		opInf := newOpInfluence()
 		opInf.bytesRead = influence
 		h.pendingOps[op] = opInf
+		hotspotOpCounter.WithLabelValues("hot_read_move_region", fmt.Sprintf("%d", srcPeer.GetStoreId()), fmt.Sprintf("%d", destPeer.GetStoreId())).Inc()
 		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -308,6 +310,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 				op.SetPriorityLevel(core.HighPriority)
+				hotspotOpCounter.WithLabelValues("hot_write_trans_leader", fmt.Sprintf("%d", srcRegion.GetLeader().GetStoreId()), fmt.Sprintf("%d", newLeader.GetStoreId())).Inc()
 				return []*operator.Operator{op}
 			}
 		default:
@@ -324,6 +327,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 				opInf := newOpInfluence()
 				opInf.bytesWrite = influence
 				h.pendingOps[op] = opInf
+				hotspotOpCounter.WithLabelValues("hot_write_move_peer", fmt.Sprintf("%d", srcPeer.GetStoreId()), fmt.Sprintf("%d", destPeer.GetStoreId())).Inc()
 				return []*operator.Operator{op}
 			}
 		}
