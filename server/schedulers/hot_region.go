@@ -73,6 +73,13 @@ func newStoreStaticstics() *storeStatistics {
 	}
 }
 
+const (
+	NEW       = "new"
+	UNSTARTED = "unstarted"
+	STARTED   = "started"
+	FINISHED  = "finished"
+)
+
 type opInfluence struct {
 	typ, status string
 	from, to    uint64
@@ -83,7 +90,7 @@ type opInfluence struct {
 func newOpInfluence(typ string, from, to uint64) *opInfluence {
 	return &opInfluence{
 		typ:        typ,
-		status:     "new",
+		status:     NEW,
 		from:       from,
 		to:         to,
 		bytesRead:  map[uint64]float64{},
@@ -100,27 +107,27 @@ func (oi *opInfluence) decMetric() {
 }
 
 func (oi *opInfluence) unstarted() {
-	if oi.status == "new" {
-		oi.status = "unstarted"
+	if oi.status == NEW {
+		oi.status = UNSTARTED
 		oi.incMetric()
 	}
 }
 
 func (oi *opInfluence) started() {
-	if oi.status == "new" {
-		oi.status = "started"
+	if oi.status == NEW {
+		oi.status = STARTED
 		oi.incMetric()
-	} else if oi.status == "unstarted" {
+	} else if oi.status == UNSTARTED {
 		oi.decMetric()
-		oi.status = "started"
+		oi.status = STARTED
 		oi.incMetric()
 	}
 }
 
 func (oi *opInfluence) finished() {
-	if oi.status != "new" && oi.status != "finish" {
+	if oi.status != NEW && oi.status != FINISHED {
 		oi.decMetric()
-		oi.status = "finished"
+		oi.status = FINISHED
 	}
 }
 
