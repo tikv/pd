@@ -312,9 +312,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 			}
 		default:
 			// balance by peer
-			log.Info("balance hot write ---------------------------------------------")
 			srcRegion, srcPeer, destPeer, influence := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
-			log.Info("balance hot write =============================================")
 			if srcRegion != nil {
 				op, err := operator.CreateMovePeerOperator("move-hot-write-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 				if err != nil {
@@ -409,13 +407,11 @@ func calcScore(cluster schedule.Cluster, pendingInf opInfluence, typ BalanceType
 // balanceByPeer balances the peer distribution of hot regions.
 func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, storesStat statistics.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer, map[uint64]float64) {
 	if !h.allowBalanceRegion(cluster) {
-		log.Info("hotspot scheduler balance by peer: not allowed balance region ************************************")
 		return nil, nil, nil, nil
 	}
 
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
-		log.Info("hotspot scheduler balance by peer: source store not found *************************************", zap.Reflect("stores-stat", storesStat))
 		return nil, nil, nil, nil
 	}
 
@@ -429,20 +425,17 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 		srcRegion := cluster.GetRegion(rs.RegionID)
 		if srcRegion == nil {
 			schedulerCounter.WithLabelValues(h.GetName(), "no_region").Inc()
-			log.Info("no_region ###########################")
 			continue
 		}
 
 		if isRegionUnhealthy(srcRegion) {
 			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy_replica").Inc()
-			log.Info("unhealthy replica ###########################")
 			continue
 		}
 
 		if len(srcRegion.GetPeers()) != cluster.GetMaxReplicas() {
 			log.Debug("region has abnormal replica count", zap.String("scheduler", h.GetName()), zap.Uint64("region-id", srcRegion.GetID()))
 			schedulerCounter.WithLabelValues(h.GetName(), "abnormal_replica").Inc()
-			log.Info("abnormal replica ###########################")
 			continue
 		}
 
@@ -450,26 +443,14 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 		if srcStore == nil {
 			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
 		}
-		log.Info("src reg stores", zap.Reflect("ids", srcRegion.GetStoreIds()))
-		filters := []filter.Filter{}
-		fff0 := filter.StoreStateFilter{MoveRegion: true}
-		fff1 := filter.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds())
-		fff2 := filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore)
+		filters := []filter.Filter{
+			filter.StoreStateFilter{MoveRegion: true},
+			filter.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
+		}
 		candidateStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
 			if filter.Target(cluster, store, filters) {
-				continue
-			}
-			if fff0.Target(cluster, store) {
-				log.Info("filtered by ffff0")
-				continue
-			}
-			if fff1.Target(cluster, store) {
-				log.Info("filtered by ffff1")
-				continue
-			}
-			if fff2.Target(cluster, store) {
-				log.Info("filtered by ffff2")
 				continue
 			}
 			candidateStoreIDs = append(candidateStoreIDs, store.GetID())
@@ -481,7 +462,6 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 
 			srcPeer := srcRegion.GetStorePeer(srcStoreID)
 			if srcPeer == nil {
-				log.Info("hotspot scheduler balance by peer: source peer not found *************************************", zap.Uint64("region id", srcRegion.GetID()), zap.Uint64("store id", srcStoreID))
 				return nil, nil, nil, nil
 			}
 
@@ -490,7 +470,6 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			destPeer, err := cluster.AllocPeer(destStoreID)
 			if err != nil {
 				log.Error("failed to allocate peer", zap.Error(err))
-				log.Info("failed to allocate peer *********************************", zap.Error(err))
 				return nil, nil, nil, nil
 			}
 
@@ -499,13 +478,10 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 				destPeer.GetStoreId(): float64(rs.GetFlowBytes()),
 			}
 
-			log.Info("hotspot scheduler balance by peer: success ***********************************")
 			return srcRegion, srcPeer, destPeer, influence
 		}
-		log.Info("no dest store ###########################")
 	}
 
-	log.Info("hotspot scheduler balance by peer: no available hot region *************************************")
 	return nil, nil, nil, nil
 }
 
@@ -590,30 +566,23 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes uint64, srcStoreID uint64, storesStat statistics.StoreHotRegionsStat) (destStoreID uint64) {
 	sr := storesStat[srcStoreID]
 	srcFlowBytes := sr.StoreFlowBytes
-	log.Info("select dest store", zap.Uint64s("can ids", candidateStoreIDs), zap.Uint64("reg flow", regionFlowBytes), zap.Uint64("src store", srcStoreID), zap.Uint64("src store flow", srcFlowBytes))
 
 	var (
 		minFlowBytes uint64 = uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) - regionFlowBytes
 		minCount            = int(math.MaxInt32)
 	)
-	log.Info("init", zap.Uint64("min flow", minFlowBytes), zap.Int("min cnt", minCount))
 	for _, storeID := range candidateStoreIDs {
-		log.Info("try store", zap.Uint64("store", storeID))
 		if s, ok := storesStat[storeID]; ok {
-			log.Info("store info", zap.Uint64("store flow", s.StoreFlowBytes), zap.Int("store len", s.RegionsStat.Len()))
 			if minFlowBytes > s.StoreFlowBytes || (minFlowBytes == s.StoreFlowBytes && s.RegionsStat.Len() < minCount) {
-				log.Info("update", zap.Uint64("min flow", minFlowBytes), zap.Int("min cnt", minCount))
 				destStoreID = storeID
 				minFlowBytes = s.StoreFlowBytes
 				minCount = s.RegionsStat.Len()
 			}
 		} else {
 			destStoreID = storeID
-			log.Info("find empty store, return")
 			return
 		}
 	}
-	log.Info("return")
 	return
 }
 
