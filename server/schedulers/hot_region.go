@@ -222,6 +222,7 @@ func (h *balanceHotRegionsScheduler) GetType() string {
 }
 
 func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+	h.observePendingOps()
 	return h.allowBalanceLeader(cluster) || h.allowBalanceRegion(cluster)
 }
 
