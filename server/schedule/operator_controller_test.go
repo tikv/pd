@@ -209,7 +209,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	c.Assert(op.ConfVerChanged(), Equals, 0)
 	c.Assert(len(stream.MsgCh()), Equals, 2)
 
-	// report the result of removing perr
+	// report the result of removing peer
 	region = cluster.MockRegionInfo(1, 2, []uint64{2},
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
