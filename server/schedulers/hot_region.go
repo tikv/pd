@@ -578,23 +578,30 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes uint64, srcStoreID uint64, storesStat statistics.StoreHotRegionsStat) (destStoreID uint64) {
 	sr := storesStat[srcStoreID]
 	srcFlowBytes := sr.StoreFlowBytes
+	log.Info("select dest store", zap.Uint64s("can ids", candidateStoreIDs), zap.Uint64("reg flow", regionFlowBytes), zap.Uint64("src store", srcStoreID), zap.Uint64("src store flow", srcFlowBytes))
 
 	var (
 		minFlowBytes uint64 = uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) - regionFlowBytes
 		minCount            = int(math.MaxInt32)
 	)
+	log.Info("init", zap.Uint64("min flow", minFlowBytes), zap.Int("min cnt", minCount))
 	for _, storeID := range candidateStoreIDs {
+		log.Info("try store", zap.Uint64("store", storeID))
 		if s, ok := storesStat[storeID]; ok {
+			log.Info("store info", zap.Uint64("store flow", s.StoreFlowBytes), zap.Int("store len", s.RegionsStat.Len()))
 			if minFlowBytes > s.StoreFlowBytes || (minFlowBytes == s.StoreFlowBytes && s.RegionsStat.Len() < minCount) {
+				log.Info("update", zap.Uint64("min flow", minFlowBytes), zap.Int("min cnt", minCount))
 				destStoreID = storeID
 				minFlowBytes = s.StoreFlowBytes
 				minCount = s.RegionsStat.Len()
 			}
 		} else {
 			destStoreID = storeID
+			log.Info("find empty store, return")
 			return
 		}
 	}
+	log.Info("return")
 	return
 }
 
