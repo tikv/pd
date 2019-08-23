@@ -42,6 +42,8 @@ type Client interface {
 	GetTS(ctx context.Context) (int64, int64, error)
 	// GetTSAsync gets a timestamp from PD, without block the caller.
 	GetTSAsync(ctx context.Context) TSFuture
+	// GetTSAsync gets a timestamp from PD, without block the caller and provided a alloc
+	GetTSAsyncWithAlloc(ctx context.Context, alloc TsoReqAlloc) TSFuture
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -91,12 +93,13 @@ func WithExcludeTombstone() GetStoreOption {
 	return func(op *GetStoreOp) { op.excludeTombstone = true }
 }
 
-type tsoRequest struct {
+type TsoRequest struct {
 	start    time.Time
 	ctx      context.Context
 	done     chan error
 	physical int64
 	logical  int64
+	alloc    TsoReqAlloc
 }
 
 const (
@@ -118,7 +121,7 @@ var (
 type client struct {
 	urls        []string
 	clusterID   uint64
-	tsoRequests chan *tsoRequest
+	tsoRequests chan *TsoRequest
 
 	connMu struct {
 		sync.RWMutex
@@ -149,7 +152,7 @@ func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{
 		urls:          addrsToUrls(pdAddrs),
-		tsoRequests:   make(chan *tsoRequest, maxMergeTSORequests),
+		tsoRequests:   make(chan *TsoRequest, maxMergeTSORequests),
 		tsDeadlineCh:  make(chan deadline, 1),
 		checkLeaderCh: make(chan struct{}, 1),
 		ctx:           ctx,
@@ -378,7 +381,7 @@ func (c *client) tsLoop() {
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
 	defer loopCancel()
 
-	var requests []*tsoRequest
+	var requests []*TsoRequest
 	var opts []opentracing.StartSpanOption
 	var stream pdpb.PD_TsoClient
 	var cancel context.CancelFunc
@@ -453,7 +456,7 @@ func (c *client) tsLoop() {
 	}
 }
 
-func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
+func extractSpanReference(requests []*TsoRequest, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
 	for _, req := range requests {
 		if span := opentracing.SpanFromContext(req.ctx); span != nil {
 			opts = append(opts, opentracing.ChildOf(span.Context()))
@@ -462,7 +465,7 @@ func extractSpanReference(requests []*tsoRequest, opts []opentracing.StartSpanOp
 	return opts
 }
 
-func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoRequest, opts []opentracing.StartSpanOption) error {
+func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*TsoRequest, opts []opentracing.StartSpanOption) error {
 	if len(opts) > 0 {
 		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
 		defer span.Finish()
@@ -499,7 +502,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 	return nil
 }
 
-func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, err error) {
+func (c *client) finishTSORequest(requests []*TsoRequest, physical, firstLogical int64, err error) {
 	for i := 0; i < len(requests); i++ {
 		if span := opentracing.SpanFromContext(requests[i].ctx); span != nil {
 			span.Finish()
@@ -563,24 +566,54 @@ func (c *client) GetURLs() []string {
 	return c.urls
 }
 
+// TsoReqAlloc defines how client create and reuse tsoRequest.
+type TsoReqAlloc interface {
+	// Get gets a request from alloc.
+	Get() *TsoRequest
+	// Put put a request back to alloc.
+	Put(req *TsoRequest)
+}
+
+// NewReqAlloc
+func NewReqAlloc() *TsoRequest {
+	return &TsoRequest{
+		done: make(chan error, 1),
+	}
+}
+
 var tsoReqPool = sync.Pool{
 	New: func() interface{} {
-		return &tsoRequest{
-			done: make(chan error, 1),
-		}
+		return NewReqAlloc()
 	},
 }
 
+var _ TsoReqAlloc = syncPoolTsoReqAlloc{}
+
+type syncPoolTsoReqAlloc struct{}
+
+func (alloc syncPoolTsoReqAlloc) Get() *TsoRequest {
+	return tsoReqPool.Get().(*TsoRequest)
+}
+
+func (alloc syncPoolTsoReqAlloc) Put(req *TsoRequest) {
+	tsoReqPool.Put(req)
+}
+
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
+	return c.GetTSAsyncWithAlloc(ctx, syncPoolTsoReqAlloc{})
+}
+
+func (c *client) GetTSAsyncWithAlloc(ctx context.Context, alloc TsoReqAlloc) TSFuture {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("GetTSAsync", opentracing.ChildOf(span.Context()))
 		ctx = opentracing.ContextWithSpan(ctx, span)
 	}
-	req := tsoReqPool.Get().(*tsoRequest)
+	req := alloc.Get()
 	req.start = time.Now()
 	req.ctx = ctx
 	req.physical = 0
 	req.logical = 0
+	req.alloc = alloc
 	c.tsoRequests <- req
 
 	return req
@@ -592,7 +625,7 @@ type TSFuture interface {
 	Wait() (int64, int64, error)
 }
 
-func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
+func (req *TsoRequest) Wait() (physical int64, logical int64, err error) {
 	// If tso command duration is observed very high, the reason could be it
 	// takes too long for Wait() be called.
 	start := time.Now()
@@ -600,7 +633,9 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 	select {
 	case err = <-req.done:
 		err = errors.WithStack(err)
-		defer tsoReqPool.Put(req)
+		if req.alloc != nil {
+			req.alloc.Put(req)
+		}
 		if err != nil {
 			cmdFailDurationTSO.Observe(time.Since(req.start).Seconds())
 			return 0, 0, err
