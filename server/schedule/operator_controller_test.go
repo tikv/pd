@@ -218,9 +218,9 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	c.Assert(len(stream.MsgCh()), Equals, 2)
 
 	// add and disaptch op again, the op should be stale
-	op = operator.NewOperator("test", "test", 1, 
-	    &metapb.RegionEpoch{ConfVer: 0, Version: 0}, 
-	    operator.OpRegion, steps...)
+	op = operator.NewOperator("test", "test", 1,
+		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
+		operator.OpRegion, steps...)
 	c.Assert(controller.AddOperator(op), Equals, true)
 	c.Assert(op.ConfVerChanged(), Equals, 0)
 	c.Assert(len(stream.MsgCh()), Equals, 3)
