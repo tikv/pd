@@ -31,6 +31,7 @@ import (
 const (
 	storeHeartBeatPeriod  = 10
 	regionHeartBeatPeriod = 60
+	compactionDelayPeriod = 600
 )
 
 // Node simulates a TiKV.
@@ -47,6 +48,9 @@ type Node struct {
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
 	ioRate                   int64
+	available                *uint64
+	ToCompactionSize         *uint64
+	sizeMutex                sync.Mutex
 }
 
 // NewNode returns a Node.
@@ -81,6 +85,8 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		ioRate:                   ioRate * cases.MB,
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
+		available:                &s.Available,
+		ToCompactionSize:         &s.ToCompactionSize,
 	}, nil
 }
 
@@ -151,6 +157,9 @@ func (n *Node) stepHeartBeat() {
 	if n.tick%regionHeartBeatPeriod == 0 {
 		n.regionHeartBeat()
 	}
+	if n.tick%compactionDelayPeriod == 0 {
+		n.compaction()
+	}
 }
 
 func (n *Node) storeHeartBeat() {
@@ -165,6 +174,15 @@ func (n *Node) storeHeartBeat() {
 			zap.Error(err))
 	}
 	cancel()
+}
+
+func (n *Node) compaction() {
+	n.sizeMutex.Lock()
+	defer n.sizeMutex.Unlock()
+	n.stats.Available += *n.ToCompactionSize
+	n.stats.UsedSize -= *n.ToCompactionSize
+	*n.ToCompactionSize = 0
+	*n.available = n.stats.Available
 }
 
 func (n *Node) regionHeartBeat() {
@@ -209,7 +227,7 @@ func (n *Node) AddTask(task Task) {
 	n.Lock()
 	defer n.Unlock()
 	if t, ok := n.tasks[task.RegionID()]; ok {
-		simutil.Logger.Info("task has already existed",
+		simutil.Logger.Debug("task has already existed",
 			zap.Uint64("node-id", n.Id),
 			zap.Uint64("region-id", task.RegionID()),
 			zap.String("task", t.Desc()))
@@ -227,11 +245,15 @@ func (n *Node) Stop() {
 }
 
 func (n *Node) incUsedSize(size uint64) {
+	n.sizeMutex.Lock()
+	defer n.sizeMutex.Unlock()
 	n.stats.Available -= size
 	n.stats.UsedSize += size
+	*n.available = n.stats.Available
 }
 
 func (n *Node) decUsedSize(size uint64) {
-	n.stats.Available += size
-	n.stats.UsedSize -= size
+	n.sizeMutex.Lock()
+	defer n.sizeMutex.Unlock()
+	*n.ToCompactionSize += size
 }

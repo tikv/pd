@@ -16,6 +16,7 @@ package simulator
 import (
 	"bytes"
 	"fmt"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -295,7 +296,7 @@ func (a *removePeer) Desc() string {
 }
 
 func (a *removePeer) Step(r *RaftEngine) {
-	if a.finished {
+	if a.finished { //lock?
 		return
 	}
 	region := r.GetRegion(a.regionID)
@@ -335,6 +336,7 @@ func (a *removePeer) Step(r *RaftEngine) {
 			}
 		}
 		a.finished = true
+		simutil.TransferRegionCounter.AddSource(a.regionID, a.peer.StoreId)
 	}
 }
 
@@ -382,6 +384,7 @@ func (a *addLearner) Step(r *RaftEngine) {
 			r.schedulerStats.taskStats.incAddLeaner(region.GetID())
 		}
 		a.finished = true
+		simutil.TransferRegionCounter.AddTarget(a.regionID, a.peer.StoreId)
 	}
 }
 

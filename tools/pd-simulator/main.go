@@ -46,12 +46,15 @@ var (
 	caseName       = flag.String("case", "", "case name")
 	serverLogLevel = flag.String("serverLog", "fatal", "pd server log level.")
 	simLogLevel    = flag.String("simLog", "fatal", "simulator log level.")
+	regionNum      = flag.Int("regionNum", 10000, "regionNum")
+	storeNum       = flag.Int("storeNum", 6, "storeNum")
 )
 
 func main() {
 	flag.Parse()
 
 	simutil.InitLogger(*simLogLevel)
+	simutil.TransferRegionCounter.Init(*storeNum, *regionNum)
 	statistics.Denoising = false
 
 	if *caseName == "" {
@@ -172,6 +175,10 @@ EXIT:
 
 	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, simCase, driver.TickCount(), time.Since(start))
 	driver.PrintStatistics()
+	if simutil.TransferRegionCounter.IsValid {
+		simutil.TransferRegionCounter.Print()
+		simutil.TransferRegionCounter.Result()
+	}
 
 	if simResult != "OK" {
 		os.Exit(1)

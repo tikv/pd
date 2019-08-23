@@ -20,14 +20,17 @@ import (
 
 // Store is used to simulate tikv.
 type Store struct {
-	ID           uint64
-	Status       metapb.StoreState
-	Labels       []*metapb.StoreLabel
-	Capacity     uint64
-	Available    uint64
-	LeaderWeight float32
-	RegionWeight float32
-	Version      string
+	ID               uint64
+	Status           metapb.StoreState
+	Labels           []*metapb.StoreLabel
+	Capacity         uint64
+	Available        uint64
+	LeaderWeight     float32
+	RegionWeight     float32
+	Version          string
+	ToCompactionSize uint64
+	LastAvailable    uint64
+	LastUpdateTime   int64
 }
 
 // Region is used to simulate a region.
@@ -90,6 +93,7 @@ var IDAllocator idAllocator
 // CaseMap is a mapping of the cases to the their corresponding initialize functions.
 var CaseMap = map[string]func() *Case{
 	"balance-leader":       newBalanceLeader,
+	"balance-region-loop":  newBalanceRegionLoop,
 	"add-nodes":            newAddNodes,
 	"add-nodes-dynamic":    newAddNodesDynamic,
 	"delete-nodes":         newDeleteNodes,
