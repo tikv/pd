@@ -101,13 +101,15 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
 			oc.pushHistory(op)
+			op.SetDropTime(time.Now())
 			oc.opRecords.Put(op, pdpb.OperatorStatus_SUCCESS)
 			oc.RemoveOperator(op)
 			oc.PromoteWaitingOperator()
 		} else if timeout {
 			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
-			oc.RemoveTimeoutOperator(op)
+			op.SetDropTime(time.Now())
 			oc.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
+			oc.RemoveTimeoutOperator(op)
 			oc.PromoteWaitingOperator()
 		}
 	}
@@ -179,6 +181,7 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) bool
 	if !oc.checkAddOperator(ops...) {
 		for _, op := range ops {
 			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
+			op.SetDropTime(time.Now())
 			oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 		}
 		oc.Unlock()
@@ -189,6 +192,8 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) bool
 	desc := op.Desc()
 	if oc.wopStatus.ops[desc] >= oc.cluster.GetSchedulerMaxWaitingOperator() {
 		operatorWaitCounter.WithLabelValues(op.Desc(), "exceed_max").Inc()
+		op.SetDropTime(time.Now())
+		oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 		oc.Unlock()
 		return false
 	}
@@ -212,6 +217,7 @@ func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 	if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
 		for _, op := range ops {
 			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
+			op.SetDropTime(time.Now())
 			oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 		}
 		return false
@@ -237,6 +243,7 @@ func (oc *OperatorController) PromoteWaitingOperator() {
 		if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
 			for _, op := range ops {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote_canceled").Inc()
+				op.SetDropTime(time.Now())
 				oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 			}
 			oc.wopStatus.ops[ops[0].Desc()]--
@@ -289,6 +296,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	if old, ok := oc.operators[regionID]; ok {
 		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", old))
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
+		old.SetDropTime(time.Now())
 		oc.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
 		oc.removeOperatorLocked(old)
 	}

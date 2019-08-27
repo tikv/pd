@@ -405,8 +405,10 @@ type Operator struct {
 	createTime  time.Time
 	// startTime is used to record the start time of an operator which is added into running operators.
 	startTime time.Time
-	stepTime  int64
-	level     core.PriorityLevel
+	// dropTime is used to record the time when the operator be dropped.
+	dropTime time.Time
+	stepTime int64
+	level    core.PriorityLevel
 }
 
 // NewOperator creates a new operator.
@@ -493,9 +495,29 @@ func (o *Operator) SetStartTime(t time.Time) {
 	o.startTime = t
 }
 
-// GetStartTime ges the start time for operator.
+// GetStartTime gets the start time for operator.
 func (o *Operator) GetStartTime() time.Time {
 	return o.startTime
+}
+
+// IsStarted returns true if the operator is started.
+func (o *Operator) IsStarted() bool {
+	return !o.startTime.IsZero()
+}
+
+// SetDropTime sets the drop time for operator.
+func (o *Operator) SetDropTime(t time.Time) {
+	o.dropTime = t
+}
+
+// GetDropTime gets drop time of the operator.
+func (o *Operator) GetDropTime() time.Time {
+	return o.dropTime
+}
+
+// IsDropped returns true if the operator has been dropped.
+func (o *Operator) IsDropped() bool {
+	return !o.dropTime.IsZero()
 }
 
 // Len returns the operator's steps count.
