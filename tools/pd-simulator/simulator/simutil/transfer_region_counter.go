@@ -8,6 +8,7 @@ import (
 	"sync"
 )
 
+// TransferRegionCount: Count transfer schedule for judging whether redundant
 type TransferRegionCount struct {
 	StoreNum        int
 	RegionNum       int
@@ -22,8 +23,10 @@ type TransferRegionCount struct {
 	loopResultCount []uint64
 }
 
+// TransferRegionCounter: Instance for TransferRegionCount
 var TransferRegionCounter TransferRegionCount
 
+// Init for TransferRegionCount
 func (c *TransferRegionCount) Init(n, regionNum int) {
 	c.StoreNum = n
 	c.RegionNum = regionNum
@@ -40,26 +43,28 @@ func (c *TransferRegionCount) Init(n, regionNum int) {
 	c.loopResultCount = c.loopResultCount[:0]
 }
 
+// AddTarget is be used to add target of edge in graph mat.
 // Firstly add a new peer and then delete the old peer of the scheduling,
 // So in the statistics, also firstly add the target and then add the source.
-func (c *TransferRegionCount) AddTarget(regionId, targetStoreId uint64) {
+func (c *TransferRegionCount) AddTarget(regionID, targetStoreID uint64) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	c.regionMap[regionId] = targetStoreId
+	c.regionMap[regionID] = targetStoreID
 }
 
-func (c *TransferRegionCount) AddSource(regionId, sourceStoreId uint64) {
+// AddSource is be used to add source of edge in graph mat.
+func (c *TransferRegionCount) AddSource(regionID, sourceStoreID uint64) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	if targetStoreId, ok := c.regionMap[regionId]; ok {
-		c.GraphMat[sourceStoreId][targetStoreId]++
-		delete(c.regionMap, regionId)
+	if targetStoreID, ok := c.regionMap[regionID]; ok {
+		c.GraphMat[sourceStoreID][targetStoreID]++
+		delete(c.regionMap, regionID)
 	} else {
 		Logger.Fatal("Error in map")
 	}
 }
 
-//A simple DFS is used to find all the looped flow in such a directed graph.
+//DFS is used to find all the looped flow in such a directed graph.
 //For each point U in the graph, a DFS is performed, and push the passing point v
 //to the stack. If there is an edge of `v->u`, then the corresponding looped flow
 //is marked and removed. When all the output edges of the point v are traversed,
@@ -100,7 +105,7 @@ func (c *TransferRegionCount) DFS(cur int, curFlow uint64, path []int) {
 	c.visited[cur] = false
 }
 
-//Output Count Result
+//Result will count redundant schedule and necessary schedule
 func (c *TransferRegionCount) Result() {
 	for i := 0; i < c.StoreNum; i++ {
 		c.DFS(i+1, 1<<16, make([]int, 0))
@@ -117,12 +122,14 @@ func (c *TransferRegionCount) Result() {
 	}
 }
 
+// PrintGraph will print current graph mat.
 func (c *TransferRegionCount) PrintGraph() {
 	for _, value := range c.GraphMat {
 		fmt.Println(value)
 	}
 }
 
+// PrintResult will print result to log and csv file.
 func (c *TransferRegionCount) PrintResult() {
 	//Output log
 	fmt.Println("Redundant Loop: ")
@@ -137,16 +144,16 @@ func (c *TransferRegionCount) PrintResult() {
 	//Output csv file
 	fd, _ := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	fdContent := strings.Join([]string{
-		ToString(uint64(c.StoreNum)),
-		ToString(uint64(c.RegionNum)),
-		ToString(c.Redundant),
-		ToString(c.Necessary),
+		toString(uint64(c.StoreNum)),
+		toString(uint64(c.RegionNum)),
+		toString(c.Redundant),
+		toString(c.Necessary),
 	}, ",") + "\n"
 	buf := []byte(fdContent)
 	_, _ = fd.Write(buf)
 	_ = fd.Close()
 }
 
-func ToString(num uint64) string {
+func toString(num uint64) string {
 	return strconv.FormatInt(int64(num), 10)
 }
