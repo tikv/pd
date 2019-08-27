@@ -296,7 +296,7 @@ func (a *removePeer) Desc() string {
 }
 
 func (a *removePeer) Step(r *RaftEngine) {
-	if a.finished { //lock?
+	if a.finished {
 		return
 	}
 	region := r.GetRegion(a.regionID)
