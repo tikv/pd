@@ -87,9 +87,9 @@ func (w *HotSpotCache) RegionStats(kind FlowKind) map[uint64][]*HotPeerStat {
 	var flowMap map[uint64]cache.Cache
 	switch kind {
 	case WriteFlow:
-		flowMap = w.writeFlow.storePeersMap
+		flowMap = w.writeFlow.peersOfStore
 	case ReadFlow:
-		flowMap = w.readFlow.storePeersMap
+		flowMap = w.readFlow.peersOfStore
 	}
 	res := make(map[uint64][]*HotPeerStat)
 	for storeID, elements := range flowMap {
@@ -132,14 +132,14 @@ func (w *HotSpotCache) IsRegionHot(region *core.RegionInfo, hotThreshold int) bo
 
 // CollectMetrics collect the hot cache metrics
 func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
-	for storeID, flowStats := range w.writeFlow.storePeersMap {
+	for storeID, flowStats := range w.writeFlow.peersOfStore {
 		storeTag := fmt.Sprintf("store-%d", storeID)
 		threshold := calculateWriteHotThresholdWithStore(stats, storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "write").Set(float64(flowStats.Len()))
 		hotCacheStatusGauge.WithLabelValues("hotThreshold", storeTag, "write").Set(float64(threshold))
 	}
 
-	for storeID, flowStats := range w.readFlow.storePeersMap {
+	for storeID, flowStats := range w.readFlow.peersOfStore {
 		storeTag := fmt.Sprintf("store-%d", storeID)
 		threshold := calculateReadHotThresholdWithStore(stats, storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", storeTag, "read").Set(float64(flowStats.Len()))
