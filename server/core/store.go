@@ -320,7 +320,7 @@ func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 	return s.GetStoreStats() != nil && s.AvailableRatio() < 1-lowSpaceRatio
 }
 
-// ResourceCount reutrns count of leader/region in the store.
+// ResourceCount returns count of leader/region in the store.
 func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
 	switch kind {
 	case LeaderKind:
@@ -344,7 +344,7 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 	}
 }
 
-// ResourceScore reutrns score of leader/region in the store.
+// ResourceScore returns score of leader/region in the store.
 func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	switch kind {
 	case LeaderKind:
