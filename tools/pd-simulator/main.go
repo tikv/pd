@@ -176,8 +176,10 @@ EXIT:
 	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, simCase, driver.TickCount(), time.Since(start))
 	driver.PrintStatistics()
 	if simutil.TransferRegionCounter.IsValid {
-		simutil.TransferRegionCounter.Print()
+		simutil.TransferRegionCounter.PrintGraph()
 		simutil.TransferRegionCounter.Result()
+		simutil.TransferRegionCounter.PrintGraph()
+		simutil.TransferRegionCounter.PrintResult()
 	}
 
 	if simResult != "OK" {

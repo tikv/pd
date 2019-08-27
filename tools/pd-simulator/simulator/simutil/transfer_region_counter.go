@@ -9,13 +9,15 @@ import (
 )
 
 type TransferRegionCount struct {
-	IsValid         bool
-	regionMap       map[uint64]uint64
-	graphMat        [][]uint64
 	StoreNum        int
 	RegionNum       int
-	mutex           sync.Mutex
+	IsValid         bool
+	Redundant       uint64
+	Necessary       uint64
+	regionMap       map[uint64]uint64
 	visited         []bool
+	GraphMat        [][]uint64
+	mutex           sync.Mutex
 	loopResultPath  [][]int
 	loopResultCount []uint64
 }
@@ -26,12 +28,16 @@ func (c *TransferRegionCount) Init(n, regionNum int) {
 	c.StoreNum = n
 	c.RegionNum = regionNum
 	c.IsValid = true
+	c.Redundant = 0
+	c.Necessary = 0
 	c.regionMap = make(map[uint64]uint64)
 	c.visited = make([]bool, c.StoreNum+1)
 	for i := 0; i < c.StoreNum+1; i++ {
 		tmp := make([]uint64, c.StoreNum+1)
-		c.graphMat = append(c.graphMat, tmp)
+		c.GraphMat = append(c.GraphMat, tmp)
 	}
+	c.loopResultPath = c.loopResultPath[:0]
+	c.loopResultCount = c.loopResultCount[:0]
 }
 
 // Firstly add a new peer and then delete the old peer of the scheduling,
@@ -46,7 +52,7 @@ func (c *TransferRegionCount) AddSource(regionId, sourceStoreId uint64) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if targetStoreId, ok := c.regionMap[regionId]; ok {
-		c.graphMat[sourceStoreId][targetStoreId]++
+		c.GraphMat[sourceStoreId][targetStoreId]++
 		delete(c.regionMap, regionId)
 	} else {
 		Logger.Fatal("Error in map")
@@ -64,7 +70,7 @@ func (c *TransferRegionCount) DFS(cur int, curFlow uint64, path []int) {
 	c.visited[cur] = true
 
 	for target := path[0]; target < c.StoreNum+1; target++ {
-		flow := c.graphMat[cur][target]
+		flow := c.GraphMat[cur][target]
 		if flow == 0 {
 			continue
 		}
@@ -72,7 +78,7 @@ func (c *TransferRegionCount) DFS(cur int, curFlow uint64, path []int) {
 			//get curMinFlow
 			curMinFlow := flow
 			for i := 0; i < len(path)-1; i++ {
-				pathFlow := c.graphMat[path[i]][path[i+1]]
+				pathFlow := c.GraphMat[path[i]][path[i+1]]
 				if curMinFlow > pathFlow {
 					curMinFlow = pathFlow
 				}
@@ -82,16 +88,15 @@ func (c *TransferRegionCount) DFS(cur int, curFlow uint64, path []int) {
 				c.loopResultPath = append(c.loopResultPath, path)
 				c.loopResultCount = append(c.loopResultCount, curMinFlow*uint64(len(path)))
 				for i := 0; i < len(path)-1; i++ {
-					c.graphMat[path[i]][path[i+1]] -= curMinFlow
+					c.GraphMat[path[i]][path[i+1]] -= curMinFlow
 				}
-				c.graphMat[cur][target] -= curMinFlow
+				c.GraphMat[cur][target] -= curMinFlow
 			}
 		} else if !c.visited[target] {
 			c.DFS(target, flow, path)
 		}
 	}
 	//pop stack
-	path = path[0 : len(path)-1]
 	c.visited[cur] = false
 }
 
@@ -101,45 +106,45 @@ func (c *TransferRegionCount) Result() {
 		c.DFS(i+1, 1<<16, make([]int, 0))
 	}
 
-	var redundant uint64
 	for _, value := range c.loopResultCount {
-		redundant += value
+		c.Redundant += value
 	}
 
-	var necessary uint64
-	for _, row := range c.graphMat {
+	for _, row := range c.GraphMat {
 		for _, flow := range row {
-			necessary += flow
+			c.Necessary += flow
 		}
 	}
+}
 
+func (c *TransferRegionCount) PrintGraph() {
+	for _, value := range c.GraphMat {
+		fmt.Println(value)
+	}
+}
+
+func (c *TransferRegionCount) PrintResult() {
 	//Output log
 	fmt.Println("Redundant Loop: ")
 	for index, value := range c.loopResultPath {
 		fmt.Println(index, value, c.loopResultCount[index])
 	}
 	fmt.Println("Necessary: ")
-	c.Print()
-	fmt.Println("Redundant: ", redundant)
-	fmt.Println("Necessary: ", necessary)
+	c.PrintGraph()
+	fmt.Println("Redundant: ", c.Redundant)
+	fmt.Println("Necessary: ", c.Necessary)
 
 	//Output csv file
 	fd, _ := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	fdContent := strings.Join([]string{
 		ToString(uint64(c.StoreNum)),
 		ToString(uint64(c.RegionNum)),
-		ToString(redundant),
-		ToString(necessary),
+		ToString(c.Redundant),
+		ToString(c.Necessary),
 	}, ",") + "\n"
 	buf := []byte(fdContent)
 	_, _ = fd.Write(buf)
 	_ = fd.Close()
-}
-
-func (c *TransferRegionCount) Print() {
-	for _, value := range c.graphMat {
-		fmt.Println(value)
-	}
 }
 
 func ToString(num uint64) string {
