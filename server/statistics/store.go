@@ -20,6 +20,11 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
+const (
+	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
+	StoreHeartBeatReportInterval = 10
+)
+
 // StoresStats is a cache hold hot regions.
 type StoresStats struct {
 	sync.RWMutex

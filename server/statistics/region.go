@@ -17,6 +17,11 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
+const (
+	// RegionHeartBeatReportInterval is the heartbeat report interval of a region.
+	RegionHeartBeatReportInterval = 60
+)
+
 // RegionStats records a list of regions' statistics and distribution status.
 type RegionStats struct {
 	Count            int              `json:"count"`
