@@ -75,21 +75,21 @@ func newStoreStaticstics() *storeStatistics {
 }
 
 const (
-	NEW = iota
-	UNSTARTED
-	STARTED
-	FINISHED
+	created = iota
+	unstarted
+	started
+	finished
 )
 
 func statusStr(status uint32) string {
 	switch status {
-	case NEW:
+	case created:
 		return "new"
-	case UNSTARTED:
+	case unstarted:
 		return "unstarted"
-	case STARTED:
+	case started:
 		return "started"
-	case FINISHED:
+	case finished:
 		return "finished"
 	}
 	return ""
@@ -106,7 +106,7 @@ type opInfluence struct {
 func newOpInfluence(typ string, from, to uint64) *opInfluence {
 	return &opInfluence{
 		typ:        typ,
-		status:     NEW,
+		status:     created,
 		from:       from,
 		to:         to,
 		bytesRead:  map[uint64]float64{},
@@ -123,25 +123,27 @@ func (oi *opInfluence) decMetric(status uint32) {
 }
 
 func (oi *opInfluence) unstarted() {
-	if atomic.CompareAndSwapUint32(&oi.status, NEW, UNSTARTED) {
-		oi.incMetric(UNSTARTED)
+	if atomic.CompareAndSwapUint32(&oi.status, created, unstarted) {
+		oi.incMetric(unstarted)
 	}
 }
 
 func (oi *opInfluence) started() {
-	if atomic.CompareAndSwapUint32(&oi.status, NEW, STARTED) {
-		oi.incMetric(STARTED)
-	} else if atomic.CompareAndSwapUint32(&oi.status, UNSTARTED, STARTED) {
-		oi.decMetric(UNSTARTED)
-		oi.incMetric(STARTED)
+	if atomic.CompareAndSwapUint32(&oi.status, created, started) {
+		oi.incMetric(started)
+	} else if atomic.CompareAndSwapUint32(&oi.status, unstarted, started) {
+		oi.decMetric(unstarted)
+		oi.incMetric(started)
 	}
 }
 
 func (oi *opInfluence) finished() {
-	if atomic.CompareAndSwapUint32(&oi.status, UNSTARTED, FINISHED) {
-		oi.decMetric(UNSTARTED)
-	} else if atomic.CompareAndSwapUint32(&oi.status, STARTED, FINISHED) {
-		oi.decMetric(STARTED)
+	if atomic.CompareAndSwapUint32(&oi.status, created, finished) {
+		return
+	} else if atomic.CompareAndSwapUint32(&oi.status, unstarted, finished) {
+		oi.decMetric(unstarted)
+	} else if atomic.CompareAndSwapUint32(&oi.status, started, finished) {
+		oi.decMetric(started)
 	}
 }
 
@@ -166,11 +168,7 @@ func mapAddWeight(a, b map[uint64]float64, w float64) {
 }
 
 func isFinish(op *operator.Operator) bool {
-	return op.IsFinish() || op.IsTimeout()
-}
-
-func isStarted(op *operator.Operator) bool {
-	return !op.GetStartTime().IsZero()
+	return op.IsDropped() || op.IsFinish() || op.IsTimeout()
 }
 
 type balanceHotRegionsScheduler struct {
@@ -264,23 +262,23 @@ func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*opera
 func (h *balanceHotRegionsScheduler) observePendingOps() {
 	h.RLock()
 	defer h.RUnlock()
-	var unstarted_cnt uint = 0
-	var unstarted_sum time.Duration = 0
+	var unstartedCnt uint = 0
+	var unstartedSum time.Duration = 0
 	for op, infl := range h.pendingOps {
 		if isFinish(op) {
 			infl.finished()
 			continue
 		}
-		if isStarted(op) {
+		if op.IsStarted() {
 			infl.started()
 		} else {
 			infl.unstarted()
-			unstarted_cnt++
-			unstarted_sum += op.ElapsedTime()
+			unstartedCnt++
+			unstartedSum += op.ElapsedTime()
 		}
 	}
-	pendingInfluenceGauge.WithLabelValues("unstarted_cnt", "--").Set(float64(unstarted_cnt))
-	pendingInfluenceGauge.WithLabelValues("unstarted_sum", "--").Set(float64(unstarted_sum) / float64(time.Millisecond))
+	pendingInfluenceGauge.WithLabelValues("unstarted_cnt", "--").Set(float64(unstartedCnt))
+	pendingInfluenceGauge.WithLabelValues("unstarted_sum", "--").Set(float64(unstartedSum) / float64(time.Millisecond))
 }
 
 func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
@@ -291,7 +289,7 @@ func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
 			delete(h.pendingOps, op)
 			continue
 		}
-		if isStarted(op) {
+		if op.IsStarted() {
 			infl.started()
 		} else {
 			infl.unstarted()
