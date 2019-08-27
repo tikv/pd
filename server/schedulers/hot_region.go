@@ -232,6 +232,10 @@ func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorControlle
 	}
 }
 
+func (s *balanceHotRegionsScheduler) GetMinInterval() time.Duration {
+	return 300 * time.Millisecond
+}
+
 func (h *balanceHotRegionsScheduler) GetName() string {
 	return "balance-hot-region-scheduler"
 }
@@ -385,7 +389,7 @@ const balanceHotRetryLimit = 10
 
 func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*operator.Operator {
 	for i := 0; i < balanceHotRetryLimit; i++ {
-		switch h.r.Int() % cluster.GetMaxReplicas() {
+		switch h.r.Intn(cluster.GetMaxReplicas() + balanceHotRetryLimit) {
 		case 0:
 			// balance by leader
 			srcRegion, newLeader, influence := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
@@ -640,7 +644,7 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 
 	for storeID, stat := range stats {
 		count, flowBytes := stat.RegionsStat.Len(), stat.StoreFlowBytes
-		if count < 2 {
+		if count < 1 {
 			continue
 		}
 		if flowBytes > maxFlowBytes || (flowBytes == maxFlowBytes && count > maxCount) {
