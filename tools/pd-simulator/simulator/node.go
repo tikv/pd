@@ -126,6 +126,7 @@ func (n *Node) Tick(wg *sync.WaitGroup) {
 		return
 	}
 	n.stepHeartBeat()
+	n.stepCompaction()
 	n.stepTask()
 	n.tick++
 }
@@ -157,6 +158,9 @@ func (n *Node) stepHeartBeat() {
 	if n.tick%regionHeartBeatPeriod == 0 {
 		n.regionHeartBeat()
 	}
+}
+
+func (n *Node) stepCompaction() {
 	if n.tick%compactionDelayPeriod == 0 {
 		n.compaction()
 	}
