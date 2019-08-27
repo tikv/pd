@@ -131,13 +131,12 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	l.counter.WithLabelValues("high_score", sourceAddress, sourceStoreLabel).Inc()
 	l.counter.WithLabelValues("low_score", targetAddress, targetStoreLabel).Inc()
 
-	opInfluence := l.opController.GetOpInfluence(cluster)
 	for i := 0; i < balanceLeaderRetryLimit; i++ {
-		if op := l.transferLeaderOut(source, cluster, opInfluence); op != nil {
+		if op := l.transferLeaderOut(cluster, source); op != nil {
 			l.counter.WithLabelValues("transfer_out", sourceAddress, sourceStoreLabel).Inc()
 			return op
 		}
-		if op := l.transferLeaderIn(target, cluster, opInfluence); op != nil {
+		if op := l.transferLeaderIn(cluster, target); op != nil {
 			l.counter.WithLabelValues("transfer_in", targetAddress, targetStoreLabel).Inc()
 			return op
 		}
@@ -155,7 +154,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 // transferLeaderOut transfers leader from the source store.
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
-func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, cluster schedule.Cluster, opInfluence operator.OpInfluence) []*operator.Operator {
+func (l *balanceLeaderScheduler) transferLeaderOut(cluster schedule.Cluster, source *core.StoreInfo) []*operator.Operator {
 	sourceID := source.GetID()
 	region := cluster.RandLeaderRegion(sourceID, core.HealthRegion())
 	if region == nil {
@@ -169,13 +168,13 @@ func (l *balanceLeaderScheduler) transferLeaderOut(source *core.StoreInfo, clust
 		schedulerCounter.WithLabelValues(l.GetName(), "no_target_store").Inc()
 		return nil
 	}
-	return l.createOperator(region, source, target, cluster, opInfluence)
+	return l.createOperator(cluster, region, source, target)
 }
 
 // transferLeaderIn transfers leader to the target store.
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
-func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluster schedule.Cluster, opInfluence operator.OpInfluence) []*operator.Operator {
+func (l *balanceLeaderScheduler) transferLeaderIn(cluster schedule.Cluster, target *core.StoreInfo) []*operator.Operator {
 	targetID := target.GetID()
 	region := cluster.RandFollowerRegion(targetID, core.HealthRegion())
 	if region == nil {
@@ -194,14 +193,14 @@ func (l *balanceLeaderScheduler) transferLeaderIn(target *core.StoreInfo, cluste
 		schedulerCounter.WithLabelValues(l.GetName(), "no_leader").Inc()
 		return nil
 	}
-	return l.createOperator(region, source, target, cluster, opInfluence)
+	return l.createOperator(cluster, region, source, target)
 }
 
 // createOperator creates the operator according to the source and target store.
 // If the region is hot or the difference between the two stores is tolerable, then
 // no new operator need to be created, otherwise create an operator that transfers
 // the leader from the source store to the target store for the region.
-func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source, target *core.StoreInfo, cluster schedule.Cluster, opInfluence operator.OpInfluence) []*operator.Operator {
+func (l *balanceLeaderScheduler) createOperator(cluster schedule.Cluster, region *core.RegionInfo, source, target *core.StoreInfo) []*operator.Operator {
 	if cluster.IsRegionHot(region) {
 		log.Debug("region is hot region, ignore it", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "region_hot").Inc()
@@ -210,6 +209,8 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 
 	sourceID := source.GetID()
 	targetID := target.GetID()
+
+	opInfluence := l.opController.GetOpInfluence(cluster)
 	if !shouldBalance(cluster, source, target, region, core.LeaderKind, opInfluence) {
 		log.Debug("skip balance leader",
 			zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),

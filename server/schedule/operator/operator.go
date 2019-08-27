@@ -127,6 +127,7 @@ func (s u64Set) String() string {
 // OpStep describes the basic scheduling steps that can not be subdivided.
 type OpStep interface {
 	fmt.Stringer
+	ExpectConfVerChange() bool
 	IsFinish(region *core.RegionInfo) bool
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
@@ -134,6 +135,12 @@ type OpStep interface {
 // TransferLeader is an OpStep that transfers a region's leader.
 type TransferLeader struct {
 	FromStore, ToStore uint64
+}
+
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (tl TransferLeader) ExpectConfVerChange() bool {
+	return false
 }
 
 func (tl TransferLeader) String() string {
@@ -161,6 +168,11 @@ type AddPeer struct {
 	ToStore, PeerID uint64
 }
 
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (ap AddPeer) ExpectConfVerChange() bool {
+	return true
+}
 func (ap AddPeer) String() string {
 	return fmt.Sprintf("add peer %v on store %v", ap.PeerID, ap.ToStore)
 }
@@ -194,6 +206,12 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 // AddLearner is an OpStep that adds a region learner peer.
 type AddLearner struct {
 	ToStore, PeerID uint64
+}
+
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (al AddLearner) ExpectConfVerChange() bool {
+	return true
 }
 
 func (al AddLearner) String() string {
@@ -231,6 +249,12 @@ type PromoteLearner struct {
 	ToStore, PeerID uint64
 }
 
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (pl PromoteLearner) ExpectConfVerChange() bool {
+	return true
+}
+
 func (pl PromoteLearner) String() string {
 	return fmt.Sprintf("promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
 }
@@ -252,6 +276,12 @@ func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionI
 // RemovePeer is an OpStep that removes a region peer.
 type RemovePeer struct {
 	FromStore uint64
+}
+
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (rp RemovePeer) ExpectConfVerChange() bool {
+	return true
 }
 
 func (rp RemovePeer) String() string {
@@ -282,6 +312,12 @@ type MergeRegion struct {
 	// thus use a IsPassive mark to indicate that
 	// this region doesn't need to send merge request to TiKV.
 	IsPassive bool
+}
+
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (mr MergeRegion) ExpectConfVerChange() bool {
+	return false
 }
 
 func (mr MergeRegion) String() string {
@@ -315,6 +351,12 @@ type SplitRegion struct {
 	Policy           pdpb.CheckPolicy
 }
 
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (sr SplitRegion) ExpectConfVerChange() bool {
+	return false
+}
+
 func (sr SplitRegion) String() string {
 	return fmt.Sprintf("split region with policy %s", sr.Policy.String())
 }
@@ -338,6 +380,12 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 // AddLightPeer is an OpStep that adds a region peer without considering the influence.
 type AddLightPeer struct {
 	ToStore, PeerID uint64
+}
+
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (ap AddLightPeer) ExpectConfVerChange() bool {
+	return true
 }
 
 func (ap AddLightPeer) String() string {
@@ -367,6 +415,12 @@ func (ap AddLightPeer) Influence(opInfluence OpInfluence, region *core.RegionInf
 // AddLightLearner is an OpStep that adds a region learner peer without considering the influence.
 type AddLightLearner struct {
 	ToStore, PeerID uint64
+}
+
+// ExpectConfVerChange returns if the confver of a region should be increased
+// after this step
+func (al AddLightLearner) ExpectConfVerChange() bool {
+	return true
 }
 
 func (al AddLightLearner) String() string {
@@ -525,6 +579,18 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 		}
 	}
 	return nil
+}
+
+// ConfVerChanged returns the number of confver has consumed by steps
+func (o *Operator) ConfVerChanged() int {
+	total := 0
+	current := atomic.LoadInt32(&o.currentStep)
+	for _, step := range o.steps[0:current] {
+		if step.ExpectConfVerChange() {
+			total++
+		}
+	}
+	return total
 }
 
 // SetPriorityLevel sets the priority level for operator.
