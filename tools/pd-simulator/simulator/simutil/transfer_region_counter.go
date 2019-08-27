@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-// TransferRegionCount: Count transfer schedule for judging whether redundant
+// TransferRegionCount is to count transfer schedule for judging whether redundant
 type TransferRegionCount struct {
 	StoreNum        int
 	RegionNum       int
@@ -23,7 +23,7 @@ type TransferRegionCount struct {
 	loopResultCount []uint64
 }
 
-// TransferRegionCounter: Instance for TransferRegionCount
+// TransferRegionCounter is an global instance for TransferRegionCount
 var TransferRegionCounter TransferRegionCount
 
 // Init for TransferRegionCount
