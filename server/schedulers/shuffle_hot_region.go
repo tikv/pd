@@ -100,6 +100,9 @@ func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster schedule.C
 
 func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, storeStats statistics.StoreHotRegionsStat) []*operator.Operator {
 	for _, stats := range storeStats {
+		if stats.RegionsStat.Len() <= 0 {
+			continue
+		}
 		i := s.r.Intn(stats.RegionsStat.Len())
 		r := stats.RegionsStat[i]
 		// select src region

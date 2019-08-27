@@ -388,13 +388,15 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 		switch h.r.Int() % cluster.GetMaxReplicas() {
 		case 0:
 			// balance by leader
-			srcRegion, newLeader, _ := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
+			srcRegion, newLeader, influence := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
 			if srcRegion != nil {
 				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 				op.SetPriorityLevel(core.HighPriority)
 				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
 
 				opInf := newOpInfluence(op.Desc(), srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId())
+				opInf.bytesWrite = influence
+				opInf.multWeight(0.01)
 				h.pendingOps[op] = opInf
 				hotspotOpCounter.WithLabelValues(op.Desc(), u64Str(srcRegion.GetLeader().GetStoreId()), u64Str(newLeader.GetStoreId())).Inc()
 
@@ -475,24 +477,20 @@ func calcScore(cluster schedule.Cluster, pendingInf *opInfluence, typ BalanceTyp
 			storeStat.RegionsStat = append(storeStat.RegionsStat, s)
 		}
 
-		if len(storeStat.RegionsStat) > 0 {
-			var storeFlowBytes float64
-			switch typ {
-			case hotReadRegionBalance:
-				{
-					_, storeFlowBytes = storesStats.GetStoreBytesRate(storeID)
-					storeFlowBytes += pendingInf.bytesRead[storeID]
-				}
-			case hotWriteRegionBalance:
-				{
-					storeFlowBytes, _ = storesStats.GetStoreBytesRate(storeID)
-					storeFlowBytes += pendingInf.bytesWrite[storeID]
-				}
+		var storeFlowBytes float64
+		switch typ {
+		case hotReadRegionBalance:
+			{
+				_, storeFlowBytes = storesStats.GetStoreBytesRate(storeID)
+				storeFlowBytes += pendingInf.bytesRead[storeID]
 			}
-			storeStat.StoreFlowBytes = uint64(storeFlowBytes)
-		} else {
-			delete(stats, storeID)
+		case hotWriteRegionBalance:
+			{
+				storeFlowBytes, _ = storesStats.GetStoreBytesRate(storeID)
+				storeFlowBytes += pendingInf.bytesWrite[storeID]
+			}
 		}
+		storeStat.StoreFlowBytes = uint64(storeFlowBytes)
 	}
 	return stats
 }
