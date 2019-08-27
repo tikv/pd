@@ -63,8 +63,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
 	defer cluster.Destroy()
 
-	ss, err := leaderServer.GetStore(1)
-	c.Assert(err, IsNil)
+	ss := leaderServer.GetStore(1)
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}
 	newStats := proto.Clone(ss.GetStoreStats()).(*pdpb.StoreStats)

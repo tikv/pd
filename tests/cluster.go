@@ -252,10 +252,10 @@ func (s *TestServer) GetStores() []*metapb.Store {
 }
 
 // GetStore returns the store with a given store ID.
-func (s *TestServer) GetStore(storeID uint64) (*core.StoreInfo, error) {
+func (s *TestServer) GetStore(storeID uint64) *core.StoreInfo {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.GetRaftCluster().TryGetStore(storeID)
+	return s.server.GetRaftCluster().GetStore(storeID)
 }
 
 // GetRaftCluster returns Raft cluster.

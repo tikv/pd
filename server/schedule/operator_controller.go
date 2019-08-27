@@ -93,6 +93,25 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		timeout := op.IsTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
+
+			// When the "source" is heartbeat, the region may have a newer
+			// confver than the region that the operator holds. In this case,
+			// the operator is stale, and will not be executed even we would
+			// have sent it to TiKV servers. Here, we just cancel it.
+			origin := op.RegionEpoch()
+			latest := region.GetRegionEpoch()
+			changes := latest.GetConfVer() - origin.GetConfVer()
+			if source == DispatchFromHeartBeat &&
+				changes > uint64(op.ConfVerChanged()) {
+				log.Info("stale operator", zap.Uint64("region-id", region.GetID()),
+					zap.Reflect("operator", op), zap.Uint64("diff", changes))
+				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
+				oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
+				oc.RemoveOperator(op)
+				oc.PromoteWaitingOperator()
+				return
+			}
+
 			oc.SendScheduleCommand(region, step, source)
 			return
 		}

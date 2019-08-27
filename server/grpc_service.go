@@ -75,8 +75,12 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 		start := time.Now()
-		if err = s.validateRequest(request.GetHeader()); err != nil {
-			return err
+		// TSO uses leader lease to determine validity. No need to check leader here.
+		if s.IsClosed() {
+			return status.Errorf(codes.Unknown, "server not started")
+		}
+		if request.GetHeader().GetClusterId() != s.clusterID {
+			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
 		ts, err := s.tso.GetRespTS(count)
@@ -162,9 +166,10 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 		return &pdpb.GetStoreResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	store, err := cluster.TryGetStore(request.GetStoreId())
-	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+	storeID := request.GetStoreId()
+	store := cluster.GetStore(storeID)
+	if store == nil {
+		return nil, status.Errorf(codes.Unknown, "invalid store ID %d, not found", storeID)
 	}
 	return &pdpb.GetStoreResponse{
 		Header: s.header(),
@@ -177,8 +182,8 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 // It returns nil if it can't get the store.
 // Copied from server/command.go
 func checkStore2(cluster *RaftCluster, storeID uint64) *pdpb.Error {
-	store, err := cluster.TryGetStore(storeID)
-	if err == nil && store != nil {
+	store := cluster.GetStore(storeID)
+	if store != nil {
 		if store.GetState() == metapb.StoreState_Tombstone {
 			return &pdpb.Error{
 				Type:    pdpb.ErrorType_STORE_TOMBSTONE,
@@ -347,18 +352,16 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		storeID := request.GetLeader().GetStoreId()
 		storeLabel := strconv.FormatUint(storeID, 10)
-		store, err := cluster.TryGetStore(storeID)
-		if err != nil {
-			return err
+		store := cluster.GetStore(storeID)
+		if store == nil {
+			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
 		storeAddress := store.GetAddress()
 
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
 		regionHeartbeatLatency.WithLabelValues(storeAddress, storeLabel).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
 
-		cluster.RLock()
-		hbStreams := cluster.coordinator.hbStreams
-		cluster.RUnlock()
+		hbStreams := cluster.GetHeartbeatStreams()
 
 		if time.Since(lastBind) > s.cfg.HeartbeatStreamBindInterval.Duration {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
@@ -453,7 +456,7 @@ func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsReque
 	if cluster == nil {
 		return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	regions := cluster.ScanRegionsByKey(request.GetStartKey(), int(request.GetLimit()))
+	regions := cluster.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
 	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
 	for _, r := range regions {
 		leader := r.GetLeader()
@@ -628,9 +631,7 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
 
-	cluster.RLock()
-	defer cluster.RUnlock()
-	co := cluster.coordinator
+	co := cluster.GetCoordinator()
 	op, err := co.regionScatterer.Scatter(region)
 	if err != nil {
 		return nil, err
