@@ -16,8 +16,8 @@ package simulator
 import (
 	"bytes"
 	"fmt"
+	
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
-
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
