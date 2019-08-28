@@ -51,7 +51,7 @@ const (
 	minFlowBytes              = 128 * 1024
 	minScoreLimit             = 0.35
 
-	opMaxZombieTime = statistics.StoreHeartBeatReportInterval * time.Second
+	opMaxZombieTime = statistics.StoreHeartBeatReportInterval * 2.5 * time.Second
 )
 
 // BalanceType : the perspective of balance
@@ -657,7 +657,7 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 	)
 
 	for storeID, stat := range stats {
-		score := minUint64(stat.StoreFlowBytes, stat.StoreFutureBytes)
+		score := stat.StoreFutureBytes
 		count := stat.RegionsStat.Len()
 		if count < 1 {
 			continue
