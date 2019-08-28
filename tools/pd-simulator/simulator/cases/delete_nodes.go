@@ -13,6 +13,7 @@
 package cases
 
 import (
+	"github.com/pingcap/pd/tools/pd-simulator/simulator"
 	"math/rand"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -68,7 +69,7 @@ func newDeleteNodes() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	simCase.Checker = func(regions *core.RegionsInfo) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, nodes map[uint64]*simulator.Node) bool {
 		res := true
 		leaderCounts := make([]int, 0, numNodes)
 		regionCounts := make([]int, 0, numNodes)

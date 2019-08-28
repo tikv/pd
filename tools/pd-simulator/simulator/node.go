@@ -48,9 +48,10 @@ type Node struct {
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
 	ioRate                   int64
-	available                *uint64
-	ToCompactionSize         *uint64
 	sizeMutex                sync.Mutex
+	ToCompactionSize         uint64
+	LastAvailable            uint64
+	LastUpdateTime           int64
 }
 
 // NewNode returns a Node.
@@ -85,8 +86,7 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		ioRate:                   ioRate * cases.MB,
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
-		available:                &s.Available,
-		ToCompactionSize:         &s.ToCompactionSize,
+		ToCompactionSize:         0,
 	}, nil
 }
 
@@ -183,10 +183,9 @@ func (n *Node) storeHeartBeat() {
 func (n *Node) compaction() {
 	n.sizeMutex.Lock()
 	defer n.sizeMutex.Unlock()
-	n.stats.Available += *n.ToCompactionSize
-	n.stats.UsedSize -= *n.ToCompactionSize
-	*n.ToCompactionSize = 0
-	*n.available = n.stats.Available
+	n.stats.Available += n.ToCompactionSize
+	n.stats.UsedSize -= n.ToCompactionSize
+	n.ToCompactionSize = 0
 }
 
 func (n *Node) regionHeartBeat() {
@@ -253,11 +252,10 @@ func (n *Node) incUsedSize(size uint64) {
 	defer n.sizeMutex.Unlock()
 	n.stats.Available -= size
 	n.stats.UsedSize += size
-	*n.available = n.stats.Available
 }
 
 func (n *Node) decUsedSize(size uint64) {
 	n.sizeMutex.Lock()
 	defer n.sizeMutex.Unlock()
-	*n.ToCompactionSize += size
+	n.ToCompactionSize += size
 }

@@ -14,6 +14,7 @@
 package cases
 
 import (
+	"github.com/pingcap/pd/tools/pd-simulator/simulator"
 	"math/rand"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -52,7 +53,7 @@ func newRegionMerge() *Case {
 	}
 
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, nodes map[uint64]*simulator.Node) bool {
 		count1 := regions.GetStoreRegionCount(1)
 		count2 := regions.GetStoreRegionCount(2)
 		count3 := regions.GetStoreRegionCount(3)

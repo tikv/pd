@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/table"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 )
 
@@ -79,7 +80,7 @@ func newImportData() *Case {
 	simCase.Events = []EventDescriptor{e}
 
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, nodes map[uint64]*simulator.Node) bool {
 		leaderDist := make(map[uint64]int)
 		peerDist := make(map[uint64]int)
 		leaderTotal := 0

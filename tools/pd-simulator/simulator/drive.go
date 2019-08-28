@@ -116,7 +116,7 @@ func (d *Driver) Tick() {
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	return d.simCase.Checker(d.raftEngine.regionsInfo)
+	return d.simCase.Checker(d.raftEngine.regionsInfo, d.raftEngine.conn.Nodes)
 }
 
 // PrintStatistics prints the statistics of the scheduler.
