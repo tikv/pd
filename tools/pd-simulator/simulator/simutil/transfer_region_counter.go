@@ -23,8 +23,8 @@ import (
 
 // TransferRegionCount is to count transfer schedule for judging whether redundant
 type TransferRegionCount struct {
-	StoreNum        int
-	RegionNum       int
+	storeNum        int
+	regionNum       int
 	IsValid         bool
 	Redundant       uint64
 	Necessary       uint64
@@ -40,16 +40,16 @@ type TransferRegionCount struct {
 var TransferRegionCounter TransferRegionCount
 
 // Init for TransferRegionCount
-func (c *TransferRegionCount) Init(n, regionNum int) {
-	c.StoreNum = n
-	c.RegionNum = regionNum
+func (c *TransferRegionCount) Init() {
+	c.storeNum = CaseConfigure.StoreNum
+	c.regionNum = CaseConfigure.RegionNum
 	c.IsValid = true
 	c.Redundant = 0
 	c.Necessary = 0
 	c.regionMap = make(map[uint64]uint64)
-	c.visited = make([]bool, c.StoreNum+1)
-	for i := 0; i < c.StoreNum+1; i++ {
-		tmp := make([]uint64, c.StoreNum+1)
+	c.visited = make([]bool, c.storeNum+1)
+	for i := 0; i < c.storeNum+1; i++ {
+		tmp := make([]uint64, c.storeNum+1)
 		c.GraphMat = append(c.GraphMat, tmp)
 	}
 	c.loopResultPath = c.loopResultPath[:0]
@@ -87,7 +87,7 @@ func (c *TransferRegionCount) DFS(cur int, curFlow uint64, path []int) {
 	path = append(path, cur)
 	c.visited[cur] = true
 
-	for target := path[0]; target < c.StoreNum+1; target++ {
+	for target := path[0]; target < c.storeNum+1; target++ {
 		flow := c.GraphMat[cur][target]
 		if flow == 0 {
 			continue
@@ -120,7 +120,7 @@ func (c *TransferRegionCount) DFS(cur int, curFlow uint64, path []int) {
 
 //Result will count redundant schedule and necessary schedule
 func (c *TransferRegionCount) Result() {
-	for i := 0; i < c.StoreNum; i++ {
+	for i := 0; i < c.storeNum; i++ {
 		c.DFS(i+1, 1<<16, make([]int, 0))
 	}
 
@@ -157,8 +157,8 @@ func (c *TransferRegionCount) PrintResult() {
 	//Output csv file
 	fd, _ := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	fdContent := strings.Join([]string{
-		toString(uint64(c.StoreNum)),
-		toString(uint64(c.RegionNum)),
+		toString(uint64(c.storeNum)),
+		toString(uint64(c.regionNum)),
 		toString(c.Redundant),
 		toString(c.Necessary),
 	}, ",") + "\n"

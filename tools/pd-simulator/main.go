@@ -41,21 +41,25 @@ import (
 )
 
 var (
-	pdAddr         = flag.String("pd", "", "pd address")
-	configFile     = flag.String("config", "conf/simconfig.toml", "config file")
-	caseName       = flag.String("case", "", "case name")
-	serverLogLevel = flag.String("serverLog", "fatal", "pd server log level.")
-	simLogLevel    = flag.String("simLog", "fatal", "simulator log level.")
-	regionNum      = flag.Int("regionNum", 10000, "regionNum")
-	storeNum       = flag.Int("storeNum", 6, "storeNum")
+	pdAddr                      = flag.String("pd", "", "pd address")
+	configFile                  = flag.String("config", "conf/simconfig.toml", "config file")
+	caseName                    = flag.String("case", "", "case name")
+	serverLogLevel              = flag.String("serverLog", "fatal", "pd server log level.")
+	simLogLevel                 = flag.String("simLog", "fatal", "simulator log level.")
+	regionNum                   = flag.Int("regionNum", 10000, "regionNum")
+	storeNum                    = flag.Int("storeNum", 6, "storeNum")
+	EnableTransferRegionCounter = flag.Bool("EnableTransferRegionCounter", false, "EnableTransferRegionCounter")
 )
 
 func main() {
 	flag.Parse()
 
 	simutil.InitLogger(*simLogLevel)
-	simutil.TransferRegionCounter.Init(*storeNum, *regionNum)
+	simutil.InitCaseConfig(*storeNum, *regionNum, *EnableTransferRegionCounter)
 	statistics.Denoising = false
+	if simutil.CaseConfigure.EnableTransferRegionCounter {
+		simutil.TransferRegionCounter.Init()
+	}
 
 	if *caseName == "" {
 		if *pdAddr != "" {
