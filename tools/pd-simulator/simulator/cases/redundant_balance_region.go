@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-func newBalanceRegionLoop() *Case {
+func newRedundantBalanceRegion() *Case {
 	var simCase Case
 
 	storeNum := simutil.TransferRegionCounter.StoreNum
