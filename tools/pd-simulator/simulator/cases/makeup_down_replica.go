@@ -15,7 +15,7 @@ package cases
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
@@ -63,7 +63,7 @@ func newMakeupDownReplicas() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	simCase.Checker = func(regions *core.RegionsInfo, nodes map[uint64]*simulator.Node) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, stats []dto.StoreStats) bool {
 		sum := 0
 		regionCounts := make([]int, 0, 3)
 		for i := 1; i <= 4; i++ {

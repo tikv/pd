@@ -23,6 +23,7 @@ type CaseConfig struct {
 // CaseConfigure is an global instance for CaseConfig
 var CaseConfigure *CaseConfig
 
+// InitCaseConfig is to init caseConfigure
 func InitCaseConfig(StoreNum, RegionNum int, EnableTransferRegionCounter bool) {
 	CaseConfigure = &CaseConfig{
 		StoreNum:                    StoreNum,

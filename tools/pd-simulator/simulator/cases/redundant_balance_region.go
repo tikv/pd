@@ -15,7 +15,7 @@ package cases
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"time"
 )
@@ -60,20 +60,21 @@ func newRedundantBalanceRegion() *Case {
 		})
 	}
 
-	simCase.Checker = func(regions *core.RegionsInfo, nodes map[uint64]*simulator.Node) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, stats []dto.StoreStats) bool {
 		res := true
 		curTime := time.Now().Unix()
 		for i := 0; i < storeNum; i++ {
-			key := uint64(i)
-			if curTime-nodes[key].LastUpdateTime > 60 {
-				if nodes[key].LastAvailable != simCase.Stores[i].Available {
+			sliceStats := stats[i]
+			simCase.Stores[i].Available = sliceStats.GetAvailable()
+			if curTime-simCase.Stores[i].LastUpdateTime > 60 {
+				if simCase.Stores[i].LastAvailable != simCase.Stores[i].Available {
 					res = false
 				}
-				if nodes[key].ToCompactionSize != 0 {
+				if sliceStats.ToCompactionSize != 0 {
 					res = false
 				}
-				nodes[key].LastUpdateTime = curTime
-				nodes[key].LastAvailable = simCase.Stores[i].Available
+				simCase.Stores[i].LastUpdateTime = curTime
+				simCase.Stores[i].LastAvailable = simCase.Stores[i].Available
 			} else {
 				res = false
 			}

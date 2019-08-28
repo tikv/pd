@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 )
 
@@ -38,7 +39,7 @@ const (
 type Node struct {
 	*metapb.Store
 	sync.RWMutex
-	stats                    *pdpb.StoreStats
+	stats                    *dto.StoreStats
 	tick                     uint64
 	wg                       sync.WaitGroup
 	tasks                    map[uint64]Task
@@ -49,9 +50,6 @@ type Node struct {
 	raftEngine               *RaftEngine
 	ioRate                   int64
 	sizeMutex                sync.Mutex
-	ToCompactionSize         uint64
-	LastAvailable            uint64
-	LastUpdateTime           int64
 }
 
 // NewNode returns a Node.
@@ -64,11 +62,13 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		Labels:  s.Labels,
 		State:   s.Status,
 	}
-	stats := &pdpb.StoreStats{
-		StoreId:   s.ID,
-		Capacity:  s.Capacity,
-		Available: s.Available,
-		StartTime: uint32(time.Now().Unix()),
+	stats := &dto.StoreStats{
+		StoreStats: pdpb.StoreStats{
+			StoreId:   s.ID,
+			Capacity:  s.Capacity,
+			Available: s.Available,
+			StartTime: uint32(time.Now().Unix()),
+		},
 	}
 	tag := fmt.Sprintf("store %d", s.ID)
 	client, receiveRegionHeartbeatCh, err := NewClient(pdAddr, tag)
@@ -86,7 +86,6 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		ioRate:                   ioRate * cases.MB,
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
-		ToCompactionSize:         0,
 	}, nil
 }
 
@@ -171,7 +170,7 @@ func (n *Node) storeHeartBeat() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
-	err := n.client.StoreHeartbeat(ctx, n.stats)
+	err := n.client.StoreHeartbeat(ctx, &n.stats.StoreStats)
 	if err != nil {
 		simutil.Logger.Info("report heartbeat error",
 			zap.Uint64("node-id", n.GetId()),
@@ -183,9 +182,9 @@ func (n *Node) storeHeartBeat() {
 func (n *Node) compaction() {
 	n.sizeMutex.Lock()
 	defer n.sizeMutex.Unlock()
-	n.stats.Available += n.ToCompactionSize
-	n.stats.UsedSize -= n.ToCompactionSize
-	n.ToCompactionSize = 0
+	n.stats.Available += n.stats.ToCompactionSize
+	n.stats.UsedSize -= n.stats.ToCompactionSize
+	n.stats.ToCompactionSize = 0
 }
 
 func (n *Node) regionHeartBeat() {
@@ -257,5 +256,5 @@ func (n *Node) incUsedSize(size uint64) {
 func (n *Node) decUsedSize(size uint64) {
 	n.sizeMutex.Lock()
 	defer n.sizeMutex.Unlock()
-	n.ToCompactionSize += size
+	n.stats.ToCompactionSize += size
 }

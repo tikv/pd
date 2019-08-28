@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"github.com/pkg/errors"
 )
@@ -116,7 +117,11 @@ func (d *Driver) Tick() {
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	return d.simCase.Checker(d.raftEngine.regionsInfo, d.raftEngine.conn.Nodes)
+	stats := make([]dto.StoreStats, len(d.conn.Nodes)+1)
+	for index, node := range d.conn.Nodes {
+		stats[index] = *node.stats
+	}
+	return d.simCase.Checker(d.raftEngine.regionsInfo, stats)
 }
 
 // PrintStatistics prints the statistics of the scheduler.

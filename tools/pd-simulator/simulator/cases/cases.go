@@ -16,19 +16,21 @@ package cases
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
 )
 
 // Store is used to simulate tikv.
 type Store struct {
-	ID           uint64
-	Status       metapb.StoreState
-	Labels       []*metapb.StoreLabel
-	Capacity     uint64
-	Available    uint64
-	LeaderWeight float32
-	RegionWeight float32
-	Version      string
+	ID             uint64
+	Status         metapb.StoreState
+	Labels         []*metapb.StoreLabel
+	Capacity       uint64
+	Available      uint64
+	LeaderWeight   float32
+	RegionWeight   float32
+	Version        string
+	LastAvailable  uint64
+	LastUpdateTime int64
 }
 
 // Region is used to simulate a region.
@@ -41,7 +43,7 @@ type Region struct {
 }
 
 // CheckerFunc checks if the scheduler is finished.
-type CheckerFunc func(*core.RegionsInfo, map[uint64]*simulator.Node) bool
+type CheckerFunc func(*core.RegionsInfo, []dto.StoreStats) bool
 
 // Case represents a test suite for simulator.
 type Case struct {

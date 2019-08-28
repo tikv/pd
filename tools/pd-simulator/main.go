@@ -48,14 +48,14 @@ var (
 	simLogLevel                 = flag.String("simLog", "fatal", "simulator log level.")
 	regionNum                   = flag.Int("regionNum", 10000, "regionNum")
 	storeNum                    = flag.Int("storeNum", 6, "storeNum")
-	EnableTransferRegionCounter = flag.Bool("EnableTransferRegionCounter", false, "EnableTransferRegionCounter")
+	enableTransferRegionCounter = flag.Bool("EnableTransferRegionCounter", false, "EnableTransferRegionCounter")
 )
 
 func main() {
 	flag.Parse()
 
 	simutil.InitLogger(*simLogLevel)
-	simutil.InitCaseConfig(*storeNum, *regionNum, *EnableTransferRegionCounter)
+	simutil.InitCaseConfig(*storeNum, *regionNum, *enableTransferRegionCounter)
 	statistics.Denoising = false
 	if simutil.CaseConfigure.EnableTransferRegionCounter {
 		simutil.TransferRegionCounter.Init()
