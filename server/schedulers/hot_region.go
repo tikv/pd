@@ -402,7 +402,7 @@ const balanceHotRetryLimit = 10
 func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*operator.Operator {
 	for i := 0; i < balanceHotRetryLimit; i++ {
 		switch h.r.Intn(cluster.GetMaxReplicas() + balanceHotRetryLimit) {
-		case 0:
+		case -1:
 			// balance by leader
 			srcRegion, newLeader, influence := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
 			if srcRegion != nil {
@@ -493,20 +493,22 @@ func calcScore(cluster schedule.Cluster, pendingInf *opInfluence, typ BalanceTyp
 			storeStat.RegionsStat = append(storeStat.RegionsStat, s)
 		}
 
-		var storeFlowBytes float64
 		switch typ {
 		case hotReadRegionBalance:
 			{
-				_, storeFlowBytes = storesStats.GetStoreBytesRate(storeID)
-				storeFlowBytes += pendingInf.bytesRead[storeID]
+				_, readBytesRate := storesStats.GetStoreBytesRate(storeID)
+				storeStat.StoreFlowBytes = uint64(readBytesRate)
+				readBytesRate += pendingInf.bytesRead[storeID]
+				storeStat.StoreFutureBytes = uint64(readBytesRate)
 			}
 		case hotWriteRegionBalance:
 			{
-				storeFlowBytes, _ = storesStats.GetStoreBytesRate(storeID)
-				storeFlowBytes += pendingInf.bytesWrite[storeID]
+				writeBytesRate, _ := storesStats.GetStoreBytesRate(storeID)
+				storeStat.StoreFlowBytes = uint64(writeBytesRate)
+				writeBytesRate += pendingInf.bytesWrite[storeID]
+				storeStat.StoreFutureBytes = uint64(writeBytesRate)
 			}
 		}
-		storeStat.StoreFlowBytes = uint64(storeFlowBytes)
 	}
 	return stats
 }
@@ -650,18 +652,19 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 // Inside these stores, we choose the one with maximum flow bytes.
 func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotRegionsStat) (srcStoreID uint64) {
 	var (
-		maxFlowBytes uint64
-		maxCount     int
+		maxScore uint64
+		maxCount int
 	)
 
 	for storeID, stat := range stats {
-		count, flowBytes := stat.RegionsStat.Len(), stat.StoreFlowBytes
+		score := minUint64(stat.StoreFlowBytes, stat.StoreFutureBytes)
+		count := stat.RegionsStat.Len()
 		if count < 1 {
 			continue
 		}
-		if flowBytes > maxFlowBytes || (flowBytes == maxFlowBytes && count > maxCount) {
+		if score > maxScore || (score == maxScore && count > maxCount) {
 			maxCount = count
-			maxFlowBytes = flowBytes
+			maxScore = score
 			srcStoreID = storeID
 		}
 	}
@@ -672,20 +675,24 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 // We choose a target store based on the hot region number and flow bytes of this store.
 func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes uint64, srcStoreID uint64, storesStat statistics.StoreHotRegionsStat) (destStoreID uint64) {
 	sr := storesStat[srcStoreID]
-	srcFlowBytes := sr.StoreFlowBytes
+	srcScore := minUint64(sr.StoreFlowBytes, sr.StoreFutureBytes)
 
 	var (
-		minFlowBytes uint64 = uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) - regionFlowBytes
-		minCount            = int(math.MaxInt32)
+		// Prevent overflow.
+		minDstScore uint64 = maxUint64(uint64(float64(srcScore)*hotRegionScheduleFactor), regionFlowBytes) - regionFlowBytes
+		minCount           = int(math.MaxInt32)
 	)
 	for _, storeID := range candidateStoreIDs {
 		if s, ok := storesStat[storeID]; ok {
-			if minFlowBytes > s.StoreFlowBytes || (minFlowBytes == s.StoreFlowBytes && s.RegionsStat.Len() < minCount) {
+			dstScore := maxUint64(s.StoreFlowBytes, s.StoreFutureBytes)
+			dstCount := s.RegionsStat.Len()
+			if minDstScore > dstScore || (minDstScore == dstScore && dstCount < minCount) {
 				destStoreID = storeID
-				minFlowBytes = s.StoreFlowBytes
-				minCount = s.RegionsStat.Len()
+				minDstScore = dstScore
+				minCount = dstCount
 			}
 		} else {
+			// Assume that stores with no hot region are cold.
 			destStoreID = storeID
 			return
 		}

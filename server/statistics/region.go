@@ -85,10 +85,11 @@ func (m RegionsStat) Less(i, j int) bool { return m[i].GetFlowBytes() < m[j].Get
 
 // HotRegionsStat records all hot regions statistics
 type HotRegionsStat struct {
-	StoreFlowBytes uint64      `json:"store_flow_bytes"`
-	TotalFlowBytes uint64      `json:"total_flow_bytes"`
-	RegionsCount   int         `json:"regions_count"`
-	RegionsStat    RegionsStat `json:"statistics"`
+	StoreFlowBytes   uint64 `json:"store_flow_bytes"`
+	StoreFutureBytes uint64
+	TotalFlowBytes   uint64      `json:"total_flow_bytes"`
+	RegionsCount     int         `json:"regions_count"`
+	RegionsStat      RegionsStat `json:"statistics"`
 }
 
 // RegionStats records a list of regions' statistics and distribution status.
