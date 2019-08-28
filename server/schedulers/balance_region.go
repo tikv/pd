@@ -132,7 +132,6 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	sourceLabel := strconv.FormatUint(sourceID, 10)
 	s.counter.WithLabelValues("source_store", sourceAddress, sourceLabel).Inc()
 
-	opInfluence := s.opController.GetOpInfluence(cluster)
 	for i := 0; i < balanceRegionRetryLimit; i++ {
 		// Priority picks the region that has a pending peer.
 		// Pending region may means the disk is overload, remove the pending region firstly.
@@ -169,7 +168,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 		}
 
 		oldPeer := region.GetStorePeer(sourceID)
-		if op := s.transferPeer(cluster, region, oldPeer, opInfluence); op != nil {
+		if op := s.transferPeer(cluster, region, oldPeer); op != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
 			return []*operator.Operator{op}
 		}
@@ -178,7 +177,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer, opInfluence operator.OpInfluence) *operator.Operator {
+func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *operator.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.GetRegionStores(region)
 	sourceStoreID := oldPeer.GetStoreId()
@@ -205,6 +204,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	targetID := target.GetID()
 	log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
+	opInfluence := s.opController.GetOpInfluence(cluster)
 	if !shouldBalance(cluster, source, target, region, core.RegionKind, opInfluence) {
 		log.Debug("skip balance region",
 			zap.String("scheduler", s.GetName()), zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),

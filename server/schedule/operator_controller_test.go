@@ -180,3 +180,56 @@ func (t *testOperatorControllerSuite) TestStorelimit(c *C) {
 	c.Assert(oc.AddOperator(op), IsFalse)
 	oc.RemoveOperator(op)
 }
+
+// #1652
+func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
+	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	stream := mockhbstream.NewHeartbeatStreams(cluster.ID)
+	controller := NewOperatorController(cluster, stream)
+
+	cluster.AddLeaderStore(1, 2)
+	cluster.AddLeaderStore(2, 0)
+	cluster.AddLeaderRegion(1, 1, 2)
+	steps := []operator.OpStep{
+		operator.TransferLeader{FromStore: 1, ToStore: 2},
+		operator.RemovePeer{FromStore: 1},
+	}
+
+	op := operator.NewOperator("test", "test", 1,
+		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
+		operator.OpRegion, steps...)
+	c.Assert(controller.AddOperator(op), Equals, true)
+	c.Assert(len(stream.MsgCh()), Equals, 1)
+
+	// report the result of transferring leader
+	region := cluster.MockRegionInfo(1, 2, []uint64{1, 2},
+		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
+
+	controller.Dispatch(region, DispatchFromHeartBeat)
+	c.Assert(op.ConfVerChanged(), Equals, 0)
+	c.Assert(len(stream.MsgCh()), Equals, 2)
+
+	// report the result of removing peer
+	region = cluster.MockRegionInfo(1, 2, []uint64{2},
+		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
+
+	controller.Dispatch(region, DispatchFromHeartBeat)
+	c.Assert(op.ConfVerChanged(), Equals, 1)
+	c.Assert(len(stream.MsgCh()), Equals, 2)
+
+	// add and disaptch op again, the op should be stale
+	op = operator.NewOperator("test", "test", 1,
+		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
+		operator.OpRegion, steps...)
+	c.Assert(controller.AddOperator(op), Equals, true)
+	c.Assert(op.ConfVerChanged(), Equals, 0)
+	c.Assert(len(stream.MsgCh()), Equals, 3)
+
+	// report region with an abnormal confver
+	region = cluster.MockRegionInfo(1, 1, []uint64{1, 2},
+		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
+	controller.Dispatch(region, DispatchFromHeartBeat)
+	c.Assert(op.ConfVerChanged(), Equals, 0)
+	// no new step sended
+	c.Assert(len(stream.MsgCh()), Equals, 3)
+}

@@ -717,30 +717,21 @@ func (r *RegionsInfo) GetFollower(storeID uint64, regionID uint64) *RegionInfo {
 	return r.followers[storeID].Get(regionID)
 }
 
-// ScanRange scans from the first region containing or behind start key,
-// until number greater than limit.
-func (r *RegionsInfo) ScanRange(startKey []byte, limit int) []*RegionInfo {
-	res := make([]*RegionInfo, 0, limit)
-	r.tree.scanRange(startKey, func(metaRegion *metapb.Region) bool {
-		res = append(res, r.GetRegion(metaRegion.GetId()))
-		return len(res) < limit
-	})
-	return res
-}
-
-// ScanRangeWithEndKey scans regions intersecting [start key, end key).
-func (r *RegionsInfo) ScanRangeWithEndKey(startKey, endKey []byte) []*RegionInfo {
-	var regions []*RegionInfo
+// ScanRange scans regions intersecting [start key, end key), returns at most
+// `limit` regions. limit <= 0 means no limit.
+func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
+	var res []*RegionInfo
 	r.tree.scanRange(startKey, func(meta *metapb.Region) bool {
 		if len(endKey) > 0 && bytes.Compare(meta.StartKey, endKey) >= 0 {
 			return false
 		}
-		if region := r.GetRegion(meta.GetId()); region != nil {
-			regions = append(regions, region)
+		if limit > 0 && len(res) >= limit {
+			return false
 		}
+		res = append(res, r.GetRegion(meta.GetId()))
 		return true
 	})
-	return regions
+	return res
 }
 
 // ScanRangeWithIterator scans from the first region containing or behind start key,

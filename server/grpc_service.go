@@ -76,6 +76,9 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		}
 		start := time.Now()
 		// TSO uses leader lease to determine validity. No need to check leader here.
+		if s.IsClosed() {
+			return status.Errorf(codes.Unknown, "server not started")
+		}
 		if request.GetHeader().GetClusterId() != s.clusterID {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
@@ -358,9 +361,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
 		regionHeartbeatLatency.WithLabelValues(storeAddress, storeLabel).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
 
-		cluster.RLock()
-		hbStreams := cluster.coordinator.hbStreams
-		cluster.RUnlock()
+		hbStreams := cluster.GetHeartbeatStreams()
 
 		if time.Since(lastBind) > s.cfg.HeartbeatStreamBindInterval.Duration {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
@@ -455,7 +456,7 @@ func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsReque
 	if cluster == nil {
 		return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	regions := cluster.ScanRegionsByKey(request.GetStartKey(), int(request.GetLimit()))
+	regions := cluster.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
 	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
 	for _, r := range regions {
 		leader := r.GetLeader()
@@ -630,9 +631,7 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
 
-	cluster.RLock()
-	defer cluster.RUnlock()
-	co := cluster.coordinator
+	co := cluster.GetCoordinator()
 	op, err := co.regionScatterer.Scatter(region)
 	if err != nil {
 		return nil, err
