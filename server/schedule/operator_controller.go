@@ -106,6 +106,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 				log.Info("stale operator", zap.Uint64("region-id", region.GetID()),
 					zap.Reflect("operator", op), zap.Uint64("diff", changes))
 				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
+				op.SetDropTime(time.Now())
 				oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 				oc.RemoveOperator(op)
 				oc.PromoteWaitingOperator()
