@@ -50,6 +50,8 @@ const (
 	hotRegionScheduleFactor   = 0.9
 	minFlowBytes              = 128 * 1024
 	minScoreLimit             = 0.35
+
+	opMaxZombieTime = statistics.StoreHeartBeatReportInterval * time.Second
 )
 
 // BalanceType : the perspective of balance
@@ -114,14 +116,6 @@ func newOpInfluence(typ string, from, to uint64) *opInfluence {
 	}
 }
 
-func (oi *opInfluence) incMetric(status uint32) {
-	hotspotPendingOpGauge.WithLabelValues(oi.typ, statusStr(status), u64Str(oi.from), u64Str(oi.to)).Inc()
-}
-
-func (oi *opInfluence) decMetric(status uint32) {
-	hotspotPendingOpGauge.WithLabelValues(oi.typ, statusStr(status), u64Str(oi.from), u64Str(oi.to)).Dec()
-}
-
 func (oi *opInfluence) unstarted() {
 	if atomic.CompareAndSwapUint32(&oi.status, created, unstarted) {
 		oi.incMetric(unstarted)
@@ -147,13 +141,29 @@ func (oi *opInfluence) finished() {
 	}
 }
 
-func (oi *opInfluence) multWeight(w float64) {
+func (oi *opInfluence) incMetric(status uint32) {
+	hotspotPendingOpGauge.WithLabelValues(oi.typ, statusStr(status), u64Str(oi.from), u64Str(oi.to)).Inc()
+}
+
+func (oi *opInfluence) decMetric(status uint32) {
+	hotspotPendingOpGauge.WithLabelValues(oi.typ, statusStr(status), u64Str(oi.from), u64Str(oi.to)).Dec()
+}
+
+func (oi *opInfluence) applyFunc(f func(float64) float64, dst *opInfluence) *opInfluence {
+	if dst == nil {
+		dst = newOpInfluence("", 0, 0)
+	}
 	for k, v := range oi.bytesRead {
-		oi.bytesRead[k] = v * w
+		dst.bytesRead[k] = f(v)
 	}
 	for k, v := range oi.bytesWrite {
-		oi.bytesWrite[k] = v * w
+		dst.bytesWrite[k] = f(v)
 	}
+	return dst
+}
+
+func (oi *opInfluence) multWeight(w float64, dst *opInfluence) *opInfluence {
+	return oi.applyFunc(func(v float64) float64 { return v * w }, dst)
 }
 
 func (oi *opInfluence) Add(other *opInfluence, w float64) {
@@ -165,10 +175,6 @@ func mapAddWeight(a, b map[uint64]float64, w float64) {
 	for k, v := range b {
 		a[k] += v * w
 	}
-}
-
-func isFinish(op *operator.Operator) bool {
-	return op.IsDropped() || op.IsFinish() || op.IsTimeout()
 }
 
 type balanceHotRegionsScheduler struct {
@@ -232,10 +238,6 @@ func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorControlle
 	}
 }
 
-func (s *balanceHotRegionsScheduler) GetMinInterval() time.Duration {
-	return 300 * time.Millisecond
-}
-
 func (h *balanceHotRegionsScheduler) GetName() string {
 	return "balance-hot-region-scheduler"
 }
@@ -269,7 +271,7 @@ func (h *balanceHotRegionsScheduler) observePendingOps() {
 	var unstartedCnt uint = 0
 	var unstartedSum time.Duration = 0
 	for op, infl := range h.pendingOps {
-		if isFinish(op) {
+		if op.IsDropped() {
 			infl.finished()
 			continue
 		}
@@ -286,19 +288,21 @@ func (h *balanceHotRegionsScheduler) observePendingOps() {
 }
 
 func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
-	h.influence.multWeight(0.1)
+	h.influence.multWeight(0, h.influence)
 	for op, infl := range h.pendingOps {
-		if isFinish(op) {
+		if op.IsDropped() {
 			infl.finished()
-			delete(h.pendingOps, op)
-			continue
-		}
-		if op.IsStarted() {
+			infl = calcZombieInfluence(op, infl)
+			if infl == nil {
+				delete(h.pendingOps, op)
+				continue
+			}
+		} else if op.IsStarted() {
 			infl.started()
 		} else {
 			infl.unstarted()
 		}
-		h.influence.Add(infl, 0.7)
+		h.influence.Add(infl, 1.0)
 	}
 	for store, value := range h.influence.bytesRead {
 		pendingInfluenceGauge.WithLabelValues("bytes_read", storeStr(store)).Set(value)
@@ -306,6 +310,14 @@ func (h *balanceHotRegionsScheduler) updatePendingInfluence() {
 	for store, value := range h.influence.bytesWrite {
 		pendingInfluenceGauge.WithLabelValues("bytes_write", storeStr(store)).Set(value)
 	}
+}
+
+func calcZombieInfluence(op *operator.Operator, infl *opInfluence) *opInfluence {
+	zombieTime := time.Since(op.GetDropTime())
+	if op.IsStarted() && zombieTime < opMaxZombieTime {
+		return infl.multWeight(float64(zombieTime)/float64(opMaxZombieTime), nil)
+	}
+	return nil
 }
 
 func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*operator.Operator {
@@ -400,7 +412,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 
 				opInf := newOpInfluence(op.Desc(), srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId())
 				opInf.bytesWrite = influence
-				opInf.multWeight(0.01)
+				opInf.multWeight(0.01, opInf)
 				h.pendingOps[op] = opInf
 				hotspotOpCounter.WithLabelValues(op.Desc(), u64Str(srcRegion.GetLeader().GetStoreId()), u64Str(newLeader.GetStoreId())).Inc()
 
