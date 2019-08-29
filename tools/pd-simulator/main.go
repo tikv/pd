@@ -46,8 +46,8 @@ var (
 	caseName                    = flag.String("case", "", "case name")
 	serverLogLevel              = flag.String("serverLog", "fatal", "pd server log level.")
 	simLogLevel                 = flag.String("simLog", "fatal", "simulator log level.")
-	regionNum                   = flag.Int("regionNum", 10000, "regionNum")
-	storeNum                    = flag.Int("storeNum", 6, "storeNum")
+	regionNum                   = flag.Int("regionNum", 0, "regionNum of one store")
+	storeNum                    = flag.Int("storeNum", 0, "storeNum")
 	enableTransferRegionCounter = flag.Bool("enableTransferRegionCounter", false, "enableTransferRegionCounter")
 )
 
