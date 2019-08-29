@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
 )
 
@@ -206,7 +207,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerChanged(), Equals, 0)
+	c.Assert(op.ConfVerChanged(region), Equals, 0)
 	c.Assert(len(stream.MsgCh()), Equals, 2)
 
 	// report the result of removing peer
@@ -214,7 +215,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerChanged(), Equals, 1)
+	c.Assert(op.ConfVerChanged(region), Equals, 1)
 	c.Assert(len(stream.MsgCh()), Equals, 2)
 
 	// add and disaptch op again, the op should be stale
@@ -222,14 +223,77 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
 		operator.OpRegion, steps...)
 	c.Assert(controller.AddOperator(op), Equals, true)
-	c.Assert(op.ConfVerChanged(), Equals, 0)
+	c.Assert(op.ConfVerChanged(region), Equals, 0)
 	c.Assert(len(stream.MsgCh()), Equals, 3)
 
 	// report region with an abnormal confver
 	region = cluster.MockRegionInfo(1, 1, []uint64{1, 2},
 		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
 	controller.Dispatch(region, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerChanged(), Equals, 0)
-	// no new step sended
+	c.Assert(op.ConfVerChanged(region), Equals, 0)
+	// no new step
 	c.Assert(len(stream.MsgCh()), Equals, 3)
+}
+
+func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
+	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	stream := mockhbstream.NewHeartbeatStreams(cluster.ID)
+	controller := NewOperatorController(cluster, stream)
+
+	// Create a new region with epoch(0, 0)
+	// the region has two peers with its peer id allocated incrementally.
+	// so the two peers are {peerid: 1, storeid: 1}, {peerid: 2, storeid: 2}
+	// The peer on store 1 is the leader
+	epoch := &metapb.RegionEpoch{ConfVer: 0, Version: 0}
+	region := cluster.MockRegionInfo(1, 1, []uint64{2}, epoch)
+	// Put region into cluster, otherwise, AddOperator will fail because of
+	// missing region
+	cluster.PutRegion(region)
+
+	// The next allocated peer should have peerid 3, so we add this peer
+	// to store 3
+	steps := []operator.OpStep{
+		operator.AddPeer{3, 3},
+	}
+
+	// Create an operator
+	op := operator.NewOperator("test", "test", 1, epoch,
+		operator.OpRegion, steps...)
+	c.Assert(controller.AddOperator(op), Equals, true)
+	c.Assert(len(stream.MsgCh()), Equals, 1)
+
+	// Create region2 witch is cloned from the original region.
+	// region2 has peer 3 in pending state, so the AddPeer step
+	// is left unfinished
+	region2 := region.Clone(
+		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3}),
+		core.WithPendingPeers([]*metapb.Peer{
+			{Id: 3, StoreId: 3, IsLearner: false},
+		}),
+		core.WithIncConfVer(),
+	)
+	c.Assert(region2.GetPendingPeers(), NotNil)
+	c.Assert(steps[0].IsFinish(region2), Equals, false)
+	controller.Dispatch(region2, DispatchFromHeartBeat)
+
+	// In this case, the conf version has been changed, but the
+	// peer added is in peeding state, the operator should not be
+	// removed by the stale checker
+	c.Assert(op.ConfVerChanged(region2), Equals, 1)
+	c.Assert(controller.GetOperator(1), NotNil)
+	// The operator is valid yet, but the step should not be sent
+	// again, because it is in pending state, so the message channel
+	// should not be increased
+	c.Assert(len(stream.MsgCh()), Equals, 1)
+
+	// Finish the step by clearing the pending state
+	region3 := region.Clone(
+		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3}),
+		core.WithIncConfVer(),
+	)
+	c.Assert(steps[0].IsFinish(region3), Equals, true)
+	controller.Dispatch(region3, DispatchFromHeartBeat)
+	c.Assert(op.ConfVerChanged(region3), Equals, 1)
+	// The Operator has finished, so no message should be sent
+	c.Assert(len(stream.MsgCh()), Equals, 1)
 }
