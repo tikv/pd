@@ -48,7 +48,7 @@ var (
 	simLogLevel                 = flag.String("simLog", "fatal", "simulator log level.")
 	regionNum                   = flag.Int("regionNum", 10000, "regionNum")
 	storeNum                    = flag.Int("storeNum", 6, "storeNum")
-	enableTransferRegionCounter = flag.Bool("EnableTransferRegionCounter", false, "EnableTransferRegionCounter")
+	enableTransferRegionCounter = flag.Bool("enableTransferRegionCounter", false, "enableTransferRegionCounter")
 )
 
 func main() {
@@ -180,9 +180,9 @@ EXIT:
 	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, simCase, driver.TickCount(), time.Since(start))
 	driver.PrintStatistics()
 	if simutil.TransferRegionCounter.IsValid {
+		simutil.Logger.Info("Total: ")
 		simutil.TransferRegionCounter.PrintGraph()
 		simutil.TransferRegionCounter.Result()
-		simutil.TransferRegionCounter.PrintGraph()
 		simutil.TransferRegionCounter.PrintResult()
 	}
 
