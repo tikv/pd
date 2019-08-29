@@ -162,7 +162,7 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 	}
 	step := op.Check(r)
 	if step == nil {
-		return nil, true
+		return r, true
 	}
 	now := time.Now()
 	if now.Before(item.time) {
