@@ -93,17 +93,17 @@ var IDAllocator idAllocator
 
 // CaseMap is a mapping of the cases to the their corresponding initialize functions.
 var CaseMap = map[string]func() *Case{
-	"balance-leader":       newBalanceLeader,
-	"balance-region-loop":  newRedundantBalanceRegion,
-	"add-nodes":            newAddNodes,
-	"add-nodes-dynamic":    newAddNodesDynamic,
-	"delete-nodes":         newDeleteNodes,
-	"region-split":         newRegionSplit,
-	"region-merge":         newRegionMerge,
-	"hot-read":             newHotRead,
-	"hot-write":            newHotWrite,
-	"makeup-down-replicas": newMakeupDownReplicas,
-	"import-data":          newImportData,
+	"balance-leader":           newBalanceLeader,
+	"redundant-balance-region": newRedundantBalanceRegion,
+	"add-nodes":                newAddNodes,
+	"add-nodes-dynamic":        newAddNodesDynamic,
+	"delete-nodes":             newDeleteNodes,
+	"region-split":             newRegionSplit,
+	"region-merge":             newRegionMerge,
+	"hot-read":                 newHotRead,
+	"hot-write":                newHotWrite,
+	"makeup-down-replicas":     newMakeupDownReplicas,
+	"import-data":              newImportData,
 }
 
 // NewCase creates a new case.

@@ -180,7 +180,7 @@ EXIT:
 	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, simCase, driver.TickCount(), time.Since(start))
 	driver.PrintStatistics()
 	if simutil.TransferRegionCounter.IsValid {
-		simutil.Logger.Info("Total: ")
+		simutil.Logger.Info("Total Schedules Graph: ")
 		simutil.TransferRegionCounter.PrintGraph()
 		simutil.TransferRegionCounter.Result()
 		simutil.TransferRegionCounter.PrintResult()
