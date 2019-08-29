@@ -336,7 +336,9 @@ func (a *removePeer) Step(r *RaftEngine) {
 			}
 		}
 		a.finished = true
-		simutil.TransferRegionCounter.AddSource(a.regionID, a.peer.StoreId)
+		if simutil.TransferRegionCounter.IsValid {
+			simutil.TransferRegionCounter.AddSource(a.regionID, a.peer.StoreId)
+		}
 	}
 }
 
@@ -384,7 +386,9 @@ func (a *addLearner) Step(r *RaftEngine) {
 			r.schedulerStats.taskStats.incAddLeaner(region.GetID())
 		}
 		a.finished = true
-		simutil.TransferRegionCounter.AddTarget(a.regionID, a.peer.StoreId)
+		if simutil.TransferRegionCounter.IsValid {
+			simutil.TransferRegionCounter.AddTarget(a.regionID, a.peer.StoreId)
+		}
 	}
 }
 
