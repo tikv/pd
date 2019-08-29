@@ -1,5 +1,9 @@
 # PD Change Log
 
+## v3.0.3
+
++ Return success message for `pdctl` [#1685](https://github.com/pingcap/pd/pull/1685)
+
 ## v3.0.2
 
 + Fix the bug that the Scatter Region scheduler cannot work [#1642](https://github.com/pingcap/pd/pull/1642)
