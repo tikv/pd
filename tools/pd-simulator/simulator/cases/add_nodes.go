@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
+	"math/rand"
 )
 
 func newAddNodes() *Case {
@@ -39,7 +40,7 @@ func newAddNodes() *Case {
 		})
 	}
 
-	emptyRatio := 0.5
+	emptyRatio := rand.Float64()
 	someStore := uint64(float64(storeNum) * (1 - emptyRatio))
 	for i := 0; i < regionNum; i++ {
 		peers := []*metapb.Peer{
