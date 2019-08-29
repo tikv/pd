@@ -149,10 +149,10 @@ func (c *TransferRegionCount) PrintResult() {
 	for index, value := range c.loopResultPath {
 		fmt.Println(index, value, c.loopResultCount[index])
 	}
-	fmt.Println("Necessary: ")
+	fmt.Println("Necessary Schedules Graph: ")
 	c.PrintGraph()
-	fmt.Println("Redundant: ", c.Redundant)
-	fmt.Println("Necessary: ", c.Necessary)
+	fmt.Println("Redundant Schedules: ", c.Redundant)
+	fmt.Println("Necessary Schedules: ", c.Necessary)
 
 	//Output csv file
 	fd, _ := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
