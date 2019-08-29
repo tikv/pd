@@ -23,7 +23,13 @@ import (
 func newAddNodes() *Case {
 	var simCase Case
 
-	for i := 1; i <= 8; i++ {
+	storeNum := simutil.CaseConfigure.StoreNum
+	regionNum := simutil.CaseConfigure.RegionNum * storeNum / 3
+	if storeNum == 0 || regionNum == 0 {
+		storeNum, regionNum = 6, 4000
+	}
+
+	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
@@ -33,11 +39,13 @@ func newAddNodes() *Case {
 		})
 	}
 
-	for i := 0; i < 1000; i++ {
+	emptyRatio := 0.5
+	someStore := uint64(float64(storeNum) * (1 - emptyRatio))
+	for i := 0; i < regionNum; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i)%4 + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%4 + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%4 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i)%someStore + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%someStore + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%someStore + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -48,19 +56,27 @@ func newAddNodes() *Case {
 		})
 	}
 
+	ratio := 0.05
+	meanLeaderCount := regionNum / storeNum
+	maxLeaderCount := int((1.0 + ratio) * float64(meanLeaderCount))
+	minLeaderCount := int((1.0 - ratio) * float64(meanLeaderCount))
+	meanRegionCount := regionNum * 3 / storeNum
+	maxRegionCount := int((1.0 + ratio) * float64(meanRegionCount))
+	minRegionCount := int((1.0 - ratio) * float64(meanRegionCount))
+
 	simCase.Checker = func(regions *core.RegionsInfo, stats []dto.StoreStats) bool {
 		res := true
-		leaderCounts := make([]int, 0, 8)
-		regionCounts := make([]int, 0, 8)
-		for i := 1; i <= 8; i++ {
+		leaderCounts := make([]int, 0, storeNum)
+		regionCounts := make([]int, 0, storeNum)
+		for i := 1; i <= storeNum; i++ {
 			leaderCount := regions.GetStoreLeaderCount(uint64(i))
 			regionCount := regions.GetStoreRegionCount(uint64(i))
 			leaderCounts = append(leaderCounts, leaderCount)
 			regionCounts = append(regionCounts, regionCount)
-			if leaderCount > 135 || leaderCount < 115 {
+			if leaderCount < minLeaderCount || leaderCount > maxLeaderCount {
 				res = false
 			}
-			if regionCount > 390 || regionCount < 360 {
+			if regionCount < minRegionCount || regionCount > maxRegionCount {
 				res = false
 			}
 		}
