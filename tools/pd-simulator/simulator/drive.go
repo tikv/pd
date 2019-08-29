@@ -117,7 +117,13 @@ func (d *Driver) Tick() {
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	stats := make([]dto.StoreStats, len(d.conn.Nodes)+1)
+	length := uint64(len(d.conn.Nodes) + 1)
+	for index := range d.conn.Nodes {
+		if index >= length {
+			length = index + 1
+		}
+	}
+	stats := make([]dto.StoreStats, length)
 	for index, node := range d.conn.Nodes {
 		stats[index] = *node.stats
 	}
