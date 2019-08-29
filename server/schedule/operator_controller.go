@@ -369,9 +369,11 @@ func (oc *OperatorController) GetOperatorStatus(id uint64) *OperatorWithStatus {
 
 func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) {
 	regionID := op.RegionID()
-	delete(oc.operators, regionID)
-	oc.updateCounts(oc.operators)
-	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
+	if cur := oc.operators[regionID]; cur == op {
+		delete(oc.operators, regionID)
+		oc.updateCounts(oc.operators)
+		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
+	}
 }
 
 // GetOperator gets a operator from the given region.
