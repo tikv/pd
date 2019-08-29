@@ -24,11 +24,9 @@ import (
 func newAddNodes() *Case {
 	var simCase Case
 
-	storeNum := simutil.CaseConfigure.StoreNum
-	regionNum := simutil.CaseConfigure.RegionNum * storeNum / 3
-	if storeNum == 0 || regionNum == 0 {
-		storeNum, regionNum = 6, 4000
-	}
+	storeNum, regionNum := readConfig()
+	emptyRatio := rand.Float64()
+	fullStoreNum := getFullStoreNum(storeNum, emptyRatio)
 
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
@@ -40,13 +38,11 @@ func newAddNodes() *Case {
 		})
 	}
 
-	emptyRatio := rand.Float64()
-	someStore := uint64(float64(storeNum) * (1 - emptyRatio))
-	for i := 0; i < regionNum; i++ {
+	for i := 0; i < regionNum*storeNum/3; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i)%someStore + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%someStore + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%someStore + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i)%fullStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%fullStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%fullStoreNum + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -58,13 +54,6 @@ func newAddNodes() *Case {
 	}
 
 	ratio := 0.05
-	meanLeaderCount := regionNum / storeNum
-	maxLeaderCount := int((1.0 + ratio) * float64(meanLeaderCount))
-	minLeaderCount := int((1.0 - ratio) * float64(meanLeaderCount))
-	meanRegionCount := regionNum * 3 / storeNum
-	maxRegionCount := int((1.0 + ratio) * float64(meanRegionCount))
-	minRegionCount := int((1.0 - ratio) * float64(meanRegionCount))
-
 	simCase.Checker = func(regions *core.RegionsInfo, stats []dto.StoreStats) bool {
 		res := true
 		leaderCounts := make([]int, 0, storeNum)
@@ -74,12 +63,7 @@ func newAddNodes() *Case {
 			regionCount := regions.GetStoreRegionCount(uint64(i))
 			leaderCounts = append(leaderCounts, leaderCount)
 			regionCounts = append(regionCounts, regionCount)
-			if leaderCount < minLeaderCount || leaderCount > maxLeaderCount {
-				res = false
-			}
-			if regionCount < minRegionCount || regionCount > maxRegionCount {
-				res = false
-			}
+			res = res && leaderAndRegionIsUniform(leaderCount, regionCount, regionNum, ratio)
 		}
 
 		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts), zap.Ints("region", regionCounts))

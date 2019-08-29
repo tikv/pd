@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 )
 
 // Store is used to simulate tikv.
@@ -111,4 +112,39 @@ func NewCase(name string) *Case {
 		return f()
 	}
 	return nil
+}
+
+func leaderAndRegionIsUniform(leaderCount, regionCount, regionNum int, ratio float64) bool {
+	return leaderIsUniform(leaderCount, regionNum, ratio) && regionIsUniform(regionCount, regionNum, ratio)
+}
+
+func leaderIsUniform(leaderCount, regionNum int, ratio float64) bool {
+	return isUniform(leaderCount, regionNum/3, ratio)
+}
+
+func regionIsUniform(regionCount, regionNum int, ratio float64) bool {
+	return isUniform(regionCount, regionNum, ratio)
+}
+
+func isUniform(count, meanCount int, ratio float64) bool {
+	maxCount := int((1.0 + ratio) * float64(meanCount))
+	minCount := int((1.0 - ratio) * float64(meanCount))
+	return minCount <= count && count <= maxCount
+}
+
+func readConfig() (int, int) {
+	storeNum := simutil.CaseConfigure.StoreNum
+	regionNum := simutil.CaseConfigure.RegionNum
+	if storeNum < 3 || regionNum == 0 {
+		simutil.Logger.Fatal("Store num should be larger than 3 and region num must not be 0")
+	}
+	return storeNum, regionNum
+}
+
+func getFullStoreNum(storeNum int, emptyRatio float64) uint64 {
+	fullStoreNum := uint64(float64(storeNum) * (1 - emptyRatio))
+	if fullStoreNum < 3 || fullStoreNum == uint64(storeNum) {
+		fullStoreNum = 3
+	}
+	return fullStoreNum
 }
