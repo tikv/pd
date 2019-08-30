@@ -107,13 +107,16 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	}
 	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
 	op2 := NewOperator("test", 2, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op3 := NewOperator("test", 3, &metapb.RegionEpoch{}, OpRegion, steps...)
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
 	// Adds operator and pushes to the notifier queue.
 	{
 		oc.SetOperator(op1)
+		oc.SetOperator(op3)
 		oc.SetOperator(op2)
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
+		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
 	}
 	// fisrt poll got nil
@@ -127,6 +130,13 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	c.Assert(r, NotNil)
 	c.Assert(next, IsTrue)
 	c.Assert(r.GetID(), Equals, region1.GetID())
+
+	// found op3 with nil region, remove it
+	c.Assert(oc.GetOperator(3), NotNil)
+	r, next = oc.pollNeedDispatchRegion()
+	c.Assert(r, IsNil)
+	c.Assert(next, IsTrue)
+	c.Assert(oc.GetOperator(3), IsNil)
 	r, next = oc.pollNeedDispatchRegion()
 	c.Assert(r, IsNil)
 	c.Assert(next, IsFalse)
@@ -137,4 +147,7 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	c.Assert(r, NotNil)
 	c.Assert(next, IsTrue)
 	c.Assert(r.GetID(), Equals, region2.GetID())
+	r, next = oc.pollNeedDispatchRegion()
+	c.Assert(r, IsNil)
+	c.Assert(next, IsFalse)
 }
