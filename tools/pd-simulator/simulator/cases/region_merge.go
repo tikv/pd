@@ -56,17 +56,15 @@ func newRegionMerge() *Case {
 	ratio := 0.05
 	mergeRatio := 4 // when max-merge-region-size is 20, per region will reach 40MB
 	simCase.Checker = func(regions *core.RegionsInfo, stats []dto.StoreStats) bool {
-		res := true
 		sum := 0
 		regionCounts := make([]int, 0, storeNum)
 		for i := 1; i <= storeNum; i++ {
 			regionCount := regions.GetStoreRegionCount(uint64(i))
 			regionCounts = append(regionCounts, regionCount)
-			res = res && isUniform(regionCount, regionNum/mergeRatio, ratio)
 			sum += regionCount
 		}
-		simutil.Logger.Info("current counts", zap.Ints("region", regionCounts))
-		return res || sum <= storeNum*regionNum/mergeRatio
+		simutil.Logger.Info("current counts", zap.Ints("region", regionCounts), zap.Int64("average region size", regions.GetAverageRegionSize()))
+		return isUniform(sum, storeNum*regionNum/mergeRatio, ratio)
 	}
 	return &simCase
 }
