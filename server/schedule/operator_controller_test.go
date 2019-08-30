@@ -15,9 +15,11 @@ package schedule
 
 import (
 	"container/heap"
+	"sync"
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
@@ -91,6 +93,46 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	ApplyOperator(tc, op2)
 	oc.Dispatch(region2, "test")
 	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_SUCCESS)
+}
+
+// issue #1716
+func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderRegion(1, 2, 1)
+	region1 := tc.GetRegion(1)
+	steps := []OperatorStep{
+		RemovePeer{FromStore: 1},
+		AddPeer{ToStore: 1, PeerID: 4},
+	}
+	// finished op with normal priority
+	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
+	// unfinished op with high priority
+	op2 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion|OpAdmin, steps...)
+
+	oc.SetOperator(op1)
+
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/concurrentRemoveOperator", "return(true)"), IsNil)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		oc.Dispatch(region1, "test")
+		wg.Done()
+	}()
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		success := oc.AddOperator(op2)
+		// If the assert failed before wg.Done, the test will be blocked.
+		defer c.Assert(success, IsTrue)
+		wg.Done()
+	}()
+	wg.Wait()
+
+	c.Assert(oc.GetOperator(1), Equals, op2)
 }
 
 func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
