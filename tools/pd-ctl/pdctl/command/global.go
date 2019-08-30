@@ -16,7 +16,6 @@ package command
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -77,8 +76,10 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 		o(b)
 	}
 	var resp string
-	var err error
-	tryURLs(cmd, func(endpoint string) error {
+
+	endpoints := getEndpoints(cmd)
+	err := tryURLs(cmd, endpoints, func(endpoint string) error {
+		var err error
 		url := endpoint + "/" + prefix
 		if method == "" {
 			method = http.MethodGet
@@ -113,7 +114,7 @@ func dail(req *http.Request) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("[%d] %s", resp.StatusCode, msg), nil
+		return "", errors.Errorf("[%d] %s", resp.StatusCode, msg)
 	}
 
 	content, err := ioutil.ReadAll(resp.Body)
@@ -128,13 +129,8 @@ type DoFunc func(endpoint string) error
 
 // tryURLs issues requests to each URL and tries next one if there
 // is an error
-func tryURLs(cmd *cobra.Command, f DoFunc) {
-	addrs, err := cmd.Flags().GetString("pd")
-	if err != nil {
-		cmd.Println("get pd address failed, should set flag with '-u'")
-		os.Exit(1)
-	}
-	endpoints := strings.Split(addrs, ",")
+func tryURLs(cmd *cobra.Command, endpoints []string, f DoFunc) error {
+	var err error
 	for _, endpoint := range endpoints {
 		var u *url.URL
 		u, err = url.Parse(endpoint)
@@ -156,15 +152,25 @@ func tryURLs(cmd *cobra.Command, f DoFunc) {
 		}
 		break
 	}
-	if err != nil {
-		cmd.Println("after trying all endpoints, no endpoint is available, the last error we met:", err)
+	if len(endpoints) > 1 && err != nil {
+		err = errors.Errorf("after trying all endpoints, no endpoint is available, the last error we met: %s", err)
 	}
+	return err
 }
 
-func printResponseError(r *http.Response) error {
-	fmt.Printf("[%d]:", r.StatusCode)
-	_, err := io.Copy(os.Stdout, r.Body)
-	return err
+func getEndpoints(cmd *cobra.Command) []string {
+	addrs, err := cmd.Flags().GetString("pd")
+	if err != nil {
+		cmd.Println("get pd address failed, should set flag with '-u'")
+		os.Exit(1)
+	}
+	eps := strings.Split(addrs, ",")
+	for i, ep := range eps {
+		if j := strings.Index(ep, "//"); j == -1 {
+			eps[i] = "//" + ep
+		}
+	}
+	return eps
 }
 
 func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
@@ -174,23 +180,29 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 		return
 	}
 
-	tryURLs(cmd, func(endpoint string) error {
+	endpoints := getEndpoints(cmd)
+	err = tryURLs(cmd, endpoints, func(endpoint string) error {
+		var msg []byte
+		var r *http.Response
 		url := endpoint + "/" + prefix
-		r, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
+		r, err = dialClient.Post(url, "application/json", bytes.NewBuffer(data))
 		if err != nil {
 			return err
 		}
 		defer r.Body.Close()
 		if r.StatusCode != http.StatusOK {
-			if err := printResponseError(r); err != nil {
-				cmd.Println(err)
+			msg, err = ioutil.ReadAll(r.Body)
+			if err != nil {
+				return err
 			}
-			return nil
+			return errors.Errorf("[%d] %s", r.StatusCode, msg)
 		}
-		cmd.Println("success!")
 		return nil
 	})
-
+	if err != nil {
+		cmd.Println(err)
+	}
+	cmd.Println("Success!")
 }
 
 // UsageTemplate will used to generate a help information

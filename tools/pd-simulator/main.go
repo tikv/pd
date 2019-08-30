@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/tools/pd-analysis"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
@@ -58,7 +59,7 @@ func main() {
 	simutil.InitCaseConfig(*storeNum, *regionNum, *enableTransferRegionCounter)
 	statistics.Denoising = false
 	if simutil.CaseConfigure.EnableTransferRegionCounter {
-		simutil.TransferRegionCounter.Init()
+		pdAnalysis.TransferRegionCounter.Init(simutil.CaseConfigure.StoreNum, simutil.CaseConfigure.RegionNum)
 	}
 
 	if *caseName == "" {
@@ -179,11 +180,8 @@ EXIT:
 
 	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, simCase, driver.TickCount(), time.Since(start))
 	driver.PrintStatistics()
-	if simutil.TransferRegionCounter.IsValid {
-		simutil.Logger.Info("Total Schedules Graph: ")
-		simutil.TransferRegionCounter.PrintGraph()
-		simutil.TransferRegionCounter.Result()
-		simutil.TransferRegionCounter.PrintResult()
+	if pdAnalysis.TransferRegionCounter.IsValid {
+		pdAnalysis.TransferRegionCounter.PrintResult()
 	}
 
 	if simResult != "OK" {

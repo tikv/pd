@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package simutil
+package pdAnalysis
 
 import (
 	. "github.com/pingcap/check"
@@ -36,8 +36,7 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 			{0, 2, 3, 4, 0, 3, 0},
 			{0, 5, 9, 0, 0, 0, 0},
 			{0, 0, 8, 0, 0, 0, 0}}
-		InitCaseConfig(6, 3000, true)
-		TransferRegionCounter.Init()
+		TransferRegionCounter.Init(6, 3000)
 		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
 		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(0))
 		TransferRegionCounter.GraphMat = test
@@ -54,8 +53,7 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 			{0, 0, 0, 0, 0, 0, 0},
 			{0, 1, 0, 0, 0, 0, 0},
 			{0, 0, 1, 0, 0, 0, 0}}
-		InitCaseConfig(6, 3000, true)
-		TransferRegionCounter.Init()
+		TransferRegionCounter.Init(6, 3000)
 		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
 		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(0))
 		TransferRegionCounter.GraphMat = test
@@ -74,8 +72,7 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 			{0, 133, 0, 140, 0, 93, 0, 114, 0},
 			{0, 0, 48, 0, 84, 1, 48, 0, 20},
 			{0, 61, 2, 57, 7, 122, 1, 21, 0}}
-		InitCaseConfig(8, 3000, true)
-		TransferRegionCounter.Init()
+		TransferRegionCounter.Init(8, 3000)
 		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
 		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(0))
 		TransferRegionCounter.GraphMat = test
@@ -87,8 +84,7 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 
 func (t *testCounterRedundantSuite) TestAddEdge(c *C) {
 	{
-		InitCaseConfig(6, 3000, true)
-		TransferRegionCounter.Init()
+		TransferRegionCounter.Init(6, 3000)
 		TransferRegionCounter.AddTarget(130, 3)
 		TransferRegionCounter.AddSource(130, 2)
 		c.Assert(TransferRegionCounter.GraphMat[2][3], Equals, uint64(1))

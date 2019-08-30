@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package simutil
+package pdAnalysis
 
 import (
 	"fmt"
@@ -40,9 +40,9 @@ type TransferRegionCount struct {
 var TransferRegionCounter TransferRegionCount
 
 // Init for TransferRegionCount
-func (c *TransferRegionCount) Init() {
-	c.storeNum = CaseConfigure.StoreNum
-	c.regionNum = CaseConfigure.RegionNum
+func (c *TransferRegionCount) Init(storeNum, regionNum int) {
+	c.storeNum = storeNum
+	c.regionNum = regionNum
 	c.IsValid = true
 	c.Redundant = 0
 	c.Necessary = 0
@@ -73,7 +73,8 @@ func (c *TransferRegionCount) AddSource(regionID, sourceStoreID uint64) {
 		c.GraphMat[sourceStoreID][targetStoreID]++
 		delete(c.regionMap, regionID)
 	} else {
-		Logger.Fatal("Error in map")
+		fmt.Println("Error when add sourceStoreID %u with regionID %u in transfer region map", sourceStoreID, regionID)
+		os.Exit(-1)
 	}
 }
 
@@ -144,6 +145,11 @@ func (c *TransferRegionCount) PrintGraph() {
 
 // PrintResult will print result to log and csv file.
 func (c *TransferRegionCount) PrintResult() {
+	//Output log
+	fmt.Println("Total Schedules Graph: ")
+	c.PrintGraph()
+	//Solve data
+	c.Result()
 	//Output log
 	fmt.Println("Redundant Loop: ")
 	for index, value := range c.loopResultPath {
