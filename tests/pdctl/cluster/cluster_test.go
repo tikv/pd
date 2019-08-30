@@ -15,6 +15,7 @@ package cluster_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -45,6 +46,8 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()
+	i := strings.Index(pdAddr, "//")
+	pdAddr = pdAddr[i+2:]
 	cmd := pdctl.InitCommand()
 	defer cluster.Destroy()
 

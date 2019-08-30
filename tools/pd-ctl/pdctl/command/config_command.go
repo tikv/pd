@@ -301,7 +301,7 @@ func setNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := path.Join(namespacePrefix, name)
 	err := postConfigDataWithPath(cmd, opt, val, prefix)
 	if err != nil {
-		cmd.Printf("Failed to set namespace:%s config: %s\n", name, err)
+		cmd.Printf("Failed to set namespace: %s error: %s\n", name, err)
 		return
 	}
 	cmd.Println("Success!")
