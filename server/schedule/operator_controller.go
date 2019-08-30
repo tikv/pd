@@ -125,8 +125,9 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			oc.pushHistory(op)
 			oc.opRecords.Put(op, pdpb.OperatorStatus_SUCCESS)
 			oc.PromoteWaitingOperator()
-		} else if timeout && oc.RemoveTimeoutOperator(op) {
+		} else if timeout && oc.RemoveOperator(op) {
 			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
+			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 			oc.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
 			oc.PromoteWaitingOperator()
 		}
@@ -350,16 +351,6 @@ func (oc *OperatorController) RemoveOperator(op *operator.Operator) (found bool)
 	oc.Lock()
 	defer oc.Unlock()
 	return oc.removeOperatorLocked(op)
-}
-
-// RemoveTimeoutOperator removes a operator which is timeout from the running operators.
-func (oc *OperatorController) RemoveTimeoutOperator(op *operator.Operator) (found bool) {
-	oc.Lock()
-	defer oc.Unlock()
-	if found = oc.removeOperatorLocked(op); found {
-		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
-	}
-	return
 }
 
 // GetOperatorStatus gets the operator and its status with the specify id.
