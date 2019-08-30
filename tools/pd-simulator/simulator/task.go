@@ -21,7 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	pdAnalysis "github.com/pingcap/pd/tools/pd-analysis"
 )
 
 // Task running in node.
@@ -336,8 +336,8 @@ func (a *removePeer) Step(r *RaftEngine) {
 			}
 		}
 		a.finished = true
-		if simutil.TransferRegionCounter.IsValid {
-			simutil.TransferRegionCounter.AddSource(a.regionID, a.peer.StoreId)
+		if pdAnalysis.TransferRegionCounter.IsValid {
+			pdAnalysis.TransferRegionCounter.AddSource(a.regionID, a.peer.StoreId)
 		}
 	}
 }
@@ -386,8 +386,8 @@ func (a *addLearner) Step(r *RaftEngine) {
 			r.schedulerStats.taskStats.incAddLeaner(region.GetID())
 		}
 		a.finished = true
-		if simutil.TransferRegionCounter.IsValid {
-			simutil.TransferRegionCounter.AddTarget(a.regionID, a.peer.StoreId)
+		if pdAnalysis.TransferRegionCounter.IsValid {
+			pdAnalysis.TransferRegionCounter.AddTarget(a.regionID, a.peer.StoreId)
 		}
 	}
 }
