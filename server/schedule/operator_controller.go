@@ -141,6 +141,7 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 		log.Debug("remove operator because region disappeared",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Stringer("operator", op))
+		operatorCounter.WithLabelValues(op.Desc(), "disappear").Inc()
 		oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 		return nil, true
 	}
@@ -214,7 +215,7 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 
 	if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
 		for _, op := range ops {
-			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
+			operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 			oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 		}
 		return false
@@ -292,7 +293,7 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	if old, ok := oc.operators[regionID]; ok {
 		_ = oc.removeOperatorLocked(old)
 		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", old))
-		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
+		operatorCounter.WithLabelValues(old.Desc(), "replace").Inc()
 		oc.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
 	}
 
