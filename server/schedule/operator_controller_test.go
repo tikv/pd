@@ -45,8 +45,9 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	oc.SetOperator(op1)
 	oc.SetOperator(op2)
 	go func() {
+		c.Assert(oc.RemoveOperator(op1), IsTrue)
 		for {
-			oc.RemoveOperator(op1)
+			c.Assert(oc.RemoveOperator(op1), IsFalse)
 		}
 	}()
 	go func() {
