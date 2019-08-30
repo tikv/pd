@@ -51,8 +51,9 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	oc.SetOperator(op1)
 	oc.SetOperator(op2)
 	go func() {
+		c.Assert(oc.RemoveOperator(op1), IsTrue)
 		for {
-			oc.RemoveOperator(op1)
+			c.Assert(oc.RemoveOperator(op1), IsFalse)
 		}
 	}()
 	go func() {
@@ -158,27 +159,27 @@ func (t *testOperatorControllerSuite) TestStorelimit(c *C) {
 	for i := uint64(1); i <= 5; i++ {
 		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
-		oc.RemoveOperator(op)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
 	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
-	oc.RemoveOperator(op)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
 
 	oc.SetStoreLimit(2, 2)
 	for i := uint64(1); i <= 10; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
-		oc.RemoveOperator(op)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
 	oc.SetAllStoresLimit(1)
 	for i := uint64(1); i <= 5; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
-		oc.RemoveOperator(op)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
 	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
-	oc.RemoveOperator(op)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
 }
 
 // #1652
