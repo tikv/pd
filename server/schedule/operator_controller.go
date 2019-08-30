@@ -136,6 +136,11 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 	}
 	r = oc.cluster.GetRegion(regionID)
 	if r == nil {
+		_ = oc.removeOperatorLocked(op)
+		log.Debug("remove operator because region disappeared",
+			zap.Uint64("region-id", op.RegionID()),
+			zap.Stringer("operator", op))
+		oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 		return nil, true
 	}
 	step := op.Check(r)
