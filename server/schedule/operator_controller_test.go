@@ -98,7 +98,7 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	tc := mockcluster.NewCluster(opt)
 	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
 	tc.AddLeaderStore(1, 2)
-	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
 	tc.AddLeaderRegion(4, 2, 1)
