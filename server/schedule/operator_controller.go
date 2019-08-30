@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/juju/ratelimit"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -90,6 +91,9 @@ func NewOperatorController(cluster Cluster, hbStreams HeartbeatStreams) *Operato
 func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 	// Check existed operator.
 	if op := oc.GetOperator(region.GetID()); op != nil {
+		failpoint.Inject("concurrentRemoveOperator", func() {
+			time.Sleep(500 * time.Millisecond)
+		})
 		timeout := op.IsTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
