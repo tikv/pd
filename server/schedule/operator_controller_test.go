@@ -107,6 +107,7 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
+	tc.AddLeaderRegion(4, 2, 1)
 	steps := []operator.OpStep{
 		operator.RemovePeer{FromStore: 2},
 		operator.AddPeer{ToStore: 2, PeerID: 4},
@@ -114,15 +115,19 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
 	op2 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	op3 := operator.NewOperator("test", "test", 3, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op4 := operator.NewOperator("test", "test", 4, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
+	region4 := tc.GetRegion(4)
 	// Adds operator and pushes to the notifier queue.
 	{
 		oc.SetOperator(op1)
 		oc.SetOperator(op3)
+		oc.SetOperator(op4)
 		oc.SetOperator(op2)
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
+		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
 	}
 	// fisrt poll got nil
@@ -137,15 +142,18 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	c.Assert(next, IsTrue)
 	c.Assert(r.GetID(), Equals, region1.GetID())
 
-	// found op3 with nil region, remove it
+	// find op3 with nil region, remove it
 	c.Assert(oc.GetOperator(3), NotNil)
 	r, next = oc.pollNeedDispatchRegion()
 	c.Assert(r, IsNil)
 	c.Assert(next, IsTrue)
 	c.Assert(oc.GetOperator(3), IsNil)
+
+	// find op4 finished
 	r, next = oc.pollNeedDispatchRegion()
-	c.Assert(r, IsNil)
-	c.Assert(next, IsFalse)
+	c.Assert(r, NotNil)
+	c.Assert(next, IsTrue)
+	c.Assert(r.GetID(), Equals, region4.GetID())
 
 	// after waiting 500 millseconds, the region2 need to dispatch
 	time.Sleep(400 * time.Millisecond)
