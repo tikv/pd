@@ -16,6 +16,7 @@ package analysis
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,17 +24,21 @@ import (
 
 // TransferRegionCount is to count transfer schedule for judging whether redundant
 type TransferRegionCount struct {
-	storeNum        int
-	regionNum       int
-	IsValid         bool
-	Redundant       uint64
-	Necessary       uint64
-	regionMap       map[uint64]uint64
-	visited         []bool
-	GraphMat        [][]uint64
-	mutex           sync.Mutex
-	loopResultPath  [][]int
-	loopResultCount []uint64
+	storeNum          int
+	scheduledStoreNum int
+	regionNum         int
+	IsValid           bool
+	Redundant         uint64
+	Necessary         uint64
+	regionMap         map[uint64]uint64
+	visited           []bool
+	graphMap          map[uint64]map[uint64]uint64
+	graphMat          [][]uint64
+	indexArray        []uint64
+	unIndexMap        map[uint64]int
+	mutex             sync.Mutex
+	loopResultPath    [][]int
+	loopResultCount   []uint64
 }
 
 // TransferRegionCounter is an global instance for TransferRegionCount
@@ -42,16 +47,14 @@ var TransferRegionCounter TransferRegionCount
 // Init for TransferRegionCount
 func (c *TransferRegionCount) Init(storeNum, regionNum int) {
 	c.storeNum = storeNum
+	c.scheduledStoreNum = 0
 	c.regionNum = regionNum
 	c.IsValid = true
 	c.Redundant = 0
 	c.Necessary = 0
 	c.regionMap = make(map[uint64]uint64)
-	c.visited = make([]bool, c.storeNum+1)
-	for i := 0; i < c.storeNum+1; i++ {
-		tmp := make([]uint64, c.storeNum+1)
-		c.GraphMat = append(c.GraphMat, tmp)
-	}
+	c.unIndexMap = make(map[uint64]int)
+	c.graphMap = make(map[uint64]map[uint64]uint64)
 	c.loopResultPath = c.loopResultPath[:0]
 	c.loopResultCount = c.loopResultCount[:0]
 }
@@ -70,7 +73,13 @@ func (c *TransferRegionCount) AddSource(regionID, sourceStoreID uint64) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if targetStoreID, ok := c.regionMap[regionID]; ok {
-		c.GraphMat[sourceStoreID][targetStoreID]++
+		if edge, ok := c.graphMap[sourceStoreID]; ok {
+			edge[targetStoreID]++
+		} else {
+			edge = make(map[uint64]uint64)
+			edge[targetStoreID]++
+			c.graphMap[sourceStoreID] = edge
+		}
 		delete(c.regionMap, regionID)
 	} else {
 		fmt.Println("Error when add sourceStoreID %u with regionID %u in transfer region map", sourceStoreID, regionID)
@@ -78,18 +87,55 @@ func (c *TransferRegionCount) AddSource(regionID, sourceStoreID uint64) {
 	}
 }
 
-//DFS is used to find all the looped flow in such a directed graph.
+//prepare is to change sparse map to dense mat.
+func (c *TransferRegionCount) prepare() {
+	set := make(map[uint64]struct{})
+	for sourceID, edge := range c.graphMap {
+		for targetID := range edge {
+			set[sourceID] = struct{}{}
+			set[targetID] = struct{}{}
+		}
+	}
+
+	c.scheduledStoreNum = len(set)
+	c.visited = make([]bool, c.scheduledStoreNum+1)
+	c.indexArray = make([]uint64, 0, c.scheduledStoreNum)
+	for storeID := range set {
+		c.indexArray = append(c.indexArray, storeID)
+	}
+	sort.Slice(c.indexArray, func(i, j int) bool { return c.indexArray[i] < c.indexArray[j] })
+
+	for index, storeID := range c.indexArray {
+		c.unIndexMap[storeID] = index
+	}
+
+	c.graphMat = make([][]uint64, 0)
+	for i := 0; i < c.scheduledStoreNum; i++ {
+		tmp := make([]uint64, c.scheduledStoreNum)
+		c.graphMat = append(c.graphMat, tmp)
+	}
+
+	for sourceID, edge := range c.graphMap {
+		for targetID, flow := range edge {
+			sourceIndex := c.unIndexMap[sourceID]
+			targetIndex := c.unIndexMap[targetID]
+			c.graphMat[sourceIndex][targetIndex] = flow
+		}
+	}
+}
+
+//dfs is used to find all the looped flow in such a directed graph.
 //For each point U in the graph, a DFS is performed, and push the passing point v
 //to the stack. If there is an edge of `v->u`, then the corresponding looped flow
 //is marked and removed. When all the output edges of the point v are traversed,
 //pop the point v out of the stack.
-func (c *TransferRegionCount) DFS(cur int, curFlow uint64, path []int) {
+func (c *TransferRegionCount) dfs(cur int, curFlow uint64, path []int) {
 	//push stack
 	path = append(path, cur)
 	c.visited[cur] = true
 
-	for target := path[0]; target < c.storeNum+1; target++ {
-		flow := c.GraphMat[cur][target]
+	for target := path[0]; target < c.scheduledStoreNum; target++ {
+		flow := c.graphMat[cur][target]
 		if flow == 0 {
 			continue
 		}
@@ -97,7 +143,7 @@ func (c *TransferRegionCount) DFS(cur int, curFlow uint64, path []int) {
 			//get curMinFlow
 			curMinFlow := flow
 			for i := 0; i < len(path)-1; i++ {
-				pathFlow := c.GraphMat[path[i]][path[i+1]]
+				pathFlow := c.graphMat[path[i]][path[i+1]]
 				if curMinFlow > pathFlow {
 					curMinFlow = pathFlow
 				}
@@ -107,12 +153,12 @@ func (c *TransferRegionCount) DFS(cur int, curFlow uint64, path []int) {
 				c.loopResultPath = append(c.loopResultPath, path)
 				c.loopResultCount = append(c.loopResultCount, curMinFlow*uint64(len(path)))
 				for i := 0; i < len(path)-1; i++ {
-					c.GraphMat[path[i]][path[i+1]] -= curMinFlow
+					c.graphMat[path[i]][path[i+1]] -= curMinFlow
 				}
-				c.GraphMat[cur][target] -= curMinFlow
+				c.graphMat[cur][target] -= curMinFlow
 			}
 		} else if !c.visited[target] {
-			c.DFS(target, flow, path)
+			c.dfs(target, flow, path)
 		}
 	}
 	//pop stack
@@ -121,25 +167,36 @@ func (c *TransferRegionCount) DFS(cur int, curFlow uint64, path []int) {
 
 //Result will count redundant schedule and necessary schedule
 func (c *TransferRegionCount) Result() {
-	for i := 0; i < c.storeNum; i++ {
-		c.DFS(i+1, 1<<16, make([]int, 0))
+	c.prepare()
+
+	for i := 0; i < c.scheduledStoreNum; i++ {
+		c.dfs(i, 1<<16, make([]int, 0))
 	}
 
 	for _, value := range c.loopResultCount {
 		c.Redundant += value
 	}
 
-	for _, row := range c.GraphMat {
+	for _, row := range c.graphMat {
 		for _, flow := range row {
 			c.Necessary += flow
 		}
 	}
 }
 
-// PrintGraph will print current graph mat.
-func (c *TransferRegionCount) PrintGraph() {
-	for _, value := range c.GraphMat {
-		fmt.Println(value)
+// printGraph will print current graph mat.
+func (c *TransferRegionCount) printGraph() {
+	fmt.Print("\t")
+	for _, storeID := range c.indexArray {
+		fmt.Print(storeID, "\t")
+	}
+	fmt.Println()
+	for index, row := range c.graphMat {
+		fmt.Print(c.indexArray[index], "\t")
+		for _, flow := range row {
+			fmt.Print(flow, "\t")
+		}
+		fmt.Println()
 	}
 }
 
@@ -147,7 +204,7 @@ func (c *TransferRegionCount) PrintGraph() {
 func (c *TransferRegionCount) PrintResult() {
 	//Output log
 	fmt.Println("Total Schedules Graph: ")
-	c.PrintGraph()
+	c.printGraph()
 	//Solve data
 	c.Result()
 	//Output log
@@ -156,7 +213,7 @@ func (c *TransferRegionCount) PrintResult() {
 		fmt.Println(index, value, c.loopResultCount[index])
 	}
 	fmt.Println("Necessary Schedules Graph: ")
-	c.PrintGraph()
+	c.printGraph()
 	fmt.Println("Redundant Schedules: ", c.Redundant)
 	fmt.Println("Necessary Schedules: ", c.Necessary)
 
