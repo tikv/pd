@@ -293,6 +293,20 @@ func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	return c.coordinator.opController
 }
 
+// GetHeartbeatStreams returns the heartbeat streams.
+func (c *RaftCluster) GetHeartbeatStreams() *heartbeatStreams {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.hbStreams
+}
+
+// GetCoordinator returns the coordinator.
+func (c *RaftCluster) GetCoordinator() *coordinator {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator
+}
+
 // handleStoreHeartbeat updates the store status.
 func (c *RaftCluster) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.Lock()

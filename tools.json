@@ -19,6 +19,10 @@
     {
       "Repository": "github.com/golangci/golangci-lint/cmd/golangci-lint",
       "Commit": "4ba2155996359eabd8800d1fbf3e3a9777c80490"
+    },
+    {
+      "Repository": "golang.org/x/tools/cmd/goimports",
+      "Commit": "04b5d21e00f1f47bd824a6ade581e7189bacde87"
     }
   ],
   "RetoolVersion": "1.3.7"

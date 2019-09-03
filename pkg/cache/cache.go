@@ -13,9 +13,7 @@
 
 package cache
 
-import (
-	"sync"
-)
+import "sync"
 
 // Cache is an interface for cache system
 type Cache interface {

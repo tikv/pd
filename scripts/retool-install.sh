@@ -23,3 +23,5 @@ which retool >/dev/null || go get github.com/twitchtv/retool
 ./scripts/retool add github.com/securego/gosec/cmd/gosec 1.0.0
 # go fail
 ./scripts/retool add github.com/pingcap/failpoint/failpoint-ctl master
+# deadlock detection
+./scripts/retool add golang.org/x/tools/cmd/goimports 04b5d21e00f1f47bd824a6ade581e7189bacde87
