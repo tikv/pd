@@ -28,6 +28,7 @@ type TransferRegionCount struct {
 	scheduledStoreNum int
 	regionNum         int
 	IsValid           bool
+	IsReady           bool
 	Redundant         uint64
 	Necessary         uint64
 	regionMap         map[uint64]uint64
@@ -50,6 +51,7 @@ func (c *TransferRegionCount) Init(storeNum, regionNum int) {
 	c.scheduledStoreNum = 0
 	c.regionNum = regionNum
 	c.IsValid = true
+	c.IsReady = false
 	c.Redundant = 0
 	c.Necessary = 0
 	c.regionMap = make(map[uint64]uint64)
@@ -167,7 +169,9 @@ func (c *TransferRegionCount) dfs(cur int, curFlow uint64, path []int) {
 
 //Result will count redundant schedule and necessary schedule
 func (c *TransferRegionCount) Result() {
-	c.prepare()
+	if !c.IsReady {
+		c.prepare()
+	}
 
 	for i := 0; i < c.scheduledStoreNum; i++ {
 		c.dfs(i, 1<<16, make([]int, 0))
@@ -202,6 +206,7 @@ func (c *TransferRegionCount) printGraph() {
 
 // PrintResult will print result to log and csv file.
 func (c *TransferRegionCount) PrintResult() {
+	c.prepare()
 	//Output log
 	fmt.Println("Total Schedules Graph: ")
 	c.printGraph()
@@ -214,6 +219,7 @@ func (c *TransferRegionCount) PrintResult() {
 	}
 	fmt.Println("Necessary Schedules Graph: ")
 	c.printGraph()
+	fmt.Println("Scheduled Store: ", c.scheduledStoreNum)
 	fmt.Println("Redundant Schedules: ", c.Redundant)
 	fmt.Println("Necessary Schedules: ", c.Necessary)
 

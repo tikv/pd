@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 	"time"
 )
 
@@ -64,25 +65,29 @@ func newRedundantBalanceRegion() *Case {
 		})
 	}
 
+	storesLastUpdateTime := make([]int64, storeNum+1, storeNum+1)
+	storeLastAvailable := make([]uint64, storeNum+1, storeNum+1)
 	simCase.Checker = func(regions *core.RegionsInfo, stats []dto.StoreStats) bool {
 		res := true
 		curTime := time.Now().Unix()
-		for i := 0; i < storeNum; i++ {
-			sliceStats := stats[i]
-			simCase.Stores[i].Available = sliceStats.GetAvailable()
-			if curTime-simCase.Stores[i].LastUpdateTime > 60 {
-				if simCase.Stores[i].LastAvailable != simCase.Stores[i].Available {
+		storesAvailable := make([]uint64, 0, storeNum+1)
+		for i := 1; i <= storeNum; i++ {
+			available := stats[i].GetAvailable()
+			storesAvailable = append(storesAvailable, available)
+			if curTime-storesLastUpdateTime[i] > 60 {
+				if storeLastAvailable[i] != available {
 					res = false
 				}
-				if sliceStats.ToCompactionSize != 0 {
+				if stats[i].ToCompactionSize != 0 {
 					res = false
 				}
-				simCase.Stores[i].LastUpdateTime = curTime
-				simCase.Stores[i].LastAvailable = simCase.Stores[i].Available
+				storesLastUpdateTime[i] = curTime
+				storeLastAvailable[i] = available
 			} else {
 				res = false
 			}
 		}
+		simutil.Logger.Info("current counts", zap.Uint64s("storesAvailable", storesAvailable))
 		return res
 	}
 	return &simCase

@@ -90,6 +90,6 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 		TransferRegionCounter.Result()
 		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(1778))
 		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(938))
-		TransferRegionCounter.printGraph()
+		TransferRegionCounter.PrintResult()
 	}
 }
