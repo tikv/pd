@@ -72,7 +72,7 @@ func PrintPDInfo() {
 }
 
 // PrintConfigCheckMsg prints the message about configuration checks.
-func PrintConfigCheckMsg(cfg *config.Config) {
+func PrintConfigCheckMsg(cfg *Config) {
 	if len(cfg.WarningMsgs) == 0 {
 		fmt.Println("config check successful")
 		return
