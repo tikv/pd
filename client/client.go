@@ -567,14 +567,6 @@ func (c *client) GetURLs() []string {
 	return c.urls
 }
 
-// TsoReqAlloc defines how client create and reuse tsoRequest.
-type TsoReqAlloc interface {
-	// Get gets a request from alloc.
-	Get() *TsoRequest
-	// Put put a request back to alloc.
-	Put(req *TsoRequest)
-}
-
 // NewReqAlloc creates a new TsoRequest.
 // only TsoReqAlloc implementor need use this.
 func NewReqAlloc() *TsoRequest {
@@ -624,7 +616,7 @@ func (req *TsoRequest) Wait() (physical int64, logical int64, err error) {
 	select {
 	case err = <-req.done:
 		err = errors.WithStack(err)
-		req.pool.Put(req)
+		defer req.pool.Put(req)
 		if err != nil {
 			cmdFailDurationTSO.Observe(time.Since(req.start).Seconds())
 			return 0, 0, err
