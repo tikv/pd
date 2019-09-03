@@ -89,7 +89,7 @@ func (c *TransferRegionCount) AddSource(regionID, sourceStoreID uint64) {
 	}
 }
 
-//prepare is to change sparse map to dense mat.
+// prepare is to change sparse map to dense mat.
 func (c *TransferRegionCount) prepare() {
 	set := make(map[uint64]struct{})
 	for sourceID, edge := range c.graphMap {
@@ -126,13 +126,13 @@ func (c *TransferRegionCount) prepare() {
 	}
 }
 
-//dfs is used to find all the looped flow in such a directed graph.
-//For each point U in the graph, a DFS is performed, and push the passing point v
-//to the stack. If there is an edge of `v->u`, then the corresponding looped flow
-//is marked and removed. When all the output edges of the point v are traversed,
-//pop the point v out of the stack.
+// dfs is used to find all the looped flow in such a directed graph.
+// For each point U in the graph, a DFS is performed, and push the passing point v
+// to the stack. If there is an edge of `v->u`, then the corresponding looped flow
+// is marked and removed. When all the output edges of the point v are traversed,
+// pop the point v out of the stack.
 func (c *TransferRegionCount) dfs(cur int, curFlow uint64, path []int) {
-	//push stack
+	// push stack
 	path = append(path, cur)
 	c.visited[cur] = true
 
@@ -142,7 +142,7 @@ func (c *TransferRegionCount) dfs(cur int, curFlow uint64, path []int) {
 			continue
 		}
 		if path[0] == target { //is a loop
-			//get curMinFlow
+			// get curMinFlow
 			curMinFlow := flow
 			for i := 0; i < len(path)-1; i++ {
 				pathFlow := c.graphMat[path[i]][path[i+1]]
@@ -150,7 +150,7 @@ func (c *TransferRegionCount) dfs(cur int, curFlow uint64, path []int) {
 					curMinFlow = pathFlow
 				}
 			}
-			//set curMinFlow
+			// set curMinFlow
 			if curMinFlow != 0 {
 				c.loopResultPath = append(c.loopResultPath, path)
 				c.loopResultCount = append(c.loopResultCount, curMinFlow*uint64(len(path)))
@@ -163,11 +163,11 @@ func (c *TransferRegionCount) dfs(cur int, curFlow uint64, path []int) {
 			c.dfs(target, flow, path)
 		}
 	}
-	//pop stack
+	// pop stack
 	c.visited[cur] = false
 }
 
-//Result will count redundant schedule and necessary schedule
+// Result will count redundant schedule and necessary schedule
 func (c *TransferRegionCount) Result() {
 	if !c.IsReady {
 		c.prepare()
@@ -207,12 +207,12 @@ func (c *TransferRegionCount) printGraph() {
 // PrintResult will print result to log and csv file.
 func (c *TransferRegionCount) PrintResult() {
 	c.prepare()
-	//Output log
+	// Output log
 	fmt.Println("Total Schedules Graph: ")
 	c.printGraph()
-	//Solve data
+	// Solve data
 	c.Result()
-	//Output log
+	// Output log
 	fmt.Println("Redundant Loop: ")
 	for index, value := range c.loopResultPath {
 		fmt.Println(index, value, c.loopResultCount[index])
@@ -223,7 +223,7 @@ func (c *TransferRegionCount) PrintResult() {
 	fmt.Println("Redundant Schedules: ", c.Redundant)
 	fmt.Println("Necessary Schedules: ", c.Necessary)
 
-	//Output csv file
+	// Output csv file
 	fd, err := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		fmt.Printf("Error: %s\n", err)

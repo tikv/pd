@@ -21,7 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
-	analysis "github.com/pingcap/pd/tools/pd-analysis"
+	"github.com/pingcap/pd/tools/pd-analysis/analysis"
 )
 
 // Task running in node.

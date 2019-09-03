@@ -29,7 +29,7 @@ import (
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/statistics"
-	analysis "github.com/pingcap/pd/tools/pd-analysis"
+	"github.com/pingcap/pd/tools/pd-analysis/analysis"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
