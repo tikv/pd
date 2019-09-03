@@ -224,7 +224,12 @@ func (c *TransferRegionCount) PrintResult() {
 	fmt.Println("Necessary Schedules: ", c.Necessary)
 
 	//Output csv file
-	fd, _ := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	fd, err := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Printf("Error: %s\n", err)
+		return
+	}
+	defer fd.Close()
 	fdContent := strings.Join([]string{
 		toString(uint64(c.storeNum)),
 		toString(uint64(c.regionNum)),
@@ -232,8 +237,11 @@ func (c *TransferRegionCount) PrintResult() {
 		toString(c.Necessary),
 	}, ",") + "\n"
 	buf := []byte(fdContent)
-	_, _ = fd.Write(buf)
-	_ = fd.Close()
+	_, err = fd.Write(buf)
+	if err != nil {
+		fmt.Printf("Error: %s\n", err)
+		return
+	}
 }
 
 func toString(num uint64) string {
