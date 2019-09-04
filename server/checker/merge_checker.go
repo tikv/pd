@@ -102,12 +102,9 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
-	var target *core.RegionInfo
-	targetNext := m.checkTarget(region, next, target)
-	target = m.checkTarget(region, prev, target)
-	if target != targetNext && m.cluster.GetEnableOneWayMerge() {
-		checkerCounter.WithLabelValues("merge_checker", "skip_left").Inc()
-		target = targetNext
+	target := m.checkTarget(region, next, nil)
+	if !m.cluster.GetEnableOneWayMerge() {
+		target = m.checkTarget(region, prev, target)
 	}
 
 	if target == nil {

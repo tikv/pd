@@ -146,7 +146,7 @@ deadlock-enable: deadlock-setup
 deadlock-disable:
 	@$(DEADLOCK_DISABLE)
 
-failpoint-enable:
+failpoint-enable: retool-setup
 	# Converting failpoints...
 	@$(FAILPOINT_ENABLE)
 
