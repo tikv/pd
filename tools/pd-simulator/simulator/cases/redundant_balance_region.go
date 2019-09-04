@@ -15,7 +15,7 @@ package cases
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"time"
 )
@@ -64,7 +64,7 @@ func newRedundantBalanceRegion() *Case {
 		})
 	}
 
-	simCase.Checker = func(regions *core.RegionsInfo, stats []dto.StoreStats) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		curTime := time.Now().Unix()
 		for i := 0; i < storeNum; i++ {

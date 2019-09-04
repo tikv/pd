@@ -22,7 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"github.com/pkg/errors"
 )
@@ -123,7 +123,7 @@ func (d *Driver) Check() bool {
 			length = index + 1
 		}
 	}
-	stats := make([]dto.StoreStats, length)
+	stats := make([]info.StoreStats, length)
 	for index, node := range d.conn.Nodes {
 		stats[index] = *node.stats
 	}
