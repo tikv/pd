@@ -91,6 +91,7 @@ func (c *TransferRegionCount) AddSource(regionID, sourceStoreID uint64) {
 
 // prepare is to change sparse map to dense mat.
 func (c *TransferRegionCount) prepare() {
+	c.IsReady = true
 	set := make(map[uint64]struct{})
 	for sourceID, edge := range c.graphMap {
 		for targetID := range edge {
