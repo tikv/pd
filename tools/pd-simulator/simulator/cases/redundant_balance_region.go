@@ -15,7 +15,7 @@ package cases
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/dto"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 	"time"
@@ -67,7 +67,7 @@ func newRedundantBalanceRegion() *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []dto.StoreStats) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
