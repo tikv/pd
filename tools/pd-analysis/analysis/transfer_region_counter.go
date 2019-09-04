@@ -42,8 +42,16 @@ type TransferRegionCount struct {
 	loopResultCount   []uint64
 }
 
-// TransferRegionCounter is an global instance for TransferRegionCount
-var TransferRegionCounter TransferRegionCount
+var once sync.Once
+var instance *TransferRegionCount
+
+// GetTransferRegionCounter is to return singleTon for TransferRegionCount
+func GetTransferRegionCounter() *TransferRegionCount {
+	once.Do(func() {
+		instance = &TransferRegionCount{}
+	})
+	return instance
+}
 
 // Init for TransferRegionCount
 func (c *TransferRegionCount) Init(storeNum, regionNum int) {
