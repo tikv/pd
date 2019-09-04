@@ -9,9 +9,10 @@ import (
 )
 
 var (
-	input    = flag.String("input", "", "input pd log file")
-	output   = flag.String("output", "", "output file")
-	logLevel = flag.String("logLevel", "info", "log level.")
+	input    = flag.String("input", "", "input pd log file, required.")
+	output   = flag.String("output", "", "output file, default output to stdout.")
+	logLevel = flag.String("logLevel", "info", "log level, default info.")
+	style    = flag.String("style", "", "analysis style, example: transfer-region-counter")
 )
 
 // Logger is the global logger used for simulator.
@@ -39,6 +40,15 @@ func main() {
 			os.Stdout = f
 		}
 	}
-	analysis.ParseLog(*input)
-	analysis.TransferRegionCounter.PrintResult()
+	switch *style {
+	case "transfer-region-counter":
+		{
+			analysis.TransferRegionCounter.ParseLog(*input)
+			analysis.TransferRegionCounter.PrintResult()
+			break
+		}
+	default:
+		Logger.Fatal("Style is not exist.")
+	}
+
 }

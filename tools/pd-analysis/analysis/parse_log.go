@@ -10,8 +10,12 @@ import (
 	"strconv"
 )
 
+type Interpreter interface {
+	ParseLog(filename string)
+}
+
 // ParseLog is to parse log for transfer region counter.
-func ParseLog(filename string) {
+func (TransferRegionCount) ParseLog(filename string) {
 	r, _ := regexp.Compile(".*?operator finish.*?region-id=([0-9]*).*?mv peer: store ([0-9]*) to ([0-9]*).*?")
 	// Open file
 	fi, err := os.Open(filename)
