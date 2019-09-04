@@ -30,8 +30,8 @@ func addData(test [][]uint64) {
 	for i, row := range test {
 		for j, flow := range row {
 			for k := uint64(0); k < flow; k++ {
-				TransferRegionCounter.AddTarget(64, uint64(j))
-				TransferRegionCounter.AddSource(64, uint64(i))
+				GetTransferRegionCounter().AddTarget(64, uint64(j))
+				GetTransferRegionCounter().AddSource(64, uint64(i))
 			}
 		}
 	}
@@ -47,13 +47,13 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 			{0, 2, 3, 4, 0, 3, 0},
 			{0, 5, 9, 0, 0, 0, 0},
 			{0, 0, 8, 0, 0, 0, 0}}
-		TransferRegionCounter.Init(6, 3000)
-		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
-		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(0))
+		GetTransferRegionCounter().Init(6, 3000)
+		c.Assert(GetTransferRegionCounter().Redundant, Equals, uint64(0))
+		c.Assert(GetTransferRegionCounter().Necessary, Equals, uint64(0))
 		addData(test)
-		TransferRegionCounter.Result()
-		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(64))
-		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(5))
+		GetTransferRegionCounter().Result()
+		c.Assert(GetTransferRegionCounter().Redundant, Equals, uint64(64))
+		c.Assert(GetTransferRegionCounter().Necessary, Equals, uint64(5))
 	}
 	{
 		test := [][]uint64{
@@ -64,13 +64,13 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 			{0, 0, 0, 0, 0, 0, 0},
 			{0, 1, 0, 0, 0, 0, 0},
 			{0, 0, 1, 0, 0, 0, 0}}
-		TransferRegionCounter.Init(6, 3000)
-		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
-		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(0))
+		GetTransferRegionCounter().Init(6, 3000)
+		c.Assert(GetTransferRegionCounter().Redundant, Equals, uint64(0))
+		c.Assert(GetTransferRegionCounter().Necessary, Equals, uint64(0))
 		addData(test)
-		TransferRegionCounter.Result()
-		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
-		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(5))
+		GetTransferRegionCounter().Result()
+		c.Assert(GetTransferRegionCounter().Redundant, Equals, uint64(0))
+		c.Assert(GetTransferRegionCounter().Necessary, Equals, uint64(5))
 	}
 	{
 		test := [][]uint64{
@@ -83,13 +83,13 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 			{0, 133, 0, 140, 0, 93, 0, 114, 0},
 			{0, 0, 48, 0, 84, 1, 48, 0, 20},
 			{0, 61, 2, 57, 7, 122, 1, 21, 0}}
-		TransferRegionCounter.Init(8, 3000)
-		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
-		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(0))
+		GetTransferRegionCounter().Init(8, 3000)
+		c.Assert(GetTransferRegionCounter().Redundant, Equals, uint64(0))
+		c.Assert(GetTransferRegionCounter().Necessary, Equals, uint64(0))
 		addData(test)
-		TransferRegionCounter.Result()
-		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(1778))
-		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(938))
-		TransferRegionCounter.PrintResult()
+		GetTransferRegionCounter().Result()
+		c.Assert(GetTransferRegionCounter().Redundant, Equals, uint64(1778))
+		c.Assert(GetTransferRegionCounter().Necessary, Equals, uint64(938))
+		GetTransferRegionCounter().PrintResult()
 	}
 }

@@ -42,8 +42,16 @@ type TransferRegionCount struct {
 	loopResultCount   []uint64
 }
 
-// TransferRegionCounter is an global instance for TransferRegionCount
-var TransferRegionCounter TransferRegionCount
+var once sync.Once
+var instance *TransferRegionCount
+
+// GetTransferRegionCounter is to return singleTon for TransferRegionCount
+func GetTransferRegionCounter() *TransferRegionCount {
+	once.Do(func() {
+		instance = &TransferRegionCount{}
+	})
+	return instance
+}
 
 // Init for TransferRegionCount
 func (c *TransferRegionCount) Init(storeNum, regionNum int) {
@@ -91,6 +99,7 @@ func (c *TransferRegionCount) AddSource(regionID, sourceStoreID uint64) {
 
 // prepare is to change sparse map to dense mat.
 func (c *TransferRegionCount) prepare() {
+	c.IsReady = true
 	set := make(map[uint64]struct{})
 	for sourceID, edge := range c.graphMap {
 		for targetID := range edge {
