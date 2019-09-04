@@ -18,6 +18,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
@@ -69,7 +70,7 @@ func newHotRead() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		var leaderCount [5]int
 		for id := range readFlow {
 			leaderStore := regions.GetRegion(id).GetLeader().GetStoreId()

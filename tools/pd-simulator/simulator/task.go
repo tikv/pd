@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/tools/pd-analysis/analysis"
 )
 
 // Task running in node.
@@ -335,6 +336,9 @@ func (a *removePeer) Step(r *RaftEngine) {
 			}
 		}
 		a.finished = true
+		if analysis.GetTransferRegionCounter().IsValid {
+			analysis.GetTransferRegionCounter().AddSource(a.regionID, a.peer.StoreId)
+		}
 	}
 }
 
@@ -382,6 +386,9 @@ func (a *addLearner) Step(r *RaftEngine) {
 			r.schedulerStats.taskStats.incAddLeaner(region.GetID())
 		}
 		a.finished = true
+		if analysis.GetTransferRegionCounter().IsValid {
+			analysis.GetTransferRegionCounter().AddTarget(a.regionID, a.peer.StoreId)
+		}
 	}
 }
 
