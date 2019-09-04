@@ -10,6 +10,7 @@ import (
 	"strconv"
 )
 
+// Interpreter is the interface for all analysis to parse log
 type Interpreter interface {
 	ParseLog(filename string)
 }
