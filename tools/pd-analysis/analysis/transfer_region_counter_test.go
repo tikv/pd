@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pdAnalysis
+package analysis
 
 import (
 	. "github.com/pingcap/check"
@@ -26,6 +26,17 @@ var _ = Suite(&testCounterRedundantSuite{})
 
 type testCounterRedundantSuite struct{}
 
+func addData(test [][]uint64) {
+	for i, row := range test {
+		for j, flow := range row {
+			for k := uint64(0); k < flow; k++ {
+				TransferRegionCounter.AddTarget(64, uint64(j))
+				TransferRegionCounter.AddSource(64, uint64(i))
+			}
+		}
+	}
+}
+
 func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 	{
 		test := [][]uint64{
@@ -39,7 +50,7 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 		TransferRegionCounter.Init(6, 3000)
 		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
 		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(0))
-		TransferRegionCounter.GraphMat = test
+		addData(test)
 		TransferRegionCounter.Result()
 		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(64))
 		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(5))
@@ -56,7 +67,7 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 		TransferRegionCounter.Init(6, 3000)
 		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
 		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(0))
-		TransferRegionCounter.GraphMat = test
+		addData(test)
 		TransferRegionCounter.Result()
 		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
 		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(5))
@@ -75,18 +86,10 @@ func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
 		TransferRegionCounter.Init(8, 3000)
 		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(0))
 		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(0))
-		TransferRegionCounter.GraphMat = test
+		addData(test)
 		TransferRegionCounter.Result()
 		c.Assert(TransferRegionCounter.Redundant, Equals, uint64(1778))
 		c.Assert(TransferRegionCounter.Necessary, Equals, uint64(938))
-	}
-}
-
-func (t *testCounterRedundantSuite) TestAddEdge(c *C) {
-	{
-		TransferRegionCounter.Init(6, 3000)
-		TransferRegionCounter.AddTarget(130, 3)
-		TransferRegionCounter.AddSource(130, 2)
-		c.Assert(TransferRegionCounter.GraphMat[2][3], Equals, uint64(1))
+		TransferRegionCounter.PrintResult()
 	}
 }

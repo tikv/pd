@@ -22,16 +22,14 @@ import (
 
 // Store is used to simulate tikv.
 type Store struct {
-	ID             uint64
-	Status         metapb.StoreState
-	Labels         []*metapb.StoreLabel
-	Capacity       uint64
-	Available      uint64
-	LeaderWeight   float32
-	RegionWeight   float32
-	Version        string
-	LastAvailable  uint64
-	LastUpdateTime int64
+	ID           uint64
+	Status       metapb.StoreState
+	Labels       []*metapb.StoreLabel
+	Capacity     uint64
+	Available    uint64
+	LeaderWeight float32
+	RegionWeight float32
+	Version      string
 }
 
 // Region is used to simulate a region.
