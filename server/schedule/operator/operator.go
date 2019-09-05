@@ -211,7 +211,7 @@ type AddLearner struct {
 
 // ConfVerChanged returns true if the conf version has been changed by this step
 func (al AddLearner) ConfVerChanged(region *core.RegionInfo) bool {
-	if p := region.GetStoreLearner(al.ToStore); p != nil {
+	if p := region.GetStorePeer(al.ToStore); p != nil {
 		return p.GetId() == al.PeerID
 	}
 	return false

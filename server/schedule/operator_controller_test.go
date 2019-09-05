@@ -253,7 +253,10 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	// The next allocated peer should have peerid 3, so we add this peer
 	// to store 3
 	steps := []operator.OpStep{
-		operator.AddPeer{3, 3},
+		operator.AddLearner{ToStore: 3, PeerID: 3},
+		operator.PromoteLearner{ToStore: 3, PeerID: 3},
+		operator.TransferLeader{ToStore: 3},
+		operator.RemovePeer{FromStore: 1},
 	}
 
 	// Create an operator
@@ -266,9 +269,9 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	// region2 has peer 3 in pending state, so the AddPeer step
 	// is left unfinished
 	region2 := region.Clone(
-		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3}),
+		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, IsLearner: true}),
 		core.WithPendingPeers([]*metapb.Peer{
-			{Id: 3, StoreId: 3, IsLearner: false},
+			{Id: 3, StoreId: 3, IsLearner: true},
 		}),
 		core.WithIncConfVer(),
 	)
@@ -288,12 +291,42 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 
 	// Finish the step by clearing the pending state
 	region3 := region.Clone(
-		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3}),
+		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, IsLearner: true}),
 		core.WithIncConfVer(),
 	)
 	c.Assert(steps[0].IsFinish(region3), Equals, true)
 	controller.Dispatch(region3, DispatchFromHeartBeat)
 	c.Assert(op.ConfVerChanged(region3), Equals, 1)
+	c.Assert(len(stream.MsgCh()), Equals, 2)
+
+	region4 := region3.Clone(
+		core.WithPromoteLearner(3),
+		core.WithIncConfVer(),
+	)
+	c.Assert(steps[1].IsFinish(region4), Equals, true)
+	controller.Dispatch(region4, DispatchFromHeartBeat)
+	c.Assert(op.ConfVerChanged(region4), Equals, 2)
+	c.Assert(len(stream.MsgCh()), Equals, 3)
+
+	// Transfer leader
+	region5 := region4.Clone(
+		core.WithLeader(region4.GetStorePeer(3)),
+	)
+	c.Assert(steps[2].IsFinish(region5), Equals, true)
+	controller.Dispatch(region5, DispatchFromHeartBeat)
+	c.Assert(op.ConfVerChanged(region5), Equals, 2)
+	c.Assert(len(stream.MsgCh()), Equals, 4)
+
+	// Remove peer
+	region6 := region5.Clone(
+		core.WithRemoveStorePeer(1),
+		core.WithIncConfVer(),
+	)
+	c.Assert(steps[3].IsFinish(region6), Equals, true)
+	controller.Dispatch(region6, DispatchFromHeartBeat)
+	c.Assert(op.ConfVerChanged(region6), Equals, 3)
+
 	// The Operator has finished, so no message should be sent
-	c.Assert(len(stream.MsgCh()), Equals, 1)
+	c.Assert(len(stream.MsgCh()), Equals, 4)
+	c.Assert(controller.GetOperator(1), IsNil)
 }
