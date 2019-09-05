@@ -53,6 +53,7 @@ func newAddNodes() *Case {
 		})
 	}
 
+
 	ratio := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
