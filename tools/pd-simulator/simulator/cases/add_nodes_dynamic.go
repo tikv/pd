@@ -15,6 +15,7 @@ package cases
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
@@ -65,7 +66,7 @@ func newAddNodesDynamic() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	simCase.Checker = func(regions *core.RegionsInfo) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		leaderCounts := make([]int, 0, numNodes)
 		regionCounts := make([]int, 0, numNodes)

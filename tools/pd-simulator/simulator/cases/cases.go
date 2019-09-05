@@ -16,6 +16,7 @@ package cases
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 )
 
 // Store is used to simulate tikv.
@@ -40,7 +41,7 @@ type Region struct {
 }
 
 // CheckerFunc checks if the scheduler is finished.
-type CheckerFunc func(*core.RegionsInfo) bool
+type CheckerFunc func(*core.RegionsInfo, []info.StoreStats) bool
 
 // Case represents a test suite for simulator.
 type Case struct {
@@ -89,16 +90,17 @@ var IDAllocator idAllocator
 
 // CaseMap is a mapping of the cases to the their corresponding initialize functions.
 var CaseMap = map[string]func() *Case{
-	"balance-leader":       newBalanceLeader,
-	"add-nodes":            newAddNodes,
-	"add-nodes-dynamic":    newAddNodesDynamic,
-	"delete-nodes":         newDeleteNodes,
-	"region-split":         newRegionSplit,
-	"region-merge":         newRegionMerge,
-	"hot-read":             newHotRead,
-	"hot-write":            newHotWrite,
-	"makeup-down-replicas": newMakeupDownReplicas,
-	"import-data":          newImportData,
+	"balance-leader":           newBalanceLeader,
+	"redundant-balance-region": newRedundantBalanceRegion,
+	"add-nodes":                newAddNodes,
+	"add-nodes-dynamic":        newAddNodesDynamic,
+	"delete-nodes":             newDeleteNodes,
+	"region-split":             newRegionSplit,
+	"region-merge":             newRegionMerge,
+	"hot-read":                 newHotRead,
+	"hot-write":                newHotWrite,
+	"makeup-down-replicas":     newMakeupDownReplicas,
+	"import-data":              newImportData,
 }
 
 // NewCase creates a new case.
