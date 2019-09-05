@@ -53,8 +53,8 @@ func (TransferRegionCount) ParseLog(filename string) {
 			}
 			regionID, sourceID, targetID := resultUint64[0], resultUint64[1], resultUint64[2]
 			// Push edge
-			TransferRegionCounter.AddTarget(regionID, targetID)
-			TransferRegionCounter.AddSource(regionID, sourceID)
+			GetTransferRegionCounter().AddTarget(regionID, targetID)
+			GetTransferRegionCounter().AddSource(regionID, sourceID)
 
 		} else {
 			log.Fatal("Parse Log Error, with", content)

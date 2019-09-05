@@ -28,7 +28,7 @@ func InitLogger(l string) {
 func main() {
 	flag.Parse()
 	InitLogger(*logLevel)
-	analysis.TransferRegionCounter.Init(0, 0)
+	analysis.GetTransferRegionCounter().Init(0, 0)
 	if *input == "" {
 		Logger.Fatal("need to specify one input pd log")
 	}
@@ -43,8 +43,8 @@ func main() {
 	switch *style {
 	case "transfer-region-counter":
 		{
-			analysis.TransferRegionCounter.ParseLog(*input)
-			analysis.TransferRegionCounter.PrintResult()
+			analysis.GetTransferRegionCounter().ParseLog(*input)
+			analysis.GetTransferRegionCounter().PrintResult()
 			break
 		}
 	default:
