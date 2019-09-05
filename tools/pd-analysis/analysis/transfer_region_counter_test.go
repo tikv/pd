@@ -22,9 +22,9 @@ func TestCounter(t *testing.T) {
 	TestingT(t)
 }
 
-var _ = Suite(&testCounterRedundantSuite{})
+var _ = Suite(&testTransferRegionCounter{})
 
-type testCounterRedundantSuite struct{}
+type testTransferRegionCounter struct{}
 
 func addData(test [][]uint64) {
 	for i, row := range test {
@@ -37,7 +37,7 @@ func addData(test [][]uint64) {
 	}
 }
 
-func (t *testCounterRedundantSuite) TestCounterRedundant(c *C) {
+func (t *testTransferRegionCounter) TestCounterRedundant(c *C) {
 	{
 		test := [][]uint64{
 			{0, 0, 0, 0, 0, 0, 0},

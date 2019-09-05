@@ -13,6 +13,7 @@ var (
 	output   = flag.String("output", "", "output file, default output to stdout.")
 	logLevel = flag.String("logLevel", "info", "log level, default info.")
 	style    = flag.String("style", "", "analysis style, example: transfer-region-counter")
+	operator = flag.String("operator", "", "operator style, example: balance-region, balance-leader, transfer-hot-read-leader, move-hot-read-region, transfer-hot-write-leader, move-hot-write-region")
 )
 
 // Logger is the global logger used for simulator.
@@ -43,7 +44,11 @@ func main() {
 	switch *style {
 	case "transfer-region-counter":
 		{
-			analysis.GetTransferRegionCounter().ParseLog(*input)
+			if *operator == "" {
+				Logger.Fatal("need to specify one operator")
+			}
+			r := analysis.GetTransferRegionCounter().CompileRegex(*operator)
+			analysis.GetTransferRegionCounter().ParseLog(*input, r)
 			analysis.GetTransferRegionCounter().PrintResult()
 			break
 		}

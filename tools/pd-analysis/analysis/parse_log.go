@@ -12,12 +12,53 @@ import (
 
 // Interpreter is the interface for all analysis to parse log
 type Interpreter interface {
-	ParseLog(filename string)
+	CompileRegex(operator string) *regexp.Regexp
+	parseLine(content string, r *regexp.Regexp) []uint64
+	ParseLog(filename string, r *regexp.Regexp)
+}
+
+// CompileRegex is to provide regexp for transfer region counter.
+func (TransferRegionCount) CompileRegex(operator string) *regexp.Regexp {
+	var r *regexp.Regexp
+	var err error
+
+	var supportOperators = []string{"balance-region", "balance-leader", "transfer-hot-read-leader", "move-hot-read-region", "transfer-hot-write-leader", "move-hot-write-region"}
+	for _, supportOperator := range supportOperators {
+		if operator == supportOperator {
+			r, err = regexp.Compile(".*?operator finish.*?region-id=([0-9]*).*?" + operator + ".*?store ([0-9]*) to ([0-9]*).*?")
+		}
+	}
+
+	if err != nil {
+		log.Fatal("Error: ", err)
+	}
+	if r == nil {
+		log.Fatal("Error operator: ", operator, ". Support operators:", supportOperators)
+	}
+	return r
+}
+
+func (TransferRegionCount) parseLine(content string, r *regexp.Regexp) []uint64 {
+	resultUint64 := make([]uint64, 0, 4)
+	result := r.FindStringSubmatch(content)
+	if len(result) == 0 {
+		return resultUint64
+	} else if len(result) == 4 {
+		for i := 1; i < 4; i++ {
+			num, err := strconv.ParseInt(result[i], 10, 64)
+			if err != nil {
+				log.Fatal("Error: ", err)
+			}
+			resultUint64 = append(resultUint64, uint64(num))
+		}
+	} else {
+		log.Fatal("Parse Log Error, with", content)
+	}
+	return resultUint64
 }
 
 // ParseLog is to parse log for transfer region counter.
-func (TransferRegionCount) ParseLog(filename string) {
-	r, _ := regexp.Compile(".*?operator finish.*?region-id=([0-9]*).*?mv peer: store ([0-9]*) to ([0-9]*).*?")
+func (c *TransferRegionCount) ParseLog(filename string, r *regexp.Regexp) {
 	// Open file
 	fi, err := os.Open(filename)
 	if err != nil {
@@ -37,27 +78,11 @@ func (TransferRegionCount) ParseLog(filename string) {
 			return
 		}
 		// Regex for each line
-		result := r.FindStringSubmatch(string(content))
-		if len(result) == 0 {
-			continue
-		} else if len(result) == 4 {
-			// Convert result
-			resultUint64 := make([]uint64, 0)
-			for i := 1; i < 4; i++ {
-				num, err := strconv.ParseInt(result[i], 10, 64)
-				if err != nil {
-					fmt.Printf("Error: %s\n", err)
-					return
-				}
-				resultUint64 = append(resultUint64, uint64(num))
-			}
-			regionID, sourceID, targetID := resultUint64[0], resultUint64[1], resultUint64[2]
-			// Push edge
+		result := c.parseLine(string(content), r)
+		if len(result) == 3 {
+			regionID, sourceID, targetID := result[0], result[1], result[2]
 			GetTransferRegionCounter().AddTarget(regionID, targetID)
 			GetTransferRegionCounter().AddSource(regionID, sourceID)
-
-		} else {
-			log.Fatal("Parse Log Error, with", content)
 		}
 	}
 }
