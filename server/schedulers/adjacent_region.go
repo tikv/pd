@@ -37,20 +37,29 @@ const (
 )
 
 func init() {
-	schedule.RegisterScheduler("adjacent-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
-		l := len(args)
+	schedule.RegisterArgsToMapper("adjacent-region", func(args []string) (schedule.ConfigMapper, error) {
+		if len(args) != 2 {
+			return nil, errors.New("should specify the leader limit and peer limit")
+		}
+		mapper := make(schedule.ConfigMapper)
+		mapper["leader-limit"] = args[0]
+		mapper["peer-limit"] = args[1]
+		return mapper, nil
+	})
+	schedule.RegisterScheduler("adjacent-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
+		l := len(mapper)
 		if l == 2 {
-			leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
+			leaderLimit, err := strconv.ParseUint(mapper["leader-limit"].(string), 10, 64)
 			if err != nil {
 				return nil, errors.WithStack(err)
 			}
-			peerLimit, err := strconv.ParseUint(args[1], 10, 64)
+			peerLimit, err := strconv.ParseUint(mapper["peer-limit"].(string), 10, 64)
 			if err != nil {
 				return nil, errors.WithStack(err)
 			}
 			return newBalanceAdjacentRegionScheduler(opController, leaderLimit, peerLimit), nil
 		} else if l == 1 {
-			leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
+			leaderLimit, err := strconv.ParseUint(mapper["leader-limit"].(string), 10, 64)
 			if err != nil {
 				return nil, errors.WithStack(err)
 			}

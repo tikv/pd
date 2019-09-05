@@ -15,6 +15,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
@@ -76,13 +77,26 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "scatter-range":
-		var args []string
+		var (
+			args []string
+			err  error
+		)
 		startKey, ok := input["start_key"].(string)
 		if ok {
+			startKey, err = url.QueryUnescape(startKey)
+			if err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			args = append(args, startKey)
 		}
 		endKey, ok := input["end_key"].(string)
 		if ok {
+			endKey, err = url.QueryUnescape(endKey)
+			if err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			args = append(args, endKey)
 		}
 		name, ok := input["range_name"].(string)
@@ -171,4 +185,28 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.r.JSON(w, http.StatusOK, nil)
+}
+
+type schedulersHandler struct {
+	svr    *server.Server
+	rd     *render.Render
+	prefix string
+}
+
+func newSchedulersHandler(svr *server.Server, rd *render.Render, prefix string) *schedulersHandler {
+	return &schedulersHandler{
+		svr:    svr,
+		rd:     rd,
+		prefix: prefix,
+	}
+}
+
+func (h *schedulersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	sh := handler.GetSchedulerHandler()
+	if sh != nil {
+		sh.ServeHTTP(w, r)
+		return
+	}
+	h.rd.JSON(w, http.StatusNotAcceptable, "no implement")
 }

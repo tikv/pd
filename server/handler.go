@@ -15,6 +15,7 @@ package server
 
 import (
 	"bytes"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -175,7 +176,11 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	s, err := schedule.CreateScheduler(name, c.opController, args...)
+	confMapper, err := schedule.ConvArgsToMapper(name, args)
+	if err != nil {
+		return err
+	}
+	s, err := schedule.CreateScheduler(name, c.opController, h.s.storage, confMapper)
 	if err != nil {
 		return err
 	}
@@ -725,4 +730,18 @@ func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 		return nil, ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.IncorrectNamespace), nil
+}
+
+func (h *Handler) GetSchedulerHandler() http.Handler {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil
+	}
+	mux := http.NewServeMux()
+	path := "/pd/api/v1/scheduler-handler/"
+	for name, handler := range c.schedulers {
+		p := path + name + "/"
+		mux.Handle(p, http.StripPrefix(p[:len(p)-1], handler))
+	}
+	return mux
 }

@@ -25,7 +25,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffle-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("shuffle-region", func(opController *schedule.OperatorController, straoge *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
 		return newShuffleRegionScheduler(opController), nil
 	})
 }

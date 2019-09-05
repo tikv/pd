@@ -509,6 +509,15 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.LabelProperty = s.scheduleOpt.LoadLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.scheduleOpt.LoadClusterVersion()
 	cfg.PDServerCfg = *s.scheduleOpt.LoadPDServerConfig()
+	sches, configs, err := s.GetStorage().LoadAllScheduleConfig()
+	if err != nil {
+		return cfg
+	}
+	payload := make(map[string]string)
+	for i, sche := range sches {
+		payload[sche] = configs[i]
+	}
+	cfg.Schedule.SchedulersPayload = payload
 	return cfg
 }
 

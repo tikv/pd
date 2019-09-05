@@ -19,12 +19,14 @@ import (
 	"math"
 	"path"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
 )
 
 const (
@@ -32,6 +34,8 @@ const (
 	configPath   = "config"
 	schedulePath = "schedule"
 	gcPath       = "gc"
+
+	customeScheduleConfigPath = "schedule-handler"
 )
 
 const (
@@ -93,6 +97,22 @@ func (s *Storage) storeLeaderWeightPath(storeID uint64) string {
 
 func (s *Storage) storeRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
+}
+
+// SaveScheduleConfig saves the config of scheduler.
+func (s *Storage) SaveScheduleConfig(scheduleName string, cfg interface{}) error {
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	configPath := path.Join(customeScheduleConfigPath, scheduleName)
+	return s.Save(configPath, string(value))
+}
+
+// LoadScheduleConfig loads the config of scheduler.
+func (s *Storage) LoadScheduleConfig(scheduleName string) (string, error) {
+	configPath := path.Join(customeScheduleConfigPath, scheduleName)
+	return s.Load(configPath)
 }
 
 // LoadMeta loads cluster meta from storage.
@@ -274,6 +294,15 @@ func (s *Storage) LoadGCSafePoint() (uint64, error) {
 		return 0, err
 	}
 	return safePoint, nil
+}
+
+// LoadAllScheduleConfig loads all schedulers' config.
+func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
+	keys, values, err := s.LoadRange(customeScheduleConfigPath, clientv3.GetPrefixRangeEnd(customeScheduleConfigPath), 1000)
+	for i, key := range keys {
+		keys[i] = strings.TrimPrefix(key, customeScheduleConfigPath+"/")
+	}
+	return keys, values, err
 }
 
 func loadProto(s kv.Base, key string, msg proto.Message) (bool, error) {

@@ -28,7 +28,13 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterArgsToMapper("balance-leader", func(args []string) (schedule.ConfigMapper, error) {
+		mapper := make(schedule.ConfigMapper)
+		return mapper, nil
+	})
+
+	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
+		storage.SaveScheduleConfig("balance-leader-scheduler", nil)
 		return newBalanceLeaderScheduler(opController), nil
 	})
 }

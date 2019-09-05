@@ -22,7 +22,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffle-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("shuffle-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
 		return newShuffleLeaderScheduler(opController), nil
 	})
 }

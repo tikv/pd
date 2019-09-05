@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -212,6 +213,25 @@ func (c *coordinator) run() {
 	}
 	log.Info("coordinator starts to run schedulers")
 
+	scheduleNames, configs, err := c.cluster.storage.LoadAllScheduleConfig()
+	if err != nil {
+		log.Fatal("cannot load schedulers' config")
+	}
+	for i, name := range scheduleNames {
+		config := configs[i]
+		confMapper := make(schedule.ConfigMapper)
+		json.Unmarshal([]byte(config), &confMapper)
+		s, err := schedule.CreateScheduler(name, c.opController, c.cluster.storage, confMapper)
+		if err != nil {
+			log.Error("can not create scheduler on new way", zap.String("scheduler-name", name), zap.Error(err))
+			continue
+		}
+		log.Info("create scheduler on new way", zap.String("scheduler-name", s.GetName()))
+		if err = c.addScheduler(s); err != nil {
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		}
+	}
+
 	k := 0
 	scheduleCfg := c.cluster.opt.Load().Clone()
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
@@ -221,21 +241,27 @@ func (c *coordinator) run() {
 			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type))
 			continue
 		}
-		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, schedulerCfg.Args...)
+		confMapper, err := schedule.ConvArgsToMapper(schedulerCfg.Type, schedulerCfg.Args)
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
 			continue
 		}
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storage, confMapper)
+		if err != nil {
+			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
+			continue
+		}
+
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		}
-
 		// Only records the valid scheduler config.
-		if err == nil {
+		if err == nil || err == errSchedulerExisted {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
 		}
+
 	}
 
 	// Removes the invalid scheduler config and persist.

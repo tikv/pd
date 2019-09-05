@@ -29,10 +29,10 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
 		limit := uint64(1)
-		if len(args) == 1 {
-			l, err := strconv.ParseUint(args[0], 10, 64)
+		if len(mapper) == 1 {
+			l, err := strconv.ParseUint(mapper["limit"].(string), 10, 64)
 			if err != nil {
 				return nil, errors.WithStack(err)
 			}

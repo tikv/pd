@@ -26,11 +26,20 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterArgsToMapper("evict-leader", func(args []string) (schedule.ConfigMapper, error) {
 		if len(args) != 1 {
+			return nil, errors.New("should specify the store-id")
+		}
+		mapper := make(schedule.ConfigMapper)
+		mapper["store-id"] = args[0]
+		return mapper, nil
+	})
+
+	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
+		if len(mapper) != 1 {
 			return nil, errors.New("evict-leader needs 1 argument")
 		}
-		id, err := strconv.ParseUint(args[0], 10, 64)
+		id, err := strconv.ParseUint(mapper["store-id"].(string), 10, 64)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
