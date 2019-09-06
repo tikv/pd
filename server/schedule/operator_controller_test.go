@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testOperatorControllerSuite{})
@@ -112,6 +113,7 @@ func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
 	// unfinished op with high priority
 	op2 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion|OpAdmin, steps...)
+	op2.SetPriorityLevel(core.HighPriority)
 
 	oc.SetOperator(op1)
 
