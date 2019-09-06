@@ -106,7 +106,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			latest := region.GetRegionEpoch()
 			changes := latest.GetConfVer() - origin.GetConfVer()
 			if source == DispatchFromHeartBeat &&
-				changes > uint64(op.ConfVerChanged()) {
+				changes > uint64(op.ConfVerChanged(region)) {
 
 				if oc.RemoveOperator(op) {
 					log.Info("stale operator", zap.Uint64("region-id", region.GetID()),
