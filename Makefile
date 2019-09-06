@@ -19,12 +19,12 @@ DEADLOCK_ENABLE := $$(\
 						find . -name "*.go" | grep -vE "(vendor|\.retools)" \
 						| xargs -n 1 sed -i.bak 's/sync\.RWMutex/deadlock.RWMutex/;s/sync\.Mutex/deadlock.Mutex/' && \
 						find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs grep -lE "(deadlock\.RWMutex|deadlock\.Mutex)" \
-						| xargs -n 1 ./scripts/retool do goimports -w)
+						| xargs ./scripts/retool do goimports -w)
 DEADLOCK_DISABLE := $$(\
 						find . -name "*.go" | grep -vE "(vendor|\.retools)" \
 						| xargs -n 1 sed -i.bak 's/deadlock\.RWMutex/sync.RWMutex/;s/deadlock\.Mutex/sync.Mutex/' && \
 						find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs grep -lE "(sync\.RWMutex|sync\.Mutex)" \
-						| xargs -n 1 ./scripts/retool do goimports -w && \
+						| xargs ./scripts/retool do goimports -w && \
 						find . -name "*.bak" | grep -vE "(vendor|\.retools)" | xargs rm && \
 						go mod tidy)
 
