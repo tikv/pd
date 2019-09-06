@@ -66,6 +66,7 @@ type Item interface {
 }
 
 const (
+	// DefaultFreeListSize is the default size of free list.
 	DefaultFreeListSize = 32
 )
 
@@ -837,12 +838,10 @@ func (c *copyOnWriteContext) freeNode(n *node) freeType {
 		n.cow = nil
 		if c.freelist.freeNode(n) {
 			return ftStored
-		} else {
-			return ftFreelistFull
 		}
-	} else {
-		return ftNotOwned
+		return ftFreelistFull
 	}
+	return ftNotOwned
 }
 
 // ReplaceOrInsert adds the given item to the tree.  If an item in the tree
@@ -859,16 +858,15 @@ func (t *BTree) ReplaceOrInsert(item Item) Item {
 		t.root.items = append(t.root.items, item)
 		t.length++
 		return nil
-	} else {
-		t.root = t.root.mutableFor(t.cow)
-		if len(t.root.items) >= t.maxItems() {
-			item2, second := t.root.split(t.maxItems() / 2)
-			oldroot := t.root
-			t.root = t.cow.newNode()
-			t.root.items = append(t.root.items, item2)
-			t.root.children = append(t.root.children, oldroot, second)
-			t.root.initSize()
-		}
+	}
+	t.root = t.root.mutableFor(t.cow)
+	if len(t.root.items) >= t.maxItems() {
+		item2, second := t.root.split(t.maxItems() / 2)
+		oldroot := t.root
+		t.root = t.cow.newNode()
+		t.root.items = append(t.root.items, item2)
+		t.root.children = append(t.root.children, oldroot, second)
+		t.root.initSize()
 	}
 	out := t.root.insert(item, t.maxItems())
 	if out == nil {
