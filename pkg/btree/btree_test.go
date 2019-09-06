@@ -73,6 +73,78 @@ func allrev(t *BTree) (out []Item) {
 	return
 }
 
+func assertEq(t *testing.T, desc string, got, need interface{}) {
+	if !reflect.DeepEqual(need, got) {
+		t.Fatalf("%s failed: need %T %v, but got %T %v", desc, need, need, got, got)
+	}
+}
+
+func TestBTreeSizeInfo(t *testing.T) {
+	tr := New(*btreeDegree)
+	const maxElt = 10000
+	elements := perm(maxElt)
+	for _, elt := range elements {
+		tr.ReplaceOrInsert(elt)
+		//tr.root.print(os.Stderr, 0)
+		assertEq(t, "root length", tr.getRootLength(), tr.Len())
+		assertEq(t, "check min", tr.GetKth(1), tr.Min())
+		assertEq(t, "check max", tr.GetKth(tr.Len()), tr.Max())
+	}
+	for k := 1; k <= maxElt; k++ {
+		assertEq(t, "get k-th", tr.GetKth(k), Int(k-1))
+	}
+	for x := 0; x < maxElt; x++ {
+		y, rk := tr.GetWithRank(Int(x))
+		assertEq(t, "get", y, Int(x))
+		assertEq(t, "get rank", rk, x+1)
+	}
+
+	for _, elt := range elements {
+		if int(elt.(Int))%3 != 0 {
+			tr.Delete(elt)
+		}
+		//tr.root.print(os.Stderr, 0)
+		assertEq(t, "after delete root length", tr.getRootLength(), tr.Len())
+		assertEq(t, "after delete check min", tr.GetKth(1), tr.Min())
+		assertEq(t, "after delete check max", tr.GetKth(tr.Len()), tr.Max())
+	}
+	for k := 1; k <= maxElt/3; k++ {
+		assertEq(t, "after delete get k-th", tr.GetKth(k), Int(3*(k-1)))
+	}
+	for x := 0; x < maxElt; x++ {
+		y, rk := tr.GetWithRank(Int(x))
+		if x%3 == 0 {
+			assertEq(t, "after delete get", y, Int(x))
+			assertEq(t, "after delete get rank", rk, (x/3)+1)
+		} else {
+			assertEq(t, "after delete get nil", y, nil)
+			assertEq(t, "after delete get nil rank", rk, (x/3)+1)
+		}
+	}
+
+	for tr.Len() > 100 {
+		tr.DeleteMax()
+		//tr.root.print(os.Stderr, 0)
+		assertEq(t, "delete max root length", tr.getRootLength(), tr.Len())
+		assertEq(t, "delete max check min", tr.GetKth(1), tr.Min())
+		assertEq(t, "delete max check max", tr.GetKth(tr.Len()), tr.Max())
+	}
+	for k := 1; k <= maxElt/3 && k <= 100; k++ {
+		assertEq(t, "delete max get k-th", tr.GetKth(k), Int(3*(k-1)))
+	}
+	for x := 0; x < maxElt && x < 300; x++ {
+		y, rk := tr.GetWithRank(Int(x))
+		if x%3 == 0 {
+			assertEq(t, "delete max get", y, Int(x))
+			assertEq(t, "delete max get rank", rk, (x/3)+1)
+		} else {
+			assertEq(t, "delete max get nil", y, nil)
+			assertEq(t, "delete max get nil rank", rk, (x/3)+1)
+		}
+	}
+
+}
+
 var btreeDegree = flag.Int("degree", 32, "B-Tree degree")
 
 func TestBTree(t *testing.T) {
