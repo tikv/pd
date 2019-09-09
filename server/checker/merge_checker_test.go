@@ -142,12 +142,24 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 		op.SetStartTime(op.GetStartTime().Add(-operator.RegionOperatorWaitTime - time.Second))
 		c.Assert(op.IsTimeout(), IsTrue)
 	}
+	// Check merge with previous region.
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
 
 	// Enable one way merge
 	s.cluster.ScheduleOptions.EnableOneWayMerge = true
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
 	s.cluster.ScheduleOptions.EnableOneWayMerge = false
+
+	// Make up peers for next region.
+	s.regions[3] = s.regions[3].Clone(core.WithAddPeer(&metapb.Peer{Id: 110, StoreId: 1}), core.WithAddPeer(&metapb.Peer{Id: 111, StoreId: 2}))
+	s.cluster.PutRegion(s.regions[3])
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	// Now it merges to next region.
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
 
 	// Skip recently split regions.
 	s.mc.RecordRegionSplit(s.regions[2].GetID())
@@ -395,7 +407,7 @@ func (s *testMergeCheckerSuite) TestStorelimit(c *C) {
 	for i := 0; i < 50; i++ {
 		c.Assert(oc.AddOperator(ops...), IsTrue)
 		for _, op := range ops {
-			oc.RemoveOperator(op)
+			c.Assert(oc.RemoveOperator(op), IsTrue)
 		}
 	}
 	s.regions[2] = s.regions[2].Clone(
@@ -409,7 +421,7 @@ func (s *testMergeCheckerSuite) TestStorelimit(c *C) {
 	for i := 0; i < 5; i++ {
 		c.Assert(oc.AddOperator(ops...), IsTrue)
 		for _, op := range ops {
-			oc.RemoveOperator(op)
+			c.Assert(oc.RemoveOperator(op), IsTrue)
 		}
 	}
 	c.Assert(oc.AddOperator(ops...), IsFalse)

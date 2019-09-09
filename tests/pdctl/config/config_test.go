@@ -15,6 +15,7 @@ package config_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/coreos/go-semver/semver"
@@ -96,6 +97,10 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(json.Unmarshal(output, &clusterVersion), IsNil)
 	c.Assert(clusterVersion, DeepEquals, svr.GetClusterVersion())
 
+	args2 = []string{"-u", pdAddr, "config", "set", "namespace", "ts1", "region-schedule-limit", "128"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Failed"), IsTrue)
 	// config show namespace <name> && config set namespace <type> <key> <value>
 	args = []string{"-u", pdAddr, "table_ns", "create", "ts1"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)

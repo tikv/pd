@@ -18,6 +18,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
@@ -52,7 +53,7 @@ func newRegionMerge() *Case {
 	}
 
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		count1 := regions.GetStoreRegionCount(1)
 		count2 := regions.GetStoreRegionCount(2)
 		count3 := regions.GetStoreRegionCount(3)

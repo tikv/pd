@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -59,19 +60,21 @@ type Server interface {
 	GetStorage() *core.Storage
 	Name() string
 	GetMetaRegions() []*metapb.Region
+	GetSecurityConfig() *config.SecurityConfig
 }
 
 // RegionSyncer is used to sync the region information without raft.
 type RegionSyncer struct {
 	sync.RWMutex
-	streams map[string]ServerStream
-	ctx     context.Context
-	cancel  context.CancelFunc
-	server  Server
-	closed  chan struct{}
-	wg      sync.WaitGroup
-	history *historyBuffer
-	limit   *ratelimit.Bucket
+	streams        map[string]ServerStream
+	ctx            context.Context
+	cancel         context.CancelFunc
+	server         Server
+	closed         chan struct{}
+	wg             sync.WaitGroup
+	history        *historyBuffer
+	limit          *ratelimit.Bucket
+	securityConfig *config.SecurityConfig
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -81,11 +84,12 @@ type RegionSyncer struct {
 // no longer etcd but go-leveldb.
 func NewRegionSyncer(s Server) *RegionSyncer {
 	return &RegionSyncer{
-		streams: make(map[string]ServerStream),
-		server:  s,
-		closed:  make(chan struct{}),
-		history: newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
-		limit:   ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
+		streams:        make(map[string]ServerStream),
+		server:         s,
+		closed:         make(chan struct{}),
+		history:        newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
+		limit:          ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
+		securityConfig: s.GetSecurityConfig(),
 	}
 }
 

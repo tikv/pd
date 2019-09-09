@@ -25,19 +25,21 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 )
 
 const (
 	storeHeartBeatPeriod  = 10
 	regionHeartBeatPeriod = 60
+	compactionDelayPeriod = 600
 )
 
 // Node simulates a TiKV.
 type Node struct {
 	*metapb.Store
 	sync.RWMutex
-	stats                    *pdpb.StoreStats
+	stats                    *info.StoreStats
 	tick                     uint64
 	wg                       sync.WaitGroup
 	tasks                    map[uint64]Task
@@ -47,6 +49,7 @@ type Node struct {
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
 	ioRate                   int64
+	sizeMutex                sync.Mutex
 }
 
 // NewNode returns a Node.
@@ -59,11 +62,13 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		Labels:  s.Labels,
 		State:   s.Status,
 	}
-	stats := &pdpb.StoreStats{
-		StoreId:   s.ID,
-		Capacity:  s.Capacity,
-		Available: s.Available,
-		StartTime: uint32(time.Now().Unix()),
+	stats := &info.StoreStats{
+		StoreStats: pdpb.StoreStats{
+			StoreId:   s.ID,
+			Capacity:  s.Capacity,
+			Available: s.Available,
+			StartTime: uint32(time.Now().Unix()),
+		},
 	}
 	tag := fmt.Sprintf("store %d", s.ID)
 	client, receiveRegionHeartbeatCh, err := NewClient(pdAddr, tag)
@@ -120,6 +125,7 @@ func (n *Node) Tick(wg *sync.WaitGroup) {
 		return
 	}
 	n.stepHeartBeat()
+	n.stepCompaction()
 	n.stepTask()
 	n.tick++
 }
@@ -153,18 +159,32 @@ func (n *Node) stepHeartBeat() {
 	}
 }
 
+func (n *Node) stepCompaction() {
+	if n.tick%compactionDelayPeriod == 0 {
+		n.compaction()
+	}
+}
+
 func (n *Node) storeHeartBeat() {
 	if n.GetState() != metapb.StoreState_Up {
 		return
 	}
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
-	err := n.client.StoreHeartbeat(ctx, n.stats)
+	err := n.client.StoreHeartbeat(ctx, &n.stats.StoreStats)
 	if err != nil {
 		simutil.Logger.Info("report heartbeat error",
 			zap.Uint64("node-id", n.GetId()),
 			zap.Error(err))
 	}
 	cancel()
+}
+
+func (n *Node) compaction() {
+	n.sizeMutex.Lock()
+	defer n.sizeMutex.Unlock()
+	n.stats.Available += n.stats.ToCompactionSize
+	n.stats.UsedSize -= n.stats.ToCompactionSize
+	n.stats.ToCompactionSize = 0
 }
 
 func (n *Node) regionHeartBeat() {
@@ -209,7 +229,7 @@ func (n *Node) AddTask(task Task) {
 	n.Lock()
 	defer n.Unlock()
 	if t, ok := n.tasks[task.RegionID()]; ok {
-		simutil.Logger.Info("task has already existed",
+		simutil.Logger.Debug("task has already existed",
 			zap.Uint64("node-id", n.Id),
 			zap.Uint64("region-id", task.RegionID()),
 			zap.String("task", t.Desc()))
@@ -227,11 +247,14 @@ func (n *Node) Stop() {
 }
 
 func (n *Node) incUsedSize(size uint64) {
+	n.sizeMutex.Lock()
+	defer n.sizeMutex.Unlock()
 	n.stats.Available -= size
 	n.stats.UsedSize += size
 }
 
 func (n *Node) decUsedSize(size uint64) {
-	n.stats.Available += size
-	n.stats.UsedSize -= size
+	n.sizeMutex.Lock()
+	defer n.sizeMutex.Unlock()
+	n.stats.ToCompactionSize += size
 }
