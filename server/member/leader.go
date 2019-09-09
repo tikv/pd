@@ -233,33 +233,25 @@ func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
 }
 
 // CampaignLeader is used to campaign the leader.
-func (m *Member) CampaignLeader(lessor clientv3.Lease, leaderLease int64) (clientv3.LeaseID, error) {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(m.client.Ctx(), requestTimeout)
-	leaseResp, err := lessor.Grant(ctx, leaderLease)
-	cancel()
-
-	if cost := time.Since(start); cost > slowRequestTime {
-		log.Warn("lessor grants too slow", zap.Duration("cost", cost))
-	}
-
+func (m *Member) CampaignLeader(lease *LeaderLease, leaseTimeout int64) error {
+	err := lease.Grant(leaseTimeout)
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return err
 	}
 
 	leaderKey := m.GetLeaderPath()
 	// The leader key must not exist, so the CreateRevision is 0.
 	resp, err := kv.NewSlowLogTxn(m.client).
 		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
-		Then(clientv3.OpPut(leaderKey, m.memberValue, clientv3.WithLease(leaseResp.ID))).
+		Then(clientv3.OpPut(leaderKey, m.memberValue, clientv3.WithLease(lease.ID))).
 		Commit()
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
-		return 0, errors.New("failed to campaign leader, other server may campaign ok")
+		return errors.New("failed to campaign leader, other server may campaign ok")
 	}
-	return leaseResp.ID, nil
+	return nil
 }
 
 // ResignLeader resigns current PD's leadership. If nextLeader is empty, all

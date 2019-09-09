@@ -102,12 +102,9 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
-	var target *core.RegionInfo
-	targetNext := m.checkTarget(region, next, target)
-	target = m.checkTarget(region, prev, target)
-	if target != targetNext && m.cluster.GetEnableOneWayMerge() {
-		checkerCounter.WithLabelValues("merge_checker", "skip_left").Inc()
-		target = targetNext
+	target := m.checkTarget(region, next, nil)
+	if !m.cluster.GetEnableOneWayMerge() {
+		target = m.checkTarget(region, prev, target)
 	}
 
 	if target == nil {
@@ -118,6 +115,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	log.Debug("try to merge region", zap.Stringer("from", core.RegionToHexMeta(region.GetMeta())), zap.Stringer("to", core.RegionToHexMeta(target.GetMeta())))
 	ops, err := operator.CreateMergeRegionOperator("merge-region", m.cluster, region, target, operator.OpMerge)
 	if err != nil {
+		log.Warn("create merge region operator failed", zap.Error(err))
 		return nil
 	}
 	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()

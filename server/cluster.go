@@ -238,7 +238,6 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 			log.Info("background jobs has been stopped")
 			return
 		case <-ticker.C:
-			c.checkOperators()
 			c.checkStores()
 			c.collectMetrics()
 			c.coordinator.opController.PruneHistory()
@@ -291,6 +290,20 @@ func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.opController
+}
+
+// GetHeartbeatStreams returns the heartbeat streams.
+func (c *RaftCluster) GetHeartbeatStreams() *heartbeatStreams {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.hbStreams
+}
+
+// GetCoordinator returns the coordinator.
+func (c *RaftCluster) GetCoordinator() *coordinator {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator
 }
 
 // handleStoreHeartbeat updates the store status.
@@ -394,7 +407,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
 			// Not successfully saved to storage is not fatal, it only leads to longer warm-up
 			// after restart. Here we only log the error then go on updating cache.
-			log.Error("fail to save region to storage",
+			log.Error("failed to save region to storage",
 				zap.Uint64("region-id", region.GetID()),
 				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
 				zap.Error(err))
@@ -419,7 +432,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if c.storage != nil {
 			for _, item := range overlaps {
 				if err := c.storage.DeleteRegion(item); err != nil {
-					log.Error("fail to delete region from storage",
+					log.Error("failed to delete region from storage",
 						zap.Uint64("region-id", item.GetId()),
 						zap.Stringer("region-meta", core.RegionToHexMeta(item)),
 						zap.Error(err))
@@ -557,19 +570,10 @@ func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *core.RegionInfo {
 	return c.core.SearchRegion(regionKey)
 }
 
-// ScanRegionsByKey scans region with start key, until number greater than limit.
-func (c *RaftCluster) ScanRegionsByKey(startKey []byte, limit int) []*core.RegionInfo {
-	return c.core.ScanRange(startKey, limit)
-}
-
-// ScanRegions scans region with start key, until number greater than limit.
-func (c *RaftCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
-	return c.core.ScanRange(startKey, limit)
-}
-
-// ScanRangeWithEndKey scans regions intersecting [start key, end key).
-func (c *RaftCluster) ScanRangeWithEndKey(startKey, endKey []byte) []*core.RegionInfo {
-	return c.core.ScanRangeWithEndKey(startKey, endKey)
+// ScanRegions scans region with start key, until the region contains endKey, or
+// total number greater than limit.
+func (c *RaftCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
+	return c.core.ScanRange(startKey, endKey, limit)
 }
 
 // GetRegionByID gets region and leader peer by regionID from cluster.
@@ -660,7 +664,7 @@ func (c *RaftCluster) GetAverageRegionSize() int64 {
 func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
 	c.RLock()
 	defer c.RUnlock()
-	return statistics.GetRegionStats(c.core.ScanRangeWithEndKey, startKey, endKey)
+	return statistics.GetRegionStats(c.core.ScanRange(startKey, endKey, -1))
 }
 
 // GetStoresStats returns stores' statistics from cluster.
@@ -687,18 +691,6 @@ func (c *RaftCluster) GetMetaStores() []*metapb.Store {
 // GetStores returns all stores in the cluster.
 func (c *RaftCluster) GetStores() []*core.StoreInfo {
 	return c.core.GetStores()
-}
-
-// TryGetStore gets store from cluster.
-func (c *RaftCluster) TryGetStore(storeID uint64) (*core.StoreInfo, error) {
-	if storeID == 0 {
-		return nil, errors.New("invalid zero store id")
-	}
-	store := c.GetStore(storeID)
-	if store == nil {
-		return nil, errors.Errorf("invalid store ID %d, not found", storeID)
-	}
-	return store, nil
 }
 
 // GetStore gets store from cluster.
@@ -999,29 +991,6 @@ func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
 	c.core.DeleteStore(store)
 	c.storesStats.RemoveRollingStoreStats(store.GetID())
 	return nil
-}
-
-func (c *RaftCluster) checkOperators() {
-	opController := c.coordinator.opController
-	for _, op := range opController.GetOperators() {
-		// after region is merged, it will not heartbeat anymore
-		// the operator of merged region will not timeout actively
-		region := c.GetRegion(op.RegionID())
-		if region == nil {
-			log.Debug("remove operator cause region is merged",
-				zap.Uint64("region-id", op.RegionID()),
-				zap.Stringer("operator", op))
-			opController.RemoveOperator(op)
-			continue
-		}
-
-		if op.IsTimeout() {
-			log.Info("operator timeout",
-				zap.Uint64("region-id", op.RegionID()),
-				zap.Stringer("operator", op))
-			opController.RemoveTimeoutOperator(op)
-		}
-	}
 }
 
 func (c *RaftCluster) collectMetrics() {

@@ -157,7 +157,7 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) []*o
 	}
 
 	l.cacheRegions.clear()
-	regions := cluster.ScanRegions(l.lastKey, scanLimit)
+	regions := cluster.ScanRegions(l.lastKey, nil, scanLimit)
 	// scan to the end
 	if len(regions) <= 1 {
 		schedulerStatus.WithLabelValues(l.GetName(), "adjacent_count").Set(float64(l.adjacentRegionsCount))
@@ -238,8 +238,10 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster schedule.Cluste
 	if len(region.GetPeers()) != cluster.GetMaxReplicas() {
 		return true
 	}
-	store := cluster.GetStore(region.GetLeader().GetStoreId())
+	storeID := region.GetLeader().GetStoreId()
+	store := cluster.GetStore(storeID)
 	if store == nil {
+		log.Error("failed to get the store", zap.Uint64("store-id", storeID))
 		return true
 	}
 	s := l.selector.SelectSource(cluster, []*core.StoreInfo{store})
@@ -287,6 +289,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, 
 	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(leaderStoreID)
 	if source == nil {
+		log.Error("failed to get the source store", zap.Uint64("store-id", leaderStoreID))
 		return nil
 	}
 

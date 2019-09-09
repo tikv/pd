@@ -102,7 +102,7 @@ func (c *client) initClusterID() error {
 	for i := 0; i < maxInitClusterRetries; i++ {
 		members, err := c.getMembers(ctx)
 		if err != nil || members.GetHeader() == nil {
-			simutil.Logger.Error("fail to get cluster id", zap.String("tag", c.tag), zap.Error(err))
+			simutil.Logger.Error("failed to get cluster id", zap.String("tag", c.tag), zap.Error(err))
 			continue
 		}
 		c.clusterID = members.GetHeader().GetClusterId()
@@ -226,7 +226,7 @@ func (c *client) Close() {
 	c.wg.Wait()
 
 	if err := c.clientConn.Close(); err != nil {
-		simutil.Logger.Error("fail to close grpc client connection", zap.String("tag", c.tag), zap.Error(err))
+		simutil.Logger.Error("failed to close grpc client connection", zap.String("tag", c.tag), zap.Error(err))
 	}
 }
 

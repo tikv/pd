@@ -53,6 +53,7 @@ const (
 	etcdTimeout           = time.Second * 3
 	etcdStartTimeout      = time.Minute * 5
 	serverMetricsInterval = time.Minute
+	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
@@ -836,26 +837,32 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
-	lessor := clientv3.NewLease(s.client)
-	defer lessor.Close()
-	var err error
-	var id clientv3.LeaseID
-	if id, err = s.member.CampaignLeader(lessor, s.cfg.LeaderLease); err != nil {
+
+	lease := member.NewLeaderLease(s.client)
+	defer lease.Close()
+	if err := s.member.CampaignLeader(lease, s.cfg.LeaderLease); err != nil {
 		log.Error("campaign leader meet error", zap.Error(err))
 		return
 	}
-	// Make the leader keepalived.
+
+	// Start keepalive and enable TSO service.
+	// TSO service is strictly enabled/disabled by leader lease for 2 reasons:
+	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
+	//   2. load region could be slow. Based on lease we can recover TSO service faster.
+
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-
-	ch, err := lessor.KeepAlive(ctx, id)
-	if err != nil {
-		log.Error("failed to keep alive", zap.Error(errors.WithStack(err)))
-		return
-	}
+	go lease.KeepAlive(ctx)
 	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
 
-	err = s.reloadConfigFromKV()
+	log.Debug("sync timestamp for tso")
+	if err := s.tso.SyncTimestamp(lease); err != nil {
+		log.Error("failed to sync timestamp", zap.Error(err))
+		return
+	}
+	defer s.tso.ResetTimestamp()
+
+	err := s.reloadConfigFromKV()
 	if err != nil {
 		log.Error("failed to reload configuration", zap.Error(err))
 		return
@@ -868,13 +875,6 @@ func (s *Server) campaignLeader() {
 	}
 	defer s.stopRaftCluster()
 
-	log.Debug("sync timestamp for tso")
-	if err = s.tso.SyncTimestamp(); err != nil {
-		log.Error("failed to sync timestamp", zap.Error(err))
-		return
-	}
-	defer s.tso.ResetTimestamp()
-
 	s.member.EnableLeader()
 	defer s.member.DisableLeader()
 
@@ -883,22 +883,24 @@ func (s *Server) campaignLeader() {
 
 	tsTicker := time.NewTicker(tso.UpdateTimestampStep)
 	defer tsTicker.Stop()
+	leaderTicker := time.NewTicker(leaderTickInterval)
+	defer leaderTicker.Stop()
 
 	for {
 		select {
-		case _, ok := <-ch:
-			if !ok {
-				log.Info("keep alive channel is closed")
-				return
-			}
-		case <-tsTicker.C:
-			if err = s.tso.UpdateTimestamp(); err != nil {
-				log.Error("failed to update timestamp", zap.Error(err))
+		case <-leaderTicker.C:
+			if lease.IsExpired() {
+				log.Info("lease expired, leader step down")
 				return
 			}
 			etcdLeader := s.member.GetEtcdLeader()
 			if etcdLeader != s.member.ID() {
 				log.Info("etcd leader changed, resigns leadership", zap.String("old-leader-name", s.Name()))
+				return
+			}
+		case <-tsTicker.C:
+			if err = s.tso.UpdateTimestamp(); err != nil {
+				log.Error("failed to update timestamp", zap.Error(err))
 				return
 			}
 		case <-ctx.Done():
