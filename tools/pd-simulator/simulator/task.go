@@ -336,8 +336,8 @@ func (a *removePeer) Step(r *RaftEngine) {
 			}
 		}
 		a.finished = true
-		if analysis.GetTransferRegionCounter().IsValid {
-			analysis.GetTransferRegionCounter().AddSource(a.regionID, a.peer.StoreId)
+		if analysis.GetTransferCounter().IsValid {
+			analysis.GetTransferCounter().AddSource(a.regionID, a.peer.StoreId)
 		}
 	}
 }
@@ -386,8 +386,8 @@ func (a *addLearner) Step(r *RaftEngine) {
 			r.schedulerStats.taskStats.incAddLeaner(region.GetID())
 		}
 		a.finished = true
-		if analysis.GetTransferRegionCounter().IsValid {
-			analysis.GetTransferRegionCounter().AddTarget(a.regionID, a.peer.StoreId)
+		if analysis.GetTransferCounter().IsValid {
+			analysis.GetTransferCounter().AddTarget(a.regionID, a.peer.StoreId)
 		}
 	}
 }

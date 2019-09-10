@@ -30,8 +30,8 @@ type Interpreter interface {
 	ParseLog(filename string, r *regexp.Regexp)
 }
 
-// CompileRegex is to provide regexp for transfer region counter.
-func (TransferRegionCount) CompileRegex(operator string) *regexp.Regexp {
+// CompileRegex is to provide regexp for transfer counter.
+func (TransferCounter) CompileRegex(operator string) *regexp.Regexp {
 	var r *regexp.Regexp
 	var err error
 
@@ -51,7 +51,7 @@ func (TransferRegionCount) CompileRegex(operator string) *regexp.Regexp {
 	return r
 }
 
-func (TransferRegionCount) parseLine(content string, r *regexp.Regexp) []uint64 {
+func (TransferCounter) parseLine(content string, r *regexp.Regexp) []uint64 {
 	resultUint64 := make([]uint64, 0, 4)
 	result := r.FindStringSubmatch(content)
 	if len(result) == 0 {
@@ -70,8 +70,8 @@ func (TransferRegionCount) parseLine(content string, r *regexp.Regexp) []uint64 
 	return resultUint64
 }
 
-// ParseLog is to parse log for transfer region counter.
-func (c *TransferRegionCount) ParseLog(filename string, r *regexp.Regexp) {
+// ParseLog is to parse log for transfer counter.
+func (c *TransferCounter) ParseLog(filename string, r *regexp.Regexp) {
 	// Open file
 	fi, err := os.Open(filename)
 	if err != nil {
@@ -94,8 +94,8 @@ func (c *TransferRegionCount) ParseLog(filename string, r *regexp.Regexp) {
 		result := c.parseLine(string(content), r)
 		if len(result) == 3 {
 			regionID, sourceID, targetID := result[0], result[1], result[2]
-			GetTransferRegionCounter().AddTarget(regionID, targetID)
-			GetTransferRegionCounter().AddSource(regionID, sourceID)
+			GetTransferCounter().AddTarget(regionID, targetID)
+			GetTransferCounter().AddSource(regionID, sourceID)
 		}
 	}
 }

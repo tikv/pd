@@ -25,7 +25,7 @@ var (
 	input    = flag.String("input", "", "input pd log file, required.")
 	output   = flag.String("output", "", "output file, default output to stdout.")
 	logLevel = flag.String("logLevel", "info", "log level, default info.")
-	style    = flag.String("style", "", "analysis style, example: transfer-region-counter")
+	style    = flag.String("style", "", "analysis style, example: transfer-counter")
 	operator = flag.String("operator", "", "operator style, example: balance-region, balance-leader, transfer-hot-read-leader, move-hot-read-region, transfer-hot-write-leader, move-hot-write-region")
 )
 
@@ -42,7 +42,7 @@ func InitLogger(l string) {
 func main() {
 	flag.Parse()
 	InitLogger(*logLevel)
-	analysis.GetTransferRegionCounter().Init(0, 0)
+	analysis.GetTransferCounter().Init(0, 0)
 	if *input == "" {
 		Logger.Fatal("need to specify one input pd log")
 	}
@@ -55,14 +55,14 @@ func main() {
 		}
 	}
 	switch *style {
-	case "transfer-region-counter":
+	case "transfer-counter":
 		{
 			if *operator == "" {
 				Logger.Fatal("need to specify one operator")
 			}
-			r := analysis.GetTransferRegionCounter().CompileRegex(*operator)
-			analysis.GetTransferRegionCounter().ParseLog(*input, r)
-			analysis.GetTransferRegionCounter().PrintResult()
+			r := analysis.GetTransferCounter().CompileRegex(*operator)
+			analysis.GetTransferCounter().ParseLog(*input, r)
+			analysis.GetTransferCounter().PrintResult()
 			break
 		}
 	default:
