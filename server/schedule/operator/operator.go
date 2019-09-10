@@ -91,7 +91,7 @@ type StoreInfluence struct {
 func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
 	switch kind {
 	case core.LeaderKind:
-		return s.LeaderSize
+		return s.LeaderCount
 	case core.RegionKind:
 		return s.RegionSize
 	default:

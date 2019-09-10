@@ -251,9 +251,9 @@ func (s *StoreInfo) GetLastHeartbeatTS() time.Time {
 const minWeight = 1e-6
 const maxScore = 1024 * 1024 * 1024
 
-// LeaderScore returns the store's leader score: leaderSize / leaderWeight.
+// LeaderScore returns the store's leader score: leaderCount / leaderWeight.
 func (s *StoreInfo) LeaderScore(delta int64) float64 {
-	return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
+	return float64(int64(s.GetLeaderCount())+delta) / math.Max(s.GetLeaderWeight(), minWeight)
 }
 
 // RegionScore returns the store's region score.

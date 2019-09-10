@@ -58,18 +58,30 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
-	regionSize := region.GetApproximateSize()
-	if regionSize < cluster.GetAverageRegionSize() {
-		regionSize = cluster.GetAverageRegionSize()
-	}
-
-	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
-	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).ResourceSize(kind) - regionSize
-	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(kind) + regionSize
+	tolerantResource := getTolerantResource(cluster, region, kind)
+	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).ResourceSize(kind) - tolerantResource
+	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(kind) + tolerantResource
 
 	// Make sure after move, source score is still greater than target score.
 	return source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceDelta) >
 		target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetDelta)
+}
+
+func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, kind core.ResourceKind) int64 {
+	switch kind {
+	case core.LeaderKind:
+		leaderCount := int64(float64(1) * adjustTolerantRatio(cluster))
+		return leaderCount
+	case core.RegionKind:
+		regionSize := region.GetApproximateSize()
+		if regionSize < cluster.GetAverageRegionSize() {
+			regionSize = cluster.GetAverageRegionSize()
+		}
+		regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
+		return regionSize
+	default:
+		return 0
+	}
 }
 
 func adjustTolerantRatio(cluster schedule.Cluster) float64 {
