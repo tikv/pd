@@ -27,8 +27,8 @@ var (
 	logLevel = flag.String("logLevel", "info", "log level, default info.")
 	style    = flag.String("style", "", "analysis style, example: transfer-counter")
 	operator = flag.String("operator", "", "operator style, example: balance-region, balance-leader, transfer-hot-read-leader, move-hot-read-region, transfer-hot-write-leader, move-hot-write-region")
-	start    = flag.String("start", "", "start time, for example 2019/09/10 12:20:07")
-	end      = flag.String("end", "", "end time, for example 2019/09/10 14:20:07")
+	start    = flag.String("start", "", "start time, for example 2019/09/10 12:20:07, default: total file")
+	end      = flag.String("end", "", "end time, for example 2019/09/10 14:20:07, default: total file")
 )
 
 // Logger is the global logger used for simulator.

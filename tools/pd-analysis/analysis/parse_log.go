@@ -71,14 +71,6 @@ func (TransferCounter) parseLine(content string, r *regexp.Regexp) []uint64 {
 	return resultUint64
 }
 
-func iterator(file *os.File) func() (string, error) {
-	br := bufio.NewReader(file)
-	return func() (string, error) {
-		content, _, err := br.ReadLine()
-		return string(content), err
-	}
-}
-
 func foreachLine(filename string, solve func(string)) {
 	// Open file
 	fi, err := os.Open(filename)
@@ -86,9 +78,10 @@ func foreachLine(filename string, solve func(string)) {
 		log.Fatal("Error: ", err)
 	}
 	defer fi.Close()
-	it := iterator(fi)
+	br := bufio.NewReader(fi)
+	// For each
 	for {
-		content, err := it()
+		content, _, err := br.ReadLine()
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -96,7 +89,7 @@ func foreachLine(filename string, solve func(string)) {
 			log.Fatal("Error: ", err)
 			return
 		}
-		solve(content)
+		solve(string(content))
 	}
 }
 
@@ -146,8 +139,7 @@ func (c *TransferCounter) ParseLog(filename, start, end, layout string, r *regex
 		// Get current line time
 		current, err := getCurrent(content)
 		if err != nil {
-			s := err.Error()
-			if s == "empty" {
+			if err.Error() == "empty" {
 				return
 			}
 			log.Fatal("Error: ", err)
