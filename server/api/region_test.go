@@ -63,6 +63,10 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...core
 	newOpts := []core.RegionCreateOption{
 		core.SetApproximateKeys(10),
 		core.SetApproximateSize(10),
+		core.SetWrittenBytes(100 * 1024 * 1024),
+		core.SetWrittenKeys(1 * 1024 * 1024),
+		core.SetReadBytes(200 * 1024 * 1024),
+		core.SetReadKeys(2 * 1024 * 1024),
 	}
 	newOpts = append(newOpts, opts...)
 	region := core.NewRegionInfo(metaRegion, leader, newOpts...)
@@ -74,9 +78,16 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
 	r1 := &RegionInfo{}
+	r1m := make(map[string]interface{})
 	err := readJSONWithURL(url, r1)
 	c.Assert(err, IsNil)
 	c.Assert(r1, DeepEquals, NewRegionInfo(r))
+	err = readJSONWithURL(url, &r1m)
+	c.Assert(err, IsNil)
+	c.Assert(r1m["written_bytes"].(float64), Equals, float64(r.GetBytesWritten()))
+	c.Assert(r1m["written_keys"].(float64), Equals, float64(r.GetKeysWritten()))
+	c.Assert(r1m["read_bytes"].(float64), Equals, float64(r.GetBytesRead()))
+	c.Assert(r1m["read_keys"].(float64), Equals, float64(r.GetKeysRead()))
 
 	url = fmt.Sprintf("%s/region/key/%s", s.urlPrefix, "a")
 	r2 := &RegionInfo{}

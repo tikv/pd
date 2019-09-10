@@ -60,7 +60,9 @@ func NewRegionInfo(r *core.RegionInfo) *RegionInfo {
 		DownPeers:       r.GetDownPeers(),
 		PendingPeers:    r.GetPendingPeers(),
 		WrittenBytes:    r.GetBytesWritten(),
+		WrittenKeys:     r.GetKeysWritten(),
 		ReadBytes:       r.GetBytesRead(),
+		ReadKeys:        r.GetKeysRead(),
 		ApproximateSize: r.GetApproximateSize(),
 		ApproximateKeys: r.GetApproximateKeys(),
 	}
