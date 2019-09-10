@@ -44,6 +44,10 @@ require (
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.0.0-20190320044326-77d4b742cdbf
 	go.uber.org/zap v1.9.1
+	golang.org/x/crypto v0.0.0-20190909091759-094676da4a83 // indirect
+	golang.org/x/net v0.0.0-20190909003024-a7b16738d86b // indirect
+	golang.org/x/sync v0.0.0-20190423024810-112230192c58 // indirect
+	golang.org/x/sys v0.0.0-20190909082730-f460065e899a // indirect
 	google.golang.org/grpc v1.14.0
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
