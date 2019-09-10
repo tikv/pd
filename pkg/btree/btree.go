@@ -310,9 +310,7 @@ func (s *size) truncate(index int) {
 }
 
 func (s size) find(k int) (index int, found bool) {
-	i := sort.Search(len(s), func(i int) bool {
-		return k <= s[i]
-	})
+	i := sort.SearchInts(s, k)
 	if i > 0 && s[i-1]+1 == k {
 		return i - 1, true
 	}
