@@ -15,13 +15,18 @@ OVERALLS := overalls
 FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl enable)
 FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl disable)
 
-DEADLOCK_ENABLE := $$(find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs -n 1 sed -i.bak 's/sync.RWMutex/deadlock.RWMutex/' && \
-						find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs -n 1 sed -i.bak 's/sync.Mutex/deadlock.Mutex/' && \
-						find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs -n 1 ./scripts/retool do goimports -w)
-DEADLOCK_DISABLE := $$(find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs -n 1 sed -i.bak 's/deadlock.RWMutex/sync.RWMutex/' && \
-						find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs -n 1 sed -i.bak 's/deadlock.Mutex/sync.Mutex/' && \
-						find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs -n 1 ./scripts/retool do goimports -w && \
-						find . -name "*.bak" | grep -vE "(vendor|\.retools)" | xargs rm)
+DEADLOCK_ENABLE := $$(\
+						find . -name "*.go" | grep -vE "(vendor|\.retools)" \
+						| xargs -n 1 sed -i.bak 's/sync\.RWMutex/deadlock.RWMutex/;s/sync\.Mutex/deadlock.Mutex/' && \
+						find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs grep -lE "(deadlock\.RWMutex|deadlock\.Mutex)" \
+						| xargs ./scripts/retool do goimports -w)
+DEADLOCK_DISABLE := $$(\
+						find . -name "*.go" | grep -vE "(vendor|\.retools)" \
+						| xargs -n 1 sed -i.bak 's/deadlock\.RWMutex/sync.RWMutex/;s/deadlock\.Mutex/sync.Mutex/' && \
+						find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs grep -lE "(sync\.RWMutex|sync\.Mutex)" \
+						| xargs ./scripts/retool do goimports -w && \
+						find . -name "*.bak" | grep -vE "(vendor|\.retools)" | xargs rm && \
+						go mod tidy)
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
@@ -62,7 +67,7 @@ pd-recover: export GO111MODULE=on
 pd-recover:
 	CGO_ENABLED=0 go build -o bin/pd-recover tools/pd-recover/main.go
 
-test: retool-setup
+test: retool-setup deadlock-setup
 	# testing...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
