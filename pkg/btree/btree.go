@@ -336,9 +336,13 @@ func (n *node) length() int {
 
 func (n *node) initSize() {
 	l := len(n.children)
-	n.size = make([]int, l)
-	if l == 0 {
+	if l <= 0 {
+		n.size.truncate(0)
 		return
+	} else if l <= cap(n.size) {
+		n.size = n.size[:l]
+	} else {
+		n.size = make([]int, l)
 	}
 	n.size[0] = n.children[0].length()
 	for i := 1; i < l; i++ {
