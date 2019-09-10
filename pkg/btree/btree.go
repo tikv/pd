@@ -240,7 +240,7 @@ func (s *children) truncate(index int) {
 // size stores size info of a node.
 // size[i] is the rank of the max item of children[i] in the subtree, so we have following formulas:
 //
-//   size[0] = if i == 0 { children[0].length() }
+//   size[i] = if i == 0 { children[0].length() }
 //             else { size[i-1] + 1 + children[i].length() }
 type size []int
 
