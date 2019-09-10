@@ -180,6 +180,13 @@ func SetApproximateKeys(v int64) RegionCreateOption {
 	}
 }
 
+// SetReportInterval sets the report interval for the region.
+func SetReportInterval(v uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.interval = &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: v}
+	}
+}
+
 // SetRegionConfVer sets the config version for the reigon.
 func SetRegionConfVer(confVer uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
