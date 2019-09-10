@@ -87,16 +87,16 @@ func TestBTreeSizeInfo(t *testing.T) {
 		tr.ReplaceOrInsert(elt)
 		//tr.root.print(os.Stderr, 0)
 		assertEq(t, "root length", tr.getRootLength(), tr.Len())
-		assertEq(t, "check min", tr.GetKth(1), tr.Min())
-		assertEq(t, "check max", tr.GetKth(tr.Len()), tr.Max())
+		assertEq(t, "check min", tr.At(0), tr.Min())
+		assertEq(t, "check max", tr.At(tr.Len()-1), tr.Max())
 	}
-	for k := 1; k <= maxElt; k++ {
-		assertEq(t, "get k-th", tr.GetKth(k), Int(k-1))
+	for k := 0; k < maxElt; k++ {
+		assertEq(t, "get k-th", tr.At(k), Int(k))
 	}
 	for x := 0; x < maxElt; x++ {
-		y, rk := tr.GetWithRank(Int(x))
+		y, rk := tr.GetWithIndex(Int(x))
 		assertEq(t, "get", y, Int(x))
-		assertEq(t, "get rank", rk, x+1)
+		assertEq(t, "get rank", rk, x)
 	}
 
 	for _, elt := range elements {
@@ -105,20 +105,20 @@ func TestBTreeSizeInfo(t *testing.T) {
 		}
 		//tr.root.print(os.Stderr, 0)
 		assertEq(t, "after delete root length", tr.getRootLength(), tr.Len())
-		assertEq(t, "after delete check min", tr.GetKth(1), tr.Min())
-		assertEq(t, "after delete check max", tr.GetKth(tr.Len()), tr.Max())
+		assertEq(t, "after delete check min", tr.At(0), tr.Min())
+		assertEq(t, "after delete check max", tr.At(tr.Len()-1), tr.Max())
 	}
-	for k := 1; k <= maxElt/3; k++ {
-		assertEq(t, "after delete get k-th", tr.GetKth(k), Int(3*(k-1)))
+	for k := 0; k < maxElt/3; k++ {
+		assertEq(t, "after delete get k-th", tr.At(k), Int(3*k))
 	}
 	for x := 0; x < maxElt; x++ {
-		y, rk := tr.GetWithRank(Int(x))
+		y, rk := tr.GetWithIndex(Int(x))
 		if x%3 == 0 {
 			assertEq(t, "after delete get", y, Int(x))
-			assertEq(t, "after delete get rank", rk, (x/3)+1)
+			assertEq(t, "after delete get rank", rk, x/3)
 		} else {
 			assertEq(t, "after delete get nil", y, nil)
-			assertEq(t, "after delete get nil rank", rk, (x/3)+1)
+			assertEq(t, "after delete get nil rank", rk, x/3+1)
 		}
 	}
 
@@ -126,20 +126,20 @@ func TestBTreeSizeInfo(t *testing.T) {
 		tr.DeleteMax()
 		//tr.root.print(os.Stderr, 0)
 		assertEq(t, "delete max root length", tr.getRootLength(), tr.Len())
-		assertEq(t, "delete max check min", tr.GetKth(1), tr.Min())
-		assertEq(t, "delete max check max", tr.GetKth(tr.Len()), tr.Max())
+		assertEq(t, "delete max check min", tr.At(0), tr.Min())
+		assertEq(t, "delete max check max", tr.At(tr.Len()-1), tr.Max())
 	}
-	for k := 1; k <= maxElt/3 && k <= 100; k++ {
-		assertEq(t, "delete max get k-th", tr.GetKth(k), Int(3*(k-1)))
+	for k := 0; k < maxElt/3 && k < 100; k++ {
+		assertEq(t, "delete max get k-th", tr.At(k), Int(3*k))
 	}
 	for x := 0; x < maxElt && x < 300; x++ {
-		y, rk := tr.GetWithRank(Int(x))
+		y, rk := tr.GetWithIndex(Int(x))
 		if x%3 == 0 {
 			assertEq(t, "delete max get", y, Int(x))
-			assertEq(t, "delete max get rank", rk, (x/3)+1)
+			assertEq(t, "delete max get rank", rk, x/3)
 		} else {
 			assertEq(t, "delete max get nil", y, nil)
-			assertEq(t, "delete max get nil rank", rk, (x/3)+1)
+			assertEq(t, "delete max get nil rank", rk, x/3+1)
 		}
 	}
 

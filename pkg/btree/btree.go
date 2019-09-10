@@ -238,7 +238,8 @@ func (s *children) truncate(index int) {
 }
 
 // size stores size info of a node.
-// size[i] is the rank of the max item of children[i] in the subtree, so we have following formulas:
+// size[i] is the number of items from the first one of this subtree to the last one of children[i],
+// so we have following formulas:
 //
 //   size[i] = if i == 0 { children[0].length() }
 //             else { size[i-1] + 1 + children[i].length() }
@@ -311,10 +312,7 @@ func (s *size) truncate(index int) {
 
 func (s size) find(k int) (index int, found bool) {
 	i := sort.SearchInts(s, k)
-	if i > 0 && s[i-1]+1 == k {
-		return i - 1, true
-	}
-	return i, false
+	return i, s[i] == k
 }
 
 // node is an internal node in a tree.
@@ -447,35 +445,34 @@ func (n *node) insert(item Item, maxItems int) Item {
 	return out
 }
 
-// getKth returns the k-th item in the subtree.
-func (n *node) getKth(k int) Item {
-	if k > n.length() || k <= 0 {
+func (n *node) at(k int) Item {
+	if k >= n.length() || k < 0 {
 		return nil
 	}
 	if len(n.children) == 0 {
-		return n.items[k-1]
+		return n.items[k]
 	}
 	i, found := n.size.find(k)
 	if found {
 		return n.items[i]
 	}
 	if i == 0 {
-		return n.children[0].getKth(k)
+		return n.children[0].at(k)
 	}
-	return n.children[i].getKth(k - n.size[i-1] - 1)
+	return n.children[i].at(k - n.size[i-1] - 1)
 }
 
-// rank is the number of items <= key
-func (n *node) getWithRank(key Item) (Item, int) {
+// index is the number of items < key
+func (n *node) getWithIndex(key Item) (Item, int) {
 	i, found := n.items.find(key)
 	if found {
-		rk := i + 1
+		rk := i
 		if len(n.size) > 0 {
-			rk = n.size[i] + 1
+			rk = n.size[i]
 		}
 		return n.items[i], rk
 	} else if len(n.children) > 0 {
-		out, rk := n.children[i].getWithRank(key)
+		out, rk := n.children[i].getWithIndex(key)
 		if i > 0 {
 			rk += n.size[i-1] + 1
 		}
@@ -989,21 +986,21 @@ func (t *BTree) Get(key Item) Item {
 	return t.root.get(key)
 }
 
-// GetWithRank looks for the key item in the tree, returns it and its rank.
-// If the key item is not in the tree, return the number of items less than it.
-func (t *BTree) GetWithRank(key Item) (Item, int) {
+// GetWithIndex gets the key and its index.
+// If the key is not in the tree, the the index is the number of items < key.
+func (t *BTree) GetWithIndex(key Item) (Item, int) {
 	if t.root == nil {
 		return nil, 0
 	}
-	return t.root.getWithRank(key)
+	return t.root.getWithIndex(key)
 }
 
-// GetKth returns the k-th item in the tree.
-func (t *BTree) GetKth(k int) Item {
+// At returns the item with index k. If k < 0 or k >= t.Len(), returns nil.
+func (t *BTree) At(k int) Item {
 	if t.root == nil {
 		return nil
 	}
-	return t.root.getKth(k)
+	return t.root.at(k)
 }
 
 // Min returns the smallest item in the tree, or nil if the tree is empty.
