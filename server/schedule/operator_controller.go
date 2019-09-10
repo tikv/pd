@@ -219,7 +219,7 @@ func (oc *OperatorController) AddOperator(ops ...*Operator) bool {
 
 	if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
 		for _, op := range ops {
-			operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
+			operatorCounter.WithLabelValues(op.Desc(), "canceled").Inc()
 			oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 		}
 		return false
@@ -297,7 +297,7 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	if old, ok := oc.operators[regionID]; ok {
 		_ = oc.removeOperatorLocked(old)
 		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", old))
-		operatorCounter.WithLabelValues(old.Desc(), "replace").Inc()
+		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
 		oc.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
 	}
 
