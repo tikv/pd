@@ -15,12 +15,13 @@ package analysis
 
 import (
 	"bufio"
-	"fmt"
+	"errors"
 	"io"
 	"log"
 	"os"
 	"regexp"
 	"strconv"
+	"time"
 )
 
 // Interpreter is the interface for all analysis to parse log
@@ -70,32 +71,95 @@ func (TransferCounter) parseLine(content string, r *regexp.Regexp) []uint64 {
 	return resultUint64
 }
 
-// ParseLog is to parse log for transfer counter.
-func (c *TransferCounter) ParseLog(filename string, r *regexp.Regexp) {
+func iterator(file *os.File) func() (string, error) {
+	br := bufio.NewReader(file)
+	return func() (string, error) {
+		content, _, err := br.ReadLine()
+		return string(content), err
+	}
+}
+
+func foreachLine(filename string, solve func(string)) {
 	// Open file
 	fi, err := os.Open(filename)
 	if err != nil {
-		fmt.Printf("Error: %s\n", err)
-		return
+		log.Fatal("Error: ", err)
 	}
 	defer fi.Close()
-	br := bufio.NewReader(fi)
+	it := iterator(fi)
 	for {
-		// Read content
-		content, _, err := br.ReadLine()
+		content, err := it()
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
-			fmt.Printf("Error: %s\n", err)
+			log.Fatal("Error: ", err)
 			return
 		}
-		// Regex for each line
-		result := c.parseLine(string(content), r)
-		if len(result) == 3 {
-			regionID, sourceID, targetID := result[0], result[1], result[2]
-			GetTransferCounter().AddTarget(regionID, targetID)
-			GetTransferCounter().AddSource(regionID, sourceID)
+		solve(content)
+	}
+}
+
+func isExpectTime(expect, layout string, isBeforeThanExpect bool) func(time.Time) bool {
+	expectTime, err := time.Parse(layout, expect)
+	if err != nil {
+		return func(current time.Time) bool {
+			return true
 		}
 	}
+	return func(current time.Time) bool {
+		return current.Before(expectTime) == isBeforeThanExpect
+	}
+
+}
+
+func currentTime(layout string) func(content string) (time.Time, error) {
+	if layout != "2006/01/02 15:04:05" {
+		log.Fatal("Unsupported time layout")
+	}
+	r, err := regexp.Compile(".*?([0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}).*")
+	if err != nil {
+		log.Fatal("Error: ", err)
+	}
+	return func(content string) (time.Time, error) {
+		result := r.FindStringSubmatch(content)
+		if len(result) == 2 {
+			current, err := time.Parse(layout, result[1])
+			if err != nil {
+				log.Fatal("Error: ", err)
+			}
+			return current, nil
+		} else if len(result) == 0 {
+			return time.Now(), errors.New("empty")
+		} else {
+			return time.Now(), errors.New("There is no valid time in log with " + content)
+		}
+	}
+}
+
+// ParseLog is to parse log for transfer counter.
+func (c *TransferCounter) ParseLog(filename, start, end, layout string, r *regexp.Regexp) {
+	afterStart := isExpectTime(start, layout, false)
+	beforeEnd := isExpectTime(end, layout, true)
+	getCurrent := currentTime(layout)
+	foreachLine(filename, func(content string) {
+		// Get current line time
+		current, err := getCurrent(content)
+		if err != nil {
+			s := err.Error()
+			if s == "empty" {
+				return
+			}
+			log.Fatal("Error: ", err)
+		}
+		// if current line time between start and end
+		if afterStart(current) && beforeEnd(current) {
+			result := c.parseLine(content, r)
+			if len(result) == 3 {
+				regionID, sourceID, targetID := result[0], result[1], result[2]
+				GetTransferCounter().AddTarget(regionID, targetID)
+				GetTransferCounter().AddSource(regionID, sourceID)
+			}
+		}
+	})
 }

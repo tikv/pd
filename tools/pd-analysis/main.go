@@ -27,6 +27,8 @@ var (
 	logLevel = flag.String("logLevel", "info", "log level, default info.")
 	style    = flag.String("style", "", "analysis style, example: transfer-counter")
 	operator = flag.String("operator", "", "operator style, example: balance-region, balance-leader, transfer-hot-read-leader, move-hot-read-region, transfer-hot-write-leader, move-hot-write-region")
+	start    = flag.String("start", "", "start time, for example 2019/09/10 12:20:07")
+	end      = flag.String("end", "", "end time, for example 2019/09/10 14:20:07")
 )
 
 // Logger is the global logger used for simulator.
@@ -54,6 +56,7 @@ func main() {
 			os.Stdout = f
 		}
 	}
+	layout := "2006/01/02 15:04:05"
 	switch *style {
 	case "transfer-counter":
 		{
@@ -61,7 +64,7 @@ func main() {
 				Logger.Fatal("need to specify one operator")
 			}
 			r := analysis.GetTransferCounter().CompileRegex(*operator)
-			analysis.GetTransferCounter().ParseLog(*input, r)
+			analysis.GetTransferCounter().ParseLog(*input, *start, *end, layout, r)
 			analysis.GetTransferCounter().PrintResult()
 			break
 		}
