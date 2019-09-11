@@ -83,9 +83,9 @@ func TestBTreeSizeInfo(t *testing.T) {
 	tr := New(*btreeDegree)
 	const maxElt = 10000
 	elements := perm(maxElt)
+	// insert 0..maxElt
 	for _, elt := range elements {
 		tr.ReplaceOrInsert(elt)
-		//tr.root.print(os.Stderr, 0)
 		assertEq(t, "root length", tr.getRootLength(), tr.Len())
 		assertEq(t, "check min", tr.At(0), tr.Min())
 		assertEq(t, "check max", tr.At(tr.Len()-1), tr.Max())
@@ -99,11 +99,18 @@ func TestBTreeSizeInfo(t *testing.T) {
 		assertEq(t, "get rank", rk, x)
 	}
 
+	// get rank of maxElt + 1
+	{
+		y, rk := tr.GetWithIndex(Int(maxElt + 1))
+		assertEq(t, "get max+1", y, nil)
+		assertEq(t, "get max+1 rank", rk, tr.Len())
+	}
+
+	// delete x if x % 3 == 0
 	for _, elt := range elements {
 		if int(elt.(Int))%3 != 0 {
 			tr.Delete(elt)
 		}
-		//tr.root.print(os.Stderr, 0)
 		assertEq(t, "after delete root length", tr.getRootLength(), tr.Len())
 		assertEq(t, "after delete check min", tr.At(0), tr.Min())
 		assertEq(t, "after delete check max", tr.At(tr.Len()-1), tr.Max())
@@ -122,9 +129,9 @@ func TestBTreeSizeInfo(t *testing.T) {
 		}
 	}
 
+	// delete max until tr.Len() <= 100
 	for tr.Len() > 100 {
 		tr.DeleteMax()
-		//tr.root.print(os.Stderr, 0)
 		assertEq(t, "delete max root length", tr.getRootLength(), tr.Len())
 		assertEq(t, "delete max check min", tr.At(0), tr.Min())
 		assertEq(t, "delete max check max", tr.At(tr.Len()-1), tr.Max())
