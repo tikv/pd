@@ -146,6 +146,13 @@ func SetWrittenBytes(v uint64) RegionCreateOption {
 	}
 }
 
+// SetWrittenKeys sets the written keys for the region.
+func SetWrittenKeys(v uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.writtenKeys = v
+	}
+}
+
 // WithRemoveStorePeer removes the specified peer for the region.
 func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -166,6 +173,13 @@ func SetReadBytes(v uint64) RegionCreateOption {
 	}
 }
 
+// SetReadKeys sets the read keys for the region.
+func SetReadKeys(v uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.readKeys = v
+	}
+}
+
 // SetApproximateSize sets the approximate size for the region.
 func SetApproximateSize(v int64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -177,6 +191,13 @@ func SetApproximateSize(v int64) RegionCreateOption {
 func SetApproximateKeys(v int64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.approximateKeys = v
+	}
+}
+
+// SetReportInterval sets the report interval for the region.
+func SetReportInterval(v uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.interval = &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: v}
 	}
 }
 

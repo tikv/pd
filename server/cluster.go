@@ -238,7 +238,6 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 			log.Info("background jobs has been stopped")
 			return
 		case <-ticker.C:
-			c.checkOperators()
 			c.checkStores()
 			c.collectMetrics()
 			c.coordinator.opController.PruneHistory()
@@ -992,29 +991,6 @@ func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
 	c.core.DeleteStore(store)
 	c.storesStats.RemoveRollingStoreStats(store.GetID())
 	return nil
-}
-
-func (c *RaftCluster) checkOperators() {
-	opController := c.coordinator.opController
-	for _, op := range opController.GetOperators() {
-		// after region is merged, it will not heartbeat anymore
-		// the operator of merged region will not timeout actively
-		region := c.GetRegion(op.RegionID())
-		if region == nil {
-			log.Debug("remove operator cause region is merged",
-				zap.Uint64("region-id", op.RegionID()),
-				zap.Stringer("operator", op))
-			opController.RemoveOperator(op)
-			continue
-		}
-
-		if op.IsTimeout() {
-			log.Info("operator timeout",
-				zap.Uint64("region-id", op.RegionID()),
-				zap.Stringer("operator", op))
-			opController.RemoveTimeoutOperator(op)
-		}
-	}
 }
 
 func (c *RaftCluster) collectMetrics() {

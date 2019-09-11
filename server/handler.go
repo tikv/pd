@@ -304,7 +304,7 @@ func (h *Handler) RemoveOperator(regionID uint64) error {
 		return ErrOperatorNotFound
 	}
 
-	c.opController.RemoveOperator(op)
+	_ = c.opController.RemoveOperator(op)
 	return nil
 }
 

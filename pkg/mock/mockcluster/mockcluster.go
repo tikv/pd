@@ -233,9 +233,10 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 }
 
 // AddLeaderRegionWithReadInfo adds region with specified leader, followers and read info.
-func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
+func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, reportInterval uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetReadBytes(readBytes))
+	r = r.Clone(core.SetReportInterval(reportInterval))
 	items := mc.HotSpotCache.CheckRead(r, mc.StoresStats)
 	for _, item := range items {
 		mc.HotSpotCache.Update(item)
@@ -244,9 +245,10 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64,
 }
 
 // AddLeaderRegionWithWriteInfo adds region with specified leader, followers and write info.
-func (mc *Cluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
+func (mc *Cluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, reportInterval uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
+	r = r.Clone(core.SetReportInterval(reportInterval))
 	items := mc.HotSpotCache.CheckWrite(r, mc.StoresStats)
 	for _, item := range items {
 		mc.HotSpotCache.Update(item)
