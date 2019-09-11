@@ -72,6 +72,7 @@ type ScheduleOptions struct {
 	DisableRemoveExtraReplica    bool
 	DisableLocationReplacement   bool
 	DisableNamespaceRelocation   bool
+	EnableLeaderScheduleByCount  bool
 	LabelProperties              map[string][]*metapb.StoreLabel
 }
 
@@ -243,4 +244,9 @@ func (mso *ScheduleOptions) IsLocationReplacementEnabled() bool {
 // IsNamespaceRelocationEnabled mocks method.
 func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
 	return !mso.DisableNamespaceRelocation
+}
+
+// IsLeaderScheduleByCountEnabled mocks method.
+func (mso *ScheduleOptions) IsLeaderScheduleByCountEnabled() bool {
+	return mso.EnableLeaderScheduleByCount
 }
