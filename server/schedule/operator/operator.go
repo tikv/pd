@@ -88,10 +88,10 @@ type StoreInfluence struct {
 }
 
 // ResourceSize returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceSize(kind core.ResourceKind, enableLeaderCountSchedule bool) int64 {
+func (s StoreInfluence) ResourceSize(kind core.ResourceKind, EnableLeaderScheduleByCount bool) int64 {
 	switch kind {
 	case core.LeaderKind:
-		if enableLeaderCountSchedule {
+		if EnableLeaderScheduleByCount {
 			return s.LeaderCount
 		}
 		return s.LeaderSize

@@ -757,7 +757,7 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
 	return ret
 }
 
-// IsLeaderCountScheduleEnabled returns if balance leader according to the count of leader.
-func (oc *OperatorController) IsLeaderCountScheduleEnabled() bool {
-	return oc.cluster.IsLeaderCountScheduleEnabled()
+// IsLeaderScheduleByCountEnabled returns if balance leader according to the count of leader.
+func (oc *OperatorController) IsLeaderScheduleByCountEnabled() bool {
+	return oc.cluster.IsLeaderScheduleByCountEnabled()
 }

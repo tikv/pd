@@ -1285,9 +1285,9 @@ func (c *RaftCluster) IsRemoveDownReplicaEnabled() bool {
 	return c.opt.IsRemoveDownReplicaEnabled()
 }
 
-// IsLeaderCountScheduleEnabled returns if balance leader according to the count of leader.
-func (c *RaftCluster) IsLeaderCountScheduleEnabled() bool {
-	return c.opt.IsLeaderCountScheduleEnabled()
+// IsLeaderScheduleByCountEnabled returns if balance leader according to the count of leader.
+func (c *RaftCluster) IsLeaderScheduleByCountEnabled() bool {
+	return c.opt.IsLeaderScheduleByCountEnabled()
 }
 
 // IsReplaceOfflineReplicaEnabled returns if replace offline replica is enabled.

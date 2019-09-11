@@ -490,8 +490,8 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
-	// EnableLeaderCountSchedule is the option to balance leader according to the count of leader".
-	EnableLeaderCountSchedule bool `toml:"enable-leader-count-schedule,omitempty" json:"enable-leader-count-schedule"`
+	// EnableLeaderScheduleByCount is the option to balance leader according to the count of leader".
+	EnableLeaderScheduleByCount bool `toml:"enable-leader-schedule-by-count,omitempty" json:"enable-leader-schedule-by-count"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -561,7 +561,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
-		EnableLeaderCountSchedule:    c.EnableLeaderCountSchedule,
+		EnableLeaderScheduleByCount:  c.EnableLeaderScheduleByCount,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,

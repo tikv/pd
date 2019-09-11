@@ -46,8 +46,8 @@ func (s *BalanceSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo
 			continue
 		}
 		if result == nil ||
-			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, opt.IsLeaderCountScheduleEnabled()) <
-				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, opt.IsLeaderCountScheduleEnabled()) {
+			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, opt.IsLeaderScheduleByCountEnabled()) <
+				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, opt.IsLeaderScheduleByCountEnabled()) {
 			result = store
 		}
 	}
@@ -64,8 +64,8 @@ func (s *BalanceSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo
 			continue
 		}
 		if result == nil ||
-			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, opt.IsLeaderCountScheduleEnabled()) >
-				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, opt.IsLeaderCountScheduleEnabled()) {
+			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, opt.IsLeaderScheduleByCountEnabled()) >
+				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, opt.IsLeaderScheduleByCountEnabled()) {
 			result = store
 		}
 	}
