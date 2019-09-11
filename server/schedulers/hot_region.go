@@ -243,7 +243,7 @@ func calcScore(storeItems map[uint64][]*statistics.HotPeerStat, cluster schedule
 			storeStat, ok := stats[storeID]
 			if !ok {
 				storeStat = &statistics.HotRegionsStat{
-					RegionsStat: make(statistics.RegionsStat, 0, storeHotRegionsDefaultLen),
+					RegionsStat: make([]statistics.HotPeerStat, 0, storeHotRegionsDefaultLen),
 				}
 				stats[storeID] = storeStat
 			}
@@ -281,7 +281,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 	// If we can find a target store, then return from this method.
 	stores := cluster.GetStores()
 	var destStoreID uint64
-	for _, i := range h.r.Perm(storesStat[srcStoreID].RegionsStat.Len()) {
+	for _, i := range h.r.Perm(len(storesStat[srcStoreID].RegionsStat)) {
 		rs := storesStat[srcStoreID].RegionsStat[i]
 		srcRegion := cluster.GetRegion(rs.RegionID)
 		if srcRegion == nil {
@@ -353,7 +353,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 	}
 
 	// select destPeer
-	for _, i := range h.r.Perm(storesStat[srcStoreID].RegionsStat.Len()) {
+	for _, i := range h.r.Perm(len(storesStat[srcStoreID].RegionsStat)) {
 		rs := storesStat[srcStoreID].RegionsStat[i]
 		srcRegion := cluster.GetRegion(rs.RegionID)
 		if srcRegion == nil {
@@ -401,7 +401,7 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 	)
 
 	for storeID, statistics := range stats {
-		count, flowBytes := statistics.RegionsStat.Len(), statistics.TotalFlowBytes
+		count, flowBytes := len(statistics.RegionsStat), statistics.TotalFlowBytes
 		if count >= 2 && (count > maxHotStoreRegionCount || (count == maxHotStoreRegionCount && flowBytes > maxFlowBytes)) {
 			maxHotStoreRegionCount = count
 			maxFlowBytes = flowBytes
@@ -416,7 +416,7 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes uint64, srcStoreID uint64, storesStat statistics.StoreHotRegionsStat) (destStoreID uint64) {
 	sr := storesStat[srcStoreID]
 	srcFlowBytes := sr.TotalFlowBytes
-	srcHotRegionsCount := sr.RegionsStat.Len()
+	srcHotRegionsCount := len(sr.RegionsStat)
 
 	var (
 		minFlowBytes    uint64 = math.MaxUint64
@@ -424,13 +424,13 @@ func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64,
 	)
 	for _, storeID := range candidateStoreIDs {
 		if s, ok := storesStat[storeID]; ok {
-			if srcHotRegionsCount-s.RegionsStat.Len() > 1 && minRegionsCount > s.RegionsStat.Len() {
+			if srcHotRegionsCount-len(s.RegionsStat) > 1 && minRegionsCount > len(s.RegionsStat) {
 				destStoreID = storeID
 				minFlowBytes = s.TotalFlowBytes
-				minRegionsCount = s.RegionsStat.Len()
+				minRegionsCount = len(s.RegionsStat)
 				continue
 			}
-			if minRegionsCount == s.RegionsStat.Len() && minFlowBytes > s.TotalFlowBytes &&
+			if minRegionsCount == len(s.RegionsStat) && minFlowBytes > s.TotalFlowBytes &&
 				uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) > s.TotalFlowBytes+2*regionFlowBytes {
 				minFlowBytes = s.TotalFlowBytes
 				destStoreID = storeID
@@ -448,12 +448,12 @@ func (h *balanceHotRegionsScheduler) adjustBalanceLimit(storeID uint64, storesSt
 
 	var hotRegionTotalCount float64
 	for _, m := range storesStat {
-		hotRegionTotalCount += float64(m.RegionsStat.Len())
+		hotRegionTotalCount += float64(len(m.RegionsStat))
 	}
 
 	avgRegionCount := hotRegionTotalCount / float64(len(storesStat))
 	// Multiplied by hotRegionLimitFactor to avoid transfer back and forth
-	limit := uint64((float64(srcStoreStatistics.RegionsStat.Len()) - avgRegionCount) * hotRegionLimitFactor)
+	limit := uint64((float64(len(srcStoreStatistics.RegionsStat)) - avgRegionCount) * hotRegionLimitFactor)
 	return maxUint64(limit, 1)
 }
 
