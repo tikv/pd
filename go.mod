@@ -1,6 +1,6 @@
 module github.com/pingcap/pd
 
-go 1.12
+go 1.13
 
 require (
 	github.com/BurntSushi/toml v0.3.1
@@ -24,6 +24,7 @@ require (
 	github.com/juju/ratelimit v1.0.1
 	github.com/kr/pretty v0.1.0 // indirect
 	github.com/mattn/go-shellwords v1.0.3
+	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/montanaflynn/stats v0.0.0-20151014174947-eeaced052adb
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8
@@ -43,6 +44,10 @@ require (
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.0.0-20190320044326-77d4b742cdbf
 	go.uber.org/zap v1.9.1
+	golang.org/x/crypto v0.0.0-20190909091759-094676da4a83 // indirect
+	golang.org/x/net v0.0.0-20190909003024-a7b16738d86b // indirect
+	golang.org/x/sync v0.0.0-20190423024810-112230192c58 // indirect
+	golang.org/x/sys v0.0.0-20190909082730-f460065e899a // indirect
 	google.golang.org/grpc v1.14.0
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0

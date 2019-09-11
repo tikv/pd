@@ -14,8 +14,9 @@
 package analysis
 
 import (
-	. "github.com/pingcap/check"
 	"testing"
+
+	. "github.com/pingcap/check"
 )
 
 func TestCounter(t *testing.T) {
