@@ -31,6 +31,10 @@ const (
 	LeaderKind = iota
 	// RegionKind indicates the region kind resource
 	RegionKind
+	// LeaderCountKind indicates the leader kind count resource
+	LeaderCountKind
+	// LeaderSizeKind indicates the leader kind size resource
+	LeaderSizeKind
 )
 
 func (k ResourceKind) String() string {

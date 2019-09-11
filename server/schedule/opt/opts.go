@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 )
 
 // Options for schedulers.
@@ -56,6 +57,8 @@ type Options interface {
 	IsRemoveExtraReplicaEnabled() bool
 	IsLocationReplacementEnabled() bool
 	IsNamespaceRelocationEnabled() bool
+	IsLeaderCountScheduleEnabled() bool
+	GetLeaderResourceKind() core.ResourceKind
 
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }

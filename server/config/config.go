@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
@@ -490,6 +491,8 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
+	// EnableLeaderCountSchedule is the option to balance leader according to the count of leader".
+	EnableLeaderCountSchedule bool `toml:"enable-leader-count-schedule,omitempty" json:"enable-leader-count-schedule"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -559,6 +562,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
+		EnableLeaderCountSchedule:    c.EnableLeaderCountSchedule,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
@@ -673,6 +677,16 @@ func (c *ScheduleConfig) Validate() error {
 		}
 	}
 	return nil
+}
+
+func (c *ScheduleConfig) GetLeaderResourceKind() core.ResourceKind {
+	var kind core.ResourceKind
+	if c.EnableLeaderCountSchedule {
+		kind = core.LeaderCountKind
+	} else {
+		kind = core.LeaderSizeKind
+	}
+	return kind
 }
 
 // SchedulerConfigs is a slice of customized scheduler configuration.
