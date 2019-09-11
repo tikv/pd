@@ -260,7 +260,8 @@ func (c *coordinator) stop() {
 type hasHotStatus interface {
 	GetHotReadStatus() *statistics.StoreHotRegionInfos
 	GetHotWriteStatus() *statistics.StoreHotRegionInfos
-	GetStoresScore() map[uint64]float64
+	GetStoresReadScore() map[uint64]float64
+	GetStoresWriteScore() map[uint64]float64
 }
 
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotRegionInfos {
@@ -372,18 +373,27 @@ func (c *coordinator) collectHotSpotMetrics() {
 		}
 	}
 
-	// Collects scores of store stats metrics.
-	storesScore := s.Scheduler.(hasHotStatus).GetStoresScore()
+	// Collects store score metrics.
+	storesScore := s.Scheduler.(hasHotStatus).GetStoresReadScore()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := fmt.Sprintf("%d", storeID)
 		score, ok := storesScore[storeID]
 		if ok {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "store_score").Set(score)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "store_read_score").Set(score)
 		}
 	}
-
+	storesScore = s.Scheduler.(hasHotStatus).GetStoresWriteScore()
+	for _, s := range stores {
+		storeAddress := s.GetAddress()
+		storeID := s.GetID()
+		storeLabel := fmt.Sprintf("%d", storeID)
+		score, ok := storesScore[storeID]
+		if ok {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "store_write_score").Set(score)
+		}
+	}
 }
 
 func (c *coordinator) shouldRun() bool {

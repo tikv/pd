@@ -45,6 +45,13 @@ func maxUint64(a, b uint64) uint64 {
 	return b
 }
 
+func maxFloat64(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func minDuration(a, b time.Duration) time.Duration {
 	if a < b {
 		return a
@@ -172,10 +179,12 @@ func (s *ScorePairSlice) Less(i, j int) bool { return s.pairs[i].score < s.pairs
 // Swap switches out two numbers in slice.
 func (s *ScorePairSlice) Swap(i, j int) { s.pairs[i], s.pairs[j] = s.pairs[j], s.pairs[i] }
 
-// Sort sorts the slice.
-func (s *ScorePairSlice) Sort() {
-	sort.Sort(s)
-	s.isSorted = true
+// checkSort will sort the slice.
+func (s *ScorePairSlice) checkSort() {
+	if !s.isSorted {
+		s.isSorted = true
+		sort.Sort(s)
+	}
 }
 
 // GetPairs returns the pairs.
@@ -185,10 +194,14 @@ func (s *ScorePairSlice) GetPairs() []*ScorePair {
 
 // GetMin returns the min of the slice.
 func (s *ScorePairSlice) GetMin() *ScorePair {
-	if !s.isSorted {
-		sort.Sort(s)
-	}
+	s.checkSort()
 	return s.pairs[0]
+}
+
+// GetMax returns the max of the slice.
+func (s *ScorePairSlice) GetMax() *ScorePair {
+	s.checkSort()
+	return s.pairs[s.Len()-1]
 }
 
 // Mean returns the mean of the slice.
@@ -222,6 +235,16 @@ func (s *ScorePairSlice) StdDeviation() float64 {
 	return res
 }
 
+// Difference uses slice's stddev/mean to measure the data imbalance.
+func (s *ScorePairSlice) Difference() float64 {
+	mean := s.Mean()
+	if mean == 0 {
+		return 0
+	}
+
+	return s.StdDeviation() / mean
+}
+
 // MeanStoresStats returns the mean of stores' stats.
 func MeanStoresStats(storesStats map[uint64]float64) float64 {
 	if len(storesStats) == 0 {
@@ -235,8 +258,8 @@ func MeanStoresStats(storesStats map[uint64]float64) float64 {
 	return sum / float64(len(storesStats))
 }
 
-// NormalizeStoresStats returns the normalized score pairs. Normolize: x_i => (x_i - x_min)/x_avg.
-func NormalizeStoresStats(storesStats map[uint64]float64) *ScorePairSlice {
+// ConvertStoresStats converts a map to a ScorePairSlice.
+func ConvertStoresStats(storesStats map[uint64]float64) *ScorePairSlice {
 	scorePairSlice := NewScorePairSlice()
 
 	for storeID, stats := range storesStats {
@@ -244,37 +267,6 @@ func NormalizeStoresStats(storesStats map[uint64]float64) *ScorePairSlice {
 		scorePairSlice.Add(pair)
 	}
 
-	mean := scorePairSlice.Mean()
-	if mean == 0 {
-		return scorePairSlice
-	}
-
-	scorePairSlice.Sort()
-	minScore := scorePairSlice.GetMin().GetScore()
-
-	for _, pair := range scorePairSlice.GetPairs() {
-		pair.SetScore((pair.GetScore() - minScore) / mean)
-	}
-
+	scorePairSlice.checkSort()
 	return scorePairSlice
-}
-
-// AggregateScores aggregates stores' scores by using their weights.
-func AggregateScores(scorePairSliceVec []*ScorePairSlice, weights []float64) *ScorePairSlice {
-	scoreMap := make(map[uint64]float64, 0)
-	for i, scorePairSlice := range scorePairSliceVec {
-		for _, pair := range scorePairSlice.GetPairs() {
-			scoreMap[pair.GetStoreID()] += pair.GetScore() * weights[i]
-		}
-	}
-
-	res := NewScorePairSlice()
-	for storeID, score := range scoreMap {
-		pair := NewScorePair(storeID, score)
-		res.Add(pair)
-	}
-
-	res.Sort()
-
-	return res
 }
