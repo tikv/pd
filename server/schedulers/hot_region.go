@@ -783,7 +783,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		}
 
 		if balanceType == hotWriteRegionBalance {
-			destStoreID = h.selectDestStoreByHotnessInfo(candidateStoreIDs, rs.GetFlowBytes(), srcStoreID, storesStat, false)
+			destStoreID = h.selectDestStoreByHotnessInfo(candidateStoreIDs, rs.GetFlowBytes(), srcStoreID, storesStat)
 		} else {
 			destStoreID = h.selectDestStoreByStoreScore(candidateStoreIDs, rs.GetFlowBytes(), srcStoreID, storesStat, balanceType)
 		}

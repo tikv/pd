@@ -90,7 +90,7 @@ func (s *testScorePairSuite) TestSortScorePairSlice(c *C) {
 	scorePairSlice.Add(NewScorePair(4, 0.35))
 
 	expectedScores := []float64{0.15, 0.25, 0.35, 0.5}
-	scorePairSlice.Sort()
+	c.Assert(scorePairSlice.GetMax().GetScore(), Equals, 0.5)
 	for i, pair := range scorePairSlice.GetPairs() {
 		c.Assert(pair.GetScore(), Equals, expectedScores[i])
 	}
