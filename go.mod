@@ -48,4 +48,4 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
-replace github.com/pingcap/kvproto v0.0.0-20190822090350-11ea838aedf7 => github.com/jiyingtk/kvproto v0.0.0-20190827063906-9454ffd9a2a5
+replace github.com/pingcap/kvproto => github.com/jiyingtk/kvproto v0.0.0-20190903114314-615829bc0b18
