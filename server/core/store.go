@@ -255,9 +255,8 @@ const maxScore = 1024 * 1024 * 1024
 func (s *StoreInfo) LeaderScore(enableLeaderCountSchedule bool, delta int64) float64 {
 	if enableLeaderCountSchedule {
 		return float64(int64(s.GetLeaderCount())+delta) / math.Max(s.GetLeaderWeight(), minWeight)
-	} else {
-		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
 	}
+	return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
 }
 
 // RegionScore returns the store's region score.
@@ -350,11 +349,12 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 
 // ResourceScore returns score of leader/region in the store.
 func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64, delta int64, enableLeaderCountSchedule bool) float64 {
-	if kind == RegionKind {
-		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
-	} else if kind == LeaderKind {
+	switch kind {
+	case LeaderKind:
 		return s.LeaderScore(enableLeaderCountSchedule, delta)
-	} else {
+	case RegionKind:
+		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
+	default:
 		return 0
 	}
 }

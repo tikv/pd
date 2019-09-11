@@ -93,9 +93,8 @@ func (s StoreInfluence) ResourceSize(kind core.ResourceKind, enableLeaderCountSc
 	case core.LeaderKind:
 		if enableLeaderCountSchedule {
 			return s.LeaderCount
-		} else {
-			return s.LeaderSize
 		}
+		return s.LeaderSize
 	case core.RegionKind:
 		return s.RegionSize
 	default:

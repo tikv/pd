@@ -72,14 +72,14 @@ func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, enab
 	if enableLeaderCountSchedule {
 		leaderCount := int64(float64(1) * adjustTolerantRatio(cluster))
 		return leaderCount
-	} else {
-		regionSize := region.GetApproximateSize()
-		if regionSize < cluster.GetAverageRegionSize() {
-			regionSize = cluster.GetAverageRegionSize()
-		}
-		regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
-		return regionSize
 	}
+	regionSize := region.GetApproximateSize()
+	if regionSize < cluster.GetAverageRegionSize() {
+		regionSize = cluster.GetAverageRegionSize()
+	}
+	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
+	return regionSize
+
 }
 
 func adjustTolerantRatio(cluster schedule.Cluster) float64 {
