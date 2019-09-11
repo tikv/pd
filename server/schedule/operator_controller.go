@@ -109,7 +109,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 				changes > uint64(op.ConfVerChanged(region)) {
 
 				if oc.RemoveOperator(op) {
-					log.Info("stale operator", zap.Uint64("region-id", region.GetID()),
+					log.Info("stale operator", zap.Uint64("region-id", region.GetID()), zap.Duration("takes", op.RunningTime()),
 						zap.Reflect("operator", op), zap.Uint64("diff", changes))
 					operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
 					oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
@@ -123,14 +123,14 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			return
 		}
 		if op.IsFinish() && oc.RemoveOperator(op) {
-			log.Info("operator finish", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
+			log.Info("operator finish", zap.Uint64("region-id", region.GetID()), zap.Duration("takes", op.RunningTime()), zap.Reflect("operator", op))
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
 			oc.pushHistory(op)
 			oc.opRecords.Put(op, pdpb.OperatorStatus_SUCCESS)
 			oc.PromoteWaitingOperator()
 		} else if timeout && oc.RemoveOperator(op) {
-			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
+			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Duration("takes", op.RunningTime()), zap.Reflect("operator", op))
 			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 			oc.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
 			oc.PromoteWaitingOperator()
@@ -319,7 +319,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	// already.
 	if old, ok := oc.operators[regionID]; ok {
 		_ = oc.removeOperatorLocked(old)
-		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", old))
+		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Duration("takes", old.RunningTime()), zap.Reflect("operator", old))
 		operatorCounter.WithLabelValues(old.Desc(), "replace").Inc()
 		oc.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
 	}
