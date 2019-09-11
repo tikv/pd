@@ -446,7 +446,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 		return err
 	}
 	requestDurationTSO.Observe(time.Since(start).Seconds())
-	TsoBatchSize.Observe(float64(count))
+	tsoBatchSize.Observe(float64(count))
 
 	if resp.GetCount() != uint32(len(requests)) {
 		err = errors.WithStack(errTSOLength)

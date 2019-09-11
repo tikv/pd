@@ -43,7 +43,7 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"type"})
 
-	TsoBatchSize = prometheus.NewHistogram(
+	tsoBatchSize = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd_client",
 			Subsystem: "request",
@@ -83,5 +83,5 @@ func init() {
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
 	prometheus.MustRegister(requestDuration)
-	prometheus.MustRegister(TsoBatchSize)
+	prometheus.MustRegister(tsoBatchSize)
 }
