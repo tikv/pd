@@ -1290,11 +1290,6 @@ func (c *RaftCluster) IsLeaderCountScheduleEnabled() bool {
 	return c.opt.IsLeaderCountScheduleEnabled()
 }
 
-// GetLeaderResourceKind returns resource kind when balancing leader.
-func (c *RaftCluster) GetLeaderResourceKind() core.ResourceKind {
-	return c.opt.GetLeaderResourceKind()
-}
-
 // IsReplaceOfflineReplicaEnabled returns if replace offline replica is enabled.
 func (c *RaftCluster) IsReplaceOfflineReplicaEnabled() bool {
 	return c.opt.IsReplaceOfflineReplicaEnabled()

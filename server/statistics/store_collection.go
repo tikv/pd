@@ -57,7 +57,6 @@ type ScheduleOptions interface {
 	IsRemoveDownReplicaEnabled() bool
 	IsReplaceOfflineReplicaEnabled() bool
 	IsLeaderCountScheduleEnabled() bool
-	GetLeaderResourceKind() core.ResourceKind
 
 	GetMaxStoreDownTime() time.Duration
 }
@@ -128,7 +127,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	s.LeaderCount += store.GetLeaderCount()
 
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderResourceKind(), 0))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.IsLeaderCountScheduleEnabled(), 0))
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_size").Set(float64(store.GetRegionSize()))
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_count").Set(float64(store.GetRegionCount()))
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_size").Set(float64(store.GetLeaderSize()))

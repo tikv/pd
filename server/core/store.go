@@ -252,13 +252,11 @@ const minWeight = 1e-6
 const maxScore = 1024 * 1024 * 1024
 
 // LeaderScore returns the store's leader score.
-func (s *StoreInfo) LeaderScore(kind ResourceKind, delta int64) float64 {
-	if kind == LeaderSizeKind || kind == LeaderKind {
-		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
-	} else if kind == LeaderCountKind {
+func (s *StoreInfo) LeaderScore(enableLeaderCountSchedule bool, delta int64) float64 {
+	if enableLeaderCountSchedule {
 		return float64(int64(s.GetLeaderCount())+delta) / math.Max(s.GetLeaderWeight(), minWeight)
 	} else {
-		return 0
+		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
 	}
 }
 
@@ -351,11 +349,11 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 }
 
 // ResourceScore returns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64, delta int64, enableLeaderCountSchedule bool) float64 {
 	if kind == RegionKind {
 		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
-	} else if kind == LeaderSizeKind || kind == LeaderCountKind || kind == LeaderKind {
-		return s.LeaderScore(kind, delta)
+	} else if kind == LeaderKind {
+		return s.LeaderScore(enableLeaderCountSchedule, delta)
 	} else {
 		return 0
 	}

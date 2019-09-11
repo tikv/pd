@@ -211,14 +211,14 @@ func (l *balanceLeaderScheduler) createOperator(cluster schedule.Cluster, region
 	targetID := target.GetID()
 
 	opInfluence := l.opController.GetOpInfluence(cluster)
-	kind := cluster.GetLeaderResourceKind()
-	if !shouldBalance(cluster, source, target, region, kind, opInfluence) {
+	if !shouldBalance(cluster, source, target, region, core.LeaderKind, opInfluence) {
+		enableLeaderCountSchedule := cluster.IsLeaderCountScheduleEnabled()
 		log.Debug("skip balance leader",
 			zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
-			zap.Int64("source-size", source.GetLeaderSize()), zap.Float64("source-score", source.LeaderScore(kind, 0)),
-			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(kind)),
-			zap.Int64("target-size", target.GetLeaderSize()), zap.Float64("target-score", target.LeaderScore(kind, 0)),
-			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(kind)),
+			zap.Int64("source-size", source.GetLeaderSize()), zap.Float64("source-score", source.LeaderScore(enableLeaderCountSchedule, 0)),
+			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(core.LeaderKind, enableLeaderCountSchedule)),
+			zap.Int64("target-size", target.GetLeaderSize()), zap.Float64("target-score", target.LeaderScore(enableLeaderCountSchedule, 0)),
+			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(core.LeaderKind, enableLeaderCountSchedule)),
 			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil

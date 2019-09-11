@@ -29,7 +29,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
@@ -677,16 +676,6 @@ func (c *ScheduleConfig) Validate() error {
 		}
 	}
 	return nil
-}
-
-func (c *ScheduleConfig) GetLeaderResourceKind() core.ResourceKind {
-	var kind core.ResourceKind
-	if c.EnableLeaderCountSchedule {
-		kind = core.LeaderCountKind
-	} else {
-		kind = core.LeaderSizeKind
-	}
-	return kind
 }
 
 // SchedulerConfigs is a slice of customized scheduler configuration.
