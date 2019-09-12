@@ -48,7 +48,7 @@ func (TransferCounter) CompileRegex(operator string) *regexp.Regexp {
 		log.Fatal("Error: ", err)
 	}
 	if r == nil {
-		log.Fatal("Error operator: ", operator, ". Support operators:", supportOperators)
+		log.Fatal("Error operator: ", operator, ". Support operators: ", supportOperators)
 	}
 	return r
 }
