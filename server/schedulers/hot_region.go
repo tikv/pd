@@ -419,7 +419,9 @@ func (h *balanceHotRegionsScheduler) analyzeStoreLoad(cluster schedule.Cluster) 
 	bytesReadStats := storesStats.GetStoresBytesReadStat()
 	readFlowMean := MeanStoresStats(bytesReadStats)
 	if readFlowMean <= minFlowBytes {
-		bytesReadStats = map[uint64]float64{}
+		for id := range bytesReadStats {
+			bytesReadStats[id] = 0
+		}
 	} else {
 		filterUnhealthyStoreStats(cluster, bytesReadStats)
 		h.updateStatsByPendingOpInfo(hotReadRegionBalance, bytesReadStats)
@@ -428,7 +430,9 @@ func (h *balanceHotRegionsScheduler) analyzeStoreLoad(cluster schedule.Cluster) 
 	bytesWriteStats := storesStats.GetStoresBytesWriteStat()
 	writeFlowMean := MeanStoresStats(bytesWriteStats)
 	if writeFlowMean <= minFlowBytes {
-		bytesWriteStats = map[uint64]float64{}
+		for id := range bytesWriteStats {
+			bytesWriteStats[id] = 0
+		}
 	} else {
 		filterUnhealthyStoreStats(cluster, bytesWriteStats)
 		h.updateStatsByPendingOpInfo(hotWriteRegionBalance, bytesWriteStats)
