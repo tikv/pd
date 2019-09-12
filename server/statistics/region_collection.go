@@ -111,7 +111,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		peerTypeIndex |= LearnerPeer
 	}
 
-	if region.GetApproximateSize() == 0 {
+	if region.GetApproximateSize() <= 1 {
 		r.stats[EmptyRegion][regionID] = region
 		peerTypeIndex |= EmptyRegion
 	}
