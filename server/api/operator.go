@@ -228,7 +228,15 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing split policy")
 			return
 		}
-		if err := h.AddSplitRegionOperator(uint64(regionID), policy); err != nil {
+		var keys []string
+		if ks, ok := input["keys"]; ok {
+			keys, ok = ks.([]string)
+			if !ok {
+				h.r.JSON(w, http.StatusBadRequest, "bad format keys")
+				return
+			}
+		}
+		if err := h.AddSplitRegionOperator(uint64(regionID), policy, keys); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

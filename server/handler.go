@@ -15,11 +15,14 @@ package server
 
 import (
 	"bytes"
+	"encoding/hex"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
@@ -634,7 +637,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 }
 
 // AddSplitRegionOperator adds an operator to split a region.
-func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
+func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys []string) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return err
@@ -645,7 +648,23 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
 		return ErrRegionNotFound(regionID)
 	}
 
-	op := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, policy)
+	policy, ok := pdpb.CheckPolicy_value[strings.ToUpper(policyStr)]
+	if !ok {
+		return errors.Errorf("check policy %s is not supported", policyStr)
+	}
+
+	var splitKeys [][]byte
+	if pdpb.CheckPolicy(policy) == pdpb.CheckPolicy_USEKEY {
+		for i := range keys {
+			k, err := hex.DecodeString(keys[i])
+			if err != nil {
+				return errors.Errorf("split key %s is not in hex format", keys[i])
+			}
+			splitKeys = append(splitKeys, k)
+		}
+	}
+
+	op := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, pdpb.CheckPolicy(policy), splitKeys)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
