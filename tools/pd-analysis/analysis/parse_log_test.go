@@ -14,9 +14,10 @@
 package analysis
 
 import (
-	. "github.com/pingcap/check"
 	"testing"
 	"time"
+
+	. "github.com/pingcap/check"
 )
 
 func TestParser(t *testing.T) {

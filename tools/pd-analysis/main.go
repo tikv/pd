@@ -15,10 +15,11 @@ package main
 
 import (
 	"flag"
+	"os"
+
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/tools/pd-analysis/analysis"
 	"go.uber.org/zap"
-	"os"
 )
 
 var (
@@ -46,12 +47,12 @@ func main() {
 	InitLogger(*logLevel)
 	analysis.GetTransferCounter().Init(0, 0)
 	if *input == "" {
-		Logger.Fatal("need to specify one input pd log")
+		Logger.Fatal("Error: need to specify one input pd log.")
 	}
 	if *output != "" {
 		f, err := os.OpenFile(*output, os.O_WRONLY|os.O_CREATE|os.O_SYNC|os.O_APPEND, 0755)
 		if err != nil {
-			Logger.Fatal(err.Error())
+			Logger.Fatal("Error: " + err.Error())
 		} else {
 			os.Stdout = f
 		}
@@ -61,7 +62,7 @@ func main() {
 	case "transfer-counter":
 		{
 			if *operator == "" {
-				Logger.Fatal("need to specify one operator")
+				Logger.Fatal("Error: need to specify one operator.")
 			}
 			r := analysis.GetTransferCounter().CompileRegex(*operator)
 			analysis.GetTransferCounter().ParseLog(*input, *start, *end, layout, r)
@@ -69,7 +70,7 @@ func main() {
 			break
 		}
 	default:
-		Logger.Fatal("Style is not exist.")
+		Logger.Fatal("Error: style is not exist.")
 	}
 
 }

@@ -47,7 +47,7 @@ func (TransferCounter) CompileRegex(operator string) *regexp.Regexp {
 		log.Fatal("Error: ", err)
 	}
 	if r == nil {
-		log.Fatal("Error operator: ", operator, ". Support operators: ", supportOperators)
+		log.Fatal("Error : unsupported operator. Support operators: ", supportOperators)
 	}
 	return r
 }
@@ -66,7 +66,7 @@ func (TransferCounter) parseLine(content string, r *regexp.Regexp) []uint64 {
 			results = append(results, uint64(num))
 		}
 	} else {
-		log.Fatal("Parse Log Error, with ", content)
+		log.Fatal("Error: can't parse Log, with ", content)
 	}
 	return results
 }
@@ -108,7 +108,7 @@ func isExpectTime(expect, layout string, isBeforeThanExpect bool) func(time.Time
 
 func currentTime(layout string) func(content string) (time.Time, error) {
 	if layout != "2006/01/02 15:04:05" {
-		log.Fatal("Unsupported time layout")
+		log.Fatal("Error: unsupported time layout.")
 	}
 	r, err := regexp.Compile(".*?([0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}).*")
 	if err != nil {
