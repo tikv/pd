@@ -62,10 +62,12 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[EmptyRegion]), Equals, 1)
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
 		core.WithPendingPeers(peers[0:1]),
+		core.SetApproximateSize(144),
 	)
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
@@ -74,6 +76,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[IncorrectNamespace]), Equals, 1)
+	c.Assert(len(regionStats.stats[EmptyRegion]), Equals, 0)
 
 	region2 = region2.Clone(core.WithDownPeers(downPeers[0:1]))
 	regionStats.Observe(region2, stores[0:2])

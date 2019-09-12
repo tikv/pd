@@ -32,6 +32,7 @@ const (
 	OfflinePeer
 	IncorrectNamespace
 	LearnerPeer
+	EmptyRegion
 )
 
 // RegionStatistics is used to record the status of regions.
@@ -57,6 +58,7 @@ func NewRegionStatistics(opt ScheduleOptions, classifier namespace.Classifier) *
 	r.stats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[IncorrectNamespace] = make(map[uint64]*core.RegionInfo)
 	r.stats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
+	r.stats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
 	return r
 }
 
@@ -109,6 +111,11 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		peerTypeIndex |= LearnerPeer
 	}
 
+	if region.GetApproximateSize() == 0 {
+		r.stats[EmptyRegion][regionID] = region
+		peerTypeIndex |= EmptyRegion
+	}
+
 	for _, store := range stores {
 		if store.IsOffline() {
 			peer := region.GetStorePeer(store.GetID())
@@ -131,6 +138,13 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	}
 	r.deleteEntry(deleteIndex, regionID)
 	r.index[regionID] = peerTypeIndex
+
+	// collect region size
+	for _, peer := range region.GetPeers() {
+		storeTag := fmt.Sprintf("store-%d", peer.GetStoreId())
+		regionStatusHistogram.WithLabelValues("size", storeTag).Observe(float64(region.GetApproximateSize()))
+		regionStatusHistogram.WithLabelValues("keys", storeTag).Observe(float64(region.GetApproximateKeys()))
+	}
 }
 
 // ClearDefunctRegion is used to handle the overlap region.
@@ -149,6 +163,7 @@ func (r *RegionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.stats[OfflinePeer])))
 	regionStatusGauge.WithLabelValues("incorrect-namespace-region-count").Set(float64(len(r.stats[IncorrectNamespace])))
 	regionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.stats[LearnerPeer])))
+	regionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.stats[EmptyRegion])))
 }
 
 // LabelLevelStatistics is the statistics of the level of labels.
