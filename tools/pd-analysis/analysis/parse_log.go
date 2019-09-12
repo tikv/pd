@@ -35,12 +35,12 @@ var supportLayouts = map[string]string{
 
 // Interpreter is the interface for all analysis to parse log
 type Interpreter interface {
-	CompileRegex(operator string) *regexp.Regexp
-	ParseLog(filename string, r *regexp.Regexp)
+	CompileRegex(operator string) (*regexp.Regexp, error)
+	ParseLog(filename string, r *regexp.Regexp) error
 }
 
 // CompileRegex is to provide regexp for transfer counter.
-func (TransferCounter) CompileRegex(operator string) *regexp.Regexp {
+func (TransferCounter) CompileRegex(operator string) (*regexp.Regexp, error) {
 	var r *regexp.Regexp
 	var err error
 
@@ -50,39 +50,36 @@ func (TransferCounter) CompileRegex(operator string) *regexp.Regexp {
 		}
 	}
 
-	if err != nil {
-		log.Fatal(err)
-	}
 	if r == nil {
-		log.Fatal("Unsupported operator. Support operators: ", supportOperators)
+		err = errors.New("Unsupported operator. ")
 	}
-	return r
+	return r, err
 }
 
-func (TransferCounter) parseLine(content string, r *regexp.Regexp) []uint64 {
+func (TransferCounter) parseLine(content string, r *regexp.Regexp) ([]uint64, error) {
 	results := make([]uint64, 0, 4)
 	subStrings := r.FindStringSubmatch(content)
 	if len(subStrings) == 0 {
-		return results
+		return results, nil
 	} else if len(subStrings) == 4 {
 		for i := 1; i < 4; i++ {
 			num, err := strconv.ParseInt(subStrings[i], 10, 64)
 			if err != nil {
-				log.Fatal(err)
+				return results, err
 			}
 			results = append(results, uint64(num))
 		}
+		return results, nil
 	} else {
-		log.Fatal("Can't parse Log, with ", content)
+		return results, errors.New("Can't parse Log, with " + content)
 	}
-	return results
 }
 
-func forEachLine(filename string, solve func(string)) {
+func forEachLine(filename string, solve func(string) error) error {
 	// Open file
 	fi, err := os.Open(filename)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer fi.Close()
 	br := bufio.NewReader(fi)
@@ -93,11 +90,15 @@ func forEachLine(filename string, solve func(string)) {
 			if err == io.EOF {
 				break
 			}
-			log.Fatal(err)
-			return
+			return err
 		}
-		solve(string(content))
+
+		err = solve(string(content))
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func isExpectTime(expect, layout string, isBeforeThanExpect bool) func(time.Time) bool {
@@ -127,41 +128,39 @@ func currentTime(layout string) func(content string) (time.Time, error) {
 	return func(content string) (time.Time, error) {
 		result := r.FindStringSubmatch(content)
 		if len(result) == 2 {
-			current, err := time.Parse(layout, result[1])
-			if err != nil {
-				log.Fatal(err)
-			}
-			return current, nil
+			return time.Parse(layout, result[1])
 		} else if len(result) == 0 {
-			return time.Now(), errors.New("empty")
+			return time.Time{}, nil
 		} else {
-			return time.Now(), errors.New("There is no valid time in log with " + content)
+			return time.Time{}, errors.New("There is no valid time in log with " + content)
 		}
 	}
 }
 
 // ParseLog is to parse log for transfer counter.
-func (c *TransferCounter) ParseLog(filename, start, end, layout string, r *regexp.Regexp) {
+func (c *TransferCounter) ParseLog(filename, start, end, layout string, r *regexp.Regexp) error {
 	afterStart := isExpectTime(start, layout, false)
 	beforeEnd := isExpectTime(end, layout, true)
 	getCurrent := currentTime(layout)
-	forEachLine(filename, func(content string) {
+	err := forEachLine(filename, func(content string) error {
 		// Get current line time
 		current, err := getCurrent(content)
-		if err != nil {
-			if err.Error() == "empty" {
-				return
-			}
-			log.Fatal(err)
+		if err != nil || current.IsZero() {
+			return err
 		}
 		// if current line time between start and end
 		if afterStart(current) && beforeEnd(current) {
-			results := c.parseLine(content, r)
+			results, err := c.parseLine(content, r)
+			if err != nil {
+				return err
+			}
 			if len(results) == 3 {
 				regionID, sourceID, targetID := results[0], results[1], results[2]
 				GetTransferCounter().AddTarget(regionID, targetID)
 				GetTransferCounter().AddSource(regionID, sourceID)
 			}
 		}
+		return nil
 	})
+	return err
 }

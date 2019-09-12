@@ -64,8 +64,14 @@ func main() {
 			if *operator == "" {
 				Logger.Fatal("Need to specify one operator.")
 			}
-			r := analysis.GetTransferCounter().CompileRegex(*operator)
-			analysis.GetTransferCounter().ParseLog(*input, *start, *end, analysis.DefaultLayout, r)
+			r, err := analysis.GetTransferCounter().CompileRegex(*operator)
+			if err != nil {
+				Logger.Fatal(err.Error())
+			}
+			err = analysis.GetTransferCounter().ParseLog(*input, *start, *end, analysis.DefaultLayout, r)
+			if err != nil {
+				Logger.Fatal(err.Error())
+			}
 			analysis.GetTransferCounter().PrintResult()
 			break
 		}
