@@ -14,10 +14,10 @@
 package opt
 
 import (
-	"github.com/pingcap/pd/server/core"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 )
 
 // Options for schedulers.
