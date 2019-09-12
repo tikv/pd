@@ -24,6 +24,8 @@ import (
 	"time"
 )
 
+var supportOperators = []string{"balance-region", "balance-leader", "transfer-hot-read-leader", "move-hot-read-region", "transfer-hot-write-leader", "move-hot-write-region"}
+
 // Interpreter is the interface for all analysis to parse log
 type Interpreter interface {
 	CompileRegex(operator string) *regexp.Regexp
@@ -36,7 +38,6 @@ func (TransferCounter) CompileRegex(operator string) *regexp.Regexp {
 	var r *regexp.Regexp
 	var err error
 
-	var supportOperators = []string{"balance-region", "balance-leader", "transfer-hot-read-leader", "move-hot-read-region", "transfer-hot-write-leader", "move-hot-write-region"}
 	for _, supportOperator := range supportOperators {
 		if operator == supportOperator {
 			r, err = regexp.Compile(".*?operator finish.*?region-id=([0-9]*).*?" + operator + ".*?store ([0-9]*) to ([0-9]*).*?")
@@ -53,25 +54,25 @@ func (TransferCounter) CompileRegex(operator string) *regexp.Regexp {
 }
 
 func (TransferCounter) parseLine(content string, r *regexp.Regexp) []uint64 {
-	resultUint64 := make([]uint64, 0, 4)
-	result := r.FindStringSubmatch(content)
-	if len(result) == 0 {
-		return resultUint64
-	} else if len(result) == 4 {
+	results := make([]uint64, 0, 4)
+	subStrings := r.FindStringSubmatch(content)
+	if len(subStrings) == 0 {
+		return results
+	} else if len(subStrings) == 4 {
 		for i := 1; i < 4; i++ {
-			num, err := strconv.ParseInt(result[i], 10, 64)
+			num, err := strconv.ParseInt(subStrings[i], 10, 64)
 			if err != nil {
 				log.Fatal("Error: ", err)
 			}
-			resultUint64 = append(resultUint64, uint64(num))
+			results = append(results, uint64(num))
 		}
 	} else {
-		log.Fatal("Parse Log Error, with", content)
+		log.Fatal("Parse Log Error, with ", content)
 	}
-	return resultUint64
+	return results
 }
 
-func foreachLine(filename string, solve func(string)) {
+func forEachLine(filename string, solve func(string)) {
 	// Open file
 	fi, err := os.Open(filename)
 	if err != nil {
@@ -135,7 +136,7 @@ func (c *TransferCounter) ParseLog(filename, start, end, layout string, r *regex
 	afterStart := isExpectTime(start, layout, false)
 	beforeEnd := isExpectTime(end, layout, true)
 	getCurrent := currentTime(layout)
-	foreachLine(filename, func(content string) {
+	forEachLine(filename, func(content string) {
 		// Get current line time
 		current, err := getCurrent(content)
 		if err != nil {
@@ -146,9 +147,9 @@ func (c *TransferCounter) ParseLog(filename, start, end, layout string, r *regex
 		}
 		// if current line time between start and end
 		if afterStart(current) && beforeEnd(current) {
-			result := c.parseLine(content, r)
-			if len(result) == 3 {
-				regionID, sourceID, targetID := result[0], result[1], result[2]
+			results := c.parseLine(content, r)
+			if len(results) == 3 {
+				regionID, sourceID, targetID := results[0], results[1], results[2]
 				GetTransferCounter().AddTarget(regionID, targetID)
 				GetTransferCounter().AddSource(regionID, sourceID)
 			}

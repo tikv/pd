@@ -25,10 +25,10 @@ var (
 	input    = flag.String("input", "", "input pd log file, required.")
 	output   = flag.String("output", "", "output file, default output to stdout.")
 	logLevel = flag.String("logLevel", "info", "log level, default info.")
-	style    = flag.String("style", "", "analysis style, example: transfer-counter")
-	operator = flag.String("operator", "", "operator style, example: balance-region, balance-leader, transfer-hot-read-leader, move-hot-read-region, transfer-hot-write-leader, move-hot-write-region")
-	start    = flag.String("start", "", "start time, for example 2019/09/10 12:20:07, default: total file")
-	end      = flag.String("end", "", "end time, for example 2019/09/10 14:20:07, default: total file")
+	style    = flag.String("style", "", "analysis style, e.g. transfer-counter")
+	operator = flag.String("operator", "", "operator style, e.g. balance-region, balance-leader, transfer-hot-read-leader, move-hot-read-region, transfer-hot-write-leader, move-hot-write-region")
+	start    = flag.String("start", "", "start time, e.g. 2019/09/10 12:20:07, default: total file")
+	end      = flag.String("end", "", "end time, e.g. 2019/09/10 14:20:07, default: total file")
 )
 
 // Logger is the global logger used for simulator.
