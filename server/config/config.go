@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/pingcap/pd/server/core"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -490,8 +491,8 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
-	// EnableLeaderScheduleByCount is the option to balance leader according to the count of leader".
-	EnableLeaderScheduleByCount bool `toml:"enable-leader-schedule-by-count,omitempty" json:"enable-leader-schedule-by-count"`
+	// EnableScheduleLeaderByCount is the option to balance leader according to the count of leader".
+	EnableScheduleLeaderByCount bool `toml:"enable-schedule-leader-by-count,omitempty" json:"enable-schedule-leader-by-count"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -561,7 +562,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
-		EnableLeaderScheduleByCount:  c.EnableLeaderScheduleByCount,
+		EnableScheduleLeaderByCount:  c.EnableScheduleLeaderByCount,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
@@ -703,6 +704,14 @@ func IsDefaultScheduler(typ string) bool {
 		}
 	}
 	return false
+}
+
+// GetLeaderScheduleKind is to get leader schedule kind
+func (c *ScheduleConfig) GetLeaderScheduleKind() core.LeaderScheduleKind {
+	if c.EnableScheduleLeaderByCount {
+		return core.ScheduleLeaderByCount
+	}
+	return core.ScheduleLeaderBySize
 }
 
 // ReplicationConfig is the replication configuration.

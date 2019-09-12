@@ -58,28 +58,31 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
-	EnableLeaderScheduleByCount := cluster.IsLeaderScheduleByCountEnabled()
-	tolerantResource := getTolerantResource(cluster, region, EnableLeaderScheduleByCount)
-	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).ResourceSize(kind, EnableLeaderScheduleByCount) - tolerantResource
-	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(kind, EnableLeaderScheduleByCount) + tolerantResource
+	leaderScheduleKind := cluster.GetLeaderScheduleKind()
+	tolerantResource := getTolerantResource(cluster, region, leaderScheduleKind)
+	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).ResourceSize(kind, leaderScheduleKind) - tolerantResource
+	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(kind, leaderScheduleKind) + tolerantResource
 
 	// Make sure after move, source score is still greater than target score.
-	return source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceDelta, EnableLeaderScheduleByCount) >
-		target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetDelta, EnableLeaderScheduleByCount)
+	return source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceDelta, leaderScheduleKind) >
+		target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetDelta, leaderScheduleKind)
 }
 
-func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, EnableLeaderScheduleByCount bool) int64 {
-	if EnableLeaderScheduleByCount {
+func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, leaderScheduleKind core.LeaderScheduleKind) int64 {
+	switch leaderScheduleKind {
+	case core.ScheduleLeaderByCount:
 		leaderCount := int64(float64(1) * adjustTolerantRatio(cluster))
 		return leaderCount
+	case core.ScheduleLeaderBySize:
+		regionSize := region.GetApproximateSize()
+		if regionSize < cluster.GetAverageRegionSize() {
+			regionSize = cluster.GetAverageRegionSize()
+		}
+		regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
+		return regionSize
+	default:
+		return 0
 	}
-	regionSize := region.GetApproximateSize()
-	if regionSize < cluster.GetAverageRegionSize() {
-		regionSize = cluster.GetAverageRegionSize()
-	}
-	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
-	return regionSize
-
 }
 
 func adjustTolerantRatio(cluster schedule.Cluster) float64 {

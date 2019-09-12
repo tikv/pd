@@ -14,6 +14,7 @@
 package mockoption
 
 import (
+	"github.com/pingcap/pd/server/core"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -72,7 +73,7 @@ type ScheduleOptions struct {
 	DisableRemoveExtraReplica    bool
 	DisableLocationReplacement   bool
 	DisableNamespaceRelocation   bool
-	EnableLeaderScheduleByCount  bool
+	EnableScheduleLeaderByCount  bool
 	LabelProperties              map[string][]*metapb.StoreLabel
 }
 
@@ -246,7 +247,10 @@ func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
 	return !mso.DisableNamespaceRelocation
 }
 
-// IsLeaderScheduleByCountEnabled mocks method.
-func (mso *ScheduleOptions) IsLeaderScheduleByCountEnabled() bool {
-	return mso.EnableLeaderScheduleByCount
+// GetLeaderScheduleKind is to get leader schedule kind
+func (mso *ScheduleOptions) GetLeaderScheduleKind() core.LeaderScheduleKind {
+	if mso.EnableScheduleLeaderByCount {
+		return core.ScheduleLeaderByCount
+	}
+	return core.ScheduleLeaderBySize
 }

@@ -43,3 +43,24 @@ func (k ResourceKind) String() string {
 		return "unknown"
 	}
 }
+
+// LeaderScheduleKind distinguishes different kinds of schedule strategy
+type LeaderScheduleKind int
+
+const (
+	// ScheduleLeaderByCount indicates that balance leader by count
+	ScheduleLeaderByCount = iota
+	// ScheduleLeaderBySize indicates that balance leader by size
+	ScheduleLeaderBySize
+)
+
+func (k LeaderScheduleKind) String() string {
+	switch k {
+	case ScheduleLeaderByCount:
+		return "scheduleLeaderByCount"
+	case ScheduleLeaderBySize:
+		return "scheduleLeaderBySize"
+	default:
+		return "unknown"
+	}
+}

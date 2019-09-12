@@ -260,9 +260,9 @@ func (o *ScheduleOption) IsRemoveExtraReplicaEnabled() bool {
 	return !o.Load().DisableRemoveExtraReplica
 }
 
-// IsLeaderScheduleByCountEnabled returns if balance leader according to the count of leader.
-func (o *ScheduleOption) IsLeaderScheduleByCountEnabled() bool {
-	return !o.Load().EnableLeaderScheduleByCount
+// GetLeaderScheduleKind is to get leader schedule kind.
+func (o *ScheduleOption) GetLeaderScheduleKind() core.LeaderScheduleKind {
+	return o.Load().GetLeaderScheduleKind()
 }
 
 // IsLocationReplacementEnabled returns if location replace is enabled.

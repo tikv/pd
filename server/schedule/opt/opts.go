@@ -14,6 +14,7 @@
 package opt
 
 import (
+	"github.com/pingcap/pd/server/core"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -56,7 +57,7 @@ type Options interface {
 	IsRemoveExtraReplicaEnabled() bool
 	IsLocationReplacementEnabled() bool
 	IsNamespaceRelocationEnabled() bool
-	IsLeaderScheduleByCountEnabled() bool
+	GetLeaderScheduleKind() core.LeaderScheduleKind
 
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
