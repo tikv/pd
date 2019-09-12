@@ -29,7 +29,6 @@ var supportOperators = []string{"balance-region", "balance-leader", "transfer-ho
 // Interpreter is the interface for all analysis to parse log
 type Interpreter interface {
 	CompileRegex(operator string) *regexp.Regexp
-	parseLine(content string, r *regexp.Regexp) []uint64
 	ParseLog(filename string, r *regexp.Regexp)
 }
 
