@@ -119,7 +119,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	f := s.hitsCounter.buildSourceFilter(cluster)
 	source := s.selector.SelectSource(cluster, stores, f)
 	if source == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-store").Inc()
 		// Unlike the balanceLeaderScheduler, we don't need to clear the taintCache
 		// here. Because normally region score won't change rapidly, and the region
 		// balance requires lower sensitivity compare to leader balance.
@@ -130,7 +130,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	log.Debug("store has the max region score", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", sourceID))
 	sourceAddress := source.GetAddress()
 	sourceLabel := strconv.FormatUint(sourceID, 10)
-	s.counter.WithLabelValues("source_store", sourceAddress, sourceLabel).Inc()
+	s.counter.WithLabelValues("source-store", sourceAddress, sourceLabel).Inc()
 
 	for i := 0; i < balanceRegionRetryLimit; i++ {
 		// Priority picks the region that has a pending peer.
@@ -145,7 +145,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			region = cluster.RandLeaderRegion(sourceID, core.HealthRegion())
 		}
 		if region == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
+			schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 			s.hitsCounter.put(source, nil)
 			continue
 		}
@@ -154,7 +154,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 		// We don't schedule region with abnormal number of replicas.
 		if len(region.GetPeers()) != cluster.GetMaxReplicas() {
 			log.Debug("region has abnormal replica count", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
-			schedulerCounter.WithLabelValues(s.GetName(), "abnormal_replica").Inc()
+			schedulerCounter.WithLabelValues(s.GetName(), "abnormal-replica").Inc()
 			s.hitsCounter.put(source, nil)
 			continue
 		}
@@ -162,14 +162,14 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 		// Skip hot regions.
 		if cluster.IsRegionHot(region) {
 			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
-			schedulerCounter.WithLabelValues(s.GetName(), "region_hot").Inc()
+			schedulerCounter.WithLabelValues(s.GetName(), "region-hot").Inc()
 			s.hitsCounter.put(source, nil)
 			continue
 		}
 
 		oldPeer := region.GetStorePeer(sourceID)
 		if op := s.transferPeer(cluster, region, oldPeer); op != nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+			schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 			return []*operator.Operator{op}
 		}
 	}
@@ -190,7 +190,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	checker := checker.NewReplicaChecker(cluster, nil)
 	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, hitsFilter)
 	if storeID == 0 {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_replacement").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
 		s.hitsCounter.put(source, nil)
 		return nil
 	}
@@ -220,21 +220,21 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 
 	newPeer, err := cluster.AllocPeer(storeID)
 	if err != nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_peer").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-peer").Inc()
 		return nil
 	}
 	op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	if err != nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "create_operator_fail").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 		return nil
 	}
 	s.hitsCounter.remove(source, target)
 	s.hitsCounter.remove(source, nil)
 	sourceLabel := strconv.FormatUint(sourceID, 10)
 	targetLabel := strconv.FormatUint(targetID, 10)
-	s.counter.WithLabelValues("move_peer", source.GetAddress()+"-out", sourceLabel).Inc()
-	s.counter.WithLabelValues("move_peer", target.GetAddress()+"-in", targetLabel).Inc()
-	s.counter.WithLabelValues("direction", "from_to", sourceLabel+"-"+targetLabel).Inc()
+	s.counter.WithLabelValues("move-peer", source.GetAddress()+"-out", sourceLabel).Inc()
+	s.counter.WithLabelValues("move-peer", target.GetAddress()+"-in", targetLabel).Inc()
+	balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel)
 	return op
 }
 

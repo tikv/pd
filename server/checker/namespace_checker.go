@@ -55,14 +55,14 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *operator.Operator {
 
 	// fail-fast if there is only ONE namespace
 	if n.classifier == nil || len(n.classifier.GetAllNamespaces()) == 1 {
-		checkerCounter.WithLabelValues("namespace_checker", "no_namespace").Inc()
+		checkerCounter.WithLabelValues("namespace_checker", "no-namespace").Inc()
 		return nil
 	}
 
 	// get all the stores belong to the namespace
 	targetStores := n.getNamespaceStores(region)
 	if len(targetStores) == 0 {
-		checkerCounter.WithLabelValues("namespace_checker", "no_target_store").Inc()
+		checkerCounter.WithLabelValues("namespace_checker", "no-target-store").Inc()
 		return nil
 	}
 	for _, peer := range region.GetPeers() {
@@ -73,19 +73,19 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *operator.Operator {
 		log.Debug("peer is not located in namespace target stores", zap.Uint64("region-id", region.GetID()), zap.Reflect("peer", peer))
 		newPeer := n.SelectBestPeerToRelocate(region, targetStores)
 		if newPeer == nil {
-			checkerCounter.WithLabelValues("namespace_checker", "no_target_peer").Inc()
+			checkerCounter.WithLabelValues("namespace_checker", "no-target-peer").Inc()
 			return nil
 		}
 		op, err := operator.CreateMovePeerOperator("make-namespace-relocation", n.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 		if err != nil {
-			checkerCounter.WithLabelValues("namespace_checker", "create_operator_fail").Inc()
+			checkerCounter.WithLabelValues("namespace_checker", "create-operator-fail").Inc()
 			return nil
 		}
-		checkerCounter.WithLabelValues("namespace_checker", "new_operator").Inc()
+		checkerCounter.WithLabelValues("namespace_checker", "new-operator").Inc()
 		return op
 	}
 
-	checkerCounter.WithLabelValues("namespace_checker", "all_right").Inc()
+	checkerCounter.WithLabelValues("namespace_checker", "all-right").Inc()
 	return nil
 }
 
