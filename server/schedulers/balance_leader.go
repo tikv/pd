@@ -112,7 +112,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 
 	// No store can be selected as source or target.
 	if source == nil || target == nil {
-		schedulerCounter.WithLabelValues(l.GetName(), "no_store").Inc()
+		schedulerCounter.WithLabelValues(l.GetName(), "no-store").Inc()
 		// When the cluster is balanced, all stores will be added to the cache once
 		// all of them have been selected. This will cause the scheduler to not adapt
 		// to sudden change of a store's leader. Here we clear the taint cache and
@@ -128,25 +128,25 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	targetStoreLabel := strconv.FormatUint(targetID, 10)
 	sourceAddress := source.GetAddress()
 	targetAddress := target.GetAddress()
-	l.counter.WithLabelValues("high_score", sourceAddress, sourceStoreLabel).Inc()
-	l.counter.WithLabelValues("low_score", targetAddress, targetStoreLabel).Inc()
+	l.counter.WithLabelValues("high-score", sourceAddress, sourceStoreLabel).Inc()
+	l.counter.WithLabelValues("low-score", targetAddress, targetStoreLabel).Inc()
 
 	for i := 0; i < balanceLeaderRetryLimit; i++ {
 		if op := l.transferLeaderOut(cluster, source); op != nil {
-			l.counter.WithLabelValues("transfer_out", sourceAddress, sourceStoreLabel).Inc()
+			l.counter.WithLabelValues("transfer-out", sourceAddress, sourceStoreLabel).Inc()
 			return op
 		}
 		if op := l.transferLeaderIn(cluster, target); op != nil {
-			l.counter.WithLabelValues("transfer_in", targetAddress, targetStoreLabel).Inc()
+			l.counter.WithLabelValues("transfer-in", targetAddress, targetStoreLabel).Inc()
 			return op
 		}
 	}
 
 	// If no operator can be created for the selected stores, ignore them for a while.
 	log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64("source", sourceID), zap.Uint64("target", targetID))
-	l.counter.WithLabelValues("add_taint", sourceAddress, sourceStoreLabel).Inc()
+	l.counter.WithLabelValues("add-taint", sourceAddress, sourceStoreLabel).Inc()
 	l.taintStores.Put(sourceID)
-	l.counter.WithLabelValues("add_taint", targetAddress, targetStoreLabel).Inc()
+	l.counter.WithLabelValues("add-taint", targetAddress, targetStoreLabel).Inc()
 	l.taintStores.Put(targetID)
 	return nil
 }
@@ -159,13 +159,13 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster schedule.Cluster, sou
 	region := cluster.RandLeaderRegion(sourceID, core.HealthRegion())
 	if region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", sourceID))
-		schedulerCounter.WithLabelValues(l.GetName(), "no_leader_region").Inc()
+		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
 		return nil
 	}
 	target := l.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
 	if target == nil {
 		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
-		schedulerCounter.WithLabelValues(l.GetName(), "no_target_store").Inc()
+		schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
 		return nil
 	}
 	return l.createOperator(cluster, region, source, target)
@@ -179,7 +179,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster schedule.Cluster, targ
 	region := cluster.RandFollowerRegion(targetID, core.HealthRegion())
 	if region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", targetID))
-		schedulerCounter.WithLabelValues(l.GetName(), "no_follower_region").Inc()
+		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()
 		return nil
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
@@ -190,7 +190,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster schedule.Cluster, targ
 			zap.Uint64("region-id", region.GetID()),
 			zap.Uint64("store-id", leaderStoreID),
 		)
-		schedulerCounter.WithLabelValues(l.GetName(), "no_leader").Inc()
+		schedulerCounter.WithLabelValues(l.GetName(), "no-leader").Inc()
 		return nil
 	}
 	return l.createOperator(cluster, region, source, target)
@@ -203,7 +203,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster schedule.Cluster, targ
 func (l *balanceLeaderScheduler) createOperator(cluster schedule.Cluster, region *core.RegionInfo, source, target *core.StoreInfo) []*operator.Operator {
 	if cluster.IsRegionHot(region) {
 		log.Debug("region is hot region, ignore it", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
-		schedulerCounter.WithLabelValues(l.GetName(), "region_hot").Inc()
+		schedulerCounter.WithLabelValues(l.GetName(), "region-hot").Inc()
 		return nil
 	}
 
@@ -223,11 +223,12 @@ func (l *balanceLeaderScheduler) createOperator(cluster schedule.Cluster, region
 		return nil
 	}
 
-	schedulerCounter.WithLabelValues(l.GetName(), "new_operator").Inc()
+	schedulerCounter.WithLabelValues(l.GetName(), "new-operator").Inc()
 	sourceLabel := strconv.FormatUint(sourceID, 10)
 	targetLabel := strconv.FormatUint(targetID, 10)
-	l.counter.WithLabelValues("move_leader", source.GetAddress()+"-out", sourceLabel).Inc()
-	l.counter.WithLabelValues("move_leader", target.GetAddress()+"-in", targetLabel).Inc()
+	l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel).Inc()
+	l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel).Inc()
+	balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel)
 	op := operator.CreateTransferLeaderOperator("balance-leader", region, region.GetLeader().GetStoreId(), targetID, operator.OpBalance)
 	return []*operator.Operator{op}
 }

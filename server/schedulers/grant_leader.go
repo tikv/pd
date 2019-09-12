@@ -77,10 +77,10 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.RandFollowerRegion(s.storeID, core.HealthRegion())
 	if region == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 		return nil
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 	op := operator.CreateTransferLeaderOperator("grant-leader", region, region.GetLeader().GetStoreId(), s.storeID, operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
