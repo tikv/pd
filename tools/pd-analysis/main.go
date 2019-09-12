@@ -47,30 +47,30 @@ func main() {
 	InitLogger(*logLevel)
 	analysis.GetTransferCounter().Init(0, 0)
 	if *input == "" {
-		Logger.Fatal("Error: need to specify one input pd log.")
+		Logger.Fatal("Need to specify one input pd log.")
 	}
 	if *output != "" {
 		f, err := os.OpenFile(*output, os.O_WRONLY|os.O_CREATE|os.O_SYNC|os.O_APPEND, 0755)
 		if err != nil {
-			Logger.Fatal("Error: " + err.Error())
+			Logger.Fatal(err.Error())
 		} else {
 			os.Stdout = f
 		}
 	}
-	layout := "2006/01/02 15:04:05"
+
 	switch *style {
 	case "transfer-counter":
 		{
 			if *operator == "" {
-				Logger.Fatal("Error: need to specify one operator.")
+				Logger.Fatal("Need to specify one operator.")
 			}
 			r := analysis.GetTransferCounter().CompileRegex(*operator)
-			analysis.GetTransferCounter().ParseLog(*input, *start, *end, layout, r)
+			analysis.GetTransferCounter().ParseLog(*input, *start, *end, analysis.DefaultLayout, r)
 			analysis.GetTransferCounter().PrintResult()
 			break
 		}
 	default:
-		Logger.Fatal("Error: style is not exist.")
+		Logger.Fatal("Style is not exist.")
 	}
 
 }

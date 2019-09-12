@@ -15,6 +15,7 @@ package analysis
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -92,8 +93,7 @@ func (c *TransferCounter) AddSource(regionID, sourceStoreID uint64) {
 		}
 		delete(c.regionMap, regionID)
 	} else {
-		fmt.Println("Error when add sourceStoreID %u with regionID %u in transfer region map", sourceStoreID, regionID)
-		os.Exit(-1)
+		log.Fatal("Error when add sourceStore in transfer region map. SourceStoreID: ", sourceStoreID, " regionID: ", regionID)
 	}
 }
 
@@ -217,26 +217,25 @@ func (c *TransferCounter) printGraph() {
 func (c *TransferCounter) PrintResult() {
 	c.prepare()
 	// Output log
-	fmt.Println("Total Schedules Graph: ")
+	log.Println("Total Schedules Graph: ")
 	c.printGraph()
 	// Solve data
 	c.Result()
 	// Output log
-	fmt.Println("Redundant Loop: ")
+	log.Println("Redundant Loop: ")
 	for index, value := range c.loopResultPath {
 		fmt.Println(index, value, c.loopResultCount[index])
 	}
-	fmt.Println("Necessary Schedules Graph: ")
+	log.Println("Necessary Schedules Graph: ")
 	c.printGraph()
-	fmt.Println("Scheduled Store: ", c.scheduledStoreNum)
-	fmt.Println("Redundant Schedules: ", c.Redundant)
-	fmt.Println("Necessary Schedules: ", c.Necessary)
+	log.Println("Scheduled Store: ", c.scheduledStoreNum)
+	log.Println("Redundant Schedules: ", c.Redundant)
+	log.Println("Necessary Schedules: ", c.Necessary)
 
 	// Output csv file
 	fd, err := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
-		fmt.Printf("Error: %s\n", err)
-		return
+		log.Fatal(err)
 	}
 	defer fd.Close()
 	fdContent := strings.Join([]string{
@@ -248,8 +247,7 @@ func (c *TransferCounter) PrintResult() {
 	buf := []byte(fdContent)
 	_, err = fd.Write(buf)
 	if err != nil {
-		fmt.Printf("Error: %s\n", err)
-		return
+		log.Fatal(err)
 	}
 }
 

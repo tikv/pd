@@ -26,6 +26,13 @@ import (
 
 var supportOperators = []string{"balance-region", "balance-leader", "transfer-hot-read-leader", "move-hot-read-region", "transfer-hot-write-leader", "move-hot-write-region"}
 
+// DefaultLayout is the default layout to parse log.
+const DefaultLayout = "2006/01/02 15:04:05"
+
+var supportLayouts = map[string]string{
+	DefaultLayout: ".*?([0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}).*",
+}
+
 // Interpreter is the interface for all analysis to parse log
 type Interpreter interface {
 	CompileRegex(operator string) *regexp.Regexp
@@ -44,10 +51,10 @@ func (TransferCounter) CompileRegex(operator string) *regexp.Regexp {
 	}
 
 	if err != nil {
-		log.Fatal("Error: ", err)
+		log.Fatal(err)
 	}
 	if r == nil {
-		log.Fatal("Error : unsupported operator. Support operators: ", supportOperators)
+		log.Fatal("Unsupported operator. Support operators: ", supportOperators)
 	}
 	return r
 }
@@ -61,12 +68,12 @@ func (TransferCounter) parseLine(content string, r *regexp.Regexp) []uint64 {
 		for i := 1; i < 4; i++ {
 			num, err := strconv.ParseInt(subStrings[i], 10, 64)
 			if err != nil {
-				log.Fatal("Error: ", err)
+				log.Fatal(err)
 			}
 			results = append(results, uint64(num))
 		}
 	} else {
-		log.Fatal("Error: can't parse Log, with ", content)
+		log.Fatal("Can't parse Log, with ", content)
 	}
 	return results
 }
@@ -75,7 +82,7 @@ func forEachLine(filename string, solve func(string)) {
 	// Open file
 	fi, err := os.Open(filename)
 	if err != nil {
-		log.Fatal("Error: ", err)
+		log.Fatal(err)
 	}
 	defer fi.Close()
 	br := bufio.NewReader(fi)
@@ -86,7 +93,7 @@ func forEachLine(filename string, solve func(string)) {
 			if err == io.EOF {
 				break
 			}
-			log.Fatal("Error: ", err)
+			log.Fatal(err)
 			return
 		}
 		solve(string(content))
@@ -107,19 +114,22 @@ func isExpectTime(expect, layout string, isBeforeThanExpect bool) func(time.Time
 }
 
 func currentTime(layout string) func(content string) (time.Time, error) {
-	if layout != "2006/01/02 15:04:05" {
-		log.Fatal("Error: unsupported time layout.")
-	}
-	r, err := regexp.Compile(".*?([0-9]{4}/[0-9]{2}/[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}).*")
-	if err != nil {
-		log.Fatal("Error: ", err)
+	var r *regexp.Regexp
+	var err error
+	if pattern, ok := supportLayouts[layout]; ok {
+		r, err = regexp.Compile(pattern)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Fatal("Unsupported time layout.")
 	}
 	return func(content string) (time.Time, error) {
 		result := r.FindStringSubmatch(content)
 		if len(result) == 2 {
 			current, err := time.Parse(layout, result[1])
 			if err != nil {
-				log.Fatal("Error: ", err)
+				log.Fatal(err)
 			}
 			return current, nil
 		} else if len(result) == 0 {
@@ -142,7 +152,7 @@ func (c *TransferCounter) ParseLog(filename, start, end, layout string, r *regex
 			if err.Error() == "empty" {
 				return
 			}
-			log.Fatal("Error: ", err)
+			log.Fatal(err)
 		}
 		// if current line time between start and end
 		if afterStart(current) && beforeEnd(current) {
