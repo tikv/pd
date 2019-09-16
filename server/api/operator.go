@@ -230,10 +230,13 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 		}
 		var keys []string
 		if ks, ok := input["keys"]; ok {
-			keys, ok = ks.([]string)
-			if !ok {
-				h.r.JSON(w, http.StatusBadRequest, "bad format keys")
-				return
+			for _, k := range ks.([]interface{}) {
+				key, ok := k.(string)
+				if !ok {
+					h.r.JSON(w, http.StatusBadRequest, "bad format keys")
+					return
+				}
+				keys = append(keys, key)
 			}
 		}
 		if err := h.AddSplitRegionOperator(uint64(regionID), policy, keys); err != nil {
