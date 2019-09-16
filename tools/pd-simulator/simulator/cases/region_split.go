@@ -24,7 +24,7 @@ import (
 func newRegionSplit() *Case {
 	var simCase Case
 	// Initialize the cluster
-	storeNum, _ := readConfig()
+	storeNum := getStoreNum()
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        uint64(i),
