@@ -112,31 +112,38 @@ func NewCase(name string) *Case {
 	return nil
 }
 
-func leaderAndRegionIsUniform(leaderCount, regionCount, regionNum int, ratio float64) bool {
-	return leaderIsUniform(leaderCount, regionNum, ratio) && regionIsUniform(regionCount, regionNum, ratio)
+func leaderAndRegionIsUniform(leaderCount, regionCount, regionNum int, threshold float64) bool {
+	return leaderIsUniform(leaderCount, regionNum, threshold) && regionIsUniform(regionCount, regionNum, threshold)
 }
 
-func leaderIsUniform(leaderCount, regionNum int, ratio float64) bool {
-	return isUniform(leaderCount, regionNum/3, ratio)
+func leaderIsUniform(leaderCount, regionNum int, threshold float64) bool {
+	return isUniform(leaderCount, regionNum/3, threshold)
 }
 
-func regionIsUniform(regionCount, regionNum int, ratio float64) bool {
-	return isUniform(regionCount, regionNum, ratio)
+func regionIsUniform(regionCount, regionNum int, threshold float64) bool {
+	return isUniform(regionCount, regionNum, threshold)
 }
 
-func isUniform(count, meanCount int, ratio float64) bool {
-	maxCount := int((1.0 + ratio) * float64(meanCount))
-	minCount := int((1.0 - ratio) * float64(meanCount))
+func isUniform(count, meanCount int, threshold float64) bool {
+	maxCount := int((1.0 + threshold) * float64(meanCount))
+	minCount := int((1.0 - threshold) * float64(meanCount))
 	return minCount <= count && count <= maxCount
 }
 
-func readConfig() (int, int) {
+func getStoreNum() int {
 	storeNum := simutil.CaseConfigure.StoreNum
-	regionNum := simutil.CaseConfigure.RegionNum
-	if storeNum < 3 || regionNum == 0 {
-		simutil.Logger.Fatal("Store num should be larger than 3 and region num must not be 0")
+	if storeNum < 3 {
+		simutil.Logger.Fatal("Store num should be larger than 3.")
 	}
-	return storeNum, regionNum
+	return storeNum
+}
+
+func getRegionNum() int {
+	regionNum := simutil.CaseConfigure.RegionNum
+	if regionNum <= 0 {
+		simutil.Logger.Fatal("Region num should be larger than 0.")
+	}
+	return regionNum
 }
 
 func getFullStoreNum(storeNum int, emptyRatio float64) uint64 {

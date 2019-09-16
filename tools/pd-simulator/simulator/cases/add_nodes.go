@@ -24,8 +24,8 @@ import (
 func newAddNodes() *Case {
 	var simCase Case
 
-	storeNum, regionNum := readConfig()
-	emptyRatio := rand.Float64()
+	storeNum, regionNum := getStoreNum(), getRegionNum()
+	emptyRatio := rand.Float64() // the ratio of empty store to total store
 	fullStoreNum := getFullStoreNum(storeNum, emptyRatio)
 
 	for i := 1; i <= storeNum; i++ {
@@ -53,7 +53,7 @@ func newAddNodes() *Case {
 		})
 	}
 
-	ratio := 0.05
+	threshold := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		leaderCounts := make([]int, 0, storeNum)
@@ -63,7 +63,7 @@ func newAddNodes() *Case {
 			regionCount := regions.GetStoreRegionCount(uint64(i))
 			leaderCounts = append(leaderCounts, leaderCount)
 			regionCounts = append(regionCounts, regionCount)
-			res = res && leaderAndRegionIsUniform(leaderCount, regionCount, regionNum, ratio)
+			res = res && leaderAndRegionIsUniform(leaderCount, regionCount, regionNum, threshold)
 		}
 
 		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts), zap.Ints("region", regionCounts))

@@ -25,7 +25,7 @@ import (
 func newDeleteNodes() *Case {
 	var simCase Case
 
-	storeNum, regionNum := readConfig()
+	storeNum, regionNum := getStoreNum(), getRegionNum()
 	fullStoreNum := storeNum - 1
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
@@ -71,7 +71,7 @@ func newDeleteNodes() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	ratio := 0.05
+	threshold := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := numNodes == int(fullStoreNum)
 		leaderCounts := make([]int, 0, numNodes)
@@ -81,7 +81,7 @@ func newDeleteNodes() *Case {
 			regionCount := regions.GetStoreRegionCount(i)
 			leaderCounts = append(leaderCounts, leaderCount)
 			regionCounts = append(regionCounts, regionCount)
-			res = res && leaderAndRegionIsUniform(leaderCount, regionCount, regionNum*storeNum/int(fullStoreNum), ratio)
+			res = res && leaderAndRegionIsUniform(leaderCount, regionCount, regionNum*storeNum/int(fullStoreNum), threshold)
 		}
 
 		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts), zap.Ints("region", regionCounts))

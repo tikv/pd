@@ -27,7 +27,7 @@ import (
 func newHotWrite() *Case {
 	var simCase Case
 
-	storeNum, regionNum := readConfig()
+	storeNum, regionNum := getStoreNum(), getRegionNum()
 	// Initialize the cluster
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{

@@ -22,7 +22,7 @@ import (
 
 func newMakeupDownReplicas() *Case {
 	var simCase Case
-	storeNum, regionNum := readConfig()
+	storeNum, regionNum := getStoreNum(), getRegionNum()
 	fullStoreNum := storeNum - 1
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
@@ -82,12 +82,12 @@ func newMakeupDownReplicas() *Case {
 		}
 
 		res := true
-		ratio := 0.05
+		threshold := 0.05
 		for index, regionCount := range regionCounts {
 			if index == 0 { //storeId ==1
 				continue
 			}
-			res = res && isUniform(regionCount, storeNum*regionNum/fullStoreNum, ratio)
+			res = res && isUniform(regionCount, storeNum*regionNum/fullStoreNum, threshold)
 		}
 		return res
 	}

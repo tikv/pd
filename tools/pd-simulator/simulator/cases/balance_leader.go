@@ -24,7 +24,7 @@ import (
 func newBalanceLeader() *Case {
 	var simCase Case
 
-	storeNum, regionNum := readConfig()
+	storeNum, regionNum := getStoreNum(), getRegionNum()
 
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
@@ -51,14 +51,14 @@ func newBalanceLeader() *Case {
 		})
 	}
 
-	ratio := 0.05
+	threshold := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		leaderCounts := make([]int, 0, storeNum)
 		for i := 1; i <= storeNum; i++ {
 			leaderCount := regions.GetStoreLeaderCount(uint64(i))
 			leaderCounts = append(leaderCounts, leaderCount)
-			res = res && leaderIsUniform(leaderCount, regionNum, ratio)
+			res = res && leaderIsUniform(leaderCount, regionNum, threshold)
 		}
 		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts))
 		return res

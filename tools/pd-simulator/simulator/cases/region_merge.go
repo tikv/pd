@@ -26,7 +26,7 @@ import (
 func newRegionMerge() *Case {
 	var simCase Case
 	// Initialize the cluster
-	storeNum, regionNum := readConfig()
+	storeNum, regionNum := getStoreNum(), getRegionNum()
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
@@ -53,7 +53,7 @@ func newRegionMerge() *Case {
 		})
 	}
 	// Checker description
-	ratio := 0.05
+	threshold := 0.05
 	mergeRatio := 4 // when max-merge-region-size is 20, per region will reach 40MB
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		sum := 0
@@ -64,7 +64,7 @@ func newRegionMerge() *Case {
 			sum += regionCount
 		}
 		simutil.Logger.Info("current counts", zap.Ints("region", regionCounts), zap.Int64("average region size", regions.GetAverageRegionSize()))
-		return isUniform(sum, storeNum*regionNum/mergeRatio, ratio)
+		return isUniform(sum, storeNum*regionNum/mergeRatio, threshold)
 	}
 	return &simCase
 }
