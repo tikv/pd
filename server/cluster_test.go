@@ -871,6 +871,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 }
 
 func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
+	c.Assert(a, DeepEquals, b)
 	c.Assert(a.GetMeta(), DeepEquals, b.GetMeta())
 	c.Assert(a.GetLeader(), DeepEquals, b.GetLeader())
 	c.Assert(a.GetPeers(), DeepEquals, b.GetPeers())
@@ -1114,6 +1115,48 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cluster.storage, regions[:i+1])
+
+		// Change leader.
+		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change ApproximateSize.
+		region = region.Clone(core.SetApproximateSize(144))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change ApproximateKeys.
+		region = region.Clone(core.SetApproximateKeys(144000))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change bytes written.
+		region = region.Clone(core.SetWrittenBytes(24000))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change keys written.
+		region = region.Clone(core.SetWrittenKeys(240))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change bytes read.
+		region = region.Clone(core.SetReadBytes(1080000))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change keys read.
+		region = region.Clone(core.SetReadKeys(1080))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
