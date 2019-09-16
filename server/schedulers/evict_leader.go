@@ -84,15 +84,15 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.RandLeaderRegion(s.storeID, core.HealthRegion())
 	if region == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_leader").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 		return nil
 	}
 	target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
 	if target == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_target_store").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 		return nil
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 	op := operator.CreateTransferLeaderOperator("evict-leader", region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
