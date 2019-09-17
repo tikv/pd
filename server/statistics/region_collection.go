@@ -138,7 +138,6 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	}
 	r.deleteEntry(deleteIndex, regionID)
 	r.index[regionID] = peerTypeIndex
-
 }
 
 // ClearDefunctRegion is used to handle the overlap region.
