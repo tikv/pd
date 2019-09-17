@@ -68,7 +68,7 @@ region-schedule-limit = 64
 replica-schedule-limit = 64
 merge-schedule-limit = 8
 hot-region-schedule-limit = 4
-#enable-schedule-leader-by-count = true
+#enable-schedule-leader-by-count = false
 #tolerant-size-ratio = 0.0
 #enable-one-way-merge = false
 
