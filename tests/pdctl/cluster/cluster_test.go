@@ -71,6 +71,7 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	temp.Close()
 	os.Stdout = old
 	out, _ := ioutil.ReadFile(fname)
+	os.Remove(fname)
 	c.Assert(strings.Contains(string(out), "no such file or directory"), IsTrue)
 
 	// cluster status

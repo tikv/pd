@@ -14,8 +14,6 @@
 package statistics
 
 import (
-	"fmt"
-
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 )
@@ -33,6 +31,8 @@ const (
 	IncorrectNamespace
 	LearnerPeer
 )
+
+const nonIsolation = "none"
 
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
@@ -151,53 +151,68 @@ func (r *RegionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.stats[LearnerPeer])))
 }
 
-// LabelLevelStatistics is the statistics of the level of labels.
-type LabelLevelStatistics struct {
-	regionLabelLevelStats map[uint64]int
-	labelLevelCounter     map[int]int
+// LabelStatistics is the statistics of the level of labels.
+type LabelStatistics struct {
+	regionLabelStats map[uint64]string
+	labelCounter     map[string]int
 }
 
-// NewLabelLevelStatistics creates a new LabelLevelStatistics.
-func NewLabelLevelStatistics() *LabelLevelStatistics {
-	return &LabelLevelStatistics{
-		regionLabelLevelStats: make(map[uint64]int),
-		labelLevelCounter:     make(map[int]int),
+// NewLabelStatistics creates a new LabelStatistics.
+func NewLabelStatistics() *LabelStatistics {
+	return &LabelStatistics{
+		regionLabelStats: make(map[uint64]string),
+		labelCounter:     make(map[string]int),
 	}
 }
 
 // Observe records the current label status.
-func (l *LabelLevelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
+func (l *LabelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
 	regionID := region.GetID()
-	regionLabelLevel := getRegionLabelIsolationLevel(stores, labels)
-	if level, ok := l.regionLabelLevelStats[regionID]; ok {
-		if level == regionLabelLevel {
+	regionIsolation := getRegionLabelIsolation(stores, labels)
+	if label, ok := l.regionLabelStats[regionID]; ok {
+		if label == regionIsolation {
 			return
 		}
-		l.labelLevelCounter[level]--
+		l.counterDec(label)
 	}
-	l.regionLabelLevelStats[regionID] = regionLabelLevel
-	l.labelLevelCounter[regionLabelLevel]++
+	l.regionLabelStats[regionID] = regionIsolation
+	l.counterInc(regionIsolation)
 }
 
 // Collect collects the metrics of the label status.
-func (l *LabelLevelStatistics) Collect() {
-	for level, count := range l.labelLevelCounter {
-		typ := fmt.Sprintf("level_%d", level)
-		regionLabelLevelGauge.WithLabelValues(typ).Set(float64(count))
+func (l *LabelStatistics) Collect() {
+	for level, count := range l.labelCounter {
+		regionLabelLevelGauge.WithLabelValues(level).Set(float64(count))
 	}
 }
 
 // ClearDefunctRegion is used to handle the overlap region.
-func (l *LabelLevelStatistics) ClearDefunctRegion(regionID uint64) {
-	if level, ok := l.regionLabelLevelStats[regionID]; ok {
-		l.labelLevelCounter[level]--
-		delete(l.regionLabelLevelStats, regionID)
+func (l *LabelStatistics) ClearDefunctRegion(regionID uint64, labels []string) {
+	if label, ok := l.regionLabelStats[regionID]; ok {
+		l.counterDec(label)
+		delete(l.regionLabelStats, regionID)
 	}
 }
 
-func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int {
+func (l *LabelStatistics) counterInc(label string) {
+	if label == nonIsolation {
+		l.labelCounter[nonIsolation]++
+	} else {
+		l.labelCounter[label]++
+	}
+}
+
+func (l *LabelStatistics) counterDec(label string) {
+	if label == nonIsolation {
+		l.labelCounter[nonIsolation]--
+	} else {
+		l.labelCounter[label]--
+	}
+}
+
+func getRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
 	if len(stores) == 0 || len(labels) == 0 {
-		return 0
+		return nonIsolation
 	}
 	queueStores := [][]*core.StoreInfo{stores}
 	for level, label := range labels {
@@ -210,10 +225,10 @@ func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int
 		}
 		queueStores = newQueueStores
 		if len(queueStores) == 0 {
-			return level + 1
+			return labels[level]
 		}
 	}
-	return 0
+	return nonIsolation
 }
 
 func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {

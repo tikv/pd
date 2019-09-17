@@ -119,10 +119,10 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 	clusterID := s.svr.clusterID
 
 	// IsBootstrapped returns false.
@@ -239,10 +239,10 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
@@ -416,8 +416,8 @@ func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
-	c.Assert(err, IsNil)
 	defer cleanup()
+	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
@@ -468,10 +468,10 @@ func (s *testClusterSuite) TestGetPDMembers(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 	req := &pdpb.GetMembersRequest{
 		Header: testutil.NewRequestHeader(s.svr.ClusterID()),
 	}
@@ -486,10 +486,10 @@ func (s *testClusterSuite) TestStoreVersionChange(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
 	s.svr.SetClusterVersion("2.0.0")
@@ -631,10 +631,10 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
