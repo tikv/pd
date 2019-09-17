@@ -34,6 +34,7 @@ var (
 	detach   bool
 	interact bool
 	version  bool
+	help     bool
 	caPath   string
 	certPath string
 	keyPath  string
@@ -47,6 +48,7 @@ func init() {
 	flag.StringVar(&caPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
 	flag.StringVar(&certPath, "cert", "", "path of file that contains X509 certificate in PEM format.")
 	flag.StringVar(&keyPath, "key", "", "path of file that contains X509 key in PEM format.")
+	flag.BoolVarP(&help, "help", "h", false, "help message.")
 }
 
 func main() {
@@ -57,6 +59,10 @@ func main() {
 	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
 	flag.Parse()
 
+	if help {
+		flag.Usage()
+		os.Exit(0)
+	}
 	if version {
 		server.PrintPDInfo()
 		os.Exit(0)
