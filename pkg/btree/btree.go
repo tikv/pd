@@ -449,7 +449,7 @@ func (n *node) insert(item Item, maxItems int) Item {
 	return out
 }
 
-func (n *node) at(k int) Item {
+func (n *node) getAt(k int) Item {
 	if k >= n.length() || k < 0 {
 		return nil
 	}
@@ -461,9 +461,9 @@ func (n *node) at(k int) Item {
 		return n.items[i]
 	}
 	if i == 0 {
-		return n.children[0].at(k)
+		return n.children[0].getAt(k)
 	}
-	return n.children[i].at(k - n.indices[i-1] - 1)
+	return n.children[i].getAt(k - n.indices[i-1] - 1)
 }
 
 // index is the number of items < key
@@ -999,12 +999,12 @@ func (t *BTree) GetWithIndex(key Item) (Item, int) {
 	return t.root.getWithIndex(key)
 }
 
-// At returns the item with index k. If k < 0 or k >= t.Len(), returns nil.
-func (t *BTree) At(k int) Item {
+// GetAt returns the item with index k. If k < 0 or k >= t.Len(), returns nil.
+func (t *BTree) GetAt(k int) Item {
 	if t.root == nil {
 		return nil
 	}
-	return t.root.at(k)
+	return t.root.getAt(k)
 }
 
 // Min returns the smallest item in the tree, or nil if the tree is empty.
