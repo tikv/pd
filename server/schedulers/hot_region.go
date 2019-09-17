@@ -257,7 +257,7 @@ func calcScore(storeItems map[uint64][]*statistics.HotPeerStat, cluster schedule
 				LastUpdateTime: r.LastUpdateTime,
 				Version:        r.Version,
 			}
-			storeStat.TotalFlowBytes += r.BytesRate
+			storeStat.TotalBytesRate += r.BytesRate
 			storeStat.RegionsCount++
 			storeStat.RegionsStat = append(storeStat.RegionsStat, s)
 		}
@@ -401,7 +401,7 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 	)
 
 	for storeID, statistics := range stats {
-		count, flowBytes := len(statistics.RegionsStat), statistics.TotalFlowBytes
+		count, flowBytes := len(statistics.RegionsStat), statistics.TotalBytesRate
 		if count >= 2 && (count > maxHotStoreRegionCount || (count == maxHotStoreRegionCount && flowBytes > maxFlowBytes)) {
 			maxHotStoreRegionCount = count
 			maxFlowBytes = flowBytes
@@ -415,7 +415,7 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 // We choose a target store based on the hot region number and flow bytes of this store.
 func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes uint64, srcStoreID uint64, storesStat statistics.StoreHotRegionsStat) (destStoreID uint64) {
 	sr := storesStat[srcStoreID]
-	srcFlowBytes := sr.TotalFlowBytes
+	srcFlowBytes := sr.TotalBytesRate
 	srcHotRegionsCount := len(sr.RegionsStat)
 
 	var (
@@ -426,13 +426,13 @@ func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64,
 		if s, ok := storesStat[storeID]; ok {
 			if srcHotRegionsCount-len(s.RegionsStat) > 1 && minRegionsCount > len(s.RegionsStat) {
 				destStoreID = storeID
-				minFlowBytes = s.TotalFlowBytes
+				minFlowBytes = s.TotalBytesRate
 				minRegionsCount = len(s.RegionsStat)
 				continue
 			}
-			if minRegionsCount == len(s.RegionsStat) && minFlowBytes > s.TotalFlowBytes &&
-				uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) > s.TotalFlowBytes+2*regionFlowBytes {
-				minFlowBytes = s.TotalFlowBytes
+			if minRegionsCount == len(s.RegionsStat) && minFlowBytes > s.TotalBytesRate &&
+				uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) > s.TotalBytesRate+2*regionFlowBytes {
+				minFlowBytes = s.TotalBytesRate
 				destStoreID = storeID
 			}
 		} else {

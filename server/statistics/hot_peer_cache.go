@@ -27,8 +27,8 @@ const (
 
 	rollingWindowsSize = 5
 
-	hotWriteRegionMinFlowRate = 16 * 1024
-	hotReadRegionMinFlowRate  = 128 * 1024
+	hotWriteRegionMinBytesRate = 16 * 1024
+	hotReadRegionMinBytesRate  = 128 * 1024
 
 	hotRegionReportMinInterval = 3
 
@@ -278,8 +278,8 @@ func calculateWriteHotThresholdWithStore(stats *StoresStats, storeID uint64) uin
 	divisor := float64(hotPeerMaxCount)
 	hotRegionThreshold := uint64(float64(writeBytes) / divisor)
 
-	if hotRegionThreshold < hotWriteRegionMinFlowRate {
-		hotRegionThreshold = hotWriteRegionMinFlowRate
+	if hotRegionThreshold < hotWriteRegionMinBytesRate {
+		hotRegionThreshold = hotWriteRegionMinBytesRate
 	}
 	return hotRegionThreshold
 }
@@ -289,8 +289,8 @@ func calculateReadHotThresholdWithStore(stats *StoresStats, storeID uint64) uint
 	divisor := float64(hotPeerMaxCount)
 	hotRegionThreshold := uint64(float64(readBytes) / divisor)
 
-	if hotRegionThreshold < hotReadRegionMinFlowRate {
-		hotRegionThreshold = hotReadRegionMinFlowRate
+	if hotRegionThreshold < hotReadRegionMinBytesRate {
+		hotRegionThreshold = hotReadRegionMinBytesRate
 	}
 	return hotRegionThreshold
 }
