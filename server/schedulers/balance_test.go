@@ -1082,7 +1082,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	c.Assert(r, NotNil)
 	c.Assert(r.GetID(), Equals, uint64(2))
 	// check hot items
-	stats := tc.HotSpotCache.RegionStats(statistics.ReadFlow)
+	stats := tc.HotCache.RegionStats(statistics.ReadFlow)
 	c.Assert(len(stats), Equals, 2)
 	for _, ss := range stats {
 		for _, s := range ss {

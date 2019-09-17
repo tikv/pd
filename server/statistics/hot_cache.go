@@ -24,32 +24,32 @@ import (
 // only turned off by the simulator and the test.
 var Denoising = true
 
-// HotSpotCache is a cache hold hot regions.
-type HotSpotCache struct {
+// HotCache is a cache hold hot regions.
+type HotCache struct {
 	writeFlow *hotPeerCache
 	readFlow  *hotPeerCache
 }
 
-// NewHotSpotCache creates a new hot spot cache.
-func NewHotSpotCache() *HotSpotCache {
-	return &HotSpotCache{
+// NewHotCache creates a new hot spot cache.
+func NewHotCache() *HotCache {
+	return &HotCache{
 		writeFlow: NewHotStoresStats(WriteFlow),
 		readFlow:  NewHotStoresStats(ReadFlow),
 	}
 }
 
 // CheckWrite checks the write status, returns update items.
-func (w *HotSpotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
+func (w *HotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
 	return w.writeFlow.CheckRegionFlow(region, stats)
 }
 
 // CheckRead checks the read status, returns update items.
-func (w *HotSpotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
+func (w *HotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
 	return w.readFlow.CheckRegionFlow(region, stats)
 }
 
 // Update updates the cache.
-func (w *HotSpotCache) Update(item *HotPeerStat) {
+func (w *HotCache) Update(item *HotPeerStat) {
 	switch item.Kind {
 	case WriteFlow:
 		w.writeFlow.Update(item)
@@ -67,7 +67,7 @@ func (w *HotSpotCache) Update(item *HotPeerStat) {
 }
 
 // RegionStats returns hot items according to kind
-func (w *HotSpotCache) RegionStats(kind FlowKind) map[uint64][]*HotPeerStat {
+func (w *HotCache) RegionStats(kind FlowKind) map[uint64][]*HotPeerStat {
 	var peersOfStore map[uint64]cache.Cache
 	switch kind {
 	case WriteFlow:
@@ -89,7 +89,7 @@ func (w *HotSpotCache) RegionStats(kind FlowKind) map[uint64][]*HotPeerStat {
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.
-func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotDegree int) *HotPeerStat {
+func (w *HotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hotDegree int) *HotPeerStat {
 	if stats, ok := w.RegionStats(kind)[storeID]; ok {
 		for _, i := range rand.Perm(len(stats)) {
 			if stats[i].HotDegree >= hotDegree {
@@ -101,18 +101,18 @@ func (w *HotSpotCache) RandHotRegionFromStore(storeID uint64, kind FlowKind, hot
 }
 
 // IsRegionHot checks if the region is hot.
-func (w *HotSpotCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
+func (w *HotCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
 	return w.writeFlow.IsRegionHot(region, hotDegree) ||
 		w.readFlow.IsRegionHot(region, hotDegree)
 }
 
 // CollectMetrics collect the hot cache metrics
-func (w *HotSpotCache) CollectMetrics(stats *StoresStats) {
+func (w *HotCache) CollectMetrics(stats *StoresStats) {
 	w.writeFlow.CollectMetrics(stats, "write")
 	w.readFlow.CollectMetrics(stats, "read")
 }
 
-func (w *HotSpotCache) incMetrics(name string, storeID uint64, kind FlowKind) {
+func (w *HotCache) incMetrics(name string, storeID uint64, kind FlowKind) {
 	store := storeTag(storeID)
 	switch kind {
 	case WriteFlow:

@@ -74,7 +74,7 @@ type RaftCluster struct {
 	labelLevelStats *statistics.LabelLevelStatistics
 	regionStats     *statistics.RegionStatistics
 	storesStats     *statistics.StoresStats
-	hotSpotCache    *statistics.HotSpotCache
+	hotSpotCache    *statistics.HotCache
 
 	coordinator *coordinator
 
@@ -148,7 +148,7 @@ func (c *RaftCluster) initCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.storesStats = statistics.NewStoresStats()
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
-	c.hotSpotCache = statistics.NewHotSpotCache()
+	c.hotSpotCache = statistics.NewHotCache()
 }
 
 func (c *RaftCluster) start() error {
