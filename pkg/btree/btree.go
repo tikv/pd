@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// This package is a modified version of google/btree. Change as follows:
+//   * Add `indices` array for `node`, and related codes to maintain it.
+//     This modification may affect performance of insertion and deletion.
+//   * Add `GetAt` and `GetWithIndex` method for `BTree`.
+
 // Package btree implements in-memory B-Trees of arbitrary degree.
 //
 // btree implements an in-memory B-Tree for use as an ordered data structure.
