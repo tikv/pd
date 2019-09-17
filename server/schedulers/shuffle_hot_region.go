@@ -146,7 +146,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, sto
 		if err != nil {
 			return nil
 		}
-		schedulerCounter.WithLabelValues(s.GetName(), "create_operator").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "create-operator").Inc()
 		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
