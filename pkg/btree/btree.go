@@ -237,21 +237,21 @@ func (s *children) truncate(index int) {
 	}
 }
 
-// size stores size info of a node.
-// size[i] is the number of items from the first one of this subtree to the last one of children[i],
-// so we have following formulas:
+// indices stores indices of items in a node.
+// If the node has any children, indices[i] is the index of items[i] in the subtree.
+// We have following formulas:
 //
-//   size[i] = if i == 0 { children[0].length() }
-//             else { size[i-1] + 1 + children[i].length() }
-type size []int
+//   indices[i] = if i == 0 { children[0].length() }
+//                else { indices[i-1] + 1 + children[i].length() }
+type indices []int
 
-func (s *size) addAt(index int, delta int) {
+func (s *indices) addAt(index int, delta int) {
 	for i := index; i < len(*s); i++ {
 		(*s)[i] += delta
 	}
 }
 
-func (s *size) insertAt(index int, sz int) {
+func (s *indices) insertAt(index int, sz int) {
 	*s = append(*s, -1)
 	for i := len(*s) - 1; i >= index && i > 0; i-- {
 		(*s)[i] = (*s)[i-1] + sz + 1
@@ -261,7 +261,7 @@ func (s *size) insertAt(index int, sz int) {
 	}
 }
 
-func (s *size) push(sz int) {
+func (s *indices) push(sz int) {
 	if len(*s) == 0 {
 		*s = append(*s, sz)
 	} else {
@@ -270,20 +270,20 @@ func (s *size) push(sz int) {
 }
 
 // children[i] is splited.
-func (s *size) split(index, nextSize int) {
+func (s *indices) split(index, nextSize int) {
 	s.insertAt(index+1, -1)
 	(*s)[index] -= 1 + nextSize
 }
 
 // children[i] and children[i+1] is merged
-func (s *size) merge(index int) {
+func (s *indices) merge(index int) {
 	for i := index; i < len(*s)-1; i++ {
 		(*s)[i] = (*s)[i+1]
 	}
 	*s = (*s)[:len(*s)-1]
 }
 
-func (s *size) removeAt(index int) int {
+func (s *indices) removeAt(index int) int {
 	sz := (*s)[index]
 	if index > 0 {
 		sz = sz - (*s)[index-1] - 1
@@ -295,7 +295,7 @@ func (s *size) removeAt(index int) int {
 	return sz
 }
 
-func (s *size) pop() int {
+func (s *indices) pop() int {
 	l := len(*s)
 	out := (*s)[l-1]
 	if l != 1 {
@@ -305,12 +305,12 @@ func (s *size) pop() int {
 	return out
 }
 
-func (s *size) truncate(index int) {
+func (s *indices) truncate(index int) {
 	*s = (*s)[:index]
 	// no need to clear
 }
 
-func (s size) find(k int) (index int, found bool) {
+func (s indices) find(k int) (index int, found bool) {
 	i := sort.SearchInts(s, k)
 	return i, s[i] == k
 }
@@ -323,30 +323,30 @@ func (s size) find(k int) (index int, found bool) {
 type node struct {
 	items    items
 	children children
-	size     size
+	indices  indices
 	cow      *copyOnWriteContext
 }
 
 func (n *node) length() int {
-	if len(n.size) <= 0 {
+	if len(n.indices) <= 0 {
 		return len(n.items)
 	}
-	return n.size[len(n.size)-1]
+	return n.indices[len(n.indices)-1]
 }
 
 func (n *node) initSize() {
 	l := len(n.children)
 	if l <= 0 {
-		n.size.truncate(0)
+		n.indices.truncate(0)
 		return
-	} else if l <= cap(n.size) {
-		n.size = n.size[:l]
+	} else if l <= cap(n.indices) {
+		n.indices = n.indices[:l]
 	} else {
-		n.size = make([]int, l)
+		n.indices = make([]int, l)
 	}
-	n.size[0] = n.children[0].length()
+	n.indices[0] = n.children[0].length()
 	for i := 1; i < l; i++ {
-		n.size[i] = n.size[i-1] + 1 + n.children[i].length()
+		n.indices[i] = n.indices[i-1] + 1 + n.children[i].length()
 	}
 }
 
@@ -368,13 +368,13 @@ func (n *node) mutableFor(cow *copyOnWriteContext) *node {
 		out.children = make(children, len(n.children), cap(n.children))
 	}
 	copy(out.children, n.children)
-	// Copy size
-	if cap(out.size) >= len(n.size) {
-		out.size = out.size[:len(n.size)]
+	// Copy indices
+	if cap(out.indices) >= len(n.indices) {
+		out.indices = out.indices[:len(n.indices)]
 	} else {
-		out.size = make(size, len(n.size), cap(n.size))
+		out.indices = make(indices, len(n.indices), cap(n.indices))
 	}
-	copy(out.size, n.size)
+	copy(out.indices, n.indices)
 	return out
 }
 
@@ -396,7 +396,7 @@ func (n *node) split(i int) (Item, *node) {
 		next.children = append(next.children, n.children[i+1:]...)
 		next.initSize()
 		n.children.truncate(i + 1)
-		n.size.truncate(i + 1)
+		n.indices.truncate(i + 1)
 	}
 	return item, next
 }
@@ -411,7 +411,7 @@ func (n *node) maybeSplitChild(i, maxItems int) bool {
 	item, second := first.split(maxItems / 2)
 	n.items.insertAt(i, item)
 	n.children.insertAt(i+1, second)
-	n.size.split(i, second.length())
+	n.indices.split(i, second.length())
 	return true
 }
 
@@ -444,7 +444,7 @@ func (n *node) insert(item Item, maxItems int) Item {
 	}
 	out := n.mutableChild(i).insert(item, maxItems)
 	if out == nil {
-		n.size.addAt(i, 1)
+		n.indices.addAt(i, 1)
 	}
 	return out
 }
@@ -456,14 +456,14 @@ func (n *node) at(k int) Item {
 	if len(n.children) == 0 {
 		return n.items[k]
 	}
-	i, found := n.size.find(k)
+	i, found := n.indices.find(k)
 	if found {
 		return n.items[i]
 	}
 	if i == 0 {
 		return n.children[0].at(k)
 	}
-	return n.children[i].at(k - n.size[i-1] - 1)
+	return n.children[i].at(k - n.indices[i-1] - 1)
 }
 
 // index is the number of items < key
@@ -471,14 +471,14 @@ func (n *node) getWithIndex(key Item) (Item, int) {
 	i, found := n.items.find(key)
 	if found {
 		rk := i
-		if len(n.size) > 0 {
-			rk = n.size[i]
+		if len(n.indices) > 0 {
+			rk = n.indices[i]
 		}
 		return n.items[i], rk
 	} else if len(n.children) > 0 {
 		out, rk := n.children[i].getWithIndex(key)
 		if i > 0 {
-			rk += n.size[i-1] + 1
+			rk += n.indices[i-1] + 1
 		}
 		return out, rk
 	}
@@ -581,7 +581,7 @@ func (n *node) remove(item Item, minItems int, typ toRemove) (out Item) {
 		out = child.remove(item, minItems, typ)
 	}
 	if out != nil {
-		n.size.addAt(i, -1)
+		n.indices.addAt(i, -1)
 	}
 	return
 }
@@ -613,12 +613,12 @@ func (n *node) growChildAndRemove(i int, item Item, minItems int, typ toRemove) 
 		stolenItem := stealFrom.items.pop()
 		child.items.insertAt(0, n.items[i-1])
 		n.items[i-1] = stolenItem
-		n.size[i-1] -= 1
+		n.indices[i-1] -= 1
 		if len(stealFrom.children) > 0 {
 			child.children.insertAt(0, stealFrom.children.pop())
-			stealSize := stealFrom.size.pop()
-			n.size[i-1] -= stealSize
-			child.size.insertAt(0, stealSize)
+			stealSize := stealFrom.indices.pop()
+			n.indices[i-1] -= stealSize
+			child.indices.insertAt(0, stealSize)
 		}
 	} else if i < len(n.items) && len(n.children[i+1].items) > minItems {
 		// steal from right child
@@ -627,12 +627,12 @@ func (n *node) growChildAndRemove(i int, item Item, minItems int, typ toRemove) 
 		stolenItem := stealFrom.items.removeAt(0)
 		child.items = append(child.items, n.items[i])
 		n.items[i] = stolenItem
-		n.size[i] += 1
+		n.indices[i] += 1
 		if len(stealFrom.children) > 0 {
 			child.children = append(child.children, stealFrom.children.removeAt(0))
-			stealSize := stealFrom.size.removeAt(0)
-			n.size[i] += stealSize
-			child.size.push(stealSize)
+			stealSize := stealFrom.indices.removeAt(0)
+			n.indices[i] += stealSize
+			child.indices.push(stealSize)
 		}
 	} else {
 		if i >= len(n.items) {
@@ -646,9 +646,9 @@ func (n *node) growChildAndRemove(i int, item Item, minItems int, typ toRemove) 
 		child.items = append(child.items, mergeChild.items...)
 		child.children = append(child.children, mergeChild.children...)
 		for _, nn := range mergeChild.children {
-			child.size.push(nn.length())
+			child.indices.push(nn.length())
 		}
-		n.size.merge(i)
+		n.indices.merge(i)
 		n.cow.freeNode(mergeChild)
 	}
 	return n.remove(item, minItems, typ)
@@ -738,7 +738,7 @@ func (n *node) iterate(dir direction, start, stop Item, includeStart bool, hit b
 
 // Used for testing/debugging purposes.
 func (n *node) print(w io.Writer, level int) {
-	fmt.Fprintf(w, "%sNODE:%v, %v\n", strings.Repeat("  ", level), n.items, n.size)
+	fmt.Fprintf(w, "%sNODE:%v, %v\n", strings.Repeat("  ", level), n.items, n.indices)
 	for _, c := range n.children {
 		c.print(w, level+1)
 	}
@@ -833,7 +833,7 @@ func (c *copyOnWriteContext) freeNode(n *node) freeType {
 		// clear to allow GC
 		n.items.truncate(0)
 		n.children.truncate(0)
-		n.size.truncate(0)
+		n.indices.truncate(0)
 		n.cow = nil
 		if c.freelist.freeNode(n) {
 			return ftStored
