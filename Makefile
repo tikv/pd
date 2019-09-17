@@ -48,7 +48,7 @@ dev: build check test
 
 ci: build check basic-test
 
-build: pd-server pd-ctl pd-tso-bench pd-recover
+build: pd-server pd-analysis pd-ctl pd-tso-bench pd-recover
 pd-server: export GO111MODULE=on
 pd-server:
 ifeq ("$(WITH_RACE)", "1")
@@ -57,6 +57,9 @@ else
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
 
+pd-analysis: export GO111MODULE=on
+pd-analysis:
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-analysis tools/pd-analysis/main.go
 pd-ctl: export GO111MODULE=on
 pd-ctl:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
