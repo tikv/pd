@@ -139,12 +139,6 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	r.deleteEntry(deleteIndex, regionID)
 	r.index[regionID] = peerTypeIndex
 
-	// collect region size
-	for _, peer := range region.GetPeers() {
-		storeTag := fmt.Sprintf("store-%d", peer.GetStoreId())
-		regionStatusHistogram.WithLabelValues("size", storeTag).Observe(float64(region.GetApproximateSize()))
-		regionStatusHistogram.WithLabelValues("keys", storeTag).Observe(float64(region.GetApproximateKeys()))
-	}
 }
 
 // ClearDefunctRegion is used to handle the overlap region.

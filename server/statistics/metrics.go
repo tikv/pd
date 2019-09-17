@@ -40,14 +40,6 @@ var (
 			Help:      "Status of the regions.",
 		}, []string{"type"})
 
-	regionStatusHistogram = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "regions",
-			Name:      "attribute",
-			Help:      "The attribute of the region size",
-		}, []string{"type", "store"})
-
 	clusterStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -85,7 +77,6 @@ func init() {
 	prometheus.MustRegister(hotCacheStatusGauge)
 	prometheus.MustRegister(storeStatusGauge)
 	prometheus.MustRegister(regionStatusGauge)
-	prometheus.MustRegister(regionStatusHistogram)
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)
