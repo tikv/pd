@@ -401,10 +401,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache = true
 		}
 
-		if (region.GetBytesWritten() != origin.GetBytesWritten()) ||
-			(region.GetBytesRead() != origin.GetBytesRead()) ||
-			(region.GetKeysWritten() != origin.GetKeysWritten()) ||
-			(region.GetKeysRead() != origin.GetKeysRead()) {
+		if region.GetBytesWritten() != origin.GetBytesWritten() ||
+			region.GetBytesRead() != origin.GetBytesRead() ||
+			region.GetKeysWritten() != origin.GetKeysWritten() ||
+			region.GetKeysRead() != origin.GetKeysRead() {
 			saveCache = true
 		}
 	}
