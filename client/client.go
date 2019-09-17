@@ -427,11 +427,11 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
 		defer span.Finish()
 	}
-
+	count := len(requests)
 	start := time.Now()
 	req := &pdpb.TsoRequest{
 		Header: c.requestHeader(),
-		Count:  uint32(len(requests)),
+		Count:  uint32(count),
 	}
 
 	if err := stream.Send(req); err != nil {
@@ -446,6 +446,8 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 		return err
 	}
 	requestDurationTSO.Observe(time.Since(start).Seconds())
+	tsoBatchSize.Observe(float64(count))
+
 	if resp.GetCount() != uint32(len(requests)) {
 		err = errors.WithStack(errTSOLength)
 		c.finishTSORequest(requests, 0, 0, err)

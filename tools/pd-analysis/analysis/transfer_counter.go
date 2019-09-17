@@ -15,6 +15,7 @@ package analysis
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -22,8 +23,8 @@ import (
 	"sync"
 )
 
-// TransferRegionCount is to count transfer schedule for judging whether redundant
-type TransferRegionCount struct {
+// TransferCounter is to count transfer schedule for judging whether redundant
+type TransferCounter struct {
 	storeNum          int
 	scheduledStoreNum int
 	regionNum         int
@@ -43,18 +44,18 @@ type TransferRegionCount struct {
 }
 
 var once sync.Once
-var instance *TransferRegionCount
+var instance *TransferCounter
 
-// GetTransferRegionCounter is to return singleTon for TransferRegionCount
-func GetTransferRegionCounter() *TransferRegionCount {
+// GetTransferCounter is to return singleTon for TransferCounter
+func GetTransferCounter() *TransferCounter {
 	once.Do(func() {
-		instance = &TransferRegionCount{}
+		instance = &TransferCounter{}
 	})
 	return instance
 }
 
-// Init for TransferRegionCount
-func (c *TransferRegionCount) Init(storeNum, regionNum int) {
+// Init for TransferCounter
+func (c *TransferCounter) Init(storeNum, regionNum int) {
 	c.storeNum = storeNum
 	c.scheduledStoreNum = 0
 	c.regionNum = regionNum
@@ -72,14 +73,14 @@ func (c *TransferRegionCount) Init(storeNum, regionNum int) {
 // AddTarget is be used to add target of edge in graph mat.
 // Firstly add a new peer and then delete the old peer of the scheduling,
 // So in the statistics, also firstly add the target and then add the source.
-func (c *TransferRegionCount) AddTarget(regionID, targetStoreID uint64) {
+func (c *TransferCounter) AddTarget(regionID, targetStoreID uint64) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	c.regionMap[regionID] = targetStoreID
 }
 
 // AddSource is be used to add source of edge in graph mat.
-func (c *TransferRegionCount) AddSource(regionID, sourceStoreID uint64) {
+func (c *TransferCounter) AddSource(regionID, sourceStoreID uint64) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	if targetStoreID, ok := c.regionMap[regionID]; ok {
@@ -92,13 +93,12 @@ func (c *TransferRegionCount) AddSource(regionID, sourceStoreID uint64) {
 		}
 		delete(c.regionMap, regionID)
 	} else {
-		fmt.Println("Error when add sourceStoreID %u with regionID %u in transfer region map", sourceStoreID, regionID)
-		os.Exit(-1)
+		log.Fatal("Error when add sourceStore in transfer region map. SourceStoreID: ", sourceStoreID, " regionID: ", regionID)
 	}
 }
 
 // prepare is to change sparse map to dense mat.
-func (c *TransferRegionCount) prepare() {
+func (c *TransferCounter) prepare() {
 	c.IsReady = true
 	set := make(map[uint64]struct{})
 	for sourceID, edge := range c.graphMap {
@@ -140,7 +140,7 @@ func (c *TransferRegionCount) prepare() {
 // to the stack. If there is an edge of `v->u`, then the corresponding looped flow
 // is marked and removed. When all the output edges of the point v are traversed,
 // pop the point v out of the stack.
-func (c *TransferRegionCount) dfs(cur int, curFlow uint64, path []int) {
+func (c *TransferCounter) dfs(cur int, curFlow uint64, path []int) {
 	// push stack
 	path = append(path, cur)
 	c.visited[cur] = true
@@ -177,7 +177,7 @@ func (c *TransferRegionCount) dfs(cur int, curFlow uint64, path []int) {
 }
 
 // Result will count redundant schedule and necessary schedule
-func (c *TransferRegionCount) Result() {
+func (c *TransferCounter) Result() {
 	if !c.IsReady {
 		c.prepare()
 	}
@@ -198,7 +198,7 @@ func (c *TransferRegionCount) Result() {
 }
 
 // printGraph will print current graph mat.
-func (c *TransferRegionCount) printGraph() {
+func (c *TransferCounter) printGraph() {
 	fmt.Print("\t")
 	for _, storeID := range c.indexArray {
 		fmt.Print(storeID, "\t")
@@ -214,29 +214,28 @@ func (c *TransferRegionCount) printGraph() {
 }
 
 // PrintResult will print result to log and csv file.
-func (c *TransferRegionCount) PrintResult() {
+func (c *TransferCounter) PrintResult() {
 	c.prepare()
 	// Output log
-	fmt.Println("Total Schedules Graph: ")
+	log.Println("Total Schedules Graph: ")
 	c.printGraph()
 	// Solve data
 	c.Result()
 	// Output log
-	fmt.Println("Redundant Loop: ")
+	log.Println("Redundant Loop: ")
 	for index, value := range c.loopResultPath {
 		fmt.Println(index, value, c.loopResultCount[index])
 	}
-	fmt.Println("Necessary Schedules Graph: ")
+	log.Println("Necessary Schedules Graph: ")
 	c.printGraph()
-	fmt.Println("Scheduled Store: ", c.scheduledStoreNum)
-	fmt.Println("Redundant Schedules: ", c.Redundant)
-	fmt.Println("Necessary Schedules: ", c.Necessary)
+	log.Println("Scheduled Store: ", c.scheduledStoreNum)
+	log.Println("Redundant Schedules: ", c.Redundant)
+	log.Println("Necessary Schedules: ", c.Necessary)
 
 	// Output csv file
 	fd, err := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
-		fmt.Printf("Error: %s\n", err)
-		return
+		log.Fatal(err)
 	}
 	defer fd.Close()
 	fdContent := strings.Join([]string{
@@ -248,8 +247,7 @@ func (c *TransferRegionCount) PrintResult() {
 	buf := []byte(fdContent)
 	_, err = fd.Write(buf)
 	if err != nil {
-		fmt.Printf("Error: %s\n", err)
-		return
+		log.Fatal(err)
 	}
 }
 

@@ -43,8 +43,8 @@ func (s *joinTestSuite) TestSimpleJoin(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(1)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -90,8 +90,8 @@ func (s *joinTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(3)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -126,8 +126,8 @@ func (s *joinTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(3)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -161,8 +161,8 @@ func (s *joinTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(1)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

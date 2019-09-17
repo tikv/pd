@@ -42,6 +42,15 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"type"})
+
+	tsoBatchSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd_client",
+			Subsystem: "request",
+			Name:      "handle_tso_batch_size",
+			Help:      "Bucketed histogram of the batch size of handled requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
+		})
 )
 
 var (
@@ -74,4 +83,5 @@ func init() {
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
 	prometheus.MustRegister(requestDuration)
+	prometheus.MustRegister(tsoBatchSize)
 }
