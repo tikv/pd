@@ -49,8 +49,8 @@ func (s *serverTestSuite) TestMemberDelete(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(3)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -137,8 +137,8 @@ func (s *serverTestSuite) TestLeaderPriority(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(3)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -196,8 +196,8 @@ func (s *serverTestSuite) TestLeaderResign(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(3)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -231,8 +231,8 @@ func (s *serverTestSuite) TestMoveLeader(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(5)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

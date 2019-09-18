@@ -42,8 +42,8 @@ func (s *serverTestSuite) TestUpdateAdvertiseUrls(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(2)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -82,8 +82,8 @@ func (s *serverTestSuite) TestClusterID(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(3)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -109,8 +109,8 @@ func (s *serverTestSuite) TestLeader(c *C) {
 	c.Parallel()
 
 	cluster, err := tests.NewTestCluster(3)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

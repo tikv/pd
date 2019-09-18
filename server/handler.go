@@ -726,3 +726,21 @@ func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 	}
 	return c.GetRegionStatsByType(statistics.IncorrectNamespace), nil
 }
+
+// GetOfflinePeer gets the region with offline peer.
+func (h *Handler) GetOfflinePeer() ([]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, ErrNotBootstrapped
+	}
+	return c.GetRegionStatsByType(statistics.OfflinePeer), nil
+}
+
+// GetEmptyRegion gets the region with empty size.
+func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
+	c := h.s.GetRaftCluster()
+	if c == nil {
+		return nil, ErrNotBootstrapped
+	}
+	return c.GetRegionStatsByType(statistics.EmptyRegion), nil
+}

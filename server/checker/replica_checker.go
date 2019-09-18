@@ -27,27 +27,35 @@ import (
 	"go.uber.org/zap"
 )
 
+const replicaCheckerName = "replica-checker"
+
 // ReplicaChecker ensures region has the best replicas.
 // Including the following:
 // Replica number management.
 // Unhealth replica management, mainly used for disaster recovery of TiKV.
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
+	name       string
 	cluster    schedule.Cluster
 	classifier namespace.Classifier
 	filters    []filter.Filter
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster schedule.Cluster, classifier namespace.Classifier) *ReplicaChecker {
+func NewReplicaChecker(cluster schedule.Cluster, classifier namespace.Classifier, n ...string) *ReplicaChecker {
+	name := replicaCheckerName
+	if len(n) != 0 {
+		name = n[0]
+	}
 	filters := []filter.Filter{
-		filter.NewOverloadFilter(),
-		filter.NewHealthFilter(),
-		filter.NewSnapshotCountFilter(),
-		filter.NewPendingPeerCountFilter(),
+		filter.NewOverloadFilter(name),
+		filter.NewHealthFilter(name),
+		filter.NewSnapshotCountFilter(name),
+		filter.NewPendingPeerCountFilter(name),
 	}
 
 	return &ReplicaChecker{
+		name:       name,
 		cluster:    cluster,
 		classifier: classifier,
 		filters:    filters,
@@ -70,7 +78,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 
 	if len(region.GetPeers()) < r.cluster.GetMaxReplicas() && r.cluster.IsMakeUpReplicaEnabled() {
 		log.Debug("region has fewer than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
-		newPeer, _ := r.selectBestPeerToAddReplica(region, filter.NewStorageThresholdFilter())
+		newPeer, _ := r.selectBestPeerToAddReplica(region, filter.NewStorageThresholdFilter(r.name))
 		if newPeer == nil {
 			checkerCounter.WithLabelValues("replica_checker", "no-target-store").Inc()
 			return nil
@@ -102,7 +110,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 
 // SelectBestReplacementStore returns a store id that to be used to replace the old peer and distinct score.
 func (r *ReplicaChecker) SelectBestReplacementStore(region *core.RegionInfo, oldPeer *metapb.Peer, filters ...filter.Filter) (uint64, float64) {
-	filters = append(filters, filter.NewExcludedFilter(nil, region.GetStoreIds()))
+	filters = append(filters, filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()))
 	newRegion := region.Clone(core.WithRemoveStorePeer(oldPeer.GetStoreId()))
 	return r.selectBestStoreToAddReplica(newRegion, filters...)
 }
@@ -125,13 +133,13 @@ func (r *ReplicaChecker) selectBestPeerToAddReplica(region *core.RegionInfo, fil
 func (r *ReplicaChecker) selectBestStoreToAddReplica(region *core.RegionInfo, filters ...filter.Filter) (uint64, float64) {
 	// Add some must have filters.
 	newFilters := []filter.Filter{
-		filter.NewStateFilter(),
-		filter.NewExcludedFilter(nil, region.GetStoreIds()),
+		filter.NewStateFilter(r.name),
+		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
 	}
 	filters = append(filters, r.filters...)
 	filters = append(filters, newFilters...)
 	if r.classifier != nil {
-		filters = append(filters, filter.NewNamespaceFilter(r.classifier, r.classifier.GetRegionNamespace(region)))
+		filters = append(filters, filter.NewNamespaceFilter(r.name, r.classifier, r.classifier.GetRegionNamespace(region)))
 	}
 	regionStores := r.cluster.GetRegionStores(region)
 	s := selector.NewReplicaSelector(regionStores, r.cluster.GetLocationLabels(), r.filters...)
@@ -219,7 +227,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *operator
 		checkerCounter.WithLabelValues("replica_checker", "all-right").Inc()
 		return nil
 	}
-	storeID, newScore := r.SelectBestReplacementStore(region, oldPeer, filter.NewStorageThresholdFilter())
+	storeID, newScore := r.SelectBestReplacementStore(region, oldPeer, filter.NewStorageThresholdFilter(r.name))
 	if storeID == 0 {
 		checkerCounter.WithLabelValues("replica_checker", "no-replacement-store").Inc()
 		return nil
@@ -269,7 +277,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 		return op
 	}
 
-	storeID, _ := r.SelectBestReplacementStore(region, peer, filter.NewStorageThresholdFilter())
+	storeID, _ := r.SelectBestReplacementStore(region, peer, filter.NewStorageThresholdFilter(r.name))
 	if storeID == 0 {
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		return nil
