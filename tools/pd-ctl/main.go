@@ -41,10 +41,10 @@ var (
 )
 
 func init() {
-	flag.StringVarP(&url, "pd", "u", "http://127.0.0.1:2379", "The pd address")
-	flag.BoolVarP(&detach, "detach", "d", true, "Run pdctl without readline")
-	flag.BoolVarP(&interact, "interact", "i", false, "Run pdctl with readline")
-	flag.BoolVarP(&version, "version", "V", false, "print version information and exit")
+	flag.StringVarP(&url, "pd", "u", "http://127.0.0.1:2379", "The pd address.")
+	flag.BoolVarP(&detach, "detach", "d", true, "Run pdctl without readline.")
+	flag.BoolVarP(&interact, "interact", "i", false, "Run pdctl with readline.")
+	flag.BoolVarP(&version, "version", "V", false, "print version information and exit.")
 	flag.StringVar(&caPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
 	flag.StringVar(&certPath, "cert", "", "path of file that contains X509 certificate in PEM format.")
 	flag.StringVar(&keyPath, "key", "", "path of file that contains X509 key in PEM format.")
