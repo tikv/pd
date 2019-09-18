@@ -80,8 +80,7 @@ var (
 )
 
 type testClientSuite struct {
-	cleanup server.CleanupFunc
-
+	cleanup         server.CleanupFunc
 	srv             *server.Server
 	client          Client
 	grpcPDClient    pdpb.PDClient
@@ -110,7 +109,6 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 
 func (s *testClientSuite) TearDownSuite(c *C) {
 	s.client.Close()
-
 	s.cleanup()
 }
 

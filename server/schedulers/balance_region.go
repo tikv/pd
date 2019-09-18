@@ -62,13 +62,9 @@ type balanceRegionScheduler struct {
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
 func newBalanceRegionScheduler(opController *schedule.OperatorController, opts ...BalanceRegionCreateOption) schedule.Scheduler {
-	filters := []filter.Filter{
-		filter.StoreStateFilter{MoveRegion: true},
-	}
 	base := newBaseScheduler(opController)
 	s := &balanceRegionScheduler{
 		baseScheduler: base,
-		selector:      selector.NewBalanceSelector(core.RegionKind, filters),
 		opController:  opController,
 		hitsCounter:   newHitsStoreBuilder(hitsStoreTTL, hitsStoreCountThreshold),
 		counter:       balanceRegionCounter,
@@ -76,6 +72,10 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, opts .
 	for _, opt := range opts {
 		opt(s)
 	}
+	filters := []filter.Filter{
+		filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
+	}
+	s.selector = selector.NewBalanceSelector(core.RegionKind, filters)
 	return s
 }
 
@@ -116,7 +116,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	stores := cluster.GetStores()
 
 	// source is the store with highest region score in the list that can be selected as balance source.
-	f := s.hitsCounter.buildSourceFilter(cluster)
+	f := s.hitsCounter.buildSourceFilter(s.GetName(), cluster)
 	source := s.selector.SelectSource(cluster, stores, f)
 	if source == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-store").Inc()
@@ -185,9 +185,9 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	if source == nil {
 		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
 	}
-	scoreGuard := filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), stores, source)
-	hitsFilter := s.hitsCounter.buildTargetFilter(cluster, source)
-	checker := checker.NewReplicaChecker(cluster, nil)
+	scoreGuard := filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), stores, source)
+	hitsFilter := s.hitsCounter.buildTargetFilter(s.GetName(), cluster, source)
+	checker := checker.NewReplicaChecker(cluster, nil, s.GetName())
 	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, hitsFilter)
 	if storeID == 0 {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
@@ -234,7 +234,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	targetLabel := strconv.FormatUint(targetID, 10)
 	s.counter.WithLabelValues("move-peer", source.GetAddress()+"-out", sourceLabel).Inc()
 	s.counter.WithLabelValues("move-peer", target.GetAddress()+"-in", targetLabel).Inc()
-	balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel)
+	balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel).Inc()
 	return op
 }
 
@@ -309,8 +309,8 @@ func (h *hitsStoreBuilder) put(source, target *core.StoreInfo) {
 	}
 }
 
-func (h *hitsStoreBuilder) buildSourceFilter(cluster schedule.Cluster) filter.Filter {
-	f := filter.NewBlacklistStoreFilter(filter.BlacklistSource)
+func (h *hitsStoreBuilder) buildSourceFilter(scope string, cluster schedule.Cluster) filter.Filter {
+	f := filter.NewBlacklistStoreFilter(scope, filter.BlacklistSource)
 	for _, source := range cluster.GetStores() {
 		if h.filter(source, nil) {
 			f.Add(source.GetID())
@@ -319,8 +319,8 @@ func (h *hitsStoreBuilder) buildSourceFilter(cluster schedule.Cluster) filter.Fi
 	return f
 }
 
-func (h *hitsStoreBuilder) buildTargetFilter(cluster schedule.Cluster, source *core.StoreInfo) filter.Filter {
-	f := filter.NewBlacklistStoreFilter(filter.BlacklistTarget)
+func (h *hitsStoreBuilder) buildTargetFilter(scope string, cluster schedule.Cluster, source *core.StoreInfo) filter.Filter {
+	f := filter.NewBlacklistStoreFilter(scope, filter.BlacklistTarget)
 	for _, target := range cluster.GetStores() {
 		if h.filter(source, target) {
 			f.Add(target.GetID())
