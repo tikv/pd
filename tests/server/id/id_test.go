@@ -42,8 +42,8 @@ func (s *testAllocIDSuite) SetUpSuite(c *C) {
 func (s *testAllocIDSuite) TestID(c *C) {
 	var err error
 	cluster, err := tests.NewTestCluster(1)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -86,8 +86,8 @@ func (s *testAllocIDSuite) TestID(c *C) {
 func (s *testAllocIDSuite) TestCommand(c *C) {
 	var err error
 	cluster, err := tests.NewTestCluster(1)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

@@ -37,8 +37,8 @@ func (s *joinTestSuite) SetUpSuite(c *C) {
 
 func (s *joinTestSuite) TestFailedPDJoinInStep1(c *C) {
 	cluster, err := tests.NewTestCluster(1)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
