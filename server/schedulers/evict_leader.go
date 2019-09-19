@@ -48,13 +48,14 @@ type evictLeaderScheduler struct {
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
+	name := fmt.Sprintf("evict-leader-scheduler-%d", storeID)
 	filters := []filter.Filter{
-		filter.StoreStateFilter{TransferLeader: true},
+		filter.StoreStateFilter{ActionScope: name, TransferLeader: true},
 	}
 	base := newBaseScheduler(opController)
 	return &evictLeaderScheduler{
 		baseScheduler: base,
-		name:          fmt.Sprintf("evict-leader-scheduler-%d", storeID),
+		name:          name,
 		storeID:       storeID,
 		selector:      selector.NewRandomSelector(filters),
 	}

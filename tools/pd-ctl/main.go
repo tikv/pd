@@ -34,19 +34,21 @@ var (
 	detach   bool
 	interact bool
 	version  bool
+	help     bool
 	caPath   string
 	certPath string
 	keyPath  string
 )
 
 func init() {
-	flag.StringVarP(&url, "pd", "u", "http://127.0.0.1:2379", "The pd address")
-	flag.BoolVarP(&detach, "detach", "d", true, "Run pdctl without readline")
-	flag.BoolVarP(&interact, "interact", "i", false, "Run pdctl with readline")
-	flag.BoolVarP(&version, "version", "V", false, "print version information and exit")
-	flag.StringVar(&caPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
-	flag.StringVar(&certPath, "cert", "", "path of file that contains X509 certificate in PEM format.")
-	flag.StringVar(&keyPath, "key", "", "path of file that contains X509 key in PEM format.")
+	flag.StringVarP(&url, "pd", "u", "http://127.0.0.1:2379", "The pd address.")
+	flag.BoolVarP(&detach, "detach", "d", true, "Run pdctl without readline.")
+	flag.BoolVarP(&interact, "interact", "i", false, "Run pdctl with readline.")
+	flag.BoolVarP(&version, "version", "V", false, "Print version information and exit.")
+	flag.StringVar(&caPath, "cacert", "", "The path of file that contains list of trusted SSL CAs.")
+	flag.StringVar(&certPath, "cert", "", "The path of file that contains X509 certificate in PEM format.")
+	flag.StringVar(&keyPath, "key", "", "The path of file that contains X509 key in PEM format.")
+	flag.BoolVarP(&help, "help", "h", false, "Help message.")
 }
 
 func main() {
@@ -57,6 +59,10 @@ func main() {
 	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
 	flag.Parse()
 
+	if help {
+		flag.Usage()
+		os.Exit(0)
+	}
 	if version {
 		server.PrintPDInfo()
 		os.Exit(0)

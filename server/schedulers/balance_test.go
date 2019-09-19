@@ -379,9 +379,9 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 		sb.Schedule(tc)
 	}
 	hit := sb.(*balanceRegionScheduler).hitsCounter
-	c.Assert(hit.buildSourceFilter(tc).Source(tc, tc.GetStore(1)), IsTrue)
-	c.Assert(hit.buildSourceFilter(tc).Source(tc, tc.GetStore(2)), IsFalse)
-	c.Assert(hit.buildSourceFilter(tc).Source(tc, tc.GetStore(3)), IsFalse)
+	c.Assert(hit.buildSourceFilter(sb.GetName(), tc).Source(tc, tc.GetStore(1)), IsTrue)
+	c.Assert(hit.buildSourceFilter(sb.GetName(), tc).Source(tc, tc.GetStore(2)), IsFalse)
+	c.Assert(hit.buildSourceFilter(sb.GetName(), tc).Source(tc, tc.GetStore(3)), IsFalse)
 
 	// Store 4 has smaller region score than store 2.
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -417,7 +417,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	for i := 0; i <= hitsStoreCountThreshold/balanceRegionRetryLimit; i++ {
 		c.Assert(sb.Schedule(tc), IsNil)
 	}
-	c.Assert(hit.buildSourceFilter(tc).Source(tc, tc.GetStore(1)), IsTrue)
+	c.Assert(hit.buildSourceFilter(sb.GetName(), tc).Source(tc, tc.GetStore(1)), IsTrue)
 	hit.remove(tc.GetStore(1), nil)
 
 	// Store 9 has different zone with other stores but larger region score than store 1.
