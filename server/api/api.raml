@@ -308,7 +308,7 @@ types:
       policy:
         type: string
         enum: [ scan, approximate, usekey ]
-      keys?: []string
+      keys?: string[]
   ScatterRegionOperator:
     type: Operator
     discriminatorValue: scatter-region
