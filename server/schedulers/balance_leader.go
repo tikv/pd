@@ -112,7 +112,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 
 	// No store can be selected as source or target.
 	if source == nil || target == nil {
-		schedulerCounter.WithLabelValues(l.GetName(), "no-store").Inc()
+		if source == nil {
+			schedulerCounter.WithLabelValues(l.GetName(), "no-source-store").Inc()
+		} else {
+			schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
+		}
 		// When the cluster is balanced, all stores will be added to the cache once
 		// all of them have been selected. This will cause the scheduler to not adapt
 		// to sudden change of a store's leader. Here we clear the taint cache and

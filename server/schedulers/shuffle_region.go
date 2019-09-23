@@ -94,7 +94,7 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 
 	source := s.selector.SelectSource(cluster, stores)
 	if source == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-store").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
 		return nil, nil
 	}
 

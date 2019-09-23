@@ -928,7 +928,6 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 func (c *RaftCluster) checkStores() {
 	var offlineStores []*metapb.Store
 	var upStoreCount int
-
 	stores := c.GetStores()
 	for _, store := range stores {
 		// the store has already been tombstone
@@ -963,7 +962,7 @@ func (c *RaftCluster) checkStores() {
 
 	if upStoreCount < c.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
-			log.Warn("store may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
+			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
 	}
 }
