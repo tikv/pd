@@ -174,6 +174,24 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	c.Check(s.schedule(), NotNil)
 }
 
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimitByCountOrSize(c *C) {
+	// Stores:			1    	2    	3    	4
+	// Leader Count:    10    	10    	10    	10
+	// Leader Size :   	10000   100    	100    	100
+	// Region1:		    L    	F   	F    	F
+	s.tc.AddLeaderStore(1, 10, 10000)
+	s.tc.AddLeaderStore(2, 10, 100)
+	s.tc.AddLeaderStore(3, 10, 100)
+	s.tc.AddLeaderStore(4, 10, 100)
+	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
+	c.Check(s.schedule(), NotNil)
+
+	s.tc.EnableScheduleLeaderByCount = true
+	c.Check(s.schedule(), IsNil)
+
+	s.tc.EnableScheduleLeaderByCount = false
+}
+
 func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   14

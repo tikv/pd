@@ -164,15 +164,22 @@ func (mc *Cluster) SetStoreBusy(storeID uint64, busy bool) {
 }
 
 // AddLeaderStore adds store with specified count of leader.
-func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int) {
+func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes ...int64) {
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = 1000 * (1 << 20)
 	stats.Available = stats.Capacity - uint64(leaderCount)*10
+	var leaderSize int64
+	if len(leaderSizes) != 0 {
+		leaderSize = leaderSizes[0]
+	} else {
+		leaderSize = int64(leaderCount) * 10
+	}
+
 	store := core.NewStoreInfo(
 		&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),
 		core.SetLeaderCount(leaderCount),
-		core.SetLeaderSize(int64(leaderCount)*10),
+		core.SetLeaderSize(leaderSize),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.PutStore(store)
