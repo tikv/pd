@@ -119,10 +119,10 @@ func (s *testClusterSuite) TestBootstrap(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 	clusterID := s.svr.clusterID
 
 	// IsBootstrapped returns false.
@@ -239,10 +239,10 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
@@ -416,8 +416,8 @@ func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
-	c.Assert(err, IsNil)
 	defer cleanup()
+	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
@@ -468,10 +468,10 @@ func (s *testClusterSuite) TestGetPDMembers(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 	req := &pdpb.GetMembersRequest{
 		Header: testutil.NewRequestHeader(s.svr.ClusterID()),
 	}
@@ -486,10 +486,10 @@ func (s *testClusterSuite) TestStoreVersionChange(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
 	s.svr.SetClusterVersion("2.0.0")
@@ -631,10 +631,10 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	var err error
 	var cleanup func()
 	_, s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 	clusterID := s.svr.clusterID
 
 	storeAddr := "127.0.0.1:0"
@@ -871,6 +871,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 }
 
 func checkRegion(c *C, a *core.RegionInfo, b *core.RegionInfo) {
+	c.Assert(a, DeepEquals, b)
 	c.Assert(a.GetMeta(), DeepEquals, b.GetMeta())
 	c.Assert(a.GetLeader(), DeepEquals, b.GetLeader())
 	c.Assert(a.GetPeers(), DeepEquals, b.GetPeers())
@@ -1114,6 +1115,48 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
 		checkRegions(c, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(c, cluster.storage, regions[:i+1])
+
+		// Change leader.
+		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change ApproximateSize.
+		region = region.Clone(core.SetApproximateSize(144))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change ApproximateKeys.
+		region = region.Clone(core.SetApproximateKeys(144000))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change bytes written.
+		region = region.Clone(core.SetWrittenBytes(24000))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change keys written.
+		region = region.Clone(core.SetWrittenKeys(240))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change bytes read.
+		region = region.Clone(core.SetReadBytes(1080000))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
+
+		// Change keys read.
+		region = region.Clone(core.SetReadKeys(1080))
+		regions[i] = region
+		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
+		checkRegions(c, cluster.core.Regions, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)

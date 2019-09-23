@@ -59,7 +59,7 @@ func main() {
 	simutil.InitCaseConfig(*storeNum, *regionNum, *enableTransferRegionCounter)
 	statistics.Denoising = false
 	if simutil.CaseConfigure.EnableTransferRegionCounter {
-		analysis.GetTransferRegionCounter().Init(simutil.CaseConfigure.StoreNum, simutil.CaseConfigure.RegionNum)
+		analysis.GetTransferCounter().Init(simutil.CaseConfigure.StoreNum, simutil.CaseConfigure.RegionNum)
 	}
 
 	if *caseName == "" {
@@ -180,8 +180,8 @@ EXIT:
 
 	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, simCase, driver.TickCount(), time.Since(start))
 	driver.PrintStatistics()
-	if analysis.GetTransferRegionCounter().IsValid {
-		analysis.GetTransferRegionCounter().PrintResult()
+	if analysis.GetTransferCounter().IsValid {
+		analysis.GetTransferCounter().PrintResult()
 	}
 
 	if simResult != "OK" {

@@ -186,5 +186,5 @@ func (s *testEtcdutilSuite) TestEtcdKVGet(c *C) {
 	resp, err = EtcdKVGet(client, next, withRange, withLimit, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	c.Assert(err, IsNil)
 	c.Assert(len(resp.Kvs), Equals, 2)
-
+	cleanConfig(cfg)
 }

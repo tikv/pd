@@ -41,8 +41,8 @@ func (s *testTsoSuite) SetUpSuite(c *C) {
 func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 	var err error
 	cluster, err := tests.NewTestCluster(1)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -75,8 +75,8 @@ func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 func (s *testTsoSuite) TestTso(c *C) {
 	var err error
 	cluster, err := tests.NewTestCluster(1)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -111,8 +111,8 @@ func (s *testTsoSuite) TestTso(c *C) {
 func (s *testTsoSuite) TestTsoCount0(c *C) {
 	var err error
 	cluster, err := tests.NewTestCluster(1)
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

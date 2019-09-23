@@ -68,6 +68,7 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 	temp.Close()
 	os.Stdout = old
 	out, _ := ioutil.ReadFile(fname)
+	os.Remove(fname)
 	c.Assert(strings.Contains(string(out), "unknown flag"), IsFalse)
 }
 
