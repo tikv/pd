@@ -519,7 +519,6 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				Keys:   st.SplitKeys,
 			},
 		}
-		log.Error("send cmd", zap.String("cmd", cmd.String()))
 		oc.hbStreams.SendMsg(region, cmd)
 	default:
 		log.Error("unknown operator step", zap.Reflect("step", step))
