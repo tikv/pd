@@ -28,6 +28,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -199,6 +200,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		}
 	}
 	s.client = client
+	failpoint.Inject("memberNil", func() {
+		time.Sleep(500 * time.Millisecond)
+	})
 	s.member = member.NewMember(etcd, client, etcdServerID)
 	return nil
 }

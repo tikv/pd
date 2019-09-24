@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/config"
@@ -37,26 +38,15 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 	os.Stdout = temp
 
 	cfg := server.NewTestSingleConfig(c)
-	stopCh := make(chan struct{})
+	reqCh := make(chan struct{})
 	go func() {
-		for {
-			select {
-			case <-stopCh:
-				return
-			default:
-				func() {
-					addr := cfg.ClientUrls + apiPrefix + "/api/v1/version"
-					resp, err := dialClient.Get(addr)
-					if resp == nil {
-						return
-					}
-					c.Assert(err, IsNil)
-					defer resp.Body.Close()
-					_, err = ioutil.ReadAll(resp.Body)
-					c.Assert(err, IsNil)
-				}()
-			}
-		}
+		<-reqCh
+		addr := cfg.ClientUrls + apiPrefix + "/api/v1/version"
+		resp, err := dialClient.Get(addr)
+		c.Assert(err, IsNil)
+		defer resp.Body.Close()
+		_, err = ioutil.ReadAll(resp.Body)
+		c.Assert(err, IsNil)
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -64,6 +54,8 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 	go func(cfg *config.Config) {
 		s, err := server.CreateServer(cfg, NewHandler)
 		c.Assert(err, IsNil)
+		c.Assert(failpoint.Enable("github.com/pingcap/pd/server/memberNil", `return(true)`), IsNil)
+		reqCh <- struct{}{}
 		err = s.Run(ctx)
 		c.Assert(err, IsNil)
 		ch <- s
@@ -73,7 +65,6 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 	close(ch)
 	out, _ := ioutil.ReadFile(fname)
 	c.Assert(strings.Contains(string(out), "PANIC"), IsFalse)
-	stopCh <- struct{}{}
 
 	// clean up
 	func() {
@@ -84,4 +75,5 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 		cancel()
 		testutil.CleanServer(cfg)
 	}()
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/memberNil"), IsNil)
 }
