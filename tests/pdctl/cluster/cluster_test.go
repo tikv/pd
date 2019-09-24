@@ -15,9 +15,6 @@ package cluster_test
 
 import (
 	"encoding/json"
-	"io/ioutil"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -26,7 +23,6 @@ import (
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
-	ctl "github.com/pingcap/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -50,6 +46,8 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()
+	i := strings.Index(pdAddr, "//")
+	pdAddr = pdAddr[i+2:]
 	cmd := pdctl.InitCommand()
 	defer cluster.Destroy()
 
@@ -61,15 +59,8 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	c.Assert(json.Unmarshal(output, ci), IsNil)
 	c.Assert(ci, DeepEquals, cluster.GetCluster())
 
-	fname := filepath.Join(os.TempDir(), "stdout")
-	old := os.Stdout
-	temp, _ := os.Create(fname)
-	os.Stdout = temp
-	ctl.Start([]string{"-u", pdAddr, "--cacert=ca.pem", "cluster"})
-	temp.Close()
-	os.Stdout = old
-	out, _ := ioutil.ReadFile(fname)
-	c.Assert(strings.Contains(string(out), "no such file or directory"), IsTrue)
+	echo := pdctl.GetEcho([]string{"-u", pdAddr, "--cacert=ca.pem", "cluster"})
+	c.Assert(strings.Contains(echo, "no such file or directory"), IsTrue)
 
 	// cluster status
 	args = []string{"-u", pdAddr, "cluster", "status"}
