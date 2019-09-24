@@ -348,6 +348,7 @@ func removeOperatorCommandFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(err)
 		return
 	}
+	cmd.Println("Success!")
 }
 
 func parseUint64s(args []string) ([]uint64, error) {
