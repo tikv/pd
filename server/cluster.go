@@ -71,7 +71,7 @@ type RaftCluster struct {
 	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
 
-	labelLevelStats *statistics.LabelLevelStatistics
+	labelLevelStats *statistics.LabelStatistics
 	regionStats     *statistics.RegionStatistics
 	storesStats     *statistics.StoresStats
 	hotSpotCache    *statistics.HotSpotCache
@@ -144,7 +144,7 @@ func (c *RaftCluster) initCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.opt = opt
 	c.storage = storage
 	c.id = id
-	c.labelLevelStats = statistics.NewLabelLevelStatistics()
+	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.storesStats = statistics.NewStoresStats()
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
@@ -395,10 +395,16 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if len(region.GetPeers()) != len(origin.GetPeers()) {
 			saveKV, saveCache = true, true
 		}
-		if region.GetApproximateSize() != origin.GetApproximateSize() {
+
+		if region.GetApproximateSize() != origin.GetApproximateSize() ||
+			region.GetApproximateKeys() != origin.GetApproximateKeys() {
 			saveCache = true
 		}
-		if region.GetApproximateKeys() != origin.GetApproximateKeys() {
+
+		if region.GetBytesWritten() != origin.GetBytesWritten() ||
+			region.GetBytesRead() != origin.GetBytesRead() ||
+			region.GetKeysWritten() != origin.GetKeysWritten() ||
+			region.GetKeysRead() != origin.GetKeysRead() {
 			saveCache = true
 		}
 	}
@@ -412,6 +418,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
 				zap.Error(err))
 		}
+		regionEventCounter.WithLabelValues("update_kv").Inc()
 		select {
 		case c.changedRegions <- region:
 		default:
@@ -443,7 +450,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			if c.regionStats != nil {
 				c.regionStats.ClearDefunctRegion(item.GetId())
 			}
-			c.labelLevelStats.ClearDefunctRegion(item.GetId())
+			c.labelLevelStats.ClearDefunctRegion(item.GetId(), c.GetLocationLabels())
 		}
 
 		// Update related stores.
@@ -455,6 +462,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		for _, p := range region.GetPeers() {
 			c.updateStoreStatusLocked(p.GetStoreId())
 		}
+		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
 	if c.regionStats != nil {
@@ -920,7 +928,6 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 func (c *RaftCluster) checkStores() {
 	var offlineStores []*metapb.Store
 	var upStoreCount int
-
 	stores := c.GetStores()
 	for _, store := range stores {
 		// the store has already been tombstone
@@ -955,7 +962,7 @@ func (c *RaftCluster) checkStores() {
 
 	if upStoreCount < c.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
-			log.Warn("store may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
+			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
 	}
 }
