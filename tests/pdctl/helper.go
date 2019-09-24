@@ -17,6 +17,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/pingcap/check"
@@ -27,6 +30,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tools/pd-ctl/pdctl"
+	ctl "github.com/pingcap/pd/tools/pd-ctl/pdctl"
 	"github.com/pingcap/pd/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
 )
@@ -131,4 +135,18 @@ func MustPutRegion(c *check.C, cluster *tests.TestCluster, regionID, storeID uin
 	err := cluster.HandleRegionHeartbeat(r)
 	c.Assert(err, check.IsNil)
 	return r
+}
+
+// GetEcho is used to get echo from stdout.
+func GetEcho(args []string) string {
+	filename := filepath.Join(os.TempDir(), "stdout")
+	old := os.Stdout
+	temp, _ := os.Create(filename)
+	os.Stdout = temp
+	ctl.Start(args)
+	temp.Close()
+	os.Stdout = old
+	out, _ := ioutil.ReadFile(filename)
+	_ = os.Remove(filename)
+	return string(out)
 }
