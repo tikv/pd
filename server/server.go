@@ -111,6 +111,7 @@ func CreateServer(cfg *config.Config, apiRegister func(*Server) http.Handler) (*
 	s := &Server{
 		cfg:         cfg,
 		scheduleOpt: config.NewScheduleOption(cfg),
+		member:      &member.Member{},
 	}
 	s.handler = newHandler(s)
 
