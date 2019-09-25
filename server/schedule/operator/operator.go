@@ -352,6 +352,7 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 type SplitRegion struct {
 	StartKey, EndKey []byte
 	Policy           pdpb.CheckPolicy
+	SplitKeys        [][]byte
 }
 
 // ConfVerChanged returns true if the conf version has been changed by this step
@@ -925,11 +926,12 @@ func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionI
 }
 
 // CreateSplitRegionOperator creates an operator that splits a region.
-func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy string) *Operator {
+func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, keys [][]byte) *Operator {
 	step := SplitRegion{
-		StartKey: region.GetStartKey(),
-		EndKey:   region.GetEndKey(),
-		Policy:   pdpb.CheckPolicy(pdpb.CheckPolicy_value[strings.ToUpper(policy)]),
+		StartKey:  region.GetStartKey(),
+		EndKey:    region.GetEndKey(),
+		Policy:    policy,
+		SplitKeys: keys,
 	}
 	brief := fmt.Sprintf("split: region %v", region.GetID())
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind, step)
