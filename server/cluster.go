@@ -1244,7 +1244,7 @@ func (c *RaftCluster) GetSplitMergeInterval() time.Duration {
 	return c.opt.GetSplitMergeInterval()
 }
 
-// GetEnableOneWayMerge returns if the one way merge is enabled.
+// GetEnableOneWayMerge returns if a region can only be merged into right.
 func (c *RaftCluster) GetEnableOneWayMerge() bool {
 	return c.opt.GetEnableOneWayMerge()
 }
