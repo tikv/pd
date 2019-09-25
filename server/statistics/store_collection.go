@@ -198,11 +198,11 @@ func (s *storeStatistics) Collect() {
 		disableReplaceOfflineReplica = 1
 	}
 
-	configs["disable_makeup_replica"] = disableMakeUpReplica
-	configs["disable_learner"] = disableLearner
-	configs["disable_remove_down_replica"] = disableRemoveDownReplica
-	configs["disable_remove_extra_replica"] = disableRemoveExtraReplica
-	configs["disable_replace_offline_replica"] = disableReplaceOfflineReplica
+	configs["disable-makeup-replica"] = disableMakeUpReplica
+	configs["disable-learner"] = disableLearner
+	configs["disable-remove-down-replica"] = disableRemoveDownReplica
+	configs["disable-remove-extra-replica"] = disableRemoveExtraReplica
+	configs["disable-replace-offline-replica"] = disableReplaceOfflineReplica
 
 	for typ, value := range configs {
 		configStatusGauge.WithLabelValues(typ, s.namespace).Set(value)

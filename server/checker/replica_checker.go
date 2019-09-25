@@ -257,7 +257,8 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 	if len(region.GetPeers()) > r.cluster.GetMaxReplicas() {
 		op, err := operator.CreateRemovePeerOperator(removeExtra, r.cluster, operator.OpReplica, region, peer.GetStoreId())
 		if err != nil {
-			checkerCounter.WithLabelValues("replica_checker", "create-operator-fail").Inc()
+			reason := fmt.Sprintf("%s-fail", removeExtra)
+			checkerCounter.WithLabelValues("replica_checker", reason).Inc()
 			return nil
 		}
 		return op
@@ -271,7 +272,8 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 	if region.GetPendingPeer(peer.GetId()) != nil {
 		op, err := operator.CreateRemovePeerOperator(removePending, r.cluster, operator.OpReplica, region, peer.GetStoreId())
 		if err != nil {
-			checkerCounter.WithLabelValues("replica_checker", "create-operator-fail").Inc()
+			reason := fmt.Sprintf("%s-fail", removePending)
+			checkerCounter.WithLabelValues("replica_checker", reason).Inc()
 			return nil
 		}
 		return op
@@ -279,6 +281,8 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 
 	storeID, _ := r.SelectBestReplacementStore(region, peer, filter.NewStorageThresholdFilter(r.name))
 	if storeID == 0 {
+		reason := fmt.Sprintf("no-store-%s", status)
+		checkerCounter.WithLabelValues("replica_checker", reason).Inc()
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		return nil
 	}
@@ -290,6 +294,8 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 	replace := fmt.Sprintf("replace-%s-replica", status)
 	op, err := operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	if err != nil {
+		reason := fmt.Sprintf("%s-fail", replace)
+		checkerCounter.WithLabelValues("replica_checker", reason).Inc()
 		return nil
 	}
 	return op
