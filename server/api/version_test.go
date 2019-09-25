@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
@@ -41,6 +42,7 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 	reqCh := make(chan struct{})
 	go func() {
 		<-reqCh
+		time.Sleep(200 * time.Millisecond)
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/version"
 		resp, err := dialClient.Get(addr)
 		c.Assert(err, IsNil)
