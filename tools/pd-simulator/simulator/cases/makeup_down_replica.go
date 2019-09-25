@@ -84,7 +84,7 @@ func newMakeupDownReplicas() *Case {
 		res := true
 		threshold := 0.05
 		for index, regionCount := range regionCounts {
-			if index == 0 { //storeId ==1
+			if index == 0 { // storeId == 1
 				continue
 			}
 			res = res && isUniform(regionCount, storeNum*regionNum/fullStoreNum, threshold)
