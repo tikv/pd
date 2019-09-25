@@ -146,8 +146,8 @@ func getRegionNum() int {
 	return regionNum
 }
 
-func getFullStoreNum(storeNum int, emptyRatio float64) uint64 {
-	fullStoreNum := uint64(float64(storeNum) * (1 - emptyRatio))
+func getFullStoreNum(storeNum int, fullRatio float64) uint64 {
+	fullStoreNum := uint64(float64(storeNum) * fullRatio)
 	if fullStoreNum < 3 || fullStoreNum == uint64(storeNum) {
 		fullStoreNum = 3
 	}

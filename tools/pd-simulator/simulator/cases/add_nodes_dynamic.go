@@ -13,20 +13,21 @@
 package cases
 
 import (
+	"math/rand"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
-	"math/rand"
 )
 
 func newAddNodesDynamic() *Case {
 	var simCase Case
 
 	storeNum, regionNum := getStoreNum(), getRegionNum()
-	emptyRatio := rand.Float64() // the ratio of empty store to total store
-	fullStoreNum := getFullStoreNum(storeNum, emptyRatio)
+	fullRatio := rand.Float64() // the ratio of full store to total store
+	fullStoreNum := getFullStoreNum(storeNum, fullRatio)
 
 	for i := 1; i <= int(fullStoreNum); i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
