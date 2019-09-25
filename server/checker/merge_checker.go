@@ -103,7 +103,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
 	target := m.checkTarget(region, next, nil)
-	if !m.cluster.GetEnableOneWayMerge() {
+	if !m.cluster.GetEnableOneWayMerge() { // allow to merge region right to left
 		target = m.checkTarget(region, prev, target)
 	}
 
