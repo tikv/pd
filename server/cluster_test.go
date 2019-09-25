@@ -509,6 +509,7 @@ func (s *testClusterSuite) TestStoreVersionChange(c *C) {
 	v, err := semver.NewVersion("1.0.0")
 	c.Assert(err, IsNil)
 	c.Assert(s.svr.GetClusterVersion(), Equals, *v)
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/versionChangeConcurrency"), IsNil)
 }
 
 func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
