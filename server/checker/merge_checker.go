@@ -106,7 +106,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	if m.checkTarget(region, next) {
 		target = next
 	}
-	if !m.cluster.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow to merge region right to left
+	if !m.cluster.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow a region can be merged by two ways.
 		if target == nil || prev.GetApproximateSize() < next.GetApproximateSize() { // pick smaller
 			target = prev
 		}
