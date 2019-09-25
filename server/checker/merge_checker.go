@@ -135,5 +135,5 @@ func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 	return adjacent != nil && !m.cluster.IsRegionHot(adjacent) &&
 		m.classifier.AllowMerge(region, adjacent) &&
 		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 && // no special peer
-		len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas()
+		len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() // peer count should equal
 }
