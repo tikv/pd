@@ -155,8 +155,8 @@ func (o *ScheduleOption) GetSplitMergeInterval() time.Duration {
 	return o.Load().SplitMergeInterval.Duration
 }
 
-// GetEnableOneWayMerge returns if a region can only be merged into right.
-func (o *ScheduleOption) GetEnableOneWayMerge() bool {
+// IsOneWayMergeEnabled returns if a region can only be merged into right.
+func (o *ScheduleOption) IsOneWayMergeEnabled() bool {
 	return o.Load().EnableOneWayMerge
 }
 

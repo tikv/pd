@@ -79,7 +79,7 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	}
 
 	other, target := cluster.GetAdjacentRegions(region)
-	if !cluster.GetEnableOneWayMerge() && ((rand.Int()%2 == 0 && other != nil) || target == nil) {
+	if !cluster.IsOneWayMergeEnabled() && ((rand.Int()%2 == 0 && other != nil) || target == nil) {
 		target = other
 	}
 	if target == nil {
