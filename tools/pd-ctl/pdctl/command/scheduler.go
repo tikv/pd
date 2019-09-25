@@ -315,4 +315,5 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	}
+	cmd.Println("Success!")
 }

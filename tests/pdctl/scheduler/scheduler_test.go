@@ -15,6 +15,7 @@ package scheduler_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,4 +132,12 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	for _, scheduler := range schedulers {
 		c.Assert(expected[scheduler], Equals, true)
 	}
+
+	// test echo
+	echo := pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"})
+	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"})
+	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"})
+	c.Assert(strings.Contains(echo, "Success!"), IsFalse)
 }
