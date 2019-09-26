@@ -186,10 +186,10 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimitByCountOrSize(c *C) {
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
 	c.Check(s.schedule(), NotNil)
 
-	s.tc.EnableScheduleLeaderByCount = true
+	s.tc.LeaderScoreStrategy = "balance-count"
 	c.Check(s.schedule(), IsNil)
 
-	s.tc.EnableScheduleLeaderByCount = false
+	s.tc.LeaderScoreStrategy = "balance-size"
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {

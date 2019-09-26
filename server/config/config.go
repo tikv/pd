@@ -491,8 +491,8 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
-	// EnableScheduleLeaderByCount is the option to balance leader according to the count of leader".
-	EnableScheduleLeaderByCount bool `toml:"enable-schedule-leader-by-count,omitempty" json:"enable-schedule-leader-by-count,string"`
+	// LeaderScoreStrategy is the option to balance leader, there are some strategics supported: ["balance-count", "balance-size"]
+	LeaderScoreStrategy string `toml:"leader-score-strategy,omitempty" json:"leader-score-strategy,string"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -562,7 +562,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
-		EnableScheduleLeaderByCount:  c.EnableScheduleLeaderByCount,
+		LeaderScoreStrategy:          c.LeaderScoreStrategy,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
@@ -607,6 +607,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
+	defaultLeaderScoreStrategy         = "balance-size"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -645,6 +646,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("tolerant-size-ratio") {
 		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
+	}
+	if !meta.IsDefined("scheduler-max-waiting-operator") {
+		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
@@ -708,7 +712,7 @@ func IsDefaultScheduler(typ string) bool {
 
 // GetLeaderScheduleKind is to get leader schedule kind
 func (c *ScheduleConfig) GetLeaderScheduleKind() core.LeaderScheduleKind {
-	if c.EnableScheduleLeaderByCount {
+	if c.LeaderScoreStrategy == "balance-count" {
 		return core.ScheduleLeaderByCount
 	}
 	return core.ScheduleLeaderBySize
