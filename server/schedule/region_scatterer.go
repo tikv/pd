@@ -91,10 +91,6 @@ func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *Regio
 
 // Scatter relocates the region.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*operator.Operator, error) {
-	if len(region.GetPeers()) != r.cluster.GetMaxReplicas() {
-		return nil, errors.Errorf("the number replicas of region %d is not expected", region.GetID())
-	}
-
 	if region.GetLeader() == nil {
 		return nil, errors.Errorf("region %d has no leader", region.GetID())
 	}
