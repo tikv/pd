@@ -146,7 +146,7 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 			cmd.Println(err)
 		}
 	} else {
-		cmd.Println("success!")
+		cmd.Println("Success!")
 	}
 }
 
