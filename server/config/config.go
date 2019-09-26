@@ -482,7 +482,7 @@ type ScheduleConfig struct {
 	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys,omitempty" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
-	// EnableOneWayMerge is the option to enable one way merge
+	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge,omitempty" json:"enable-one-way-merge,string"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
 	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`

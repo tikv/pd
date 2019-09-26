@@ -307,7 +307,8 @@ types:
       region_id: integer
       policy:
         type: string
-        enum: [ scan, approximate ]
+        enum: [ scan, approximate, usekey ]
+      keys?: string[]
   ScatterRegionOperator:
     type: Operator
     discriminatorValue: scatter-region

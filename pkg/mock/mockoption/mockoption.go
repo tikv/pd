@@ -159,8 +159,8 @@ func (mso *ScheduleOptions) GetSplitMergeInterval() time.Duration {
 	return mso.SplitMergeInterval
 }
 
-// GetEnableOneWayMerge mocks method
-func (mso *ScheduleOptions) GetEnableOneWayMerge() bool {
+// IsOneWayMergeEnabled mocks method
+func (mso *ScheduleOptions) IsOneWayMergeEnabled() bool {
 	return mso.EnableOneWayMerge
 }
 

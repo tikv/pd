@@ -197,7 +197,7 @@ Usage:
     >> config set split-merge-interval 24h  // Set the interval between `split` and `merge` to one day
     ```
 
-- `enable-one-way-merge` controls the merge scheduler behavior. This means a Region can only be merged into left.
+- `enable-one-way-merge` controls the merge scheduler behavior. This means a region can only be merged into the next region of it.
 
     ```bash
     >> config set enable-one-way-merge true  // Enable one way merge.

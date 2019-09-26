@@ -516,6 +516,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		cmd := &pdpb.RegionHeartbeatResponse{
 			SplitRegion: &pdpb.SplitRegion{
 				Policy: st.Policy,
+				Keys:   st.SplitKeys,
 			},
 		}
 		oc.hbStreams.SendMsg(region, cmd)
