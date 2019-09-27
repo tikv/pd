@@ -14,10 +14,10 @@
 package mockoption
 
 import (
-	"github.com/pingcap/pd/server/core"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 )
 
 const (
@@ -40,7 +40,7 @@ const (
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true
-	defaultLeaderScoreStrategy         = "balance-size"
+	defaultLeaderScoreStrategy         = "size"
 )
 
 // ScheduleOptions is a mock of ScheduleOptions
@@ -251,7 +251,7 @@ func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
 
 // GetLeaderScheduleKind is to get leader schedule kind
 func (mso *ScheduleOptions) GetLeaderScheduleKind() core.LeaderScheduleKind {
-	if mso.LeaderScoreStrategy == "balance-count" {
+	if mso.LeaderScoreStrategy == "count" {
 		return core.ScheduleLeaderByCount
 	}
 	return core.ScheduleLeaderBySize

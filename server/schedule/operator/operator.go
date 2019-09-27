@@ -91,18 +91,10 @@ type StoreInfluence struct {
 func (s StoreInfluence) ResourceSize(kind core.ResourceKind, opt ...core.LeaderScheduleKind) int64 {
 	switch kind {
 	case core.LeaderKind:
-		if len(opt) == 0 {
-			return s.LeaderSize
-		}
-		leaderScheduleKind := opt[0]
-		switch leaderScheduleKind {
-		case core.ScheduleLeaderBySize:
-			return s.LeaderSize
-		case core.ScheduleLeaderByCount:
+		if len(opt) > 0 && opt[0] == core.ScheduleLeaderByCount {
 			return s.LeaderCount
-		default:
-			return s.LeaderSize
 		}
+		return s.LeaderSize
 	case core.RegionKind:
 		return s.RegionSize
 	default:

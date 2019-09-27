@@ -491,7 +491,7 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
-	// LeaderScoreStrategy is the option to balance leader, there are some strategics supported: ["balance-count", "balance-size"]
+	// LeaderScoreStrategy is the option to balance leader, there are some strategics supported: ["count", "size"]
 	LeaderScoreStrategy string `toml:"leader-score-strategy,omitempty" json:"leader-score-strategy,string"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
@@ -607,7 +607,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
-	defaultLeaderScoreStrategy         = "balance-size"
+	defaultLeaderScoreStrategy         = "size"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -712,7 +712,7 @@ func IsDefaultScheduler(typ string) bool {
 
 // GetLeaderScheduleKind is to get leader schedule kind
 func (c *ScheduleConfig) GetLeaderScheduleKind() core.LeaderScheduleKind {
-	if c.LeaderScoreStrategy == "balance-count" {
+	if c.LeaderScoreStrategy == "count" {
 		return core.ScheduleLeaderByCount
 	}
 	return core.ScheduleLeaderBySize
