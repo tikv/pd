@@ -102,22 +102,22 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			// confver than the region that the operator holds. In this case,
 			// the operator is stale, and will not be executed even we would
 			// have sent it to TiKV servers. Here, we just cancel it.
-			origin := op.RegionEpoch()
-			latest := region.GetRegionEpoch()
-			changes := latest.GetConfVer() - origin.GetConfVer()
-			if source == DispatchFromHeartBeat &&
-				changes > uint64(op.ConfVerChanged(region)) {
+			// origin := op.RegionEpoch()
+			// latest := region.GetRegionEpoch()
+			// changes := latest.GetConfVer() - origin.GetConfVer()
+			// if source == DispatchFromHeartBeat &&
+			// 	changes > uint64(op.ConfVerChanged(region)) {
 
-				if oc.RemoveOperator(op) {
-					log.Info("stale operator", zap.Uint64("region-id", region.GetID()), zap.Duration("takes", op.RunningTime()),
-						zap.Reflect("operator", op), zap.Uint64("diff", changes))
-					operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
-					oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
-					oc.PromoteWaitingOperator()
-				}
+			// 	if oc.RemoveOperator(op) {
+			// 		log.Info("stale operator", zap.Uint64("region-id", region.GetID()), zap.Duration("takes", op.RunningTime()),
+			// 			zap.Reflect("operator", op), zap.Uint64("diff", changes))
+			// 		operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
+			// 		oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
+			// 		oc.PromoteWaitingOperator()
+			// 	}
 
-				return
-			}
+			// 	return
+			// }
 
 			oc.SendScheduleCommand(region, step, source)
 			return
