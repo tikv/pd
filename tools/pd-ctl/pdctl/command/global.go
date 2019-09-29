@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -203,6 +204,10 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 		cmd.Println(err)
 	}
 	cmd.Println("Success!")
+}
+
+func withPrefix(url string) string {
+	return path.Join("pd", url)
 }
 
 // UsageTemplate will used to generate a help information
