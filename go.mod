@@ -9,7 +9,8 @@ require (
 	github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1 // indirect
 	github.com/coreos/go-semver v0.2.0
 	github.com/coreos/pkg v0.0.0-20160727233714-3ac0863d7acf
-	github.com/dustin/go-humanize v0.0.0-20180421182945-02af3965c54e
+	github.com/docker/go-units v0.4.0
+	github.com/dustin/go-humanize v0.0.0-20180421182945-02af3965c54e // indirect
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32
 	github.com/gogo/protobuf v1.0.0
