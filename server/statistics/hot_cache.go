@@ -148,7 +148,7 @@ func (f *HotStoresStats) CheckRegionFlow(region *core.RegionInfo, kind FlowKind)
 		if ok {
 			if v, isExist := hotStoreStats.Peek(region.GetID()); isExist {
 				oldRegionStat = v.(*HotSpotPeerStat)
-				// This is used for the simulator.
+				// This is used for the simulator and test.
 				if Denoising {
 					interval := time.Since(oldRegionStat.LastUpdateTime).Seconds()
 					if interval < minHotRegionReportInterval && !isExpiredInStore(region, storeID) {
