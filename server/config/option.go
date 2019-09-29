@@ -235,11 +235,6 @@ func (o *ScheduleOption) GetSchedulerMaxWaitingOperator() uint64 {
 	return o.Load().SchedulerMaxWaitingOperator
 }
 
-// IsRaftLearnerEnabled returns if raft learner is enabled.
-func (o *ScheduleOption) IsRaftLearnerEnabled() bool {
-	return !o.Load().DisableLearner
-}
-
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (o *ScheduleOption) IsRemoveDownReplicaEnabled() bool {
 	return !o.Load().DisableRemoveDownReplica

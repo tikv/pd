@@ -51,7 +51,6 @@ type ScheduleOptions interface {
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
 
-	IsRaftLearnerEnabled() bool
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool
 	IsRemoveDownReplicaEnabled() bool
@@ -181,12 +180,9 @@ func (s *storeStatistics) Collect() {
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
 
-	var disableMakeUpReplica, disableLearner, disableRemoveDownReplica, disableRemoveExtraReplica, disableReplaceOfflineReplica float64
+	var disableMakeUpReplica, disableRemoveDownReplica, disableRemoveExtraReplica, disableReplaceOfflineReplica float64
 	if !s.opt.IsMakeUpReplicaEnabled() {
 		disableMakeUpReplica = 1
-	}
-	if !s.opt.IsRaftLearnerEnabled() {
-		disableLearner = 1
 	}
 	if !s.opt.IsRemoveDownReplicaEnabled() {
 		disableRemoveDownReplica = 1
@@ -199,7 +195,6 @@ func (s *storeStatistics) Collect() {
 	}
 
 	configs["disable-makeup-replica"] = disableMakeUpReplica
-	configs["disable-learner"] = disableLearner
 	configs["disable-remove-down-replica"] = disableRemoveDownReplica
 	configs["disable-remove-extra-replica"] = disableRemoveExtraReplica
 	configs["disable-replace-offline-replica"] = disableReplaceOfflineReplica

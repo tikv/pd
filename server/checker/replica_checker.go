@@ -84,7 +84,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 			return nil
 		}
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
-		return operator.CreateAddPeerOperator("make-up-replica", r.cluster, region, newPeer.GetId(), newPeer.GetStoreId(), operator.OpReplica)
+		return operator.CreateAddPeerOperator("make-up-replica", region, newPeer.GetId(), newPeer.GetStoreId(), operator.OpReplica)
 	}
 
 	// when add learner peer, the number of peer will exceed max replicas for a while,

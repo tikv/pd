@@ -65,7 +65,6 @@ type ScheduleOptions struct {
 	TolerantSizeRatio            float64
 	LowSpaceRatio                float64
 	HighSpaceRatio               float64
-	DisableLearner               bool
 	DisableRemoveDownReplica     bool
 	DisableReplaceOfflineReplica bool
 	DisableMakeUpReplica         bool
@@ -208,11 +207,6 @@ func (mso *ScheduleOptions) GetSchedulerMaxWaitingOperator() uint64 {
 // SetMaxReplicas mocks method
 func (mso *ScheduleOptions) SetMaxReplicas(replicas int) {
 	mso.MaxReplicas = replicas
-}
-
-// IsRaftLearnerEnabled mocks method
-func (mso *ScheduleOptions) IsRaftLearnerEnabled() bool {
-	return !mso.DisableLearner
 }
 
 // IsRemoveDownReplicaEnabled mocks method.
