@@ -25,66 +25,126 @@ import (
 const pingAPI = "/ping"
 
 const (
-	Operators                 = "/api/v1/operators"
-	OperatorsByID             = "/api/v1/operators/{region_id}"
-	Schedulers                = "/api/v1/schedulers"
-	SchedulersByName          = "/api/v1/schedulers/{name}"
-	Cluster                   = "/api/v1/cluster"
-	ClusterStatus             = "/api/v1/cluster/status"
-	Config                    = "/api/v1/config"
-	Schedule                  = "/api/v1/config/schedule"
-	Replication               = "/api/v1/config/replicate"
-	Namespace                 = "/api/v1/config/namespace/{name}"
-	LabelProperty             = "/api/v1/config/label-property"
-	ClusterVersion            = "/api/v1/config/cluster-version"
-	StoreByID                 = "/api/v1/store/{id}"
-	StoreState                = "/api/v1/store/{id}/state"
-	StoreLabels               = "/api/v1/store/{id}/label"
-	StoreWeight               = "/api/v1/store/{id}/weight"
-	StoreLimit                = "/api/v1/store/{id}/limit"
-	Stores                    = "/api/v1/stores"
-	RemoveTombStone           = "/api/v1/stores/remove-tombstone"
-	AllLimit                  = "/api/v1/stores/limit"
-	Labels                    = "/api/v1/labels"
-	LabelAllStores            = "/api/v1/labels/stores"
-	HotWriteRegions           = "/api/v1/hotspot/regions/write"
-	HotReadRegions            = "/api/v1/hotspot/regions/read"
-	HotStores                 = "/api/v1/hotspot/stores"
-	RegionByID                = "/api/v1/region/id/{id}"
-	RegionByKey               = "/api/v1/region/key/{key}"
-	Regions                   = "/api/v1/regions"
-	ScanRegions               = "/api/v1/regions/key"
-	StoreRegions              = "/api/v1/regions/store/{id}"
-	TopWriteFlow              = "/api/v1/regions/writeflow"
-	TopReadFlow               = "/api/v1/regions/readflow"
-	TopConfVer                = "/api/v1/regions/confver"
-	TopVersion                = "/api/v1/regions/version"
-	TopSize                   = "/api/v1/regions/size"
-	MissPeerRegions           = "/api/v1/regions/check/miss-peer"
-	ExtraPeerRegions          = "/api/v1/regions/check/extra-peer"
-	PendingPeerRegions        = "/api/v1/regions/check/pending-peer"
-	DownPeerRegions           = "/api/v1/regions/check/down-peer"
-	OfflinePeer               = "/api/v1/regions/check/offline-peer"
-	EmptyRegion               = "/api/v1/regions/check/empty-region"
-	RegionSiblings            = "/api/v1/regions/sibling/{id}"
+	//Operators is the api that may GET and POST.
+	Operators = "/api/v1/operators"
+	//OperatorsByID is the api that may GET and DELETE.
+	OperatorsByID = "/api/v1/operators/{region_id}"
+	//Schedulers is the api that may GET and POST.
+	Schedulers = "/api/v1/schedulers"
+	//SchedulersByName is the api that may DELETE.
+	SchedulersByName = "/api/v1/schedulers/{name}"
+	//Cluster is the api that may GET.
+	Cluster = "/api/v1/cluster"
+	//ClusterStatus is the api that may GET.
+	ClusterStatus = "/api/v1/cluster/status"
+	//Config is the api that may GET and POST.
+	Config = "/api/v1/config"
+	//Schedule is the api that may POST and GET.
+	Schedule = "/api/v1/config/schedule"
+	//Replication is the api that may POST and GET.
+	Replication = "/api/v1/config/replicate"
+	//Namespace is the api that may GET, POST and DELETE.
+	Namespace = "/api/v1/config/namespace/{name}"
+	//LabelProperty is the api that may GET and POST.
+	LabelProperty = "/api/v1/config/label-property"
+	//ClusterVersion is the api that may GET and POST.
+	ClusterVersion = "/api/v1/config/cluster-version"
+	//StoreByID is the api that may GET and DELETE.
+	StoreByID = "/api/v1/store/{id}"
+	//StoreState is the api that may POST.
+	StoreState = "/api/v1/store/{id}/state"
+	//StoreLabels is the api that may POST.
+	StoreLabels = "/api/v1/store/{id}/label"
+	//StoreWeight is the api that may POST.
+	StoreWeight = "/api/v1/store/{id}/weight"
+	//StoreLimit is the api that may POST.
+	StoreLimit = "/api/v1/store/{id}/limit"
+	//Stores is the api that may GET.
+	Stores = "/api/v1/stores"
+	//RemoveTombStone is the api that may DELETE.
+	RemoveTombStone = "/api/v1/stores/remove-tombstone"
+	//AllLimit is the api that may GET and POST.
+	AllLimit = "/api/v1/stores/limit"
+	//Labels is the api that may GET.
+	Labels = "/api/v1/labels"
+	//LabelAllStores is the api that may GET.
+	LabelAllStores = "/api/v1/labels/stores"
+	//HotWriteRegions is the api that may GET.
+	HotWriteRegions = "/api/v1/hotspot/regions/write"
+	//HotReadRegions is the api that may GET.
+	HotReadRegions = "/api/v1/hotspot/regions/read"
+	//HotStores is the api that may GET.
+	HotStores = "/api/v1/hotspot/stores"
+	//RegionByID is the api that may GET.
+	RegionByID = "/api/v1/region/id/{id}"
+	//RegionByKey is the api that may GET.
+	RegionByKey = "/api/v1/region/key/{key}"
+	//Regions is the api that may GET.
+	Regions = "/api/v1/regions"
+	//ScanRegions is the api that may GET.
+	ScanRegions = "/api/v1/regions/key"
+	//StoreRegions is the api that may GET.
+	StoreRegions = "/api/v1/regions/store/{id}"
+	//TopWriteFlow is the api that may GET.
+	TopWriteFlow = "/api/v1/regions/writeflow"
+	//TopReadFlow is the api that may GET.
+	TopReadFlow = "/api/v1/regions/readflow"
+	//TopConfVer is the api that may GET.
+	TopConfVer = "/api/v1/regions/confver"
+	//TopVersion is the api that may GET.
+	TopVersion = "/api/v1/regions/version"
+	//TopSize is the api that may GET.
+	TopSize = "/api/v1/regions/size"
+	//MissPeerRegions is the api that may GET.
+	MissPeerRegions = "/api/v1/regions/check/miss-peer"
+	//ExtraPeerRegions is the api that may GET.
+	ExtraPeerRegions = "/api/v1/regions/check/extra-peer"
+	//PendingPeerRegions is the api that may GET.
+	PendingPeerRegions = "/api/v1/regions/check/pending-peer"
+	//DownPeerRegions is the api that may GET.
+	DownPeerRegions = "/api/v1/regions/check/down-peer"
+	//OfflinePeer is the api that may GET.
+	OfflinePeer = "/api/v1/regions/check/offline-peer"
+	//EmptyRegion is the api that may GET.
+	EmptyRegion = "/api/v1/regions/check/empty-region"
+	//RegionSiblings is the api that may GET.
+	RegionSiblings = "/api/v1/regions/sibling/{id}"
+	//IncorrectNamespaceRegions is the api that may GET.
 	IncorrectNamespaceRegions = "/api/v1/regions/check/incorrect-ns"
-	Version                   = "/api/v1/version"
-	Status                    = "/api/v1/status"
-	Members                   = "/api/v1/members"
-	MembersByName             = "/api/v1/members/name/{name}"
-	MembersByID               = "/api/v1/members/id/{id}"
-	Leader                    = "/api/v1/leader"
-	LeaderResign              = "/api/v1/leader/resign"
-	LeaderTransfer            = "/api/v1/leader/transfer/{next_leader}"
-	StatsRegion               = "/api/v1/stats/region"
-	Trends                    = "/api/v1/trend"
-	HandleDropCacheRegion     = "/api/v1/admin/cache/region/{id}"
-	AdminLog                  = "/api/v1/admin/log"
-	Healths                   = "/api/v1/health"
-	Diagnose                  = "/api/v1/diagnose"
-	DeprecatedHealths         = "/health"
-	DeprecatedDiagnose        = "/diagnose"
-	Classifier                = "/api/v1/classifier/"
+	//Version is the api that may GET.
+	Version = "/api/v1/version"
+	//Status is the api that may GET.
+	Status = "/api/v1/status"
+	//Members is the api that may GET.
+	Members = "/api/v1/members"
+	//MembersByName is the api that may DELETE and POST.
+	MembersByName = "/api/v1/members/name/{name}"
+	//MembersByID is the api that may DELETE.
+	MembersByID = "/api/v1/members/id/{id}"
+	//Leader is the api that may GET.
+	Leader = "/api/v1/leader"
+	//LeaderResign is the api that may POST.
+	LeaderResign = "/api/v1/leader/resign"
+	//LeaderTransfer is the api that may POST.
+	LeaderTransfer = "/api/v1/leader/transfer/{next_leader}"
+	//StatsRegion is the api that may GET.
+	StatsRegion = "/api/v1/stats/region"
+	//Trends is the api that may GET.
+	Trends = "/api/v1/trend"
+	//HandleDropCacheRegion is the api that may DELETE.
+	HandleDropCacheRegion = "/api/v1/admin/cache/region/{id}"
+	//AdminLog is the api that may POST.
+	AdminLog = "/api/v1/admin/log"
+	//Healths is the api that may GET.
+	Healths = "/api/v1/health"
+	//Diagnose is the api that may GET.
+	Diagnose = "/api/v1/diagnose"
+	//DeprecatedHealths is the api that may GET.
+	DeprecatedHealths = "/health"
+	//DeprecatedDiagnose is the api that may GET.
+	DeprecatedDiagnose = "/diagnose"
+	//Classifier is the prefix.
+	Classifier = "/api/v1/classifier/"
 )
 
 func createRouter(prefix string, svr *server.Server) *mux.Router {
