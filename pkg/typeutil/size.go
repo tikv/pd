@@ -25,7 +25,7 @@ type ByteSize uint64
 
 // MarshalJSON returns the size as a JSON string.
 func (b ByteSize) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + units.HumanSize(float64(b)) + `"`), nil
+	return []byte(`"` + units.BytesSize(float64(b)) + `"`), nil
 }
 
 // UnmarshalJSON parses a JSON string into the bytesize.
@@ -34,7 +34,7 @@ func (b *ByteSize) UnmarshalJSON(text []byte) error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	v, err := units.FromHumanSize(s)
+	v, err := units.RAMInBytes(s)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -44,7 +44,7 @@ func (b *ByteSize) UnmarshalJSON(text []byte) error {
 
 // UnmarshalText parses a Toml string into the bytesize.
 func (b *ByteSize) UnmarshalText(text []byte) error {
-	v, err := units.FromHumanSize(string(text))
+	v, err := units.RAMInBytes(string(text))
 	if err != nil {
 		return errors.WithStack(err)
 	}
