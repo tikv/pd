@@ -145,6 +145,14 @@ const (
 	DeprecatedDiagnose = "/diagnose"
 	//Classifier is the prefix.
 	Classifier = "/api/v1/classifier/"
+	//NameSpace is the api that may GET and POST.
+	NameSpace = "/table/namespaces"
+	//NameSpaceTable is the api that may POST.
+	NameSpaceTable = "/table/namespaces/table"
+	//NameSpaceMeta is the api that may POST.
+	NameSpaceMeta = "/table/namespaces/meta"
+	//StoreNameSpace is the api that may POST.
+	StoreNameSpace = "/table/store_ns/{id}"
 )
 
 func createRouter(prefix string, svr *server.Server) *mux.Router {
