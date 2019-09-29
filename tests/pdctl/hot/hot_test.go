@@ -24,8 +24,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
+	"github.com/stretchr/testify/assert"
 )
 
 func Test(t *testing.T) {
@@ -63,6 +66,31 @@ func (s *hotTestSuite) TestHot(c *C) {
 	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
 	defer cluster.Destroy()
 
+	// test hot region
+	statistics.Denoising = false
+	checkInMap := assert.New(c)
+	reportInterval := uint64(3) // need to be minHotRegionReportInterval < reportInterval < 3*RegionHeartBeatReportInterval
+	args := []string{"-u", pdAddr, "config", "set", "hot-region-cache-hits-threshold", "0"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+
+	testHot := func(hotRegionID, hotStoreId uint64, hotType string, option core.RegionCreateOption) {
+		pdctl.MustPutRegion(c, cluster, hotRegionID, hotStoreId, []byte("b"), []byte("c"), option, core.SetReportInterval(reportInterval))
+		time.Sleep(5 * time.Second)
+		args = []string{"-u", pdAddr, "hot", hotType}
+		_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+		hotRegion := statistics.StoreHotRegionInfos{}
+		c.Assert(err, IsNil)
+		c.Assert(json.Unmarshal(output, &hotRegion), IsNil)
+		checkInMap.Contains(hotRegion.AsLeader, hotStoreId)
+		c.Assert(hotRegion.AsLeader[hotStoreId].RegionsCount, Equals, 1)
+		c.Assert(hotRegion.AsLeader[hotStoreId].RegionsStat[0].RegionID, Equals, hotRegionID)
+	}
+
+	testHot(3, 1, "read", core.SetReadBytes(1000000000))
+	testHot(2, 1, "write", core.SetWrittenBytes(1000000000))
+
+	//test hot store
 	ss := leaderServer.GetStore(1)
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}
@@ -78,19 +106,6 @@ func (s *hotTestSuite) TestHot(c *C) {
 	newStats.Interval = interval
 	rc := leaderServer.GetRaftCluster()
 	rc.GetStoresStats().Observe(ss.GetID(), newStats)
-
-	// TODO: Provide a way to test the result of hot read and hot write commands
-	// hot read
-	args := []string{"-u", pdAddr, "hot", "read"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-
-	// hot write
-	args = []string{"-u", pdAddr, "hot", "write"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-
-	// hot store
 	args = []string{"-u", pdAddr, "hot", "store"}
 	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
