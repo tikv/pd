@@ -258,20 +258,6 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 		return op
 	}
 
-	removePending := fmt.Sprintf("remove-pending-%s-replica", status)
-	// Consider we have 3 peers (A, B, C), we set the store that contains C to
-	// offline/down while C is pending. If we generate an operator that adds a replica
-	// D then removes C, D will not be successfully added util C is normal again.
-	// So it's better to remove C directly.
-	if region.GetPendingPeer(peer.GetId()) != nil {
-		op, err := CreateRemovePeerOperator(removePending, r.cluster, OpReplica, region, peer.GetStoreId())
-		if err != nil {
-			checkerCounter.WithLabelValues("replica_checker", "create_operator_fail").Inc()
-			return nil
-		}
-		return op
-	}
-
 	storeID, _ := r.SelectBestReplacementStore(region, peer, NewStorageThresholdFilter(r.name))
 	if storeID == 0 {
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))

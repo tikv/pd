@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -934,6 +935,73 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	testutil.CheckTransferPeer(c, rc.Check(region), schedule.OpReplica, 2, 4)
 	opt.DisableReplaceOfflineReplica = true
 	c.Assert(rc.Check(region), IsNil)
+}
+
+func (s *testReplicaCheckerSuite) TestReplacePendingPeer(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	stats := &pdpb.StoreStats{
+		Capacity:  100,
+		Available: 100,
+	}
+	stores := []*core.StoreInfo{
+		core.NewStoreInfo(
+			&metapb.Store{
+				Id:    1,
+				State: metapb.StoreState_Offline,
+			},
+			core.SetStoreStats(stats),
+			core.SetLastHeartbeatTS(time.Now()),
+		),
+		core.NewStoreInfo(
+			&metapb.Store{
+				Id:    2,
+				State: metapb.StoreState_Up,
+			},
+			core.SetStoreStats(stats),
+			core.SetLastHeartbeatTS(time.Now()),
+		),
+		core.NewStoreInfo(
+			&metapb.Store{
+				Id:    3,
+				State: metapb.StoreState_Up,
+			},
+			core.SetStoreStats(stats),
+			core.SetLastHeartbeatTS(time.Now()),
+		),
+		core.NewStoreInfo(
+			&metapb.Store{
+				Id:    4,
+				State: metapb.StoreState_Up,
+			}, core.SetStoreStats(stats),
+			core.SetLastHeartbeatTS(time.Now()),
+		),
+	}
+	for _, store := range stores {
+		tc.PutStore(store)
+	}
+	peers := []*metapb.Peer{
+		{
+			Id:      2,
+			StoreId: 1,
+		},
+		{
+			Id:      3,
+			StoreId: 2,
+		},
+		{
+			Id:      4,
+			StoreId: 3,
+		},
+	}
+	r := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[1], core.WithPendingPeers(peers[0:1]))
+	tc.PutRegion(r)
+	rc := schedule.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	op := rc.Check(r)
+	c.Assert(op, NotNil)
+	c.Assert(op.Step(0).(schedule.AddLearner).ToStore, Equals, uint64(4))
+	c.Assert(op.Step(1).(schedule.PromoteLearner).ToStore, Equals, uint64(4))
+	c.Assert(op.Step(2).(schedule.RemovePeer).FromStore, Equals, uint64(1))
 }
 
 var _ = Suite(&testRandomMergeSchedulerSuite{})
