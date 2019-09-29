@@ -40,5 +40,6 @@ func (s *testSizeSuite) TestJSON(c *C) {
 
 	b = ByteSize(1756821276000)
 	o, err = json.Marshal(b)
+	c.Assert(err, IsNil)
 	c.Assert(string(o), Equals, `"1.598TiB"`)
 }
