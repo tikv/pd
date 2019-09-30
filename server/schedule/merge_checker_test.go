@@ -295,7 +295,7 @@ func (s *testMergeCheckerSuite) TestStorelimit(c *C) {
 	for i := 0; i < 50; i++ {
 		c.Assert(oc.AddOperator(ops...), IsTrue)
 		for _, op := range ops {
-			oc.RemoveOperator(op)
+			c.Assert(oc.RemoveOperator(op), IsTrue)
 		}
 	}
 	s.regions[2] = s.regions[2].Clone(
@@ -309,7 +309,7 @@ func (s *testMergeCheckerSuite) TestStorelimit(c *C) {
 	for i := 0; i < 5; i++ {
 		c.Assert(oc.AddOperator(ops...), IsTrue)
 		for _, op := range ops {
-			oc.RemoveOperator(op)
+			c.Assert(oc.RemoveOperator(op), IsTrue)
 		}
 	}
 	c.Assert(oc.AddOperator(ops...), IsFalse)

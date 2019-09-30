@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/juju/ratelimit"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -89,23 +90,25 @@ func NewOperatorController(cluster Cluster, hbStreams HeartbeatStreams) *Operato
 func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 	// Check existed operator.
 	if op := oc.GetOperator(region.GetID()); op != nil {
+		failpoint.Inject("concurrentRemoveOperator", func() {
+			time.Sleep(500 * time.Millisecond)
+		})
 		timeout := op.IsTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
 			oc.SendScheduleCommand(region, step, source)
 			return
 		}
-		if op.IsFinish() {
+		if op.IsFinish() && oc.RemoveOperator(op) {
 			log.Info("operator finish", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
 			oc.pushHistory(op)
 			oc.opRecords.Put(op, pdpb.OperatorStatus_SUCCESS)
-			oc.RemoveOperator(op)
 			oc.PromoteWaitingOperator()
-		} else if timeout {
+		} else if timeout && oc.RemoveOperator(op) {
 			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Reflect("operator", op))
-			oc.RemoveTimeoutOperator(op)
+			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 			oc.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
 			oc.PromoteWaitingOperator()
 		}
@@ -138,11 +141,17 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 	}
 	r = oc.cluster.GetRegion(regionID)
 	if r == nil {
+		_ = oc.removeOperatorLocked(op)
+		log.Debug("remove operator because region disappeared",
+			zap.Uint64("region-id", op.RegionID()),
+			zap.Stringer("operator", op))
+		operatorCounter.WithLabelValues(op.Desc(), "disappear").Inc()
+		oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 		return nil, true
 	}
 	step := op.Check(r)
 	if step == nil {
-		return nil, true
+		return r, true
 	}
 	now := time.Now()
 	if now.Before(item.time) {
@@ -286,10 +295,10 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
 	if old, ok := oc.operators[regionID]; ok {
+		_ = oc.removeOperatorLocked(old)
 		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", old))
 		operatorCounter.WithLabelValues(old.Desc(), "replaced").Inc()
 		oc.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
-		oc.removeOperatorLocked(old)
 	}
 
 	oc.operators[regionID] = op
@@ -320,18 +329,10 @@ func (oc *OperatorController) addOperatorLocked(op *Operator) bool {
 }
 
 // RemoveOperator removes a operator from the running operators.
-func (oc *OperatorController) RemoveOperator(op *Operator) {
+func (oc *OperatorController) RemoveOperator(op *Operator) (found bool) {
 	oc.Lock()
 	defer oc.Unlock()
-	oc.removeOperatorLocked(op)
-}
-
-// RemoveTimeoutOperator removes a operator which is timeout from the running operators.
-func (oc *OperatorController) RemoveTimeoutOperator(op *Operator) {
-	oc.Lock()
-	defer oc.Unlock()
-	operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
-	oc.removeOperatorLocked(op)
+	return oc.removeOperatorLocked(op)
 }
 
 // GetOperatorStatus gets the operator and its status with the specify id.
@@ -347,11 +348,15 @@ func (oc *OperatorController) GetOperatorStatus(id uint64) *OperatorWithStatus {
 	return oc.opRecords.Get(id)
 }
 
-func (oc *OperatorController) removeOperatorLocked(op *Operator) {
+func (oc *OperatorController) removeOperatorLocked(op *Operator) bool {
 	regionID := op.RegionID()
-	delete(oc.operators, regionID)
-	oc.updateCounts(oc.operators)
-	operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
+	if cur := oc.operators[regionID]; cur == op {
+		delete(oc.operators, regionID)
+		oc.updateCounts(oc.operators)
+		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
+		return true
+	}
+	return false
 }
 
 // GetOperator gets a operator from the given region.
