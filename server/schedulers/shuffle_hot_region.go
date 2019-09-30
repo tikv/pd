@@ -29,6 +29,11 @@ import (
 )
 
 func init() {
+	schedule.RegisterArgsToMapper("shuffle-hot-region", func(args []string) (schedule.ConfigMapper, error) {
+		mapper := make(schedule.ConfigMapper)
+		return mapper, nil
+	})
+
 	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
 		limit := uint64(1)
 		if len(mapper) == 1 {

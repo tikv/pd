@@ -30,11 +30,11 @@ import (
 )
 
 func init() {
-	schedule.RegisterArgsToMapper("hot-region", func(args []string) (schedule.ConfigMapper, error) {
+	schedule.RegisterArgsToMapper("balance-hot-region", func(args []string) (schedule.ConfigMapper, error) {
 		mapper := make(schedule.ConfigMapper)
 		return mapper, nil
 	})
-	schedule.RegisterScheduler("hot-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("balance-hot-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
 		storage.SaveScheduleConfig("balance-hot-region-scheduler", nil)
 		return newBalanceHotRegionsScheduler(opController), nil
 	})
@@ -128,7 +128,7 @@ func (h *balanceHotRegionsScheduler) GetName() string {
 }
 
 func (h *balanceHotRegionsScheduler) GetType() string {
-	return "hot-region"
+	return "balance-hot-region"
 }
 
 func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {

@@ -47,7 +47,6 @@ func init() {
 		if len(rangeName) == 0 {
 			return nil, errors.New("the range name is invalid")
 		}
-		fmt.Println("mapper", mapper)
 		config := &ScatterRangeSchedulerConf{
 			mu:        &sync.RWMutex{},
 			storage:   storage,

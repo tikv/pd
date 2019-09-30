@@ -219,7 +219,7 @@ func (h *Handler) AddBalanceRegionScheduler() error {
 
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
 func (h *Handler) AddBalanceHotRegionScheduler() error {
-	return h.AddScheduler("hot-region")
+	return h.AddScheduler("balance-hot-region")
 }
 
 // AddLabelScheduler adds a label-scheduler.
