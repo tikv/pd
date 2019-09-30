@@ -44,6 +44,7 @@ type Scheduler interface {
 }
 
 // ConfigMapper can hold any config of the scheduler.
+// Only supports bool, int, float64, string.
 type ConfigMapper map[string]interface{}
 
 // SchedulerArgsToMapper is for creating scheduler config mapper.

@@ -51,8 +51,8 @@ func init() {
 		config := &ScatterRangeSchedulerConf{
 			mu:        &sync.RWMutex{},
 			storage:   storage,
-			StartKey:  [](byte)(mapper["start-key"].(string)),
-			EndKey:    [](byte)(mapper["end-key"].(string)),
+			StartKey:  mapper["start-key"].(string),
+			EndKey:    mapper["end-key"].(string),
 			RangeName: rangeName,
 		}
 
@@ -71,8 +71,8 @@ type ScatterRangeSchedulerConf struct {
 	mu        *sync.RWMutex
 	storage   *core.Storage
 	RangeName string `json:"range-name"`
-	StartKey  []byte `json:"start-key"`
-	EndKey    []byte `json:"end-key"`
+	StartKey  string `json:"start-key"`
+	EndKey    string `json:"end-key"`
 }
 
 func (conf *ScatterRangeSchedulerConf) BuildWithArgs(args []string) error {
@@ -83,18 +83,16 @@ func (conf *ScatterRangeSchedulerConf) BuildWithArgs(args []string) error {
 	defer conf.mu.Unlock()
 
 	conf.RangeName = args[0]
-	conf.StartKey = []byte(args[1])
-	conf.EndKey = []byte(args[2])
+	conf.StartKey = args[1]
+	conf.EndKey = args[2]
 	return nil
 }
 
 func (conf *ScatterRangeSchedulerConf) Clone() *ScatterRangeSchedulerConf {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	cpStartkey := make([]byte, len(conf.StartKey))
-	copy(cpStartkey, conf.StartKey)
-	cpEndKey := make([]byte, len(conf.EndKey))
-	copy(cpEndKey, conf.EndKey)
+	cpStartkey := string([]byte(conf.StartKey))
+	cpEndKey := string([]byte(conf.EndKey))
 	return &ScatterRangeSchedulerConf{
 		mu:        &sync.RWMutex{},
 		StartKey:  cpStartkey,
@@ -123,13 +121,13 @@ func (conf *ScatterRangeSchedulerConf) GetRangeName() string {
 func (conf *ScatterRangeSchedulerConf) GetStartKey() []byte {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	return conf.StartKey
+	return []byte(conf.StartKey)
 }
 
 func (conf *ScatterRangeSchedulerConf) GetEndKey() []byte {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	return conf.EndKey
+	return []byte(conf.EndKey)
 }
 
 func (conf *ScatterRangeSchedulerConf) getScheduleName() string {
@@ -191,7 +189,7 @@ func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool
 func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	// isolate a new cluster according to the key range
-	c := schedule.GenRangeCluster(cluster, l.config.StartKey, l.config.EndKey)
+	c := schedule.GenRangeCluster(cluster, []byte(l.config.StartKey), []byte(l.config.EndKey))
 	c.SetTolerantSizeRatio(2)
 	ops := l.balanceLeader.Schedule(c)
 	if len(ops) > 0 {
