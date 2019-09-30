@@ -15,14 +15,17 @@ package schedule
 
 import (
 	"container/heap"
+	"sync"
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
+	"github.com/pingcap/pd/server/core"
 )
 
 var _ = Suite(&testOperatorControllerSuite{})
@@ -45,8 +48,9 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	oc.SetOperator(op1)
 	oc.SetOperator(op2)
 	go func() {
+		c.Assert(oc.RemoveOperator(op1), IsTrue)
 		for {
-			oc.RemoveOperator(op1)
+			c.Assert(oc.RemoveOperator(op1), IsFalse)
 		}
 	}()
 	go func() {
@@ -92,27 +96,76 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_SUCCESS)
 }
 
+// issue #1716
+func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderRegion(1, 2, 1)
+	region1 := tc.GetRegion(1)
+	steps := []OperatorStep{
+		RemovePeer{FromStore: 1},
+		AddPeer{ToStore: 1, PeerID: 4},
+	}
+	// finished op with normal priority
+	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
+	// unfinished op with high priority
+	op2 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion|OpAdmin, steps...)
+	op2.SetPriorityLevel(core.HighPriority)
+
+	oc.SetOperator(op1)
+
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/concurrentRemoveOperator", "return(true)"), IsNil)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		oc.Dispatch(region1, "test")
+		wg.Done()
+	}()
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		success := oc.AddOperator(op2)
+		// If the assert failed before wg.Done, the test will be blocked.
+		defer c.Assert(success, IsTrue)
+		wg.Done()
+	}()
+	wg.Wait()
+
+	c.Assert(oc.GetOperator(1), Equals, op2)
+}
+
 func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
 	tc.AddLeaderStore(1, 2)
-	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
+	tc.AddLeaderRegion(4, 2, 1)
 	steps := []OperatorStep{
 		RemovePeer{FromStore: 2},
 		AddPeer{ToStore: 2, PeerID: 4},
 	}
 	op1 := NewOperator("test", 1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
 	op2 := NewOperator("test", 2, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op3 := NewOperator("test", 3, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op4 := NewOperator("test", 4, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
+	region4 := tc.GetRegion(4)
 	// Adds operator and pushes to the notifier queue.
 	{
 		oc.SetOperator(op1)
+		oc.SetOperator(op3)
+		oc.SetOperator(op4)
 		oc.SetOperator(op2)
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
+		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
+		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
 	}
 	// fisrt poll got nil
@@ -126,9 +179,19 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	c.Assert(r, NotNil)
 	c.Assert(next, IsTrue)
 	c.Assert(r.GetID(), Equals, region1.GetID())
+
+	// find op3 with nil region, remove it
+	c.Assert(oc.GetOperator(3), NotNil)
 	r, next = oc.pollNeedDispatchRegion()
 	c.Assert(r, IsNil)
-	c.Assert(next, IsFalse)
+	c.Assert(next, IsTrue)
+	c.Assert(oc.GetOperator(3), IsNil)
+
+	// find op4 finished
+	r, next = oc.pollNeedDispatchRegion()
+	c.Assert(r, NotNil)
+	c.Assert(next, IsTrue)
+	c.Assert(r.GetID(), Equals, region4.GetID())
 
 	// after waiting 500 millseconds, the region2 need to dispatch
 	time.Sleep(400 * time.Millisecond)
@@ -136,4 +199,7 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	c.Assert(r, NotNil)
 	c.Assert(next, IsTrue)
 	c.Assert(r.GetID(), Equals, region2.GetID())
+	r, next = oc.pollNeedDispatchRegion()
+	c.Assert(r, IsNil)
+	c.Assert(next, IsFalse)
 }
