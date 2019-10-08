@@ -1,5 +1,11 @@
 # PD Change Log
 
+## v3.0.4
+
++ Fix a thread-safe bug and improve code [#1719](https://github.com/pingcap/pd/pull/1719)
++ Fix TLS in pd control [#1729](https://github.com/pingcap/pd/pull/1729)
++ Fix the issue that a region does not merge to the sibling with smaller size [#1723](https://github.com/pingcap/pd/pull/1723)
+
 ## v3.0.3
 
 + Return success message for `pdctl` [#1685](https://github.com/pingcap/pd/pull/1685)
