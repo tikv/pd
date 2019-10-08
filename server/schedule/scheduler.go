@@ -92,7 +92,7 @@ func ConvArgsToMapper(typ string, args []string) (ConfigMapper, error) {
 func CreateScheduler(name string, opController *OperatorController, storage *core.Storage, mapper ConfigMapper) (Scheduler, error) {
 	// Fix: do not loop the map.
 	var typ string
-	for registerdType, _ := range schedulerMap {
+	for registerdType := range schedulerMap {
 		if strings.Index(name, registerdType) != -1 {
 			typ = registerdType
 			break

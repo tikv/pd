@@ -414,6 +414,7 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	tc.AddLeaderRegion(3, 3, 1)
 
 	conf, err := schedule.ConvArgsToMapper("evict-leader", []string{"1"})
+	c.Assert(err, IsNil)
 	sl, err := schedule.CreateScheduler("evict-leader", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), conf)
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
