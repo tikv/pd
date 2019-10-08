@@ -47,10 +47,11 @@ type Scheduler interface {
 // Only supports bool, int, float64, string.
 type ConfigMapper map[string]interface{}
 
-// SchedulerArgsToMapper is for creating scheduler config mapper.
+// ArgsToMapper is for creating scheduler config mapper.
+// TODO: remove me.
 type ArgsToMapper func(args []string) (ConfigMapper, error)
 
-// CreateSchedulerFuncV2 is for creating scheduler.
+// CreateSchedulerFunc is for creating scheduler.
 type CreateSchedulerFunc func(opController *OperatorController, storage *core.Storage, mapper ConfigMapper) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
@@ -80,6 +81,8 @@ func IsSchedulerRegistered(name string) bool {
 	return ok
 }
 
+// ConvArgsToMapper converts the args to config mapper according the scheduler type.
+// TODO: remove me.
 func ConvArgsToMapper(typ string, args []string) (ConfigMapper, error) {
 	toMapper, ok := schedulerArgsToMapper[typ]
 	if !ok {

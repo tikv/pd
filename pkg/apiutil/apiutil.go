@@ -91,7 +91,7 @@ func ParseUint64VarsField(vars map[string]string, varName string) (uint64, *Fiel
 	return parsed, &FieldError{field: varName, error: err}
 }
 
-// Write json into data.
+// ReadJSONRespondError writes json into data.
 // On error respond with a 400 Bad Request
 func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
 	err := ReadJSON(body, data)
