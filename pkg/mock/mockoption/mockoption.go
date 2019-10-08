@@ -65,7 +65,6 @@ type ScheduleOptions struct {
 	TolerantSizeRatio            float64
 	LowSpaceRatio                float64
 	HighSpaceRatio               float64
-	DisableLearner               bool
 	DisableRemoveDownReplica     bool
 	DisableReplaceOfflineReplica bool
 	DisableMakeUpReplica         bool
@@ -155,8 +154,8 @@ func (mso *ScheduleOptions) GetSplitMergeInterval() time.Duration {
 	return mso.SplitMergeInterval
 }
 
-// GetEnableOneWayMerge mocks method
-func (mso *ScheduleOptions) GetEnableOneWayMerge() bool {
+// IsOneWayMergeEnabled mocks method
+func (mso *ScheduleOptions) IsOneWayMergeEnabled() bool {
 	return mso.EnableOneWayMerge
 }
 
@@ -208,11 +207,6 @@ func (mso *ScheduleOptions) GetSchedulerMaxWaitingOperator() uint64 {
 // SetMaxReplicas mocks method
 func (mso *ScheduleOptions) SetMaxReplicas(replicas int) {
 	mso.MaxReplicas = replicas
-}
-
-// IsRaftLearnerEnabled mocks method
-func (mso *ScheduleOptions) IsRaftLearnerEnabled() bool {
-	return !mso.DisableLearner
 }
 
 // IsRemoveDownReplicaEnabled mocks method.

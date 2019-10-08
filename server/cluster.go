@@ -71,7 +71,7 @@ type RaftCluster struct {
 	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
 
-	labelLevelStats *statistics.LabelLevelStatistics
+	labelLevelStats *statistics.LabelStatistics
 	regionStats     *statistics.RegionStatistics
 	storesStats     *statistics.StoresStats
 	hotSpotCache    *statistics.HotSpotCache
@@ -144,7 +144,7 @@ func (c *RaftCluster) initCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.opt = opt
 	c.storage = storage
 	c.id = id
-	c.labelLevelStats = statistics.NewLabelLevelStatistics()
+	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.storesStats = statistics.NewStoresStats()
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
@@ -238,7 +238,6 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 			log.Info("background jobs has been stopped")
 			return
 		case <-ticker.C:
-			c.checkOperators()
 			c.checkStores()
 			c.collectMetrics()
 			c.coordinator.opController.PruneHistory()
@@ -291,6 +290,20 @@ func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.opController
+}
+
+// GetHeartbeatStreams returns the heartbeat streams.
+func (c *RaftCluster) GetHeartbeatStreams() *heartbeatStreams {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.hbStreams
+}
+
+// GetCoordinator returns the coordinator.
+func (c *RaftCluster) GetCoordinator() *coordinator {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator
 }
 
 // handleStoreHeartbeat updates the store status.
@@ -382,10 +395,16 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if len(region.GetPeers()) != len(origin.GetPeers()) {
 			saveKV, saveCache = true, true
 		}
-		if region.GetApproximateSize() != origin.GetApproximateSize() {
+
+		if region.GetApproximateSize() != origin.GetApproximateSize() ||
+			region.GetApproximateKeys() != origin.GetApproximateKeys() {
 			saveCache = true
 		}
-		if region.GetApproximateKeys() != origin.GetApproximateKeys() {
+
+		if region.GetBytesWritten() != origin.GetBytesWritten() ||
+			region.GetBytesRead() != origin.GetBytesRead() ||
+			region.GetKeysWritten() != origin.GetKeysWritten() ||
+			region.GetKeysRead() != origin.GetKeysRead() {
 			saveCache = true
 		}
 	}
@@ -399,6 +418,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
 				zap.Error(err))
 		}
+		regionEventCounter.WithLabelValues("update_kv").Inc()
 		select {
 		case c.changedRegions <- region:
 		default:
@@ -430,7 +450,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			if c.regionStats != nil {
 				c.regionStats.ClearDefunctRegion(item.GetId())
 			}
-			c.labelLevelStats.ClearDefunctRegion(item.GetId())
+			c.labelLevelStats.ClearDefunctRegion(item.GetId(), c.GetLocationLabels())
 		}
 
 		// Update related stores.
@@ -442,6 +462,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		for _, p := range region.GetPeers() {
 			c.updateStoreStatusLocked(p.GetStoreId())
 		}
+		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
 	if c.regionStats != nil {
@@ -557,19 +578,10 @@ func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *core.RegionInfo {
 	return c.core.SearchRegion(regionKey)
 }
 
-// ScanRegionsByKey scans region with start key, until number greater than limit.
-func (c *RaftCluster) ScanRegionsByKey(startKey []byte, limit int) []*core.RegionInfo {
-	return c.core.ScanRange(startKey, limit)
-}
-
-// ScanRegions scans region with start key, until number greater than limit.
-func (c *RaftCluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
-	return c.core.ScanRange(startKey, limit)
-}
-
-// ScanRangeWithEndKey scans regions intersecting [start key, end key).
-func (c *RaftCluster) ScanRangeWithEndKey(startKey, endKey []byte) []*core.RegionInfo {
-	return c.core.ScanRangeWithEndKey(startKey, endKey)
+// ScanRegions scans region with start key, until the region contains endKey, or
+// total number greater than limit.
+func (c *RaftCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
+	return c.core.ScanRange(startKey, endKey, limit)
 }
 
 // GetRegionByID gets region and leader peer by regionID from cluster.
@@ -660,7 +672,7 @@ func (c *RaftCluster) GetAverageRegionSize() int64 {
 func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
 	c.RLock()
 	defer c.RUnlock()
-	return statistics.GetRegionStats(c.core.ScanRangeWithEndKey, startKey, endKey)
+	return statistics.GetRegionStats(c.core.ScanRange(startKey, endKey, -1))
 }
 
 // GetStoresStats returns stores' statistics from cluster.
@@ -916,7 +928,6 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 func (c *RaftCluster) checkStores() {
 	var offlineStores []*metapb.Store
 	var upStoreCount int
-
 	stores := c.GetStores()
 	for _, store := range stores {
 		// the store has already been tombstone
@@ -951,7 +962,7 @@ func (c *RaftCluster) checkStores() {
 
 	if upStoreCount < c.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
-			log.Warn("store may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
+			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
 	}
 }
@@ -987,29 +998,6 @@ func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
 	c.core.DeleteStore(store)
 	c.storesStats.RemoveRollingStoreStats(store.GetID())
 	return nil
-}
-
-func (c *RaftCluster) checkOperators() {
-	opController := c.coordinator.opController
-	for _, op := range opController.GetOperators() {
-		// after region is merged, it will not heartbeat anymore
-		// the operator of merged region will not timeout actively
-		region := c.GetRegion(op.RegionID())
-		if region == nil {
-			log.Debug("remove operator cause region is merged",
-				zap.Uint64("region-id", op.RegionID()),
-				zap.Stringer("operator", op))
-			opController.RemoveOperator(op)
-			continue
-		}
-
-		if op.IsTimeout() {
-			log.Info("operator timeout",
-				zap.Uint64("region-id", op.RegionID()),
-				zap.Stringer("operator", op))
-			opController.RemoveTimeoutOperator(op)
-		}
-	}
 }
 
 func (c *RaftCluster) collectMetrics() {
@@ -1256,9 +1244,9 @@ func (c *RaftCluster) GetSplitMergeInterval() time.Duration {
 	return c.opt.GetSplitMergeInterval()
 }
 
-// GetEnableOneWayMerge returns if the one way merge is enabled.
-func (c *RaftCluster) GetEnableOneWayMerge() bool {
-	return c.opt.GetEnableOneWayMerge()
+// IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
+func (c *RaftCluster) IsOneWayMergeEnabled() bool {
+	return c.opt.IsOneWayMergeEnabled()
 }
 
 // GetPatrolRegionInterval returns the interval of patroling region.
@@ -1289,14 +1277,6 @@ func (c *RaftCluster) GetStrictlyMatchLabel() bool {
 // GetHotRegionCacheHitsThreshold gets the threshold of hitting hot region cache.
 func (c *RaftCluster) GetHotRegionCacheHitsThreshold() int {
 	return c.opt.GetHotRegionCacheHitsThreshold()
-}
-
-// IsRaftLearnerEnabled returns if raft learner is enabled.
-func (c *RaftCluster) IsRaftLearnerEnabled() bool {
-	if !c.IsFeatureSupported(RaftLearner) {
-		return false
-	}
-	return c.opt.IsRaftLearnerEnabled()
 }
 
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.

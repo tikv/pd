@@ -56,12 +56,12 @@ func (m *MergeChecker) RecordRegionSplit(regionID uint64) {
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	if m.splitCache.Exists(mergeBlockMarker) {
-		checkerCounter.WithLabelValues("merge_checker", "recently_start").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
 		return nil
 	}
 
 	if m.splitCache.Exists(region.GetID()) {
-		checkerCounter.WithLabelValues("merge_checker", "recently_split").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "recently-split").Inc()
 		return nil
 	}
 
@@ -79,67 +79,61 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	// region is not small enough
 	if region.GetApproximateSize() > int64(m.cluster.GetMaxMergeRegionSize()) ||
 		region.GetApproximateKeys() > int64(m.cluster.GetMaxMergeRegionKeys()) {
-		checkerCounter.WithLabelValues("merge_checker", "no_need").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "no-need").Inc()
 		return nil
 	}
 
 	// skip region has down peers or pending peers or learner peers
 	if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 || len(region.GetLearners()) > 0 {
-		checkerCounter.WithLabelValues("merge_checker", "special_peer").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "special-peer").Inc()
 		return nil
 	}
 
 	if len(region.GetPeers()) != m.cluster.GetMaxReplicas() {
-		checkerCounter.WithLabelValues("merge_checker", "abnormal_replica").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "abnormal-replica").Inc()
 		return nil
 	}
 
 	// skip hot region
 	if m.cluster.IsRegionHot(region) {
-		checkerCounter.WithLabelValues("merge_checker", "hot_region").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "hot-region").Inc()
 		return nil
 	}
 
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
 	var target *core.RegionInfo
-	targetNext := m.checkTarget(region, next, target)
-	target = m.checkTarget(region, prev, target)
-	if target != targetNext && m.cluster.GetEnableOneWayMerge() {
-		checkerCounter.WithLabelValues("merge_checker", "skip_left").Inc()
-		target = targetNext
+	if m.checkTarget(region, next) {
+		target = next
+	}
+	if !m.cluster.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow a region can be merged by two ways.
+		if target == nil || prev.GetApproximateSize() < next.GetApproximateSize() { // pick smaller
+			target = prev
+		}
 	}
 
 	if target == nil {
-		checkerCounter.WithLabelValues("merge_checker", "no_target").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "no-target").Inc()
 		return nil
 	}
 
 	log.Debug("try to merge region", zap.Stringer("from", core.RegionToHexMeta(region.GetMeta())), zap.Stringer("to", core.RegionToHexMeta(target.GetMeta())))
 	ops, err := operator.CreateMergeRegionOperator("merge-region", m.cluster, region, target, operator.OpMerge)
 	if err != nil {
+		log.Warn("create merge region operator failed", zap.Error(err))
 		return nil
 	}
-	checkerCounter.WithLabelValues("merge_checker", "new_operator").Inc()
+	checkerCounter.WithLabelValues("merge_checker", "new-operator").Inc()
 	if region.GetApproximateSize() > target.GetApproximateSize() ||
 		region.GetApproximateKeys() > target.GetApproximateKeys() {
-		checkerCounter.WithLabelValues("merge_checker", "larger_source").Inc()
+		checkerCounter.WithLabelValues("merge_checker", "larger-source").Inc()
 	}
 	return ops
 }
 
-func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *core.RegionInfo {
-	// if is not hot region and under same namespace
-	if adjacent != nil && !m.cluster.IsRegionHot(adjacent) &&
+func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
+	return adjacent != nil && !m.cluster.IsRegionHot(adjacent) &&
 		m.classifier.AllowMerge(region, adjacent) &&
-		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 {
-		// if both region is not hot, prefer the one with smaller size
-		if target == nil || target.GetApproximateSize() > adjacent.GetApproximateSize() {
-			// peer count should equal
-			if len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() {
-				target = adjacent
-			}
-		}
-	}
-	return target
+		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 && // no special peer
+		len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() // peer count should equal
 }

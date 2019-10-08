@@ -30,7 +30,10 @@ func init() {
 	})
 }
 
+const shuffleRegionName = "shuffle-region-scheduler"
+
 type shuffleRegionScheduler struct {
+	name string
 	*baseScheduler
 	selector *selector.RandomSelector
 }
@@ -39,17 +42,18 @@ type shuffleRegionScheduler struct {
 // between stores.
 func newShuffleRegionScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{MoveRegion: true},
+		filter.StoreStateFilter{ActionScope: shuffleRegionName, MoveRegion: true},
 	}
 	base := newBaseScheduler(opController)
 	return &shuffleRegionScheduler{
+		name:          shuffleRegionName,
 		baseScheduler: base,
 		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
 func (s *shuffleRegionScheduler) GetName() string {
-	return "shuffle-region-scheduler"
+	return s.name
 }
 
 func (s *shuffleRegionScheduler) GetType() string {
@@ -64,23 +68,23 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region, oldPeer := s.scheduleRemovePeer(cluster)
 	if region == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 		return nil
 	}
 
-	excludedFilter := filter.NewExcludedFilter(nil, region.GetStoreIds())
+	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds())
 	newPeer := s.scheduleAddPeer(cluster, excludedFilter)
 	if newPeer == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_new_peer").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-new-peer").Inc()
 		return nil
 	}
 
 	op, err := operator.CreateMovePeerOperator("shuffle-region", cluster, region, operator.OpAdmin, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 	if err != nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "create_operator_fail").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 		return nil
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }
@@ -90,7 +94,7 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 
 	source := s.selector.SelectSource(cluster, stores)
 	if source == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_store").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
 		return nil, nil
 	}
 
@@ -99,7 +103,7 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 		region = cluster.RandLeaderRegion(source.GetID(), core.HealthRegion())
 	}
 	if region == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 		return nil, nil
 	}
 

@@ -15,6 +15,7 @@ package cluster_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -45,6 +46,8 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()
+	i := strings.Index(pdAddr, "//")
+	pdAddr = pdAddr[i+2:]
 	cmd := pdctl.InitCommand()
 	defer cluster.Destroy()
 
@@ -55,6 +58,9 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	ci := &metapb.Cluster{}
 	c.Assert(json.Unmarshal(output, ci), IsNil)
 	c.Assert(ci, DeepEquals, cluster.GetCluster())
+
+	echo := pdctl.GetEcho([]string{"-u", pdAddr, "--cacert=ca.pem", "cluster"})
+	c.Assert(strings.Contains(echo, "no such file or directory"), IsTrue)
 
 	// cluster status
 	args = []string{"-u", pdAddr, "cluster", "status"}

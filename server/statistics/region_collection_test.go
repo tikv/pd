@@ -62,10 +62,12 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
+	c.Assert(len(regionStats.stats[EmptyRegion]), Equals, 1)
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
 		core.WithPendingPeers(peers[0:1]),
+		core.SetApproximateSize(144),
 	)
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
@@ -74,6 +76,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[IncorrectNamespace]), Equals, 1)
+	c.Assert(len(regionStats.stats[EmptyRegion]), Equals, 0)
 
 	region2 = region2.Clone(core.WithDownPeers(downPeers[0:1]))
 	regionStats.Observe(region2, stores[0:2])
@@ -102,38 +105,45 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 }
 
 func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
-	labelLevelStats := NewLabelLevelStatistics()
+	locationLabels := []string{"zone", "rack", "host"}
+	labelLevelStats := NewLabelStatistics()
 	labelsSet := [][]map[string]string{
 		{
+			// isolated by rack
 			{"zone": "z1", "rack": "r1", "host": "h1"},
 			{"zone": "z2", "rack": "r1", "host": "h2"},
 			{"zone": "z2", "rack": "r2", "host": "h3"},
 		},
 		{
+			// isolated by host when location labels is ["zone", "rack", "host"]
+			// cannot be isolated when location labels is ["zone", "rack"]
 			{"zone": "z1", "rack": "r1", "host": "h1"},
 			{"zone": "z2", "rack": "r2", "host": "h2"},
 			{"zone": "z2", "rack": "r2", "host": "h3"},
 		},
 		{
+			// isolated by zone
 			{"zone": "z1", "rack": "r1", "host": "h1"},
 			{"zone": "z2", "rack": "r2", "host": "h2"},
 			{"zone": "z3", "rack": "r2", "host": "h3"},
 		},
 		{
+			// isolated by rack
 			{"zone": "z1", "rack": "r1", "host": "h1"},
 			{"zone": "z1", "rack": "r2", "host": "h2"},
 			{"zone": "z1", "rack": "r3", "host": "h3"},
 		},
 		{
+			// cannot be isolated
 			{"zone": "z1", "rack": "r1", "host": "h1"},
 			{"zone": "z1", "rack": "r2", "host": "h2"},
 			{"zone": "z1", "rack": "r2", "host": "h2"},
 		},
 	}
-	res := []int{2, 3, 1, 2, 0}
-	counter := []int{1, 1, 2, 1, 0}
+	res := []string{"rack", "host", "zone", "rack", "none"}
+	counter := map[string]int{"none": 1, "host": 1, "rack": 2, "zone": 1}
 	regionID := 1
-	f := func(labels []map[string]string, res int) {
+	f := func(labels []map[string]string, res string, locationLabels []string) {
 		metaStores := []*metapb.Store{
 			{Id: 1, Address: "mock://tikv-1"},
 			{Id: 2, Address: "mock://tikv-2"},
@@ -150,21 +160,33 @@ func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
 			stores = append(stores, s)
 		}
 		region := core.NewRegionInfo(&metapb.Region{Id: uint64(regionID)}, nil)
-		level := getRegionLabelIsolationLevel(stores, []string{"zone", "rack", "host"})
-		labelLevelStats.Observe(region, stores, []string{"zone", "rack", "host"})
-		c.Assert(level, Equals, res)
+		label := getRegionLabelIsolation(stores, locationLabels)
+		labelLevelStats.Observe(region, stores, locationLabels)
+		c.Assert(label, Equals, res)
 		regionID++
 	}
 
 	for i, labels := range labelsSet {
-		f(labels, res[i])
+		f(labels, res[i], locationLabels)
 	}
 	for i, res := range counter {
-		c.Assert(labelLevelStats.labelLevelCounter[i], Equals, res)
+		c.Assert(labelLevelStats.labelCounter[i], Equals, res)
 	}
 
-	level := getRegionLabelIsolationLevel(nil, []string{"zone", "rack", "host"})
-	c.Assert(level, Equals, 0)
-	level = getRegionLabelIsolationLevel(nil, nil)
-	c.Assert(level, Equals, 0)
+	label := getRegionLabelIsolation(nil, locationLabels)
+	c.Assert(label, Equals, nonIsolation)
+	label = getRegionLabelIsolation(nil, nil)
+	c.Assert(label, Equals, nonIsolation)
+
+	regionID = 1
+	res = []string{"rack", "none", "zone", "rack", "none"}
+	counter = map[string]int{"none": 2, "host": 0, "rack": 2, "zone": 1}
+	locationLabels = []string{"zone", "rack"}
+
+	for i, labels := range labelsSet {
+		f(labels, res[i], locationLabels)
+	}
+	for i, res := range counter {
+		c.Assert(labelLevelStats.labelCounter[i], Equals, res)
+	}
 }

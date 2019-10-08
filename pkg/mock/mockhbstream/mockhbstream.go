@@ -95,3 +95,9 @@ func (mhs *HeartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHe
 	case <-mhs.ctx.Done():
 	}
 }
+
+// MsgCh returns the internal channel which contains the heartbeat responses
+// from PD. It can be used to inspect the content of a PD response
+func (mhs *HeartbeatStreams) MsgCh() chan *pdpb.RegionHeartbeatResponse {
+	return mhs.msgCh
+}

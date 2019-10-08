@@ -118,9 +118,9 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, sto
 			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
 		}
 		filters := []filter.Filter{
-			filter.StoreStateFilter{MoveRegion: true},
-			filter.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
+			filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
+			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
 		}
 		stores := cluster.GetStores()
 		destStoreIDs := make([]uint64, 0, len(stores))
@@ -151,7 +151,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, sto
 		if err != nil {
 			return nil
 		}
-		schedulerCounter.WithLabelValues(s.GetName(), "create_operator").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "create-operator").Inc()
 		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()

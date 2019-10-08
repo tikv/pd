@@ -16,23 +16,6 @@ package server
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	txnCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "txn",
-			Name:      "txns_count",
-			Help:      "Counter of txns.",
-		}, []string{"result"})
-
-	txnDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "txn",
-			Name:      "handle_txns_duration_seconds",
-			Help:      "Bucketed histogram of processing time (s) of handled txns.",
-			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, []string{"result"})
-
 	healthStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -64,6 +47,14 @@ var (
 			Name:      "region_heartbeat",
 			Help:      "Counter of region hearbeat.",
 		}, []string{"address", "store", "type", "status"})
+
+	regionEventCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "region_event",
+			Help:      "Counter of the region event",
+		}, []string{"event"})
 
 	regionHeartbeatLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -121,6 +112,7 @@ func init() {
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(regionHeartbeatCounter)
+	prometheus.MustRegister(regionEventCounter)
 	prometheus.MustRegister(regionHeartbeatLatency)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(metadataGauge)

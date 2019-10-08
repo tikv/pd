@@ -109,7 +109,7 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
-		regions := c.cluster.ScanRegions(key, patrolScanRegionLimit)
+		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// Resets the scan key.
 			key = nil
@@ -157,8 +157,6 @@ func (c *coordinator) drivePushOperator() {
 }
 
 func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
-	// If PD has restarted, it need to check learners added before and promote them.
-	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 
 	if op := c.learnerChecker.Check(region); op != nil {

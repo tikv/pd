@@ -55,8 +55,8 @@ func (mc *Cluster) allocID() (uint64, error) {
 }
 
 // ScanRegions scans region with start key, until number greater than limit.
-func (mc *Cluster) ScanRegions(startKey []byte, limit int) []*core.RegionInfo {
-	return mc.Regions.ScanRange(startKey, limit)
+func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
+	return mc.Regions.ScanRange(startKey, endKey, limit)
 }
 
 // LoadRegion puts region info without leader
@@ -233,9 +233,10 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 }
 
 // AddLeaderRegionWithReadInfo adds region with specified leader, followers and read info.
-func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, followerIds ...uint64) {
+func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, reportInterval uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetReadBytes(readBytes))
+	r = r.Clone(core.SetReportInterval(reportInterval))
 	items := mc.HotSpotCache.CheckRead(r, mc.StoresStats)
 	for _, item := range items {
 		mc.HotSpotCache.Update(item)
@@ -244,9 +245,10 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64,
 }
 
 // AddLeaderRegionWithWriteInfo adds region with specified leader, followers and write info.
-func (mc *Cluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, followerIds ...uint64) {
+func (mc *Cluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, reportInterval uint64, followerIds ...uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
+	r = r.Clone(core.SetReportInterval(reportInterval))
 	items := mc.HotSpotCache.CheckWrite(r, mc.StoresStats)
 	for _, item := range items {
 		mc.HotSpotCache.Update(item)
@@ -386,20 +388,8 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	mc.PutStore(newStore)
 }
 
-func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {
-	region := &metapb.Region{
-		Id:       regionID,
-		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
-	}
-	leader, _ := mc.AllocPeer(leaderID)
-	region.Peers = []*metapb.Peer{leader}
-	for _, id := range followerIds {
-		peer, _ := mc.AllocPeer(id)
-		region.Peers = append(region.Peers, peer)
-	}
-
-	return core.NewRegionInfo(region, leader)
+func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIDs ...uint64) *core.RegionInfo {
+	return mc.MockRegionInfo(regionID, leaderID, followerIDs, nil)
 }
 
 // GetOpt mocks method.
@@ -465,4 +455,23 @@ func (mc *Cluster) PutStoreWithLabels(id uint64, labelPairs ...string) {
 		labels = append(labels, &metapb.StoreLabel{Key: labelPairs[i], Value: labelPairs[i+1]})
 	}
 	mc.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Labels: labels}))
+}
+
+// MockRegionInfo returns a mock region
+func (mc *Cluster) MockRegionInfo(regionID uint64, leaderID uint64,
+	followerIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
+
+	region := &metapb.Region{
+		Id:          regionID,
+		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),
+		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
+		RegionEpoch: epoch,
+	}
+	leader, _ := mc.AllocPeer(leaderID)
+	region.Peers = []*metapb.Peer{leader}
+	for _, id := range followerIDs {
+		peer, _ := mc.AllocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	return core.NewRegionInfo(region, leader)
 }

@@ -51,6 +51,7 @@ const (
 	hotRegionLimitFactor      = 0.75
 	storeHotRegionsDefaultLen = 100
 	hotRegionScheduleFactor   = 0.9
+	balanceHotRegionName      = "balance-hot-region-scheduler"
 )
 
 // BalanceType : the perspective of balance
@@ -76,6 +77,7 @@ func newStoreStaticstics() *storeStatistics {
 }
 
 type balanceHotRegionsScheduler struct {
+	name string
 	*baseScheduler
 	sync.RWMutex
 	leaderLimit uint64
@@ -90,6 +92,7 @@ type balanceHotRegionsScheduler struct {
 func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
 	base := newBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
+		name:          balanceHotRegionName,
 		baseScheduler: base,
 		leaderLimit:   1,
 		peerLimit:     1,
@@ -124,7 +127,7 @@ func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorControlle
 }
 
 func (h *balanceHotRegionsScheduler) GetName() string {
-	return "balance-hot-region-scheduler"
+	return h.name
 }
 
 func (h *balanceHotRegionsScheduler) GetType() string {
@@ -168,7 +171,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 	// balance by leader
 	srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
-		schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
+		schedulerCounter.WithLabelValues(h.GetName(), "move-leader").Inc()
 		op := operator.CreateTransferLeaderOperator("transfer-hot-read-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 		op.SetPriorityLevel(core.HighPriority)
 		return []*operator.Operator{op}
@@ -179,11 +182,11 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 	if srcRegion != nil {
 		op, err := operator.CreateMovePeerOperator("move-hot-read-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 		if err != nil {
-			schedulerCounter.WithLabelValues(h.GetName(), "create_operator_fail").Inc()
+			schedulerCounter.WithLabelValues(h.GetName(), "create-operator-fail").Inc()
 			return nil
 		}
 		op.SetPriorityLevel(core.HighPriority)
-		schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
+		schedulerCounter.WithLabelValues(h.GetName(), "move-peer").Inc()
 		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -202,18 +205,18 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 			if srcRegion != nil {
 				op, err := operator.CreateMovePeerOperator("move-hot-write-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 				if err != nil {
-					schedulerCounter.WithLabelValues(h.GetName(), "create_operator_fail").Inc()
+					schedulerCounter.WithLabelValues(h.GetName(), "create-operator-fail").Inc()
 					return nil
 				}
 				op.SetPriorityLevel(core.HighPriority)
-				schedulerCounter.WithLabelValues(h.GetName(), "move_peer").Inc()
+				schedulerCounter.WithLabelValues(h.GetName(), "move-peer").Inc()
 				return []*operator.Operator{op}
 			}
 		case 1:
 			// balance by leader
 			srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
 			if srcRegion != nil {
-				schedulerCounter.WithLabelValues(h.GetName(), "move_leader").Inc()
+				schedulerCounter.WithLabelValues(h.GetName(), "move-leader").Inc()
 				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 				op.SetPriorityLevel(core.HighPriority)
 				return []*operator.Operator{op}
@@ -290,18 +293,18 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 		rs := storesStat[srcStoreID].RegionsStat[i]
 		srcRegion := cluster.GetRegion(rs.RegionID)
 		if srcRegion == nil {
-			schedulerCounter.WithLabelValues(h.GetName(), "no_region").Inc()
+			schedulerCounter.WithLabelValues(h.GetName(), "no-region").Inc()
 			continue
 		}
 
 		if isRegionUnhealthy(srcRegion) {
-			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy_replica").Inc()
+			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy-replica").Inc()
 			continue
 		}
 
 		if len(srcRegion.GetPeers()) != cluster.GetMaxReplicas() {
 			log.Debug("region has abnormal replica count", zap.String("scheduler", h.GetName()), zap.Uint64("region-id", srcRegion.GetID()))
-			schedulerCounter.WithLabelValues(h.GetName(), "abnormal_replica").Inc()
+			schedulerCounter.WithLabelValues(h.GetName(), "abnormal-replica").Inc()
 			continue
 		}
 
@@ -310,9 +313,9 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
 		}
 		filters := []filter.Filter{
-			filter.StoreStateFilter{MoveRegion: true},
-			filter.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
+			filter.StoreStateFilter{ActionScope: h.GetName(), MoveRegion: true},
+			filter.NewExcludedFilter(h.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			filter.NewDistinctScoreFilter(h.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
 		}
 		candidateStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
@@ -362,16 +365,16 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 		rs := storesStat[srcStoreID].RegionsStat[i]
 		srcRegion := cluster.GetRegion(rs.RegionID)
 		if srcRegion == nil {
-			schedulerCounter.WithLabelValues(h.GetName(), "no_region").Inc()
+			schedulerCounter.WithLabelValues(h.GetName(), "no-region").Inc()
 			continue
 		}
 
 		if isRegionUnhealthy(srcRegion) {
-			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy_replica").Inc()
+			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy-replica").Inc()
 			continue
 		}
 
-		filters := []filter.Filter{filter.StoreStateFilter{TransferLeader: true}}
+		filters := []filter.Filter{filter.StoreStateFilter{ActionScope: h.GetName(), TransferLeader: true}}
 		candidateStoreIDs := make([]uint64, 0, len(srcRegion.GetPeers())-1)
 		for _, store := range cluster.GetFollowerStores(srcRegion) {
 			if !filter.Target(cluster, store, filters) {

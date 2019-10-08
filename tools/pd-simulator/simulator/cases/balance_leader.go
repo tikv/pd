@@ -16,6 +16,7 @@ package cases
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
@@ -48,7 +49,7 @@ func newBalanceLeader() *Case {
 		})
 	}
 
-	simCase.Checker = func(regions *core.RegionsInfo) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		count1 := regions.GetStoreLeaderCount(1)
 		count2 := regions.GetStoreLeaderCount(2)
 		count3 := regions.GetStoreLeaderCount(3)

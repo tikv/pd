@@ -9,3 +9,5 @@ tags
 /.retools/
 vendor
 default*
+*.bak
+.vscode/

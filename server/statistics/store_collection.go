@@ -51,7 +51,6 @@ type ScheduleOptions interface {
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
 
-	IsRaftLearnerEnabled() bool
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool
 	IsRemoveDownReplicaEnabled() bool
@@ -165,14 +164,14 @@ func (s *storeStatistics) Collect() {
 
 	// Current scheduling configurations of the cluster
 	configs := make(map[string]float64)
-	configs["leader_schedule_limit"] = float64(s.opt.GetLeaderScheduleLimit(s.namespace))
-	configs["region_schedule_limit"] = float64(s.opt.GetRegionScheduleLimit(s.namespace))
-	configs["merge_schedule_limit"] = float64(s.opt.GetMergeScheduleLimit(s.namespace))
-	configs["replica_schedule_limit"] = float64(s.opt.GetReplicaScheduleLimit(s.namespace))
-	configs["max_replicas"] = float64(s.opt.GetMaxReplicas(s.namespace))
-	configs["high_space_ratio"] = float64(s.opt.GetHighSpaceRatio())
-	configs["low_space_ratio"] = float64(s.opt.GetLowSpaceRatio())
-	configs["tolerant_size_ratio"] = float64(s.opt.GetTolerantSizeRatio())
+	configs["leader-schedule-limit"] = float64(s.opt.GetLeaderScheduleLimit(s.namespace))
+	configs["region-schedule-limit"] = float64(s.opt.GetRegionScheduleLimit(s.namespace))
+	configs["merge-schedule-limit"] = float64(s.opt.GetMergeScheduleLimit(s.namespace))
+	configs["replica-schedule-limit"] = float64(s.opt.GetReplicaScheduleLimit(s.namespace))
+	configs["max-replicas"] = float64(s.opt.GetMaxReplicas(s.namespace))
+	configs["high-space-ratio"] = float64(s.opt.GetHighSpaceRatio())
+	configs["low-space-ratio"] = float64(s.opt.GetLowSpaceRatio())
+	configs["tolerant-size-ratio"] = float64(s.opt.GetTolerantSizeRatio())
 	configs["store-balance-rate"] = float64(s.opt.GetStoreBalanceRate())
 	configs["hot-region-schedule-limit"] = float64(s.opt.GetHotRegionScheduleLimit(s.namespace))
 	configs["hot-region-cache-hits-threshold"] = float64(s.opt.GetHotRegionCacheHitsThreshold())
@@ -181,12 +180,9 @@ func (s *storeStatistics) Collect() {
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
 
-	var disableMakeUpReplica, disableLearner, disableRemoveDownReplica, disableRemoveExtraReplica, disableReplaceOfflineReplica float64
+	var disableMakeUpReplica, disableRemoveDownReplica, disableRemoveExtraReplica, disableReplaceOfflineReplica float64
 	if !s.opt.IsMakeUpReplicaEnabled() {
 		disableMakeUpReplica = 1
-	}
-	if !s.opt.IsRaftLearnerEnabled() {
-		disableLearner = 1
 	}
 	if !s.opt.IsRemoveDownReplicaEnabled() {
 		disableRemoveDownReplica = 1
@@ -198,11 +194,10 @@ func (s *storeStatistics) Collect() {
 		disableReplaceOfflineReplica = 1
 	}
 
-	configs["disable_makeup_replica"] = disableMakeUpReplica
-	configs["disable_learner"] = disableLearner
-	configs["disable_remove_down_replica"] = disableRemoveDownReplica
-	configs["disable_remove_extra_replica"] = disableRemoveExtraReplica
-	configs["disable_replace_offline_replica"] = disableReplaceOfflineReplica
+	configs["disable-makeup-replica"] = disableMakeUpReplica
+	configs["disable-remove-down-replica"] = disableRemoveDownReplica
+	configs["disable-remove-extra-replica"] = disableRemoveExtraReplica
+	configs["disable-replace-offline-replica"] = disableReplaceOfflineReplica
 
 	for typ, value := range configs {
 		configStatusGauge.WithLabelValues(typ, s.namespace).Set(value)

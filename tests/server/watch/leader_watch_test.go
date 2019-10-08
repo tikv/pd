@@ -41,8 +41,8 @@ func (s *serverTestSuite) SetUpSuite(c *C) {
 func (s *serverTestSuite) TestWatcher(c *C) {
 	c.Parallel()
 	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.AutoCompactionRetention = "1s" })
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -78,8 +78,8 @@ func (s *serverTestSuite) TestWatcher(c *C) {
 func (s *serverTestSuite) TestWatcherCompacted(c *C) {
 	c.Parallel()
 	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.AutoCompactionRetention = "1s" })
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)

@@ -15,14 +15,14 @@ package syncer
 
 import (
 	"context"
-	"net/url"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -51,14 +51,9 @@ func (s *RegionSyncer) reset() {
 func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
 	s.reset()
 
-	u, err := url.Parse(addr)
+	cc, err := grpcutil.GetClientConn(addr, s.securityConfig.CAPath, s.securityConfig.CertPath, s.securityConfig.KeyPath)
 	if err != nil {
-		return nil, err
-	}
-
-	cc, err := grpc.Dial(u.Host, grpc.WithInsecure(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)))
-	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	ctx, cancel := context.WithCancel(s.server.Context())

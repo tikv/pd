@@ -14,8 +14,6 @@
 package statistics
 
 import (
-	"fmt"
-
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 )
@@ -32,7 +30,10 @@ const (
 	OfflinePeer
 	IncorrectNamespace
 	LearnerPeer
+	EmptyRegion
 )
+
+const nonIsolation = "none"
 
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
@@ -57,6 +58,7 @@ func NewRegionStatistics(opt ScheduleOptions, classifier namespace.Classifier) *
 	r.stats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[IncorrectNamespace] = make(map[uint64]*core.RegionInfo)
 	r.stats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
+	r.stats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
 	return r
 }
 
@@ -109,6 +111,11 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		peerTypeIndex |= LearnerPeer
 	}
 
+	if region.GetApproximateSize() <= core.EmptyRegionApproximateSize {
+		r.stats[EmptyRegion][regionID] = region
+		peerTypeIndex |= EmptyRegion
+	}
+
 	for _, store := range stores {
 		if store.IsOffline() {
 			peer := region.GetStorePeer(store.GetID())
@@ -142,62 +149,78 @@ func (r *RegionStatistics) ClearDefunctRegion(regionID uint64) {
 
 // Collect collects the metrics of the regions' status.
 func (r *RegionStatistics) Collect() {
-	regionStatusGauge.WithLabelValues("miss_peer_region_count").Set(float64(len(r.stats[MissPeer])))
-	regionStatusGauge.WithLabelValues("extra_peer_region_count").Set(float64(len(r.stats[ExtraPeer])))
-	regionStatusGauge.WithLabelValues("down_peer_region_count").Set(float64(len(r.stats[DownPeer])))
-	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[PendingPeer])))
-	regionStatusGauge.WithLabelValues("offline_peer_region_count").Set(float64(len(r.stats[OfflinePeer])))
-	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[IncorrectNamespace])))
-	regionStatusGauge.WithLabelValues("learner_peer_region_count").Set(float64(len(r.stats[LearnerPeer])))
+	regionStatusGauge.WithLabelValues("miss-peer-region-count").Set(float64(len(r.stats[MissPeer])))
+	regionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.stats[ExtraPeer])))
+	regionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.stats[DownPeer])))
+	regionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.stats[PendingPeer])))
+	regionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.stats[OfflinePeer])))
+	regionStatusGauge.WithLabelValues("incorrect-namespace-region-count").Set(float64(len(r.stats[IncorrectNamespace])))
+	regionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.stats[LearnerPeer])))
+	regionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.stats[EmptyRegion])))
 }
 
-// LabelLevelStatistics is the statistics of the level of labels.
-type LabelLevelStatistics struct {
-	regionLabelLevelStats map[uint64]int
-	labelLevelCounter     map[int]int
+// LabelStatistics is the statistics of the level of labels.
+type LabelStatistics struct {
+	regionLabelStats map[uint64]string
+	labelCounter     map[string]int
 }
 
-// NewLabelLevelStatistics creates a new LabelLevelStatistics.
-func NewLabelLevelStatistics() *LabelLevelStatistics {
-	return &LabelLevelStatistics{
-		regionLabelLevelStats: make(map[uint64]int),
-		labelLevelCounter:     make(map[int]int),
+// NewLabelStatistics creates a new LabelStatistics.
+func NewLabelStatistics() *LabelStatistics {
+	return &LabelStatistics{
+		regionLabelStats: make(map[uint64]string),
+		labelCounter:     make(map[string]int),
 	}
 }
 
 // Observe records the current label status.
-func (l *LabelLevelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
+func (l *LabelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
 	regionID := region.GetID()
-	regionLabelLevel := getRegionLabelIsolationLevel(stores, labels)
-	if level, ok := l.regionLabelLevelStats[regionID]; ok {
-		if level == regionLabelLevel {
+	regionIsolation := getRegionLabelIsolation(stores, labels)
+	if label, ok := l.regionLabelStats[regionID]; ok {
+		if label == regionIsolation {
 			return
 		}
-		l.labelLevelCounter[level]--
+		l.counterDec(label)
 	}
-	l.regionLabelLevelStats[regionID] = regionLabelLevel
-	l.labelLevelCounter[regionLabelLevel]++
+	l.regionLabelStats[regionID] = regionIsolation
+	l.counterInc(regionIsolation)
 }
 
 // Collect collects the metrics of the label status.
-func (l *LabelLevelStatistics) Collect() {
-	for level, count := range l.labelLevelCounter {
-		typ := fmt.Sprintf("level_%d", level)
-		regionLabelLevelGauge.WithLabelValues(typ).Set(float64(count))
+func (l *LabelStatistics) Collect() {
+	for level, count := range l.labelCounter {
+		regionLabelLevelGauge.WithLabelValues(level).Set(float64(count))
 	}
 }
 
 // ClearDefunctRegion is used to handle the overlap region.
-func (l *LabelLevelStatistics) ClearDefunctRegion(regionID uint64) {
-	if level, ok := l.regionLabelLevelStats[regionID]; ok {
-		l.labelLevelCounter[level]--
-		delete(l.regionLabelLevelStats, regionID)
+func (l *LabelStatistics) ClearDefunctRegion(regionID uint64, labels []string) {
+	if label, ok := l.regionLabelStats[regionID]; ok {
+		l.counterDec(label)
+		delete(l.regionLabelStats, regionID)
 	}
 }
 
-func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int {
+func (l *LabelStatistics) counterInc(label string) {
+	if label == nonIsolation {
+		l.labelCounter[nonIsolation]++
+	} else {
+		l.labelCounter[label]++
+	}
+}
+
+func (l *LabelStatistics) counterDec(label string) {
+	if label == nonIsolation {
+		l.labelCounter[nonIsolation]--
+	} else {
+		l.labelCounter[label]--
+	}
+}
+
+func getRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
 	if len(stores) == 0 || len(labels) == 0 {
-		return 0
+		return nonIsolation
 	}
 	queueStores := [][]*core.StoreInfo{stores}
 	for level, label := range labels {
@@ -210,10 +233,10 @@ func getRegionLabelIsolationLevel(stores []*core.StoreInfo, labels []string) int
 		}
 		queueStores = newQueueStores
 		if len(queueStores) == 0 {
-			return level + 1
+			return labels[level]
 		}
 	}
-	return 0
+	return nonIsolation
 }
 
 func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {

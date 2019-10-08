@@ -15,9 +15,6 @@ package region_test
 
 import (
 	"encoding/json"
-	"io/ioutil"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,7 +26,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
-	ctl "github.com/pingcap/pd/tools/pd-ctl/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -60,15 +56,9 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
-	fname := filepath.Join(os.TempDir(), "stdout")
-	old := os.Stdout
-	temp, _ := os.Create(fname)
-	os.Stdout = temp
-	ctl.Start([]string{"-u", url, "region", "key", "--format=raw", " "})
-	temp.Close()
-	os.Stdout = old
-	out, _ := ioutil.ReadFile(fname)
-	c.Assert(strings.Contains(string(out), "unknown flag"), IsFalse)
+
+	echo := pdctl.GetEcho([]string{"-u", url, "region", "key", "--format=raw", " "})
+	c.Assert(strings.Contains(string(echo), "unknown flag"), IsFalse)
 }
 
 func (s *regionTestSuite) TestRegion(c *C) {

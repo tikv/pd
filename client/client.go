@@ -15,10 +15,6 @@ package pd
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"io/ioutil"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -27,10 +23,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 // Client is a PD (Placement Driver) client.
@@ -56,7 +52,7 @@ type Client interface {
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
 	// with empty value (PeerID is 0).
-	ScanRegions(ctx context.Context, key []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error)
+	ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -272,43 +268,7 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 		return conn, nil
 	}
 
-	opt := grpc.WithInsecure()
-	if len(c.security.CAPath) != 0 {
-
-		certificates := []tls.Certificate{}
-		if len(c.security.CertPath) != 0 && len(c.security.KeyPath) != 0 {
-			// Load the client certificates from disk
-			certificate, err := tls.LoadX509KeyPair(c.security.CertPath, c.security.KeyPath)
-			if err != nil {
-				return nil, errors.Errorf("could not load client key pair: %s", err)
-			}
-			certificates = append(certificates, certificate)
-		}
-
-		// Create a certificate pool from the certificate authority
-		certPool := x509.NewCertPool()
-		ca, err := ioutil.ReadFile(c.security.CAPath)
-		if err != nil {
-			return nil, errors.Errorf("could not read ca certificate: %s", err)
-		}
-
-		// Append the certificates from the CA
-		if !certPool.AppendCertsFromPEM(ca) {
-			return nil, errors.New("failed to append ca certs")
-		}
-
-		creds := credentials.NewTLS(&tls.Config{
-			Certificates: certificates,
-			RootCAs:      certPool,
-		})
-
-		opt = grpc.WithTransportCredentials(creds)
-	}
-	u, err := url.Parse(addr)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	cc, err := grpc.Dial(u.Host, opt)
+	cc, err := grpcutil.GetClientConn(addr, c.security.CAPath, c.security.CertPath, c.security.KeyPath)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -467,11 +427,11 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
 		defer span.Finish()
 	}
-
+	count := len(requests)
 	start := time.Now()
 	req := &pdpb.TsoRequest{
 		Header: c.requestHeader(),
-		Count:  uint32(len(requests)),
+		Count:  uint32(count),
 	}
 
 	if err := stream.Send(req); err != nil {
@@ -486,6 +446,8 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 		return err
 	}
 	requestDurationTSO.Observe(time.Since(start).Seconds())
+	tsoBatchSize.Observe(float64(count))
+
 	if resp.GetCount() != uint32(len(requests)) {
 		err = errors.WithStack(errTSOLength)
 		c.finishTSORequest(requests, 0, 0, err)
@@ -689,7 +651,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 	return resp.GetRegion(), resp.GetLeader(), nil
 }
 
-func (c *client) ScanRegions(ctx context.Context, key []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error) {
+func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -700,6 +662,7 @@ func (c *client) ScanRegions(ctx context.Context, key []byte, limit int) ([]*met
 	resp, err := c.leaderClient().ScanRegions(ctx, &pdpb.ScanRegionsRequest{
 		Header:   c.requestHeader(),
 		StartKey: key,
+		EndKey:   endKey,
 		Limit:    int32(limit),
 	})
 	cancel()

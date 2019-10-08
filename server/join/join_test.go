@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 )
 
@@ -31,6 +32,7 @@ type testJoinServerSuite struct{}
 // A PD joins itself.
 func (s *testJoinServerSuite) TestPDJoinsItself(c *C) {
 	cfg := server.NewTestSingleConfig(c)
+	defer testutil.CleanServer(cfg)
 	cfg.Join = cfg.AdvertiseClientUrls
 	c.Assert(PrepareJoinCluster(cfg), NotNil)
 }

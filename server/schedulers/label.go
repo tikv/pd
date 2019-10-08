@@ -36,7 +36,10 @@ func init() {
 	})
 }
 
+const labelSchedulerName = "label-scheduler"
+
 type labelScheduler struct {
+	name string
 	*baseScheduler
 	selector *selector.BalanceSelector
 }
@@ -46,16 +49,17 @@ type labelScheduler struct {
 // the store with the specific label.
 func newLabelScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{TransferLeader: true},
+		filter.StoreStateFilter{ActionScope: labelSchedulerName, TransferLeader: true},
 	}
 	return &labelScheduler{
+		name:          labelSchedulerName,
 		baseScheduler: newBaseScheduler(opController),
 		selector:      selector.NewBalanceSelector(core.LeaderKind, filters),
 	}
 }
 
 func (s *labelScheduler) GetName() string {
-	return "label-scheduler"
+	return s.name
 }
 
 func (s *labelScheduler) GetType() string {
@@ -90,19 +94,19 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator
 			for _, p := range region.GetPendingPeers() {
 				excludeStores[p.GetStoreId()] = struct{}{}
 			}
-			f := filter.NewExcludedFilter(nil, excludeStores)
+			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 			target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region), f)
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "no_target").Inc()
+				schedulerCounter.WithLabelValues(s.GetName(), "no-target").Inc()
 				continue
 			}
 
-			schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+			schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 			op := operator.CreateTransferLeaderOperator("label-reject-leader", region, id, target.GetID(), operator.OpLeader)
 			return []*operator.Operator{op}
 		}
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "no_region").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 	return nil
 }

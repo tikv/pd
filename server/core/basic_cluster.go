@@ -284,19 +284,12 @@ func (bc *BasicCluster) SearchPrevRegion(regionKey []byte) *RegionInfo {
 	return bc.Regions.SearchPrevRegion(regionKey)
 }
 
-// ScanRange scans from the first region containing or behind start key,
-// until number greater than limit.
-func (bc *BasicCluster) ScanRange(startKey []byte, limit int) []*RegionInfo {
+// ScanRange scans regions intersecting [start key, end key), returns at most
+// `limit` regions. limit <= 0 means no limit.
+func (bc *BasicCluster) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
 	bc.RLock()
 	defer bc.RUnlock()
-	return bc.Regions.ScanRange(startKey, limit)
-}
-
-// ScanRangeWithEndKey scans regions intersecting [start key, end key).
-func (bc *BasicCluster) ScanRangeWithEndKey(startKey, endKey []byte) []*RegionInfo {
-	bc.RLock()
-	defer bc.RUnlock()
-	return bc.Regions.ScanRangeWithEndKey(startKey, endKey)
+	return bc.Regions.ScanRange(startKey, endKey, limit)
 }
 
 // GetOverlaps returns the regions which are overlapped with the specified region range.
@@ -322,7 +315,7 @@ type RegionSetInformer interface {
 	GetStoreRegionCount(storeID uint64) int
 	GetRegion(id uint64) *RegionInfo
 	GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo)
-	ScanRegions(startKey []byte, limit int) []*RegionInfo
+	ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo
 }
 
 // StoreSetInformer provides access to a shared informer of stores.

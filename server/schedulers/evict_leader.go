@@ -57,13 +57,14 @@ type evictLeaderScheduler struct {
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
+	name := fmt.Sprintf("evict-leader-scheduler-%d", storeID)
 	filters := []filter.Filter{
-		filter.StoreStateFilter{TransferLeader: true},
+		filter.StoreStateFilter{ActionScope: name, TransferLeader: true},
 	}
 	base := newBaseScheduler(opController)
 	return &evictLeaderScheduler{
 		baseScheduler: base,
-		name:          fmt.Sprintf("evict-leader-scheduler-%d", storeID),
+		name:          name,
 		storeID:       storeID,
 		selector:      selector.NewRandomSelector(filters),
 	}
@@ -93,15 +94,15 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.RandLeaderRegion(s.storeID, core.HealthRegion())
 	if region == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_leader").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 		return nil
 	}
 	target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
 	if target == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no_target_store").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 		return nil
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "new_operator").Inc()
+	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 	op := operator.CreateTransferLeaderOperator("evict-leader", region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}

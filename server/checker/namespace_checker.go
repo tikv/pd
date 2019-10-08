@@ -25,8 +25,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const namespaceCheckerName = "namespace-checker"
+
 // NamespaceChecker ensures region to go to the right place.
 type NamespaceChecker struct {
+	name       string
 	cluster    schedule.Cluster
 	filters    []filter.Filter
 	classifier namespace.Classifier
@@ -35,10 +38,11 @@ type NamespaceChecker struct {
 // NewNamespaceChecker creates a namespace checker.
 func NewNamespaceChecker(cluster schedule.Cluster, classifier namespace.Classifier) *NamespaceChecker {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{MoveRegion: true},
+		filter.StoreStateFilter{ActionScope: namespaceCheckerName, MoveRegion: true},
 	}
 
 	return &NamespaceChecker{
+		name:       namespaceCheckerName,
 		cluster:    cluster,
 		filters:    filters,
 		classifier: classifier,
@@ -55,14 +59,14 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *operator.Operator {
 
 	// fail-fast if there is only ONE namespace
 	if n.classifier == nil || len(n.classifier.GetAllNamespaces()) == 1 {
-		checkerCounter.WithLabelValues("namespace_checker", "no_namespace").Inc()
+		checkerCounter.WithLabelValues("namespace_checker", "no-namespace").Inc()
 		return nil
 	}
 
 	// get all the stores belong to the namespace
 	targetStores := n.getNamespaceStores(region)
 	if len(targetStores) == 0 {
-		checkerCounter.WithLabelValues("namespace_checker", "no_target_store").Inc()
+		checkerCounter.WithLabelValues("namespace_checker", "no-target-store").Inc()
 		return nil
 	}
 	for _, peer := range region.GetPeers() {
@@ -73,19 +77,19 @@ func (n *NamespaceChecker) Check(region *core.RegionInfo) *operator.Operator {
 		log.Debug("peer is not located in namespace target stores", zap.Uint64("region-id", region.GetID()), zap.Reflect("peer", peer))
 		newPeer := n.SelectBestPeerToRelocate(region, targetStores)
 		if newPeer == nil {
-			checkerCounter.WithLabelValues("namespace_checker", "no_target_peer").Inc()
+			checkerCounter.WithLabelValues("namespace_checker", "no-target-peer").Inc()
 			return nil
 		}
 		op, err := operator.CreateMovePeerOperator("make-namespace-relocation", n.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
 		if err != nil {
-			checkerCounter.WithLabelValues("namespace_checker", "create_operator_fail").Inc()
+			checkerCounter.WithLabelValues("namespace_checker", "create-operator-fail").Inc()
 			return nil
 		}
-		checkerCounter.WithLabelValues("namespace_checker", "new_operator").Inc()
+		checkerCounter.WithLabelValues("namespace_checker", "new-operator").Inc()
 		return op
 	}
 
-	checkerCounter.WithLabelValues("namespace_checker", "all_right").Inc()
+	checkerCounter.WithLabelValues("namespace_checker", "all-right").Inc()
 	return nil
 }
 
@@ -106,7 +110,7 @@ func (n *NamespaceChecker) SelectBestPeerToRelocate(region *core.RegionInfo, tar
 // SelectBestStoreToRelocate randomly returns the store to relocate
 func (n *NamespaceChecker) SelectBestStoreToRelocate(region *core.RegionInfo, targets []*core.StoreInfo) uint64 {
 	selector := selector.NewRandomSelector(n.filters)
-	target := selector.SelectTarget(n.cluster, targets, filter.NewExcludedFilter(nil, region.GetStoreIds()))
+	target := selector.SelectTarget(n.cluster, targets, filter.NewExcludedFilter(n.name, nil, region.GetStoreIds()))
 	if target == nil {
 		return 0
 	}
@@ -124,7 +128,7 @@ func (n *NamespaceChecker) isExists(stores []*core.StoreInfo, storeID uint64) bo
 
 func (n *NamespaceChecker) getNamespaceStores(region *core.RegionInfo) []*core.StoreInfo {
 	ns := n.classifier.GetRegionNamespace(region)
-	filteredStores := n.filter(n.cluster.GetStores(), filter.NewNamespaceFilter(n.classifier, ns))
+	filteredStores := n.filter(n.cluster.GetStores(), filter.NewNamespaceFilter(n.name, n.classifier, ns))
 
 	return filteredStores
 }

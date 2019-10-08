@@ -14,6 +14,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/go-units"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -134,9 +136,26 @@ func (s *testStoreSuite) TestStoresList(c *C) {
 
 func (s *testStoreSuite) TestStoreGet(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
+	s.svr.StoreHeartbeat(
+		context.Background(), &pdpb.StoreHeartbeatRequest{
+			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
+			Stats: &pdpb.StoreStats{
+				StoreId:   1,
+				Capacity:  1798985089024,
+				Available: 1709868695552,
+				UsedSize:  85150956358,
+			},
+		},
+	)
+
 	info := new(StoreInfo)
 	err := readJSONWithURL(url, info)
+
 	c.Assert(err, IsNil)
+	capacity, _ := units.RAMInBytes("1.636TiB")
+	available, _ := units.RAMInBytes("1.555TiB")
+	c.Assert(int64(info.Status.Capacity), Equals, capacity)
+	c.Assert(int64(info.Status.Available), Equals, available)
 	checkStoresInfo(c, []*StoreInfo{info}, s.stores[:1])
 }
 

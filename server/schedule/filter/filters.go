@@ -26,6 +26,8 @@ import (
 
 // Filter is an interface to filter source and target store.
 type Filter interface {
+	// Scope is used to indicate where the filter will act on.
+	Scope() string
 	Type() string
 	// Return true if the store should not be used as a source store.
 	Source(opt opt.Options, store *core.StoreInfo) bool
@@ -39,7 +41,7 @@ func Source(opt opt.Options, store *core.StoreInfo, filters []Filter) bool {
 	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
 		if filter.Source(opt, store) {
-			filterCounter.WithLabelValues("filter-source", storeAddress, storeID, filter.Type()).Inc()
+			filterCounter.WithLabelValues("filter-source", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
 			return true
 		}
 	}
@@ -52,7 +54,7 @@ func Target(opt opt.Options, store *core.StoreInfo, filters []Filter) bool {
 	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
 		if filter.Target(opt, store) {
-			filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Type()).Inc()
+			filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
 			return true
 		}
 	}
@@ -60,16 +62,22 @@ func Target(opt opt.Options, store *core.StoreInfo, filters []Filter) bool {
 }
 
 type excludedFilter struct {
+	scope   string
 	sources map[uint64]struct{}
 	targets map[uint64]struct{}
 }
 
 // NewExcludedFilter creates a Filter that filters all specified stores.
-func NewExcludedFilter(sources, targets map[uint64]struct{}) Filter {
+func NewExcludedFilter(scope string, sources, targets map[uint64]struct{}) Filter {
 	return &excludedFilter{
+		scope:   scope,
 		sources: sources,
 		targets: targets,
 	}
+}
+
+func (f *excludedFilter) Scope() string {
+	return f.scope
 }
 
 func (f *excludedFilter) Type() string {
@@ -86,30 +94,15 @@ func (f *excludedFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return ok
 }
 
-type blockFilter struct{}
-
-// NewBlockFilter creates a Filter that filters all stores that are blocked from balance.
-func NewBlockFilter() Filter {
-	return &blockFilter{}
-}
-
-func (f *blockFilter) Type() string {
-	return "block-filter"
-}
-
-func (f *blockFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsBlocked()
-}
-
-func (f *blockFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsBlocked()
-}
-
-type overloadFilter struct{}
+type overloadFilter struct{ scope string }
 
 // NewOverloadFilter creates a Filter that filters all stores that are overloaded from balance.
-func NewOverloadFilter() Filter {
-	return &overloadFilter{}
+func NewOverloadFilter(scope string) Filter {
+	return &overloadFilter{scope: scope}
+}
+
+func (f *overloadFilter) Scope() string {
+	return f.scope
 }
 
 func (f *overloadFilter) Type() string {
@@ -124,11 +117,15 @@ func (f *overloadFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return store.IsOverloaded()
 }
 
-type stateFilter struct{}
+type stateFilter struct{ scope string }
 
 // NewStateFilter creates a Filter that filters all stores that are not UP.
-func NewStateFilter() Filter {
-	return &stateFilter{}
+func NewStateFilter(scope string) Filter {
+	return &stateFilter{scope: scope}
+}
+
+func (f *stateFilter) Scope() string {
+	return f.scope
 }
 
 func (f *stateFilter) Type() string {
@@ -143,11 +140,15 @@ func (f *stateFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return !store.IsUp()
 }
 
-type healthFilter struct{}
+type healthFilter struct{ scope string }
 
 // NewHealthFilter creates a Filter that filters all stores that are Busy or Down.
-func NewHealthFilter() Filter {
-	return &healthFilter{}
+func NewHealthFilter(scope string) Filter {
+	return &healthFilter{scope: scope}
+}
+
+func (f *healthFilter) Scope() string {
+	return f.scope
 }
 
 func (f *healthFilter) Type() string {
@@ -169,31 +170,16 @@ func (f *healthFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return f.filter(opt, store)
 }
 
-type disconnectFilter struct{}
-
-// NewDisconnectFilter creates a Filter that filters all stores that are disconnected.
-func NewDisconnectFilter() Filter {
-	return &disconnectFilter{}
-}
-
-func (f *disconnectFilter) Type() string {
-	return "disconnect-filter"
-}
-
-func (f *disconnectFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsDisconnected()
-}
-
-func (f *disconnectFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsDisconnected()
-}
-
-type pendingPeerCountFilter struct{}
+type pendingPeerCountFilter struct{ scope string }
 
 // NewPendingPeerCountFilter creates a Filter that filters all stores that are
 // currently handling too many pending peers.
-func NewPendingPeerCountFilter() Filter {
-	return &pendingPeerCountFilter{}
+func NewPendingPeerCountFilter(scope string) Filter {
+	return &pendingPeerCountFilter{scope: scope}
+}
+
+func (p *pendingPeerCountFilter) Scope() string {
+	return p.scope
 }
 
 func (p *pendingPeerCountFilter) Type() string {
@@ -215,12 +201,16 @@ func (p *pendingPeerCountFilter) Target(opt opt.Options, store *core.StoreInfo) 
 	return p.filter(opt, store)
 }
 
-type snapshotCountFilter struct{}
+type snapshotCountFilter struct{ scope string }
 
 // NewSnapshotCountFilter creates a Filter that filters all stores that are
 // currently handling too many snapshots.
-func NewSnapshotCountFilter() Filter {
-	return &snapshotCountFilter{}
+func NewSnapshotCountFilter(scope string) Filter {
+	return &snapshotCountFilter{scope: scope}
+}
+
+func (f *snapshotCountFilter) Scope() string {
+	return f.scope
 }
 
 func (f *snapshotCountFilter) Type() string {
@@ -242,12 +232,17 @@ func (f *snapshotCountFilter) Target(opt opt.Options, store *core.StoreInfo) boo
 }
 
 type cacheFilter struct {
+	scope string
 	cache *cache.TTLUint64
 }
 
 // NewCacheFilter creates a Filter that filters all stores that are in the cache.
-func NewCacheFilter(cache *cache.TTLUint64) Filter {
-	return &cacheFilter{cache: cache}
+func NewCacheFilter(scope string, cache *cache.TTLUint64) Filter {
+	return &cacheFilter{scope: scope, cache: cache}
+}
+
+func (f *cacheFilter) Scope() string {
+	return f.scope
 }
 
 func (f *cacheFilter) Type() string {
@@ -262,12 +257,16 @@ func (f *cacheFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return false
 }
 
-type storageThresholdFilter struct{}
+type storageThresholdFilter struct{ scope string }
 
 // NewStorageThresholdFilter creates a Filter that filters all stores that are
 // almost full.
-func NewStorageThresholdFilter() Filter {
-	return &storageThresholdFilter{}
+func NewStorageThresholdFilter(scope string) Filter {
+	return &storageThresholdFilter{scope: scope}
+}
+
+func (f *storageThresholdFilter) Scope() string {
+	return f.scope
 }
 
 func (f *storageThresholdFilter) Type() string {
@@ -284,6 +283,7 @@ func (f *storageThresholdFilter) Target(opt opt.Options, store *core.StoreInfo) 
 
 // distinctScoreFilter ensures that distinct score will not decrease.
 type distinctScoreFilter struct {
+	scope     string
 	labels    []string
 	stores    []*core.StoreInfo
 	safeScore float64
@@ -291,7 +291,7 @@ type distinctScoreFilter struct {
 
 // NewDistinctScoreFilter creates a filter that filters all stores that have
 // lower distinct score than specified store.
-func NewDistinctScoreFilter(labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+func NewDistinctScoreFilter(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
 	newStores := make([]*core.StoreInfo, 0, len(stores)-1)
 	for _, s := range stores {
 		if s.GetID() == source.GetID() {
@@ -301,10 +301,15 @@ func NewDistinctScoreFilter(labels []string, stores []*core.StoreInfo, source *c
 	}
 
 	return &distinctScoreFilter{
+		scope:     scope,
 		labels:    labels,
 		stores:    newStores,
 		safeScore: core.DistinctScore(labels, newStores, source),
 	}
+}
+
+func (f *distinctScoreFilter) Scope() string {
+	return f.scope
 }
 
 func (f *distinctScoreFilter) Type() string {
@@ -320,17 +325,23 @@ func (f *distinctScoreFilter) Target(opt opt.Options, store *core.StoreInfo) boo
 }
 
 type namespaceFilter struct {
+	scope      string
 	classifier namespace.Classifier
 	namespace  string
 }
 
 // NewNamespaceFilter creates a Filter that filters all stores that are not
 // belong to a namespace.
-func NewNamespaceFilter(classifier namespace.Classifier, namespace string) Filter {
+func NewNamespaceFilter(scope string, classifier namespace.Classifier, namespace string) Filter {
 	return &namespaceFilter{
+		scope:      scope,
 		classifier: classifier,
 		namespace:  namespace,
 	}
+}
+
+func (f *namespaceFilter) Scope() string {
+	return f.scope
 }
 
 func (f *namespaceFilter) Type() string {
@@ -349,33 +360,19 @@ func (f *namespaceFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return f.filter(store)
 }
 
-type rejectLeaderFilter struct{}
-
-// NewRejectLeaderFilter creates a Filter that filters stores that marked as
-// rejectLeader from being the target of leader transfer.
-func NewRejectLeaderFilter() Filter {
-	return rejectLeaderFilter{}
-}
-
-func (f rejectLeaderFilter) Type() string {
-	return "reject-leader-filter"
-}
-
-func (f rejectLeaderFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return false
-}
-
-func (f rejectLeaderFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
-	return opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())
-}
-
 // StoreStateFilter is used to determine whether a store can be selected as the
 // source or target of the schedule based on the store's state.
 type StoreStateFilter struct {
+	ActionScope string
 	// Set true if the schedule involves any transfer leader operation.
 	TransferLeader bool
 	// Set true if the schedule involves any move region operation.
 	MoveRegion bool
+}
+
+// Scope returns the scheduler or the checker which the filter acts on.
+func (f StoreStateFilter) Scope() string {
+	return f.ActionScope
 }
 
 // Type returns the type of the Filter.
@@ -459,16 +456,23 @@ const (
 
 // BlacklistStoreFilter filters the store according to the blacklist.
 type BlacklistStoreFilter struct {
+	scope     string
 	blacklist map[uint64]struct{}
 	flag      BlacklistType
 }
 
 // NewBlacklistStoreFilter creates a blacklist filter.
-func NewBlacklistStoreFilter(typ BlacklistType) *BlacklistStoreFilter {
+func NewBlacklistStoreFilter(scope string, typ BlacklistType) *BlacklistStoreFilter {
 	return &BlacklistStoreFilter{
+		scope:     scope,
 		blacklist: make(map[uint64]struct{}),
 		flag:      typ,
 	}
+}
+
+// Scope returns the scheduler or the checker which the filter acts on.
+func (f *BlacklistStoreFilter) Scope() string {
+	return f.scope
 }
 
 // Type implements the Filter.

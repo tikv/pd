@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/kv"
+	"github.com/pingcap/pd/server/member"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -41,6 +42,7 @@ type TimestampOracle struct {
 	// For tso, set after pd becomes leader.
 	ts            atomic.Value
 	lastSavedTime time.Time
+	lease         *member.LeaderLease
 
 	rootPath     string
 	member       string
@@ -100,7 +102,7 @@ func (t *TimestampOracle) saveTimestamp(ts time.Time) error {
 }
 
 // SyncTimestamp is used to synchronize the timestamp.
-func (t *TimestampOracle) SyncTimestamp() error {
+func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 	tsoCounter.WithLabelValues("sync").Inc()
 
 	last, err := t.loadTimestamp()
@@ -131,6 +133,7 @@ func (t *TimestampOracle) SyncTimestamp() error {
 	current := &atomicObject{
 		physical: next,
 	}
+	t.lease = lease
 	t.ts.Store(current)
 
 	return nil
@@ -237,6 +240,9 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 			tsoCounter.WithLabelValues("logical_overflow").Inc()
 			time.Sleep(UpdateTimestampStep)
 			continue
+		}
+		if t.lease == nil || t.lease.IsExpired() {
+			return pdpb.Timestamp{}, errors.New("alloc timestamp failed, lease expired")
 		}
 		return resp, nil
 	}

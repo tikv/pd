@@ -51,8 +51,8 @@ func (alloc *idAllocator) Alloc() uint64 {
 func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	c.Parallel()
 	cluster, err := tests.NewTestCluster(3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -81,8 +81,9 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 		err = rc.HandleRegionHeartbeat(region)
 		c.Assert(err, IsNil)
 	}
-	// ensure flush to region storage
-	time.Sleep(3 * time.Second)
+	// ensure flush to region storage, we use a duration larger than the
+	// region storage flush rate limit (3s).
+	time.Sleep(4 * time.Second)
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
@@ -95,9 +96,8 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Parallel()
 	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
-
-	c.Assert(err, IsNil)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
