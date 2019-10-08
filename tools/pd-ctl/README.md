@@ -266,12 +266,6 @@ The configuration above is global. You can also tune the configuration by config
     config set high-space-ratio 0.5             // Set the threshold value of sufficient space to 0.5
     ```
 
-- `disable-raft-learner` is used to disable Raft learner. By default, PD uses Raft learner when adding replicas to reduce the risk of unavailability due to downtime or network failure.
-
-    ```bash
-    config set disable-raft-learner true        // Disable Raft learner
-    ```
-
 - `cluster-version` is the version of the cluster, which is used to enable or disable some features and to deal with the compatibility issues. By default, it is the minimum version of all normally running TiKV nodes in the cluster. You can set it manually only when you need to roll it back to an earlier version.
 
     ```bash

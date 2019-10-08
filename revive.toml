@@ -20,14 +20,9 @@ warningCode = 0
 [rule.empty-block]
 [rule.superfluous-else]
 [rule.modifies-parameter]
-
-# Add these once issues are fixed
 [rule.confusing-naming]
-  severity = "warning"
 [rule.confusing-results]
-  severity = "warning"
 [rule.flag-parameter]
-  severity = "warning"
 
 # Currently this makes too much noise, but should add it in
 # and perhaps ignore it in a few files

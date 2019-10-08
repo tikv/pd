@@ -185,7 +185,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(scheduleCfg.HotRegionCacheHitsThreshold, Equals, uint64(5))
 	c.Assert(scheduleCfg.HotRegionScheduleLimit, Equals, uint64(64))
 	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, uint64(64))
-	args1 = []string{"-u", pdAddr, "config", "set", "disable-raft-learner", "true"}
+	args1 = []string{"-u", pdAddr, "config", "set", "disable-remove-down-replica", "true"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	args2 = []string{"-u", pdAddr, "config", "show"}
@@ -194,5 +194,5 @@ func (s *configTestSuite) TestConfig(c *C) {
 	cfg = config.Config{}
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	scheduleCfg = cfg.Schedule
-	c.Assert(scheduleCfg.DisableLearner, Equals, svr.GetScheduleConfig().DisableLearner)
+	c.Assert(scheduleCfg.DisableRemoveDownReplica, Equals, svr.GetScheduleConfig().DisableRemoveDownReplica)
 }

@@ -34,9 +34,6 @@ const (
 	// region to be merged. if there is, will send the corresponding
 	// merge command to the TiKV.
 	RegionMerge
-	// RaftLearner supports add a non-voting member in raft members.
-	// and PD scheduling strategy will replace `addPeer` to `addLearner`,`promotoLearner`.
-	RaftLearner
 	// BatchSplit can speed up the region split.
 	// and PD will response the BatchSplit request.
 	BatchSplit
@@ -46,7 +43,6 @@ var featuresDict = map[Feature]string{
 	Base:        "1.0.0",
 	Version2_0:  "2.0.0",
 	RegionMerge: "2.0.0",
-	RaftLearner: "2.0.0",
 	BatchSplit:  "2.1.0-rc.1",
 }
 

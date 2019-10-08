@@ -1279,14 +1279,6 @@ func (c *RaftCluster) GetHotRegionCacheHitsThreshold() int {
 	return c.opt.GetHotRegionCacheHitsThreshold()
 }
 
-// IsRaftLearnerEnabled returns if raft learner is enabled.
-func (c *RaftCluster) IsRaftLearnerEnabled() bool {
-	if !c.IsFeatureSupported(RaftLearner) {
-		return false
-	}
-	return c.opt.IsRaftLearnerEnabled()
-}
-
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (c *RaftCluster) IsRemoveDownReplicaEnabled() bool {
 	return c.opt.IsRemoveDownReplicaEnabled()
