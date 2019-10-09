@@ -15,6 +15,7 @@ package server
 
 import (
 	"bytes"
+	"fmt"
 	"encoding/hex"
 	"strconv"
 	"strings"
@@ -62,12 +63,13 @@ var (
 
 // Handler is a helper to export methods to handle API/RPC requests.
 type Handler struct {
-	s   *Server
-	opt *config.ScheduleOption
+	s     *Server
+	opt   *config.ScheduleOption
+	chMap map[string]chan string
 }
 
 func newHandler(s *Server) *Handler {
-	return &Handler{s: s, opt: s.scheduleOpt}
+	return &Handler{s: s, opt: s.scheduleOpt, chMap: make(map[string]chan string)}
 }
 
 // GetRaftCluster returns RaftCluster.
@@ -758,4 +760,34 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 		return nil, ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.EmptyRegion), nil
+}
+
+// PluginLoad loads the plugin referenced by the pluginPath
+func (h *Handler) PluginLoad(pluginPath, configPath string) error {
+	fmt.Println(pluginPath)
+	fmt.Println(configPath)
+	c, err := h.getCoordinator()
+	if err != nil {
+		return err
+	}
+	ch := make(chan string)
+	h.chMap[pluginPath] = ch
+	c.wg.Add(1)
+	go c.readUserConfig(pluginPath, configPath, ch)
+	return nil
+}
+
+// PluginUpdate update the plugin referenced by the pluginPath
+func (h *Handler) PluginUpdate(pluginPath, configPath string) error {
+	fmt.Println(pluginPath)
+	fmt.Println(configPath)
+	ch := h.chMap[pluginPath]
+	ch <- configPath
+	return nil
+}
+
+// PluginUnload unloads the plugin referenced by the pluginPath
+func (h *Handler) PluginUnload(pluginPath string) error {
+	fmt.Println(pluginPath)
+	return nil
 }

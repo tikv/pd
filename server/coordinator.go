@@ -249,6 +249,52 @@ func (c *coordinator) run() {
 	go c.drivePushOperator()
 }
 
+//read user_config.toml and load plugin
+func (c *coordinator) readUserConfig(pluginPath, configPath string, ch chan string) {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+	//get func from plugin
+	//func : NewUserConfig()
+	f1, err := schedule.GetFunction(pluginPath, "NewUserConfig")
+	if err != nil {
+		log.Error("GetFunction err", zap.Error(err))
+		return
+	}
+
+	NewUserConfig := f1.(func() schedule.Config)
+	//func : ProduceScheduler()
+	f2, err := schedule.GetFunction(pluginPath, "ProduceScheduler")
+	if err != nil {
+		log.Error("GetFunction err", zap.Error(err))
+		return
+	}
+
+	ProduceScheduler := f2.(func(schedule.Config, *schedule.OperatorController, schedule.Cluster) []schedule.Scheduler)
+
+	userConfig := NewUserConfig()
+	if userConfig.LoadConfig(configPath, c.cluster.GetMaxReplicas()) {
+		schedulers := ProduceScheduler(userConfig, c.opController, c.cluster)
+		for _, s := range schedulers {
+			if err = c.addUserScheduler(s); err != nil {
+				log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+			}
+		}
+	}
+	//Get signal from channel which means user config changed
+	for {
+		configPath := <-ch
+		log.Info("user config changed")
+		if userConfig.LoadConfig(configPath, c.cluster.GetMaxReplicas()) {
+			schedulers := ProduceScheduler(userConfig, c.opController, c.cluster)
+			for _, s := range schedulers {
+				if err = c.addUserScheduler(s); err != nil {
+					log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+				}
+			}
+		}
+	}
+}
+
 func (c *coordinator) stop() {
 	c.cancel()
 }
@@ -382,6 +428,33 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	if _, ok := c.schedulers[scheduler.GetName()]; ok {
 		return errSchedulerExisted
 	}
+
+	s := newScheduleController(c, scheduler)
+	if err := s.Prepare(c.cluster); err != nil {
+		return err
+	}
+
+	c.wg.Add(1)
+	go c.runScheduler(s)
+	c.schedulers[s.GetName()] = s
+	c.cluster.opt.AddSchedulerCfg(s.GetType(), args)
+
+	return nil
+}
+
+func (c *coordinator) addUserScheduler(scheduler schedule.Scheduler, args ...string) error {
+	c.RLock()
+	if _, ok := c.schedulers[scheduler.GetName()]; ok {
+		c.RUnlock()
+		if err := c.removeScheduler(scheduler.GetName()); err != nil {
+			log.Error("can not remove scheduler", zap.String("scheduler-name", scheduler.GetName()), zap.Error(err))
+		}
+	} else {
+		c.RUnlock()
+	}
+
+	c.Lock()
+	defer c.Unlock()
 
 	s := newScheduleController(c, scheduler)
 	if err := s.Prepare(c.cluster); err != nil {
