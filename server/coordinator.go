@@ -121,9 +121,13 @@ func (c *coordinator) patrolRegions() {
 				continue
 			}
 
-			key = region.GetEndKey()
+			checkerIsBusy, ops := c.checkRegion(region)
+			if checkerIsBusy {
+				break
+			}
 
-			if ops := c.checkRegion(region); ops != nil {
+			key = region.GetEndKey()
+			if ops != nil {
 				opController := c.opController
 				opController.AddWaitingOperator(ops...)
 			}
@@ -156,39 +160,43 @@ func (c *coordinator) drivePushOperator() {
 	}
 }
 
-func (c *coordinator) checkRegion(region *core.RegionInfo) []*operator.Operator {
+func (c *coordinator) checkRegion(region *core.RegionInfo) (bool, []*operator.Operator) {
 	opController := c.opController
-
+	checkerIsBusy := true
 	if op := c.learnerChecker.Check(region); op != nil {
+		checkerIsBusy = false
 		ops := make([]*operator.Operator, 0, 1)
 		ops = append(ops, op)
-		return ops
+		return checkerIsBusy, ops
 	}
 
 	if opController.OperatorCount(operator.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
 		opController.OperatorCount(operator.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
 		opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+		checkerIsBusy = false
 		if op := c.namespaceChecker.Check(region); op != nil {
 			ops := make([]*operator.Operator, 0, 1)
 			ops = append(ops, op)
-			return ops
+			return checkerIsBusy, ops
 		}
 	}
 
 	if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+		checkerIsBusy = false
 		if op := c.replicaChecker.Check(region); op != nil {
 			ops := make([]*operator.Operator, 0, 1)
 			ops = append(ops, op)
-			return ops
+			return checkerIsBusy, ops
 		}
 	}
 	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+		checkerIsBusy = false
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
-			return ops
+			return checkerIsBusy, ops
 		}
 	}
-	return nil
+	return checkerIsBusy, nil
 }
 
 func (c *coordinator) run() {
