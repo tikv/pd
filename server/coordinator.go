@@ -123,8 +123,9 @@ func (c *coordinator) patrolRegions() {
 
 			key = region.GetEndKey()
 
-			if c.checkRegion(region) {
-				break
+			if ops := c.checkRegion(region); ops != nil {
+				opController := c.opController
+				opController.AddWaitingOperator(ops...)
 			}
 		}
 		// Updates the label level isolation statistics.
@@ -155,41 +156,39 @@ func (c *coordinator) drivePushOperator() {
 	}
 }
 
-func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
+func (c *coordinator) checkRegion(region *core.RegionInfo) []*operator.Operator {
 	opController := c.opController
 
 	if op := c.learnerChecker.Check(region); op != nil {
-		if opController.AddOperator(op) {
-			return true
-		}
+		ops := make([]*operator.Operator, 0, 1)
+		ops = append(ops, op)
+		return ops
 	}
 
 	if opController.OperatorCount(operator.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
 		opController.OperatorCount(operator.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
 		opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.namespaceChecker.Check(region); op != nil {
-			if opController.AddWaitingOperator(op) {
-				return true
-			}
+			ops := make([]*operator.Operator, 0, 1)
+			ops = append(ops, op)
+			return ops
 		}
 	}
 
 	if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		if op := c.replicaChecker.Check(region); op != nil {
-			if opController.AddWaitingOperator(op) {
-				return true
-			}
+			ops := make([]*operator.Operator, 0, 1)
+			ops = append(ops, op)
+			return ops
 		}
 	}
 	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
-			if opController.AddWaitingOperator(ops...) {
-				return true
-			}
+			return ops
 		}
 	}
-	return false
+	return nil
 }
 
 func (c *coordinator) run() {
