@@ -1,0 +1,27 @@
+language: go
+
+cache:
+  directories:
+    - $HOME/.cache/go-build
+    - $GOPATH/pkg/mod
+    - $GOPATH/src/github.com/pingcap/pd/.retools
+
+go:
+  - 1.13
+
+script:
+  - make ci
+
+matrix:
+  include:
+  - go: 1.13
+    install:
+      - go get github.com/mattn/goveralls
+    env:
+      - TRAVIS_COVERAGE=1
+    script:
+      - make ci
+    after_success:
+      - travis_wait make travis_coverage
+      - mv overalls.coverprofile coverage.txt
+      - bash <(curl -s https://codecov.io/bash)
