@@ -673,7 +673,7 @@ const (
 // will force the iterator to include the first item when it equals 'start',
 // thus creating a "greaterOrEqual" or "lessThanEqual" rather than just a
 // "greaterThan" or "lessThan" queries.
-func (n *node) iterate(dir direction, start, stop Item, includeStart bool, hit bool, iter ItemIterator) (bool, bool) {
+func (n *node) iterate(dir direction, start, stop Item, includeStart bool, hit bool, iter ItemIterator) (bool, bool) { // revive:disable-line:flag-parameter,confusing-results
 	var ok, found bool
 	var index int
 	switch dir {
@@ -1060,7 +1060,7 @@ func (t *BTree) getRootLength() int {
 //   O(tree size):  when all nodes are owned by another tree, all nodes are
 //       iterated over looking for nodes to add to the freelist, and due to
 //       ownership, none are.
-func (t *BTree) Clear(addNodesToFreelist bool) {
+func (t *BTree) Clear(addNodesToFreelist bool) { // revive:disable-line:flag-parameter
 	if t.root != nil && addNodesToFreelist {
 		t.root.reset(t.cow)
 	}

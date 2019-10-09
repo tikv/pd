@@ -278,9 +278,8 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
-	cfg, opt, err := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cfg.DisableLearner = false
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(c, tc)
 	defer cleanup()
@@ -310,8 +309,6 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	co.stop()
 	co.wg.Wait()
 
-	// new cluster with learner disabled
-	cfg.DisableLearner = true
 	tc = newTestCluster(opt)
 	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()

@@ -530,6 +530,9 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if err := cfg.Deprecated(); err != nil {
+		return err
+	}
 	old := s.scheduleOpt.Load()
 	s.scheduleOpt.Store(&cfg)
 	if err := s.scheduleOpt.Persist(s.storage); err != nil {

@@ -49,8 +49,6 @@ type Options interface {
 	GetHighSpaceRatio() float64
 	GetSchedulerMaxWaitingOperator() uint64
 
-	IsRaftLearnerEnabled() bool
-
 	IsRemoveDownReplicaEnabled() bool
 	IsReplaceOfflineReplicaEnabled() bool
 	IsMakeUpReplicaEnabled() bool

@@ -84,7 +84,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 			return nil
 		}
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
-		return operator.CreateAddPeerOperator("make-up-replica", r.cluster, region, newPeer.GetId(), newPeer.GetStoreId(), operator.OpReplica)
+		return operator.CreateAddPeerOperator("make-up-replica", region, newPeer.GetId(), newPeer.GetStoreId(), operator.OpReplica)
 	}
 
 	// when add learner peer, the number of peer will exceed max replicas for a while,
@@ -258,21 +258,6 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 		op, err := operator.CreateRemovePeerOperator(removeExtra, r.cluster, operator.OpReplica, region, peer.GetStoreId())
 		if err != nil {
 			reason := fmt.Sprintf("%s-fail", removeExtra)
-			checkerCounter.WithLabelValues("replica_checker", reason).Inc()
-			return nil
-		}
-		return op
-	}
-
-	removePending := fmt.Sprintf("remove-pending-%s-replica", status)
-	// Consider we have 3 peers (A, B, C), we set the store that contains C to
-	// offline/down while C is pending. If we generate an operator that adds a replica
-	// D then removes C, D will not be successfully added util C is normal again.
-	// So it's better to remove C directly.
-	if region.GetPendingPeer(peer.GetId()) != nil {
-		op, err := operator.CreateRemovePeerOperator(removePending, r.cluster, operator.OpReplica, region, peer.GetStoreId())
-		if err != nil {
-			reason := fmt.Sprintf("%s-fail", removePending)
 			checkerCounter.WithLabelValues("replica_checker", reason).Inc()
 			return nil
 		}
