@@ -774,9 +774,7 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	tc.RaftCluster.opt = newOpt
 	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
-	storage = tc.RaftCluster.storage
 	c.Assert(co.schedulers, HasLen, 0)
-
 	// the option remains default scheduler
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 4)
 	co.stop()
