@@ -288,15 +288,25 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 
+	testCheckRegion := func(expectCheckerIsBusy, expectAddOperator bool) {
+		checkerIsBusy, ops := co.checkRegion(tc.GetRegion(1))
+		c.Assert(checkerIsBusy, Equals, expectCheckerIsBusy)
+		if ops == nil {
+			c.Assert(expectAddOperator, IsFalse)
+		} else {
+			c.Assert(co.opController.AddWaitingOperator(ops...), Equals, expectAddOperator)
+		}
+	}
+
 	c.Assert(tc.addRegionStore(4, 4), IsNil)
 	c.Assert(tc.addRegionStore(3, 3), IsNil)
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsTrue)
+	testCheckRegion(false, true)
 	waitOperator(c, co, 1)
 	testutil.CheckAddPeer(c, co.opController.GetOperator(1), operator.OpReplica, 1)
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+	testCheckRegion(false, false)
 
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
@@ -305,7 +315,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
 	)
 	c.Assert(tc.putRegion(r), IsNil)
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+	testCheckRegion(false, false)
 	co.stop()
 	co.wg.Wait()
 
@@ -320,15 +330,15 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.putRegion(r), IsNil)
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+	testCheckRegion(false, false)
 	r = r.Clone(core.WithPendingPeers(nil))
 	c.Assert(tc.putRegion(r), IsNil)
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsTrue)
+	testCheckRegion(false, true)
 	waitOperator(c, co, 1)
 	op := co.opController.GetOperator(1)
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+	testCheckRegion(false, false)
 }
 
 func (s *testCoordinatorSuite) TestReplica(c *C) {
