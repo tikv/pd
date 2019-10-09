@@ -22,6 +22,11 @@ import (
 )
 
 func init() {
+	schedule.RegisterArgsToMapper("shuffle-leader", func(args []string) (schedule.ConfigMapper, error) {
+		mapper := make(schedule.ConfigMapper)
+		return mapper, nil
+	})
+
 	schedule.RegisterScheduler("shuffle-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
 		return newShuffleLeaderScheduler(opController), nil
 	})

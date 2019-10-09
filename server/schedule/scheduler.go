@@ -92,21 +92,26 @@ func ConvArgsToMapper(typ string, args []string) (ConfigMapper, error) {
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(name string, opController *OperatorController, storage *core.Storage, mapper ConfigMapper) (Scheduler, error) {
-	// Fix: do not loop the map.
-	var typ string
-	for registerdType := range schedulerMap {
-		if strings.Index(name, registerdType) != -1 {
-			typ = registerdType
-			break
-		}
-	}
+func CreateScheduler(typ string, opController *OperatorController, storage *core.Storage, mapper ConfigMapper) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
-		return nil, errors.Errorf("create func of %v is not registered", name)
+		return nil, errors.Errorf("create func of %v is not registered", typ)
 	}
 
 	return fn(opController, storage, mapper)
+}
+
+// FindScheduleTypeByName finds the type of the specified name.
+func FindScheduleTypeByName(name string) string {
+	var typ string
+	for registerdType := range schedulerMap {
+		if strings.Index(name, registerdType) != -1 {
+			if len(registerdType) > len(typ) {
+				typ = registerdType
+			}
+		}
+	}
+	return typ
 }
 
 // Cluster provides an overview of a cluster's regions distribution.

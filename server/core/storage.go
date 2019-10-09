@@ -109,6 +109,12 @@ func (s *Storage) SaveScheduleConfig(scheduleName string, cfg interface{}) error
 	return s.Save(configPath, string(value))
 }
 
+// RemoveScheduleConfig remvoes the config of scheduler.
+func (s *Storage) RemoveScheduleConfig(scheduleName string) error {
+	configPath := path.Join(customeScheduleConfigPath, scheduleName)
+	return s.Remove(configPath)
+}
+
 // LoadScheduleConfig loads the config of scheduler.
 func (s *Storage) LoadScheduleConfig(scheduleName string) (string, error) {
 	configPath := path.Join(customeScheduleConfigPath, scheduleName)
@@ -190,6 +196,7 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 	if value == "" {
 		return false, nil
 	}
+	fmt.Println("load cfg", value)
 	err = json.Unmarshal([]byte(value), cfg)
 	if err != nil {
 		return false, errors.WithStack(err)

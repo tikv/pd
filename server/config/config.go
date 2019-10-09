@@ -547,9 +547,10 @@ type ScheduleConfig struct {
 	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string"`
 
 	// Schedulers support for loading customized schedulers
-	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"-"` // json v2 is for the sake of compatible upgrade
+	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
+
 	// Only used to display
-	SchedulersPayload map[string]string `json:"schedulers"`
+	SchedulersPayload map[string]string `json:"schedulers,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.

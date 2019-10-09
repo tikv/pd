@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/checker"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
@@ -215,23 +216,40 @@ func (c *coordinator) run() {
 	if err != nil {
 		log.Fatal("cannot load schedulers' config")
 	}
+
+	scheduleCfg := c.cluster.opt.Load().Clone()
 	for i, name := range scheduleNames {
-		config := configs[i]
-		confMapper := make(schedule.ConfigMapper)
-		json.Unmarshal([]byte(config), &confMapper)
-		s, err := schedule.CreateScheduler(name, c.opController, c.cluster.storage, confMapper)
-		if err != nil {
-			log.Error("can not create scheduler on new way", zap.String("scheduler-name", name), zap.Error(err))
+		payload := configs[i]
+		typ := schedule.FindScheduleTypeByName(name)
+		var cfg config.SchedulerConfig
+		for _, c := range scheduleCfg.Schedulers {
+			if c.Type == typ {
+				cfg = c
+				break
+			}
+		}
+		if len(cfg.Type) <= 0 {
+			log.Error("can not create scheduler with independent configuration", zap.String("schedule-name", name), zap.String("scheduler-type", cfg.Type))
 			continue
 		}
-		log.Info("create scheduler on new way", zap.String("scheduler-name", s.GetName()))
+		if cfg.Disable {
+			log.Info("skip create scheduler with independent configuration", zap.String("schedule-name", name), zap.String("scheduler-type", cfg.Type))
+			continue
+		}
+		confMapper := make(schedule.ConfigMapper)
+		json.Unmarshal([]byte(payload), &confMapper)
+		s, err := schedule.CreateScheduler(cfg.Type, c.opController, c.cluster.storage, confMapper)
+		if err != nil {
+			log.Error("can not create scheduler with independent configuration", zap.String("schedule-name", name), zap.Error(err))
+			continue
+		}
+		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
 		if err = c.addScheduler(s); err != nil {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		}
 	}
 
 	k := 0
-	scheduleCfg := c.cluster.opt.Load().Clone()
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg

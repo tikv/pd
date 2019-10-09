@@ -39,12 +39,11 @@ const (
 
 func init() {
 	schedule.RegisterArgsToMapper("adjacent-region", func(args []string) (schedule.ConfigMapper, error) {
-		if len(args) != 2 {
-			return nil, errors.New("should specify the leader limit and peer limit")
-		}
 		mapper := make(schedule.ConfigMapper)
-		mapper["leader-limit"] = args[0]
-		mapper["peer-limit"] = args[1]
+		if len(args) == 2 {
+			mapper["leader-limit"] = args[0]
+			mapper["peer-limit"] = args[1]
+		}
 		return mapper, nil
 	})
 	schedule.RegisterScheduler("adjacent-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
@@ -58,16 +57,24 @@ func init() {
 			if err != nil {
 				return nil, errors.WithStack(err)
 			}
-			return newBalanceAdjacentRegionScheduler(opController, leaderLimit, peerLimit), nil
-		} else if l == 1 {
-			leaderLimit, err := strconv.ParseUint(mapper["leader-limit"].(string), 10, 64)
-			if err != nil {
-				return nil, errors.WithStack(err)
+			conf := &balanceAdjacentRegionConf{
+				leaderLimit: leaderLimit,
+				peerLimit:   peerLimit,
 			}
-			return newBalanceAdjacentRegionScheduler(opController, leaderLimit), nil
+			return newBalanceAdjacentRegionScheduler(opController, conf), nil
 		}
-		return newBalanceAdjacentRegionScheduler(opController), nil
+		conf := &balanceAdjacentRegionConf{
+			leaderLimit: defaultAdjacentLeaderLimit,
+			peerLimit:   defaultAdjacentPeerLimit,
+		}
+		storage.SaveScheduleConfig(balanceAdjacentRegionName, storage)
+		return newBalanceAdjacentRegionScheduler(opController, conf), nil
 	})
+}
+
+type balanceAdjacentRegionConf struct {
+	leaderLimit uint64
+	peerLimit   uint64
 }
 
 // balanceAdjacentRegionScheduler will disperse adjacent regions.
@@ -77,12 +84,10 @@ func init() {
 // 2. the two regions' leader will not in the public store of this two regions
 type balanceAdjacentRegionScheduler struct {
 	*baseScheduler
-	name                 string
 	selector             *selector.RandomSelector
-	leaderLimit          uint64
-	peerLimit            uint64
 	lastKey              []byte
 	cacheRegions         *adjacentState
+	conf                 *balanceAdjacentRegionConf
 	adjacentRegionsCount int
 }
 
@@ -104,31 +109,22 @@ func (a *adjacentState) len() int {
 
 // newBalanceAdjacentRegionScheduler creates a scheduler that tends to disperse adjacent region
 // on each store.
-func newBalanceAdjacentRegionScheduler(opController *schedule.OperatorController, args ...uint64) schedule.Scheduler {
+func newBalanceAdjacentRegionScheduler(opController *schedule.OperatorController, conf *balanceAdjacentRegionConf) schedule.Scheduler {
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: balanceAdjacentRegionName, TransferLeader: true, MoveRegion: true},
 	}
 	base := newBaseScheduler(opController)
 	s := &balanceAdjacentRegionScheduler{
 		baseScheduler: base,
-		name:          balanceAdjacentRegionName,
 		selector:      selector.NewRandomSelector(filters),
-		leaderLimit:   defaultAdjacentLeaderLimit,
-		peerLimit:     defaultAdjacentPeerLimit,
+		conf:          conf,
 		lastKey:       []byte(""),
-	}
-	l := len(args)
-	if l == 1 {
-		s.leaderLimit = args[0]
-	} else if l == 2 {
-		s.leaderLimit = args[0]
-		s.peerLimit = args[1]
 	}
 	return s
 }
 
 func (l *balanceAdjacentRegionScheduler) GetName() string {
-	return l.name
+	return balanceAdjacentRegionName
 }
 
 func (l *balanceAdjacentRegionScheduler) GetType() string {
@@ -148,11 +144,11 @@ func (l *balanceAdjacentRegionScheduler) IsScheduleAllowed(cluster schedule.Clus
 }
 
 func (l *balanceAdjacentRegionScheduler) allowBalanceLeader() bool {
-	return l.opController.OperatorCount(operator.OpAdjacent|operator.OpLeader) < l.leaderLimit
+	return l.opController.OperatorCount(operator.OpAdjacent|operator.OpLeader) < l.conf.leaderLimit
 }
 
 func (l *balanceAdjacentRegionScheduler) allowBalancePeer() bool {
-	return l.opController.OperatorCount(operator.OpAdjacent|operator.OpRegion) < l.peerLimit
+	return l.opController.OperatorCount(operator.OpAdjacent|operator.OpRegion) < l.conf.peerLimit
 }
 
 func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {

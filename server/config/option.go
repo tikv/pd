@@ -23,6 +23,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/schedule"
 )
 
@@ -303,7 +304,7 @@ func (o *ScheduleOption) RemoveSchedulerCfg(name string) error {
 		if err != nil {
 			return nil
 		}
-		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(nil, nil), nil, confMapper)
+		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), confMapper)
 		if err != nil {
 			return err
 		}

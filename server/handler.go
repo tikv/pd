@@ -205,7 +205,17 @@ func (h *Handler) RemoveScheduler(name string) error {
 	if err = c.removeScheduler(name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
 	} else if err = h.opt.Persist(c.cluster.storage); err != nil {
-		log.Error("can not persist scheduler config", zap.Error(err))
+		log.Error("the option can not persist scheduler config ", zap.Error(err))
+	} else {
+		cluster := h.s.GetRaftCluster()
+		if cluster == nil {
+			return ErrNotBootstrapped
+		}
+		err := cluster.storage.RemoveScheduleConfig(name)
+		if err != nil {
+			log.Error("can not remove the scheduler config", zap.Error(err))
+			return err
+		}
 	}
 	return err
 }

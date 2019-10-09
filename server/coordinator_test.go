@@ -584,12 +584,16 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(tc.addLeaderRegion(3, 3, 1, 2), IsNil)
 
 	oc := co.opController
-	gls, err := schedule.CreateScheduler("grant-leader", oc, nil, "0")
+	confMapper, err := schedule.ConvArgsToMapper("grant-leader", []string{"0"})
+	c.Assert(err, IsNil)
+	gls, err := schedule.CreateScheduler("grant-leader", oc, core.NewStorage(kv.NewMemoryKV()), confMapper)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	gls, err = schedule.CreateScheduler("grant-leader", oc, nil, "1")
+	confMapper, err = schedule.ConvArgsToMapper("grant-leader", []string{"1"})
+	c.Assert(err, IsNil)
+	gls, err = schedule.CreateScheduler("grant-leader", oc, core.NewStorage(kv.NewMemoryKV()), confMapper)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), IsNil)
 
@@ -628,13 +632,22 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 
 	c.Assert(co.schedulers, HasLen, 4)
 	oc := co.opController
-	gls1, err := schedule.CreateScheduler("grant-leader", oc, nil, "1")
+	storage := tc.RaftCluster.storage
+
+	confMapper, err := schedule.ConvArgsToMapper("grant-leader", []string{"1"})
+	c.Assert(err, IsNil)
+	gls1, err := schedule.CreateScheduler("grant-leader", oc, storage, confMapper)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
-	gls2, err := schedule.CreateScheduler("grant-leader", oc, nil, "2")
+	confMapper, err = schedule.ConvArgsToMapper("grant-leader", []string{"2"})
+	c.Assert(err, IsNil)
+	gls2, err := schedule.CreateScheduler("grant-leader", oc, storage, confMapper)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls2, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 6)
+	sches, _, err := storage.LoadAllScheduleConfig()
+	c.Assert(err, IsNil)
+	c.Assert(sches, HasLen, 6)
 	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
@@ -647,12 +660,15 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	_, err = schedule.CreateScheduler("adjacent-region", oc, nil)
+	_, err = schedule.CreateScheduler("adjacent-region", oc, storage, nil)
 	c.Assert(err, IsNil)
 	// suppose we add a new default enable scheduler
 	newOpt.AddSchedulerCfg("adjacent-region", []string{})
 	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
 	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
+	sches, _, err = storage.LoadAllScheduleConfig()
+	c.Assert(err, IsNil)
+	c.Assert(sches, HasLen, 7)
 	c.Assert(newOpt.GetSchedulers(), HasLen, 7)
 	tc.RaftCluster.opt = newOpt
 
@@ -668,11 +684,12 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	tc.RaftCluster.opt = newOpt
 	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
+	storage = tc.RaftCluster.storage
 	c.Assert(co.schedulers, HasLen, 3)
-	bls, err := schedule.CreateScheduler("balance-leader", oc, nil)
+	bls, err := schedule.CreateScheduler("balance-leader", oc, storage, nil)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls), IsNil)
-	brs, err := schedule.CreateScheduler("balance-region", oc, nil)
+	brs, err := schedule.CreateScheduler("balance-region", oc, storage, nil)
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
@@ -793,7 +810,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 	oc := schedule.NewOperatorController(tc.RaftCluster, hbStreams)
-	lb, err := schedule.CreateScheduler("balance-region", oc, nil)
+	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, nil)
 	c.Assert(err, IsNil)
 
 	c.Assert(tc.addRegionStore(4, 40), IsNil)
@@ -822,7 +839,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 	oc := schedule.NewOperatorController(tc.RaftCluster, hbStreams)
-	lb, err := schedule.CreateScheduler("balance-region", oc)
+	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, nil)
 	c.Assert(err, IsNil)
 
 	c.Assert(tc.addRegionStore(4, 40), IsNil)
@@ -872,7 +889,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	oc := co.opController
-	scheduler, err := schedule.CreateScheduler("balance-leader", oc)
+	scheduler, err := schedule.CreateScheduler("balance-leader", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
@@ -947,7 +964,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	defer hbStreams.Close()
 
 	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
-	lb, err := schedule.CreateScheduler("balance-leader", co.opController)
+	lb, err := schedule.CreateScheduler("balance-leader", co.opController, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
 

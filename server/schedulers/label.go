@@ -25,7 +25,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterArgsToMapper("label-scheduler", func(args []string) (schedule.ConfigMapper, error) {
+	schedule.RegisterArgsToMapper("label", func(args []string) (schedule.ConfigMapper, error) {
 		mapper := make(schedule.ConfigMapper)
 		return mapper, nil
 	})
