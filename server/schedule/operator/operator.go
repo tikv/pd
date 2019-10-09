@@ -87,8 +87,8 @@ type StoreInfluence struct {
 	StepCost    int64
 }
 
-// ResourceSize returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceSize(kind core.ResourceKind, opt ...core.LeaderScheduleKind) int64 {
+// ResourceScore returns delta size of leader/region by influence.
+func (s StoreInfluence) ResourceScore(kind core.ResourceKind, opt ...core.LeaderScheduleKind) int64 {
 	switch kind {
 	case core.LeaderKind:
 		if len(opt) > 0 && opt[0] == core.ScheduleLeaderByCount {

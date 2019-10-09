@@ -209,9 +209,9 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 		log.Debug("skip balance region",
 			zap.String("scheduler", s.GetName()), zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
 			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
-			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(core.RegionKind)),
+			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceScore(core.RegionKind)),
 			zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
-			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(core.RegionKind)),
+			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceScore(core.RegionKind)),
 			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		s.hitsCounter.put(source, target)

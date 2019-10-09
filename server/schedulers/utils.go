@@ -60,8 +60,8 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 	// 2. prevent moving huge regions, leading to over balance.
 	leaderScheduleKind := cluster.GetLeaderScheduleKind()
 	tolerantResource := getTolerantResource(cluster, region, leaderScheduleKind)
-	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).ResourceSize(kind, leaderScheduleKind) - tolerantResource
-	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(kind, leaderScheduleKind) + tolerantResource
+	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).ResourceScore(kind, leaderScheduleKind) - tolerantResource
+	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).ResourceScore(kind, leaderScheduleKind) + tolerantResource
 
 	// Make sure after move, source score is still greater than target score.
 	return source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceDelta, leaderScheduleKind) >
