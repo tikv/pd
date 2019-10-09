@@ -24,9 +24,10 @@ import (
 type StoreCreateOption func(region *StoreInfo)
 
 // SetStoreAddress sets the address for the store.
-func SetStoreAddress(address string) StoreCreateOption {
+func SetStoreAddress(address, peerAddress string) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.meta.Address = address
+		store.meta.PeerAddress = peerAddress
 	}
 }
 
