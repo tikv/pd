@@ -666,9 +666,12 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	newOpt.AddSchedulerCfg("adjacent-region", []string{})
 	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
 	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
+	// only remains 3 items with independent config.
 	sches, _, err = storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 7)
+	c.Assert(sches, HasLen, 3)
+
+	// option have 7 items because the default scheduler do not remove.
 	c.Assert(newOpt.GetSchedulers(), HasLen, 7)
 	tc.RaftCluster.opt = newOpt
 
@@ -716,6 +719,68 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.removeScheduler("grant-leader-scheduler-2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 3)
+}
+
+func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
+	cfg, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cfg.ReplicaScheduleLimit = 0
+
+	tc := newTestCluster(opt)
+	hbStreams, cleanup := getHeartBeatStreams(c, tc)
+	defer cleanup()
+	defer hbStreams.Close()
+
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co.run()
+
+	// Add stores 1,2
+	c.Assert(tc.addLeaderStore(1, 1), IsNil)
+	c.Assert(tc.addLeaderStore(2, 1), IsNil)
+
+	c.Assert(co.schedulers, HasLen, 4)
+	oc := co.opController
+	storage := tc.RaftCluster.storage
+
+	confMapper, err := schedule.ConvArgsToMapper("grant-leader", []string{"1"})
+	c.Assert(err, IsNil)
+	gls1, err := schedule.CreateScheduler("grant-leader", oc, storage, confMapper)
+	c.Assert(err, IsNil)
+	c.Assert(co.addScheduler(gls1, "1"), IsNil)
+	c.Assert(co.schedulers, HasLen, 5)
+	sches, _, err := storage.LoadAllScheduleConfig()
+	c.Assert(err, IsNil)
+	c.Assert(sches, HasLen, 5)
+
+	// remove all schedulers
+	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("label-scheduler"), IsNil)
+	c.Assert(co.removeScheduler("grant-leader-scheduler-1"), IsNil)
+	// all removed
+	sches, _, err = storage.LoadAllScheduleConfig()
+	c.Assert(err, IsNil)
+	c.Assert(sches, HasLen, 0)
+	c.Assert(co.schedulers, HasLen, 0)
+	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
+	co.stop()
+	co.wg.Wait()
+
+	// suppose restart PD again
+	_, newOpt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	c.Assert(newOpt.Reload(tc.storage), IsNil)
+	tc.RaftCluster.opt = newOpt
+	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co.run()
+	storage = tc.RaftCluster.storage
+	c.Assert(co.schedulers, HasLen, 0)
+
+	// the option remains default scheduler
+	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 4)
+	co.stop()
+	co.wg.Wait()
 }
 
 func (s *testCoordinatorSuite) TestRestart(c *C) {

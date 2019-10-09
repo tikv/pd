@@ -204,18 +204,6 @@ func (h *Handler) RemoveScheduler(name string) error {
 	}
 	if err = c.removeScheduler(name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
-	} else if err = h.opt.Persist(c.cluster.storage); err != nil {
-		log.Error("the option can not persist scheduler config ", zap.Error(err))
-	} else {
-		cluster := h.s.GetRaftCluster()
-		if cluster == nil {
-			return ErrNotBootstrapped
-		}
-		err := cluster.storage.RemoveScheduleConfig(name)
-		if err != nil {
-			log.Error("can not remove the scheduler config", zap.Error(err))
-			return err
-		}
 	}
 	return err
 }
@@ -232,7 +220,7 @@ func (h *Handler) AddBalanceRegionScheduler() error {
 
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
 func (h *Handler) AddBalanceHotRegionScheduler() error {
-	return h.AddScheduler("balance-hot-region")
+	return h.AddScheduler("hot-region")
 }
 
 // AddLabelScheduler adds a label-scheduler.

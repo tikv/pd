@@ -453,7 +453,24 @@ func (c *coordinator) removeScheduler(name string) error {
 	schedulerStatusGauge.WithLabelValues(name, "allow").Set(0)
 	delete(c.schedulers, name)
 
-	return c.cluster.opt.RemoveSchedulerCfg(name)
+	var err error
+	opt := c.cluster.opt
+	if err = opt.RemoveSchedulerCfg(name); err != nil {
+		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
+	} else if err = opt.Persist(c.cluster.storage); err != nil {
+		log.Error("the option can not persist scheduler config ", zap.Error(err))
+	} else {
+		cluster := c.cluster
+		if cluster == nil {
+			return ErrNotBootstrapped
+		}
+		err := cluster.storage.RemoveScheduleConfig(name)
+		if err != nil {
+			log.Error("can not remove the scheduler config", zap.Error(err))
+			return err
+		}
+	}
+	return err
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {
