@@ -80,7 +80,6 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		}
 		body, err := json.Marshal(input)
 		c.Assert(err, IsNil)
-		fmt.Println("Debug", ca.name)
 		s.testAddAndRemoveScheduler(ca.name, ca.createdName, body, c)
 	}
 

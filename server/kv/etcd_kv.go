@@ -15,7 +15,6 @@ package kv
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"strings"
 	"time"
@@ -82,8 +81,6 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 		keys = append(keys, strings.TrimPrefix(strings.TrimPrefix(string(item.Key), kv.rootPath), "/"))
 		values = append(values, string(item.Value))
 	}
-
-	fmt.Println("debug etcd", key, endKey, keys, values)
 	return keys, values, nil
 }
 
