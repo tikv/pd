@@ -128,8 +128,7 @@ func (c *coordinator) patrolRegions() {
 
 			key = region.GetEndKey()
 			if ops != nil {
-				opController := c.opController
-				opController.AddWaitingOperator(ops...)
+				c.opController.AddWaitingOperator(ops...)
 			}
 		}
 		// Updates the label level isolation statistics.
@@ -165,9 +164,7 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) (bool, []*operator.Op
 	checkerIsBusy := true
 	if op := c.learnerChecker.Check(region); op != nil {
 		checkerIsBusy = false
-		ops := make([]*operator.Operator, 0, 1)
-		ops = append(ops, op)
-		return checkerIsBusy, ops
+		return checkerIsBusy, []*operator.Operator{op}
 	}
 
 	if opController.OperatorCount(operator.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
@@ -175,18 +172,14 @@ func (c *coordinator) checkRegion(region *core.RegionInfo) (bool, []*operator.Op
 		opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		checkerIsBusy = false
 		if op := c.namespaceChecker.Check(region); op != nil {
-			ops := make([]*operator.Operator, 0, 1)
-			ops = append(ops, op)
-			return checkerIsBusy, ops
+			return checkerIsBusy, []*operator.Operator{op}
 		}
 	}
 
 	if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		checkerIsBusy = false
 		if op := c.replicaChecker.Check(region); op != nil {
-			ops := make([]*operator.Operator, 0, 1)
-			ops = append(ops, op)
-			return checkerIsBusy, ops
+			return checkerIsBusy, []*operator.Operator{op}
 		}
 	}
 	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
