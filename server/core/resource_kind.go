@@ -57,9 +57,9 @@ const (
 func (k LeaderScheduleKind) String() string {
 	switch k {
 	case ByCount:
-		return "ByCount"
+		return "count"
 	case BySize:
-		return "BySize"
+		return "size"
 	default:
 		return "unknown"
 	}
