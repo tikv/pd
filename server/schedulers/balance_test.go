@@ -47,6 +47,7 @@ type testBalanceSpeedCase struct {
 	targetCount    uint64
 	regionSize     int64
 	expectedResult bool
+	kind           core.LeaderScheduleKind
 }
 
 func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
@@ -55,27 +56,27 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		// size = count * 10
 
 		// target size is zero
-		{2, 0, 1, true},
-		{2, 0, 10, false},
+		{2, 0, 1, true, core.BySize},
+		{2, 0, 10, false, core.BySize},
 		// all in high space stage
-		{10, 5, 1, true},
-		{10, 5, 20, false},
-		{10, 10, 1, false},
-		{10, 10, 20, false},
+		{10, 5, 1, true, core.BySize},
+		{10, 5, 20, false, core.BySize},
+		{10, 10, 1, false, core.BySize},
+		{10, 10, 20, false, core.BySize},
 		// all in transition stage
-		{70, 50, 1, true},
-		{70, 50, 50, false},
-		{70, 70, 1, false},
+		{70, 50, 1, true, core.BySize},
+		{70, 50, 50, false, core.BySize},
+		{70, 70, 1, false, core.BySize},
 		// all in low space stage
-		{90, 80, 1, true},
-		{90, 80, 50, false},
-		{90, 90, 1, false},
+		{90, 80, 1, true, core.BySize},
+		{90, 80, 50, false, core.BySize},
+		{90, 90, 1, false, core.BySize},
 		// one in high space stage, other in transition stage
-		{65, 55, 5, true},
-		{65, 50, 50, false},
+		{65, 55, 5, true, core.BySize},
+		{65, 50, 50, false, core.BySize},
 		// one in transition space stage, other in low space stage
-		{80, 70, 5, true},
-		{80, 70, 50, false},
+		{80, 70, 5, true, core.BySize},
+		{80, 70, 50, false, core.BySize},
 	}
 
 	opt := mockoption.NewScheduleOptions()
@@ -90,17 +91,20 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		target := tc.GetStore(2)
 		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 		tc.PutRegion(region)
+		tc.LeaderScoreStrategy = t.kind.String()
 		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewUnfinishedOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
-
+	//tc.LeaderScoreStrategy = core.LeaderScheduleKind(core.ByCount).String()
 	for _, t := range tests {
-		tc.AddRegionStore(1, int(t.sourceCount))
-		tc.AddRegionStore(2, int(t.targetCount))
-		source := tc.GetStore(1)
-		target := tc.GetStore(2)
-		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
-		tc.PutRegion(region)
-		c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewUnfinishedOpInfluence(nil, tc)), Equals, t.expectedResult)
+		if t.kind.String() == core.LeaderScheduleKind(core.BySize).String() {
+			tc.AddRegionStore(1, int(t.sourceCount))
+			tc.AddRegionStore(2, int(t.targetCount))
+			source := tc.GetStore(1)
+			target := tc.GetStore(2)
+			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
+			tc.PutRegion(region)
+			c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewUnfinishedOpInfluence(nil, tc)), Equals, t.expectedResult)
+		}
 	}
 }
 

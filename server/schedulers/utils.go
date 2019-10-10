@@ -60,7 +60,7 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
 	leaderScheduleKind := cluster.GetLeaderScheduleKind()
-	tolerantResource := getTolerantResource(cluster, region, leaderScheduleKind)
+	tolerantResource := getTolerantResource(cluster, region, kind, leaderScheduleKind)
 	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).ResourceScore(kind, leaderScheduleKind) - tolerantResource
 	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).ResourceScore(kind, leaderScheduleKind) + tolerantResource
 
@@ -69,21 +69,17 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 		target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetDelta, leaderScheduleKind)
 }
 
-func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, kind core.LeaderScheduleKind) int64 {
-	switch kind {
-	case core.ByCount:
+func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, resourceKind core.ResourceKind, kind core.LeaderScheduleKind) int64 {
+	if resourceKind == core.LeaderKind && kind == core.ByCount {
 		leaderCount := int64(float64(1) * adjustTolerantRatio(cluster, kind))
 		return leaderCount
-	case core.BySize:
-		regionSize := region.GetApproximateSize()
-		if regionSize < cluster.GetAverageRegionSize() {
-			regionSize = cluster.GetAverageRegionSize()
-		}
-		regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster, kind))
-		return regionSize
-	default:
-		return 0
 	}
+	regionSize := region.GetApproximateSize()
+	if regionSize < cluster.GetAverageRegionSize() {
+		regionSize = cluster.GetAverageRegionSize()
+	}
+	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster, kind))
+	return regionSize
 }
 
 func adjustTolerantRatio(cluster schedule.Cluster, kind core.LeaderScheduleKind) float64 {
