@@ -100,7 +100,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 
-	testHot := func(hotRegionID, hotStoreId uint64, hotType string) {
+	testHot := func(hotRegionID, hotStoreID uint64, hotType string) {
 		args = []string{"-u", pdAddr, "hot", hotType}
 		_, output, e := pdctl.ExecuteCommandC(cmd, args...)
 		hotRegion := statistics.StoreHotRegionInfos{}
