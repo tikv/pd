@@ -80,7 +80,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 
 		// default leader tolerant ratio is 5, when schedule by count
 		// target size is zero
-		{2, 0, 1, false, core.ByCount}, // todo test
+		{2, 0, 1, false, core.ByCount},
 		{2, 0, 10, false, core.ByCount},
 		// all in high space stage
 		{10, 5, 1, true, core.ByCount},
@@ -203,7 +203,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	c.Check(s.schedule(), NotNil)
 }
 
-func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimitByCountOrSize(c *C) {
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderScheduleStrategy(c *C) {
 	// Stores:			1    	2    	3    	4
 	// Leader Count:		10    	10    	10    	10
 	// Leader Size :		10000   100    	100    	100
@@ -216,6 +216,25 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimitByCountOrSize(c *C) {
 	c.Assert(s.tc.LeaderScoreStrategy, Equals, core.LeaderScheduleKind(core.ByCount).String()) // default by count
 	c.Check(s.schedule(), IsNil)
 	s.tc.LeaderScoreStrategy = core.LeaderScheduleKind(core.BySize).String()
+	c.Check(s.schedule(), NotNil)
+}
+
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
+	// default leader tolerant ratio is 5, when schedule by count
+	// Stores:			1    	2    	3    	4
+	// Leader Count:		14->15    	10    	10    	10
+	// Leader Size :		100   100    	100    	100
+	// Region1:			L    	F   	F    	F
+	s.tc.AddLeaderStore(1, 14, 100)
+	s.tc.AddLeaderStore(2, 10, 100)
+	s.tc.AddLeaderStore(3, 10, 100)
+	s.tc.AddLeaderStore(4, 10, 100)
+	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
+	c.Assert(s.tc.LeaderScoreStrategy, Equals, core.LeaderScheduleKind(core.ByCount).String()) // default by count
+	c.Check(s.schedule(), IsNil)
+	c.Assert(s.tc.GetStore(1).GetLeaderCount(), Equals, 14)
+	s.tc.AddLeaderStore(1, 15, 100)
+	c.Assert(s.tc.GetStore(1).GetLeaderCount(), Equals, 15)
 	c.Check(s.schedule(), NotNil)
 }
 
