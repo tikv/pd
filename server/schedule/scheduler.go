@@ -35,6 +35,7 @@ type Scheduler interface {
 	GetName() string
 	// GetType should in accordance with the name passing to schedule.RegisterScheduler()
 	GetType() string
+	GetConfig() interface{}
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster Cluster) error
@@ -44,7 +45,7 @@ type Scheduler interface {
 }
 
 // ConfigMapper can hold any config of the scheduler.
-// Only supports bool, int, float64, string.
+// Only supports bool, float64, string.
 type ConfigMapper map[string]interface{}
 
 // ArgsToMapper is for creating scheduler config mapper.
@@ -98,7 +99,12 @@ func CreateScheduler(typ string, opController *OperatorController, storage *core
 		return nil, errors.Errorf("create func of %v is not registered", typ)
 	}
 
-	return fn(opController, storage, mapper)
+	s, err := fn(opController, storage, mapper)
+	if err != nil {
+		return s, err
+	}
+	err = storage.SaveScheduleConfig(s.GetName(), s.GetConfig())
+	return s, err
 }
 
 // FindScheduleTypeByName finds the type of the specified name.

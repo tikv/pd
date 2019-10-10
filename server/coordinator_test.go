@@ -653,7 +653,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
 	c.Assert(co.removeScheduler("label-scheduler"), IsNil)
 	c.Assert(co.schedulers, HasLen, 2)
-	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
+	c.Assert(co.cluster.opt.Persist(storage), IsNil)
 	co.stop()
 	co.wg.Wait()
 	// make a new coordinator for testing
@@ -665,7 +665,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// suppose we add a new default enable scheduler
 	newOpt.AddSchedulerCfg("adjacent-region", []string{})
 	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
-	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
+	c.Assert(newOpt.Reload(storage), IsNil)
 	// only remains 3 items with independent config.
 	sches, _, err = storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
@@ -673,6 +673,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 
 	// option have 7 items because the default scheduler do not remove.
 	c.Assert(newOpt.GetSchedulers(), HasLen, 7)
+	c.Assert(newOpt.Persist(storage), IsNil)
 	tc.RaftCluster.opt = newOpt
 
 	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
@@ -683,7 +684,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// suppose restart PD again
 	_, newOpt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(newOpt.Reload(tc.storage), IsNil)
+	c.Assert(newOpt.Reload(storage), IsNil)
 	tc.RaftCluster.opt = newOpt
 	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()

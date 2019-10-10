@@ -29,7 +29,12 @@ func init() {
 			return nil, errors.New("should specify the store-id")
 		}
 		mapper := make(schedule.ConfigMapper)
-		mapper["store-id"] = args[0]
+		id, err := strconv.ParseFloat(args[0], 64)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+
+		mapper["store-id"] = id
 		return mapper, nil
 	})
 
@@ -37,13 +42,10 @@ func init() {
 		if len(mapper) != 1 {
 			return nil, errors.New("grant-leader needs 1 argument")
 		}
-		id, err := strconv.ParseUint(mapper["store-id"].(string), 10, 64)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
+		id := uint64(mapper["store-id"].(float64))
 		conf := &grandLeaderConf{
 			name:    fmt.Sprintf("grant-leader-scheduler-%d", id),
-			storeID: id,
+			StoreID: id,
 		}
 		storage.SaveScheduleConfig(conf.name, conf)
 		return newGrantLeaderScheduler(opController, conf), nil
@@ -52,7 +54,7 @@ func init() {
 
 type grandLeaderConf struct {
 	name    string
-	storeID uint64
+	StoreID uint64 `json:"store-id"`
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
@@ -78,12 +80,17 @@ func (s *grantLeaderScheduler) GetName() string {
 func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
+
+func (s *grantLeaderScheduler) GetConfig() interface{} {
+	return s.conf
+}
+
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	return cluster.BlockStore(s.conf.storeID)
+	return cluster.BlockStore(s.conf.StoreID)
 }
 
 func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
-	cluster.UnblockStore(s.conf.storeID)
+	cluster.UnblockStore(s.conf.StoreID)
 }
 
 func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
@@ -92,13 +99,13 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 
 func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandFollowerRegion(s.conf.storeID, core.HealthRegion())
+	region := cluster.RandFollowerRegion(s.conf.StoreID, core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator("grant-leader", region, region.GetLeader().GetStoreId(), s.conf.storeID, operator.OpLeader)
+	op := operator.CreateTransferLeaderOperator("grant-leader", region, region.GetLeader().GetStoreId(), s.conf.StoreID, operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }

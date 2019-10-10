@@ -181,6 +181,10 @@ func (l *scatterRangeScheduler) GetType() string {
 	return scatterRangeScheduleType
 }
 
+func (l *scatterRangeScheduler) GetConfig() interface{} {
+	return l.config.Clone()
+}
+
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return l.opController.OperatorCount(operator.OpRange) < cluster.GetRegionScheduleLimit()
 }

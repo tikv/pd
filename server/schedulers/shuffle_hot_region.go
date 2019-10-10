@@ -31,6 +31,9 @@ import (
 func init() {
 	schedule.RegisterArgsToMapper("shuffle-hot-region", func(args []string) (schedule.ConfigMapper, error) {
 		mapper := make(schedule.ConfigMapper)
+		if len(args) == 1 {
+			mapper["limit"] = args[0]
+		}
 		return mapper, nil
 	})
 
@@ -43,8 +46,13 @@ func init() {
 			}
 			limit = l
 		}
-		return newShuffleHotRegionScheduler(opController, limit), nil
+		conf := &shuffleHotRegionSchedulerConf{Limit: limit}
+		return newShuffleHotRegionScheduler(opController, conf), nil
 	})
+}
+
+type shuffleHotRegionSchedulerConf struct {
+	Limit uint64 `limit`
 }
 
 // ShuffleHotRegionScheduler mainly used to test.
@@ -55,16 +63,16 @@ type shuffleHotRegionScheduler struct {
 	*baseScheduler
 	stats *storeStatistics
 	r     *rand.Rand
-	limit uint64
+	conf  *shuffleHotRegionSchedulerConf
 	types []BalanceType
 }
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
-func newShuffleHotRegionScheduler(opController *schedule.OperatorController, limit uint64) schedule.Scheduler {
+func newShuffleHotRegionScheduler(opController *schedule.OperatorController, conf *shuffleHotRegionSchedulerConf) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 	return &shuffleHotRegionScheduler{
 		baseScheduler: base,
-		limit:         limit,
+		conf:          conf,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotReadRegionBalance, hotWriteRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -79,8 +87,12 @@ func (s *shuffleHotRegionScheduler) GetType() string {
 	return "shuffle-hot-region"
 }
 
+func (s *shuffleHotRegionScheduler) GetConfig() interface{} {
+	return s.conf
+}
+
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpHotRegion) < s.limit &&
+	return s.opController.OperatorCount(operator.OpHotRegion) < s.conf.Limit &&
 		s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit() &&
 		s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }

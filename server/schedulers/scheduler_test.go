@@ -72,18 +72,18 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), configMapper)
 	c.Assert(err, IsNil)
 
-	c.Assert(sc.(*balanceAdjacentRegionScheduler).conf.leaderLimit, Equals, uint64(32))
-	c.Assert(sc.(*balanceAdjacentRegionScheduler).conf.peerLimit, Equals, uint64(2))
+	c.Assert(sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit, Equals, uint64(32))
+	c.Assert(sc.(*balanceAdjacentRegionScheduler).conf.PeerLimit, Equals, uint64(2))
 
-	sc.(*balanceAdjacentRegionScheduler).conf.leaderLimit = 0
-	sc.(*balanceAdjacentRegionScheduler).conf.peerLimit = 0
+	sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit = 0
+	sc.(*balanceAdjacentRegionScheduler).conf.PeerLimit = 0
 	c.Assert(sc.IsScheduleAllowed(tc), IsFalse)
-	sc.(*balanceAdjacentRegionScheduler).conf.leaderLimit = defaultAdjacentLeaderLimit
+	sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit = defaultAdjacentLeaderLimit
 	c.Assert(sc.IsScheduleAllowed(tc), IsTrue)
-	sc.(*balanceAdjacentRegionScheduler).conf.leaderLimit = 0
-	sc.(*balanceAdjacentRegionScheduler).conf.peerLimit = defaultAdjacentPeerLimit
+	sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit = 0
+	sc.(*balanceAdjacentRegionScheduler).conf.PeerLimit = defaultAdjacentPeerLimit
 	c.Assert(sc.IsScheduleAllowed(tc), IsTrue)
-	sc.(*balanceAdjacentRegionScheduler).conf.leaderLimit = defaultAdjacentLeaderLimit
+	sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit = defaultAdjacentLeaderLimit
 	c.Assert(sc.IsScheduleAllowed(tc), IsTrue)
 
 	c.Assert(sc.Schedule(tc), IsNil)

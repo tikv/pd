@@ -196,7 +196,6 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 	if value == "" {
 		return false, nil
 	}
-	fmt.Println("load cfg", value)
 	err = json.Unmarshal([]byte(value), cfg)
 	if err != nil {
 		return false, errors.WithStack(err)

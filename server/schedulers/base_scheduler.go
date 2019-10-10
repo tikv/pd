@@ -71,6 +71,10 @@ func (s *baseScheduler) GetMinInterval() time.Duration {
 	return MinScheduleInterval
 }
 
+func (s *baseScheduler) GetConfig() interface{} {
+	return nil
+}
+
 func (s *baseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }

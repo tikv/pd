@@ -31,7 +31,11 @@ func init() {
 			return nil, errors.New("should specify the store-id")
 		}
 		mapper := make(schedule.ConfigMapper)
-		mapper["store-id"] = args[0]
+		id, err := strconv.ParseFloat(args[0], 64)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		mapper["store-id"] = id
 		return mapper, nil
 	})
 
@@ -39,51 +43,60 @@ func init() {
 		if len(mapper) != 1 {
 			return nil, errors.New("evict-leader needs 1 argument")
 		}
-		id, err := strconv.ParseUint(mapper["store-id"].(string), 10, 64)
-		if err != nil {
-			return nil, errors.WithStack(err)
+		id := uint64(mapper["store-id"].(float64))
+		name := fmt.Sprintf("evict-leader-scheduler-%d", id)
+		conf := &evictLeaderSchedulerConf{
+			Name:    name,
+			StoreID: id,
 		}
-		return newEvictLeaderScheduler(opController, id), nil
+		return newEvictLeaderScheduler(opController, conf), nil
 	})
+}
+
+type evictLeaderSchedulerConf struct {
+	Name    string
+	StoreID uint64 `json:"store-id"`
 }
 
 type evictLeaderScheduler struct {
 	*baseScheduler
-	name     string
-	storeID  uint64
+	conf     *evictLeaderSchedulerConf
 	selector *selector.RandomSelector
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
-func newEvictLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
-	name := fmt.Sprintf("evict-leader-scheduler-%d", storeID)
+func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConf) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: name, TransferLeader: true},
+		filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true},
 	}
+
 	base := newBaseScheduler(opController)
 	return &evictLeaderScheduler{
 		baseScheduler: base,
-		name:          name,
-		storeID:       storeID,
+		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
 func (s *evictLeaderScheduler) GetName() string {
-	return s.name
+	return s.conf.Name
 }
 
 func (s *evictLeaderScheduler) GetType() string {
 	return "evict-leader"
 }
 
+func (s *evictLeaderScheduler) GetConfig() interface{} {
+	return s.conf
+}
+
 func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	return cluster.BlockStore(s.storeID)
+	return cluster.BlockStore(s.conf.StoreID)
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
-	cluster.UnblockStore(s.storeID)
+	cluster.UnblockStore(s.conf.StoreID)
 }
 
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
@@ -92,7 +105,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 
 func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandLeaderRegion(s.storeID, core.HealthRegion())
+	region := cluster.RandLeaderRegion(s.conf.StoreID, core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 		return nil
