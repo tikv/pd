@@ -41,11 +41,11 @@ func init() {
 	schedule.RegisterArgsToMapper("adjacent-region", func(args []string) (schedule.ConfigMapper, error) {
 		mapper := make(schedule.ConfigMapper)
 		if len(args) == 2 {
-			leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
+			leaderLimit, err := strconv.ParseFloat(args[0], 64)
 			if err != nil {
 				return nil, errors.WithStack(err)
 			}
-			peerLimit, err := strconv.ParseUint(args[1], 10, 64)
+			peerLimit, err := strconv.ParseFloat(args[1], 64)
 			if err != nil {
 				return nil, errors.WithStack(err)
 			}
