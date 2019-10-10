@@ -48,18 +48,18 @@ func (k ResourceKind) String() string {
 type LeaderScheduleKind int
 
 const (
-	// ScheduleLeaderByCount indicates that balance leader by count
-	ScheduleLeaderByCount = iota
-	// ScheduleLeaderBySize indicates that balance leader by size
-	ScheduleLeaderBySize
+	// ByCount indicates that balance leader by count
+	ByCount = iota
+	// BySize indicates that balance leader by size
+	BySize
 )
 
 func (k LeaderScheduleKind) String() string {
 	switch k {
-	case ScheduleLeaderByCount:
-		return "scheduleLeaderByCount"
-	case ScheduleLeaderBySize:
-		return "scheduleLeaderBySize"
+	case ByCount:
+		return "ByCount"
+	case BySize:
+		return "BySize"
 	default:
 		return "unknown"
 	}

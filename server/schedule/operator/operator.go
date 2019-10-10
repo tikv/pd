@@ -83,7 +83,7 @@ type StoreInfluence struct {
 func (s StoreInfluence) ResourceScore(kind core.ResourceKind, opt ...core.LeaderScheduleKind) int64 {
 	switch kind {
 	case core.LeaderKind:
-		if len(opt) > 0 && opt[0] == core.ScheduleLeaderByCount {
+		if len(opt) > 0 && opt[0] == core.ByCount {
 			return s.LeaderCount
 		}
 		return s.LeaderSize

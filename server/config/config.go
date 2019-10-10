@@ -725,9 +725,9 @@ func IsDefaultScheduler(typ string) bool {
 // GetLeaderScheduleKind is to get leader schedule kind
 func (c *ScheduleConfig) GetLeaderScheduleKind() core.LeaderScheduleKind {
 	if c.LeaderScoreStrategy == "count" {
-		return core.ScheduleLeaderByCount
+		return core.ByCount
 	}
-	return core.ScheduleLeaderBySize
+	return core.BySize
 }
 
 // ReplicationConfig is the replication configuration.

@@ -246,7 +246,7 @@ func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
 // GetLeaderScheduleKind is to get leader schedule kind
 func (mso *ScheduleOptions) GetLeaderScheduleKind() core.LeaderScheduleKind {
 	if mso.LeaderScoreStrategy == "count" {
-		return core.ScheduleLeaderByCount
+		return core.ByCount
 	}
-	return core.ScheduleLeaderBySize
+	return core.BySize
 }

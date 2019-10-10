@@ -254,9 +254,9 @@ const maxScore = 1024 * 1024 * 1024
 // LeaderScore returns the store's leader score.
 func (s *StoreInfo) LeaderScore(kind LeaderScheduleKind, delta int64) float64 {
 	switch kind {
-	case ScheduleLeaderBySize:
+	case BySize:
 		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
-	case ScheduleLeaderByCount:
+	case ByCount:
 		return float64(int64(s.GetLeaderCount())+delta) / math.Max(s.GetLeaderWeight(), minWeight)
 	default:
 		return 0

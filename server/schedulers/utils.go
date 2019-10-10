@@ -69,17 +69,17 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 		target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetDelta, leaderScheduleKind)
 }
 
-func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, leaderScheduleKind core.LeaderScheduleKind) int64 {
-	switch leaderScheduleKind {
-	case core.ScheduleLeaderByCount:
-		leaderCount := int64(float64(1) * adjustTolerantRatio(cluster, leaderScheduleKind))
+func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, kind core.LeaderScheduleKind) int64 {
+	switch kind {
+	case core.ByCount:
+		leaderCount := int64(float64(1) * adjustTolerantRatio(cluster, kind))
 		return leaderCount
-	case core.ScheduleLeaderBySize:
+	case core.BySize:
 		regionSize := region.GetApproximateSize()
 		if regionSize < cluster.GetAverageRegionSize() {
 			regionSize = cluster.GetAverageRegionSize()
 		}
-		regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster, leaderScheduleKind))
+		regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster, kind))
 		return regionSize
 	default:
 		return 0
@@ -89,7 +89,7 @@ func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, lead
 func adjustTolerantRatio(cluster schedule.Cluster, kind core.LeaderScheduleKind) float64 {
 	tolerantSizeRatio := cluster.GetTolerantSizeRatio()
 	if tolerantSizeRatio == 0 {
-		if kind == core.ScheduleLeaderBySize {
+		if kind == core.BySize {
 			var maxRegionCount float64
 			stores := cluster.GetStores()
 			for _, store := range stores {
