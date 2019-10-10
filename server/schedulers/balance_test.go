@@ -234,6 +234,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	// After considering the scheduled operator, leaders of store1 and store4 are 8
 	// and 13 respectively. As the `TolerantSizeRatio` is 2.5, `shouldBalance`
 	// returns false when leader difference is not greater than 5.
+	c.Assert(s.tc.LeaderScoreStrategy, Equals, core.LeaderScheduleKind(core.ByCount).String()) // default by count
+	c.Check(s.schedule(), NotNil)
+	s.tc.LeaderScoreStrategy = core.LeaderScheduleKind(core.BySize).String()
 	c.Check(s.schedule(), IsNil)
 
 	// Stores:     1    2    3    4
