@@ -188,8 +188,6 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimitByCountOrSize(c *C) {
 
 	s.tc.LeaderScoreStrategy = "count"
 	c.Check(s.schedule(), IsNil)
-
-	s.tc.LeaderScoreStrategy = "size"
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
