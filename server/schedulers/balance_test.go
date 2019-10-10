@@ -77,6 +77,31 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		// one in transition space stage, other in low space stage
 		{80, 70, 5, true, core.BySize},
 		{80, 70, 50, false, core.BySize},
+
+		// default leader tolerant ratio is 5, when schedule by count
+		// target size is zero
+		{2, 0, 1, false, core.ByCount}, // todo test
+		{2, 0, 10, false, core.ByCount},
+		// all in high space stage
+		{10, 5, 1, true, core.ByCount},
+		{10, 5, 20, true, core.ByCount},
+		{10, 6, 20, false, core.ByCount},
+		{10, 10, 1, false, core.ByCount},
+		{10, 10, 20, false, core.ByCount},
+		// all in transition stage
+		{70, 50, 1, true, core.ByCount},
+		{70, 50, 50, true, core.ByCount},
+		{70, 70, 1, false, core.ByCount},
+		// all in low space stage
+		{90, 80, 1, true, core.ByCount},
+		{90, 80, 50, true, core.ByCount},
+		{90, 90, 1, false, core.ByCount},
+		// one in high space stage, other in transition stage
+		{65, 55, 5, true, core.ByCount},
+		{65, 50, 50, true, core.ByCount},
+		// one in transition space stage, other in low space stage
+		{80, 70, 5, true, core.ByCount},
+		{80, 70, 50, true, core.ByCount},
 	}
 
 	opt := mockoption.NewScheduleOptions()
@@ -94,7 +119,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		tc.LeaderScoreStrategy = t.kind.String()
 		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewUnfinishedOpInfluence(nil, tc)), Equals, t.expectedResult)
 	}
-	//tc.LeaderScoreStrategy = core.LeaderScheduleKind(core.ByCount).String()
+
 	for _, t := range tests {
 		if t.kind.String() == core.LeaderScheduleKind(core.BySize).String() {
 			tc.AddRegionStore(1, int(t.sourceCount))
