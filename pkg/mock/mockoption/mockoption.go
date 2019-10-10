@@ -40,7 +40,7 @@ const (
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true
-	defaultLeaderScoreStrategy         = "size"
+	defaultLeaderScoreStrategy         = "count"
 )
 
 // ScheduleOptions is a mock of ScheduleOptions
@@ -245,8 +245,8 @@ func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
 
 // GetLeaderScheduleKind is to get leader schedule kind
 func (mso *ScheduleOptions) GetLeaderScheduleKind() core.LeaderScheduleKind {
-	if mso.LeaderScoreStrategy == "count" {
-		return core.ByCount
+	if mso.LeaderScoreStrategy == "size" {
+		return core.BySize
 	}
-	return core.BySize
+	return core.ByCount
 }

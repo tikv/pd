@@ -611,7 +611,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
-	defaultLeaderScoreStrategy         = "size"
+	defaultLeaderScoreStrategy         = "count"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -724,10 +724,10 @@ func IsDefaultScheduler(typ string) bool {
 
 // GetLeaderScheduleKind is to get leader schedule kind
 func (c *ScheduleConfig) GetLeaderScheduleKind() core.LeaderScheduleKind {
-	if c.LeaderScoreStrategy == "count" {
-		return core.ByCount
+	if c.LeaderScoreStrategy == "size" {
+		return core.BySize
 	}
-	return core.BySize
+	return core.ByCount
 }
 
 // ReplicationConfig is the replication configuration.
