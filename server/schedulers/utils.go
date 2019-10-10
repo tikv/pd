@@ -25,8 +25,9 @@ import (
 
 const (
 	// adjustRatio is used to adjust TolerantSizeRatio according to region count.
-	adjustRatio          float64 = 0.005
-	minTolerantSizeRatio float64 = 1.0
+	adjustRatio             float64 = 0.005
+	leaderTolerantSizeRatio float64 = 5.0
+	minTolerantSizeRatio    float64 = 1.0
 )
 
 func minUint64(a, b uint64) uint64 {
@@ -71,34 +72,38 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, leaderScheduleKind core.LeaderScheduleKind) int64 {
 	switch leaderScheduleKind {
 	case core.ScheduleLeaderByCount:
-		leaderCount := int64(float64(1) * adjustTolerantRatio(cluster))
+		leaderCount := int64(float64(1) * adjustTolerantRatio(cluster, leaderScheduleKind))
 		return leaderCount
 	case core.ScheduleLeaderBySize:
 		regionSize := region.GetApproximateSize()
 		if regionSize < cluster.GetAverageRegionSize() {
 			regionSize = cluster.GetAverageRegionSize()
 		}
-		regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
+		regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster, leaderScheduleKind))
 		return regionSize
 	default:
 		return 0
 	}
 }
 
-func adjustTolerantRatio(cluster schedule.Cluster) float64 {
+func adjustTolerantRatio(cluster schedule.Cluster, kind core.LeaderScheduleKind) float64 {
 	tolerantSizeRatio := cluster.GetTolerantSizeRatio()
 	if tolerantSizeRatio == 0 {
-		var maxRegionCount float64
-		stores := cluster.GetStores()
-		for _, store := range stores {
-			regionCount := float64(cluster.GetStoreRegionCount(store.GetID()))
-			if maxRegionCount < regionCount {
-				maxRegionCount = regionCount
+		if kind == core.ScheduleLeaderBySize {
+			var maxRegionCount float64
+			stores := cluster.GetStores()
+			for _, store := range stores {
+				regionCount := float64(cluster.GetStoreRegionCount(store.GetID()))
+				if maxRegionCount < regionCount {
+					maxRegionCount = regionCount
+				}
 			}
-		}
-		tolerantSizeRatio = maxRegionCount * adjustRatio
-		if tolerantSizeRatio < minTolerantSizeRatio {
-			tolerantSizeRatio = minTolerantSizeRatio
+			tolerantSizeRatio = maxRegionCount * adjustRatio
+			if tolerantSizeRatio < minTolerantSizeRatio {
+				tolerantSizeRatio = minTolerantSizeRatio
+			}
+		} else {
+			tolerantSizeRatio = leaderTolerantSizeRatio
 		}
 	}
 	return tolerantSizeRatio
