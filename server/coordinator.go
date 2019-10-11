@@ -159,12 +159,11 @@ func (c *coordinator) drivePushOperator() {
 	}
 }
 
-func (c *coordinator) checkRegion(region *core.RegionInfo) (bool, []*operator.Operator) {
+func (c *coordinator) checkRegion(region *core.RegionInfo) (bool, []*operator.Operator) { //return checkerIsBusy,ops
 	opController := c.opController
 	checkerIsBusy := true
 	if op := c.learnerChecker.Check(region); op != nil {
-		checkerIsBusy = false
-		return checkerIsBusy, []*operator.Operator{op}
+		return false, []*operator.Operator{op}
 	}
 
 	if opController.OperatorCount(operator.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
