@@ -102,9 +102,14 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
-	target := m.checkTarget(region, next, nil)
-	if !m.cluster.GetEnableOneWayMerge() {
-		target = m.checkTarget(region, prev, target)
+	var target *core.RegionInfo
+	if m.checkTarget(region, next) {
+		target = next
+	}
+	if !m.cluster.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow a region can be merged by two ways.
+		if target == nil || prev.GetApproximateSize() < next.GetApproximateSize() { // pick smaller
+			target = prev
+		}
 	}
 
 	if target == nil {
@@ -126,18 +131,9 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	return ops
 }
 
-func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *core.RegionInfo {
-	// if is not hot region and under same namespace
-	if adjacent != nil && !m.cluster.IsRegionHot(adjacent) &&
+func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
+	return adjacent != nil && !m.cluster.IsRegionHot(adjacent) &&
 		m.classifier.AllowMerge(region, adjacent) &&
-		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 {
-		// if both region is not hot, prefer the one with smaller size
-		if target == nil || target.GetApproximateSize() > adjacent.GetApproximateSize() {
-			// peer count should equal
-			if len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() {
-				target = adjacent
-			}
-		}
-	}
-	return target
+		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 && // no special peer
+		len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() // peer count should equal
 }

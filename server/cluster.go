@@ -768,7 +768,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		labels := s.MergeLabels(store.GetLabels())
 
 		s = s.Clone(
-			core.SetStoreAddress(store.Address),
+			core.SetStoreAddress(store.Address, store.PeerAddress),
 			core.SetStoreVersion(store.Version),
 			core.SetStoreLabels(labels),
 		)
@@ -928,7 +928,6 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 func (c *RaftCluster) checkStores() {
 	var offlineStores []*metapb.Store
 	var upStoreCount int
-
 	stores := c.GetStores()
 	for _, store := range stores {
 		// the store has already been tombstone
@@ -963,7 +962,7 @@ func (c *RaftCluster) checkStores() {
 
 	if upStoreCount < c.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
-			log.Warn("store may not turn into Tombstone, there are no extra up node has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
+			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
 	}
 }
@@ -1245,9 +1244,9 @@ func (c *RaftCluster) GetSplitMergeInterval() time.Duration {
 	return c.opt.GetSplitMergeInterval()
 }
 
-// GetEnableOneWayMerge returns if the one way merge is enabled.
-func (c *RaftCluster) GetEnableOneWayMerge() bool {
-	return c.opt.GetEnableOneWayMerge()
+// IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
+func (c *RaftCluster) IsOneWayMergeEnabled() bool {
+	return c.opt.IsOneWayMergeEnabled()
 }
 
 // GetPatrolRegionInterval returns the interval of patroling region.
@@ -1278,14 +1277,6 @@ func (c *RaftCluster) GetStrictlyMatchLabel() bool {
 // GetHotRegionCacheHitsThreshold gets the threshold of hitting hot region cache.
 func (c *RaftCluster) GetHotRegionCacheHitsThreshold() int {
 	return c.opt.GetHotRegionCacheHitsThreshold()
-}
-
-// IsRaftLearnerEnabled returns if raft learner is enabled.
-func (c *RaftCluster) IsRaftLearnerEnabled() bool {
-	if !c.IsFeatureSupported(RaftLearner) {
-		return false
-	}
-	return c.opt.IsRaftLearnerEnabled()
 }
 
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.

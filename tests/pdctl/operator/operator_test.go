@@ -195,4 +195,12 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "scatter-region"), IsTrue)
+
+	// test echo
+	echo := pdctl.GetEcho([]string{"-u", pdAddr, "operator", "add", "scatter-region", "1"})
+	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
+	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
+	c.Assert(strings.Contains(echo, "Success!"), IsFalse)
 }

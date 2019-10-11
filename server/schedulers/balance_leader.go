@@ -49,15 +49,10 @@ type balanceLeaderScheduler struct {
 // each store balanced.
 func newBalanceLeaderScheduler(opController *schedule.OperatorController, opts ...BalanceLeaderCreateOption) schedule.Scheduler {
 	taintStores := newTaintCache()
-	filters := []filter.Filter{
-		filter.StoreStateFilter{TransferLeader: true},
-		filter.NewCacheFilter(taintStores),
-	}
 	base := newBaseScheduler(opController)
 
 	s := &balanceLeaderScheduler{
 		baseScheduler: base,
-		selector:      selector.NewBalanceSelector(core.LeaderKind, filters),
 		taintStores:   taintStores,
 		opController:  opController,
 		counter:       balanceLeaderCounter,
@@ -65,6 +60,11 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, opts .
 	for _, opt := range opts {
 		opt(s)
 	}
+	filters := []filter.Filter{
+		filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true},
+		filter.NewCacheFilter(s.GetName(), taintStores),
+	}
+	s.selector = selector.NewBalanceSelector(core.LeaderKind, filters)
 	return s
 }
 
@@ -112,7 +112,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 
 	// No store can be selected as source or target.
 	if source == nil || target == nil {
-		schedulerCounter.WithLabelValues(l.GetName(), "no-store").Inc()
+		if source == nil {
+			schedulerCounter.WithLabelValues(l.GetName(), "no-source-store").Inc()
+		} else {
+			schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
+		}
 		// When the cluster is balanced, all stores will be added to the cache once
 		// all of them have been selected. This will cause the scheduler to not adapt
 		// to sudden change of a store's leader. Here we clear the taint cache and
@@ -228,7 +232,7 @@ func (l *balanceLeaderScheduler) createOperator(cluster schedule.Cluster, region
 	targetLabel := strconv.FormatUint(targetID, 10)
 	l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel).Inc()
 	l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel).Inc()
-	balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel)
+	balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel).Inc()
 	op := operator.CreateTransferLeaderOperator("balance-leader", region, region.GetLeader().GetStoreId(), targetID, operator.OpBalance)
 	return []*operator.Operator{op}
 }

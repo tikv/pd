@@ -46,6 +46,7 @@ const (
 	hotRegionLimitFactor      = 0.75
 	storeHotRegionsDefaultLen = 100
 	hotRegionScheduleFactor   = 0.9
+	balanceHotRegionName      = "balance-hot-region-scheduler"
 )
 
 // BalanceType : the perspective of balance
@@ -71,6 +72,7 @@ func newStoreStaticstics() *storeStatistics {
 }
 
 type balanceHotRegionsScheduler struct {
+	name string
 	*baseScheduler
 	sync.RWMutex
 	leaderLimit uint64
@@ -85,6 +87,7 @@ type balanceHotRegionsScheduler struct {
 func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
 	base := newBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
+		name:          balanceHotRegionName,
 		baseScheduler: base,
 		leaderLimit:   1,
 		peerLimit:     1,
@@ -119,7 +122,7 @@ func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorControlle
 }
 
 func (h *balanceHotRegionsScheduler) GetName() string {
-	return "balance-hot-region-scheduler"
+	return h.name
 }
 
 func (h *balanceHotRegionsScheduler) GetType() string {
@@ -305,9 +308,9 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
 		}
 		filters := []filter.Filter{
-			filter.StoreStateFilter{MoveRegion: true},
-			filter.NewExcludedFilter(srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			filter.NewDistinctScoreFilter(cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
+			filter.StoreStateFilter{ActionScope: h.GetName(), MoveRegion: true},
+			filter.NewExcludedFilter(h.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			filter.NewDistinctScoreFilter(h.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
 		}
 		candidateStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
@@ -366,7 +369,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, s
 			continue
 		}
 
-		filters := []filter.Filter{filter.StoreStateFilter{TransferLeader: true}}
+		filters := []filter.Filter{filter.StoreStateFilter{ActionScope: h.GetName(), TransferLeader: true}}
 		candidateStoreIDs := make([]uint64, 0, len(srcRegion.GetPeers())-1)
 		for _, store := range cluster.GetFollowerStores(srcRegion) {
 			if !filter.Target(cluster, store, filters) {

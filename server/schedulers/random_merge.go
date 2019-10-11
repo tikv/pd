@@ -29,7 +29,10 @@ func init() {
 	})
 }
 
+const randomMergeName = "random-merge-scheduler"
+
 type randomMergeScheduler struct {
+	name string
 	*baseScheduler
 	selector *selector.RandomSelector
 }
@@ -38,17 +41,18 @@ type randomMergeScheduler struct {
 // then merges them.
 func newRandomMergeScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{MoveRegion: true},
+		filter.StoreStateFilter{ActionScope: randomMergeName, MoveRegion: true},
 	}
 	base := newBaseScheduler(opController)
 	return &randomMergeScheduler{
+		name:          randomMergeName,
 		baseScheduler: base,
 		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
 func (s *randomMergeScheduler) GetName() string {
-	return "random-merge-scheduler"
+	return s.name
 }
 
 func (s *randomMergeScheduler) GetType() string {
@@ -65,7 +69,7 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	stores := cluster.GetStores()
 	store := s.selector.SelectSource(cluster, stores)
 	if store == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-store").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
 		return nil
 	}
 	region := cluster.RandLeaderRegion(store.GetID(), core.HealthRegion())
@@ -75,11 +79,11 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	}
 
 	other, target := cluster.GetAdjacentRegions(region)
-	if !cluster.GetEnableOneWayMerge() && ((rand.Int()%2 == 0 && other != nil) || target == nil) {
+	if !cluster.IsOneWayMergeEnabled() && ((rand.Int()%2 == 0 && other != nil) || target == nil) {
 		target = other
 	}
 	if target == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-adjacent").Inc()
+		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 		return nil
 	}
 

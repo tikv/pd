@@ -278,9 +278,8 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
-	cfg, opt, err := newTestScheduleConfig()
+	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cfg.DisableLearner = false
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(c, tc)
 	defer cleanup()
@@ -310,8 +309,6 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	co.stop()
 	co.wg.Wait()
 
-	// new cluster with learner disabled
-	cfg.DisableLearner = true
 	tc = newTestCluster(opt)
 	co = newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
@@ -789,8 +786,10 @@ func (s *testOperatorControllerSuite) TestOperatorCount(c *C) {
 }
 
 func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
-	_, opt, err := newTestScheduleConfig()
+	cfg, opt, err := newTestScheduleConfig()
+	c.Assert(cfg, NotNil)
 	c.Assert(err, IsNil)
+	cfg.StoreBalanceRate = 10
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(c, tc)
 	defer cleanup()
@@ -804,22 +803,28 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	c.Assert(tc.addRegionStore(2, 40), IsNil)
 	c.Assert(tc.addRegionStore(1, 10), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3, 4), IsNil)
+	start := time.Now()
 	op1 := lb.Schedule(tc)[0]
 	c.Assert(op1, NotNil)
 	c.Assert(oc.AddOperator(op1), IsTrue)
 	for i := 0; i < 10; i++ {
+		if time.Now().Sub(start) >= time.Second*9/10 {
+			break
+		}
 		c.Assert(lb.Schedule(tc), IsNil)
 	}
 	c.Assert(oc.RemoveOperator(op1), IsTrue)
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 	for i := 0; i < 100; i++ {
 		c.Assert(lb.Schedule(tc), NotNil)
 	}
 }
 
 func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
-	_, opt, err := newTestScheduleConfig()
+	cfg, opt, err := newTestScheduleConfig()
+	c.Assert(cfg, NotNil)
 	c.Assert(err, IsNil)
+	cfg.StoreBalanceRate = 10
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(c, tc)
 	defer cleanup()
@@ -842,7 +847,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	c.Assert(oc.AddOperator(op3), IsFalse)
 	c.Assert(lb.Schedule(tc), IsNil)
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 	c.Assert(lb.Schedule(tc), NotNil)
 }
 

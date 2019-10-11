@@ -38,7 +38,6 @@ type ScheduleOptions interface {
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
 
-	IsRaftLearnerEnabled() bool
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool
 	IsRemoveDownReplicaEnabled() bool

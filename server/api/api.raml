@@ -134,6 +134,7 @@ types:
         enum: [ Up, Disconnected, Down, Offline, Tombstone ]
       labels?: StoreLabel[]
       version?: string
+      peer_address: string
   StoreLabel:
     type: object
     properties:
@@ -307,7 +308,8 @@ types:
       region_id: integer
       policy:
         type: string
-        enum: [ scan, approximate ]
+        enum: [ scan, approximate, usekey ]
+      keys?: string[]
   ScatterRegionOperator:
     type: Operator
     discriminatorValue: scatter-region
@@ -969,7 +971,7 @@ types:
     uriParameters:
       filter:
         type: string
-        enum: [ miss-peer, extra-peer, pending-peer, down-peer, incorrect-ns ]
+        enum: [ miss-peer, extra-peer, pending-peer, down-peer, incorrect-ns, offline-peer, empty-region ]
     get:
       description: List regions with unhealthy status.
       responses:

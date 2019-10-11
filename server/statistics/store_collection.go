@@ -148,12 +148,9 @@ func (s *storeStatistics) Collect() {
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
 
-	var disableMakeUpReplica, disableLearner, disableRemoveDownReplica, disableRemoveExtraReplica, disableReplaceOfflineReplica float64
+	var disableMakeUpReplica, disableRemoveDownReplica, disableRemoveExtraReplica, disableReplaceOfflineReplica float64
 	if !s.opt.IsMakeUpReplicaEnabled() {
 		disableMakeUpReplica = 1
-	}
-	if !s.opt.IsRaftLearnerEnabled() {
-		disableLearner = 1
 	}
 	if !s.opt.IsRemoveDownReplicaEnabled() {
 		disableRemoveDownReplica = 1
@@ -165,11 +162,10 @@ func (s *storeStatistics) Collect() {
 		disableReplaceOfflineReplica = 1
 	}
 
-	configs["disable_makeup_replica"] = disableMakeUpReplica
-	configs["disable_learner"] = disableLearner
-	configs["disable_remove_down_replica"] = disableRemoveDownReplica
-	configs["disable_remove_extra_replica"] = disableRemoveExtraReplica
-	configs["disable_replace_offline_replica"] = disableReplaceOfflineReplica
+	configs["disable-makeup-replica"] = disableMakeUpReplica
+	configs["disable-remove-down-replica"] = disableRemoveDownReplica
+	configs["disable-remove-extra-replica"] = disableRemoveExtraReplica
+	configs["disable-replace-offline-replica"] = disableReplaceOfflineReplica
 
 	for typ, value := range configs {
 		configStatusGauge.WithLabelValues(typ, s.namespace).Set(value)

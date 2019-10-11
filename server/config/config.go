@@ -270,6 +270,10 @@ func (c *Config) Parse(arguments []string) error {
 			msg := fmt.Sprintf("log-level in %s is deprecated, use [log] instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
+		if meta.IsDefined("schedule", "disable-raft-learner") {
+			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", c.configFile)
+			c.WarningMsgs = append(c.WarningMsgs, msg)
+		}
 	}
 
 	// Parse again to replace with command line options.
@@ -481,7 +485,7 @@ type ScheduleConfig struct {
 	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys,omitempty" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
-	// EnableOneWayMerge is the option to enable one way merge
+	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge,omitempty" json:"enable-one-way-merge,string"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
 	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
@@ -520,9 +524,9 @@ type ScheduleConfig struct {
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
 	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
 	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator,omitempty" json:"scheduler-max-waiting-operator"`
+	// WARN: DisableLearner is deprecated.
 	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
 	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
-
 	// DisableRemoveDownReplica is the option to prevent replica checker from
 	// removing down replicas.
 	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
@@ -671,6 +675,14 @@ func (c *ScheduleConfig) Validate() error {
 		if !schedule.IsSchedulerRegistered(scheduleConfig.Type) {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
 		}
+	}
+	return nil
+}
+
+// Deprecated is used to find if there is an option has beed deprecated.
+func (c *ScheduleConfig) Deprecated() error {
+	if c.DisableLearner {
+		return errors.New("disable-raft-learner has already been deprecated")
 	}
 	return nil
 }

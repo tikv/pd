@@ -155,8 +155,8 @@ func (o *ScheduleOption) GetSplitMergeInterval() time.Duration {
 	return o.Load().SplitMergeInterval.Duration
 }
 
-// GetEnableOneWayMerge returns if the one way merge is enabled.
-func (o *ScheduleOption) GetEnableOneWayMerge() bool {
+// IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
+func (o *ScheduleOption) IsOneWayMergeEnabled() bool {
 	return o.Load().EnableOneWayMerge
 }
 
@@ -233,11 +233,6 @@ func (o *ScheduleOption) GetHighSpaceRatio() float64 {
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
 func (o *ScheduleOption) GetSchedulerMaxWaitingOperator() uint64 {
 	return o.Load().SchedulerMaxWaitingOperator
-}
-
-// IsRaftLearnerEnabled returns if raft learner is enabled.
-func (o *ScheduleOption) IsRaftLearnerEnabled() bool {
-	return !o.Load().DisableLearner
 }
 
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
