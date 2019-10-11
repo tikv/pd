@@ -126,7 +126,7 @@ func (c *namespaceCluster) GetRegion(id uint64) *core.RegionInfo {
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (c *namespaceCluster) RegionWriteStats() map[uint64][]*statistics.HotSpotPeerStat {
+func (c *namespaceCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	return c.Cluster.RegionWriteStats()
 }
 

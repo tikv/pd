@@ -20,6 +20,11 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
+const (
+	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
+	StoreHeartBeatReportInterval = 10
+)
+
 // StoresStats is a cache hold hot regions.
 type StoresStats struct {
 	sync.RWMutex
@@ -147,15 +152,6 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]uint64 {
 	}
 	return res
 }
-
-// StoreHotRegionInfos : used to get human readable description for hot regions.
-type StoreHotRegionInfos struct {
-	AsPeer   StoreHotRegionsStat `json:"as_peer"`
-	AsLeader StoreHotRegionsStat `json:"as_leader"`
-}
-
-// StoreHotRegionsStat used to record the hot region statistics group by store
-type StoreHotRegionsStat map[uint64]*HotRegionsStat
 
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
