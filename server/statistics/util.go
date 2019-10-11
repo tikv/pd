@@ -14,8 +14,14 @@
 package statistics
 
 import (
+	"fmt"
+
 	"github.com/montanaflynn/stats"
 )
+
+func storeTag(id uint64) string {
+	return fmt.Sprintf("store-%d", id)
+}
 
 // RollingStats provides rolling statistics with specified window size.
 // There are window size records for calculating.

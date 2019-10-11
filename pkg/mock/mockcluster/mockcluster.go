@@ -34,7 +34,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*mockoption.ScheduleOptions
-	*statistics.HotSpotCache
+	*statistics.HotCache
 	*statistics.StoresStats
 	ID uint64
 }
@@ -45,7 +45,7 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 		BasicCluster:    core.NewBasicCluster(),
 		IDAllocator:     mockid.NewIDAllocator(),
 		ScheduleOptions: opt,
-		HotSpotCache:    statistics.NewHotSpotCache(),
+		HotCache:        statistics.NewHotCache(),
 		StoresStats:     statistics.NewStoresStats(),
 	}
 }
@@ -78,22 +78,22 @@ func (mc *Cluster) GetStore(storeID uint64) *core.StoreInfo {
 
 // IsRegionHot checks if the region is hot.
 func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
-	return mc.HotSpotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
+	return mc.HotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // RegionReadStats returns hot region's read stats.
-func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotSpotPeerStat {
-	return mc.HotSpotCache.RegionStats(statistics.ReadFlow)
+func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
+	return mc.HotCache.RegionStats(statistics.ReadFlow)
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotSpotPeerStat {
-	return mc.HotSpotCache.RegionStats(statistics.WriteFlow)
+func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
+	return mc.HotCache.RegionStats(statistics.WriteFlow)
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.
 func (mc *Cluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind) *core.RegionInfo {
-	r := mc.HotSpotCache.RandHotRegionFromStore(store, kind, mc.GetHotRegionCacheHitsThreshold())
+	r := mc.HotCache.RandHotRegionFromStore(store, kind, mc.GetHotRegionCacheHitsThreshold())
 	if r == nil {
 		return nil
 	}
@@ -237,9 +237,9 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64,
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReportInterval(reportInterval))
-	items := mc.HotSpotCache.CheckRead(r, mc.StoresStats)
+	items := mc.HotCache.CheckRead(r, mc.StoresStats)
 	for _, item := range items {
-		mc.HotSpotCache.Update(item)
+		mc.HotCache.Update(item)
 	}
 	mc.PutRegion(r)
 }
@@ -249,9 +249,9 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	r = r.Clone(core.SetReportInterval(reportInterval))
-	items := mc.HotSpotCache.CheckWrite(r, mc.StoresStats)
+	items := mc.HotCache.CheckWrite(r, mc.StoresStats)
 	for _, item := range items {
-		mc.HotSpotCache.Update(item)
+		mc.HotCache.Update(item)
 	}
 	mc.PutRegion(r)
 }

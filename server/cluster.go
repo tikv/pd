@@ -74,7 +74,7 @@ type RaftCluster struct {
 	labelLevelStats *statistics.LabelStatistics
 	regionStats     *statistics.RegionStatistics
 	storesStats     *statistics.StoresStats
-	hotSpotCache    *statistics.HotSpotCache
+	hotSpotCache    *statistics.HotCache
 
 	coordinator *coordinator
 
@@ -148,7 +148,7 @@ func (c *RaftCluster) initCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.storesStats = statistics.NewStoresStats()
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
-	c.hotSpotCache = statistics.NewHotSpotCache()
+	c.hotSpotCache = statistics.NewHotCache()
 }
 
 func (c *RaftCluster) start() error {
@@ -1346,24 +1346,24 @@ func (c *RaftCluster) getStoresKeysReadStat() map[uint64]uint64 {
 }
 
 // RegionReadStats returns hot region's read stats.
-func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotSpotPeerStat {
+func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
 	return c.hotSpotCache.RegionStats(statistics.ReadFlow)
 }
 
 // RegionWriteStats returns hot region's write stats.
-func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotSpotPeerStat {
+func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
 	return c.hotSpotCache.RegionStats(statistics.WriteFlow)
 }
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
-func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotSpotPeerStat {
+func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
 	return c.hotSpotCache.CheckWrite(region, c.storesStats)
 }
 
 // CheckReadStatus checks the read status, returns whether need update statistics and item.
-func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.HotSpotPeerStat {
+func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
 	return c.hotSpotCache.CheckRead(region, c.storesStats)
 }
 
