@@ -71,35 +71,36 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 
 func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, resourceKind core.ResourceKind, kind core.LeaderScheduleKind) int64 {
 	if resourceKind == core.LeaderKind && kind == core.ByCount {
-		leaderCount := int64(float64(1) * adjustTolerantRatio(cluster, kind))
+		tolerantSizeRatio := cluster.GetTolerantSizeRatio()
+		if tolerantSizeRatio == 0 {
+			tolerantSizeRatio = leaderTolerantSizeRatio
+		}
+		leaderCount := int64(float64(1) * tolerantSizeRatio)
 		return leaderCount
 	}
+
 	regionSize := region.GetApproximateSize()
 	if regionSize < cluster.GetAverageRegionSize() {
 		regionSize = cluster.GetAverageRegionSize()
 	}
-	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster, kind))
+	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
 	return regionSize
 }
 
-func adjustTolerantRatio(cluster schedule.Cluster, kind core.LeaderScheduleKind) float64 {
+func adjustTolerantRatio(cluster schedule.Cluster) float64 {
 	tolerantSizeRatio := cluster.GetTolerantSizeRatio()
 	if tolerantSizeRatio == 0 {
-		if kind == core.BySize {
-			var maxRegionCount float64
-			stores := cluster.GetStores()
-			for _, store := range stores {
-				regionCount := float64(cluster.GetStoreRegionCount(store.GetID()))
-				if maxRegionCount < regionCount {
-					maxRegionCount = regionCount
-				}
+		var maxRegionCount float64
+		stores := cluster.GetStores()
+		for _, store := range stores {
+			regionCount := float64(cluster.GetStoreRegionCount(store.GetID()))
+			if maxRegionCount < regionCount {
+				maxRegionCount = regionCount
 			}
-			tolerantSizeRatio = maxRegionCount * adjustRatio
-			if tolerantSizeRatio < minTolerantSizeRatio {
-				tolerantSizeRatio = minTolerantSizeRatio
-			}
-		} else {
-			tolerantSizeRatio = leaderTolerantSizeRatio
+		}
+		tolerantSizeRatio = maxRegionCount * adjustRatio
+		if tolerantSizeRatio < minTolerantSizeRatio {
+			tolerantSizeRatio = minTolerantSizeRatio
 		}
 	}
 	return tolerantSizeRatio

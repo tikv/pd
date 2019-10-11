@@ -50,6 +50,27 @@ type testBalanceSpeedCase struct {
 	kind           core.LeaderScheduleKind
 }
 
+func (s *testBalanceSpeedSuite) TestTolerantRatio(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	// create a region to control average region size.
+	tc.AddLeaderRegion(1, 1, 2)
+	regionSize := int64(96 * 1024)
+	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
+
+	tc.TolerantSizeRatio = 0
+	c.Assert(getTolerantResource(tc, region, core.LeaderKind, core.ByCount), Equals, int64(leaderTolerantSizeRatio))
+	c.Assert(getTolerantResource(tc, region, core.LeaderKind, core.BySize), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.RegionKind, core.ByCount), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.RegionKind, core.BySize), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+
+	tc.TolerantSizeRatio = 10
+	c.Assert(getTolerantResource(tc, region, core.LeaderKind, core.ByCount), Equals, int64(tc.TolerantSizeRatio))
+	c.Assert(getTolerantResource(tc, region, core.LeaderKind, core.BySize), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.RegionKind, core.ByCount), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.RegionKind, core.BySize), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+}
+
 func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 	tests := []testBalanceSpeedCase{
 		// all store capacity is 1024MB
