@@ -38,7 +38,6 @@ func (s *compatibilityTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
-	c.Parallel()
 	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -90,7 +89,6 @@ func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
 }
 
 func (s *compatibilityTestSuite) TestRollingUpgrade(c *C) {
-	c.Parallel()
 	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()

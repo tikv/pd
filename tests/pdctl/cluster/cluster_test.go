@@ -38,8 +38,6 @@ func (s *clusterTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *clusterTestSuite) TestClusterAndPing(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
