@@ -768,7 +768,7 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		labels := s.MergeLabels(store.GetLabels())
 
 		s = s.Clone(
-			core.SetStoreAddress(store.Address),
+			core.SetStoreAddress(store.Address, store.PeerAddress),
 			core.SetStoreVersion(store.Version),
 			core.SetStoreLabels(labels),
 		)
