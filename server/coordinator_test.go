@@ -814,7 +814,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 		c.Assert(lb.Schedule(tc), IsNil)
 	}
 	c.Assert(oc.RemoveOperator(op1), IsTrue)
-	time.Sleep(time.Duration(60/cfg.StoreBalanceRate) * time.Second)
+	time.Sleep(2 * time.Second)
 	for i := 0; i < 100; i++ {
 		c.Assert(lb.Schedule(tc), NotNil)
 	}
@@ -847,7 +847,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	c.Assert(oc.AddOperator(op3), IsFalse)
 	c.Assert(lb.Schedule(tc), IsNil)
-	time.Sleep(time.Duration(60/cfg.StoreBalanceRate) * time.Second)
+	time.Sleep(2 * time.Second)
 	c.Assert(lb.Schedule(tc), NotNil)
 }
 
