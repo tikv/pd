@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -28,6 +29,9 @@ const (
 	adjustRatio          float64 = 0.005
 	minTolerantSizeRatio float64 = 1.0
 )
+
+// ErrScheduleConfigNotExist the config is not correct.
+var ErrScheduleConfigNotExist = errors.New("the config is not exist")
 
 func minUint64(a, b uint64) uint64 {
 	if a < b {

@@ -14,6 +14,7 @@
 package schedule
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -35,7 +36,7 @@ type Scheduler interface {
 	GetName() string
 	// GetType should in accordance with the name passing to schedule.RegisterScheduler()
 	GetType() string
-	GetConfig() interface{}
+	EncodeConfig() ([]byte, error)
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster Cluster) error
@@ -44,19 +45,45 @@ type Scheduler interface {
 	IsScheduleAllowed(cluster Cluster) bool
 }
 
-// ConfigMapper can hold any config of the scheduler.
-// Only supports bool, float64, string.
-type ConfigMapper map[string]interface{}
+// EncodeConfig encode the custome config for each scheduler.
+func EncodeConfig(v interface{}) ([]byte, error) {
+	return json.Marshal(v)
+}
 
-// ArgsToMapper is for creating scheduler config mapper.
-// TODO: remove me.
-type ArgsToMapper func(args []string) (ConfigMapper, error)
+// ConfigDecoder used to decode the config.
+type ConfigDecoder func(v interface{}) error
+
+// ConfigSliceDecoderBuilder used to build slice decoder of the config.
+type ConfigSliceDecoderBuilder func([]string) ConfigDecoder
+
+//ConfigJSONDecoder used to build a json decoder of the config.
+func ConfigJSONDecoder(data []byte) ConfigDecoder {
+	return func(v interface{}) error {
+		return DecodeConfig(data, v)
+	}
+}
+
+// ConfigSliceDecoder the default decode for the
+func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
+	builder, ok := schedulerArgsToDecoder[name]
+	if !ok {
+		return func(v interface{}) error {
+			return errors.Errorf("the config decoer do not register for %s", name)
+		}
+	}
+	return builder(args)
+}
+
+// DecodeConfig decode the custome config for each scheduler.
+func DecodeConfig(data []byte, v interface{}) error {
+	return json.Unmarshal(data, v)
+}
 
 // CreateSchedulerFunc is for creating scheduler.
-type CreateSchedulerFunc func(opController *OperatorController, storage *core.Storage, mapper ConfigMapper) (Scheduler, error)
+type CreateSchedulerFunc func(opController *OperatorController, storage *core.Storage, dec ConfigDecoder) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
-var schedulerArgsToMapper = make(map[string]ArgsToMapper)
+var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
 
 // RegisterScheduler binds a scheduler creator. It should be called in init()
 // func of a package.
@@ -67,13 +94,13 @@ func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 	schedulerMap[typ] = createFn
 }
 
-// RegisterArgsToMapper binds a config mapper convert. It should be called in init()
-// func of a package.
-func RegisterArgsToMapper(typ string, toMapper ArgsToMapper) {
-	if _, ok := schedulerArgsToMapper[typ]; ok {
+// RegisterSliceDecoderBuilder convert arguments to config. It should be called in init()
+// func of package.
+func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) {
+	if _, ok := schedulerArgsToDecoder[typ]; ok {
 		log.Fatal("duplicated scheduler", zap.String("type", typ))
 	}
-	schedulerArgsToMapper[typ] = toMapper
+	schedulerArgsToDecoder[typ] = builder
 }
 
 // IsSchedulerRegistered check where the named scheduler type is registered.
@@ -82,28 +109,22 @@ func IsSchedulerRegistered(name string) bool {
 	return ok
 }
 
-// ConvArgsToMapper converts the args to config mapper according the scheduler type.
-// TODO: remove me.
-func ConvArgsToMapper(typ string, args []string) (ConfigMapper, error) {
-	toMapper, ok := schedulerArgsToMapper[typ]
-	if !ok {
-		return nil, errors.New("cannot convert to config mapper")
-	}
-	return toMapper(args)
-}
-
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(typ string, opController *OperatorController, storage *core.Storage, mapper ConfigMapper) (Scheduler, error) {
+func CreateScheduler(typ string, opController *OperatorController, storage *core.Storage, dec ConfigDecoder) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
 		return nil, errors.Errorf("create func of %v is not registered", typ)
 	}
 
-	s, err := fn(opController, storage, mapper)
+	s, err := fn(opController, storage, dec)
 	if err != nil {
 		return s, err
 	}
-	err = storage.SaveScheduleConfig(s.GetName(), s.GetConfig())
+	data, err := s.EncodeConfig()
+	if err != nil {
+		return s, err
+	}
+	err = storage.SaveScheduleConfig(s.GetName(), data)
 	return s, err
 }
 

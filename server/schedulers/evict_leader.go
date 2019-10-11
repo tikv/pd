@@ -26,29 +26,32 @@ import (
 )
 
 func init() {
-	schedule.RegisterArgsToMapper("evict-leader", func(args []string) (schedule.ConfigMapper, error) {
-		if len(args) != 1 {
-			return nil, errors.New("should specify the store-id")
+	schedule.RegisterSliceDecoderBuilder("evict-leader", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			if len(args) != 1 {
+				return errors.New("should specify the store-id")
+			}
+			conf, ok := v.(*evictLeaderSchedulerConf)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+
+			id, err := strconv.ParseUint(args[0], 10, 64)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			name := fmt.Sprintf("evict-leader-scheduler-%d", id)
+			conf.StoreID = id
+			conf.Name = name
+			return nil
+
 		}
-		mapper := make(schedule.ConfigMapper)
-		id, err := strconv.ParseFloat(args[0], 64)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		mapper["store-id"] = id
-		return mapper, nil
 	})
 
-	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
-		if len(mapper) != 1 {
-			return nil, errors.New("evict-leader needs 1 argument")
-		}
-		id := uint64(mapper["store-id"].(float64))
-		name := fmt.Sprintf("evict-leader-scheduler-%d", id)
-		conf := &evictLeaderSchedulerConf{
-			Name:    name,
-			StoreID: id,
-		}
+	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+
+		conf := &evictLeaderSchedulerConf{}
+		decoder(conf)
 		return newEvictLeaderScheduler(opController, conf), nil
 	})
 }
@@ -87,8 +90,8 @@ func (s *evictLeaderScheduler) GetType() string {
 	return "evict-leader"
 }
 
-func (s *evictLeaderScheduler) GetConfig() interface{} {
-	return s.conf
+func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {

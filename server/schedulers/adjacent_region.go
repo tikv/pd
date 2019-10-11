@@ -38,34 +38,38 @@ const (
 )
 
 func init() {
-	schedule.RegisterArgsToMapper("adjacent-region", func(args []string) (schedule.ConfigMapper, error) {
-		mapper := make(schedule.ConfigMapper)
-		if len(args) == 2 {
-			leaderLimit, err := strconv.ParseFloat(args[0], 64)
-			if err != nil {
-				return nil, errors.WithStack(err)
+	schedule.RegisterSliceDecoderBuilder("adjacent-region", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			conf, ok := v.(*balanceAdjacentRegionConf)
+			if !ok {
+				return ErrScheduleConfigNotExist
 			}
-			peerLimit, err := strconv.ParseFloat(args[1], 64)
-			if err != nil {
-				return nil, errors.WithStack(err)
+			if len(args) == 2 {
+				leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
+				if err != nil {
+					return errors.WithStack(err)
+				}
+				peerLimit, err := strconv.ParseUint(args[1], 10, 64)
+				if err != nil {
+					return errors.WithStack(err)
+				}
+				conf.LeaderLimit = leaderLimit
+				conf.PeerLimit = peerLimit
+				return nil
 			}
-			mapper["leader-limit"] = leaderLimit
-			mapper["peer-limit"] = peerLimit
+			conf.LeaderLimit = defaultAdjacentLeaderLimit
+			conf.PeerLimit = defaultAdjacentPeerLimit
+			return nil
 		}
-		return mapper, nil
 	})
 
-	schedule.RegisterScheduler("adjacent-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
-		if len(mapper) == 2 {
-			conf := &balanceAdjacentRegionConf{
-				LeaderLimit: uint64(mapper["leader-limit"].(float64)),
-				PeerLimit:   uint64(mapper["peer-limit"].(float64)),
-			}
-			return newBalanceAdjacentRegionScheduler(opController, conf), nil
-		}
+	schedule.RegisterScheduler("adjacent-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceAdjacentRegionConf{
 			LeaderLimit: defaultAdjacentLeaderLimit,
 			PeerLimit:   defaultAdjacentPeerLimit,
+		}
+		if err := decoder(conf); err != nil {
+			return nil, err
 		}
 		return newBalanceAdjacentRegionScheduler(opController, conf), nil
 	})
@@ -130,8 +134,8 @@ func (l *balanceAdjacentRegionScheduler) GetType() string {
 	return "adjacent-region"
 }
 
-func (l *balanceAdjacentRegionScheduler) GetConfig() interface{} {
-	return l.conf
+func (l *balanceAdjacentRegionScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(l.conf)
 }
 
 func (l *balanceAdjacentRegionScheduler) GetMinInterval() time.Duration {

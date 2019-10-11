@@ -28,12 +28,13 @@ import (
 )
 
 func init() {
-	schedule.RegisterArgsToMapper("balance-leader", func(args []string) (schedule.ConfigMapper, error) {
-		mapper := make(schedule.ConfigMapper)
-		return mapper, nil
+	schedule.RegisterSliceDecoderBuilder("balance-leader", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
 	})
 
-	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceLeaderScheduler(opController), nil
 	})
 }

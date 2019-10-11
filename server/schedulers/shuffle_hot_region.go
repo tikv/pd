@@ -24,35 +24,37 @@ import (
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/statistics"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
 func init() {
-	schedule.RegisterArgsToMapper("shuffle-hot-region", func(args []string) (schedule.ConfigMapper, error) {
-		mapper := make(schedule.ConfigMapper)
-		if len(args) == 1 {
-			mapper["limit"] = args[0]
+	schedule.RegisterSliceDecoderBuilder("shuffle-hot-region", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			conf, ok := v.(*shuffleHotRegionSchedulerConf)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+			conf.Limit = uint64(1)
+			if len(args) == 1 {
+				limit, err := strconv.ParseUint(args[0], 10, 64)
+				if err != nil {
+					return err
+				}
+				conf.Limit = limit
+			}
+			return nil
 		}
-		return mapper, nil
 	})
 
-	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
-		limit := uint64(1)
-		if len(mapper) == 1 {
-			l, err := strconv.ParseUint(mapper["limit"].(string), 10, 64)
-			if err != nil {
-				return nil, errors.WithStack(err)
-			}
-			limit = l
-		}
-		conf := &shuffleHotRegionSchedulerConf{Limit: limit}
+	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &shuffleHotRegionSchedulerConf{Limit: uint64(1)}
+		decoder(conf)
 		return newShuffleHotRegionScheduler(opController, conf), nil
 	})
 }
 
 type shuffleHotRegionSchedulerConf struct {
-	Limit uint64 `limit`
+	Limit uint64 `json:"limit"`
 }
 
 // ShuffleHotRegionScheduler mainly used to test.
@@ -87,8 +89,8 @@ func (s *shuffleHotRegionScheduler) GetType() string {
 	return "shuffle-hot-region"
 }
 
-func (s *shuffleHotRegionScheduler) GetConfig() interface{} {
-	return s.conf
+func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
 }
 
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {

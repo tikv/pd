@@ -15,7 +15,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -219,7 +218,7 @@ func (c *coordinator) run() {
 
 	scheduleCfg := c.cluster.opt.Load().Clone()
 	for i, name := range scheduleNames {
-		payload := configs[i]
+		data := configs[i]
 		typ := schedule.FindScheduleTypeByName(name)
 		var cfg config.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
@@ -236,9 +235,8 @@ func (c *coordinator) run() {
 			log.Info("skip create scheduler with independent configuration", zap.String("schedule-name", name), zap.String("scheduler-type", cfg.Type))
 			continue
 		}
-		confMapper := make(schedule.ConfigMapper)
-		json.Unmarshal([]byte(payload), &confMapper)
-		s, err := schedule.CreateScheduler(cfg.Type, c.opController, c.cluster.storage, confMapper)
+
+		s, err := schedule.CreateScheduler(cfg.Type, c.opController, c.cluster.storage, schedule.ConfigJSONDecoder([]byte(data)))
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("schedule-name", name), zap.Error(err))
 			continue
@@ -257,12 +255,8 @@ func (c *coordinator) run() {
 			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type))
 			continue
 		}
-		confMapper, err := schedule.ConvArgsToMapper(schedulerCfg.Type, schedulerCfg.Args)
-		if err != nil {
-			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
-			continue
-		}
-		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storage, confMapper)
+
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args))
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
 			continue

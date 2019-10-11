@@ -24,11 +24,12 @@ import (
 )
 
 func init() {
-	schedule.RegisterArgsToMapper("random-merge", func(args []string) (schedule.ConfigMapper, error) {
-		mapper := make(schedule.ConfigMapper)
-		return mapper, nil
+	schedule.RegisterSliceDecoderBuilder("random-merge", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
 	})
-	schedule.RegisterScheduler("random-merge", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("random-merge", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newRandomMergeScheduler(opController), nil
 	})
 }

@@ -28,37 +28,36 @@ import (
 )
 
 func init() {
-	schedule.RegisterArgsToMapper("scatter-range", func(args []string) (schedule.ConfigMapper, error) {
-		if len(args) != 3 {
-			return nil, errors.New("should specify the range and the name")
+
+	// args: [start-key, end-key, range-name].
+	schedule.RegisterSliceDecoderBuilder("scatter-range", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			if len(args) != 3 {
+				return errors.New("should specify the range and the name")
+			}
+			if len(args[2]) == 0 {
+				return errors.New("the range name is invalid")
+			}
+			conf, ok := v.(*scatterRangeSchedulerConf)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+			conf.StartKey = args[0]
+			conf.EndKey = args[1]
+			conf.RangeName = args[2]
+			return nil
 		}
-		mapper := make(schedule.ConfigMapper)
-		mapper["start-key"] = args[0]
-		mapper["end-key"] = args[1]
-		mapper["range-name"] = args[2]
-		return mapper, nil
 	})
 
-	schedule.RegisterScheduler("scatter-range", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
-		if len(mapper) != 3 {
-			return nil, errors.New("should specify the range and the name")
+	schedule.RegisterScheduler("scatter-range", func(opController *schedule.OperatorController, storage *core.Storage, decode schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		config := &scatterRangeSchedulerConf{
+			mu:      &sync.RWMutex{},
+			storage: storage,
 		}
-		rangeName := mapper["range-name"].(string)
+		decode(config)
+		rangeName := config.RangeName
 		if len(rangeName) == 0 {
 			return nil, errors.New("the range name is invalid")
-		}
-		config := &scatterRangeSchedulerConf{
-			mu:        &sync.RWMutex{},
-			storage:   storage,
-			StartKey:  mapper["start-key"].(string),
-			EndKey:    mapper["end-key"].(string),
-			RangeName: rangeName,
-		}
-
-		// persist config firstly
-		err := storage.SaveScheduleConfig(config.getScheduleName(), config)
-		if err != nil {
-			return nil, err
 		}
 		return newScatterRangeScheduler(opController, storage, config), nil
 	})
@@ -100,11 +99,17 @@ func (conf *scatterRangeSchedulerConf) Clone() *scatterRangeSchedulerConf {
 	}
 }
 
-func (conf *scatterRangeSchedulerConf) Persist() {
+func (conf *scatterRangeSchedulerConf) Persist() error {
+
 	name := conf.getScheduleName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	conf.storage.SaveScheduleConfig(name, conf.Clone())
+	data, err := schedule.EncodeConfig(conf)
+	if err != nil {
+		return err
+	}
+	conf.storage.SaveScheduleConfig(name, data)
+	return nil
 }
 
 func (conf *scatterRangeSchedulerConf) Reload() {
@@ -181,8 +186,10 @@ func (l *scatterRangeScheduler) GetType() string {
 	return scatterRangeScheduleType
 }
 
-func (l *scatterRangeScheduler) GetConfig() interface{} {
-	return l.config.Clone()
+func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
+	l.config.mu.RLock()
+	defer l.config.mu.RUnlock()
+	return schedule.EncodeConfig(l.config)
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
@@ -250,7 +257,10 @@ func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.
 		args = append(args, string(handler.config.GetEndKey()))
 	}
 	handler.config.BuildWithArgs(args)
-	handler.config.Persist()
+	err := handler.config.Persist()
+	if err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err)
+	}
 
 	handler.rd.JSON(w, http.StatusOK, nil)
 }

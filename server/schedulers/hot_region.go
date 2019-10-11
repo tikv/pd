@@ -30,18 +30,20 @@ import (
 )
 
 func init() {
-	schedule.RegisterArgsToMapper("hot-region", func(args []string) (schedule.ConfigMapper, error) {
-		mapper := make(schedule.ConfigMapper)
-		return mapper, nil
+	schedule.RegisterSliceDecoderBuilder("hot-region", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
 	})
-	schedule.RegisterScheduler("hot-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("hot-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+
 		return newBalanceHotRegionsScheduler(opController), nil
 	})
 	// FIXME: remove this two schedule after the balance test move in schedulers package
-	schedule.RegisterScheduler("hot-write-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("hot-write-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceHotWriteRegionsScheduler(opController), nil
 	})
-	schedule.RegisterScheduler("hot-read-region", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler("hot-read-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceHotReadRegionsScheduler(opController), nil
 	})
 }

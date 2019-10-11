@@ -1235,11 +1235,8 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		tc.UpdateStoreStatus(uint64(i))
 	}
 	oc := schedule.NewOperatorController(nil, nil)
-	mapper := make(schedule.ConfigMapper)
-	mapper["range-name"] = "t"
-	mapper["start-key"] = "s_00"
-	mapper["end-key"] = "s_50"
-	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), mapper)
+
+	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_50", "t"}))
 	c.Assert(err, IsNil)
 	limit := 0
 	for {
@@ -1311,11 +1308,7 @@ func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 	}
 
 	oc := schedule.NewOperatorController(nil, nil)
-	mapper := make(schedule.ConfigMapper)
-	mapper["range-name"] = "t"
-	mapper["start-key"] = "s_00"
-	mapper["end-key"] = "s_09"
-	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), mapper)
+	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_09", "t"}))
 	c.Assert(err, IsNil)
 
 	limit := 0

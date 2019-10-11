@@ -584,16 +584,12 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(tc.addLeaderRegion(3, 3, 1, 2), IsNil)
 
 	oc := co.opController
-	confMapper, err := schedule.ConvArgsToMapper("grant-leader", []string{"0"})
-	c.Assert(err, IsNil)
-	gls, err := schedule.CreateScheduler("grant-leader", oc, core.NewStorage(kv.NewMemoryKV()), confMapper)
+	gls, err := schedule.CreateScheduler("grant-leader", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("grant-leader", []string{"0"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	confMapper, err = schedule.ConvArgsToMapper("grant-leader", []string{"1"})
-	c.Assert(err, IsNil)
-	gls, err = schedule.CreateScheduler("grant-leader", oc, core.NewStorage(kv.NewMemoryKV()), confMapper)
+	gls, err = schedule.CreateScheduler("grant-leader", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("grant-leader", []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), IsNil)
 
@@ -634,14 +630,10 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
-	confMapper, err := schedule.ConvArgsToMapper("grant-leader", []string{"1"})
-	c.Assert(err, IsNil)
-	gls1, err := schedule.CreateScheduler("grant-leader", oc, storage, confMapper)
+	gls1, err := schedule.CreateScheduler("grant-leader", oc, storage, schedule.ConfigSliceDecoder("grant-leader", []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
-	confMapper, err = schedule.ConvArgsToMapper("grant-leader", []string{"2"})
-	c.Assert(err, IsNil)
-	gls2, err := schedule.CreateScheduler("grant-leader", oc, storage, confMapper)
+	gls2, err := schedule.CreateScheduler("grant-leader", oc, storage, schedule.ConfigSliceDecoder("grant-leader", []string{"2"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls2, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 6)
@@ -743,9 +735,7 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
-	confMapper, err := schedule.ConvArgsToMapper("grant-leader", []string{"1"})
-	c.Assert(err, IsNil)
-	gls1, err := schedule.CreateScheduler("grant-leader", oc, storage, confMapper)
+	gls1, err := schedule.CreateScheduler("grant-leader", oc, storage, schedule.ConfigSliceDecoder("grant-leader", []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)

@@ -100,13 +100,9 @@ func (s *Storage) storeRegionWeightPath(storeID uint64) string {
 }
 
 // SaveScheduleConfig saves the config of scheduler.
-func (s *Storage) SaveScheduleConfig(scheduleName string, cfg interface{}) error {
-	value, err := json.Marshal(cfg)
-	if err != nil {
-		return errors.WithStack(err)
-	}
+func (s *Storage) SaveScheduleConfig(scheduleName string, data []byte) error {
 	configPath := path.Join(customeScheduleConfigPath, scheduleName)
-	return s.Save(configPath, string(value))
+	return s.Save(configPath, string(data))
 }
 
 // RemoveScheduleConfig remvoes the config of scheduler.

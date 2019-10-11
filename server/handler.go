@@ -179,11 +179,8 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	confMapper, err := schedule.ConvArgsToMapper(name, args)
-	if err != nil {
-		return err
-	}
-	s, err := schedule.CreateScheduler(name, c.opController, h.s.storage, confMapper)
+
+	s, err := schedule.CreateScheduler(name, c.opController, h.s.storage, schedule.ConfigSliceDecoder(name, args))
 	if err != nil {
 		return err
 	}

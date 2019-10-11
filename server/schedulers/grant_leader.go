@@ -24,30 +24,30 @@ import (
 )
 
 func init() {
-	schedule.RegisterArgsToMapper("grant-leader", func(args []string) (schedule.ConfigMapper, error) {
-		if len(args) != 1 {
-			return nil, errors.New("should specify the store-id")
-		}
-		mapper := make(schedule.ConfigMapper)
-		id, err := strconv.ParseFloat(args[0], 64)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
+	schedule.RegisterSliceDecoderBuilder("grant-leader", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			if len(args) != 1 {
+				return errors.New("should specify the store-id")
+			}
 
-		mapper["store-id"] = id
-		return mapper, nil
+			conf, ok := v.(*grandLeaderConf)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+
+			id, err := strconv.ParseUint(args[0], 10, 64)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			conf.StoreID = id
+			conf.name = fmt.Sprintf("grant-leader-scheduler-%d", id)
+			return nil
+		}
 	})
 
-	schedule.RegisterScheduler("grant-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigMapper) (schedule.Scheduler, error) {
-		if len(mapper) != 1 {
-			return nil, errors.New("grant-leader needs 1 argument")
-		}
-		id := uint64(mapper["store-id"].(float64))
-		conf := &grandLeaderConf{
-			name:    fmt.Sprintf("grant-leader-scheduler-%d", id),
-			StoreID: id,
-		}
-		storage.SaveScheduleConfig(conf.name, conf)
+	schedule.RegisterScheduler("grant-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &grandLeaderConf{}
+		decoder(conf)
 		return newGrantLeaderScheduler(opController, conf), nil
 	})
 }
@@ -81,8 +81,8 @@ func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
 
-func (s *grantLeaderScheduler) GetConfig() interface{} {
-	return s.conf
+func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
 }
 
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
