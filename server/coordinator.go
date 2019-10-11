@@ -327,7 +327,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		storeLabel := fmt.Sprintf("%d", storeID)
 		stat, ok := status.AsPeer[storeID]
 		if ok {
-			totalWriteBytes := float64(stat.TotalFlowBytes)
+			totalWriteBytes := float64(stat.TotalBytesRate)
 			hotWriteRegionCount := float64(stat.RegionsCount)
 
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(totalWriteBytes)
@@ -339,7 +339,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 		stat, ok = status.AsLeader[storeID]
 		if ok {
-			totalWriteBytes := float64(stat.TotalFlowBytes)
+			totalWriteBytes := float64(stat.TotalBytesRate)
 			hotWriteRegionCount := float64(stat.RegionsCount)
 
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(totalWriteBytes)
@@ -358,7 +358,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		storeLabel := fmt.Sprintf("%d", storeID)
 		stat, ok := status.AsLeader[storeID]
 		if ok {
-			totalReadBytes := float64(stat.TotalFlowBytes)
+			totalReadBytes := float64(stat.TotalBytesRate)
 			hotReadRegionCount := float64(stat.RegionsCount)
 
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(totalReadBytes)
