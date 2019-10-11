@@ -106,9 +106,9 @@ func (s *hotTestSuite) TestHot(c *C) {
 		hotRegion := statistics.StoreHotRegionInfos{}
 		c.Assert(e, IsNil)
 		c.Assert(json.Unmarshal(output, &hotRegion), IsNil)
-		checkInMap.Contains(hotRegion.AsLeader, hotStoreId)
-		c.Assert(hotRegion.AsLeader[hotStoreId].RegionsCount, Equals, 1)
-		c.Assert(hotRegion.AsLeader[hotStoreId].RegionsStat[0].RegionID, Equals, hotRegionID)
+		checkInMap.Contains(hotRegion.AsLeader, hotStoreID)
+		c.Assert(hotRegion.AsLeader[hotStoreID].RegionsCount, Equals, 1)
+		c.Assert(hotRegion.AsLeader[hotStoreID].RegionsStat[0].RegionID, Equals, hotRegionID)
 	}
 
 	hotReadRegionID, hotWriteRegionID, hotStoreId := uint64(3), uint64(2), uint64(1)
