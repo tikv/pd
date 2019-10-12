@@ -35,7 +35,7 @@ const (
 	schedulePath = "schedule"
 	gcPath       = "gc"
 
-	customeScheduleConfigPath = "scheduler-config"
+	customScheduleConfigPath = "scheduler-config"
 )
 
 const (
@@ -101,19 +101,19 @@ func (s *Storage) storeRegionWeightPath(storeID uint64) string {
 
 // SaveScheduleConfig saves the config of scheduler.
 func (s *Storage) SaveScheduleConfig(scheduleName string, data []byte) error {
-	configPath := path.Join(customeScheduleConfigPath, scheduleName)
+	configPath := path.Join(customScheduleConfigPath, scheduleName)
 	return s.Save(configPath, string(data))
 }
 
 // RemoveScheduleConfig remvoes the config of scheduler.
 func (s *Storage) RemoveScheduleConfig(scheduleName string) error {
-	configPath := path.Join(customeScheduleConfigPath, scheduleName)
+	configPath := path.Join(customScheduleConfigPath, scheduleName)
 	return s.Remove(configPath)
 }
 
 // LoadScheduleConfig loads the config of scheduler.
 func (s *Storage) LoadScheduleConfig(scheduleName string) (string, error) {
-	configPath := path.Join(customeScheduleConfigPath, scheduleName)
+	configPath := path.Join(customScheduleConfigPath, scheduleName)
 	return s.Load(configPath)
 }
 
@@ -300,9 +300,9 @@ func (s *Storage) LoadGCSafePoint() (uint64, error) {
 
 // LoadAllScheduleConfig loads all schedulers' config.
 func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
-	keys, values, err := s.LoadRange(customeScheduleConfigPath, clientv3.GetPrefixRangeEnd(customeScheduleConfigPath), 1000)
+	keys, values, err := s.LoadRange(customScheduleConfigPath, clientv3.GetPrefixRangeEnd(customScheduleConfigPath), 1000)
 	for i, key := range keys {
-		keys[i] = strings.TrimPrefix(key, customeScheduleConfigPath+"/")
+		keys[i] = strings.TrimPrefix(key, customScheduleConfigPath+"/")
 	}
 	return keys, values, err
 }
