@@ -79,19 +79,19 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 			// Test the scheduler config handler.
 			extraTestFunc: func(name string, c *C) {
 				resp := make(map[string]interface{})
-				url := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name)
-				readJSONWithURL(url, &resp)
+				listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name)
+				readJSONWithURL(listURL, &resp)
 				c.Assert(resp["start-key"], Equals, "")
 				c.Assert(resp["end-key"], Equals, "")
 				c.Assert(resp["range-name"], Equals, "test")
 				resp["start-key"] = "a_00"
 				resp["end-key"] = "a_99"
-				updateUrl := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name)
+				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name)
 				body, err := json.Marshal(resp)
 				c.Assert(err, IsNil)
-				err = postJSON(updateUrl, body)
+				err = postJSON(updateURL, body)
 				c.Assert(err, IsNil)
-				readJSONWithURL(url, &resp)
+				readJSONWithURL(listURL, &resp)
 				c.Assert(resp["start-key"], Equals, "a_00")
 				c.Assert(resp["end-key"], Equals, "a_99")
 				c.Assert(resp["range-name"], Equals, "test")
