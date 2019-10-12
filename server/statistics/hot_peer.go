@@ -26,8 +26,8 @@ type HotPeerStat struct {
 	AntiCount int
 
 	Kind      FlowKind `json:"kind"`
-	BytesRate uint64   `json:"flow_bytes"`
-	KeysRate  uint64   `json:"flow_keys"`
+	BytesRate float64  `json:"flow_bytes"`
+	KeysRate  float64  `json:"flow_keys"`
 	// RollingBytesRate is a rolling statistics, recording some recently added records.
 	RollingBytesRate *RollingStats
 
@@ -56,9 +56,10 @@ func (stat *HotPeerStat) IsNew() bool {
 	return stat.isNew
 }
 
+// GetBytesRate returns denoised BytesRate if possible.
 func (stat *HotPeerStat) GetBytesRate() float64 {
-  if stat.RollingBytesRate == nil {
-    return float64(stat.BytesRate)
-  }
-  return stat.RollingBytesRate.Median()
+	if stat.RollingBytesRate == nil {
+		return stat.BytesRate
+	}
+	return stat.RollingBytesRate.Median()
 }
