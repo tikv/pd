@@ -28,7 +28,6 @@ import (
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
-	"github.com/stretchr/testify/assert"
 )
 
 func Test(t *testing.T) {
@@ -94,7 +93,6 @@ func (s *hotTestSuite) TestHot(c *C) {
 
 	// test hot region
 	statistics.Denoising = false
-	checkInMap := assert.New(c)
 	reportInterval := uint64(3) // need to be minHotRegionReportInterval < reportInterval < 3*RegionHeartBeatReportInterval
 	args = []string{"-u", pdAddr, "config", "set", "hot-region-cache-hits-threshold", "0"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
@@ -106,7 +104,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 		hotRegion := statistics.StoreHotRegionInfos{}
 		c.Assert(e, IsNil)
 		c.Assert(json.Unmarshal(output, &hotRegion), IsNil)
-		checkInMap.Contains(hotRegion.AsLeader, hotStoreID)
+		c.Assert(hotRegion.AsLeader, HasKey, hotStoreID)
 		c.Assert(hotRegion.AsLeader[hotStoreID].RegionsCount, Equals, 1)
 		c.Assert(hotRegion.AsLeader[hotStoreID].RegionsStat[0].RegionID, Equals, hotRegionID)
 	}
@@ -114,7 +112,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	hotReadRegionID, hotWriteRegionID, hotStoreId := uint64(3), uint64(2), uint64(1)
 	pdctl.MustPutRegion(c, cluster, hotReadRegionID, hotStoreId, []byte("b"), []byte("c"), core.SetReadBytes(1000000000), core.SetReportInterval(reportInterval))
 	pdctl.MustPutRegion(c, cluster, hotWriteRegionID, hotStoreId, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000), core.SetReportInterval(reportInterval))
-	time.Sleep(3 * time.Second)
+	time.Sleep(3200 * time.Millisecond)
 	testHot(hotReadRegionID, hotStoreId, "read")
 	testHot(hotWriteRegionID, hotStoreId, "write")
 
