@@ -28,7 +28,7 @@ type ResourceKind int
 
 const (
 	// LeaderKind indicates the leader kind resource
-	LeaderKind = iota
+	LeaderKind ResourceKind = iota
 	// RegionKind indicates the region kind resource
 	RegionKind
 )
@@ -49,7 +49,7 @@ type LeaderScheduleKind int
 
 const (
 	// ByCount indicates that balance leader by count
-	ByCount = iota
+	ByCount LeaderScheduleKind = iota
 	// BySize indicates that balance leader by size
 	BySize
 )

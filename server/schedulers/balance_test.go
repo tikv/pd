@@ -121,7 +121,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 	}
 
 	for _, t := range tests {
-		if t.kind.String() == core.LeaderScheduleKind(core.BySize).String() {
+		if t.kind.String() == core.BySize.String() {
 			tc.AddRegionStore(1, int(t.sourceCount))
 			tc.AddRegionStore(2, int(t.targetCount))
 			source := tc.GetStore(1)
@@ -213,9 +213,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderScheduleStrategy(c *C
 	s.tc.AddLeaderStore(3, 10, 100)
 	s.tc.AddLeaderStore(4, 10, 100)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	c.Assert(s.tc.LeaderScoreStrategy, Equals, core.LeaderScheduleKind(core.ByCount).String()) // default by count
+	c.Assert(s.tc.LeaderScoreStrategy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), IsNil)
-	s.tc.LeaderScoreStrategy = core.LeaderScheduleKind(core.BySize).String()
+	s.tc.LeaderScoreStrategy = core.BySize.String()
 	c.Check(s.schedule(), NotNil)
 }
 
@@ -251,7 +251,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
 	s.tc.AddLeaderStore(3, 10, 100)
 	s.tc.AddLeaderStore(4, 10, 100)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	c.Assert(s.tc.LeaderScoreStrategy, Equals, core.LeaderScheduleKind(core.ByCount).String()) // default by count
+	c.Assert(s.tc.LeaderScoreStrategy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), IsNil)
 	c.Assert(s.tc.GetStore(1).GetLeaderCount(), Equals, 14)
 	s.tc.AddLeaderStore(1, 15, 100)
@@ -276,9 +276,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	// After considering the scheduled operator, leaders of store1 and store4 are 8
 	// and 13 respectively. As the `TolerantSizeRatio` is 2.5, `shouldBalance`
 	// returns false when leader difference is not greater than 5.
-	c.Assert(s.tc.LeaderScoreStrategy, Equals, core.LeaderScheduleKind(core.ByCount).String()) // default by count
+	c.Assert(s.tc.LeaderScoreStrategy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), NotNil)
-	s.tc.LeaderScoreStrategy = core.LeaderScheduleKind(core.BySize).String()
+	s.tc.LeaderScoreStrategy = core.BySize.String()
 	c.Check(s.schedule(), IsNil)
 
 	// Stores:     1    2    3    4
