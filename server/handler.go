@@ -35,6 +35,10 @@ import (
 )
 
 var (
+	// ScheuduleConfigHandlerPath is the api router path of the schedule config handler.
+	ScheduleConfigHandlerPath     = "/api/v1/schedule-config"
+	scheduleConfigHandlerFullPath = "/pd/api/v1/schedule-config"
+
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
 	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
 	// ErrOperatorNotFound is error info for operator not found.
@@ -742,16 +746,15 @@ func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 	return c.GetRegionStatsByType(statistics.IncorrectNamespace), nil
 }
 
-// GetSchedulerHandler gets the handler of schedulers.
-func (h *Handler) GetSchedulerHandler() http.Handler {
+// GetSchedulerConfigHandler gets the handler of schedulers.
+func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil
 	}
 	mux := http.NewServeMux()
-	path := "/pd/api/v1/scheduler-handler/"
 	for name, handler := range c.schedulers {
-		p := path + name + "/"
+		p := scheduleConfigHandlerFullPath + "/" + name + "/"
 		mux.Handle(p, http.StripPrefix(p[:len(p)-1], handler))
 	}
 	return mux

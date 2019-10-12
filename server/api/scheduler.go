@@ -188,23 +188,21 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, nil)
 }
 
-type schedulersHandler struct {
-	svr    *server.Server
-	rd     *render.Render
-	prefix string
+type schedulerConfigHandler struct {
+	svr *server.Server
+	rd  *render.Render
 }
 
-func newSchedulersHandler(svr *server.Server, rd *render.Render, prefix string) *schedulersHandler {
-	return &schedulersHandler{
-		svr:    svr,
-		rd:     rd,
-		prefix: prefix,
+func newSchedulerConfigHandler(svr *server.Server, rd *render.Render, prefix string) *schedulerConfigHandler {
+	return &schedulerConfigHandler{
+		svr: svr,
+		rd:  rd,
 	}
 }
 
-func (h *schedulersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *schedulerConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	sh := handler.GetSchedulerHandler()
+	sh := handler.GetSchedulerConfigHandler()
 	if sh != nil {
 		sh.ServeHTTP(w, r)
 		return

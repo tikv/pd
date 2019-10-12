@@ -35,7 +35,7 @@ const (
 	schedulePath = "schedule"
 	gcPath       = "gc"
 
-	customeScheduleConfigPath = "schedule-handler"
+	customeScheduleConfigPath = "scheduler-config"
 )
 
 const (
