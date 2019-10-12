@@ -42,16 +42,23 @@ type HotPeerStat struct {
 }
 
 // IsNeedDelete to delete the item in cache.
-func (stat HotPeerStat) IsNeedDelete() bool {
+func (stat *HotPeerStat) IsNeedDelete() bool {
 	return stat.needDelete
 }
 
 // IsLeader indicaes the item belong to the leader.
-func (stat HotPeerStat) IsLeader() bool {
+func (stat *HotPeerStat) IsLeader() bool {
 	return stat.isLeader
 }
 
 // IsNew indicaes the item is first update in the cache of the region.
-func (stat HotPeerStat) IsNew() bool {
+func (stat *HotPeerStat) IsNew() bool {
 	return stat.isNew
+}
+
+func (stat *HotPeerStat) GetBytesRate() float64 {
+  if stat.RollingBytesRate == nil {
+    return float64(stat.BytesRate)
+  }
+  return stat.RollingBytesRate.Median()
 }

@@ -147,7 +147,7 @@ func (h *trendHandler) getStoreFlow(stats statistics.StoreHotRegionsStat, storeI
 	if stat, ok := stats[storeID]; ok {
 		storeFlow = stat.TotalBytesRate
 		for _, flow := range stat.RegionsStat {
-			regionFlows = append(regionFlows, flow.BytesRate)
+			regionFlows = append(regionFlows, uint64(flow.GetBytesRate()))
 		}
 	}
 	return
