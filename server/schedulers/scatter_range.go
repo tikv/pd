@@ -89,8 +89,8 @@ func (conf *scatterRangeSchedulerConfig) Clone() *scatterRangeSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	return &scatterRangeSchedulerConfig{
-		StartKey:  conf.RangeName,
-		EndKey:    conf.StartKey,
+		StartKey:  conf.StartKey,
+		EndKey:    conf.EndKey,
 		RangeName: conf.RangeName,
 	}
 }
