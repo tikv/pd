@@ -27,10 +27,10 @@
     [[Regions.Region.Stores]]
         [[Regions.Region.Stores.StoreLabel]]
             Key   = "zone"
-            Value = "z3"
+            Value = "z4"
         [[Regions.Region.Stores.StoreLabel]]
             Key   = "rack"
-            Value = "r3"
+            Value = "r4"
         [[Regions.Region.Stores.StoreLabel]]
             Key   = "host"
-            Value = "h3"
+            Value = "h4"

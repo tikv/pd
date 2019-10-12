@@ -763,9 +763,8 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 }
 
 // PluginLoad loads the plugin referenced by the pluginPath
-func (h *Handler) PluginLoad(pluginPath, configPath string) error {
+func (h *Handler) PluginLoad(pluginPath string) error {
 	fmt.Println(pluginPath)
-	fmt.Println(configPath)
 	c, err := h.getCoordinator()
 	if err != nil {
 		return err
@@ -773,21 +772,25 @@ func (h *Handler) PluginLoad(pluginPath, configPath string) error {
 	ch := make(chan string)
 	h.chMap[pluginPath] = ch
 	c.wg.Add(1)
-	go c.readUserConfig(pluginPath, configPath, ch)
+	go c.LoadPlugin(pluginPath, ch)
 	return nil
 }
 
 // PluginUpdate update the plugin referenced by the pluginPath
-func (h *Handler) PluginUpdate(pluginPath, configPath string) error {
+func (h *Handler) PluginUpdate(pluginPath string) error {
 	fmt.Println(pluginPath)
-	fmt.Println(configPath)
 	ch := h.chMap[pluginPath]
-	ch <- configPath
+	update := "update"
+	ch <- update
 	return nil
 }
 
 // PluginUnload unloads the plugin referenced by the pluginPath
 func (h *Handler) PluginUnload(pluginPath string) error {
 	fmt.Println(pluginPath)
+	ch := h.chMap[pluginPath]
+	unload := "unload"
+	ch <- unload
+	delete(h.chMap, pluginPath)
 	return nil
 }

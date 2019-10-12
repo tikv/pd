@@ -249,48 +249,52 @@ func (c *coordinator) run() {
 	go c.drivePushOperator()
 }
 
-//read user_config.toml and load plugin
-func (c *coordinator) readUserConfig(pluginPath, configPath string, ch chan string) {
+// LoadPlugin load user plugin
+func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	//get func from plugin
-	//func : NewUserConfig()
-	f1, err := schedule.GetFunction(pluginPath, "NewUserConfig")
+	log.Info("load plugin", zap.String("plugin-path", pluginPath))
+	// get func: SchedulerType from plugin
+	f1, err := schedule.GetFunction(pluginPath, "SchedulerType")
 	if err != nil {
-		log.Error("GetFunction err", zap.Error(err))
+		log.Error("GetFunction error", zap.Error(err))
+		return
+	}
+	SchedulerType := f1.(func() string)
+	// get func: SchedulerArgs from plugin
+	f2, err := schedule.GetFunction(pluginPath, "SchedulerArgs")
+	if err != nil {
+		log.Error("GetFunction error", zap.Error(err))
+		return
+	}
+	SchedulerArgs := f2.(func() []string)
+	// create and add user scheduler
+	s, err := schedule.CreateScheduler(SchedulerType(), c.opController, SchedulerArgs()...)
+	if err != nil {
+		log.Error("can not create scheduler", zap.String("scheduler-type", SchedulerType()), zap.Error(err))
+		return
+	}
+	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+	if err = c.addUserScheduler(s); err != nil {
+		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		return
 	}
 
-	NewUserConfig := f1.(func() schedule.Config)
-	//func : ProduceScheduler()
-	f2, err := schedule.GetFunction(pluginPath, "ProduceScheduler")
-	if err != nil {
-		log.Error("GetFunction err", zap.Error(err))
-		return
-	}
-
-	ProduceScheduler := f2.(func(schedule.Config, *schedule.OperatorController, schedule.Cluster) []schedule.Scheduler)
-
-	userConfig := NewUserConfig()
-	if userConfig.LoadConfig(configPath, c.cluster.GetMaxReplicas()) {
-		schedulers := ProduceScheduler(userConfig, c.opController, c.cluster)
-		for _, s := range schedulers {
-			if err = c.addUserScheduler(s); err != nil {
-				log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
-			}
-		}
-	}
-	//Get signal from channel which means user config changed
+	// Get signal from channel which means user unload the plugin
 	for {
-		configPath := <-ch
-		log.Info("user config changed")
-		if userConfig.LoadConfig(configPath, c.cluster.GetMaxReplicas()) {
-			schedulers := ProduceScheduler(userConfig, c.opController, c.cluster)
-			for _, s := range schedulers {
-				if err = c.addUserScheduler(s); err != nil {
-					log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		action := <-ch
+		switch action {
+			case "unload":
+				if err := c.removeScheduler(s.GetName()); err != nil {
+					log.Error("can not remove scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+				} else {
+					log.Info("unload plugin")
+					return
 				}
-			}
+			case "update":
+				log.Info("update plugin")
+			default:
+				log.Error("unknown action", zap.String("action", action))
 		}
 	}
 }

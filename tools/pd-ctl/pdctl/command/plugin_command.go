@@ -26,8 +26,8 @@ func NewPluginCommand() *cobra.Command {
 // NewLoadPluginCommand return a load subcommand of plugin command
 func NewLoadPluginCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "load <plugin_path> <config_path>",
-		Short: "load a plugin with a user defined config file",
+		Use:   "load <plugin_path>",
+		Short: "load a plugin",
 		Run:   loadPluginCommandFunc,
 	}
 	return r
@@ -36,8 +36,8 @@ func NewLoadPluginCommand() *cobra.Command {
 // NewUpdatePluginCommand return a update subcommand of plugin command
 func NewUpdatePluginCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "update <plugin_path> <config_path>",
-		Short: "update plugin with a user defined config file",
+		Use:   "update <plugin_path>",
+		Short: "update plugin",
 		Run:   updatePluginCommandFunc,
 	}
 	return r
@@ -54,25 +54,23 @@ func NewUnloadPluginCommand() *cobra.Command {
 }
 
 func loadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
+	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
 	input := map[string]interface{}{
 		"plugin-path": args[0],
-		"config-path": args[1],
 	}
 	postJSON(cmd, loadPrefix, input)
 }
 
 func updatePluginCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
+	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
 	input := map[string]interface{}{
 		"plugin-path": args[0],
-		"config-path": args[1],
 	}
 	postJSON(cmd, updatePrefix, input)
 }
