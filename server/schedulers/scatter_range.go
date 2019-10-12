@@ -88,11 +88,9 @@ func (conf *scatterRangeSchedulerConfig) BuildWithArgs(args []string) error {
 func (conf *scatterRangeSchedulerConfig) Clone() *scatterRangeSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	cpStartkey := string([]byte(conf.StartKey))
-	cpEndKey := string([]byte(conf.EndKey))
 	return &scatterRangeSchedulerConfig{
-		StartKey:  cpStartkey,
-		EndKey:    cpEndKey,
+		StartKey:  conf.RangeName,
+		EndKey:    conf.StartKey,
 		RangeName: conf.RangeName,
 	}
 }
