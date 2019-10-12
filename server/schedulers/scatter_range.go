@@ -259,7 +259,6 @@ func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err)
 	}
-
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 

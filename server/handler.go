@@ -35,7 +35,7 @@ import (
 )
 
 var (
-	// ScheuduleConfigHandlerPath is the api router path of the schedule config handler.
+	// ScheduleConfigHandlerPath is the api router path of the schedule config handler.
 	ScheduleConfigHandlerPath     = "/api/v1/schedule-config"
 	scheduleConfigHandlerFullPath = "/pd/api/v1/schedule-config"
 
