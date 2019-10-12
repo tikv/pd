@@ -40,7 +40,7 @@ const (
 func init() {
 	schedule.RegisterSliceDecoderBuilder("adjacent-region", func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
-			conf, ok := v.(*balanceAdjacentRegionConf)
+			conf, ok := v.(*balanceAdjacentRegionConfig)
 			if !ok {
 				return ErrScheduleConfigNotExist
 			}
@@ -64,7 +64,7 @@ func init() {
 	})
 
 	schedule.RegisterScheduler("adjacent-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &balanceAdjacentRegionConf{
+		conf := &balanceAdjacentRegionConfig{
 			LeaderLimit: defaultAdjacentLeaderLimit,
 			PeerLimit:   defaultAdjacentPeerLimit,
 		}
@@ -75,7 +75,7 @@ func init() {
 	})
 }
 
-type balanceAdjacentRegionConf struct {
+type balanceAdjacentRegionConfig struct {
 	LeaderLimit uint64 `json:"leader-limit"`
 	PeerLimit   uint64 `json:"peer-limit"`
 }
@@ -90,7 +90,7 @@ type balanceAdjacentRegionScheduler struct {
 	selector             *selector.RandomSelector
 	lastKey              []byte
 	cacheRegions         *adjacentState
-	conf                 *balanceAdjacentRegionConf
+	conf                 *balanceAdjacentRegionConfig
 	adjacentRegionsCount int
 }
 
@@ -112,7 +112,7 @@ func (a *adjacentState) len() int {
 
 // newBalanceAdjacentRegionScheduler creates a scheduler that tends to disperse adjacent region
 // on each store.
-func newBalanceAdjacentRegionScheduler(opController *schedule.OperatorController, conf *balanceAdjacentRegionConf) schedule.Scheduler {
+func newBalanceAdjacentRegionScheduler(opController *schedule.OperatorController, conf *balanceAdjacentRegionConfig) schedule.Scheduler {
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: balanceAdjacentRegionName, TransferLeader: true, MoveRegion: true},
 	}

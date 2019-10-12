@@ -63,7 +63,6 @@ func newBaseScheduler(opController *schedule.OperatorController) *baseScheduler 
 }
 
 func (s *baseScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	fmt.Println(r.URL.Path)
 	fmt.Fprintf(w, "not implements")
 }
 

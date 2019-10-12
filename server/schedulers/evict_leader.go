@@ -31,7 +31,7 @@ func init() {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
 			}
-			conf, ok := v.(*evictLeaderSchedulerConf)
+			conf, ok := v.(*evictLeaderSchedulerConfig)
 			if !ok {
 				return ErrScheduleConfigNotExist
 			}
@@ -50,26 +50,26 @@ func init() {
 
 	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 
-		conf := &evictLeaderSchedulerConf{}
+		conf := &evictLeaderSchedulerConfig{}
 		decoder(conf)
 		return newEvictLeaderScheduler(opController, conf), nil
 	})
 }
 
-type evictLeaderSchedulerConf struct {
-	Name    string
+type evictLeaderSchedulerConfig struct {
+	Name    string `json:"name"`
 	StoreID uint64 `json:"store-id"`
 }
 
 type evictLeaderScheduler struct {
 	*baseScheduler
-	conf     *evictLeaderSchedulerConf
+	conf     *evictLeaderSchedulerConfig
 	selector *selector.RandomSelector
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
-func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConf) schedule.Scheduler {
+func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true},
 	}

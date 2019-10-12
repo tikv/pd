@@ -30,7 +30,7 @@ import (
 func init() {
 	schedule.RegisterSliceDecoderBuilder("shuffle-hot-region", func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
-			conf, ok := v.(*shuffleHotRegionSchedulerConf)
+			conf, ok := v.(*shuffleHotRegionSchedulerConfig)
 			if !ok {
 				return ErrScheduleConfigNotExist
 			}
@@ -47,13 +47,13 @@ func init() {
 	})
 
 	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &shuffleHotRegionSchedulerConf{Limit: uint64(1)}
+		conf := &shuffleHotRegionSchedulerConfig{Limit: uint64(1)}
 		decoder(conf)
 		return newShuffleHotRegionScheduler(opController, conf), nil
 	})
 }
 
-type shuffleHotRegionSchedulerConf struct {
+type shuffleHotRegionSchedulerConfig struct {
 	Limit uint64 `json:"limit"`
 }
 
@@ -65,12 +65,12 @@ type shuffleHotRegionScheduler struct {
 	*baseScheduler
 	stats *storeStatistics
 	r     *rand.Rand
-	conf  *shuffleHotRegionSchedulerConf
+	conf  *shuffleHotRegionSchedulerConfig
 	types []BalanceType
 }
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
-func newShuffleHotRegionScheduler(opController *schedule.OperatorController, conf *shuffleHotRegionSchedulerConf) schedule.Scheduler {
+func newShuffleHotRegionScheduler(opController *schedule.OperatorController, conf *shuffleHotRegionSchedulerConfig) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 	return &shuffleHotRegionScheduler{
 		baseScheduler: base,

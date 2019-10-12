@@ -130,7 +130,3 @@ func (s *testScheduleSuite) testAddAndRemoveScheduler(name, createdName string, 
 	err = doDelete(deleteURL)
 	c.Assert(err, IsNil)
 }
-
-func (s *testScheduleSuite) TestScheduleConfigHanlder(c *C) {
-
-}

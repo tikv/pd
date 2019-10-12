@@ -30,7 +30,7 @@ func init() {
 				return errors.New("should specify the store-id")
 			}
 
-			conf, ok := v.(*grandLeaderConf)
+			conf, ok := v.(*grandLeaderConfig)
 			if !ok {
 				return ErrScheduleConfigNotExist
 			}
@@ -40,33 +40,32 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.StoreID = id
-			conf.name = fmt.Sprintf("grant-leader-scheduler-%d", id)
+			conf.Name = fmt.Sprintf("grant-leader-scheduler-%d", id)
 			return nil
 		}
 	})
 
 	schedule.RegisterScheduler("grant-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &grandLeaderConf{}
+		conf := &grandLeaderConfig{}
 		decoder(conf)
-		conf.name = fmt.Sprintf("grant-leader-scheduler-%d", conf.StoreID)
 		return newGrantLeaderScheduler(opController, conf), nil
 	})
 }
 
-type grandLeaderConf struct {
-	name    string
+type grandLeaderConfig struct {
+	Name    string `json:"name"`
 	StoreID uint64 `json:"store-id"`
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
 	*baseScheduler
-	conf *grandLeaderConf
+	conf *grandLeaderConfig
 }
 
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
-func newGrantLeaderScheduler(opController *schedule.OperatorController, conf *grandLeaderConf) schedule.Scheduler {
+func newGrantLeaderScheduler(opController *schedule.OperatorController, conf *grandLeaderConfig) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 	return &grantLeaderScheduler{
 		baseScheduler: base,
@@ -75,7 +74,7 @@ func newGrantLeaderScheduler(opController *schedule.OperatorController, conf *gr
 }
 
 func (s *grantLeaderScheduler) GetName() string {
-	return s.conf.name
+	return s.conf.Name
 }
 
 func (s *grantLeaderScheduler) GetType() string {

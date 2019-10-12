@@ -38,7 +38,7 @@ func init() {
 			if len(args[2]) == 0 {
 				return errors.New("the range name is invalid")
 			}
-			conf, ok := v.(*scatterRangeSchedulerConf)
+			conf, ok := v.(*scatterRangeSchedulerConfig)
 			if !ok {
 				return ErrScheduleConfigNotExist
 			}
@@ -50,7 +50,7 @@ func init() {
 	})
 
 	schedule.RegisterScheduler("scatter-range", func(opController *schedule.OperatorController, storage *core.Storage, decode schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		config := &scatterRangeSchedulerConf{
+		config := &scatterRangeSchedulerConfig{
 			storage: storage,
 		}
 		decode(config)
@@ -64,7 +64,7 @@ func init() {
 
 const scatterRangeScheduleType = "scatter-range"
 
-type scatterRangeSchedulerConf struct {
+type scatterRangeSchedulerConfig struct {
 	mu        sync.RWMutex
 	storage   *core.Storage
 	RangeName string `json:"range-name"`
@@ -72,7 +72,7 @@ type scatterRangeSchedulerConf struct {
 	EndKey    string `json:"end-key"`
 }
 
-func (conf *scatterRangeSchedulerConf) BuildWithArgs(args []string) error {
+func (conf *scatterRangeSchedulerConfig) BuildWithArgs(args []string) error {
 	if len(args) != 3 {
 		return errors.New("scatter range need 3 arguments to setup config")
 	}
@@ -85,19 +85,19 @@ func (conf *scatterRangeSchedulerConf) BuildWithArgs(args []string) error {
 	return nil
 }
 
-func (conf *scatterRangeSchedulerConf) Clone() *scatterRangeSchedulerConf {
+func (conf *scatterRangeSchedulerConfig) Clone() *scatterRangeSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	cpStartkey := string([]byte(conf.StartKey))
 	cpEndKey := string([]byte(conf.EndKey))
-	return &scatterRangeSchedulerConf{
+	return &scatterRangeSchedulerConfig{
 		StartKey:  cpStartkey,
 		EndKey:    cpEndKey,
 		RangeName: conf.RangeName,
 	}
 }
 
-func (conf *scatterRangeSchedulerConf) Persist() error {
+func (conf *scatterRangeSchedulerConfig) Persist() error {
 
 	name := conf.getScheduleName()
 	conf.mu.RLock()
@@ -110,29 +110,25 @@ func (conf *scatterRangeSchedulerConf) Persist() error {
 	return nil
 }
 
-func (conf *scatterRangeSchedulerConf) Reload() {
-
-}
-
-func (conf *scatterRangeSchedulerConf) GetRangeName() string {
+func (conf *scatterRangeSchedulerConfig) GetRangeName() string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	return conf.RangeName
 }
 
-func (conf *scatterRangeSchedulerConf) GetStartKey() []byte {
+func (conf *scatterRangeSchedulerConfig) GetStartKey() []byte {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	return []byte(conf.StartKey)
 }
 
-func (conf *scatterRangeSchedulerConf) GetEndKey() []byte {
+func (conf *scatterRangeSchedulerConfig) GetEndKey() []byte {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	return []byte(conf.EndKey)
 }
 
-func (conf *scatterRangeSchedulerConf) getScheduleName() string {
+func (conf *scatterRangeSchedulerConfig) getScheduleName() string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	return fmt.Sprintf("scatter-range-%s", conf.RangeName)
@@ -141,14 +137,14 @@ func (conf *scatterRangeSchedulerConf) getScheduleName() string {
 type scatterRangeScheduler struct {
 	*baseScheduler
 	name          string
-	config        *scatterRangeSchedulerConf
+	config        *scatterRangeSchedulerConfig
 	balanceLeader schedule.Scheduler
 	balanceRegion schedule.Scheduler
 	handler       http.Handler
 }
 
 // newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
-func newScatterRangeScheduler(opController *schedule.OperatorController, storage *core.Storage, config *scatterRangeSchedulerConf) schedule.Scheduler {
+func newScatterRangeScheduler(opController *schedule.OperatorController, storage *core.Storage, config *scatterRangeSchedulerConfig) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 
 	name := config.getScheduleName()
@@ -221,7 +217,7 @@ type scatterRangeHandler struct {
 	scheduleName string
 	storage      *core.Storage
 	rd           *render.Render
-	config       *scatterRangeSchedulerConf
+	config       *scatterRangeSchedulerConfig
 }
 
 func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -267,7 +263,7 @@ func (handler *scatterRangeHandler) ListConfig(w http.ResponseWriter, r *http.Re
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
-func newScatterRangeHandler(config *scatterRangeSchedulerConf) http.Handler {
+func newScatterRangeHandler(config *scatterRangeSchedulerConfig) http.Handler {
 	h := &scatterRangeHandler{
 		config: config,
 		rd:     render.New(render.Options{IndentJSON: true}),
