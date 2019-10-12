@@ -48,6 +48,7 @@ func init() {
 	schedule.RegisterScheduler("grant-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &grandLeaderConf{}
 		decoder(conf)
+		conf.name = fmt.Sprintf("grant-leader-scheduler-%d", conf.StoreID)
 		return newGrantLeaderScheduler(opController, conf), nil
 	})
 }

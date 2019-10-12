@@ -652,7 +652,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	_, err = schedule.CreateScheduler("adjacent-region", oc, storage, nil)
+	_, err = schedule.CreateScheduler("adjacent-region", oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	// suppose we add a new default enable scheduler
 	newOpt.AddSchedulerCfg("adjacent-region", []string{})

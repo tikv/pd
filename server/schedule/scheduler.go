@@ -50,6 +50,11 @@ func EncodeConfig(v interface{}) ([]byte, error) {
 	return json.Marshal(v)
 }
 
+// DecodeConfig decode the custome config for each scheduler.
+func DecodeConfig(data []byte, v interface{}) error {
+	return json.Unmarshal(data, v)
+}
+
 // ConfigDecoder used to decode the config.
 type ConfigDecoder func(v interface{}) error
 
@@ -72,11 +77,6 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 		}
 	}
 	return builder(args)
-}
-
-// DecodeConfig decode the custome config for each scheduler.
-func DecodeConfig(data []byte, v interface{}) error {
-	return json.Unmarshal(data, v)
 }
 
 // CreateSchedulerFunc is for creating scheduler.
