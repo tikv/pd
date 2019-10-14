@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -146,7 +147,7 @@ func (l *balanceAdjacentRegionScheduler) GetNextInterval(interval time.Duration)
 	return intervalGrow(interval, maxAdjacentSchedulerInterval, linearGrowth)
 }
 
-func (l *balanceAdjacentRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (l *balanceAdjacentRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return l.allowBalanceLeader() || l.allowBalancePeer()
 }
 
@@ -158,7 +159,7 @@ func (l *balanceAdjacentRegionScheduler) allowBalancePeer() bool {
 	return l.opController.OperatorCount(operator.OpAdjacent|operator.OpRegion) < l.conf.PeerLimit
 }
 
-func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (l *balanceAdjacentRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	if l.cacheRegions == nil {
 		l.cacheRegions = &adjacentState{
 			assignedStoreIds: make([]uint64, 0, len(cluster.GetStores())),
@@ -215,7 +216,7 @@ func (l *balanceAdjacentRegionScheduler) Schedule(cluster schedule.Cluster) []*o
 	return l.process(cluster)
 }
 
-func (l *balanceAdjacentRegionScheduler) process(cluster schedule.Cluster) []*operator.Operator {
+func (l *balanceAdjacentRegionScheduler) process(cluster opt.Cluster) []*operator.Operator {
 	if l.cacheRegions.len() < 2 {
 		return nil
 	}
@@ -249,7 +250,7 @@ func (l *balanceAdjacentRegionScheduler) process(cluster schedule.Cluster) []*op
 	return []*operator.Operator{op}
 }
 
-func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster schedule.Cluster, region *core.RegionInfo) bool {
+func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster opt.Cluster, region *core.RegionInfo) bool {
 	if len(region.GetPeers()) != cluster.GetMaxReplicas() {
 		return true
 	}
@@ -271,7 +272,7 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster schedule.Cluste
 	return false
 }
 
-func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster, before *core.RegionInfo, after *core.RegionInfo) *operator.Operator {
+func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster opt.Cluster, before *core.RegionInfo, after *core.RegionInfo) *operator.Operator {
 	if !l.allowBalanceLeader() {
 		return nil
 	}
@@ -295,7 +296,7 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster schedule.Cluster
 	return op
 }
 
-func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster schedule.Cluster, region *core.RegionInfo) *operator.Operator {
+func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, region *core.RegionInfo) *operator.Operator {
 	if !l.allowBalancePeer() {
 		return nil
 	}

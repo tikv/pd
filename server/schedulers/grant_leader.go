@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pkg/errors"
 )
 
@@ -85,19 +86,19 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
+func (s *grantLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	return cluster.BlockStore(s.conf.StoreID)
 }
 
-func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
+func (s *grantLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	cluster.UnblockStore(s.conf.StoreID)
 }
 
-func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.RandFollowerRegion(s.conf.StoreID, core.HealthRegion())
 	if region == nil {

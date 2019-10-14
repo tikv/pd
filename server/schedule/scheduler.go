@@ -19,13 +19,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -39,10 +36,10 @@ type Scheduler interface {
 	EncodeConfig() ([]byte, error)
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	Prepare(cluster Cluster) error
-	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster) []*operator.Operator
-	IsScheduleAllowed(cluster Cluster) bool
+	Prepare(cluster opt.Cluster) error
+	Cleanup(cluster opt.Cluster)
+	Schedule(cluster opt.Cluster) []*operator.Operator
+	IsScheduleAllowed(cluster opt.Cluster) bool
 }
 
 // EncodeConfig encode the custome config for each scheduler.
@@ -139,20 +136,4 @@ func FindScheduleTypeByName(name string) string {
 		}
 	}
 	return typ
-}
-
-// Cluster provides an overview of a cluster's regions distribution.
-type Cluster interface {
-	core.RegionSetInformer
-	core.StoreSetInformer
-	core.StoreSetController
-
-	statistics.RegionStatInformer
-	opt.Options
-
-	// get config methods
-	GetOpt() namespace.ScheduleOptions
-	// TODO: it should be removed. Schedulers don't need to know anything
-	// about peers.
-	AllocPeer(storeID uint64) (*metapb.Peer, error)
 }
