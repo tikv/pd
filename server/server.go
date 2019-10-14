@@ -201,7 +201,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 	s.client = client
 	failpoint.Inject("memberNil", func() {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(1500 * time.Millisecond)
 	})
 	s.member = member.NewMember(etcd, client, etcdServerID)
 	return nil
