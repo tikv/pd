@@ -82,11 +82,11 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresStats) (ret []*HotPeerStat) {
 	storeIDs := f.getAllStoreIDs(region)
 
-	bytesFlow := f.getBytesFlow(region)
-	keysFlow := f.getKeysFlow(region)
+	totalBytes := float64(f.getTotalBytes(region))
+	totalKeys := float64(f.getTotalKeys(region))
 
-	bytesPerSecInit := bytesFlow / RegionHeartBeatReportInterval
-	keysPerSecInit := keysFlow / RegionHeartBeatReportInterval
+	bytesPerSecInit := totalBytes / RegionHeartBeatReportInterval
+	keysPerSecInit := totalKeys / RegionHeartBeatReportInterval
 
 	for storeID := range storeIDs {
 		bytesPerSec := bytesPerSecInit
@@ -101,8 +101,8 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 			if interval < hotRegionReportMinInterval && !isExpired {
 				continue
 			}
-			bytesPerSec = bytesFlow / interval
-			keysPerSec = keysFlow / interval
+			bytesPerSec = totalBytes / interval
+			keysPerSec = totalKeys / interval
 		}
 
 		newItem := &HotPeerStat{
@@ -146,22 +146,22 @@ func (f *hotPeerCache) CollectMetrics(stats *StoresStats, typ string) {
 	}
 }
 
-func (f *hotPeerCache) getBytesFlow(region *core.RegionInfo) float64 {
+func (f *hotPeerCache) getTotalBytes(region *core.RegionInfo) uint64 {
 	switch f.kind {
 	case WriteFlow:
-		return float64(region.GetBytesWritten())
+		return region.GetBytesWritten()
 	case ReadFlow:
-		return float64(region.GetBytesRead())
+		return region.GetBytesRead()
 	}
 	return 0
 }
 
-func (f *hotPeerCache) getKeysFlow(region *core.RegionInfo) float64 {
+func (f *hotPeerCache) getTotalKeys(region *core.RegionInfo) uint64 {
 	switch f.kind {
 	case WriteFlow:
-		return float64(region.GetKeysWritten())
+		return region.GetKeysWritten()
 	case ReadFlow:
-		return float64(region.GetKeysRead())
+		return region.GetKeysRead()
 	}
 	return 0
 }
