@@ -14,7 +14,11 @@
 package core
 
 import (
+	"sync"
+	"time"
+
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 var _ = Suite(&testDistinctScoreSuite{})
@@ -53,4 +57,38 @@ func (s *testDistinctScoreSuite) TestDistinctScore(c *C) {
 	}
 	store := NewStoreInfoWithLabel(100, 1, nil)
 	c.Assert(DistinctScore(labels, stores, store), Equals, float64(0))
+}
+
+var _ = Suite(&testConcurrencySuite{})
+
+type testConcurrencySuite struct{}
+
+func (s *testConcurrencySuite) TestCloneStore(c *C) {
+	meta := &metapb.Store{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
+	store := NewStoreInfo(meta)
+	start := time.Now()
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for {
+			if time.Since(start) > time.Second {
+				break
+			}
+			store.GetMeta().GetState()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for {
+			if time.Since(start) > time.Second {
+				break
+			}
+			store.Clone(
+				SetStoreState(metapb.StoreState_Up),
+				SetLastHeartbeatTS(time.Now()),
+			)
+		}
+	}()
+	wg.Wait()
 }
