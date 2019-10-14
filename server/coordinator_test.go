@@ -34,6 +34,7 @@ import (
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedulers"
 )
 
@@ -299,7 +300,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	co.run()
 
 	testCheckRegion := func(regionID uint64, expectCheckerIsBusy, expectAddOperator bool) {
-		checkerIsBusy, ops := co.checkRegion(tc.GetRegion(regionID))
+		checkerIsBusy, ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
 		c.Assert(checkerIsBusy, Equals, expectCheckerIsBusy)
 		if ops == nil {
 			c.Assert(expectAddOperator, IsFalse)
@@ -909,7 +910,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 

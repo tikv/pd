@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"github.com/pkg/errors"
 )
@@ -69,19 +70,19 @@ func (s *evictLeaderScheduler) GetType() string {
 	return "evict-leader"
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {
+func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	return cluster.BlockStore(s.storeID)
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
+func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	cluster.UnblockStore(s.storeID)
 }
 
-func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region := cluster.RandLeaderRegion(s.storeID, core.HealthRegion())
 	if region == nil {

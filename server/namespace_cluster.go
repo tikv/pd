@@ -20,19 +20,20 @@ import (
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/statistics"
 )
 
 // namespaceCluster is part of a global cluster that contains stores and regions
 // within a specific namespace.
 type namespaceCluster struct {
-	schedule.Cluster
+	opt.Cluster
 	classifier namespace.Classifier
 	namespace  string
 	stores     map[uint64]*core.StoreInfo
 }
 
-func newNamespaceCluster(c schedule.Cluster, classifier namespace.Classifier, namespace string) *namespaceCluster {
+func newNamespaceCluster(c opt.Cluster, classifier namespace.Classifier, namespace string) *namespaceCluster {
 	stores := make(map[uint64]*core.StoreInfo)
 	for _, s := range c.GetStores() {
 		if classifier.GetStoreNamespace(s) == namespace {
@@ -130,7 +131,7 @@ func (c *namespaceCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerSt
 	return c.Cluster.RegionWriteStats()
 }
 
-func scheduleByNamespace(cluster schedule.Cluster, classifier namespace.Classifier, scheduler schedule.Scheduler) []*operator.Operator {
+func scheduleByNamespace(cluster opt.Cluster, classifier namespace.Classifier, scheduler schedule.Scheduler) []*operator.Operator {
 	namespaces := classifier.GetAllNamespaces()
 	for _, i := range rand.Perm(len(namespaces)) {
 		nc := newNamespaceCluster(cluster, classifier, namespaces[i])

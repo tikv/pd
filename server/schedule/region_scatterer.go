@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -69,7 +70,7 @@ func (s *selectedStores) newFilter(scope string) filter.Filter {
 // RegionScatterer scatters regions.
 type RegionScatterer struct {
 	name       string
-	cluster    Cluster
+	cluster    opt.Cluster
 	classifier namespace.Classifier
 	filters    []filter.Filter
 	selected   *selectedStores
@@ -77,7 +78,7 @@ type RegionScatterer struct {
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(cluster Cluster, classifier namespace.Classifier) *RegionScatterer {
+func NewRegionScatterer(cluster opt.Cluster, classifier namespace.Classifier) *RegionScatterer {
 	return &RegionScatterer{
 		name:       regionScatterName,
 		cluster:    cluster,

@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 )
 
@@ -59,11 +60,11 @@ func (s *randomMergeScheduler) GetType() string {
 	return "random-merge"
 }
 
-func (s *randomMergeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *randomMergeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpMerge) < cluster.GetMergeScheduleLimit()
 }
 
-func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	stores := cluster.GetStores()
