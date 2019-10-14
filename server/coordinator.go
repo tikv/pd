@@ -41,6 +41,8 @@ const (
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
+	unload                = "unload"
+	update                = "update"
 )
 
 var (
@@ -284,17 +286,17 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	for {
 		action := <-ch
 		switch action {
-			case "unload":
-				if err := c.removeScheduler(s.GetName()); err != nil {
-					log.Error("can not remove scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
-				} else {
-					log.Info("unload plugin")
-					return
-				}
-			case "update":
-				log.Info("update plugin")
-			default:
-				log.Error("unknown action", zap.String("action", action))
+		case unload:
+			if err := c.removeScheduler(s.GetName()); err != nil {
+				log.Error("can not remove scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+			} else {
+				log.Info("unload plugin")
+				return
+			}
+		case update:
+			log.Info("update plugin")
+		default:
+			log.Error("unknown action", zap.String("action", action))
 		}
 	}
 }

@@ -15,7 +15,6 @@ package server
 
 import (
 	"bytes"
-	"fmt"
 	"encoding/hex"
 	"strconv"
 	"strings"
@@ -764,7 +763,6 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 
 // PluginLoad loads the plugin referenced by the pluginPath
 func (h *Handler) PluginLoad(pluginPath string) error {
-	fmt.Println(pluginPath)
 	c, err := h.getCoordinator()
 	if err != nil {
 		return err
@@ -778,7 +776,6 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 
 // PluginUpdate update the plugin referenced by the pluginPath
 func (h *Handler) PluginUpdate(pluginPath string) error {
-	fmt.Println(pluginPath)
 	ch := h.chMap[pluginPath]
 	update := "update"
 	ch <- update
@@ -787,7 +784,6 @@ func (h *Handler) PluginUpdate(pluginPath string) error {
 
 // PluginUnload unloads the plugin referenced by the pluginPath
 func (h *Handler) PluginUnload(pluginPath string) error {
-	fmt.Println(pluginPath)
 	ch := h.chMap[pluginPath]
 	unload := "unload"
 	ch <- unload
