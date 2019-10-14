@@ -14,6 +14,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -22,6 +23,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -50,31 +52,62 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := json.Unmarshal(data, &config.Schedule); err != nil {
+	up1, err := h.updateSchedule(data, config)
+	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := json.Unmarshal(data, &config.Replication); err != nil {
+	up2, err := h.updateReplication(data, config)
+	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := json.Unmarshal(data, &config.PDServerCfg); err != nil {
+	up3, err := h.updatePDServerConfig(data, config)
+	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := h.svr.SetScheduleConfig(config.Schedule); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := h.svr.SetReplicationConfig(config.Replication); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if err := h.svr.SetPDServerConfig(config.PDServerCfg); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	if !up1 && !up2 && !up3 {
+		h.rd.JSON(w, http.StatusBadRequest, "config item not found")
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *confHandler) updateSchedule(data []byte, config *config.Config) (bool, error) {
+	old, _ := json.Marshal(config.Schedule)
+	if err := json.Unmarshal(data, &config.Schedule); err != nil {
+		return false, err
+	}
+	new, _ := json.Marshal(config.Schedule)
+	if bytes.Equal(old, new) {
+		return false, nil
+	}
+	return true, h.svr.SetScheduleConfig(config.Schedule)
+}
+
+func (h *confHandler) updateReplication(data []byte, config *config.Config) (bool, error) {
+	old, _ := json.Marshal(config.Replication)
+	if err := json.Unmarshal(data, &config.Replication); err != nil {
+		return false, err
+	}
+	new, _ := json.Marshal(config.Replication)
+	if bytes.Equal(old, new) {
+		return false, nil
+	}
+	return true, h.svr.SetReplicationConfig(config.Replication)
+}
+
+func (h *confHandler) updatePDServerConfig(data []byte, config *config.Config) (bool, error) {
+	old, _ := json.Marshal(config.PDServerCfg)
+	if err := json.Unmarshal(data, &config.PDServerCfg); err != nil {
+		return false, err
+	}
+	new, _ := json.Marshal(config.PDServerCfg)
+	if bytes.Equal(old, new) {
+		return false, nil
+	}
+	return true, h.svr.SetPDServerConfig(config.PDServerCfg)
 }
 
 func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
