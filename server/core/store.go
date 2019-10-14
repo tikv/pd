@@ -19,7 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -60,9 +59,8 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
-	meta := proto.Clone(s.meta).(*metapb.Store)
 	store := &StoreInfo{
-		meta:             meta,
+		meta:             s.meta,
 		stats:            s.stats,
 		blocked:          s.blocked,
 		leaderCount:      s.leaderCount,
