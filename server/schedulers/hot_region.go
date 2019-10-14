@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -129,25 +130,25 @@ func (h *balanceHotRegionsScheduler) GetType() string {
 	return "hot-region"
 }
 
-func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return h.allowBalanceLeader(cluster) || h.allowBalanceRegion(cluster)
 }
 
-func (h *balanceHotRegionsScheduler) allowBalanceLeader(cluster schedule.Cluster) bool {
+func (h *balanceHotRegionsScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
 	return h.opController.OperatorCount(operator.OpHotRegion) < minUint64(h.leaderLimit, cluster.GetHotRegionScheduleLimit()) &&
 		h.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (h *balanceHotRegionsScheduler) allowBalanceRegion(cluster schedule.Cluster) bool {
+func (h *balanceHotRegionsScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
 	return h.opController.OperatorCount(operator.OpHotRegion) < minUint64(h.peerLimit, cluster.GetHotRegionScheduleLimit())
 }
 
-func (h *balanceHotRegionsScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (h *balanceHotRegionsScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }
 
-func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*operator.Operator {
+func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 	switch typ {
@@ -162,7 +163,7 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.
 	return nil
 }
 
-func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operator.Operator {
+func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
 	// balance by leader
 	srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
@@ -191,7 +192,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 // balanceHotRetryLimit is the limit to retry schedule for selected balance strategy.
 const balanceHotRetryLimit = 10
 
-func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*operator.Operator {
+func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
 	for i := 0; i < balanceHotRetryLimit; i++ {
 		switch h.r.Int() % 2 {
 		case 0:
@@ -223,7 +224,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 	return nil
 }
 
-func calcScore(storeItems map[uint64][]*statistics.HotPeerStat, cluster schedule.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
+func calcScore(storeItems map[uint64][]*statistics.HotPeerStat, cluster opt.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
 	stats := make(statistics.StoreHotRegionsStat)
 	for storeID, items := range storeItems {
 		// HotDegree is the update times on the hot cache. If the heartbeat report
@@ -269,7 +270,7 @@ func calcScore(storeItems map[uint64][]*statistics.HotPeerStat, cluster schedule
 }
 
 // balanceByPeer balances the peer distribution of hot regions.
-func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, storesStat statistics.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
+func (h *balanceHotRegionsScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer) {
 	if !h.allowBalanceRegion(cluster) {
 		return nil, nil, nil
 	}
@@ -345,7 +346,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster schedule.Cluster, sto
 }
 
 // balanceByLeader balances the leader distribution of hot regions.
-func (h *balanceHotRegionsScheduler) balanceByLeader(cluster schedule.Cluster, storesStat statistics.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer) {
+func (h *balanceHotRegionsScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistics.StoreHotRegionsStat) (*core.RegionInfo, *metapb.Peer) {
 	if !h.allowBalanceLeader(cluster) {
 		return nil, nil
 	}

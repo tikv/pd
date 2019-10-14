@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pkg/errors"
 )
 
@@ -78,11 +79,11 @@ func (l *scatterRangeScheduler) GetType() string {
 	return "scatter-range"
 }
 
-func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (l *scatterRangeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return l.opController.OperatorCount(operator.OpRange) < cluster.GetRegionScheduleLimit()
 }
 
-func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	// isolate a new cluster according to the key range
 	c := schedule.GenRangeCluster(cluster, l.startKey, l.endKey)
