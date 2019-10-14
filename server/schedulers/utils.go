@@ -20,8 +20,8 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -57,7 +57,7 @@ func isRegionUnhealthy(region *core.RegionInfo) bool {
 	return len(region.GetDownPeers()) != 0 || len(region.GetLearners()) != 0
 }
 
-func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ResourceKind, opInfluence operator.OpInfluence, scheduleName string) bool {
+func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ResourceKind, opInfluence operator.OpInfluence, scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
@@ -86,7 +86,7 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 	return toBalance
 }
 
-func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, resourceKind core.ResourceKind, kind core.LeaderScheduleKind) int64 {
+func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, resourceKind core.ResourceKind, kind core.LeaderScheduleKind) int64 {
 	if resourceKind == core.LeaderKind && kind == core.ByCount {
 		tolerantSizeRatio := cluster.GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
@@ -104,7 +104,7 @@ func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, reso
 	return regionSize
 }
 
-func adjustTolerantRatio(cluster schedule.Cluster) float64 {
+func adjustTolerantRatio(cluster opt.Cluster) float64 {
 	tolerantSizeRatio := cluster.GetTolerantSizeRatio()
 	if tolerantSizeRatio == 0 {
 		var maxRegionCount float64
@@ -123,7 +123,7 @@ func adjustTolerantRatio(cluster schedule.Cluster) float64 {
 	return tolerantSizeRatio
 }
 
-func adjustBalanceLimit(cluster schedule.Cluster, kind core.ResourceKind) uint64 {
+func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
 	stores := cluster.GetStores()
 	counts := make([]float64, 0, len(stores))
 	for _, s := range stores {

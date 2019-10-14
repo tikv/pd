@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/pd/server/namespace"
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -1162,6 +1163,13 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 // GetNamespaceClassifier returns current namespace classifier.
 func (c *RaftCluster) GetNamespaceClassifier() namespace.Classifier {
 	return c.s.classifier
+}
+
+// GetMergeChecker returns merge checker.
+func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.checkers.GetMergeChecker()
 }
 
 // GetOpt returns the scheduling options.

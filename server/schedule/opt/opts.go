@@ -18,6 +18,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/statistics"
 )
 
 // Options for schedulers.
@@ -65,3 +67,20 @@ const (
 	// have any region leaders.
 	RejectLeader = "reject-leader"
 )
+
+// Cluster provides an overview of a cluster's regions distribution.
+// TODO: This interface should be moved to a better place.
+type Cluster interface {
+	core.RegionSetInformer
+	core.StoreSetInformer
+	core.StoreSetController
+
+	statistics.RegionStatInformer
+	Options
+
+	// get config methods
+	GetOpt() namespace.ScheduleOptions
+	// TODO: it should be removed. Schedulers don't need to know anything
+	// about peers.
+	AllocPeer(storeID uint64) (*metapb.Peer, error)
+}

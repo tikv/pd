@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -58,7 +59,7 @@ type HeartbeatStreams interface {
 // OperatorController is used to limit the speed of scheduling.
 type OperatorController struct {
 	sync.RWMutex
-	cluster   Cluster
+	cluster   opt.Cluster
 	operators map[uint64]*operator.Operator
 	hbStreams HeartbeatStreams
 	histories *list.List
@@ -72,7 +73,7 @@ type OperatorController struct {
 }
 
 // NewOperatorController creates a OperatorController.
-func NewOperatorController(cluster Cluster, hbStreams HeartbeatStreams) *OperatorController {
+func NewOperatorController(cluster opt.Cluster, hbStreams HeartbeatStreams) *OperatorController {
 	return &OperatorController{
 		cluster:         cluster,
 		operators:       make(map[uint64]*operator.Operator),
@@ -584,7 +585,7 @@ func (oc *OperatorController) OperatorCount(mask operator.OpKind) uint64 {
 }
 
 // GetOpInfluence gets OpInfluence.
-func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluence {
+func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInfluence {
 	oc.RLock()
 	defer oc.RUnlock()
 
@@ -601,7 +602,7 @@ func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluen
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
-func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operator.OpInfluence {
+func NewTotalOpInfluence(operators []*operator.Operator, cluster opt.Cluster) operator.OpInfluence {
 	influence := operator.OpInfluence{
 		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
 	}
@@ -617,7 +618,7 @@ func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operat
 }
 
 // NewUnfinishedOpInfluence creates a OpInfluence.
-func NewUnfinishedOpInfluence(operators []*operator.Operator, cluster Cluster) operator.OpInfluence {
+func NewUnfinishedOpInfluence(operators []*operator.Operator, cluster opt.Cluster) operator.OpInfluence {
 	influence := operator.OpInfluence{
 		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
 	}
