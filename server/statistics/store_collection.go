@@ -177,15 +177,24 @@ func (s *storeStatistics) Collect() {
 }
 
 func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_score").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_score").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_size").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_count").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_size").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_count").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_available").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_used").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_capacity").Set(0)
+	metrics := []string{
+		"region_score",
+		"leader_score",
+		"region_size",
+		"region_count",
+		"leader_size",
+		"leader_count",
+		"store_available",
+		"store_used",
+		"store_capacity",
+		"store_write_rate_bytes",
+		"store_read_rate_bytes",
+		"store_write_rate_keys",
+		"store_read_rate_keys",
+	}
+	for _, m := range metrics {
+		storeStatusGauge.DeleteLabelValues(s.namespace, storeAddress, id, m)
+	}
 }
 
 type storeStatisticsMap struct {
@@ -217,4 +226,9 @@ func (m *storeStatisticsMap) Collect() {
 	for _, s := range m.stats {
 		s.Collect()
 	}
+}
+
+func (m *storeStatisticsMap) Reset() {
+	storeStatusGauge.Reset()
+	clusterStatusGauge.Reset()
 }

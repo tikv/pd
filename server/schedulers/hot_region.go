@@ -257,11 +257,11 @@ func calcScore(storeItems map[uint64][]*statistics.HotPeerStat, cluster opt.Clus
 				RegionID:       r.RegionID,
 				HotDegree:      r.HotDegree,
 				AntiCount:      r.AntiCount,
-				BytesRate:      uint64(r.RollingBytesRate.Median()),
+				BytesRate:      r.GetBytesRate(),
 				LastUpdateTime: r.LastUpdateTime,
 				Version:        r.Version,
 			}
-			storeStat.TotalBytesRate += r.BytesRate
+			storeStat.TotalBytesRate += r.GetBytesRate()
 			storeStat.RegionsCount++
 			storeStat.RegionsStat = append(storeStat.RegionsStat, s)
 		}
@@ -321,7 +321,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster opt.Cluster, storesSt
 			candidateStoreIDs = append(candidateStoreIDs, store.GetID())
 		}
 
-		destStoreID = h.selectDestStore(candidateStoreIDs, rs.BytesRate, srcStoreID, storesStat)
+		destStoreID = h.selectDestStore(candidateStoreIDs, rs.GetBytesRate(), srcStoreID, storesStat)
 		if destStoreID != 0 {
 			h.peerLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
 
@@ -380,7 +380,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster opt.Cluster, stores
 		if len(candidateStoreIDs) == 0 {
 			continue
 		}
-		destStoreID := h.selectDestStore(candidateStoreIDs, rs.BytesRate, srcStoreID, storesStat)
+		destStoreID := h.selectDestStore(candidateStoreIDs, rs.GetBytesRate(), srcStoreID, storesStat)
 		if destStoreID == 0 {
 			continue
 		}
@@ -400,7 +400,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster opt.Cluster, stores
 // Inside these stores, we choose the one with maximum flow bytes.
 func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotRegionsStat) (srcStoreID uint64) {
 	var (
-		maxFlowBytes           uint64
+		maxFlowBytes           float64
 		maxHotStoreRegionCount int
 	)
 
@@ -417,14 +417,14 @@ func (h *balanceHotRegionsScheduler) selectSrcStore(stats statistics.StoreHotReg
 
 // selectDestStore selects a target store to hold the region of the source region.
 // We choose a target store based on the hot region number and flow bytes of this store.
-func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes uint64, srcStoreID uint64, storesStat statistics.StoreHotRegionsStat) (destStoreID uint64) {
+func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64, regionFlowBytes float64, srcStoreID uint64, storesStat statistics.StoreHotRegionsStat) (destStoreID uint64) {
 	sr := storesStat[srcStoreID]
 	srcFlowBytes := sr.TotalBytesRate
 	srcHotRegionsCount := len(sr.RegionsStat)
 
 	var (
-		minFlowBytes    uint64 = math.MaxUint64
-		minRegionsCount        = int(math.MaxInt32)
+		minFlowBytes    float64 = math.MaxFloat64
+		minRegionsCount         = int(math.MaxInt32)
 	)
 	for _, storeID := range candidateStoreIDs {
 		if s, ok := storesStat[storeID]; ok {
@@ -435,7 +435,7 @@ func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64,
 				continue
 			}
 			if minRegionsCount == len(s.RegionsStat) && minFlowBytes > s.TotalBytesRate &&
-				uint64(float64(srcFlowBytes)*hotRegionScheduleFactor) > s.TotalBytesRate+2*regionFlowBytes {
+				srcFlowBytes*hotRegionScheduleFactor > s.TotalBytesRate+2*regionFlowBytes {
 				minFlowBytes = s.TotalBytesRate
 				destStoreID = storeID
 			}
@@ -450,12 +450,12 @@ func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64,
 func (h *balanceHotRegionsScheduler) adjustBalanceLimit(storeID uint64, storesStat statistics.StoreHotRegionsStat) uint64 {
 	srcStoreStatistics := storesStat[storeID]
 
-	var hotRegionTotalCount float64
+	var hotRegionTotalCount int
 	for _, m := range storesStat {
-		hotRegionTotalCount += float64(len(m.RegionsStat))
+		hotRegionTotalCount += len(m.RegionsStat)
 	}
 
-	avgRegionCount := hotRegionTotalCount / float64(len(storesStat))
+	avgRegionCount := float64(hotRegionTotalCount) / float64(len(storesStat))
 	// Multiplied by hotRegionLimitFactor to avoid transfer back and forth
 	limit := uint64((float64(len(srcStoreStatistics.RegionsStat)) - avgRegionCount) * hotRegionLimitFactor)
 	return maxUint64(limit, 1)
