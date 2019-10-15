@@ -15,6 +15,7 @@ package store_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -133,4 +134,8 @@ func (s *storeTestSuite) TestStore(c *C) {
 	storesInfo = new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
 	c.Assert(len([]*api.StoreInfo{storeInfo}), Equals, 1)
+
+	// It should be called after stores remove-tombstone.
+	echo := pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit"})
+	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
 }
