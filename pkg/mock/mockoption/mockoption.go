@@ -44,34 +44,34 @@ const (
 // ScheduleOptions is a mock of ScheduleOptions
 // which implements Options interface
 type ScheduleOptions struct {
-	RegionScheduleLimit          uint64
-	LeaderScheduleLimit          uint64
-	ReplicaScheduleLimit         uint64
-	MergeScheduleLimit           uint64
-	HotRegionScheduleLimit       uint64
-	StoreBalanceRate             float64
-	MaxSnapshotCount             uint64
-	MaxPendingPeerCount          uint64
-	MaxMergeRegionSize           uint64
-	MaxMergeRegionKeys           uint64
-	SchedulerMaxWaitingOperator  uint64
-	SplitMergeInterval           time.Duration
-	EnableOneWayMerge            bool
-	MaxStoreDownTime             time.Duration
-	MaxReplicas                  int
-	LocationLabels               []string
-	StrictlyMatchLabel           bool
-	HotRegionCacheHitsThreshold  int
-	TolerantSizeRatio            float64
-	LowSpaceRatio                float64
-	HighSpaceRatio               float64
-	DisableRemoveDownReplica     bool
-	DisableReplaceOfflineReplica bool
-	DisableMakeUpReplica         bool
-	DisableRemoveExtraReplica    bool
-	DisableLocationReplacement   bool
-	DisableNamespaceRelocation   bool
-	LabelProperties              map[string][]*metapb.StoreLabel
+	RegionScheduleLimit         uint64
+	LeaderScheduleLimit         uint64
+	ReplicaScheduleLimit        uint64
+	MergeScheduleLimit          uint64
+	HotRegionScheduleLimit      uint64
+	StoreBalanceRate            float64
+	MaxSnapshotCount            uint64
+	MaxPendingPeerCount         uint64
+	MaxMergeRegionSize          uint64
+	MaxMergeRegionKeys          uint64
+	SchedulerMaxWaitingOperator uint64
+	SplitMergeInterval          time.Duration
+	EnableOneWayMerge           bool
+	MaxStoreDownTime            time.Duration
+	MaxReplicas                 int
+	LocationLabels              []string
+	StrictlyMatchLabel          bool
+	HotRegionCacheHitsThreshold int
+	TolerantSizeRatio           float64
+	LowSpaceRatio               float64
+	HighSpaceRatio              float64
+	EnableRemoveDownReplica     bool
+	EnableReplaceOfflineReplica bool
+	EnableMakeUpReplica         bool
+	EnableRemoveExtraReplica    bool
+	EnableLocationReplacement   bool
+	EnableNamespaceRelocation   bool
+	LabelProperties             map[string][]*metapb.StoreLabel
 }
 
 // NewScheduleOptions creates a mock schedule option.
@@ -96,6 +96,12 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
 	mso.HighSpaceRatio = defaultHighSpaceRatio
+	mso.EnableRemoveDownReplica = true
+	mso.EnableReplaceOfflineReplica = true
+	mso.EnableMakeUpReplica = true
+	mso.EnableRemoveExtraReplica = true
+	mso.EnableLocationReplacement = true
+	mso.EnableNamespaceRelocation = true
 	return mso
 }
 
@@ -211,30 +217,30 @@ func (mso *ScheduleOptions) SetMaxReplicas(replicas int) {
 
 // IsRemoveDownReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsRemoveDownReplicaEnabled() bool {
-	return !mso.DisableRemoveDownReplica
+	return mso.EnableRemoveDownReplica
 }
 
 // IsReplaceOfflineReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsReplaceOfflineReplicaEnabled() bool {
-	return !mso.DisableReplaceOfflineReplica
+	return mso.EnableReplaceOfflineReplica
 }
 
 // IsMakeUpReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsMakeUpReplicaEnabled() bool {
-	return !mso.DisableMakeUpReplica
+	return mso.EnableMakeUpReplica
 }
 
 // IsRemoveExtraReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsRemoveExtraReplicaEnabled() bool {
-	return !mso.DisableRemoveExtraReplica
+	return mso.EnableRemoveExtraReplica
 }
 
 // IsLocationReplacementEnabled mocks method.
 func (mso *ScheduleOptions) IsLocationReplacementEnabled() bool {
-	return !mso.DisableLocationReplacement
+	return mso.EnableLocationReplacement
 }
 
 // IsNamespaceRelocationEnabled mocks method.
 func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
-	return !mso.DisableNamespaceRelocation
+	return mso.EnableNamespaceRelocation
 }

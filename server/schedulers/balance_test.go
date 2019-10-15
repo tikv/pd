@@ -894,9 +894,9 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	tc.SetStoreOffline(2)
 	// RemoveDownReplica has higher priority than replaceOfflineReplica.
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 1, 4)
-	opt.DisableRemoveDownReplica = true
+	opt.EnableRemoveDownReplica = false
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 2, 4)
-	opt.DisableReplaceOfflineReplica = true
+	opt.EnableReplaceOfflineReplica = false
 	c.Assert(rc.Check(region), IsNil)
 }
 

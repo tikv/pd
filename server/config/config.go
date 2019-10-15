@@ -529,22 +529,41 @@ type ScheduleConfig struct {
 	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
 	// DisableRemoveDownReplica is the option to prevent replica checker from
 	// removing down replicas.
+	// WARN: DisableRemoveDownReplica is deprecated.
 	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
 	// DisableReplaceOfflineReplica is the option to prevent replica checker from
 	// replacing offline replicas.
+	// WARN: DisableReplaceOfflineReplica is deprecated.
 	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string"`
 	// DisableMakeUpReplica is the option to prevent replica checker from making up
 	// replicas when replica count is less than expected.
+	// WARN: DisableMakeUpReplica is deprecated.
 	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string"`
 	// DisableRemoveExtraReplica is the option to prevent replica checker from
 	// removing extra replicas.
+	// WARN: DisableRemoveExtraReplica is deprecated.
 	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string"`
 	// DisableLocationReplacement is the option to prevent replica checker from
 	// moving replica to a better location.
+	// WARN: DisableLocationReplacement is deprecated.
 	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string"`
 	// DisableNamespaceRelocation is the option to prevent namespace checker
 	// from moving replica to the target namespace.
+	// WARN: DisableNamespaceRelocation.
 	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string"`
+
+	// EnableRemoveDownReplica is the option to enable replica checker to remove down replica.
+	EnableRemoveDownReplica bool `toml:"enable-remove-down-replica" json:"enable-remove-down-replica,string"`
+	// EnableReplaceOfflineReplica is the option to enable replica checker to replace offline replica.
+	EnableReplaceOfflineReplica bool `toml:"enable-replace-offline-replica" json:"enable-replace-offline-replica,string"`
+	// EnableMakeUpReplica is the option to enable replica checker to make up replica.
+	EnableMakeUpReplica bool `toml:"enable-make-up-replica" json:"enable-make-up-replica,string"`
+	// EnableRemoveExtraReplica is the option to enable replica checker to remove extra replica.
+	EnableRemoveExtraReplica bool `toml:"enable-remove-extra-replica" json:"enable-remove-extra-replica,string"`
+	// EnableLocationReplacement is the option to enable replica checker to move replica to a better location.
+	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
+	// EnableNamespaceRelocation is the option to enable namespace checker to move replica to the target namespace.
+	EnableNamespaceRelocation bool `toml:"enable-namespace-relocation" json:"enable-namespace-relocation,string"`
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
@@ -581,6 +600,12 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		DisableRemoveExtraReplica:    c.DisableRemoveExtraReplica,
 		DisableLocationReplacement:   c.DisableLocationReplacement,
 		DisableNamespaceRelocation:   c.DisableNamespaceRelocation,
+		EnableRemoveDownReplica:      c.EnableRemoveDownReplica,
+		EnableReplaceOfflineReplica:  c.EnableReplaceOfflineReplica,
+		EnableMakeUpReplica:          c.EnableMakeUpReplica,
+		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
+		EnableLocationReplacement:    c.EnableLocationReplacement,
+		EnableNamespaceRelocation:    c.EnableNamespaceRelocation,
 		Schedulers:                   schedulers,
 	}
 }
@@ -649,12 +674,31 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
+
+	c.adjustScheduleFlag(meta, &c.EnableRemoveDownReplica, "remove-down-replica", c.DisableRemoveDownReplica)
+	c.adjustScheduleFlag(meta, &c.EnableReplaceOfflineReplica, "replace-offline-replica", c.DisableReplaceOfflineReplica)
+	c.adjustScheduleFlag(meta, &c.EnableMakeUpReplica, "make-up-replica", c.DisableMakeUpReplica)
+	c.adjustScheduleFlag(meta, &c.EnableRemoveExtraReplica, "remove-extra-replica", c.DisableRemoveExtraReplica)
+	c.adjustScheduleFlag(meta, &c.EnableLocationReplacement, "location-replacement", c.DisableLocationReplacement)
+	c.adjustScheduleFlag(meta, &c.EnableNamespaceRelocation, "namespace-relocation", c.DisableNamespaceRelocation)
+
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 
 	return c.Validate()
+}
+
+func (c *ScheduleConfig) adjustScheduleFlag(meta *configMetaData, flag *bool, name string, oldFlag bool) {
+	if meta.IsDefined("enable-" + name) {
+		return
+	}
+	if meta.IsDefined("disable-" + name) {
+		*flag = !oldFlag
+		return
+	}
+	*flag = true
 }
 
 // Validate is used to validate if some scheduling configurations are right.
@@ -683,6 +727,24 @@ func (c *ScheduleConfig) Validate() error {
 func (c *ScheduleConfig) Deprecated() error {
 	if c.DisableLearner {
 		return errors.New("disable-raft-learner has already been deprecated")
+	}
+	if c.DisableRemoveDownReplica {
+		return errors.New("disable-remove-down-replica has already been deprecated")
+	}
+	if c.DisableReplaceOfflineReplica {
+		return errors.New("disable-replace-offline-replica has already been deprecated")
+	}
+	if c.DisableMakeUpReplica {
+		return errors.New("disable-make-up-replica has already been deprecated")
+	}
+	if c.DisableRemoveExtraReplica {
+		return errors.New("disable-remove-extra-replica has already been deprecated")
+	}
+	if c.EnableLocationReplacement {
+		return errors.New("enable-location-replacement has already been deprecated")
+	}
+	if c.EnableNamespaceRelocation {
+		return errors.New("enable-namespace-relocation has already been deprecated")
 	}
 	return nil
 }
