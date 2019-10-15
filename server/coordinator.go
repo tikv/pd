@@ -35,6 +35,7 @@ const (
 	collectFactor             = 0.8
 	collectTimeout            = 5 * time.Minute
 	maxScheduleRetries        = 10
+	maxLoadConfigRetries      = 10
 
 	regionheartbeatSendChanCap = 1024
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
@@ -165,13 +166,12 @@ func (c *coordinator) run() {
 		}
 	}
 	log.Info("coordinator starts to run schedulers")
-	maxRetryLoadTimes := 10
 	var (
 		scheduleNames []string
 		configs       []string
 		err           error
 	)
-	for i := 0; i <= maxRetryLoadTimes; i++ {
+	for i := 0; i <= maxLoadConfigRetries; i++ {
 		scheduleNames, configs, err = c.cluster.storage.LoadAllScheduleConfig()
 		if err == nil {
 			break
