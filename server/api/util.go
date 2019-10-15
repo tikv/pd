@@ -19,6 +19,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 
 	"github.com/pkg/errors"
 )
@@ -28,6 +29,32 @@ var dialClient = &http.Client{
 	Transport: &http.Transport{
 		DisableKeepAlives: true,
 	},
+}
+
+var errOptionNotExist = func(name string) error { return errors.Errorf("the option %s does not exist", name) }
+
+func collectEscapeStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+	if key, ok := input[option].(string); ok {
+		key, err := url.QueryUnescape(key)
+		if err != nil {
+			return err
+		}
+		for _, c := range collectors {
+			c(key)
+		}
+		return nil
+	}
+	return errOptionNotExist(option)
+}
+
+func collectStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+	if key, ok := input[option].(string); ok {
+		for _, c := range collectors {
+			c(key)
+		}
+		return nil
+	}
+	return errOptionNotExist(option)
 }
 
 func readJSON(r io.ReadCloser, data interface{}) error {

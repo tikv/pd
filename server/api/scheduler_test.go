@@ -91,6 +91,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				c.Assert(err, IsNil)
 				err = postJSON(updateURL, body)
 				c.Assert(err, IsNil)
+				resp = make(map[string]interface{})
 				readJSONWithURL(listURL, &resp)
 				c.Assert(resp["start-key"], Equals, "a_00")
 				c.Assert(resp["end-key"], Equals, "a_99")

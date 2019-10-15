@@ -15,7 +15,6 @@ package api
 
 import (
 	"net/http"
-	"net/url"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/pkg/apiutil"
@@ -80,29 +79,24 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	case "scatter-range":
 		var (
 			args []string
-			err  error
 		)
-		startKey, ok := input["start_key"].(string)
-		if ok {
-			startKey, err = url.QueryUnescape(startKey)
-			if err != nil {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			args = append(args, startKey)
+
+		collector := func(v string) {
+			args = append(args, v)
 		}
-		endKey, ok := input["end_key"].(string)
-		if ok {
-			endKey, err = url.QueryUnescape(endKey)
-			if err != nil {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			args = append(args, endKey)
+		if err := collectEscapeStringOption("start_key", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
 		}
-		name, ok := input["range_name"].(string)
-		if ok {
-			args = append(args, name)
+
+		if err := collectEscapeStringOption("end_key", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if err := collectStringOption("range_name", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 		if err := h.AddScatterRangeScheduler(args...); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
