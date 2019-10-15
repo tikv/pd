@@ -34,13 +34,13 @@ var dialClient = &http.Client{
 var errOptionNotExist = func(name string) error { return errors.Errorf("the option %s does not exist", name) }
 
 func collectEscapeStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
-	if key, ok := input[option].(string); ok {
-		key, err := url.QueryUnescape(key)
+	if v, ok := input[option].(string); ok {
+		value, err := url.QueryUnescape(v)
 		if err != nil {
 			return err
 		}
 		for _, c := range collectors {
-			c(key)
+			c(value)
 		}
 		return nil
 	}
@@ -48,9 +48,9 @@ func collectEscapeStringOption(option string, input map[string]interface{}, coll
 }
 
 func collectStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
-	if key, ok := input[option].(string); ok {
+	if v, ok := input[option].(string); ok {
 		for _, c := range collectors {
-			c(key)
+			c(v)
 		}
 		return nil
 	}
