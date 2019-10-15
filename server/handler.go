@@ -753,7 +753,7 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.schedulers {
-		p := pdAPIPrefix + ScheduleConfigHandlerPath + "/" + name + "/"
+		p := pdRootPath + ScheduleConfigHandlerPath + "/" + name + "/"
 		mux.Handle(p, http.StripPrefix(p[:len(p)-1], handler))
 	}
 	return mux
