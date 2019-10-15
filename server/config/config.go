@@ -740,11 +740,11 @@ func (c *ScheduleConfig) Deprecated() error {
 	if c.DisableRemoveExtraReplica {
 		return errors.New("disable-remove-extra-replica has already been deprecated")
 	}
-	if c.EnableLocationReplacement {
-		return errors.New("enable-location-replacement has already been deprecated")
+	if c.DisableLocationReplacement {
+		return errors.New("disable-location-replacement has already been deprecated")
 	}
-	if c.EnableNamespaceRelocation {
-		return errors.New("enable-namespace-relocation has already been deprecated")
+	if c.DisableNamespaceRelocation {
+		return errors.New("disable-namespace-relocation has already been deprecated")
 	}
 	return nil
 }
