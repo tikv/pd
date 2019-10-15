@@ -138,9 +138,9 @@ func SetStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	}
 }
 
-// SetOverloadStatus sets the overload status for the store.
-func SetOverloadStatus(f func() bool) StoreCreateOption {
+// SetAvailableFunc sets a customize function for the store. The function f returns true if the store limit is not exceeded.
+func SetAvailableFunc(f func() bool) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.overloaded = f
+		store.available = f
 	}
 }
