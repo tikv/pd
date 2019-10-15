@@ -595,7 +595,7 @@ const (
 	defaultPatrolRegionInterval   = 100 * time.Millisecond
 	defaultMaxStoreDownTime       = 30 * time.Minute
 	defaultLeaderScheduleLimit    = 4
-	defaultRegionScheduleLimit    = 64
+	defaultRegionScheduleLimit    = 2048
 	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 4

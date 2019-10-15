@@ -120,7 +120,7 @@ Usage:
     "max-store-down-time": "30m0s",
     "merge-schedule-limit": 8,
     "patrol-region-interval": "100ms",
-    "region-schedule-limit": 64,
+    "region-schedule-limit": 2048,
     "replica-schedule-limit": 64,
     "scheduler-max-waiting-operator": 3,
     "schedulers-v2": [
@@ -221,7 +221,7 @@ Usage:
     >> config set leader-schedule-limit 4         // 4 tasks of leader scheduling at the same time at most
     ```
 
-- `region-schedule-limit` controls the number of tasks scheduling the Region at the same time. This value affects the speed of Region balance. A larger value means a higher speed and setting the value to 0 closes the scheduling. Usually the Region scheduling has a large load, so do not set a too large value.
+- `region-schedule-limit` controls the number of tasks scheduling the Region at the same time. This value avoids too many region balance operators being created. The default value is 2048 which suits enough for all kinds sizes of clusters, setting the value to 0 closes the scheduling. Usually the Region scheduling speed is limited by the store-limit, users do not need to customize this value. Only change it when you know exactly what you are doing.
 
     ```bash
     >> config set region-schedule-limit 2         // 2 tasks of Region scheduling at the same time at most
