@@ -20,11 +20,12 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -107,11 +108,11 @@ func (s *balanceRegionScheduler) GetType() string {
 	return "balance-region"
 }
 
-func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 
@@ -177,7 +178,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *operator.Operator {
+func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *operator.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.GetRegionStores(region)
 	sourceStoreID := oldPeer.GetStoreId()
@@ -309,7 +310,7 @@ func (h *hitsStoreBuilder) put(source, target *core.StoreInfo) {
 	}
 }
 
-func (h *hitsStoreBuilder) buildSourceFilter(scope string, cluster schedule.Cluster) filter.Filter {
+func (h *hitsStoreBuilder) buildSourceFilter(scope string, cluster opt.Cluster) filter.Filter {
 	f := filter.NewBlacklistStoreFilter(scope, filter.BlacklistSource)
 	for _, source := range cluster.GetStores() {
 		if h.filter(source, nil) {
@@ -319,7 +320,7 @@ func (h *hitsStoreBuilder) buildSourceFilter(scope string, cluster schedule.Clus
 	return f
 }
 
-func (h *hitsStoreBuilder) buildTargetFilter(scope string, cluster schedule.Cluster, source *core.StoreInfo) filter.Filter {
+func (h *hitsStoreBuilder) buildTargetFilter(scope string, cluster opt.Cluster, source *core.StoreInfo) filter.Filter {
 	f := filter.NewBlacklistStoreFilter(scope, filter.BlacklistTarget)
 	for _, target := range cluster.GetStores() {
 		if h.filter(source, target) {

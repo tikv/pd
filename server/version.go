@@ -23,7 +23,7 @@ import (
 // Feature supported features.
 type Feature int
 
-// Fetures list.
+// Features list.
 // The cluster provides corresponding new features if the cluster version
 // greater than or equal to the required minimum version of the feature.
 const (
