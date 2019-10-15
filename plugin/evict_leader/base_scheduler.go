@@ -3,6 +3,8 @@ package main
 import (
 	"github.com/pingcap/pd/server/schedule"
 	"time"
+	
+	"github.com/pingcap/pd/server/schedule"
 )
 
 type userBaseScheduler struct {
