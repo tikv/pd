@@ -601,9 +601,9 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 4)
 
 	// Disable make up replica feature.
-	opt.DisableMakeUpReplica = true
+	opt.EnableMakeUpReplica = false
 	c.Assert(rc.Check(region), IsNil)
-	opt.DisableMakeUpReplica = false
+	opt.EnableMakeUpReplica = true
 
 	// Test healthFilter.
 	// If store 4 is down, we add to store 3.
@@ -631,9 +631,9 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
 
 	// Disable remove extra replica feature.
-	opt.DisableRemoveExtraReplica = true
+	opt.EnableRemoveExtraReplica = false
 	c.Assert(rc.Check(region), IsNil)
-	opt.DisableRemoveExtraReplica = false
+	opt.EnableRemoveExtraReplica = true
 
 	region = region.Clone(core.WithRemoveStorePeer(1))
 
@@ -780,9 +780,9 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	// Replace peer in store 1 with store 6 because it has a different rack.
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 1, 6)
 	// Disable locationReplacement feature.
-	opt.DisableLocationReplacement = true
+	opt.EnableLocationReplacement = false
 	c.Assert(rc.Check(region), IsNil)
-	opt.DisableLocationReplacement = false
+	opt.EnableLocationReplacement = true
 	peer6, _ := tc.AllocPeer(6)
 	region = region.Clone(core.WithAddPeer(peer6))
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
