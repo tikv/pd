@@ -195,4 +195,5 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	scheduleCfg = cfg.Schedule
 	c.Assert(scheduleCfg.EnableRemoveDownReplica, Equals, svr.GetScheduleConfig().EnableRemoveDownReplica)
+	c.Assert(scheduleCfg.EnableRemoveDownReplica, IsFalse)
 }
