@@ -195,4 +195,8 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	scheduleCfg = cfg.Schedule
 	c.Assert(scheduleCfg.DisableRemoveDownReplica, Equals, svr.GetScheduleConfig().DisableRemoveDownReplica)
+	args1 = []string{"-u", pdAddr, "config", "set", "foo-bar", "1"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "config item not found"), IsTrue)
 }
