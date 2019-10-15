@@ -41,8 +41,12 @@ const (
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
-	unload                = "unload"
-	update                = "update"
+	// PluginLoad means action for load plugin
+	PluginLoad = "load"
+	// PluginUnload means action for unload plugin
+	PluginUnload = "unload"
+	// PluginUpdate means action for update plugin
+	PluginUpdate = "update"
 )
 
 var (
@@ -257,23 +261,23 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	defer c.wg.Done()
 	log.Info("load plugin", zap.String("plugin-path", pluginPath))
 	// get func: SchedulerType from plugin
-	f1, err := schedule.GetFunction(pluginPath, "SchedulerType")
+	SchedulerType, err := schedule.GetFunction(pluginPath, "SchedulerType")
 	if err != nil {
 		log.Error("GetFunction error", zap.Error(err))
 		return
 	}
-	SchedulerType := f1.(func() string)
+	schedulerType := SchedulerType.(func() string)
 	// get func: SchedulerArgs from plugin
-	f2, err := schedule.GetFunction(pluginPath, "SchedulerArgs")
+	SchedulerArgs, err := schedule.GetFunction(pluginPath, "SchedulerArgs")
 	if err != nil {
 		log.Error("GetFunction error", zap.Error(err))
 		return
 	}
-	SchedulerArgs := f2.(func() []string)
+	schedulerArgs := SchedulerArgs.(func() []string)
 	// create and add user scheduler
-	s, err := schedule.CreateScheduler(SchedulerType(), c.opController, SchedulerArgs()...)
+	s, err := schedule.CreateScheduler(schedulerType(), c.opController, schedulerArgs()...)
 	if err != nil {
-		log.Error("can not create scheduler", zap.String("scheduler-type", SchedulerType()), zap.Error(err))
+		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), zap.Error(err))
 		return
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
@@ -286,14 +290,14 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	for {
 		action := <-ch
 		switch action {
-		case unload:
+		case PluginUnload:
 			if err := c.removeScheduler(s.GetName()); err != nil {
 				log.Error("can not remove scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 			} else {
 				log.Info("unload plugin")
 				return
 			}
-		case update:
+		case PluginUpdate:
 			log.Info("update plugin")
 		default:
 			log.Error("unknown action", zap.String("action", action))
@@ -449,14 +453,10 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 }
 
 func (c *coordinator) addUserScheduler(scheduler schedule.Scheduler, args ...string) error {
-	c.RLock()
 	if _, ok := c.schedulers[scheduler.GetName()]; ok {
-		c.RUnlock()
 		if err := c.removeScheduler(scheduler.GetName()); err != nil {
 			log.Error("can not remove scheduler", zap.String("scheduler-name", scheduler.GetName()), zap.Error(err))
 		}
-	} else {
-		c.RUnlock()
 	}
 
 	c.Lock()

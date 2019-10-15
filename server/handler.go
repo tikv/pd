@@ -58,17 +58,21 @@ var (
 	ErrStoreNotFound = func(storeID uint64) error {
 		return errors.Errorf("store %v not found", storeID)
 	}
+	// ErrPluginNotFound is error info for plugin not found.
+	ErrPluginNotFound = func(pluginPath string) error {
+		return errors.Errorf("plugin <%s> not found", pluginPath)
+	}
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
 type Handler struct {
-	s     *Server
-	opt   *config.ScheduleOption
-	chMap map[string]chan string
+	s           *Server
+	opt         *config.ScheduleOption
+	pluginChMap map[string]chan string
 }
 
 func newHandler(s *Server) *Handler {
-	return &Handler{s: s, opt: s.scheduleOpt, chMap: make(map[string]chan string)}
+	return &Handler{s: s, opt: s.scheduleOpt, pluginChMap: make(map[string]chan string)}
 }
 
 // GetRaftCluster returns RaftCluster.
@@ -768,7 +772,7 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 		return err
 	}
 	ch := make(chan string)
-	h.chMap[pluginPath] = ch
+	h.pluginChMap[pluginPath] = ch
 	c.wg.Add(1)
 	go c.LoadPlugin(pluginPath, ch)
 	return nil
@@ -776,17 +780,18 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 
 // PluginUpdate update the plugin referenced by the pluginPath
 func (h *Handler) PluginUpdate(pluginPath string) error {
-	ch := h.chMap[pluginPath]
-	update := "update"
-	ch <- update
-	return nil
+	if ch, ok := h.pluginChMap[pluginPath]; ok {
+		ch <- "update"
+		return nil
+	}
+	return ErrPluginNotFound(pluginPath)
 }
 
 // PluginUnload unloads the plugin referenced by the pluginPath
 func (h *Handler) PluginUnload(pluginPath string) error {
-	ch := h.chMap[pluginPath]
-	unload := "unload"
-	ch <- unload
-	delete(h.chMap, pluginPath)
-	return nil
+	if ch, ok := h.pluginChMap[pluginPath]; ok {
+		ch <- "unload"
+		return nil
+	}
+	return ErrPluginNotFound(pluginPath)
 }

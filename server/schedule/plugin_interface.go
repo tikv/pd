@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2019 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 package schedule
 
 import (
-	"fmt"
 	"path/filepath"
 	"plugin"
 	"sync"
@@ -29,7 +28,7 @@ var PluginMap = make(map[string]*plugin.Plugin)
 // GetFunction gets func by funcName from plugin(.so)
 func GetFunction(path string, funcName string) (plugin.Symbol, error) {
 	PluginMapLock.Lock()
-	if PluginMap[path] == nil {
+	if _, ok := PluginMap[path]; !ok {
 		//open plugin
 		filePath, err := filepath.Abs(path)
 		if err != nil {
@@ -45,12 +44,10 @@ func GetFunction(path string, funcName string) (plugin.Symbol, error) {
 		PluginMap[path] = p
 	}
 	PluginMapLock.Unlock()
-	PluginMapLock.RLock()
-	defer PluginMapLock.RUnlock()
 	//get func from plugin
 	f, err := PluginMap[path].Lookup(funcName)
 	if err != nil {
-		fmt.Println("Lookup func error!")
+		log.Error("Lookup func error!")
 		return nil, err
 	}
 	return f, nil

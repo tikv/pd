@@ -1,3 +1,16 @@
+// Copyright 2019 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package command
 
 import (
@@ -6,9 +19,6 @@ import (
 
 var (
 	pluginPrefix = "pd/api/v1/plugin"
-	loadPrefix   = "pd/api/v1/plugin/load"
-	updatePrefix = "pd/api/v1/plugin/update"
-	unloadPrefix = "pd/api/v1/plugin/unload"
 )
 
 // NewPluginCommand a set subcommand of plugin command
@@ -54,34 +64,25 @@ func NewUnloadPluginCommand() *cobra.Command {
 }
 
 func loadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
-		cmd.Println(cmd.UsageString())
-		return
-	}
-	input := map[string]interface{}{
-		"plugin-path": args[0],
-	}
-	postJSON(cmd, loadPrefix, input)
+	postPluginCommand(cmd, "load", args)
 }
 
 func updatePluginCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
-		cmd.Println(cmd.UsageString())
-		return
-	}
-	input := map[string]interface{}{
-		"plugin-path": args[0],
-	}
-	postJSON(cmd, updatePrefix, input)
+	postPluginCommand(cmd, "update", args)
 }
 
 func unloadPluginCommandFunc(cmd *cobra.Command, args []string) {
+	postPluginCommand(cmd, "unload", args)
+}
+
+func postPluginCommand(cmd *cobra.Command, action string, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
 	input := map[string]interface{}{
+		"action":      action,
 		"plugin-path": args[0],
 	}
-	postJSON(cmd, unloadPrefix, input)
+	postJSON(cmd, pluginPrefix, input)
 }
