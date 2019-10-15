@@ -31,7 +31,7 @@ const (
 )
 
 // ErrScheduleConfigNotExist the config is not correct.
-var ErrScheduleConfigNotExist = errors.New("the config is not exist")
+var ErrScheduleConfigNotExist = errors.New("the config does not exist")
 
 func minUint64(a, b uint64) uint64 {
 	if a < b {

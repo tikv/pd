@@ -97,7 +97,6 @@ func (conf *scatterRangeSchedulerConfig) Clone() *scatterRangeSchedulerConfig {
 }
 
 func (conf *scatterRangeSchedulerConfig) Persist() error {
-
 	name := conf.getScheduleName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()

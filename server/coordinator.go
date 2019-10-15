@@ -175,7 +175,7 @@ func (c *coordinator) run() {
 	// The new way to create schedule with the independent configuration.
 	for i, name := range scheduleNames {
 		data := configs[i]
-		typ := schedule.FindScheduleTypeByName(name)
+		typ := schedule.FindSchedulerTypeByName(name)
 		var cfg config.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
 			if c.Type == typ {
@@ -219,7 +219,7 @@ func (c *coordinator) run() {
 		}
 
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-		if err = c.addScheduler(s, schedulerCfg.Args...); !(err == nil || err == errSchedulerExisted) {
+		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != errSchedulerExisted {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		} else {
 			// Only records the valid scheduler config.

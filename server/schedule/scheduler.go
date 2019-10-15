@@ -115,18 +115,18 @@ func CreateScheduler(typ string, opController *OperatorController, storage *core
 
 	s, err := fn(opController, storage, dec)
 	if err != nil {
-		return s, err
+		return nil, err
 	}
 	data, err := s.EncodeConfig()
 	if err != nil {
-		return s, err
+		return nil, err
 	}
 	err = storage.SaveScheduleConfig(s.GetName(), data)
 	return s, err
 }
 
-// FindScheduleTypeByName finds the type of the specified name.
-func FindScheduleTypeByName(name string) string {
+// FindSchedulerTypeByName finds the type of the specified name.
+func FindSchedulerTypeByName(name string) string {
 	var typ string
 	for registerdType := range schedulerMap {
 		if strings.Index(name, registerdType) != -1 {
