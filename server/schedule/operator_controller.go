@@ -768,3 +768,10 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
 	}
 	return ret
 }
+
+// RemoveStoreLimit removes the store limit for a given store ID.
+func (oc *OperatorController) RemoveStoreLimit(storeID uint64) {
+	oc.Lock()
+	defer oc.Unlock()
+	delete(oc.storesLimit, storeID)
+}
