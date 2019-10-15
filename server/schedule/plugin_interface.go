@@ -29,7 +29,7 @@ var PluginMap = make(map[string]*plugin.Plugin)
 // GetFunction gets func by funcName from plugin(.so)
 func GetFunction(path string, funcName string) (plugin.Symbol, error) {
 	PluginMapLock.Lock()
-	if PluginMap[path] == nil {
+	if _,ok :=PluginMap[path];!ok {
 		//open plugin
 		filePath, err := filepath.Abs(path)
 		if err != nil {
