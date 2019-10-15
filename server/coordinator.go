@@ -359,6 +359,10 @@ func (c *coordinator) collectSchedulerMetrics() {
 	}
 }
 
+func (c *coordinator) resetSchedulerMetrics() {
+	schedulerStatusGauge.Reset()
+}
+
 func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
 	defer c.RUnlock()
@@ -412,7 +416,10 @@ func (c *coordinator) collectHotSpotMetrics() {
 			hotSpotStatusGauge.WithLabelValues(store, "hot_read_region_as_leader").Set(0)
 		}
 	}
+}
 
+func (c *coordinator) resetHotSpotMetrics() {
+	hotSpotStatusGauge.Reset()
 }
 
 func (c *coordinator) shouldRun() bool {

@@ -146,3 +146,8 @@ func (m *storeStatisticsMap) Collect() {
 		s.Collect()
 	}
 }
+
+func (m *storeStatisticsMap) Reset() {
+	storeStatusGauge.Reset()
+	clusterStatusGauge.Reset()
+}

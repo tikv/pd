@@ -217,6 +217,11 @@ func (w *HotSpotCache) CollectMetrics(stores *core.StoresInfo) {
 	hotCacheStatusGauge.WithLabelValues("hotThreshold", "read").Set(float64(threshold))
 }
 
+// ResetMetrics reset the hot cache metrics
+func (w *HotSpotCache) ResetMetrics() {
+	hotCacheStatusGauge.Reset()
+}
+
 func (w *HotSpotCache) isRegionHot(id uint64, hotThreshold int) bool {
 	if stat, ok := w.writeFlow.Peek(id); ok {
 		if stat.(*core.RegionStat).HotDegree >= hotThreshold {

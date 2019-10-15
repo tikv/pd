@@ -567,6 +567,16 @@ func (c *RaftCluster) collectMetrics() {
 	c.collectHealthStatus()
 }
 
+func (c *RaftCluster) resetMetrics() {
+	cluster := c.cachedCluster
+	statsMap := newStoreStatisticsMap(c.cachedCluster.opt, c.GetNamespaceClassifier())
+	statsMap.Reset()
+
+	c.coordinator.resetSchedulerMetrics()
+	c.coordinator.resetHotSpotMetrics()
+	cluster.resetMetrics()
+}
+
 func (c *RaftCluster) collectHealthStatus() {
 	client := c.s.GetClient()
 	members, err := GetMembers(client)
@@ -593,6 +603,8 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 	for {
 		select {
 		case <-c.quit:
+			log.Info("metrics are reset")
+			c.resetMetrics()
 			log.Info("background jobs has been stopped")
 			return
 		case <-ticker.C:

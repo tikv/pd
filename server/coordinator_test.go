@@ -268,6 +268,9 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 		co.collectSchedulerMetrics()
 		co.cluster.collectMetrics()
 	}
+	co.resetHotSpotMetrics()
+	co.resetSchedulerMetrics()
+	co.cluster.resetMetrics()
 }
 
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {

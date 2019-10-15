@@ -636,15 +636,27 @@ func (c *clusterInfo) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 }
 
 func (c *clusterInfo) collectMetrics() {
+	c.RLock()
+	defer c.RUnlock()
 	if c.regionStats == nil {
 		return
 	}
-	c.RLock()
-	defer c.RUnlock()
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
 	// collect hot cache metrics
 	c.core.HotCache.CollectMetrics(c.core.Stores)
+}
+
+func (c *clusterInfo) resetMetrics() {
+	c.RLock()
+	defer c.RUnlock()
+	if c.regionStats == nil {
+		return
+	}
+	c.regionStats.Reset()
+	c.labelLevelStats.Reset()
+	// reset hot cache metrics
+	c.core.HotCache.ResetMetrics()
 }
 
 func (c *clusterInfo) GetRegionStatsByType(typ regionStatisticType) []*core.RegionInfo {

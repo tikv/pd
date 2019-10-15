@@ -143,6 +143,10 @@ func (r *regionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("learner_peer_region_count").Set(float64(len(r.stats[learnerPeer])))
 }
 
+func (r *regionStatistics) Reset() {
+	regionStatusGauge.Reset()
+}
+
 type labelLevelStatistics struct {
 	regionLabelLevelStats map[uint64]int
 	labelLevelCounter     map[int]int
@@ -173,6 +177,10 @@ func (l *labelLevelStatistics) Collect() {
 		typ := fmt.Sprintf("level_%d", level)
 		regionLabelLevelGauge.WithLabelValues(typ).Set(float64(count))
 	}
+}
+
+func (l *labelLevelStatistics) Reset() {
+	regionLabelLevelGauge.Reset()
 }
 
 func (l *labelLevelStatistics) clearDefunctRegion(regionID uint64) {
