@@ -117,7 +117,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 		tc.PutRegion(region)
 		tc.LeaderScoreStrategy = t.kind.String()
-		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewUnfinishedOpInfluence(nil, tc)), Equals, t.expectedResult)
+		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -128,7 +128,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 			target := tc.GetStore(2)
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 			tc.PutRegion(region)
-			c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewUnfinishedOpInfluence(nil, tc)), Equals, t.expectedResult)
+			c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
 		}
 	}
 }

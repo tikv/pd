@@ -17,10 +17,12 @@ import (
 	"time"
 
 	"github.com/montanaflynn/stats"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"go.uber.org/zap"
 )
 
 const (
@@ -55,18 +57,33 @@ func isRegionUnhealthy(region *core.RegionInfo) bool {
 	return len(region.GetDownPeers()) != 0 || len(region.GetLearners()) != 0
 }
 
-func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ResourceKind, opInfluence operator.OpInfluence) bool {
+func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ResourceKind, opInfluence operator.OpInfluence, scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
 	leaderScheduleKind := cluster.GetLeaderScheduleKind()
+	sourceID := source.GetID()
+	targetID := target.GetID()
 	tolerantResource := getTolerantResource(cluster, region, kind, leaderScheduleKind)
-	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).ResourceScore(kind, leaderScheduleKind) - tolerantResource
-	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).ResourceScore(kind, leaderScheduleKind) + tolerantResource
+	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceScore(kind, leaderScheduleKind)
+	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceScore(kind, leaderScheduleKind)
+	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource, leaderScheduleKind)
+	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource, leaderScheduleKind)
 
 	// Make sure after move, source score is still greater than target score.
-	return source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceDelta, leaderScheduleKind) >
-		target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetDelta, leaderScheduleKind)
+	toBalance := sourceScore > targetScore
+
+	if !toBalance {
+		log.Debug("skip balance "+kind.String(),
+			zap.String("scheduler", scheduleName), zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
+			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", sourceScore),
+			zap.Int64("source-influence", sourceInfluence),
+			zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", targetScore),
+			zap.Int64("target-influence", targetInfluence),
+			zap.Int64("average-region-size", cluster.GetAverageRegionSize()),
+			zap.Int64("tolerant-resource", tolerantResource))
+	}
+	return toBalance
 }
 
 func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, resourceKind core.ResourceKind, kind core.LeaderScheduleKind) int64 {
@@ -75,7 +92,7 @@ func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, reso
 		if tolerantSizeRatio == 0 {
 			tolerantSizeRatio = leaderTolerantSizeRatio
 		}
-		leaderCount := int64(float64(1) * tolerantSizeRatio)
+		leaderCount := int64(1.0 * tolerantSizeRatio)
 		return leaderCount
 	}
 
