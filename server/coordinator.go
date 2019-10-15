@@ -165,10 +165,21 @@ func (c *coordinator) run() {
 		}
 	}
 	log.Info("coordinator starts to run schedulers")
-
-	scheduleNames, configs, err := c.cluster.storage.LoadAllScheduleConfig()
+	maxRetryLoadTimes := 10
+	var (
+		scheduleNames []string
+		configs       []string
+		err           error
+	)
+	for i := 0; i <= maxRetryLoadTimes; i++ {
+		scheduleNames, configs, err = c.cluster.storage.LoadAllScheduleConfig()
+		if err == nil {
+			break
+		}
+		log.Error("cannot load schedulers' config", zap.Int("retry-times", i), zap.Error(err))
+	}
 	if err != nil {
-		log.Fatal("cannot load schedulers' config")
+		log.Fatal("cannot load schedulers' config", zap.Error(err))
 	}
 
 	scheduleCfg := c.cluster.opt.Load().Clone()
@@ -184,7 +195,7 @@ func (c *coordinator) run() {
 			}
 		}
 		if len(cfg.Type) == 0 {
-			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name))
+			log.Error("not found the scheduler type", zap.String("scheduler-name", name))
 			continue
 		}
 		if cfg.Disable {
@@ -198,7 +209,7 @@ func (c *coordinator) run() {
 		}
 		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
 		if err = c.addScheduler(s); err != nil {
-			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		}
 	}
 
@@ -391,7 +402,9 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 func (c *coordinator) removeScheduler(name string) error {
 	c.Lock()
 	defer c.Unlock()
-
+	if c.cluster == nil {
+		return ErrNotBootstrapped
+	}
 	s, ok := c.schedulers[name]
 	if !ok {
 		return errSchedulerNotFound
@@ -408,11 +421,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	} else if err = opt.Persist(c.cluster.storage); err != nil {
 		log.Error("the option can not persist scheduler config", zap.Error(err))
 	} else {
-		cluster := c.cluster
-		if cluster == nil {
-			return ErrNotBootstrapped
-		}
-		err = cluster.storage.RemoveScheduleConfig(name)
+		err = c.cluster.storage.RemoveScheduleConfig(name)
 		if err != nil {
 			log.Error("can not remove the scheduler config", zap.Error(err))
 		}

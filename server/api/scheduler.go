@@ -187,7 +187,7 @@ type schedulerConfigHandler struct {
 	rd  *render.Render
 }
 
-func newSchedulerConfigHandler(svr *server.Server, rd *render.Render, prefix string) *schedulerConfigHandler {
+func newSchedulerConfigHandler(svr *server.Server, rd *render.Render) *schedulerConfigHandler {
 	return &schedulerConfigHandler{
 		svr: svr,
 		rd:  rd,
@@ -201,5 +201,5 @@ func (h *schedulerConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		sh.ServeHTTP(w, r)
 		return
 	}
-	h.rd.JSON(w, http.StatusNotAcceptable, "no implement")
+	h.rd.JSON(w, http.StatusNotAcceptable, errNoImplement)
 }

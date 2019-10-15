@@ -31,7 +31,10 @@ var dialClient = &http.Client{
 	},
 }
 
-var errOptionNotExist = func(name string) error { return errors.Errorf("the option %s does not exist", name) }
+var (
+	errNoImplement    = errors.New("no implement")
+	errOptionNotExist = func(name string) error { return errors.Errorf("the option %s does not exist", name) }
+)
 
 func collectEscapeStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
 	if v, ok := input[option].(string); ok {
