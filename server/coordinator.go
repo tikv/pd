@@ -21,8 +21,6 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
-	"github.com/pingcap/pd/server/checker"
-	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
@@ -52,38 +50,32 @@ var (
 type coordinator struct {
 	sync.RWMutex
 
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	cluster          *RaftCluster
-	learnerChecker   *checker.LearnerChecker
-	replicaChecker   *checker.ReplicaChecker
-	namespaceChecker *checker.NamespaceChecker
-	mergeChecker     *checker.MergeChecker
-	regionScatterer  *schedule.RegionScatterer
-	schedulers       map[string]*scheduleController
-	opController     *schedule.OperatorController
-	classifier       namespace.Classifier
-	hbStreams        *heartbeatStreams
+	wg              sync.WaitGroup
+	ctx             context.Context
+	cancel          context.CancelFunc
+	cluster         *RaftCluster
+	checkers        *schedule.CheckerController
+	regionScatterer *schedule.RegionScatterer
+	schedulers      map[string]*scheduleController
+	opController    *schedule.OperatorController
+	classifier      namespace.Classifier
+	hbStreams       *heartbeatStreams
 }
 
 // newCoordinator creates a new coordinator.
 func newCoordinator(cluster *RaftCluster, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
+	opController := schedule.NewOperatorController(cluster, hbStreams)
 	return &coordinator{
-		ctx:              ctx,
-		cancel:           cancel,
-		cluster:          cluster,
-		learnerChecker:   checker.NewLearnerChecker(),
-		replicaChecker:   checker.NewReplicaChecker(cluster, classifier),
-		namespaceChecker: checker.NewNamespaceChecker(cluster, classifier),
-		mergeChecker:     checker.NewMergeChecker(cluster, classifier),
-		regionScatterer:  schedule.NewRegionScatterer(cluster, classifier),
-		schedulers:       make(map[string]*scheduleController),
-		opController:     schedule.NewOperatorController(cluster, hbStreams),
-		classifier:       classifier,
-		hbStreams:        hbStreams,
+		ctx:             ctx,
+		cancel:          cancel,
+		cluster:         cluster,
+		checkers:        schedule.NewCheckerController(cluster, classifier, opController),
+		regionScatterer: schedule.NewRegionScatterer(cluster, classifier),
+		schedulers:      make(map[string]*scheduleController),
+		opController:    opController,
+		classifier:      classifier,
+		hbStreams:       hbStreams,
 	}
 }
 
@@ -123,7 +115,7 @@ func (c *coordinator) patrolRegions() {
 
 			key = region.GetEndKey()
 
-			if c.checkRegion(region) {
+			if c.checkers.CheckRegion(region) {
 				break
 			}
 		}
@@ -153,43 +145,6 @@ func (c *coordinator) drivePushOperator() {
 			c.opController.PushOperators()
 		}
 	}
-}
-
-func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
-	opController := c.opController
-
-	if op := c.learnerChecker.Check(region); op != nil {
-		if opController.AddOperator(op) {
-			return true
-		}
-	}
-
-	if opController.OperatorCount(operator.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
-		opController.OperatorCount(operator.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
-		opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-		if op := c.namespaceChecker.Check(region); op != nil {
-			if opController.AddWaitingOperator(op) {
-				return true
-			}
-		}
-	}
-
-	if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-		if op := c.replicaChecker.Check(region); op != nil {
-			if opController.AddWaitingOperator(op) {
-				return true
-			}
-		}
-	}
-	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
-		if ops := c.mergeChecker.Check(region); ops != nil {
-			// It makes sure that two operators can be added successfully altogether.
-			if opController.AddWaitingOperator(ops...) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (c *coordinator) run() {

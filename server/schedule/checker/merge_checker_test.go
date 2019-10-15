@@ -20,11 +20,9 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 )
@@ -162,7 +160,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
 
 	// Skip recently split regions.
-	s.mc.RecordRegionSplit(s.regions[2].GetID())
+	s.mc.RecordRegionSplit([]uint64{s.regions[2].GetID()})
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
 	ops = s.mc.Check(s.regions[3])
@@ -386,43 +384,4 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			IsPassive:  true,
 		},
 	})
-}
-
-func (s *testMergeCheckerSuite) TestStorelimit(c *C) {
-	oc := schedule.NewOperatorController(s.cluster, mockhbstream.NewHeartbeatStream())
-	s.cluster.ScheduleOptions.SplitMergeInterval = time.Hour
-	s.cluster.ScheduleOptions.StoreBalanceRate = 60
-	s.regions[2] = s.regions[2].Clone(
-		core.SetPeers([]*metapb.Peer{
-			{Id: 109, StoreId: 2},
-			{Id: 110, StoreId: 3},
-			{Id: 111, StoreId: 6},
-		}),
-		core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}),
-	)
-	s.cluster.PutRegion(s.regions[2])
-	ops := s.mc.Check(s.regions[2])
-	c.Assert(ops, NotNil)
-	// The size of Region is less or equal than 1MB.
-	for i := 0; i < 50; i++ {
-		c.Assert(oc.AddOperator(ops...), IsTrue)
-		for _, op := range ops {
-			c.Assert(oc.RemoveOperator(op), IsTrue)
-		}
-	}
-	s.regions[2] = s.regions[2].Clone(
-		core.SetApproximateSize(2),
-		core.SetApproximateKeys(2),
-	)
-	s.cluster.PutRegion(s.regions[2])
-	ops = s.mc.Check(s.regions[2])
-	c.Assert(ops, NotNil)
-	// The size of Region is more than 1MB but no more than 20MB.
-	for i := 0; i < 5; i++ {
-		c.Assert(oc.AddOperator(ops...), IsTrue)
-		for _, op := range ops {
-			c.Assert(oc.RemoveOperator(op), IsTrue)
-		}
-	}
-	c.Assert(oc.AddOperator(ops...), IsFalse)
 }

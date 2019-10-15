@@ -16,11 +16,11 @@ package server
 import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/operator"
 )
 

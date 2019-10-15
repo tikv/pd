@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"go.uber.org/zap"
 )
@@ -60,11 +61,11 @@ func (s *shuffleRegionScheduler) GetType() string {
 	return "shuffle-region"
 }
 
-func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
-func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region, oldPeer := s.scheduleRemovePeer(cluster)
 	if region == nil {
@@ -89,7 +90,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	return []*operator.Operator{op}
 }
 
-func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer) {
+func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.RegionInfo, *metapb.Peer) {
 	stores := cluster.GetStores()
 
 	source := s.selector.SelectSource(cluster, stores)
@@ -110,7 +111,7 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 	return region, region.GetStorePeer(source.GetID())
 }
 
-func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, filter filter.Filter) *metapb.Peer {
+func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, filter filter.Filter) *metapb.Peer {
 	stores := cluster.GetStores()
 
 	target := s.selector.SelectTarget(cluster, stores, filter)
