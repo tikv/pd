@@ -71,9 +71,9 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource, leaderScheduleKind)
 
 	// Make sure after move, source score is still greater than target score.
-	toBalance := sourceScore > targetScore
+	shouldBalance := sourceScore > targetScore
 
-	if !toBalance {
+	if !shouldBalance {
 		log.Debug("skip balance "+kind.String(),
 			zap.String("scheduler", scheduleName), zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
 			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", sourceScore),
@@ -83,7 +83,7 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 			zap.Int64("average-region-size", cluster.GetAverageRegionSize()),
 			zap.Int64("tolerant-resource", tolerantResource))
 	}
-	return toBalance
+	return shouldBalance
 }
 
 func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, resourceKind core.ResourceKind, kind core.LeaderScheduleKind) int64 {
