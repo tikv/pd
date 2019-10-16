@@ -873,9 +873,9 @@ func (c *RaftCluster) UnblockStore(storeID uint64) {
 	c.core.UnblockStore(storeID)
 }
 
-// AttachOverloadStatus attaches the overload status to a store.
-func (c *RaftCluster) AttachOverloadStatus(storeID uint64, f func() bool) {
-	c.core.AttachOverloadStatus(storeID, f)
+// AttachAvailableFunc attaches an available function to a specific store.
+func (c *RaftCluster) AttachAvailableFunc(storeID uint64, f func() bool) {
+	c.core.AttachAvailableFunc(storeID, f)
 }
 
 // SetStoreState sets up a store's state.
@@ -985,6 +985,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 					zap.Error(err))
 				return err
 			}
+			c.coordinator.opController.RemoveStoreLimit(store.GetID())
 			log.Info("delete store successed",
 				zap.Stringer("store", store.GetMeta()))
 		}
