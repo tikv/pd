@@ -130,7 +130,7 @@ func adjustBalanceLimit(cluster opt.Cluster, kind core.ScheduleKind) uint64 {
 			counts = append(counts, float64(s.ResourceCount(kind)))
 		}
 	}
-	limit, _ := stats.StandardDeviation(stats.Float64Data(counts))
+	limit, _ := stats.StandardDeviation(counts)
 	return maxUint64(1, uint64(limit))
 }
 
