@@ -25,10 +25,10 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/statistics"
 )
@@ -1086,7 +1086,7 @@ func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
 	c.Assert(len(stats), Equals, 2)
 	for _, ss := range stats {
 		for _, s := range ss {
-			c.Assert(s.BytesRate, Equals, uint64(512*1024))
+			c.Assert(s.BytesRate, Equals, 512.0*1024)
 		}
 	}
 	// Will transfer a hot region leader from store 1 to store 3, because the total count of peers

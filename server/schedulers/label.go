@@ -60,11 +60,11 @@ func (s *labelScheduler) GetType() string {
 	return "label"
 }
 
-func (s *labelScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *labelScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})

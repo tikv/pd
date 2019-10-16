@@ -40,7 +40,7 @@ type StoreInfo struct {
 	lastHeartbeatTS  time.Time
 	leaderWeight     float64
 	regionWeight     float64
-	overloaded       func() bool
+	available        func() bool
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -71,7 +71,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		lastHeartbeatTS:  s.lastHeartbeatTS,
 		leaderWeight:     s.leaderWeight,
 		regionWeight:     s.regionWeight,
-		overloaded:       s.overloaded,
+		available:        s.available,
 	}
 
 	for _, opt := range opts {
@@ -85,12 +85,12 @@ func (s *StoreInfo) IsBlocked() bool {
 	return s.blocked
 }
 
-// IsOverloaded returns if the store is overloaded.
-func (s *StoreInfo) IsOverloaded() bool {
-	if s.overloaded == nil {
-		return false
+// IsAvailable returns if the store bucket of limitation is available
+func (s *StoreInfo) IsAvailable() bool {
+	if s.available == nil {
+		return true
 	}
-	return s.overloaded()
+	return s.available()
 }
 
 // IsUp checks if the store's state is Up.
@@ -540,10 +540,10 @@ func (s *StoresInfo) UnblockStore(storeID uint64) {
 	s.stores[storeID] = store.Clone(SetStoreUnBlock())
 }
 
-// AttachOverloadStatus attaches the overload status to a store.
-func (s *StoresInfo) AttachOverloadStatus(storeID uint64, f func() bool) {
+// AttachAvailableFunc attaches f to a specific store.
+func (s *StoresInfo) AttachAvailableFunc(storeID uint64, f func() bool) {
 	if store, ok := s.stores[storeID]; ok {
-		s.stores[storeID] = store.Clone(SetOverloadStatus(f))
+		s.stores[storeID] = store.Clone(SetAvailableFunc(f))
 	}
 }
 

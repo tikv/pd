@@ -34,7 +34,9 @@ import (
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedulers"
+	"github.com/pingcap/pd/server/statistics"
 )
 
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.ScheduleOption, error) {
@@ -260,6 +262,7 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
+	tc.regionStats = statistics.NewRegionStatistics(tc.s.scheduleOpt, tc.s.classifier)
 	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
 	// Make sure there are no problem when concurrent write and read
@@ -275,6 +278,9 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 		co.collectSchedulerMetrics()
 		co.cluster.collectClusterMetrics()
 	}
+	co.resetHotSpotMetrics()
+	co.resetSchedulerMetrics()
+	co.cluster.resetClusterMetrics()
 }
 
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
@@ -293,10 +299,10 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsTrue)
+	c.Assert(co.checkers.CheckRegion(tc.GetRegion(1)), IsTrue)
 	waitOperator(c, co, 1)
 	testutil.CheckAddPeer(c, co.opController.GetOperator(1), operator.OpReplica, 1)
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+	c.Assert(co.checkers.CheckRegion(tc.GetRegion(1)), IsFalse)
 
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
@@ -305,7 +311,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
 	)
 	c.Assert(tc.putRegion(r), IsNil)
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+	c.Assert(co.checkers.CheckRegion(tc.GetRegion(1)), IsFalse)
 	co.stop()
 	co.wg.Wait()
 
@@ -320,15 +326,15 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.putRegion(r), IsNil)
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+	c.Assert(co.checkers.CheckRegion(tc.GetRegion(1)), IsFalse)
 	r = r.Clone(core.WithPendingPeers(nil))
 	c.Assert(tc.putRegion(r), IsNil)
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsTrue)
+	c.Assert(co.checkers.CheckRegion(tc.GetRegion(1)), IsTrue)
 	waitOperator(c, co, 1)
 	op := co.opController.GetOperator(1)
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
-	c.Assert(co.checkRegion(tc.GetRegion(1)), IsFalse)
+	c.Assert(co.checkers.CheckRegion(tc.GetRegion(1)), IsFalse)
 }
 
 func (s *testCoordinatorSuite) TestReplica(c *C) {
@@ -863,7 +869,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 

@@ -15,7 +15,7 @@ package statistics
 
 // HotRegionsStat records all hot regions statistics
 type HotRegionsStat struct {
-	TotalBytesRate uint64        `json:"total_flow_bytes"`
+	TotalBytesRate float64       `json:"total_flow_bytes"`
 	RegionsCount   int           `json:"regions_count"`
 	RegionsStat    []HotPeerStat `json:"statistics"`
 }

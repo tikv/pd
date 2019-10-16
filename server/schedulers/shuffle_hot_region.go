@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -74,19 +75,19 @@ func (s *shuffleHotRegionScheduler) GetType() string {
 	return "shuffle-hot-region"
 }
 
-func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpHotRegion) < s.limit &&
 		s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit() &&
 		s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	i := s.r.Int() % len(s.types)
 	return s.dispatch(s.types[i], cluster)
 }
 
-func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster opt.Cluster) []*operator.Operator {
 	switch typ {
 	case hotReadRegionBalance:
 		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
@@ -98,7 +99,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster schedule.C
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, storeStats statistics.StoreHotRegionsStat) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeStats statistics.StoreHotRegionsStat) []*operator.Operator {
 	for _, stats := range storeStats {
 		i := s.r.Intn(len(stats.RegionsStat))
 		r := stats.RegionsStat[i]

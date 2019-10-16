@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/pd/server/namespace"
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -235,6 +236,8 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 	for {
 		select {
 		case <-c.quit:
+			log.Info("metrics are reset")
+			c.resetMetrics()
 			log.Info("background jobs has been stopped")
 			return
 		case <-ticker.C:
@@ -870,9 +873,9 @@ func (c *RaftCluster) UnblockStore(storeID uint64) {
 	c.core.UnblockStore(storeID)
 }
 
-// AttachOverloadStatus attaches the overload status to a store.
-func (c *RaftCluster) AttachOverloadStatus(storeID uint64, f func() bool) {
-	c.core.AttachOverloadStatus(storeID, f)
+// AttachAvailableFunc attaches an available function to a specific store.
+func (c *RaftCluster) AttachAvailableFunc(storeID uint64, f func() bool) {
+	c.core.AttachAvailableFunc(storeID, f)
 }
 
 // SetStoreState sets up a store's state.
@@ -982,6 +985,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 					zap.Error(err))
 				return err
 			}
+			c.coordinator.opController.RemoveStoreLimit(store.GetID())
 			log.Info("delete store successed",
 				zap.Stringer("store", store.GetMeta()))
 		}
@@ -1014,6 +1018,15 @@ func (c *RaftCluster) collectMetrics() {
 	c.collectHealthStatus()
 }
 
+func (c *RaftCluster) resetMetrics() {
+	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.GetNamespaceClassifier())
+	statsMap.Reset()
+
+	c.coordinator.resetSchedulerMetrics()
+	c.coordinator.resetHotSpotMetrics()
+	c.resetClusterMetrics()
+}
+
 func (c *RaftCluster) collectClusterMetrics() {
 	c.RLock()
 	defer c.RUnlock()
@@ -1024,6 +1037,18 @@ func (c *RaftCluster) collectClusterMetrics() {
 	c.labelLevelStats.Collect()
 	// collect hot cache metrics
 	c.hotSpotCache.CollectMetrics(c.storesStats)
+}
+
+func (c *RaftCluster) resetClusterMetrics() {
+	c.RLock()
+	defer c.RUnlock()
+	if c.regionStats == nil {
+		return
+	}
+	c.regionStats.Reset()
+	c.labelLevelStats.Reset()
+	// reset hot cache metrics
+	c.hotSpotCache.ResetMetrics()
 }
 
 func (c *RaftCluster) collectHealthStatus() {
@@ -1162,6 +1187,13 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 // GetNamespaceClassifier returns current namespace classifier.
 func (c *RaftCluster) GetNamespaceClassifier() namespace.Classifier {
 	return c.s.classifier
+}
+
+// GetMergeChecker returns merge checker.
+func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.checkers.GetMergeChecker()
 }
 
 // GetOpt returns the scheduling options.

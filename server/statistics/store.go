@@ -183,10 +183,10 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	}
 	r.Lock()
 	defer r.Unlock()
-	r.bytesWriteRate.Add(float64(stats.BytesWritten / interval))
-	r.bytesReadRate.Add(float64(stats.BytesRead / interval))
-	r.keysWriteRate.Add(float64(stats.KeysWritten / interval))
-	r.keysReadRate.Add(float64(stats.KeysRead / interval))
+	r.bytesWriteRate.Add(float64(stats.BytesWritten) / float64(interval))
+	r.bytesReadRate.Add(float64(stats.BytesRead) / float64(interval))
+	r.keysWriteRate.Add(float64(stats.KeysWritten) / float64(interval))
+	r.keysReadRate.Add(float64(stats.KeysRead) / float64(interval))
 }
 
 // GetBytesRate returns the bytes write rate and the bytes read rate.
