@@ -30,7 +30,7 @@ var _ = Suite(&testTrendSuite{})
 type testTrendSuite struct{}
 
 func (s *testTrendSuite) TestTrend(c *C) {
-	svr, cleanup := mustNewServer(c, func(cfg *config.Config) { cfg.Schedule.StoreBalanceRate = 60 })
+	svr, cleanup := mustNewServer(c, func(cfg *config.Config) { cfg.Schedule.DefaultStoreLimit = 60 })
 	defer cleanup()
 	mustWaitLeader(c, []*server.Server{svr})
 

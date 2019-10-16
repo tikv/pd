@@ -795,7 +795,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(cfg, NotNil)
 	c.Assert(err, IsNil)
-	cfg.StoreBalanceRate = 10
+	cfg.DefaultStoreLimit = 10
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(c, tc)
 	defer cleanup()
@@ -830,7 +830,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(cfg, NotNil)
 	c.Assert(err, IsNil)
-	cfg.StoreBalanceRate = 10
+	cfg.DefaultStoreLimit = 10
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(c, tc)
 	defer cleanup()

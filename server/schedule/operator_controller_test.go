@@ -420,7 +420,7 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
 
 	cfg.SplitMergeInterval = time.Hour
-	cfg.StoreBalanceRate = 60
+	cfg.DefaultStoreLimit = 60
 
 	regions[2] = regions[2].Clone(
 		core.SetPeers([]*metapb.Peer{
