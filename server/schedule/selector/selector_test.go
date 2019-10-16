@@ -89,6 +89,6 @@ func (s *testSelectorSuite) TestScheduleConfig(c *C) {
 		core.NewStoreInfoWithSizeCount(4, 2, 20, 10, 1),
 	}
 	testScheduleConfig(selector, stores, 2, 3)
-	s.tc.LeaderScoreStrategy = core.BySize.String()
+	s.tc.LeaderScheduleStrategy = core.BySize.String()
 	testScheduleConfig(selector, stores, 1, 4)
 }

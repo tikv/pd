@@ -255,9 +255,9 @@ func (o *ScheduleOption) IsRemoveExtraReplicaEnabled() bool {
 	return !o.Load().DisableRemoveExtraReplica
 }
 
-// GetLeaderScheduleKind is to get leader schedule kind.
-func (o *ScheduleOption) GetLeaderScheduleKind() core.ScheduleStrategy {
-	return o.Load().GetLeaderScheduleKind()
+// GetLeaderScheduleStrategy is to get leader schedule kind.
+func (o *ScheduleOption) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	return o.Load().GetLeaderScheduleStrategy()
 }
 
 // IsLocationReplacementEnabled returns if location replace is enabled.

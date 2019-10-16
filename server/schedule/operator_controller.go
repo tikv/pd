@@ -759,9 +759,9 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
 	return ret
 }
 
-// GetLeaderScheduleKind is to get leader schedule kind
-func (oc *OperatorController) GetLeaderScheduleKind() core.ScheduleStrategy {
-	return oc.cluster.GetLeaderScheduleKind()
+// GetLeaderScheduleStrategy is to get leader schedule kind
+func (oc *OperatorController) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	return oc.cluster.GetLeaderScheduleStrategy()
 }
 
 // RemoveStoreLimit removes the store limit for a given store ID.

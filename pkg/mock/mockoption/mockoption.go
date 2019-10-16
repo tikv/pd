@@ -40,7 +40,7 @@ const (
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true
-	defaultLeaderScoreStrategy         = "count"
+	defaultLeaderScheduleStrategy      = "count"
 )
 
 // ScheduleOptions is a mock of ScheduleOptions
@@ -73,7 +73,7 @@ type ScheduleOptions struct {
 	DisableRemoveExtraReplica    bool
 	DisableLocationReplacement   bool
 	DisableNamespaceRelocation   bool
-	LeaderScoreStrategy          string
+	LeaderScheduleStrategy       string
 	LabelProperties              map[string][]*metapb.StoreLabel
 }
 
@@ -99,7 +99,7 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
 	mso.HighSpaceRatio = defaultHighSpaceRatio
-	mso.LeaderScoreStrategy = defaultLeaderScoreStrategy
+	mso.LeaderScheduleStrategy = defaultLeaderScheduleStrategy
 	return mso
 }
 
@@ -243,9 +243,9 @@ func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
 	return !mso.DisableNamespaceRelocation
 }
 
-// GetLeaderScheduleKind is to get leader schedule kind
-func (mso *ScheduleOptions) GetLeaderScheduleKind() core.ScheduleStrategy {
-	if mso.LeaderScoreStrategy == core.BySize.String() {
+// GetLeaderScheduleStrategy is to get leader schedule kind
+func (mso *ScheduleOptions) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	if mso.LeaderScheduleStrategy == core.BySize.String() {
 		return core.BySize
 	}
 	return core.ByCount

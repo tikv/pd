@@ -495,8 +495,8 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
-	// LeaderScoreStrategy is the option to balance leader, there are some strategics supported: ["count", "size"]
-	LeaderScoreStrategy string `toml:"leader-score-strategy,omitempty" json:"leader-score-strategy,string"`
+	// LeaderScheduleStrategy is the option to balance leader, there are some strategics supported: ["count", "size"]
+	LeaderScheduleStrategy string `toml:"leader-schedule-strategy,omitempty" json:"leader-schedule-strategy,string"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -566,7 +566,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
-		LeaderScoreStrategy:          c.LeaderScoreStrategy,
+		LeaderScheduleStrategy:       c.LeaderScheduleStrategy,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
@@ -611,7 +611,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
-	defaultLeaderScoreStrategy         = "count"
+	defaultLeaderScheduleStrategy      = "count"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -654,8 +654,8 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
-	if !meta.IsDefined("leader-score-strategy") {
-		adjustString(&c.LeaderScoreStrategy, defaultLeaderScoreStrategy)
+	if !meta.IsDefined("leader-schedule-strategy") {
+		adjustString(&c.LeaderScheduleStrategy, defaultLeaderScheduleStrategy)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
@@ -722,9 +722,9 @@ func IsDefaultScheduler(typ string) bool {
 	return false
 }
 
-// GetLeaderScheduleKind is to get leader schedule kind
-func (c *ScheduleConfig) GetLeaderScheduleKind() core.ScheduleStrategy {
-	if c.LeaderScoreStrategy == core.BySize.String() {
+// GetLeaderScheduleStrategy is to get leader schedule kind
+func (c *ScheduleConfig) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	if c.LeaderScheduleStrategy == core.BySize.String() {
 		return core.BySize
 	}
 	return core.ByCount
