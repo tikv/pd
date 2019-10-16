@@ -38,7 +38,7 @@ func (s *compatibilityTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -89,7 +89,7 @@ func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
 }
 
 func (s *compatibilityTestSuite) TestRollingUpgrade(c *C) {
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
