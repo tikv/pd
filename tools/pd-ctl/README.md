@@ -573,7 +573,7 @@ Usage:
 >> scheduler remove grant-leader-scheduler-1  // Remove the corresponding scheduler
 ```
 
-### `store [delete | label | weight] <store_id>  [--jq="<query string>"]`
+### `store [delete | label | weight | remove-tombstone | limit] <store_id>  [--jq="<query string>"]`
 
 Use this command to view the store information or remove a specified store. For a jq formatted output, see [jq-formatted-json-output-usage](#jq-formatted-json-output-usage).
 
@@ -591,6 +591,10 @@ Usage:
   ......
 >> store label 1 zone cn        // Set the value of the label with the "zone" key to "cn" for the store with the store id of 1
 >> store weight 1 5 10          // Set the leader weight to 5 and region weight to 10 for the store with the store id of 1
+>> store remove-tombstone       // Remove stores that are in tombstone state
+>> store limit                  // Show limits for all stores
+>> store limit all 5            // Limit 5 operators per minute for all stores
+>> store limit 1 5              // Limit 5 operators per minute for store 1
 ```
 
 ### `table_ns [create | add | remove | set_store | rm_store | set_meta | rm_meta]`
