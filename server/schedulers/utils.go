@@ -64,8 +64,8 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	sourceID := source.GetID()
 	targetID := target.GetID()
 	tolerantResource := getTolerantResource(cluster, region, kind)
-	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceInfluence(kind)
-	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceInfluence(kind)
+	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceProperty(kind)
+	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
 	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
 	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource)
 

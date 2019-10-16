@@ -79,8 +79,8 @@ type StoreInfluence struct {
 	StepCost    int64
 }
 
-// ResourceInfluence returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceInfluence(kind core.ScheduleKind) int64 {
+// ResourceProperty returns delta size of leader/region by influence.
+func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
 	switch kind.Resource {
 	case core.LeaderKind:
 		switch kind.Strategy {

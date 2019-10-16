@@ -759,7 +759,7 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
 	return ret
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule kind
+// GetLeaderScheduleStrategy is to get leader schedule strategy
 func (oc *OperatorController) GetLeaderScheduleStrategy() core.ScheduleStrategy {
 	return oc.cluster.GetLeaderScheduleStrategy()
 }
@@ -769,5 +769,4 @@ func (oc *OperatorController) RemoveStoreLimit(storeID uint64) {
 	oc.Lock()
 	defer oc.Unlock()
 	delete(oc.storesLimit, storeID)
-
 }
