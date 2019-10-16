@@ -696,7 +696,7 @@ func (c *ScheduleConfig) Deprecated() error {
 		return errors.New("disable-raft-learner has already been deprecated")
 	}
 	if c.StoreBalanceRate != 0.0 {
-		return errors.New("store-balance-rate has been deprecated, use default-store-limit instread")
+		return errors.New("store-balance-rate has been deprecated, use default-store-limit instead")
 	}
 	return nil
 }
