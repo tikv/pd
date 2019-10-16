@@ -328,8 +328,8 @@ func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 }
 
 // ResourceCount returns count of leader/region in the store.
-func (s *StoreInfo) ResourceCount(kind ScheduleKind) uint64 {
-	switch kind.Resource {
+func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
+	switch kind {
 	case LeaderKind:
 		return uint64(s.GetLeaderCount())
 	case RegionKind:
@@ -340,8 +340,8 @@ func (s *StoreInfo) ResourceCount(kind ScheduleKind) uint64 {
 }
 
 // ResourceSize returns size of leader/region in the store
-func (s *StoreInfo) ResourceSize(kind ScheduleKind) int64 {
-	switch kind.Resource {
+func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
+	switch kind {
 	case LeaderKind:
 		return s.GetLeaderSize()
 	case RegionKind:
@@ -352,10 +352,10 @@ func (s *StoreInfo) ResourceSize(kind ScheduleKind) int64 {
 }
 
 // ResourceScore returns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(kind ScheduleKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
-	switch kind.Resource {
+func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+	switch scheduleKind.Resource {
 	case LeaderKind:
-		return s.LeaderScore(kind.Strategy, delta)
+		return s.LeaderScore(scheduleKind.Strategy, delta)
 	case RegionKind:
 		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
 	default:
@@ -364,8 +364,8 @@ func (s *StoreInfo) ResourceScore(kind ScheduleKind, highSpaceRatio, lowSpaceRat
 }
 
 // ResourceWeight returns weight of leader/region in the score
-func (s *StoreInfo) ResourceWeight(kind ScheduleKind) float64 {
-	switch kind.Resource {
+func (s *StoreInfo) ResourceWeight(kind ResourceKind) float64 {
+	switch kind {
 	case LeaderKind:
 		leaderWeight := s.GetLeaderWeight()
 		if leaderWeight <= 0 {
