@@ -26,8 +26,8 @@ type HotPeerStat struct {
 	AntiCount int
 
 	Kind      FlowKind `json:"kind"`
-	BytesRate uint64   `json:"flow_bytes"`
-	KeysRate  uint64   `json:"flow_keys"`
+	BytesRate float64  `json:"flow_bytes"`
+	KeysRate  float64  `json:"flow_keys"`
 	// RollingBytesRate is a rolling statistics, recording some recently added records.
 	RollingBytesRate *RollingStats
 
@@ -42,16 +42,24 @@ type HotPeerStat struct {
 }
 
 // IsNeedDelete to delete the item in cache.
-func (stat HotPeerStat) IsNeedDelete() bool {
+func (stat *HotPeerStat) IsNeedDelete() bool {
 	return stat.needDelete
 }
 
 // IsLeader indicaes the item belong to the leader.
-func (stat HotPeerStat) IsLeader() bool {
+func (stat *HotPeerStat) IsLeader() bool {
 	return stat.isLeader
 }
 
 // IsNew indicaes the item is first update in the cache of the region.
-func (stat HotPeerStat) IsNew() bool {
+func (stat *HotPeerStat) IsNew() bool {
 	return stat.isNew
+}
+
+// GetBytesRate returns denoised BytesRate if possible.
+func (stat *HotPeerStat) GetBytesRate() float64 {
+	if stat.RollingBytesRate == nil {
+		return stat.BytesRate
+	}
+	return stat.RollingBytesRate.Median()
 }

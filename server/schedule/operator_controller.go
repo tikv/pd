@@ -736,10 +736,10 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64) *ratelimit.B
 	if oc.storesLimit[storeID] == nil {
 		rate := oc.cluster.GetStoreBalanceRate() / StoreBalanceBaseTime
 		oc.newStoreLimit(storeID, rate)
-		oc.cluster.AttachOverloadStatus(storeID, func() bool {
+		oc.cluster.AttachAvailableFunc(storeID, func() bool {
 			oc.RLock()
 			defer oc.RUnlock()
-			return oc.storesLimit[storeID].Available() < operator.RegionInfluence
+			return oc.storesLimit[storeID].Available() >= operator.RegionInfluence
 		})
 	}
 	return oc.storesLimit[storeID]
