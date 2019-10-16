@@ -23,7 +23,7 @@ type ScheduleOptions interface {
 	GetLowSpaceRatio() float64
 	GetHighSpaceRatio() float64
 	GetTolerantSizeRatio() float64
-	GetStoreBalanceRate() float64
+	GetDefaultStoreLimit() float64
 
 	GetSchedulerMaxWaitingOperator() uint64
 	GetLeaderScheduleLimit(name string) uint64

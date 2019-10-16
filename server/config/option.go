@@ -210,9 +210,9 @@ func (o *ScheduleOption) GetHotRegionScheduleLimit(name string) uint64 {
 	return o.Load().HotRegionScheduleLimit
 }
 
-// GetStoreBalanceRate returns the balance rate of a store.
-func (o *ScheduleOption) GetStoreBalanceRate() float64 {
-	return o.Load().StoreBalanceRate
+// GetDefaultStoreLimit returns the default store limit.
+func (o *ScheduleOption) GetDefaultStoreLimit() float64 {
+	return o.Load().DefaultStoreLimit
 }
 
 // GetTolerantSizeRatio gets the tolerant size ratio.

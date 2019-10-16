@@ -506,8 +506,10 @@ type ScheduleConfig struct {
 	// If the number of times a region hits the hot cache is greater than this
 	// threshold, it is considered a hot region.
 	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold,omitempty" json:"hot-region-cache-hits-threshold"`
-	// StoreBalanceRate is the maximum of balance rate for each store.
+	// StoreBalanceRate is deprecated, use DefaultStoreLimit instead.
 	StoreBalanceRate float64 `toml:"store-balance-rate,omitempty" json:"store-balance-rate"`
+	// DefaultStoreLimit limits the number of operators to be executed per minute for each store.
+	DefaultStoreLimit float64 `toml:"default-store-limit,omitempty" json:"default-store-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
 	//
@@ -570,6 +572,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
 		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
 		StoreBalanceRate:             c.StoreBalanceRate,
+		DefaultStoreLimit:            c.DefaultStoreLimit,
 		TolerantSizeRatio:            c.TolerantSizeRatio,
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
@@ -599,7 +602,7 @@ const (
 	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 4
-	defaultStoreBalanceRate       = 15
+	defaultStoreLimit             = 15
 	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
 	defaultHighSpaceRatio         = 0.6
@@ -649,7 +652,15 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
-	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
+	// default-store-limit may not be defined in old version configuration
+	if !meta.IsDefined("default-store-limit") {
+		c.DefaultStoreLimit = c.StoreBalanceRate
+	}
+	adjustFloat64(&c.DefaultStoreLimit, defaultStoreLimit)
+	// set c.StoreBalanceRate to ensure compatibility in case of the users
+	// fetch and use store-blance-rate from the api or command line.
+	c.StoreBalanceRate = c.DefaultStoreLimit
+
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
@@ -683,6 +694,9 @@ func (c *ScheduleConfig) Validate() error {
 func (c *ScheduleConfig) Deprecated() error {
 	if c.DisableLearner {
 		return errors.New("disable-raft-learner has already been deprecated")
+	}
+	if c.StoreBalanceRate != 0.0 {
+		return errors.New("store-balance-rate has been deprecated, use default-store-limit instread")
 	}
 	return nil
 }

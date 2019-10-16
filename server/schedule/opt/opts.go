@@ -31,7 +31,7 @@ type Options interface {
 	GetHotRegionScheduleLimit() uint64
 
 	// store limit
-	GetStoreBalanceRate() float64
+	GetDefaultStoreLimit() float64
 
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64

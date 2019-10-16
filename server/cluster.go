@@ -1226,9 +1226,9 @@ func (c *RaftCluster) GetHotRegionScheduleLimit() uint64 {
 	return c.opt.GetHotRegionScheduleLimit(namespace.DefaultNamespace)
 }
 
-// GetStoreBalanceRate returns the balance rate of a store.
-func (c *RaftCluster) GetStoreBalanceRate() float64 {
-	return c.opt.GetStoreBalanceRate()
+// GetDefaultStoreLimit returns the balance rate of a store.
+func (c *RaftCluster) GetDefaultStoreLimit() float64 {
+	return c.opt.GetDefaultStoreLimit()
 }
 
 // GetTolerantSizeRatio gets the tolerant size ratio.

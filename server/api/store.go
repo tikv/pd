@@ -330,7 +330,7 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.SetStoreLimit(storeID, rate/schedule.StoreBalanceBaseTime); err != nil {
+	if err := h.SetStoreLimit(storeID, rate/schedule.StoreLimitBaseTime); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -383,7 +383,7 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.SetAllStoresLimit(rate / schedule.StoreBalanceBaseTime); err != nil {
+	if err := h.SetAllStoresLimit(rate / schedule.StoreLimitBaseTime); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -401,7 +401,7 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	for s, l := range limit {
 		ret[s] = struct {
 			Rate float64 `json:"rate"`
-		}{Rate: l * schedule.StoreBalanceBaseTime}
+		}{Rate: l * schedule.StoreLimitBaseTime}
 	}
 
 	h.rd.JSON(w, http.StatusOK, ret)

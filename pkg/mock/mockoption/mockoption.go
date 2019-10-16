@@ -32,7 +32,7 @@ const (
 	defaultReplicaScheduleLimit        = 64
 	defaultMergeScheduleLimit          = 8
 	defaultHotRegionScheduleLimit      = 4
-	defaultStoreBalanceRate            = 60
+	defaultStoreLimit                  = 64
 	defaultTolerantSizeRatio           = 2.5
 	defaultLowSpaceRatio               = 0.8
 	defaultHighSpaceRatio              = 0.6
@@ -49,7 +49,7 @@ type ScheduleOptions struct {
 	ReplicaScheduleLimit         uint64
 	MergeScheduleLimit           uint64
 	HotRegionScheduleLimit       uint64
-	StoreBalanceRate             float64
+	DefaultStoreLimit            float64
 	MaxSnapshotCount             uint64
 	MaxPendingPeerCount          uint64
 	MaxMergeRegionSize           uint64
@@ -82,7 +82,7 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.ReplicaScheduleLimit = defaultReplicaScheduleLimit
 	mso.MergeScheduleLimit = defaultMergeScheduleLimit
 	mso.HotRegionScheduleLimit = defaultHotRegionScheduleLimit
-	mso.StoreBalanceRate = defaultStoreBalanceRate
+	mso.DefaultStoreLimit = defaultStoreLimit
 	mso.MaxSnapshotCount = defaultMaxSnapshotCount
 	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
 	mso.MaxMergeRegionKeys = defaultMaxMergeRegionKeys
@@ -124,9 +124,9 @@ func (mso *ScheduleOptions) GetHotRegionScheduleLimit(name string) uint64 {
 	return mso.HotRegionScheduleLimit
 }
 
-// GetStoreBalanceRate mocks method
-func (mso *ScheduleOptions) GetStoreBalanceRate() float64 {
-	return mso.StoreBalanceRate
+// GetDefaultStoreLimit mocks method
+func (mso *ScheduleOptions) GetDefaultStoreLimit() float64 {
+	return mso.DefaultStoreLimit
 }
 
 // GetMaxSnapshotCount mocks method

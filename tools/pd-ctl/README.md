@@ -146,7 +146,7 @@ Usage:
       }
     ],
     "split-merge-interval": "1h0m0s",
-    "store-balance-rate": 1,
+    "default-store-limit": 1,
     "tolerant-size-ratio": 0
   }
 }
