@@ -80,13 +80,17 @@ type StoreInfluence struct {
 }
 
 // ResourceScore returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceScore(kind core.ResourceKind, opt ...core.LeaderScheduleKind) int64 {
-	switch kind {
+func (s StoreInfluence) ResourceScore(kind core.DataKind) int64 {
+	switch kind.Resource {
 	case core.LeaderKind:
-		if len(opt) > 0 && opt[0] == core.BySize {
+		switch kind.Schedule {
+		case core.ByCount:
+			return s.LeaderCount
+		case core.BySize:
 			return s.LeaderSize
+		default:
+			return 0
 		}
-		return s.LeaderCount
 	case core.RegionKind:
 		return s.RegionSize
 	default:

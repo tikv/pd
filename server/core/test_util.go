@@ -103,3 +103,21 @@ func NewStoreInfoWithLabel(id uint64, regionCount int, labels map[string]string)
 	)
 	return store
 }
+
+// NewStoreInfoWithSizeCount is create a store with size and count.
+func NewStoreInfoWithSizeCount(id uint64, regionCount, leaderCount int, regionSize, leaderSize int64) *StoreInfo {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = uint64(1024)
+	stats.Available = uint64(1024)
+	store := NewStoreInfo(
+		&metapb.Store{
+			Id: id,
+		},
+		SetStoreStats(stats),
+		SetRegionCount(regionCount),
+		SetRegionSize(regionSize),
+		SetLeaderCount(leaderCount),
+		SetLeaderSize(leaderSize),
+	)
+	return store
+}

@@ -256,7 +256,7 @@ func (o *ScheduleOption) IsRemoveExtraReplicaEnabled() bool {
 }
 
 // GetLeaderScheduleKind is to get leader schedule kind.
-func (o *ScheduleOption) GetLeaderScheduleKind() core.LeaderScheduleKind {
+func (o *ScheduleOption) GetLeaderScheduleKind() core.ScheduleKind {
 	return o.Load().GetLeaderScheduleKind()
 }
 

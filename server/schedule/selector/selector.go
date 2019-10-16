@@ -24,12 +24,12 @@ import (
 // BalanceSelector selects source/target from store candidates based on their
 // resource scores.
 type BalanceSelector struct {
-	kind    core.ResourceKind
+	kind    core.DataKind
 	filters []filter.Filter
 }
 
 // NewBalanceSelector creates a BalanceSelector instance.
-func NewBalanceSelector(kind core.ResourceKind, filters []filter.Filter) *BalanceSelector {
+func NewBalanceSelector(kind core.DataKind, filters []filter.Filter) *BalanceSelector {
 	return &BalanceSelector{
 		kind:    kind,
 		filters: filters,
@@ -39,16 +39,16 @@ func NewBalanceSelector(kind core.ResourceKind, filters []filter.Filter) *Balanc
 // SelectSource selects the store that can pass all filters and has the maximal
 // resource score.
 func (s *BalanceSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo, filters ...filter.Filter) *core.StoreInfo {
+	s.updateConfig(opt)
 	filters = append(filters, s.filters...)
 	var result *core.StoreInfo
 	for _, store := range stores {
 		if filter.Source(opt, store, filters) {
 			continue
 		}
-		leaderScheduleKind := opt.GetLeaderScheduleKind()
 		if result == nil ||
-			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, leaderScheduleKind) <
-				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, leaderScheduleKind) {
+			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) <
+				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
 			result = store
 		}
 	}
@@ -58,20 +58,26 @@ func (s *BalanceSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo
 // SelectTarget selects the store that can pass all filters and has the minimal
 // resource score.
 func (s *BalanceSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo, filters ...filter.Filter) *core.StoreInfo {
+	s.updateConfig(opt)
 	filters = append(filters, s.filters...)
 	var result *core.StoreInfo
 	for _, store := range stores {
 		if filter.Target(opt, store, filters) {
 			continue
 		}
-		leaderScheduleKind := opt.GetLeaderScheduleKind()
 		if result == nil ||
-			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, leaderScheduleKind) >
-				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0, leaderScheduleKind) {
+			result.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) >
+				store.ResourceScore(s.kind, opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0) {
 			result = store
 		}
 	}
 	return result
+}
+
+func (s *BalanceSelector) updateConfig(opt opt.Options) {
+	if s.kind.Resource == core.LeaderKind {
+		s.kind.Schedule = opt.GetLeaderScheduleKind()
+	}
 }
 
 // ReplicaSelector selects source/target store candidates based on their

@@ -14,6 +14,7 @@
 package selector
 
 import (
+	"github.com/pingcap/pd/server/schedule/filter"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -49,4 +50,45 @@ func (s *testSelectorSuite) TestCompareStoreScore(c *C) {
 	c.Assert(compareStoreScore(s.tc, store1, 2, store3, 1), Equals, 1)
 	c.Assert(compareStoreScore(s.tc, store1, 1, store3, 1), Equals, 1)
 	c.Assert(compareStoreScore(s.tc, store1, 1, store3, 2), Equals, -1)
+}
+
+func (s *testSelectorSuite) TestScheduleConfig(c *C) {
+	filters := make([]filter.Filter, 0)
+	testScheduleConfig := func(selector *BalanceSelector, stores []*core.StoreInfo, expectSourceID, expectTargetID uint64) {
+		c.Assert(selector.SelectSource(s.tc, stores).GetID(), Equals, expectSourceID)
+		c.Assert(selector.SelectTarget(s.tc, stores).GetID(), Equals, expectTargetID)
+	}
+
+	kinds := []core.DataKind{{
+		Resource: core.RegionKind,
+		Schedule: core.ByCount,
+	}, {
+		Resource: core.RegionKind,
+		Schedule: core.BySize,
+	}}
+
+	for _, kind := range kinds {
+		selector := NewBalanceSelector(kind, filters)
+		stores := []*core.StoreInfo{
+			core.NewStoreInfoWithSizeCount(1, 2, 3, 10, 5),
+			core.NewStoreInfoWithSizeCount(2, 2, 3, 4, 5),
+			core.NewStoreInfoWithSizeCount(3, 2, 3, 4, 5),
+			core.NewStoreInfoWithSizeCount(4, 2, 3, 2, 5),
+		}
+		testScheduleConfig(selector, stores, 1, 4)
+	}
+
+	selector := NewBalanceSelector(core.DataKind{
+		Resource: core.LeaderKind,
+		Schedule: core.ByCount,
+	}, filters)
+	stores := []*core.StoreInfo{
+		core.NewStoreInfoWithSizeCount(1, 2, 20, 10, 25),
+		core.NewStoreInfoWithSizeCount(2, 2, 66, 10, 5),
+		core.NewStoreInfoWithSizeCount(3, 2, 6, 10, 5),
+		core.NewStoreInfoWithSizeCount(4, 2, 20, 10, 1),
+	}
+	testScheduleConfig(selector, stores, 2, 3)
+	s.tc.LeaderScoreStrategy = core.BySize.String()
+	testScheduleConfig(selector, stores, 1, 4)
 }

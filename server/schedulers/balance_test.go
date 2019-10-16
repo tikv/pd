@@ -47,7 +47,7 @@ type testBalanceSpeedCase struct {
 	targetCount    uint64
 	regionSize     int64
 	expectedResult bool
-	kind           core.LeaderScheduleKind
+	kind           core.ScheduleKind
 }
 
 func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {

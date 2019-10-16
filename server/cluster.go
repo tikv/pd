@@ -1316,7 +1316,7 @@ func (c *RaftCluster) IsRemoveDownReplicaEnabled() bool {
 }
 
 // GetLeaderScheduleKind is to get leader schedule kind
-func (c *RaftCluster) GetLeaderScheduleKind() core.LeaderScheduleKind {
+func (c *RaftCluster) GetLeaderScheduleKind() core.ScheduleKind {
 	return c.opt.GetLeaderScheduleKind()
 }
 

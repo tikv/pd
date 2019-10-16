@@ -41,7 +41,7 @@ type ScheduleOptions interface {
 	GetMaxPendingPeerCount() uint64
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
-	GetLeaderScheduleKind() core.LeaderScheduleKind
+	GetLeaderScheduleKind() core.ScheduleKind
 
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool

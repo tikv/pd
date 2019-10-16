@@ -760,6 +760,6 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
 }
 
 // GetLeaderScheduleKind is to get leader schedule kind
-func (oc *OperatorController) GetLeaderScheduleKind() core.LeaderScheduleKind {
+func (oc *OperatorController) GetLeaderScheduleKind() core.ScheduleKind {
 	return oc.cluster.GetLeaderScheduleKind()
 }

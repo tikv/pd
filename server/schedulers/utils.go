@@ -57,24 +57,23 @@ func isRegionUnhealthy(region *core.RegionInfo) bool {
 	return len(region.GetDownPeers()) != 0 || len(region.GetLearners()) != 0
 }
 
-func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ResourceKind, opInfluence operator.OpInfluence, scheduleName string) bool {
+func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.DataKind, opInfluence operator.OpInfluence, scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
-	leaderScheduleKind := cluster.GetLeaderScheduleKind()
 	sourceID := source.GetID()
 	targetID := target.GetID()
-	tolerantResource := getTolerantResource(cluster, region, kind, leaderScheduleKind)
-	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceScore(kind, leaderScheduleKind)
-	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceScore(kind, leaderScheduleKind)
-	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource, leaderScheduleKind)
-	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource, leaderScheduleKind)
+	tolerantResource := getTolerantResource(cluster, region, kind)
+	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceScore(kind)
+	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceScore(kind)
+	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
+	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource)
 
 	// Make sure after move, source score is still greater than target score.
 	shouldBalance := sourceScore > targetScore
 
 	if !shouldBalance {
-		log.Debug("skip balance "+kind.String(),
+		log.Debug("skip balance "+kind.Resource.String(),
 			zap.String("scheduler", scheduleName), zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
 			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", sourceScore),
 			zap.Int64("source-influence", sourceInfluence),
@@ -86,8 +85,8 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	return shouldBalance
 }
 
-func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, resourceKind core.ResourceKind, kind core.LeaderScheduleKind) int64 {
-	if resourceKind == core.LeaderKind && kind == core.ByCount {
+func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.DataKind) int64 {
+	if kind.Resource == core.LeaderKind && kind.Schedule == core.ByCount {
 		tolerantSizeRatio := cluster.GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
 			tolerantSizeRatio = leaderTolerantSizeRatio
@@ -123,7 +122,7 @@ func adjustTolerantRatio(cluster opt.Cluster) float64 {
 	return tolerantSizeRatio
 }
 
-func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
+func adjustBalanceLimit(cluster opt.Cluster, kind core.DataKind) uint64 {
 	stores := cluster.GetStores()
 	counts := make([]float64, 0, len(stores))
 	for _, s := range stores {

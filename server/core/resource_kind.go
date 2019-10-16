@@ -23,6 +23,12 @@ const (
 	HighPriority
 )
 
+// DataKind distinguishes resources and schedule strategy.
+type DataKind struct {
+	Resource ResourceKind
+	Schedule ScheduleKind
+}
+
 // ResourceKind distinguishes different kinds of resources.
 type ResourceKind int
 
@@ -44,17 +50,17 @@ func (k ResourceKind) String() string {
 	}
 }
 
-// LeaderScheduleKind distinguishes different kinds of schedule strategy
-type LeaderScheduleKind int
+// ScheduleKind distinguishes different kinds of schedule strategy
+type ScheduleKind int
 
 const (
-	// ByCount indicates that balance leader by count
-	ByCount LeaderScheduleKind = iota
-	// BySize indicates that balance leader by size
+	// ByCount indicates that balance by count
+	ByCount ScheduleKind = iota
+	// BySize indicates that balance by size
 	BySize
 )
 
-func (k LeaderScheduleKind) String() string {
+func (k ScheduleKind) String() string {
 	switch k {
 	case ByCount:
 		return "count"
