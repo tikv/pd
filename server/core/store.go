@@ -252,7 +252,7 @@ const minWeight = 1e-6
 const maxScore = 1024 * 1024 * 1024
 
 // LeaderScore returns the store's leader score.
-func (s *StoreInfo) LeaderScore(kind ScheduleKind, delta int64) float64 {
+func (s *StoreInfo) LeaderScore(kind ScheduleStrategy, delta int64) float64 {
 	switch kind {
 	case BySize:
 		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
@@ -328,7 +328,7 @@ func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 }
 
 // ResourceCount returns count of leader/region in the store.
-func (s *StoreInfo) ResourceCount(kind DataKind) uint64 {
+func (s *StoreInfo) ResourceCount(kind ScheduleKind) uint64 {
 	switch kind.Resource {
 	case LeaderKind:
 		return uint64(s.GetLeaderCount())
@@ -340,7 +340,7 @@ func (s *StoreInfo) ResourceCount(kind DataKind) uint64 {
 }
 
 // ResourceSize returns size of leader/region in the store
-func (s *StoreInfo) ResourceSize(kind DataKind) int64 {
+func (s *StoreInfo) ResourceSize(kind ScheduleKind) int64 {
 	switch kind.Resource {
 	case LeaderKind:
 		return s.GetLeaderSize()
@@ -352,10 +352,10 @@ func (s *StoreInfo) ResourceSize(kind DataKind) int64 {
 }
 
 // ResourceScore returns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(kind DataKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+func (s *StoreInfo) ResourceScore(kind ScheduleKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	switch kind.Resource {
 	case LeaderKind:
-		return s.LeaderScore(kind.Schedule, delta)
+		return s.LeaderScore(kind.Strategy, delta)
 	case RegionKind:
 		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
 	default:
@@ -364,7 +364,7 @@ func (s *StoreInfo) ResourceScore(kind DataKind, highSpaceRatio, lowSpaceRatio f
 }
 
 // ResourceWeight returns weight of leader/region in the score
-func (s *StoreInfo) ResourceWeight(kind DataKind) float64 {
+func (s *StoreInfo) ResourceWeight(kind ScheduleKind) float64 {
 	switch kind.Resource {
 	case LeaderKind:
 		leaderWeight := s.GetLeaderWeight()

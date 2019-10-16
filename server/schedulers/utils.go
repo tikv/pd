@@ -57,7 +57,7 @@ func isRegionUnhealthy(region *core.RegionInfo) bool {
 	return len(region.GetDownPeers()) != 0 || len(region.GetLearners()) != 0
 }
 
-func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.DataKind, opInfluence operator.OpInfluence, scheduleName string) bool {
+func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
@@ -85,8 +85,8 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	return shouldBalance
 }
 
-func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.DataKind) int64 {
-	if kind.Resource == core.LeaderKind && kind.Schedule == core.ByCount {
+func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
+	if kind.Resource == core.LeaderKind && kind.Strategy == core.ByCount {
 		tolerantSizeRatio := cluster.GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
 			tolerantSizeRatio = leaderTolerantSizeRatio
@@ -122,7 +122,7 @@ func adjustTolerantRatio(cluster opt.Cluster) float64 {
 	return tolerantSizeRatio
 }
 
-func adjustBalanceLimit(cluster opt.Cluster, kind core.DataKind) uint64 {
+func adjustBalanceLimit(cluster opt.Cluster, kind core.ScheduleKind) uint64 {
 	stores := cluster.GetStores()
 	counts := make([]float64, 0, len(stores))
 	for _, s := range stores {

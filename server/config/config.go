@@ -723,7 +723,7 @@ func IsDefaultScheduler(typ string) bool {
 }
 
 // GetLeaderScheduleKind is to get leader schedule kind
-func (c *ScheduleConfig) GetLeaderScheduleKind() core.ScheduleKind {
+func (c *ScheduleConfig) GetLeaderScheduleKind() core.ScheduleStrategy {
 	if c.LeaderScoreStrategy == core.BySize.String() {
 		return core.BySize
 	}

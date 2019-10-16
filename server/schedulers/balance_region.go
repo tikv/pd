@@ -76,9 +76,9 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, opts .
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
-	kind := core.DataKind{
+	kind := core.ScheduleKind{
 		Resource: core.RegionKind,
-		Schedule: core.BySize,
+		Strategy: core.BySize,
 	}
 	s.selector = selector.NewBalanceSelector(kind, filters)
 	return s
@@ -210,9 +210,9 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 	log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
 	opInfluence := s.opController.GetOpInfluence(cluster)
-	kind := core.DataKind{
+	kind := core.ScheduleKind{
 		Resource: core.RegionKind,
-		Schedule: core.BySize,
+		Strategy: core.BySize,
 	}
 	if !shouldBalance(cluster, source, target, region, kind, opInfluence, s.GetName()) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()

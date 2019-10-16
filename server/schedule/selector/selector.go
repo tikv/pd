@@ -24,12 +24,12 @@ import (
 // BalanceSelector selects source/target from store candidates based on their
 // resource scores.
 type BalanceSelector struct {
-	kind    core.DataKind
+	kind    core.ScheduleKind
 	filters []filter.Filter
 }
 
 // NewBalanceSelector creates a BalanceSelector instance.
-func NewBalanceSelector(kind core.DataKind, filters []filter.Filter) *BalanceSelector {
+func NewBalanceSelector(kind core.ScheduleKind, filters []filter.Filter) *BalanceSelector {
 	return &BalanceSelector{
 		kind:    kind,
 		filters: filters,
@@ -76,7 +76,7 @@ func (s *BalanceSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo
 
 func (s *BalanceSelector) updateConfig(opt opt.Options) {
 	if s.kind.Resource == core.LeaderKind {
-		s.kind.Schedule = opt.GetLeaderScheduleKind()
+		s.kind.Strategy = opt.GetLeaderScheduleKind()
 	}
 }
 

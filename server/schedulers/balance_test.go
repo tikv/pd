@@ -47,7 +47,7 @@ type testBalanceSpeedCase struct {
 	targetCount    uint64
 	regionSize     int64
 	expectedResult bool
-	kind           core.ScheduleKind
+	kind           core.ScheduleStrategy
 }
 
 func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
@@ -117,7 +117,11 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 		tc.PutRegion(region)
 		tc.LeaderScoreStrategy = t.kind.String()
-		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
+		kind := core.ScheduleKind{
+			Resource: core.LeaderKind,
+			Strategy: t.kind,
+		}
+		c.Assert(shouldBalance(tc, source, target, region, kind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -128,7 +132,11 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 			target := tc.GetStore(2)
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 			tc.PutRegion(region)
-			c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
+			kind := core.ScheduleKind{
+				Resource: core.RegionKind,
+				Strategy: t.kind,
+			}
+			c.Assert(shouldBalance(tc, source, target, region, kind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
 		}
 	}
 }

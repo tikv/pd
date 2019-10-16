@@ -59,12 +59,12 @@ func (s *testSelectorSuite) TestScheduleConfig(c *C) {
 		c.Assert(selector.SelectTarget(s.tc, stores).GetID(), Equals, expectTargetID)
 	}
 
-	kinds := []core.DataKind{{
+	kinds := []core.ScheduleKind{{
 		Resource: core.RegionKind,
-		Schedule: core.ByCount,
+		Strategy: core.ByCount,
 	}, {
 		Resource: core.RegionKind,
-		Schedule: core.BySize,
+		Strategy: core.BySize,
 	}}
 
 	for _, kind := range kinds {
@@ -78,9 +78,9 @@ func (s *testSelectorSuite) TestScheduleConfig(c *C) {
 		testScheduleConfig(selector, stores, 1, 4)
 	}
 
-	selector := NewBalanceSelector(core.DataKind{
+	selector := NewBalanceSelector(core.ScheduleKind{
 		Resource: core.LeaderKind,
-		Schedule: core.ByCount,
+		Strategy: core.ByCount,
 	}, filters)
 	stores := []*core.StoreInfo{
 		core.NewStoreInfoWithSizeCount(1, 2, 20, 10, 25),
