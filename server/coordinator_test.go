@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math/rand"
 	"path/filepath"
+	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -72,14 +73,21 @@ func newTestRegionMeta(regionID uint64) *metapb.Region {
 	}
 }
 
-func (c *testCluster) addRegionStore(storeID uint64, regionCount int) error {
+func (c *testCluster) addRegionStore(storeID uint64, regionCount int, regionSizes ...uint64) error {
+	var regionSize uint64
+	if len(regionSizes) == 0 {
+		regionSize = uint64(regionCount) * 10
+	} else {
+		regionSize = regionSizes[0]
+	}
+
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = 1000 * (1 << 20)
-	stats.Available = stats.Capacity - uint64(regionCount)*10
+	stats.Available = stats.Capacity - regionSize
 	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*10),
+		core.SetRegionSize(int64(regionSize)),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	c.Lock()
@@ -87,12 +95,12 @@ func (c *testCluster) addRegionStore(storeID uint64, regionCount int) error {
 	return c.putStoreLocked(newStore)
 }
 
-func (c *testCluster) addLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) error {
+func (c *testCluster) addLeaderRegion(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) error {
 	region := newTestRegionMeta(regionID)
-	leader, _ := c.AllocPeer(leaderID)
+	leader, _ := c.AllocPeer(leaderStoreID)
 	region.Peers = []*metapb.Peer{leader}
-	for _, id := range followerIds {
-		peer, _ := c.AllocPeer(id)
+	for _, followerStoreID := range followerStoreIDs {
+		peer, _ := c.AllocPeer(followerStoreID)
 		region.Peers = append(region.Peers, peer)
 	}
 	regionInfo := core.NewRegionInfo(region, leader, core.SetApproximateSize(10), core.SetApproximateKeys(10))
@@ -142,11 +150,11 @@ func (c *testCluster) setStoreOffline(storeID uint64) error {
 	return c.putStoreLocked(newStore)
 }
 
-func (c *testCluster) LoadRegion(regionID uint64, followerIds ...uint64) error {
+func (c *testCluster) LoadRegion(regionID uint64, followerStoreIDs ...uint64) error {
 	//  regions load from etcd will have no leader
 	region := newTestRegionMeta(regionID)
 	region.Peers = []*metapb.Peer{}
-	for _, id := range followerIds {
+	for _, id := range followerStoreIDs {
 		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
@@ -788,6 +796,48 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	waitPromoteLearner(c, stream, region, 3)
 	co.stop()
 	co.wg.Wait()
+}
+
+func BenchmarkPatrolRegion(b *testing.B) {
+	mergeLimit := uint64(4100)
+	regionNum := 10000
+
+	_, scheduleOpt, _ := newTestScheduleConfig()
+	scheduleOpt.SetSplitMergeInterval(time.Duration(0))
+	scheduleOpt.SetMergeScheduleLimit(mergeLimit)
+	tc := newTestCluster(scheduleOpt)
+	hbStreams, cleanup := getHeartBeatStreams(&C{}, tc)
+	defer cleanup()
+	defer hbStreams.Close()
+
+	for i := 1; i < 4; i++ {
+		if err := tc.addRegionStore(uint64(i), regionNum, 96); err != nil {
+			return
+		}
+	}
+	for i := 0; i < regionNum; i++ {
+		if err := tc.addLeaderRegion(uint64(i), 1, 2, 3); err != nil {
+			return
+		}
+	}
+	co := newCoordinator(tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+
+	listen := make(chan int)
+	go func() {
+		oc := co.opController
+		listen <- 0
+		for {
+			if oc.OperatorCount(operator.OpMerge) == mergeLimit {
+				co.cancel()
+				co.wg.Add(1)
+				return
+			}
+		}
+	}()
+	<-listen
+
+	b.ResetTimer()
+	co.patrolRegions()
 }
 
 func waitOperator(c *C, co *coordinator, regionID uint64) {

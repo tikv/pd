@@ -22,6 +22,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 )
@@ -155,6 +156,11 @@ func (o *ScheduleOption) GetSplitMergeInterval() time.Duration {
 	return o.Load().SplitMergeInterval.Duration
 }
 
+// SetSplitMergeInterval to set the interval between finishing split and starting to merge.
+func (o *ScheduleOption) SetSplitMergeInterval(splitMergeInterval time.Duration) {
+	o.Load().SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
+}
+
 // IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
 func (o *ScheduleOption) IsOneWayMergeEnabled() bool {
 	return o.Load().EnableOneWayMerge
@@ -200,6 +206,11 @@ func (o *ScheduleOption) GetMergeScheduleLimit(name string) uint64 {
 		return n.GetMergeScheduleLimit()
 	}
 	return o.Load().MergeScheduleLimit
+}
+
+// SetMergeScheduleLimit to set the limit for merge schedule.
+func (o *ScheduleOption) SetMergeScheduleLimit(mergeScheduleLimit uint64) {
+	o.Load().MergeScheduleLimit = mergeScheduleLimit
 }
 
 // GetHotRegionScheduleLimit returns the limit for hot region schedule.
