@@ -122,7 +122,7 @@ func adjustTolerantRatio(cluster opt.Cluster) float64 {
 	return tolerantSizeRatio
 }
 
-func adjustBalanceLimit(cluster opt.Cluster, kind core.ScheduleKind) uint64 {
+func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
 	stores := cluster.GetStores()
 	counts := make([]float64, 0, len(stores))
 	for _, s := range stores {
