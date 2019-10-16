@@ -656,6 +656,10 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	typ, labelKey, labelValue := "testTyp", "testKey", "testValue"
 	nsConfig := config.NamespaceConfig{LeaderScheduleLimit: uint64(200)}
 
+	// clear the value of StoreBalanceRate otherwise it will
+	// cause an error in "SetScheduleConfig" because the option
+	// is deprecated.
+	scheduleCfg.StoreBalanceRate = 0
 	c.Assert(s.svr.SetScheduleConfig(*scheduleCfg), IsNil)
 	c.Assert(s.svr.SetPDServerConfig(*pdServerCfg), IsNil)
 	c.Assert(s.svr.SetLabelProperty(typ, labelKey, labelValue), IsNil)
