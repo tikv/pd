@@ -46,8 +46,6 @@ func (s *serverTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *serverTestSuite) TestMemberDelete(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -134,8 +132,6 @@ func (s *serverTestSuite) checkMemberList(c *C, clientURL string, configs []*con
 }
 
 func (s *serverTestSuite) TestLeaderPriority(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -193,8 +189,6 @@ func (s *serverTestSuite) waitEtcdLeaderChange(c *C, server *tests.TestServer, o
 }
 
 func (s *serverTestSuite) TestLeaderResign(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -228,8 +222,6 @@ func (s *serverTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old
 }
 
 func (s *serverTestSuite) TestMoveLeader(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(5)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)

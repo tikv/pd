@@ -137,11 +137,11 @@ func (bc *BasicCluster) UnblockStore(storeID uint64) {
 	bc.Stores.UnblockStore(storeID)
 }
 
-// AttachOverloadStatus attaches the overload status to a store.
-func (bc *BasicCluster) AttachOverloadStatus(storeID uint64, f func() bool) {
+// AttachAvailableFunc attaches an available function to a specific store.
+func (bc *BasicCluster) AttachAvailableFunc(storeID uint64, f func() bool) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.AttachOverloadStatus(storeID, f)
+	bc.Stores.AttachAvailableFunc(storeID, f)
 }
 
 // UpdateStoreStatus updates the information of the store.
@@ -333,5 +333,5 @@ type StoreSetController interface {
 	BlockStore(id uint64) error
 	UnblockStore(id uint64)
 
-	AttachOverloadStatus(id uint64, f func() bool)
+	AttachAvailableFunc(id uint64, f func() bool)
 }
