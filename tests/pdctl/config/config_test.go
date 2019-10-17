@@ -40,8 +40,6 @@ func (s *configTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *configTestSuite) TestConfig(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
@@ -196,4 +194,8 @@ func (s *configTestSuite) TestConfig(c *C) {
 	scheduleCfg = cfg.Schedule
 	c.Assert(scheduleCfg.EnableRemoveDownReplica, Equals, svr.GetScheduleConfig().EnableRemoveDownReplica)
 	c.Assert(scheduleCfg.EnableRemoveDownReplica, IsFalse)
+	args1 = []string{"-u", pdAddr, "config", "set", "foo-bar", "1"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "config item not found"), IsTrue)
 }

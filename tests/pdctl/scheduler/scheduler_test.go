@@ -39,8 +39,6 @@ func (s *schedulerTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *schedulerTestSuite) TestScheduler(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()

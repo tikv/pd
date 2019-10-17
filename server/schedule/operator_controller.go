@@ -736,10 +736,10 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64) *ratelimit.B
 	if oc.storesLimit[storeID] == nil {
 		rate := oc.cluster.GetStoreBalanceRate() / StoreBalanceBaseTime
 		oc.newStoreLimit(storeID, rate)
-		oc.cluster.AttachOverloadStatus(storeID, func() bool {
+		oc.cluster.AttachAvailableFunc(storeID, func() bool {
 			oc.RLock()
 			defer oc.RUnlock()
-			return oc.storesLimit[storeID].Available() < operator.RegionInfluence
+			return oc.storesLimit[storeID].Available() >= operator.RegionInfluence
 		})
 	}
 	return oc.storesLimit[storeID]
@@ -757,4 +757,11 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
 		}
 	}
 	return ret
+}
+
+// RemoveStoreLimit removes the store limit for a given store ID.
+func (oc *OperatorController) RemoveStoreLimit(storeID uint64) {
+	oc.Lock()
+	defer oc.Unlock()
+	delete(oc.storesLimit, storeID)
 }

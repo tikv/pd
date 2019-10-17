@@ -37,8 +37,6 @@ func (s *healthTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *healthTestSuite) TestHealth(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()

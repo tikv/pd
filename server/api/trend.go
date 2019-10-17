@@ -42,10 +42,10 @@ type trendStore struct {
 	LastHeartbeatTS *time.Time         `json:"last_heartbeat_ts,omitempty"`
 	Uptime          *typeutil.Duration `json:"uptime,omitempty"`
 
-	HotWriteFlow        uint64   `json:"hot_write_flow"`
-	HotWriteRegionFlows []uint64 `json:"hot_write_region_flows"`
-	HotReadFlow         uint64   `json:"hot_read_flow"`
-	HotReadRegionFlows  []uint64 `json:"hot_read_region_flows"`
+	HotWriteFlow        float64   `json:"hot_write_flow"`
+	HotWriteRegionFlows []float64 `json:"hot_write_region_flows"`
+	HotReadFlow         float64   `json:"hot_read_flow"`
+	HotReadRegionFlows  []float64 `json:"hot_read_region_flows"`
 }
 
 type trendHistory struct {
@@ -140,14 +140,14 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	return trendStores, nil
 }
 
-func (h *trendHandler) getStoreFlow(stats statistics.StoreHotRegionsStat, storeID uint64) (storeFlow uint64, regionFlows []uint64) {
+func (h *trendHandler) getStoreFlow(stats statistics.StoreHotRegionsStat, storeID uint64) (storeFlow float64, regionFlows []float64) {
 	if stats == nil {
 		return
 	}
 	if stat, ok := stats[storeID]; ok {
 		storeFlow = stat.TotalBytesRate
 		for _, flow := range stat.RegionsStat {
-			regionFlows = append(regionFlows, flow.BytesRate)
+			regionFlows = append(regionFlows, flow.GetBytesRate())
 		}
 	}
 	return
