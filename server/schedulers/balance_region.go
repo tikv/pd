@@ -76,10 +76,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, opts .
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
-	kind := core.ScheduleKind{
-		Resource: core.RegionKind,
-		Strategy: core.BySize,
-	}
+	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
 	s.selector = selector.NewBalanceSelector(kind, filters)
 	return s
 }

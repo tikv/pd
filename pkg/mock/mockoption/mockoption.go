@@ -245,8 +245,5 @@ func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
 
 // GetLeaderScheduleStrategy is to get leader schedule strategy
 func (mso *ScheduleOptions) GetLeaderScheduleStrategy() core.ScheduleStrategy {
-	if mso.LeaderScheduleStrategy == core.BySize.String() {
-		return core.BySize
-	}
-	return core.ByCount
+	return core.NewScheduleStrategy(mso.LeaderScheduleStrategy)
 }

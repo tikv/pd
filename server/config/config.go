@@ -724,10 +724,7 @@ func IsDefaultScheduler(typ string) bool {
 
 // GetLeaderScheduleStrategy is to get leader schedule strategy
 func (c *ScheduleConfig) GetLeaderScheduleStrategy() core.ScheduleStrategy {
-	if c.LeaderScheduleStrategy == core.BySize.String() {
-		return core.BySize
-	}
-	return core.ByCount
+	return core.NewScheduleStrategy(c.LeaderScheduleStrategy)
 }
 
 // ReplicationConfig is the replication configuration.

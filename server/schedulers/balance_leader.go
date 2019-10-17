@@ -65,10 +65,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, opts .
 		filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true},
 		filter.NewCacheFilter(s.GetName(), taintStores),
 	}
-	kind := core.ScheduleKind{
-		Resource: core.LeaderKind,
-		Strategy: core.ByCount,
-	}
+	kind := core.NewScheduleKind(core.LeaderKind, opController.GetLeaderScheduleStrategy())
 	s.selector = selector.NewBalanceSelector(kind, filters)
 	return s
 }

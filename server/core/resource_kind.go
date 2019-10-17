@@ -13,6 +13,8 @@
 
 package core
 
+import "log"
+
 // PriorityLevel lower level means higher priority
 type PriorityLevel int
 
@@ -27,6 +29,14 @@ const (
 type ScheduleKind struct {
 	Resource ResourceKind
 	Strategy ScheduleStrategy
+}
+
+// NewScheduleKind creates a schedule kind with resource kind and schedule strategy.
+func NewScheduleKind(Resource ResourceKind, Strategy ScheduleStrategy) ScheduleKind {
+	return ScheduleKind{
+		Resource: Resource,
+		Strategy: Strategy,
+	}
 }
 
 // ResourceKind distinguishes different kinds of resources.
@@ -68,5 +78,18 @@ func (k ScheduleStrategy) String() string {
 		return "size"
 	default:
 		return "unknown"
+	}
+}
+
+// NewScheduleStrategy creates a schedule strategy with string.
+func NewScheduleStrategy(input string) ScheduleStrategy {
+	switch input {
+	case BySize.String():
+		return BySize
+	case ByCount.String():
+		return ByCount
+	default:
+		log.Fatal("Error schedule strategy")
+		return ByCount // default leader schedule Strategy
 	}
 }
