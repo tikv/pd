@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/opt"
 )
 
-func TestChecker(t *testing.T) {
+func TestMergeChecker(t *testing.T) {
 	TestingT(t)
 }
 

@@ -80,6 +80,12 @@ func (c *TTL) Get(key uint64) (interface{}, bool) {
 	return item.value, true
 }
 
+// Exists checks if an ID exists in cache.
+func (c *TTL) Exists(id uint64) bool {
+	_, ok := c.Get(id)
+	return ok
+}
+
 // Remove eliminates an item from cache.
 func (c *TTL) Remove(key uint64) {
 	c.Lock()
