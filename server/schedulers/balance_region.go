@@ -160,48 +160,54 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 	}
 	scoreGuard := filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), stores, source)
 	checker := checker.NewReplicaChecker(cluster, nil, s.GetName())
-	storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard)
-	if storeID == 0 {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
-		return nil
-	}
+	exclude := make(map[uint64]struct{})
+	excludeFilter := filter.NewExcludedFilter(s.name, nil, exclude)
+	for {
+		storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
+		if storeID == 0 {
+			schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
+			return nil
+		}
+		exclude[storeID] = struct{}{} // exlucde next round.
 
-	target := cluster.GetStore(storeID)
-	if target == nil {
-		log.Error("failed to get the target store", zap.Uint64("store-id", storeID))
-	}
-	regionID := region.GetID()
-	sourceID := source.GetID()
-	targetID := target.GetID()
-	log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
+		target := cluster.GetStore(storeID)
+		if target == nil {
+			log.Error("failed to get the target store", zap.Uint64("store-id", storeID))
+			continue
+		}
+		regionID := region.GetID()
+		sourceID := source.GetID()
+		targetID := target.GetID()
+		log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
-	opInfluence := s.opController.GetOpInfluence(cluster)
-	if !shouldBalance(cluster, source, target, region, core.RegionKind, opInfluence) {
-		log.Debug("skip balance region",
-			zap.String("scheduler", s.GetName()), zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
-			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
-			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(core.RegionKind)),
-			zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
-			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(core.RegionKind)),
-			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
-		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
-		return nil
-	}
+		opInfluence := s.opController.GetOpInfluence(cluster)
+		if !shouldBalance(cluster, source, target, region, core.RegionKind, opInfluence) {
+			log.Debug("skip balance region",
+				zap.String("scheduler", s.GetName()), zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
+				zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
+				zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(core.RegionKind)),
+				zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
+				zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(core.RegionKind)),
+				zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
+			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+			continue
+		}
 
-	newPeer, err := cluster.AllocPeer(storeID)
-	if err != nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-peer").Inc()
-		return nil
+		newPeer, err := cluster.AllocPeer(storeID)
+		if err != nil {
+			schedulerCounter.WithLabelValues(s.GetName(), "no-peer").Inc()
+			return nil
+		}
+		op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		if err != nil {
+			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
+			return nil
+		}
+		sourceLabel := strconv.FormatUint(sourceID, 10)
+		targetLabel := strconv.FormatUint(targetID, 10)
+		s.counter.WithLabelValues("move-peer", source.GetAddress()+"-out", sourceLabel).Inc()
+		s.counter.WithLabelValues("move-peer", target.GetAddress()+"-in", targetLabel).Inc()
+		balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel).Inc()
+		return op
 	}
-	op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
-	if err != nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
-		return nil
-	}
-	sourceLabel := strconv.FormatUint(sourceID, 10)
-	targetLabel := strconv.FormatUint(targetID, 10)
-	s.counter.WithLabelValues("move-peer", source.GetAddress()+"-out", sourceLabel).Inc()
-	s.counter.WithLabelValues("move-peer", target.GetAddress()+"-in", targetLabel).Inc()
-	balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel).Inc()
-	return op
 }

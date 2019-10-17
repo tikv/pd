@@ -493,14 +493,9 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	store5 := origin.Clone(core.SetStoreStats(stats))
 	tc.PutStore(store5)
 
-	// the scheduler always pick store 1 as source store,
+	// the scheduler first picks store 1 as source store,
 	// and store 5 as target store, but cannot pass `shouldBalance`.
-	c.Assert(sb.Schedule(tc), IsNil)
-	// hits the store many times
-	for i := 0; i < 1000; i++ {
-		sb.Schedule(tc)
-	}
-	// now filter the store 5, and can transfer store 1 to store 4
+	// Then it will try store4.
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], operator.OpBalance, 1, 4)
 }
 
