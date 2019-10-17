@@ -31,7 +31,7 @@ var (
 // NewStoreCommand return a stores subcommand of rootCmd
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
-		Use:   `store [comnand] [flags]`,
+		Use:   `store [command] [flags]`,
 		Short: "manipulate stores",
 		Run:   showStoreCommandFunc,
 	}
