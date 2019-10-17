@@ -87,6 +87,6 @@ func StringToScheduleStrategy(input string) ScheduleStrategy {
 	case ByCount.String():
 		return ByCount
 	default:
-		panic("Invalid schedule strategy: " + input)
+		panic("invalid schedule strategy: " + input)
 	}
 }
