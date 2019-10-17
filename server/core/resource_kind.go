@@ -13,8 +13,6 @@
 
 package core
 
-import "log"
-
 // PriorityLevel lower level means higher priority
 type PriorityLevel int
 
@@ -81,15 +79,14 @@ func (k ScheduleStrategy) String() string {
 	}
 }
 
-// NewScheduleStrategy creates a schedule strategy with string.
-func NewScheduleStrategy(input string) ScheduleStrategy {
+// StringToScheduleStrategy creates a schedule strategy with string.
+func StringToScheduleStrategy(input string) ScheduleStrategy {
 	switch input {
 	case BySize.String():
 		return BySize
 	case ByCount.String():
 		return ByCount
 	default:
-		log.Fatal("Error schedule strategy")
-		return ByCount // default leader schedule Strategy
+		panic("Error schedule strategy")
 	}
 }
