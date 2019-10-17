@@ -25,15 +25,15 @@ import (
 
 //revive:disable:unused-parameter
 
-// FilterSourceStores selects stores that be selected as source store from the list.
-func FilterSourceStores(stores []*core.StoreInfo, filters []Filter, opt opt.Options) []*core.StoreInfo {
+// SelectSourceStores selects stores that be selected as source store from the list.
+func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt opt.Options) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.NoneOf(filters, func(i int) bool { return filters[i].Source(opt, s) })
 	})
 }
 
-// FilterSourceStores selects stores that be selected as target store from the list.
-func FilterTargetStores(stores []*core.StoreInfo, filters []Filter, opt opt.Options) []*core.StoreInfo {
+// SelectTargetStores selects stores that be selected as target store from the list.
+func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt opt.Options) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.NoneOf(filters, func(i int) bool { return filters[i].Target(opt, s) })
 	})

@@ -100,7 +100,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
-	stores = filter.FilterSourceStores(stores, s.filters, cluster)
+	stores = filter.SelectSourceStores(stores, s.filters, cluster)
 	sort.Slice(stores, func(i, j int) bool {
 		return stores[i].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0) > stores[j].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)
 	})

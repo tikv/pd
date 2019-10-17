@@ -96,8 +96,8 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
-	sources := filter.FilterSourceStores(cluster.GetStores(), l.filters, cluster)
-	targets := filter.FilterTargetStores(cluster.GetStores(), l.filters, cluster)
+	sources := filter.SelectSourceStores(cluster.GetStores(), l.filters, cluster)
+	targets := filter.SelectTargetStores(cluster.GetStores(), l.filters, cluster)
 	sort.Slice(sources, func(i, j int) bool { return sources[i].LeaderScore(0) > sources[j].LeaderScore(0) })
 	sort.Slice(targets, func(i, j int) bool { return targets[i].LeaderScore(0) < targets[j].LeaderScore(0) })
 
@@ -109,7 +109,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			sourceStoreLabel := strconv.FormatUint(sourceID, 10)
 			sourceAddress := source.GetAddress()
 			l.counter.WithLabelValues("high-score", sourceAddress, sourceStoreLabel).Inc()
-			for i := 0; i < balanceLeaderRetryLimit; i++ {
+			for j := 0; j < balanceLeaderRetryLimit; j++ {
 				if op := l.transferLeaderOut(cluster, source); len(op) > 0 {
 					l.counter.WithLabelValues("transfer-out", sourceAddress, sourceStoreLabel).Inc()
 					return op
@@ -125,7 +125,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			targetAddress := target.GetAddress()
 			l.counter.WithLabelValues("low-score", targetAddress, targetStoreLabel).Inc()
 
-			for i := 0; i < balanceLeaderRetryLimit; i++ {
+			for j := 0; j < balanceLeaderRetryLimit; j++ {
 				if op := l.transferLeaderIn(cluster, target); len(op) > 0 {
 					l.counter.WithLabelValues("transfer-in", targetAddress, targetStoreLabel).Inc()
 					return op
@@ -149,7 +149,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 		return nil
 	}
 	targets := cluster.GetFollowerStores(region)
-	targets = filter.FilterTargetStores(targets, l.filters, cluster)
+	targets = filter.SelectTargetStores(targets, l.filters, cluster)
 	sort.Slice(targets, func(i, j int) bool {
 		return targets[i].LeaderScore(0) < targets[j].LeaderScore(0)
 	})
