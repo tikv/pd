@@ -139,6 +139,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 
+	router.HandleFunc("/api/v1/recovery/tso/{ts}", newRecoveryHandler(handler, rd).ResetTS).Methods("POST")
+
 	// Deprecated
 	router.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
 	// Deprecated
