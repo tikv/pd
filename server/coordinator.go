@@ -171,7 +171,7 @@ func (c *coordinator) run() {
 		configs       []string
 		err           error
 	)
-	for i := 0; i <= maxLoadConfigRetries; i++ {
+	for i := 0; i < maxLoadConfigRetries; i++ {
 		scheduleNames, configs, err = c.cluster.storage.LoadAllScheduleConfig()
 		if err == nil {
 			break
@@ -195,7 +195,7 @@ func (c *coordinator) run() {
 			}
 		}
 		if len(cfg.Type) == 0 {
-			log.Error("not found the scheduler type", zap.String("scheduler-name", name))
+			log.Error("the scheduler type not found", zap.String("scheduler-name", name))
 			continue
 		}
 		if cfg.Disable {
