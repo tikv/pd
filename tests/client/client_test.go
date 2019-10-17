@@ -49,8 +49,6 @@ type client interface {
 }
 
 func (s *serverTestSuite) TestClientLeaderChange(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -105,8 +103,6 @@ func (s *serverTestSuite) TestClientLeaderChange(c *C) {
 }
 
 func (s *serverTestSuite) TestLeaderTransfer(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(2)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()

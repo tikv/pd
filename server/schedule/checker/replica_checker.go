@@ -48,7 +48,7 @@ func NewReplicaChecker(cluster opt.Cluster, classifier namespace.Classifier, n .
 		name = n[0]
 	}
 	filters := []filter.Filter{
-		filter.NewOverloadFilter(name),
+		filter.NewStoreLimitFilter(name),
 		filter.NewHealthFilter(name),
 		filter.NewSnapshotCountFilter(name),
 		filter.NewPendingPeerCountFilter(name),
