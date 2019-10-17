@@ -17,12 +17,38 @@ import (
 	"fmt"
 
 	"github.com/pingcap/pd/pkg/cache"
+	"github.com/pingcap/pd/pkg/slice"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/opt"
 )
 
 //revive:disable:unused-parameter
+
+// FilterSourceStores selects stores that be selected as source store from the list.
+func FilterSourceStores(stores []*core.StoreInfo, filters []Filter, opt opt.Options) []*core.StoreInfo {
+	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		return slice.NoneOf(filters, func(i int) bool { return filters[i].Source(opt, s) })
+	})
+}
+
+// FilterSourceStores selects stores that be selected as target store from the list.
+func FilterTargetStores(stores []*core.StoreInfo, filters []Filter, opt opt.Options) []*core.StoreInfo {
+	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		return slice.NoneOf(filters, func(i int) bool { return filters[i].Target(opt, s) })
+	})
+}
+
+func filterStoresBy(stores []*core.StoreInfo, keepPred func(*core.StoreInfo) bool) []*core.StoreInfo {
+	var i int
+	for j, s := range stores {
+		if keepPred(s) {
+			stores[i] = stores[j]
+			i++
+		}
+	}
+	return stores[:i]
+}
 
 // Filter is an interface to filter source and target store.
 type Filter interface {
