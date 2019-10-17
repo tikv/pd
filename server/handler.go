@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -753,8 +754,9 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.schedulers {
-		p := pdRootPath + ScheduleConfigHandlerPath + "/" + name + "/"
-		mux.Handle(p, http.StripPrefix(p[:len(p)-1], handler))
+		prefix := path.Join(pdRootPath, ScheduleConfigHandlerPath, name)
+		urlPath := prefix + "/"
+		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
 	return mux
 }
