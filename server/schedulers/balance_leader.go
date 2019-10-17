@@ -217,10 +217,7 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	targetID := target.GetID()
 
 	opInfluence := l.opController.GetOpInfluence(cluster)
-	kind := core.ScheduleKind{
-		Resource: core.LeaderKind,
-		Strategy: cluster.GetLeaderScheduleStrategy(),
-	}
+	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetLeaderScheduleStrategy())
 	if !shouldBalance(cluster, source, target, region, kind, opInfluence, l.GetName()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
