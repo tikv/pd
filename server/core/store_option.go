@@ -16,6 +16,7 @@ package core
 import (
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -26,28 +27,36 @@ type StoreCreateOption func(region *StoreInfo)
 // SetStoreAddress sets the address for the store.
 func SetStoreAddress(address string) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.meta.Address = address
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.Address = address
+		store.meta = meta
 	}
 }
 
 // SetStoreLabels sets the labels for the store.
 func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.meta.Labels = labels
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.Labels = labels
+		store.meta = meta
 	}
 }
 
 // SetStoreVersion sets the version for the store.
 func SetStoreVersion(version string) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.meta.Version = version
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.Version = version
+		store.meta = meta
 	}
 }
 
 // SetStoreState sets the state for the store.
 func SetStoreState(state metapb.StoreState) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.meta.State = state
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.State = state
+		store.meta = meta
 	}
 }
 

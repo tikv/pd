@@ -107,6 +107,20 @@ func (s *testRegionSuite) TestRegionCheck(c *C) {
 	err = readJSONWithURL(url, r3)
 	c.Assert(err, IsNil)
 	c.Assert(r3, DeepEquals, &RegionsInfo{Count: 1, Regions: []*RegionInfo{NewRegionInfo(r)}})
+
+	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "offline-peer")
+	r4 := &RegionsInfo{}
+	err = readJSONWithURL(url, r4)
+	c.Assert(err, IsNil)
+	c.Assert(r4, DeepEquals, &RegionsInfo{Count: 0, Regions: []*RegionInfo{}})
+
+	r = r.Clone(core.SetApproximateSize(1))
+	mustRegionHeartbeat(c, s.svr, r)
+	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "empty-region")
+	r5 := &RegionsInfo{}
+	err = readJSONWithURL(url, r5)
+	c.Assert(err, IsNil)
+	c.Assert(r5, DeepEquals, &RegionsInfo{Count: 1, Regions: []*RegionInfo{NewRegionInfo(r)}})
 }
 
 func (s *testRegionSuite) TestRegions(c *C) {

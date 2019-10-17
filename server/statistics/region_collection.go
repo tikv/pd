@@ -32,6 +32,7 @@ const (
 	OfflinePeer
 	IncorrectNamespace
 	LearnerPeer
+	EmptyRegion
 )
 
 // RegionStatistics is used to record the status of regions.
@@ -57,6 +58,7 @@ func NewRegionStatistics(opt ScheduleOptions, classifier namespace.Classifier) *
 	r.stats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[IncorrectNamespace] = make(map[uint64]*core.RegionInfo)
 	r.stats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
+	r.stats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
 	return r
 }
 
@@ -109,6 +111,11 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		peerTypeIndex |= LearnerPeer
 	}
 
+	if region.GetApproximateSize() <= core.EmptyRegionApproximateSize {
+		r.stats[EmptyRegion][regionID] = region
+		peerTypeIndex |= EmptyRegion
+	}
+
 	for _, store := range stores {
 		if store.IsOffline() {
 			peer := region.GetStorePeer(store.GetID())
@@ -142,13 +149,14 @@ func (r *RegionStatistics) ClearDefunctRegion(regionID uint64) {
 
 // Collect collects the metrics of the regions' status.
 func (r *RegionStatistics) Collect() {
-	regionStatusGauge.WithLabelValues("miss_peer_region_count").Set(float64(len(r.stats[MissPeer])))
-	regionStatusGauge.WithLabelValues("extra_peer_region_count").Set(float64(len(r.stats[ExtraPeer])))
-	regionStatusGauge.WithLabelValues("down_peer_region_count").Set(float64(len(r.stats[DownPeer])))
-	regionStatusGauge.WithLabelValues("pending_peer_region_count").Set(float64(len(r.stats[PendingPeer])))
-	regionStatusGauge.WithLabelValues("offline_peer_region_count").Set(float64(len(r.stats[OfflinePeer])))
-	regionStatusGauge.WithLabelValues("incorrect_namespace_region_count").Set(float64(len(r.stats[IncorrectNamespace])))
-	regionStatusGauge.WithLabelValues("learner_peer_region_count").Set(float64(len(r.stats[LearnerPeer])))
+	regionStatusGauge.WithLabelValues("miss-peer-region-count").Set(float64(len(r.stats[MissPeer])))
+	regionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.stats[ExtraPeer])))
+	regionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.stats[DownPeer])))
+	regionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.stats[PendingPeer])))
+	regionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.stats[OfflinePeer])))
+	regionStatusGauge.WithLabelValues("incorrect-namespace-region-count").Set(float64(len(r.stats[IncorrectNamespace])))
+	regionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.stats[LearnerPeer])))
+	regionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.stats[EmptyRegion])))
 }
 
 // LabelLevelStatistics is the statistics of the level of labels.
