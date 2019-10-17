@@ -1,15 +1,15 @@
-// copyright 2019 pingcap, inc.
+// Copyright 2019 PingCAP, Inc.
 //
-// licensed under the apache license, version 2.0 (the "license");
-// you may not use this file except in compliance with the license.
-// you may obtain a copy of the license at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/license-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// unless required by applicable law or agreed to in writing, software
-// distributed under the license is distributed on an "as is" basis,
-// see the license for the specific language governing permissions and
-// limitations under the license.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package main
 
@@ -29,7 +29,7 @@ import (
 var (
 	pdAddr            = flag.String("pd", "127.0.0.1:2379", "pd address")
 	storeCount        = flag.Int("store", 20, "store count")
-	regionCount       = flag.Uint64("region", 200000, "region count")
+	regionCount       = flag.Uint64("region", 1000000, "region count")
 	keyLen            = flag.Int("keylen", 56, "key length")
 	replica           = flag.Int("replica", 3, "replica count")
 	regionUpdateRatio = flag.Float64("region-update-ratio", 0.05, "the ratio of the region need to update")
@@ -182,6 +182,7 @@ func (s *Store) Run(startNotifier chan report.Report, endNotifier chan struct{})
 }
 
 func main() {
+	log.SetFlags(0)
 	flag.Parse()
 
 	cli := newClient()
@@ -202,7 +203,7 @@ func main() {
 	}
 
 	for i := 0; i < *heartbeatTimes; i++ {
-		fmt.Printf("\n--------- Bench heartbeat (%d times) ----------\n", i+1)
+		fmt.Printf("\n--------- Bench heartbeat (Round %d) ----------\n", i+1)
 		report := newReport()
 		rs := report.Run()
 		// all store start heartbeat.
