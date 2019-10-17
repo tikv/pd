@@ -549,7 +549,7 @@ type ScheduleConfig struct {
 	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string,omitempty"`
 	// DisableNamespaceRelocation is the option to prevent namespace checker
 	// from moving replica to the target namespace.
-	// WARN: DisableNamespaceRelocation.
+	// WARN: DisableNamespaceRelocation is deprecated.
 	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string,omitempty"`
 
 	// EnableRemoveDownReplica is the option to enable replica checker to remove down replica.
