@@ -526,31 +526,31 @@ type ScheduleConfig struct {
 	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator,omitempty" json:"scheduler-max-waiting-operator"`
 	// WARN: DisableLearner is deprecated.
 	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
-	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
+	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
 	// DisableRemoveDownReplica is the option to prevent replica checker from
 	// removing down replicas.
 	// WARN: DisableRemoveDownReplica is deprecated.
-	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
+	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string,omitempty"`
 	// DisableReplaceOfflineReplica is the option to prevent replica checker from
 	// replacing offline replicas.
 	// WARN: DisableReplaceOfflineReplica is deprecated.
-	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string"`
+	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string,omitempty"`
 	// DisableMakeUpReplica is the option to prevent replica checker from making up
 	// replicas when replica count is less than expected.
 	// WARN: DisableMakeUpReplica is deprecated.
-	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string"`
+	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string,omitempty"`
 	// DisableRemoveExtraReplica is the option to prevent replica checker from
 	// removing extra replicas.
 	// WARN: DisableRemoveExtraReplica is deprecated.
-	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string"`
+	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string,omitempty"`
 	// DisableLocationReplacement is the option to prevent replica checker from
 	// moving replica to a better location.
 	// WARN: DisableLocationReplacement is deprecated.
-	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string"`
+	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string,omitempty"`
 	// DisableNamespaceRelocation is the option to prevent namespace checker
 	// from moving replica to the target namespace.
 	// WARN: DisableNamespaceRelocation.
-	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string"`
+	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string,omitempty"`
 
 	// EnableRemoveDownReplica is the option to enable replica checker to remove down replica.
 	EnableRemoveDownReplica bool `toml:"enable-remove-down-replica" json:"enable-remove-down-replica,string"`
@@ -675,12 +675,13 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
 
-	c.adjustScheduleFlag(meta, &c.EnableRemoveDownReplica, "remove-down-replica", c.DisableRemoveDownReplica)
-	c.adjustScheduleFlag(meta, &c.EnableReplaceOfflineReplica, "replace-offline-replica", c.DisableReplaceOfflineReplica)
-	c.adjustScheduleFlag(meta, &c.EnableMakeUpReplica, "make-up-replica", c.DisableMakeUpReplica)
-	c.adjustScheduleFlag(meta, &c.EnableRemoveExtraReplica, "remove-extra-replica", c.DisableRemoveExtraReplica)
-	c.adjustScheduleFlag(meta, &c.EnableLocationReplacement, "location-replacement", c.DisableLocationReplacement)
-	c.adjustScheduleFlag(meta, &c.EnableNamespaceRelocation, "namespace-relocation", c.DisableNamespaceRelocation)
+	c.DisableLearner = false // Deprecated, always false.
+	c.adjustDeprecatedFlag(meta, &c.EnableRemoveDownReplica, "enable-remove-down-replica", &c.DisableRemoveDownReplica, "disable-remove-down-replica")
+	c.adjustDeprecatedFlag(meta, &c.EnableReplaceOfflineReplica, "enable-replace-offline-replica", &c.DisableReplaceOfflineReplica, "disable-replace-offline-replica")
+	c.adjustDeprecatedFlag(meta, &c.EnableMakeUpReplica, "enable-make-up-replica", &c.DisableMakeUpReplica, "disable-make-up-replica")
+	c.adjustDeprecatedFlag(meta, &c.EnableRemoveExtraReplica, "enable-remove-extra-replica", &c.DisableRemoveExtraReplica, "disable-remove-extra-replica")
+	c.adjustDeprecatedFlag(meta, &c.EnableLocationReplacement, "enable-location-replacement", &c.DisableLocationReplacement, "disable-location-replacement")
+	c.adjustDeprecatedFlag(meta, &c.EnableNamespaceRelocation, "enable-namespace-relocation", &c.DisableNamespaceRelocation, "disable-namespace-relocation")
 
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
@@ -690,12 +691,14 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	return c.Validate()
 }
 
-func (c *ScheduleConfig) adjustScheduleFlag(meta *configMetaData, flag *bool, name string, oldFlag bool) {
-	if meta.IsDefined("enable-" + name) {
+func (c *ScheduleConfig) adjustDeprecatedFlag(meta *configMetaData, flag *bool, name string, oldFlag *bool, oldName string) {
+	defer func() { *oldFlag = false }() // Reset deprecated flag to make it skip by marshalers.
+
+	if meta.IsDefined(name) {
 		return
 	}
-	if meta.IsDefined("disable-" + name) {
-		*flag = !oldFlag
+	if meta.IsDefined(oldName) {
+		*flag = !*oldFlag
 		return
 	}
 	*flag = true
