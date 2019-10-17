@@ -25,8 +25,6 @@ import (
 )
 
 func (s *serverTestSuite) TestReconnect(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(3, func(conf *config.Config) {
 		conf.TickInterval = typeutil.Duration{50 * time.Millisecond}
 		conf.ElectionInterval = typeutil.Duration{250 * time.Millisecond}

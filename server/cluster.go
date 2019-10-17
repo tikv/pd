@@ -236,6 +236,8 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 	for {
 		select {
 		case <-c.quit:
+			log.Info("metrics are reset")
+			c.resetMetrics()
 			log.Info("background jobs has been stopped")
 			return
 		case <-ticker.C:
@@ -871,9 +873,9 @@ func (c *RaftCluster) UnblockStore(storeID uint64) {
 	c.core.UnblockStore(storeID)
 }
 
-// AttachOverloadStatus attaches the overload status to a store.
-func (c *RaftCluster) AttachOverloadStatus(storeID uint64, f func() bool) {
-	c.core.AttachOverloadStatus(storeID, f)
+// AttachAvailableFunc attaches an available function to a specific store.
+func (c *RaftCluster) AttachAvailableFunc(storeID uint64, f func() bool) {
+	c.core.AttachAvailableFunc(storeID, f)
 }
 
 // SetStoreState sets up a store's state.
@@ -983,6 +985,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 					zap.Error(err))
 				return err
 			}
+			c.coordinator.opController.RemoveStoreLimit(store.GetID())
 			log.Info("delete store successed",
 				zap.Stringer("store", store.GetMeta()))
 		}
@@ -1015,6 +1018,15 @@ func (c *RaftCluster) collectMetrics() {
 	c.collectHealthStatus()
 }
 
+func (c *RaftCluster) resetMetrics() {
+	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.GetNamespaceClassifier())
+	statsMap.Reset()
+
+	c.coordinator.resetSchedulerMetrics()
+	c.coordinator.resetHotSpotMetrics()
+	c.resetClusterMetrics()
+}
+
 func (c *RaftCluster) collectClusterMetrics() {
 	c.RLock()
 	defer c.RUnlock()
@@ -1025,6 +1037,18 @@ func (c *RaftCluster) collectClusterMetrics() {
 	c.labelLevelStats.Collect()
 	// collect hot cache metrics
 	c.hotSpotCache.CollectMetrics(c.storesStats)
+}
+
+func (c *RaftCluster) resetClusterMetrics() {
+	c.RLock()
+	defer c.RUnlock()
+	if c.regionStats == nil {
+		return
+	}
+	c.regionStats.Reset()
+	c.labelLevelStats.Reset()
+	// reset hot cache metrics
+	c.hotSpotCache.ResetMetrics()
 }
 
 func (c *RaftCluster) collectHealthStatus() {

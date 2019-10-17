@@ -40,8 +40,6 @@ func (s *joinTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *joinTestSuite) TestSimpleJoin(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -87,8 +85,6 @@ func (s *joinTestSuite) TestSimpleJoin(c *C) {
 // A failed PD tries to join the previous cluster but it has been deleted
 // during its downtime.
 func (s *joinTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -123,8 +119,6 @@ func (s *joinTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 
 // A deleted PD joins the previous cluster.
 func (s *joinTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -158,8 +152,6 @@ func (s *joinTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 }
 
 func (s *joinTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)

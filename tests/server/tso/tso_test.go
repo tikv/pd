@@ -73,15 +73,6 @@ func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 }
 
 func (s *testTsoSuite) TestTso(c *C) {
-	var err error
-	cluster, err := tests.NewTestCluster(1)
-	defer cluster.Destroy()
-	c.Assert(err, IsNil)
-
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -93,7 +84,7 @@ func (s *testTsoSuite) TestTso(c *C) {
 				Logical:  0,
 			}
 
-			for j := 0; j < 50; j++ {
+			for j := 0; j < 30; j++ {
 				ts := s.testGetTimestamp(c, 10)
 				c.Assert(ts.GetPhysical(), Not(Less), last.GetPhysical())
 				if ts.GetPhysical() == last.GetPhysical() {
@@ -201,7 +192,7 @@ func (s *testTimeFallBackSuite) TestTimeFallBack(c *C) {
 				Logical:  0,
 			}
 
-			for j := 0; j < 50; j++ {
+			for j := 0; j < 30; j++ {
 				ts := s.testGetTimestamp(c, 10)
 				c.Assert(ts.GetPhysical(), Not(Less), last.GetPhysical())
 				if ts.GetPhysical() == last.GetPhysical() {
