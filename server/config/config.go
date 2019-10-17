@@ -674,14 +674,24 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
-
-	c.DisableLearner = false // Deprecated, always false.
-	c.adjustDeprecatedFlag(meta, &c.EnableRemoveDownReplica, "enable-remove-down-replica", &c.DisableRemoveDownReplica, "disable-remove-down-replica")
-	c.adjustDeprecatedFlag(meta, &c.EnableReplaceOfflineReplica, "enable-replace-offline-replica", &c.DisableReplaceOfflineReplica, "disable-replace-offline-replica")
-	c.adjustDeprecatedFlag(meta, &c.EnableMakeUpReplica, "enable-make-up-replica", &c.DisableMakeUpReplica, "disable-make-up-replica")
-	c.adjustDeprecatedFlag(meta, &c.EnableRemoveExtraReplica, "enable-remove-extra-replica", &c.DisableRemoveExtraReplica, "disable-remove-extra-replica")
-	c.adjustDeprecatedFlag(meta, &c.EnableLocationReplacement, "enable-location-replacement", &c.DisableLocationReplacement, "disable-location-replacement")
-	c.adjustDeprecatedFlag(meta, &c.EnableNamespaceRelocation, "enable-namespace-relocation", &c.DisableNamespaceRelocation, "disable-namespace-relocation")
+	if !meta.IsDefined("enable-remove-down-replica") {
+		c.EnableRemoveDownReplica = true
+	}
+	if !meta.IsDefined("enable-replace-offline-replica") {
+		c.EnableReplaceOfflineReplica = true
+	}
+	if !meta.IsDefined("enable-make-up-replica") {
+		c.EnableMakeUpReplica = true
+	}
+	if !meta.IsDefined("enable-remove-extra-replica") {
+		c.EnableRemoveExtraReplica = true
+	}
+	if !meta.IsDefined("enable-location-replacement") {
+		c.EnableLocationReplacement = true
+	}
+	if !meta.IsDefined("enable-namespace-relocation") {
+		c.EnableNamespaceRelocation = true
+	}
 
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
@@ -689,19 +699,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 
 	return c.Validate()
-}
-
-func (c *ScheduleConfig) adjustDeprecatedFlag(meta *configMetaData, flag *bool, name string, oldFlag *bool, oldName string) {
-	defer func() { *oldFlag = false }() // Reset deprecated flag to make it skip by marshalers.
-
-	if meta.IsDefined(name) {
-		return
-	}
-	if meta.IsDefined(oldName) {
-		*flag = !*oldFlag
-		return
-	}
-	*flag = true
 }
 
 // Validate is used to validate if some scheduling configurations are right.
@@ -723,7 +720,18 @@ func (c *ScheduleConfig) Validate() error {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
 		}
 	}
-	return nil
+	return c.Deprecated()
+}
+
+// ResetDeprecatedConfigs resets all deprecated configurations to default value.
+func (c *ScheduleConfig) ResetDeprecatedConfigs() {
+	c.DisableLearner = false
+	c.DisableRemoveDownReplica = false
+	c.DisableReplaceOfflineReplica = false
+	c.DisableMakeUpReplica = false
+	c.DisableRemoveExtraReplica = false
+	c.DisableLocationReplacement = false
+	c.DisableNamespaceRelocation = false
 }
 
 // Deprecated is used to find if there is an option has beed deprecated.

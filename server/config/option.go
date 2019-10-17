@@ -443,6 +443,7 @@ func (o *ScheduleOption) adjustScheduleCfg(persistentCfg *Config) {
 	}
 	scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, restoredSchedulers...)
 	persistentCfg.Schedule.Schedulers = scheduleCfg.Schedulers
+	persistentCfg.Schedule.ResetDeprecatedConfigs()
 	o.Store(scheduleCfg)
 }
 
