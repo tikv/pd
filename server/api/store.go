@@ -81,7 +81,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			Available:          typeutil.ByteSize(store.GetAvailable()),
 			LeaderCount:        store.GetLeaderCount(),
 			LeaderWeight:       store.GetLeaderWeight(),
-			LeaderScore:        store.LeaderScore(0),
+			LeaderScore:        store.LeaderScore(opt.GetLeaderScheduleStrategy(), 0),
 			LeaderSize:         store.GetLeaderSize(),
 			RegionCount:        store.GetRegionCount(),
 			RegionWeight:       store.GetRegionWeight(),
