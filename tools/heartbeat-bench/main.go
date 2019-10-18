@@ -33,8 +33,8 @@ var (
 	keyLen            = flag.Int("keylen", 56, "key length")
 	replica           = flag.Int("replica", 3, "replica count")
 	regionUpdateRatio = flag.Float64("region-update-ratio", 0.05, "the ratio of the region need to update")
-	sample            = flag.Bool("sample", true, "sample per second")
-	heartbeatTimes    = flag.Int("heartbeat-times", 3, "the times of hearbeat")
+	sample            = flag.Bool("sample", false, "sample per second")
+	heartbeatRounds   = flag.Int("heartbeat-rounds", 5, "the total rounds of hearbeat")
 )
 
 var clusterID uint64
@@ -202,21 +202,21 @@ func main() {
 		go s.Run(startNotifier, endNotifier)
 	}
 
-	for i := 0; i < *heartbeatTimes; i++ {
-		fmt.Printf("\n--------- Bench heartbeat (Round %d) ----------\n", i+1)
+	for i := 0; i < *heartbeatRounds; i++ {
+		log.Printf("\n--------- Bench heartbeat (Round %d) ----------\n", i+1)
 		report := newReport()
 		rs := report.Run()
-		// all store start heartbeat.
+		// All stores start heartbeat.
 		for storeID := 1; storeID <= *storeCount; storeID++ {
 			startNotifier := groupStartNotify[storeID]
 			startNotifier <- report
 		}
-		// all store finished hearbeat once.
+		// All stores finished hearbeat once.
 		for storeID := 1; storeID <= *storeCount; storeID++ {
 			<-groupEndNotify[storeID]
 		}
 
 		close(report.Results())
-		fmt.Println(<-rs)
+		log.Println(<-rs)
 	}
 }
