@@ -385,3 +385,66 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		},
 	})
 }
+
+var _ = Suite(&testSplitMergeSuite{})
+
+type testSplitMergeSuite struct{}
+
+func (s *testMergeCheckerSuite) TestCache(c *C) {
+	cfg := mockoption.NewScheduleOptions()
+	cfg.MaxMergeRegionSize = 2
+	cfg.MaxMergeRegionKeys = 2
+	cfg.SplitMergeInterval = time.Hour
+	s.cluster = mockcluster.NewCluster(cfg)
+	stores := map[uint64][]string{
+		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
+	}
+	for storeID, labels := range stores {
+		s.cluster.PutStoreWithLabels(storeID, labels...)
+	}
+	s.regions = []*core.RegionInfo{
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:       2,
+				StartKey: []byte("a"),
+				EndKey:   []byte("t"),
+				Peers: []*metapb.Peer{
+					{Id: 103, StoreId: 1},
+					{Id: 104, StoreId: 4},
+					{Id: 105, StoreId: 5},
+				},
+			},
+			&metapb.Peer{Id: 104, StoreId: 4},
+			core.SetApproximateSize(200),
+			core.SetApproximateKeys(200),
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:       3,
+				StartKey: []byte("t"),
+				EndKey:   []byte("x"),
+				Peers: []*metapb.Peer{
+					{Id: 106, StoreId: 2},
+					{Id: 107, StoreId: 5},
+					{Id: 108, StoreId: 6},
+				},
+			},
+			&metapb.Peer{Id: 108, StoreId: 6},
+			core.SetApproximateSize(1),
+			core.SetApproximateKeys(1),
+		),
+	}
+
+	for _, region := range s.regions {
+		s.cluster.PutRegion(region)
+	}
+
+	s.mc = NewMergeChecker(s.cluster, namespace.DefaultClassifier)
+
+	ops := s.mc.Check(s.regions[1])
+	c.Assert(ops, IsNil)
+	s.cluster.SplitMergeInterval = 0
+	time.Sleep(time.Second)
+	ops = s.mc.Check(s.regions[1])
+	c.Assert(ops, NotNil)
+}
