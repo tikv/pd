@@ -17,16 +17,19 @@ import (
 	"time"
 
 	"github.com/montanaflynn/stats"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"go.uber.org/zap"
 )
 
 const (
 	// adjustRatio is used to adjust TolerantSizeRatio according to region count.
-	adjustRatio          float64 = 0.005
-	minTolerantSizeRatio float64 = 1.0
+	adjustRatio             float64 = 0.005
+	leaderTolerantSizeRatio float64 = 5.0
+	minTolerantSizeRatio    float64 = 1.0
 )
 
 func minUint64(a, b uint64) uint64 {
@@ -54,22 +57,50 @@ func isRegionUnhealthy(region *core.RegionInfo) bool {
 	return len(region.GetDownPeers()) != 0 || len(region.GetLearners()) != 0
 }
 
-func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ResourceKind, opInfluence operator.OpInfluence) bool {
+func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
+	sourceID := source.GetID()
+	targetID := target.GetID()
+	tolerantResource := getTolerantResource(cluster, region, kind)
+	sourceInfluence := opInfluence.GetStoreInfluence(sourceID).ResourceProperty(kind)
+	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
+	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
+	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource)
+
+	// Make sure after move, source score is still greater than target score.
+	shouldBalance := sourceScore > targetScore
+
+	if !shouldBalance {
+		log.Debug("skip balance "+kind.Resource.String(),
+			zap.String("scheduler", scheduleName), zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
+			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", sourceScore),
+			zap.Int64("source-influence", sourceInfluence),
+			zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", targetScore),
+			zap.Int64("target-influence", targetInfluence),
+			zap.Int64("average-region-size", cluster.GetAverageRegionSize()),
+			zap.Int64("tolerant-resource", tolerantResource))
+	}
+	return shouldBalance
+}
+
+func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
+	if kind.Resource == core.LeaderKind && kind.Strategy == core.ByCount {
+		tolerantSizeRatio := cluster.GetTolerantSizeRatio()
+		if tolerantSizeRatio == 0 {
+			tolerantSizeRatio = leaderTolerantSizeRatio
+		}
+		leaderCount := int64(1.0 * tolerantSizeRatio)
+		return leaderCount
+	}
+
 	regionSize := region.GetApproximateSize()
 	if regionSize < cluster.GetAverageRegionSize() {
 		regionSize = cluster.GetAverageRegionSize()
 	}
-
 	regionSize = int64(float64(regionSize) * adjustTolerantRatio(cluster))
-	sourceDelta := opInfluence.GetStoreInfluence(source.GetID()).ResourceSize(kind) - regionSize
-	targetDelta := opInfluence.GetStoreInfluence(target.GetID()).ResourceSize(kind) + regionSize
-
-	// Make sure after move, source score is still greater than target score.
-	return source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceDelta) >
-		target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetDelta)
+	return regionSize
 }
 
 func adjustTolerantRatio(cluster opt.Cluster) float64 {
@@ -99,7 +130,7 @@ func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
 			counts = append(counts, float64(s.ResourceCount(kind)))
 		}
 	}
-	limit, _ := stats.StandardDeviation(stats.Float64Data(counts))
+	limit, _ := stats.StandardDeviation(counts)
 	return maxUint64(1, uint64(limit))
 }
 

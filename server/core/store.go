@@ -251,9 +251,16 @@ func (s *StoreInfo) GetLastHeartbeatTS() time.Time {
 const minWeight = 1e-6
 const maxScore = 1024 * 1024 * 1024
 
-// LeaderScore returns the store's leader score: leaderSize / leaderWeight.
-func (s *StoreInfo) LeaderScore(delta int64) float64 {
-	return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
+// LeaderScore returns the store's leader score.
+func (s *StoreInfo) LeaderScore(strategy ScheduleStrategy, delta int64) float64 {
+	switch strategy {
+	case BySize:
+		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
+	case ByCount:
+		return float64(int64(s.GetLeaderCount())+delta) / math.Max(s.GetLeaderWeight(), minWeight)
+	default:
+		return 0
+	}
 }
 
 // RegionScore returns the store's region score.
@@ -345,10 +352,10 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 }
 
 // ResourceScore returns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
-	switch kind {
+func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+	switch scheduleKind.Resource {
 	case LeaderKind:
-		return s.LeaderScore(delta)
+		return s.LeaderScore(scheduleKind.Strategy, delta)
 	case RegionKind:
 		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
 	default:

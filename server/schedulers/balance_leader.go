@@ -96,10 +96,15 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
+	leaderScheduleStrategy := l.opController.GetLeaderScheduleStrategy()
 	sources := filter.SelectSourceStores(cluster.GetStores(), l.filters, cluster)
 	targets := filter.SelectTargetStores(cluster.GetStores(), l.filters, cluster)
-	sort.Slice(sources, func(i, j int) bool { return sources[i].LeaderScore(0) > sources[j].LeaderScore(0) })
-	sort.Slice(targets, func(i, j int) bool { return targets[i].LeaderScore(0) < targets[j].LeaderScore(0) })
+	sort.Slice(sources, func(i, j int) bool {
+		return sources[i].LeaderScore(leaderScheduleStrategy, 0) > sources[j].LeaderScore(leaderScheduleStrategy, 0)
+	})
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].LeaderScore(leaderScheduleStrategy, 0) < targets[j].LeaderScore(leaderScheduleStrategy, 0)
+	})
 
 	for i := 0; i < len(sources) || i < len(targets); i++ {
 		if i < len(sources) {
@@ -150,8 +155,9 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 	}
 	targets := cluster.GetFollowerStores(region)
 	targets = filter.SelectTargetStores(targets, l.filters, cluster)
+	leaderScheduleStrategy := l.opController.GetLeaderScheduleStrategy()
 	sort.Slice(targets, func(i, j int) bool {
-		return targets[i].LeaderScore(0) < targets[j].LeaderScore(0)
+		return targets[i].LeaderScore(leaderScheduleStrategy, 0) < targets[j].LeaderScore(leaderScheduleStrategy, 0)
 	})
 	for _, target := range targets {
 		if op := l.createOperator(cluster, region, source, target); len(op) > 0 {
@@ -203,14 +209,8 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	targetID := target.GetID()
 
 	opInfluence := l.opController.GetOpInfluence(cluster)
-	if !shouldBalance(cluster, source, target, region, core.LeaderKind, opInfluence) {
-		log.Debug("skip balance leader",
-			zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
-			zap.Int64("source-size", source.GetLeaderSize()), zap.Float64("source-score", source.LeaderScore(0)),
-			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(core.LeaderKind)),
-			zap.Int64("target-size", target.GetLeaderSize()), zap.Float64("target-score", target.LeaderScore(0)),
-			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(core.LeaderKind)),
-			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
+	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetLeaderScheduleStrategy())
+	if !shouldBalance(cluster, source, target, region, kind, opInfluence, l.GetName()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}

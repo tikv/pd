@@ -1316,6 +1316,11 @@ func (c *RaftCluster) IsRemoveDownReplicaEnabled() bool {
 	return c.opt.IsRemoveDownReplicaEnabled()
 }
 
+// GetLeaderScheduleStrategy is to get leader schedule strategy
+func (c *RaftCluster) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	return c.opt.GetLeaderScheduleStrategy()
+}
+
 // IsReplaceOfflineReplicaEnabled returns if replace offline replica is enabled.
 func (c *RaftCluster) IsReplaceOfflineReplicaEnabled() bool {
 	return c.opt.IsReplaceOfflineReplicaEnabled()
