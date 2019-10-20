@@ -77,9 +77,7 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "scatter-range":
-		var (
-			args []string
-		)
+		var args []string
 
 		collector := func(v string) {
 			args = append(args, v)

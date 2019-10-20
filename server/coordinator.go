@@ -213,7 +213,7 @@ func (c *coordinator) run() {
 		}
 	}
 
-	// The old way to create the schedule.
+	// The old way to create the scheduler.
 	k := 0
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
 		if schedulerCfg.Disable {
