@@ -56,11 +56,13 @@ type TimestampOracle struct {
 }
 
 // NewTimestampOracle creates a new TimestampOracle.
-func NewTimestampOracle(client *clientv3.Client, rootPath string, member string, saveInterval time.Duration) *TimestampOracle {
+// TODO: remove saveInterval
+func NewTimestampOracle(client *clientv3.Client, rootPath string, member string, saveInterval time.Duration, opt *config.ScheduleOption) *TimestampOracle {
 	return &TimestampOracle{
 		rootPath:     rootPath,
 		client:       client,
 		saveInterval: saveInterval,
+		opt:          opt,
 		member:       member,
 	}
 }
