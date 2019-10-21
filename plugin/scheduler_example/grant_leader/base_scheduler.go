@@ -35,14 +35,18 @@ func newUserBaseScheduler(opController *schedule.OperatorController) *userBaseSc
 	return &userBaseScheduler{opController: opController}
 }
 
+// Prepare just return nil
 func (s *userBaseScheduler) Prepare(cluster schedule.Cluster) error { return nil }
 
+// Cleanup doing nothing
 func (s *userBaseScheduler) Cleanup(cluster schedule.Cluster) {}
 
+// GetNextInterval is to used to get min schedule interval.
 func (s *userBaseScheduler) GetMinInterval() time.Duration {
 	return MinScheduleInterval
 }
 
+// GetNextInterval is to used to get next interval.
 func (s *userBaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return minDuration(time.Duration(float64(interval)*ScheduleIntervalFactor), MaxScheduleInterval)
 }

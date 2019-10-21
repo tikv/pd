@@ -32,14 +32,16 @@ func init() {
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
-		return NewUserScheduler(opController, id), nil
+		return newGrantLeaderScheduler(opController, id), nil
 	})
 }
 
+// SchedulerType retutn type of the scheduler
 func SchedulerType() string {
 	return "user-grant-leader"
 }
 
+// SchedulerArgs provide parameters for the scheduler
 func SchedulerArgs() []string {
 	args := []string{"7"}
 	return args
@@ -54,7 +56,7 @@ type grantLeaderScheduler struct {
 
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
-func NewUserScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
+func newGrantLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
 	base := newUserBaseScheduler(opController)
 	return &grantLeaderScheduler{
 		userBaseScheduler: base,

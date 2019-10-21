@@ -263,14 +263,14 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	// get func: SchedulerType from plugin
 	SchedulerType, err := schedule.GetFunction(pluginPath, "SchedulerType")
 	if err != nil {
-		log.Error("GetFunction error", zap.Error(err))
+		log.Error("GetFunction SchedulerType error", zap.Error(err))
 		return
 	}
 	schedulerType := SchedulerType.(func() string)
 	// get func: SchedulerArgs from plugin
 	SchedulerArgs, err := schedule.GetFunction(pluginPath, "SchedulerArgs")
 	if err != nil {
-		log.Error("GetFunction error", zap.Error(err))
+		log.Error("GetFunction SchedulerArgs error", zap.Error(err))
 		return
 	}
 	schedulerArgs := SchedulerArgs.(func() []string)
