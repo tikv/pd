@@ -57,6 +57,7 @@ type Options interface {
 	IsRemoveExtraReplicaEnabled() bool
 	IsLocationReplacementEnabled() bool
 	IsNamespaceRelocationEnabled() bool
+	GetLeaderScheduleStrategy() core.ScheduleStrategy
 
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }

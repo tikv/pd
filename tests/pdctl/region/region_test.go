@@ -41,8 +41,6 @@ func (s *regionTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
@@ -62,8 +60,6 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 }
 
 func (s *regionTestSuite) TestRegion(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()

@@ -225,7 +225,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	}
 }
 
-func (s *testScatterRegionSuite) TestStorelimit(c *C) {
+func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(tc, mockhbstream.NewHeartbeatStream())

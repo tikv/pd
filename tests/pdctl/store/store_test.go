@@ -39,8 +39,6 @@ func (s *storeTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *storeTestSuite) TestStore(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
