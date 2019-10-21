@@ -42,12 +42,12 @@ type Scheduler interface {
 	IsScheduleAllowed(cluster opt.Cluster) bool
 }
 
-// EncodeConfig encode the custome config for each scheduler.
+// EncodeConfig encode the custom config for each scheduler.
 func EncodeConfig(v interface{}) ([]byte, error) {
 	return json.Marshal(v)
 }
 
-// DecodeConfig decode the custome config for each scheduler.
+// DecodeConfig decode the custom config for each scheduler.
 func DecodeConfig(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
@@ -65,7 +65,7 @@ func ConfigJSONDecoder(data []byte) ConfigDecoder {
 	}
 }
 
-// ConfigSliceDecoder the default decode for the
+// ConfigSliceDecoder the default decode for the config.
 func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 	builder, ok := schedulerArgsToDecoder[name]
 	if !ok {

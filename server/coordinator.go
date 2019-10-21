@@ -183,7 +183,7 @@ func (c *coordinator) run() {
 	}
 
 	scheduleCfg := c.cluster.opt.Load().Clone()
-	// The new way to create schedule with the independent configuration.
+	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
 		data := configs[i]
 		typ := schedule.FindSchedulerTypeByName(name)
