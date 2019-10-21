@@ -32,7 +32,12 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterSliceDecoderBuilder("balance-region", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
+	})
+	schedule.RegisterScheduler("balance-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceRegionScheduler(opController), nil
 	})
 }

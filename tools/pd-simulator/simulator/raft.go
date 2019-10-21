@@ -273,7 +273,7 @@ func (r *RaftEngine) GetRegions() []*core.RegionInfo {
 }
 
 // SetRegion sets the RegionInfo with regionID
-func (r *RaftEngine) SetRegion(region *core.RegionInfo) []*metapb.Region {
+func (r *RaftEngine) SetRegion(region *core.RegionInfo) []*core.RegionInfo {
 	r.Lock()
 	defer r.Unlock()
 	return r.regionsInfo.SetRegion(region)

@@ -552,6 +552,9 @@ type ScheduleConfig struct {
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
+
+	// Only used to display
+	SchedulersPayload map[string]string `json:"schedulers,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -701,9 +704,10 @@ type SchedulerConfigs []SchedulerConfig
 
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
-	Type    string   `toml:"type" json:"type"`
-	Args    []string `toml:"args,omitempty" json:"args"`
-	Disable bool     `toml:"disable" json:"disable"`
+	Type        string   `toml:"type" json:"type"`
+	Args        []string `toml:"args,omitempty" json:"args"`
+	Disable     bool     `toml:"disable" json:"disable"`
+	ArgsPayload string   `toml:"args-payload,omitempty" json:"args-payload"`
 }
 
 var defaultSchedulers = SchedulerConfigs{

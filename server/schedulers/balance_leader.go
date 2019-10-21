@@ -29,7 +29,13 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterSliceDecoderBuilder("balance-leader", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
+	})
+
+	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceLeaderScheduler(opController), nil
 	})
 }
