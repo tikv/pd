@@ -16,6 +16,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -34,7 +35,7 @@ func newRecoveryHandler(handler *server.Handler, rd *render.Render) *recoveryHan
 
 func (t *recoveryHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
-	if err := readJSONRespondError(t.rd, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(t.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	ts, ok := input["tso"].(float64)
