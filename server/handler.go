@@ -36,8 +36,8 @@ import (
 var (
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
 	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
-	// ErrServerNotStarted is error infor for server not started.
-	ErrServerNotStarted = errors.New("The server has not started")
+	// ErrServerNotStarted is error info for server not started.
+	ErrServerNotStarted = errors.New("The server has not been started")
 	// ErrOperatorNotFound is error info for operator not found.
 	ErrOperatorNotFound = errors.New("operator not found")
 	// ErrAddOperator is error info for already have an operator when adding operator.

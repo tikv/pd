@@ -15,9 +15,7 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 
-	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -35,14 +33,16 @@ func newRecoveryHandler(handler *server.Handler, rd *render.Render) *recoveryHan
 }
 
 func (t *recoveryHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
-	tsString := mux.Vars(r)["ts"]
-	ts, err := strconv.ParseInt(tsString, 10, 64)
-	if err != nil {
-		t.rd.JSON(w, http.StatusBadRequest, err.Error())
+	var input map[string]interface{}
+	if err := readJSONRespondError(t.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	err = t.h.ResetTS(ts)
-	if err != nil {
+	ts, ok := input["tso"].(float64)
+	if !ok {
+		t.rd.JSON(w, http.StatusBadRequest, "missing tso value")
+	}
+
+	if err := t.h.ResetTS(int64(ts)); err != nil {
 		t.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 }

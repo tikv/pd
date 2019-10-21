@@ -145,18 +145,21 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 // ResetUserTimestamp update the physical part with specified tso.
 func (t *TimestampOracle) ResetUserTimestamp(tso int64) error {
 	if t.lease == nil || t.lease.IsExpired() {
+		tsoCounter.WithLabelValues("err_lease_reset_tso").Inc()
 		return errors.New("Setup timestamp failed, lease expired")
 	}
-	pythsic, _ := tsoutil.ParseTS(tso)
-	next := pythsic.Add(time.Millisecond)
+	physical, _ := tsoutil.ParseTS(tso)
+	next := physical.Add(time.Millisecond)
 	prev := (*atomicObject)(atomic.LoadPointer(&t.ts))
 
 	// do not update
 	if typeutil.SubTimeByWallClock(next, prev.physical) <= 3*updateTimestampGuard {
+		tsoCounter.WithLabelValues("err_reset_invalid_tso").Inc()
 		return errors.New("cannot be reset the smaller tso")
 	}
 
 	if typeutil.SubTimeByWallClock(next, prev.physical) >= maxResetGap {
+		tsoCounter.WithLabelValues("err_reset_invalid_tso").Inc()
 		return errors.New("the specified ts too large than now")
 	}
 

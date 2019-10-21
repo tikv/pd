@@ -14,6 +14,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -40,7 +41,7 @@ func (s *testTSOSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = mustNewServer(c)
 	mustWaitLeader(c, []*server.Server{s.svr})
 	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/recovery/tso/", addr, apiPrefix)
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/recovery/tso", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
 	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, nil)
@@ -51,20 +52,27 @@ func (s *testTSOSuite) TearDownSuite(c *C) {
 }
 
 func (s *testTSOSuite) TestResetTS(c *C) {
+	args := make(map[string]interface{})
 	t1 := makeTS(time.Hour)
-	url := fmt.Sprintf("%s%d", s.urlPrefix, t1)
-	err := postJSON(url, nil)
+	url := s.urlPrefix
+	args["tso"] = t1
+	values, err := json.Marshal(args)
 	c.Assert(err, IsNil)
-
+	err = postJSON(url, values)
+	c.Assert(err, IsNil)
 	t2 := makeTS(32 * time.Hour)
-	url = fmt.Sprintf("%s%d", s.urlPrefix, t2)
-	err = postJSON(url, nil)
+	args["tso"] = t2
+	values, err = json.Marshal(args)
+	c.Assert(err, IsNil)
+	err = postJSON(url, values)
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "too large"), IsTrue)
 
-	t3 := makeTS(-time.Hour)
-	url = fmt.Sprintf("%s%d", s.urlPrefix, t3)
-	err = postJSON(url, nil)
+	t3 := makeTS(-2 * time.Hour)
+	args["tso"] = t3
+	values, err = json.Marshal(args)
+	c.Assert(err, IsNil)
+	err = postJSON(url, values)
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "smaller"), IsTrue)
 }
