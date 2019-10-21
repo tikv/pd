@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/tsoutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/member"
 	"github.com/pkg/errors"
@@ -37,7 +38,6 @@ const (
 	UpdateTimestampStep  = 50 * time.Millisecond
 	updateTimestampGuard = time.Millisecond
 	maxLogical           = int64(1 << 18)
-	maxResetGap          = 24 * time.Hour
 )
 
 // TimestampOracle is used to maintain the logic of tso.
@@ -51,6 +51,8 @@ type TimestampOracle struct {
 	member       string
 	client       *clientv3.Client
 	saveInterval time.Duration
+	// TODO: rename ScheduleOption
+	opt *config.ScheduleOption
 }
 
 // NewTimestampOracle creates a new TimestampOracle.
@@ -158,7 +160,7 @@ func (t *TimestampOracle) ResetUserTimestamp(tso int64) error {
 		return errors.New("cannot be reset the smaller tso")
 	}
 
-	if typeutil.SubTimeByWallClock(next, prev.physical) >= maxResetGap {
+	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.opt.LoadPDServerConfig().MaxResetTSGap {
 		tsoCounter.WithLabelValues("err_reset_invalid_tso").Inc()
 		return errors.New("the specified ts too large than now")
 	}
