@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/statistics"
 )
 
 func newTestReplication(mso *mockoption.ScheduleOptions, maxReplicas int, locationLabels ...string) {
@@ -1020,72 +1019,6 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 
 	oc.AddWaitingOperator(ops...)
 	c.Assert(mb.IsScheduleAllowed(tc), IsFalse)
-}
-
-var _ = Suite(&testBalanceHotCacheSuite{})
-
-type testBalanceHotCacheSuite struct{}
-
-func (s *testBalanceHotCacheSuite) TestUpdateCache(c *C) {
-	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
-
-	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
-	tc.AddRegionStore(1, 3)
-	tc.AddRegionStore(2, 2)
-	tc.AddRegionStore(3, 2)
-	tc.AddRegionStore(4, 2)
-	tc.AddRegionStore(5, 0)
-
-	// Report store read bytes.
-	tc.UpdateStorageReadBytes(1, 75*1024*1024)
-	tc.UpdateStorageReadBytes(2, 45*1024*1024)
-	tc.UpdateStorageReadBytes(3, 45*1024*1024)
-	tc.UpdateStorageReadBytes(4, 60*1024*1024)
-	tc.UpdateStorageReadBytes(5, 0)
-
-	/// For read flow
-	tc.AddLeaderRegionWithReadInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithReadInfo(2, 2, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 3)
-	tc.AddLeaderRegionWithReadInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	// lower than hot read flow rate, but higher than write flow rate
-	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	opt.HotRegionCacheHitsThreshold = 0
-	stats := tc.RegionStats(statistics.ReadFlow)
-	c.Assert(len(stats[1]), Equals, 2)
-	c.Assert(len(stats[2]), Equals, 1)
-	c.Assert(len(stats[3]), Equals, 0)
-
-	tc.AddLeaderRegionWithReadInfo(3, 2, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	stats = tc.RegionStats(statistics.ReadFlow)
-
-	c.Assert(len(stats[1]), Equals, 1)
-	c.Assert(len(stats[2]), Equals, 2)
-	c.Assert(len(stats[3]), Equals, 0)
-
-	// For write flow
-	tc.UpdateStorageWrittenBytes(1, 60*1024*1024)
-	tc.UpdateStorageWrittenBytes(2, 30*1024*1024)
-	tc.UpdateStorageWrittenBytes(3, 60*1024*1024)
-	tc.UpdateStorageWrittenBytes(4, 30*1024*1024)
-	tc.UpdateStorageWrittenBytes(5, 0*1024*1024)
-	tc.AddLeaderRegionWithWriteInfo(4, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(5, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(6, 1, 12*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-
-	stats = tc.RegionStats(statistics.WriteFlow)
-	c.Assert(len(stats[1]), Equals, 2)
-	c.Assert(len(stats[2]), Equals, 2)
-	c.Assert(len(stats[3]), Equals, 2)
-
-	tc.AddLeaderRegionWithWriteInfo(5, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 5)
-	stats = tc.RegionStats(statistics.WriteFlow)
-
-	c.Assert(len(stats[1]), Equals, 2)
-	c.Assert(len(stats[2]), Equals, 2)
-	c.Assert(len(stats[3]), Equals, 1)
-	c.Assert(len(stats[5]), Equals, 1)
 }
 
 var _ = Suite(&testScatterRangeLeaderSuite{})
