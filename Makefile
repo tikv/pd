@@ -49,7 +49,7 @@ dev: build tools check test
 ci: build check basic-test
 
 build: pd-server pd-ctl
-tools: pd-tso-bench pd-recover pd-analysis heartbeat-bench
+tools: pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench
 pd-server: export GO111MODULE=on
 pd-server:
 ifeq ("$(WITH_RACE)", "1")
@@ -71,9 +71,9 @@ pd-recover:
 pd-analysis: export GO111MODULE=on
 pd-analysis:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-analysis tools/pd-analysis/main.go
-heartbeat-bench: export GO111MODULE=on
-heartbeat-bench:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/heartbeat-bench tools/heartbeat-bench/main.go
+pd-heartbeat-bench: export GO111MODULE=on
+pd-heartbeat-bench:
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
 test: retool-setup deadlock-setup
 	# testing...
