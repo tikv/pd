@@ -377,6 +377,7 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 			IsPassive:  false,
 		},
 	})
+	//for test
 	s.checkSteps(c, ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
