@@ -795,7 +795,6 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(cfg, NotNil)
 	c.Assert(err, IsNil)
-	cfg.StoreBalanceRate = 10
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(c, tc)
 	defer cleanup()
@@ -803,24 +802,30 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	oc := schedule.NewOperatorController(tc.RaftCluster, hbStreams)
 	lb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
-
-	c.Assert(tc.addRegionStore(4, 40), IsNil)
-	c.Assert(tc.addRegionStore(3, 40), IsNil)
-	c.Assert(tc.addRegionStore(2, 40), IsNil)
+	cfg.StoreBalanceRate = 1
+	c.Assert(tc.addRegionStore(4, 100), IsNil)
+	c.Assert(tc.addRegionStore(3, 100), IsNil)
+	c.Assert(tc.addRegionStore(2, 100), IsNil)
 	c.Assert(tc.addRegionStore(1, 10), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3, 4), IsNil)
-	start := time.Now()
+	region := tc.GetRegion(1).Clone(core.SetApproximateSize(60))
+	tc.putRegion(region)
 	op1 := lb.Schedule(tc)[0]
 	c.Assert(op1, NotNil)
 	c.Assert(oc.AddOperator(op1), IsTrue)
+	c.Assert(oc.RemoveOperator(op1), IsTrue)
 	for i := 0; i < 10; i++ {
-		if time.Now().Sub(start) >= time.Second*9/10 {
-			break
-		}
 		c.Assert(lb.Schedule(tc), IsNil)
 	}
-	c.Assert(oc.RemoveOperator(op1), IsTrue)
-	time.Sleep(2 * time.Second)
+
+	oc.SetAllStoresLimit(10)
+	for i := 0; i < 10; i++ {
+		op1 = lb.Schedule(tc)[0]
+		c.Assert(op1, NotNil)
+		c.Assert(oc.AddOperator(op1), IsTrue)
+		c.Assert(oc.RemoveOperator(op1), IsTrue)
+	}
+	time.Sleep(1 * time.Second)
 	for i := 0; i < 100; i++ {
 		c.Assert(lb.Schedule(tc), NotNil)
 	}
@@ -830,7 +835,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(cfg, NotNil)
 	c.Assert(err, IsNil)
-	cfg.StoreBalanceRate = 10
+	cfg.StoreBalanceRate = 30
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(c, tc)
 	defer cleanup()
@@ -839,12 +844,16 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	lb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
 
-	c.Assert(tc.addRegionStore(4, 40), IsNil)
-	c.Assert(tc.addRegionStore(3, 40), IsNil)
-	c.Assert(tc.addRegionStore(2, 40), IsNil)
+	c.Assert(tc.addRegionStore(4, 100), IsNil)
+	c.Assert(tc.addRegionStore(3, 100), IsNil)
+	c.Assert(tc.addRegionStore(2, 100), IsNil)
 	c.Assert(tc.addRegionStore(1, 10), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3, 4), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 1, 3, 4), IsNil)
+	region := tc.GetRegion(1).Clone(core.SetApproximateSize(60))
+	tc.putRegion(region)
+	region = tc.GetRegion(2).Clone(core.SetApproximateSize(60))
+	tc.putRegion(region)
 	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 1})
 	c.Assert(oc.AddOperator(op1), IsTrue)
 	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 2})
