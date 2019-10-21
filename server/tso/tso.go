@@ -129,6 +129,7 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 
 	save := next.Add(t.saveInterval)
 	if err = t.saveTimestamp(save); err != nil {
+		tsoCounter.WithLabelValues("err_save_ts").Inc()
 		return err
 	}
 
@@ -147,7 +148,7 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 // ResetUserTimestamp update the physical part with specified tso.
 func (t *TimestampOracle) ResetUserTimestamp(tso int64) error {
 	if t.lease == nil || t.lease.IsExpired() {
-		tsoCounter.WithLabelValues("err_lease_reset_tso").Inc()
+		tsoCounter.WithLabelValues("err_lease_reset_ts").Inc()
 		return errors.New("Setup timestamp failed, lease expired")
 	}
 	physical, _ := tsoutil.ParseTS(tso)
@@ -156,17 +157,19 @@ func (t *TimestampOracle) ResetUserTimestamp(tso int64) error {
 
 	// do not update
 	if typeutil.SubTimeByWallClock(next, prev.physical) <= 3*updateTimestampGuard {
-		tsoCounter.WithLabelValues("err_reset_invalid_tso").Inc()
+		tsoCounter.WithLabelValues("err_reset_invalid_ts").Inc()
 		return errors.New("cannot be reset the smaller tso")
 	}
 
 	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.opt.LoadPDServerConfig().MaxResetTSGap {
-		tsoCounter.WithLabelValues("err_reset_invalid_tso").Inc()
+		tsoCounter.WithLabelValues("err_reset_invalid_ts").Inc()
 		return errors.New("the specified ts too large than now")
 	}
 
 	save := next.Add(t.saveInterval)
 	if err := t.saveTimestamp(save); err != nil {
+
+		tsoCounter.WithLabelValues("err_save_ts").Inc()
 		return err
 	}
 	update := &atomicObject{
@@ -229,6 +232,7 @@ func (t *TimestampOracle) UpdateTimestamp() error {
 	if typeutil.SubTimeByWallClock(t.lastSavedTime, next) <= updateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		if err := t.saveTimestamp(save); err != nil {
+			tsoCounter.WithLabelValues("err_save_ts").Inc()
 			return err
 		}
 	}
