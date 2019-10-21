@@ -255,6 +255,11 @@ func (o *ScheduleOption) IsRemoveExtraReplicaEnabled() bool {
 	return !o.Load().DisableRemoveExtraReplica
 }
 
+// GetLeaderScheduleStrategy is to get leader schedule strategy.
+func (o *ScheduleOption) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	return o.Load().GetLeaderScheduleStrategy()
+}
+
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *ScheduleOption) IsLocationReplacementEnabled() bool {
 	return !o.Load().DisableLocationReplacement

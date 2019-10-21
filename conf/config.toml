@@ -64,10 +64,11 @@ max-snapshot-count = 3
 max-pending-peer-count = 16
 max-store-down-time = "30m"
 leader-schedule-limit = 4
-region-schedule-limit = 64
+region-schedule-limit = 2048
 replica-schedule-limit = 64
 merge-schedule-limit = 8
 hot-region-schedule-limit = 4
+#leader-schedule-strategy = "count" #  there are some strategics supported: ["count", "size"], default: "count"
 #tolerant-size-ratio = 0.0
 #enable-one-way-merge = false
 

@@ -76,7 +76,8 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, opts .
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
-	s.selector = selector.NewBalanceSelector(core.RegionKind, filters)
+	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
+	s.selector = selector.NewBalanceSelector(kind, filters)
 	return s
 }
 
@@ -206,14 +207,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 	log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
 	opInfluence := s.opController.GetOpInfluence(cluster)
-	if !shouldBalance(cluster, source, target, region, core.RegionKind, opInfluence) {
-		log.Debug("skip balance region",
-			zap.String("scheduler", s.GetName()), zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
-			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
-			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(core.RegionKind)),
-			zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
-			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(core.RegionKind)),
-			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
+	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
+	if !shouldBalance(cluster, source, target, region, kind, opInfluence, s.GetName()) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		s.hitsCounter.put(source, target)
 		return nil
