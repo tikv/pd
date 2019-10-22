@@ -40,8 +40,6 @@ func (s *configTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *configTestSuite) TestConfig(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
@@ -66,6 +64,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	scheduleCfg := config.ScheduleConfig{}
 	cfg := config.Config{}
+	cfg.Adjust(nil)
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	c.Assert(&cfg.Schedule, DeepEquals, svr.GetScheduleConfig())
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())

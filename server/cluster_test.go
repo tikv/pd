@@ -905,10 +905,10 @@ func checkRegions(c *C, cache *core.RegionsInfo, regions []*core.RegionInfo) {
 			regionCount[peer.StoreId]++
 			if peer.Id == region.GetLeader().Id {
 				leaderCount[peer.StoreId]++
-				checkRegion(c, cache.GetLeader(peer.StoreId, region.GetID()), region)
+				checkRegion(c, cache.GetLeader(peer.StoreId, region), region)
 			} else {
 				followerCount[peer.StoreId]++
-				checkRegion(c, cache.GetFollower(peer.StoreId, region.GetID()), region)
+				checkRegion(c, cache.GetFollower(peer.StoreId, region), region)
 			}
 		}
 	}
@@ -1245,11 +1245,9 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	}
 }
 
-func heartbeatRegions(c *C, cluster *RaftCluster, regions []*metapb.Region) {
+func heartbeatRegions(c *C, cluster *RaftCluster, regions []*core.RegionInfo) {
 	// Heartbeat and check region one by one.
-	for _, region := range regions {
-		r := core.NewRegionInfo(region, nil)
-
+	for _, r := range regions {
 		c.Assert(cluster.processRegionHeartbeat(r), IsNil)
 
 		checkRegion(c, cluster.GetRegion(r.GetID()), r)
@@ -1262,9 +1260,7 @@ func heartbeatRegions(c *C, cluster *RaftCluster, regions []*metapb.Region) {
 	}
 
 	// Check all regions after handling all heartbeats.
-	for _, region := range regions {
-		r := core.NewRegionInfo(region, nil)
-
+	for _, r := range regions {
 		checkRegion(c, cluster.GetRegion(r.GetID()), r)
 		checkRegion(c, cluster.GetRegionInfoByKey(r.GetStartKey()), r)
 
@@ -1321,14 +1317,7 @@ func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
 	c.Assert(err, IsNil)
 	cluster := createTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()))
 
-	regions := []*metapb.Region{
-		{
-			Id:          1,
-			StartKey:    []byte{},
-			EndKey:      []byte{},
-			RegionEpoch: &metapb.RegionEpoch{},
-		},
-	}
+	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
 
 	// Byte will underflow/overflow if n > 7.
 	n := 7
@@ -1403,25 +1392,25 @@ type testClusterUtilSuite struct{}
 
 func (s *testClusterUtilSuite) TestCheckStaleRegion(c *C) {
 	// (0, 0) v.s. (0, 0)
-	region := core.NewRegion([]byte{}, []byte{})
-	origin := core.NewRegion([]byte{}, []byte{})
-	c.Assert(checkStaleRegion(region, origin), IsNil)
-	c.Assert(checkStaleRegion(origin, region), IsNil)
+	region := core.NewTestRegionInfo([]byte{}, []byte{})
+	origin := core.NewTestRegionInfo([]byte{}, []byte{})
+	c.Assert(checkStaleRegion(region.GetMeta(), origin.GetMeta()), IsNil)
+	c.Assert(checkStaleRegion(origin.GetMeta(), region.GetMeta()), IsNil)
 
 	// (1, 0) v.s. (0, 0)
-	region.RegionEpoch.Version++
-	c.Assert(checkStaleRegion(origin, region), IsNil)
-	c.Assert(checkStaleRegion(region, origin), NotNil)
+	region.GetRegionEpoch().Version++
+	c.Assert(checkStaleRegion(origin.GetMeta(), region.GetMeta()), IsNil)
+	c.Assert(checkStaleRegion(region.GetMeta(), origin.GetMeta()), NotNil)
 
 	// (1, 1) v.s. (0, 0)
-	region.RegionEpoch.ConfVer++
-	c.Assert(checkStaleRegion(origin, region), IsNil)
-	c.Assert(checkStaleRegion(region, origin), NotNil)
+	region.GetRegionEpoch().ConfVer++
+	c.Assert(checkStaleRegion(origin.GetMeta(), region.GetMeta()), IsNil)
+	c.Assert(checkStaleRegion(region.GetMeta(), origin.GetMeta()), NotNil)
 
 	// (0, 1) v.s. (0, 0)
-	region.RegionEpoch.Version--
-	c.Assert(checkStaleRegion(origin, region), IsNil)
-	c.Assert(checkStaleRegion(region, origin), NotNil)
+	region.GetRegionEpoch().Version--
+	c.Assert(checkStaleRegion(origin.GetMeta(), region.GetMeta()), IsNil)
+	c.Assert(checkStaleRegion(region.GetMeta(), origin.GetMeta()), NotNil)
 }
 
 func mustSaveStores(c *C, s *core.Storage, n int) []*metapb.Store {

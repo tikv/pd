@@ -20,7 +20,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-
+	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
@@ -40,16 +40,15 @@ func (s *serverTestSuite) SetUpSuite(c *C) {
 }
 
 type idAllocator struct {
-	id uint64
+	allocator *mockid.IDAllocator
 }
 
-func (alloc *idAllocator) Alloc() uint64 {
-	alloc.id++
-	return alloc.id
+func (i *idAllocator) alloc() uint64 {
+	v, _ := i.allocator.Alloc()
+	return v
 }
 
 func (s *serverTestSuite) TestRegionSyncer(c *C) {
-	c.Parallel()
 	cluster, err := tests.NewTestCluster(3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -62,18 +61,18 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	c.Assert(rc, NotNil)
 	regionLen := 110
-	id := &idAllocator{}
+	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
 	regions := make([]*core.RegionInfo, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
 		r := &metapb.Region{
-			Id: id.Alloc(),
+			Id: allocator.alloc(),
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: 1,
 				Version: 1,
 			},
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
-			Peers:    []*metapb.Peer{{Id: id.Alloc(), StoreId: uint64(0)}},
+			Peers:    []*metapb.Peer{{Id: allocator.alloc(), StoreId: uint64(0)}},
 		}
 		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
 	}
@@ -94,7 +93,6 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 }
 
 func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
-	c.Parallel()
 	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
@@ -107,18 +105,18 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	c.Assert(rc, NotNil)
 	regionLen := 110
-	id := &idAllocator{}
+	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
 	regions := make([]*core.RegionInfo, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
 		r := &metapb.Region{
-			Id: id.Alloc(),
+			Id: allocator.alloc(),
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: 1,
 				Version: 1,
 			},
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
-			Peers:    []*metapb.Peer{{Id: id.Alloc(), StoreId: uint64(0)}},
+			Peers:    []*metapb.Peer{{Id: allocator.alloc(), StoreId: uint64(0)}},
 		}
 		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
 	}
