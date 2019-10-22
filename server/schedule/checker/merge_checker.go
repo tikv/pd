@@ -27,22 +27,20 @@ import (
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
-	cluster       opt.Cluster
-	classifier    namespace.Classifier
-	splitCache    *cache.TTLUint64
-	startTime     time.Time
-	recentlyStart bool
+	cluster    opt.Cluster
+	classifier namespace.Classifier
+	splitCache *cache.TTLUint64
+	startTime  time.Time
 }
 
 // NewMergeChecker creates a merge checker.
 func NewMergeChecker(cluster opt.Cluster, classifier namespace.Classifier) *MergeChecker {
 	splitCache := cache.NewIDTTL(time.Minute, cluster.GetSplitMergeInterval())
 	return &MergeChecker{
-		cluster:       cluster,
-		classifier:    classifier,
-		splitCache:    splitCache,
-		startTime:     time.Now(),
-		recentlyStart: true,
+		cluster:    cluster,
+		classifier: classifier,
+		splitCache: splitCache,
+		startTime:  time.Now(),
 	}
 }
 
@@ -56,14 +54,10 @@ func (m *MergeChecker) RecordRegionSplit(regionIDs []uint64) {
 
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
-	if m.recentlyStart {
-		expireTime := m.startTime.Add(m.cluster.GetSplitMergeInterval())
-		if time.Now().Before(expireTime) {
-			checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
-			return nil
-		}
-		// after expireTime
-		m.recentlyStart = false
+	expireTime := m.startTime.Add(m.cluster.GetSplitMergeInterval())
+	if time.Now().Before(expireTime) {
+		checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
+		return nil
 	}
 
 	if m.splitCache.Exists(region.GetID()) {
