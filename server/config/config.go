@@ -696,7 +696,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 		}
 	}
 
-	return nil
+	return c.Validate()
 }
 
 func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
