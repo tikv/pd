@@ -196,3 +196,46 @@ func newTestScheduleOption() (*ScheduleOption, error) {
 	opt := NewScheduleOption(cfg)
 	return opt, nil
 }
+
+func (s *testConfigSuite) TestDefaultStoreLimit_Upgrading(c *C) {
+	var cfgData = `
+	[schedule]
+	store-balance-rate = 128.0
+	`
+
+	conf := NewConfig()
+	meta, err := toml.Decode(cfgData, &conf)
+	c.Assert(meta, NotNil)
+	c.Assert(err, IsNil)
+
+	// After decoding, default-store-limit has not been set
+	c.Assert(conf.Schedule.DefaultStoreLimit, Equals, 0.0)
+	c.Assert(conf.Schedule.StoreBalanceRate, Equals, 128.0)
+
+	// After adjusting, default-store-limit has the save value of store-blance-rate
+	c.Assert(conf.Adjust(&meta), IsNil)
+	c.Assert(conf.Schedule.DefaultStoreLimit, Equals, 128.0)
+	c.Assert(conf.Schedule.StoreBalanceRate, Equals, 128.0)
+}
+
+func (s *testConfigSuite) TestDefaultStoreLimit_Overwrite(c *C) {
+	var cfgData = `
+	[schedule]
+	store-balance-rate = 128.0
+	default-store-limit= 256.0
+	`
+
+	conf := NewConfig()
+	meta, err := toml.Decode(cfgData, &conf)
+	c.Assert(meta, NotNil)
+	c.Assert(err, IsNil)
+
+	// The options are decoded as usual
+	c.Assert(conf.Schedule.DefaultStoreLimit, Equals, 256.0)
+	c.Assert(conf.Schedule.StoreBalanceRate, Equals, 128.0)
+
+	// After adjusting, default-store-limit overwrites store-balance-rate
+	c.Assert(conf.Adjust(&meta), IsNil)
+	c.Assert(conf.Schedule.DefaultStoreLimit, Equals, 256.0)
+	c.Assert(conf.Schedule.StoreBalanceRate, Equals, 256.0)
+}
