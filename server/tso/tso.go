@@ -129,7 +129,7 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 
 	save := next.Add(t.saveInterval)
 	if err = t.saveTimestamp(save); err != nil {
-		tsoCounter.WithLabelValues("err_save_ts").Inc()
+		tsoCounter.WithLabelValues("err_save_sync_ts").Inc()
 		return err
 	}
 
@@ -168,7 +168,7 @@ func (t *TimestampOracle) ResetUserTimestamp(tso int64) error {
 
 	save := next.Add(t.saveInterval)
 	if err := t.saveTimestamp(save); err != nil {
-		tsoCounter.WithLabelValues("err_save_ts").Inc()
+		tsoCounter.WithLabelValues("err_save_reset_ts").Inc()
 		return err
 	}
 	update := &atomicObject{
@@ -231,7 +231,7 @@ func (t *TimestampOracle) UpdateTimestamp() error {
 	if typeutil.SubTimeByWallClock(t.lastSavedTime, next) <= updateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		if err := t.saveTimestamp(save); err != nil {
-			tsoCounter.WithLabelValues("err_save_ts").Inc()
+			tsoCounter.WithLabelValues("err_save_update_ts").Inc()
 			return err
 		}
 	}

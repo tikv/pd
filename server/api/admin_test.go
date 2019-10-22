@@ -100,7 +100,7 @@ func (s *testTSOSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = mustNewServer(c)
 	mustWaitLeader(c, []*server.Server{s.svr})
 	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/reset_ts", addr, apiPrefix)
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/reset-ts", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
 	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, nil)
