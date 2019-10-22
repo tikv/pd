@@ -60,6 +60,7 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	ts, ok := input["tso"].(float64)
 	if !ok || ts < 0 {
 		h.rd.JSON(w, http.StatusBadRequest, "invalid tso value")
+		return
 	}
 
 	if err := handler.ResetTS(uint64(ts)); err != nil {
