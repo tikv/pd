@@ -1,5 +1,3 @@
-// Copyright 2018 PingCAP, Inc.
-//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -60,11 +58,11 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ts, ok := input["tso"].(float64)
-	if !ok {
-		h.rd.JSON(w, http.StatusBadRequest, "missing tso value")
+	if !ok || ts < 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "invalid tso value")
 	}
 
-	if err := handler.ResetTS(int64(ts)); err != nil {
+	if err := handler.ResetTS(uint64(ts)); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 }

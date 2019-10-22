@@ -40,7 +40,7 @@ func showTSOCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println("Usage: tso <timestamp>")
 		return
 	}
-	ts, err := strconv.ParseInt(args[0], 10, 64)
+	ts, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
 		cmd.Printf("Failed to parse TSO: %s\n", err)
 		return

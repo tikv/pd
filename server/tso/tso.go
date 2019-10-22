@@ -146,7 +146,7 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 }
 
 // ResetUserTimestamp update the physical part with specified tso.
-func (t *TimestampOracle) ResetUserTimestamp(tso int64) error {
+func (t *TimestampOracle) ResetUserTimestamp(tso uint64) error {
 	if t.lease == nil || t.lease.IsExpired() {
 		tsoCounter.WithLabelValues("err_lease_reset_ts").Inc()
 		return errors.New("Setup timestamp failed, lease expired")
