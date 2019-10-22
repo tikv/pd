@@ -134,14 +134,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	adminHandler := newAdminHandler(svr, rd)
 	router.HandleFunc("/api/v1/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion).Methods("DELETE")
+	router.HandleFunc("/api/v1/admin/reset_ts", adminHandler.ResetTS).Methods("POST")
 
 	logHanler := newlogHandler(svr, rd)
 	router.HandleFunc("/api/v1/admin/log", logHanler.Handle).Methods("POST")
 
 	router.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
 	router.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
-
-	router.HandleFunc("/api/v1/recovery/tso", newRecoveryHandler(handler, rd).ResetTS).Methods("POST")
 
 	// Deprecated
 	router.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")

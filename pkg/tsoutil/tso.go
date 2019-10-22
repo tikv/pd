@@ -17,7 +17,7 @@ import "time"
 
 const (
 	physicalShiftBits = 18
-	logicalBits       = 0x3FFFF
+	logicalBits       = (1 << physicalShiftBits) - 1
 )
 
 // ParseTS parses the ts to (physical,logical).

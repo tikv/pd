@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -50,4 +51,20 @@ func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Requ
 	}
 	cluster.DropCacheRegion(regionID)
 	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	ts, ok := input["tso"].(float64)
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "missing tso value")
+	}
+
+	if err := handler.ResetTS(int64(ts)); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
 }

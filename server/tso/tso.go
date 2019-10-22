@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/tsoutil"
 	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/member"
 	"github.com/pkg/errors"
@@ -47,23 +46,22 @@ type TimestampOracle struct {
 	lastSavedTime time.Time
 	lease         *member.LeaderLease
 
-	rootPath     string
-	member       string
-	client       *clientv3.Client
-	saveInterval time.Duration
-	// TODO: rename ScheduleOption
-	opt *config.ScheduleOption
+	rootPath      string
+	member        string
+	client        *clientv3.Client
+	saveInterval  time.Duration
+	maxResetTsGap func() time.Duration
 }
 
 // NewTimestampOracle creates a new TimestampOracle.
 // TODO: remove saveInterval
-func NewTimestampOracle(client *clientv3.Client, rootPath string, member string, saveInterval time.Duration, opt *config.ScheduleOption) *TimestampOracle {
+func NewTimestampOracle(client *clientv3.Client, rootPath string, member string, saveInterval time.Duration, maxResetTsGap func() time.Duration) *TimestampOracle {
 	return &TimestampOracle{
-		rootPath:     rootPath,
-		client:       client,
-		saveInterval: saveInterval,
-		opt:          opt,
-		member:       member,
+		rootPath:      rootPath,
+		client:        client,
+		saveInterval:  saveInterval,
+		maxResetTsGap: maxResetTsGap,
+		member:        member,
 	}
 }
 
@@ -163,7 +161,7 @@ func (t *TimestampOracle) ResetUserTimestamp(tso int64) error {
 		return errors.New("the specified ts too small than now")
 	}
 
-	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.opt.LoadPDServerConfig().MaxResetTSGap {
+	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.maxResetTsGap() {
 		tsoCounter.WithLabelValues("err_reset_large_ts").Inc()
 		return errors.New("the specified ts too large than now")
 	}
