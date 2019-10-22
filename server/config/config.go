@@ -726,7 +726,7 @@ func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, 
 	return nil
 }
 
-// MigrateDeprecatedFlag updates new flags according to deprecated flags.
+// MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.DisableLearner = false
 	for _, b := range c.migrateConfigurationMap() {
