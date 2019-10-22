@@ -33,15 +33,15 @@ func newPluginHandler(handler *server.Handler, rd *render.Render) *pluginHandler
 }
 
 func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
-	h.processPluginCommand(w, r, "load")
+	h.processPluginCommand(w, r, server.PluginLoad)
 }
 
 func (h *pluginHandler) UpdatePlugin(w http.ResponseWriter, r *http.Request) {
-	h.processPluginCommand(w, r, "update")
+	h.processPluginCommand(w, r, server.PluginUpdate)
 }
 
 func (h *pluginHandler) UnloadPlugin(w http.ResponseWriter, r *http.Request) {
-	h.processPluginCommand(w, r, "unload")
+	h.processPluginCommand(w, r, server.PluginUnload)
 }
 
 func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Request, action string) {

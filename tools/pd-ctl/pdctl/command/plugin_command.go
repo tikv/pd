@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/pingcap/pd/server"
 	"github.com/spf13/cobra"
 )
 
@@ -68,18 +69,18 @@ func NewUnloadPluginCommand() *cobra.Command {
 }
 
 func loadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	postPluginCommand(cmd, "load", args)
+	sendPluginCommand(cmd, server.PluginLoad, args)
 }
 
 func updatePluginCommandFunc(cmd *cobra.Command, args []string) {
-	postPluginCommand(cmd, "update", args)
+	sendPluginCommand(cmd, server.PluginUpdate, args)
 }
 
 func unloadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	postPluginCommand(cmd, "unload", args)
+	sendPluginCommand(cmd, server.PluginUnload, args)
 }
 
-func postPluginCommand(cmd *cobra.Command, action string, args []string) {
+func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
 		return
@@ -93,11 +94,11 @@ func postPluginCommand(cmd *cobra.Command, action string, args []string) {
 		return
 	}
 	switch action {
-	case "load":
+	case server.PluginLoad:
 		_, err = doRequest(cmd, pluginPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(reqData)))
-	case "update":
+	case server.PluginUpdate:
 		_, err = doRequest(cmd, pluginPrefix, http.MethodPut, WithBody("application/json", bytes.NewBuffer(reqData)))
-	case "unload":
+	case server.PluginUnload:
 		_, err = doRequest(cmd, pluginPrefix, http.MethodDelete, WithBody("application/json", bytes.NewBuffer(reqData)))
 	default:
 		cmd.Printf("Unknown action %s\n", action)
