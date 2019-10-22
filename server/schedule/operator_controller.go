@@ -759,6 +759,14 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
 	return ret
 }
 
+// GetLeaderScheduleStrategy is to get leader schedule strategy
+func (oc *OperatorController) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	if oc.cluster == nil {
+		return core.ByCount
+	}
+	return oc.cluster.GetLeaderScheduleStrategy()
+}
+
 // RemoveStoreLimit removes the store limit for a given store ID.
 func (oc *OperatorController) RemoveStoreLimit(storeID uint64) {
 	oc.Lock()

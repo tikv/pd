@@ -16,6 +16,8 @@ package server
 import (
 	"bytes"
 	"encoding/hex"
+	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +36,9 @@ import (
 )
 
 var (
+	// ScheduleConfigHandlerPath is the api router path of the schedule config handler.
+	ScheduleConfigHandlerPath = "/api/v1/schedule-config"
+
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
 	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
 	// ErrOperatorNotFound is error info for operator not found.
@@ -178,7 +183,8 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	s, err := schedule.CreateScheduler(name, c.opController, args...)
+
+	s, err := schedule.CreateScheduler(name, c.opController, h.s.storage, schedule.ConfigSliceDecoder(name, args))
 	if err != nil {
 		return err
 	}
@@ -199,8 +205,6 @@ func (h *Handler) RemoveScheduler(name string) error {
 	}
 	if err = c.removeScheduler(name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
-	} else if err = h.opt.Persist(c.cluster.storage); err != nil {
-		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err
 }
@@ -740,6 +744,21 @@ func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 		return nil, ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.IncorrectNamespace), nil
+}
+
+// GetSchedulerConfigHandler gets the handler of schedulers.
+func (h *Handler) GetSchedulerConfigHandler() http.Handler {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil
+	}
+	mux := http.NewServeMux()
+	for name, handler := range c.schedulers {
+		prefix := path.Join(pdRootPath, ScheduleConfigHandlerPath, name)
+		urlPath := prefix + "/"
+		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
+	}
+	return mux
 }
 
 // GetOfflinePeer gets the region with offline peer.

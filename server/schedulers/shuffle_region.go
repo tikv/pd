@@ -26,7 +26,12 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffle-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterSliceDecoderBuilder("shuffle-region", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
+	})
+	schedule.RegisterScheduler("shuffle-region", func(opController *schedule.OperatorController, straoge *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newShuffleRegionScheduler(opController), nil
 	})
 }
