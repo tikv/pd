@@ -25,25 +25,24 @@ import (
 	"go.uber.org/zap"
 )
 
-// As region split history is not persisted. We put a special marker into
-// splitCache to prevent merging any regions when server is recently started.
-const mergeBlockMarker = 0
-
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
-	cluster    opt.Cluster
-	classifier namespace.Classifier
-	splitCache *cache.TTL
+	cluster       opt.Cluster
+	classifier    namespace.Classifier
+	splitCache    *cache.TTLUint64
+	startTime     time.Time
+	recentlyStart bool
 }
 
 // NewMergeChecker creates a merge checker.
 func NewMergeChecker(cluster opt.Cluster, classifier namespace.Classifier) *MergeChecker {
-	splitCache := cache.NewTTL(time.Minute, cluster.GetSplitMergeInterval())
-	splitCache.Put(mergeBlockMarker, time.Now())
+	splitCache := cache.NewIDTTL(time.Minute, cluster.GetSplitMergeInterval())
 	return &MergeChecker{
-		cluster:    cluster,
-		classifier: classifier,
-		splitCache: splitCache,
+		cluster:       cluster,
+		classifier:    classifier,
+		splitCache:    splitCache,
+		startTime:     time.Now(),
+		recentlyStart: true,
 	}
 }
 
@@ -57,13 +56,13 @@ func (m *MergeChecker) RecordRegionSplit(regionIDs []uint64) {
 
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
-	if value, ok := m.splitCache.Get(mergeBlockMarker); ok {
-		startTime := value.(time.Time)
-		if startTime.Add(m.cluster.GetSplitMergeInterval()).Before(time.Now()) {
-			m.splitCache.Remove(mergeBlockMarker)
-		} else {
+	if m.recentlyStart {
+		expireTime := m.startTime.Add(m.cluster.GetSplitMergeInterval())
+		if time.Now().Before(expireTime) {
 			checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
 			return nil
+		} else {
+			m.recentlyStart = false
 		}
 	}
 

@@ -123,7 +123,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 }
 
 func (s *testMergeCheckerSuite) TestBasic(c *C) {
-	s.cluster.ScheduleOptions.SplitMergeInterval = time.Hour
+	s.cluster.ScheduleOptions.SplitMergeInterval = 0
 
 	// should with same peer count
 	ops := s.mc.Check(s.regions[0])
@@ -160,6 +160,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
 
 	// Skip recently split regions.
+	s.cluster.ScheduleOptions.SplitMergeInterval = time.Hour
 	s.mc.RecordRegionSplit([]uint64{s.regions[2].GetID()})
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
