@@ -756,7 +756,7 @@ func (c *ScheduleConfig) Validate() error {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
 		}
 	}
-	return c.Deprecated()
+	return nil
 }
 
 // Deprecated is used to find if there is an option has beed deprecated.
