@@ -20,10 +20,10 @@ const (
 	logicalBits       = 0x3FFFF
 )
 
-// ParseTS parses the ts to (pythsic,logical).
+// ParseTS parses the ts to (physical,logical).
 func ParseTS(ts int64) (time.Time, int64) {
 	logical := ts & logicalBits
-	pythsic := ts >> physicalShiftBits
-	pythsicalTime := time.Unix(pythsic/1000, int64(pythsic%1000)*time.Millisecond.Nanoseconds())
-	return pythsicalTime, logical
+	physical := ts >> physicalShiftBits
+	physicalTime := time.Unix(physical/1000, int64(physical%1000)*time.Millisecond.Nanoseconds())
+	return physicalTime, logical
 }

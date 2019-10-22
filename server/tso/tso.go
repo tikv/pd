@@ -159,18 +159,17 @@ func (t *TimestampOracle) ResetUserTimestamp(tso int64) error {
 
 	// do not update
 	if typeutil.SubTimeByWallClock(next, prev.physical) <= 3*updateTimestampGuard {
-		tsoCounter.WithLabelValues("err_reset_invalid_ts").Inc()
-		return errors.New("cannot be reset the smaller tso")
+		tsoCounter.WithLabelValues("err_reset_small_ts").Inc()
+		return errors.New("the specified ts too small than now")
 	}
 
 	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.opt.LoadPDServerConfig().MaxResetTSGap {
-		tsoCounter.WithLabelValues("err_reset_invalid_ts").Inc()
+		tsoCounter.WithLabelValues("err_reset_large_ts").Inc()
 		return errors.New("the specified ts too large than now")
 	}
 
 	save := next.Add(t.saveInterval)
 	if err := t.saveTimestamp(save); err != nil {
-
 		tsoCounter.WithLabelValues("err_save_ts").Inc()
 		return err
 	}

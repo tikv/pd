@@ -74,5 +74,5 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	c.Assert(err, IsNil)
 	err = postJSON(url, values)
 	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "smaller"), IsTrue)
+	c.Assert(strings.Contains(err.Error(), "small"), IsTrue)
 }
