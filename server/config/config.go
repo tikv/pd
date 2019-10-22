@@ -701,12 +701,12 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 
 func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
 	return map[string][2]*bool{
-		"remove-down-replica":     [2]*bool{&c.DisableRemoveDownReplica, &c.EnableRemoveDownReplica},
-		"replace-offline-replica": [2]*bool{&c.DisableReplaceOfflineReplica, &c.EnableReplaceOfflineReplica},
-		"make-up-replica":         [2]*bool{&c.DisableMakeUpReplica, &c.EnableMakeUpReplica},
-		"remove-extra-replica":    [2]*bool{&c.DisableRemoveExtraReplica, &c.EnableRemoveExtraReplica},
-		"location-replacement":    [2]*bool{&c.DisableLocationReplacement, &c.EnableLocationReplacement},
-		"namespace-relocation":    [2]*bool{&c.DisableNamespaceRelocation, &c.EnableNamespaceRelocation},
+		"remove-down-replica":     {&c.DisableRemoveDownReplica, &c.EnableRemoveDownReplica},
+		"replace-offline-replica": {&c.DisableReplaceOfflineReplica, &c.EnableReplaceOfflineReplica},
+		"make-up-replica":         {&c.DisableMakeUpReplica, &c.EnableMakeUpReplica},
+		"remove-extra-replica":    {&c.DisableRemoveExtraReplica, &c.EnableRemoveExtraReplica},
+		"location-replacement":    {&c.DisableLocationReplacement, &c.EnableLocationReplacement},
+		"namespace-relocation":    {&c.DisableNamespaceRelocation, &c.EnableNamespaceRelocation},
 	}
 }
 
