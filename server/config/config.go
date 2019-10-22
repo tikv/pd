@@ -203,6 +203,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage    = true
+	defaultMaxResetTsGap       = 24 * time.Hour
 	defaultStrictlyMatchLabel  = false
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
@@ -551,6 +552,9 @@ type ScheduleConfig struct {
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
+
+	// Only used to display
+	SchedulersPayload map[string]string `json:"schedulers,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -700,9 +704,10 @@ type SchedulerConfigs []SchedulerConfig
 
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
-	Type    string   `toml:"type" json:"type"`
-	Args    []string `toml:"args,omitempty" json:"args"`
-	Disable bool     `toml:"disable" json:"disable"`
+	Type        string   `toml:"type" json:"type"`
+	Args        []string `toml:"args,omitempty" json:"args"`
+	Disable     bool     `toml:"disable" json:"disable"`
+	ArgsPayload string   `toml:"args-payload,omitempty" json:"args-payload"`
 }
 
 var defaultSchedulers = SchedulerConfigs{
@@ -827,11 +832,16 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
+	// MaxResetTSGap is the max gap to reset the tso.
+	MaxResetTSGap time.Duration `toml:"max-reset-ts-gap" json:"max-reset-ts-gap"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
+	}
+	if !meta.IsDefined("max-reset-ts-gap") {
+		c.MaxResetTSGap = defaultMaxResetTsGap
 	}
 	return nil
 }

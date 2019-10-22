@@ -42,6 +42,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/schedulers", schedulerHandler.List).Methods("GET")
 	router.HandleFunc("/api/v1/schedulers", schedulerHandler.Post).Methods("POST")
 	router.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
+	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
+	router.PathPrefix(server.ScheduleConfigHandlerPath).Handler(schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
 	router.Handle("/api/v1/cluster", clusterHandler).Methods("GET")
@@ -132,6 +134,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	adminHandler := newAdminHandler(svr, rd)
 	router.HandleFunc("/api/v1/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion).Methods("DELETE")
+	router.HandleFunc("/api/v1/admin/reset-ts", adminHandler.ResetTS).Methods("POST")
 
 	logHanler := newlogHandler(svr, rd)
 	router.HandleFunc("/api/v1/admin/log", logHanler.Handle).Methods("POST")

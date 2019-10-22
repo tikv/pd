@@ -25,7 +25,13 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("label", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterSliceDecoderBuilder("label", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
+	})
+
+	schedule.RegisterScheduler("label", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newLabelScheduler(opController), nil
 	})
 }
