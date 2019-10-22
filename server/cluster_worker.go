@@ -101,7 +101,7 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 		return nil, err
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
-	recordRegions := make([]uint64, splitCount+1)
+	recordRegions := make([]uint64, 0, splitCount+1)
 
 	for i := 0; i < int(splitCount); i++ {
 		newRegionID, err := c.s.idAllocator.Alloc()
