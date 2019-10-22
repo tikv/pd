@@ -19,12 +19,9 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 
-	"github.com/pingcap/errcode"
-	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pkg/errors"
-	"github.com/unrolled/render"
 )
 
 // dialClient used to dail http request.
@@ -34,41 +31,33 @@ var dialClient = &http.Client{
 	},
 }
 
-// Respond to the client about the given error, integrating with errcode.ErrorCode.
-//
-// Important: if the `err` is just an error and not an errcode.ErrorCode (given by errors.Cause),
-// then by default an error is assumed to be a 500 Internal Error.
-//
-// If the error is nil, this also responds with a 500 and logs at the error level.
-func errorResp(rd *render.Render, w http.ResponseWriter, err error) {
-	if err == nil {
-		log.Error("nil is given to errorResp")
-		rd.JSON(w, http.StatusInternalServerError, "nil error")
-		return
-	}
-	if errCode := errcode.CodeChain(err); errCode != nil {
-		w.Header().Set("TiDB-Error-Code", errCode.Code().CodeStr().String())
-		rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
-	} else {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
-	}
-}
+var (
+	errNoImplement    = errors.New("no implement")
+	errOptionNotExist = func(name string) error { return errors.Errorf("the option %s does not exist", name) }
+)
 
-// Write json into data.
-// On error respond with a 400 Bad Request
-func readJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
-	err := apiutil.ReadJSON(body, data)
-	if err == nil {
+func collectEscapeStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+	if v, ok := input[option].(string); ok {
+		value, err := url.QueryUnescape(v)
+		if err != nil {
+			return err
+		}
+		for _, c := range collectors {
+			c(value)
+		}
 		return nil
 	}
-	var errCode errcode.ErrorCode
-	if jsonErr, ok := errors.Cause(err).(apiutil.JSONError); ok {
-		errCode = errcode.NewInvalidInputErr(jsonErr.Err)
-	} else {
-		errCode = errcode.NewInternalErr(err)
+	return errOptionNotExist(option)
+}
+
+func collectStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+	if v, ok := input[option].(string); ok {
+		for _, c := range collectors {
+			c(v)
+		}
+		return nil
 	}
-	errorResp(rd, w, errCode)
-	return err
+	return errOptionNotExist(option)
 }
 
 func readJSON(r io.ReadCloser, data interface{}) error {

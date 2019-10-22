@@ -44,11 +44,12 @@ default: build
 
 all: dev
 
-dev: build check test
+dev: build tools check test
 
 ci: build check basic-test
 
-build: pd-server pd-analysis pd-ctl pd-tso-bench pd-recover
+build: pd-server pd-ctl
+tools: pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench
 pd-server: export GO111MODULE=on
 pd-server:
 ifeq ("$(WITH_RACE)", "1")
@@ -57,9 +58,7 @@ else
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
 
-pd-analysis: export GO111MODULE=on
-pd-analysis:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-analysis tools/pd-analysis/main.go
+# Tools
 pd-ctl: export GO111MODULE=on
 pd-ctl:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
@@ -69,6 +68,12 @@ pd-tso-bench:
 pd-recover: export GO111MODULE=on
 pd-recover:
 	CGO_ENABLED=0 go build -o bin/pd-recover tools/pd-recover/main.go
+pd-analysis: export GO111MODULE=on
+pd-analysis:
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-analysis tools/pd-analysis/main.go
+pd-heartbeat-bench: export GO111MODULE=on
+pd-heartbeat-bench:
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
 test: retool-setup deadlock-setup
 	# testing...

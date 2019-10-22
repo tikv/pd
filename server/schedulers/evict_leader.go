@@ -27,55 +27,79 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
-		if len(args) != 1 {
-			return nil, errors.New("evict-leader needs 1 argument")
+	schedule.RegisterSliceDecoderBuilder("evict-leader", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			if len(args) != 1 {
+				return errors.New("should specify the store-id")
+			}
+			conf, ok := v.(*evictLeaderSchedulerConfig)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+
+			id, err := strconv.ParseUint(args[0], 10, 64)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			name := fmt.Sprintf("evict-leader-scheduler-%d", id)
+			conf.StoreID = id
+			conf.Name = name
+			return nil
+
 		}
-		id, err := strconv.ParseUint(args[0], 10, 64)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		return newEvictLeaderScheduler(opController, id), nil
 	})
+
+	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &evictLeaderSchedulerConfig{}
+		decoder(conf)
+		return newEvictLeaderScheduler(opController, conf), nil
+	})
+}
+
+type evictLeaderSchedulerConfig struct {
+	Name    string `json:"name"`
+	StoreID uint64 `json:"store-id"`
 }
 
 type evictLeaderScheduler struct {
 	*baseScheduler
-	name     string
-	storeID  uint64
+	conf     *evictLeaderSchedulerConfig
 	selector *selector.RandomSelector
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
-func newEvictLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
-	name := fmt.Sprintf("evict-leader-scheduler-%d", storeID)
+func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: name, TransferLeader: true},
+		filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true},
 	}
+
 	base := newBaseScheduler(opController)
 	return &evictLeaderScheduler{
 		baseScheduler: base,
-		name:          name,
-		storeID:       storeID,
+		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
 func (s *evictLeaderScheduler) GetName() string {
-	return s.name
+	return s.conf.Name
 }
 
 func (s *evictLeaderScheduler) GetType() string {
 	return "evict-leader"
 }
 
+func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
+}
+
 func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
-	return cluster.BlockStore(s.storeID)
+	return cluster.BlockStore(s.conf.StoreID)
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
-	cluster.UnblockStore(s.storeID)
+	cluster.UnblockStore(s.conf.StoreID)
 }
 
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -84,7 +108,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 
 func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandLeaderRegion(s.storeID, core.HealthRegion())
+	region := cluster.RandLeaderRegion(s.conf.StoreID, core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 		return nil
