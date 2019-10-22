@@ -33,37 +33,34 @@ func newPluginHandler(handler *server.Handler, rd *render.Render) *pluginHandler
 }
 
 func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
-	data := make(map[string]string)
-	if err := readJSONRespondError(h.rd, w, r.Body, &data); err != nil {
-		return
-	}
-	err := h.PluginLoad(data["plugin-path"])
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.processPluginCommand(w, r, "load")
 }
 
 func (h *pluginHandler) UpdatePlugin(w http.ResponseWriter, r *http.Request) {
-	data := make(map[string]string)
-	if err := readJSONRespondError(h.rd, w, r.Body, &data); err != nil {
-		return
-	}
-	err := h.PluginUpdate(data["plugin-path"])
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.processPluginCommand(w, r, "update")
 }
 
 func (h *pluginHandler) UnloadPlugin(w http.ResponseWriter, r *http.Request) {
+	h.processPluginCommand(w, r, "unload")
+}
+
+func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Request, action string) {
 	data := make(map[string]string)
 	if err := readJSONRespondError(h.rd, w, r.Body, &data); err != nil {
 		return
 	}
-	err := h.PluginUnload(data["plugin-path"])
+	var err error
+	switch action {
+	case "load":
+		err = h.PluginLoad(data["plugin-path"])
+	case "update":
+		err = h.PluginUpdate(data["plugin-path"])
+	case "unload":
+		err = h.PluginUnload(data["plugin-path"])
+	default:
+		h.rd.JSON(w, http.StatusBadRequest, "unknown action")
+		return
+	}
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

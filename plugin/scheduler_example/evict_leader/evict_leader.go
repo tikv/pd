@@ -39,12 +39,12 @@ func init() {
 	})
 }
 
-// SchedulerType retutn type of the scheduler
+// SchedulerType return type of the scheduler
 func SchedulerType() string {
 	return "user-evict-leader"
 }
 
-// SchedulerArgs provide parameters for the scheduler
+// SchedulerArgs provides parameters for the scheduler
 func SchedulerArgs() []string {
 	args := []string{"1"}
 	return args

@@ -68,48 +68,18 @@ func NewUnloadPluginCommand() *cobra.Command {
 }
 
 func loadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
-		cmd.Println(cmd.UsageString())
-		return
-	}
-	data := map[string]interface{}{
-		"plugin-path": args[0],
-	}
-	reqData, err := json.Marshal(data)
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	_, err = doRequest(cmd, pluginPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(reqData)))
-	if err != nil {
-		cmd.Printf("Failed to load plugin %s: %s\n", args[0], err)
-		return
-	}
-	cmd.Println("Success!")
+	postPluginCommand(cmd, "load", args)
 }
 
 func updatePluginCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
-		cmd.Println(cmd.UsageString())
-		return
-	}
-	data := map[string]interface{}{
-		"plugin-path": args[0],
-	}
-	reqData, err := json.Marshal(data)
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	_, err = doRequest(cmd, pluginPrefix, http.MethodPut, WithBody("application/json", bytes.NewBuffer(reqData)))
-	if err != nil {
-		cmd.Printf("Failed to load plugin %s: %s\n", args[0], err)
-		return
-	}
-	cmd.Println("Success!")
+	postPluginCommand(cmd, "update", args)
 }
 
 func unloadPluginCommandFunc(cmd *cobra.Command, args []string) {
+	postPluginCommand(cmd, "unload", args)
+}
+
+func postPluginCommand(cmd *cobra.Command, action string, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
 		return
@@ -122,7 +92,17 @@ func unloadPluginCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	}
-	_, err = doRequest(cmd, pluginPrefix, http.MethodDelete, WithBody("application/json", bytes.NewBuffer(reqData)))
+	switch action {
+	case "load":
+		_, err = doRequest(cmd, pluginPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(reqData)))
+	case "update":
+		_, err = doRequest(cmd, pluginPrefix, http.MethodPut, WithBody("application/json", bytes.NewBuffer(reqData)))
+	case "unload":
+		_, err = doRequest(cmd, pluginPrefix, http.MethodDelete, WithBody("application/json", bytes.NewBuffer(reqData)))
+	default:
+		cmd.Printf("Unknown action %s\n", action)
+		return
+	}
 	if err != nil {
 		cmd.Printf("Failed to load plugin %s: %s\n", args[0], err)
 		return
