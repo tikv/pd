@@ -32,7 +32,7 @@ var (
 func NewStoreCommand() *cobra.Command {
 	s := &cobra.Command{
 		Use:   `store [command] [flags]`,
-		Short: "manipulate stores",
+		Short: "manipulate or query stores",
 		Run:   showStoreCommandFunc,
 	}
 	s.AddCommand(NewDeleteStoreCommand())
