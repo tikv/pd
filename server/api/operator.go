@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/unrolled/render"
@@ -92,7 +93,7 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
-	if err := readJSONRespondError(h.r, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}
 

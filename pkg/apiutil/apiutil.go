@@ -18,9 +18,13 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"strconv"
 
+	"github.com/pingcap/errcode"
+	"github.com/pingcap/log"
 	"github.com/pkg/errors"
+	"github.com/unrolled/render"
 )
 
 // DeferClose captures the error returned from closing (if an error occurs).
@@ -85,4 +89,41 @@ func ParseUint64VarsField(vars map[string]string, varName string) (uint64, *Fiel
 		return parsed, nil
 	}
 	return parsed, &FieldError{field: varName, error: err}
+}
+
+// ReadJSONRespondError writes json into data.
+// On error respond with a 400 Bad Request
+func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
+	err := ReadJSON(body, data)
+	if err == nil {
+		return nil
+	}
+	var errCode errcode.ErrorCode
+	if jsonErr, ok := errors.Cause(err).(JSONError); ok {
+		errCode = errcode.NewInvalidInputErr(jsonErr.Err)
+	} else {
+		errCode = errcode.NewInternalErr(err)
+	}
+	ErrorResp(rd, w, errCode)
+	return err
+}
+
+// ErrorResp Respond to the client about the given error, integrating with errcode.ErrorCode.
+//
+// Important: if the `err` is just an error and not an errcode.ErrorCode (given by errors.Cause),
+// then by default an error is assumed to be a 500 Internal Error.
+//
+// If the error is nil, this also responds with a 500 and logs at the error level.
+func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
+	if err == nil {
+		log.Error("nil is given to errorResp")
+		rd.JSON(w, http.StatusInternalServerError, "nil error")
+		return
+	}
+	if errCode := errcode.CodeChain(err); errCode != nil {
+		w.Header().Set("TiDB-Error-Code", errCode.Code().CodeStr().String())
+		rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
+	} else {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
 }

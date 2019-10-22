@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
@@ -34,6 +35,7 @@ const (
 	collectFactor             = 0.8
 	collectTimeout            = 5 * time.Minute
 	maxScheduleRetries        = 10
+	maxLoadConfigRetries      = 10
 
 	regionheartbeatSendChanCap = 1024
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
@@ -164,9 +166,55 @@ func (c *coordinator) run() {
 		}
 	}
 	log.Info("coordinator starts to run schedulers")
+	var (
+		scheduleNames []string
+		configs       []string
+		err           error
+	)
+	for i := 0; i < maxLoadConfigRetries; i++ {
+		scheduleNames, configs, err = c.cluster.storage.LoadAllScheduleConfig()
+		if err == nil {
+			break
+		}
+		log.Error("cannot load schedulers' config", zap.Int("retry-times", i), zap.Error(err))
+	}
+	if err != nil {
+		log.Fatal("cannot load schedulers' config", zap.Error(err))
+	}
 
-	k := 0
 	scheduleCfg := c.cluster.opt.Load().Clone()
+	// The new way to create scheduler with the independent configuration.
+	for i, name := range scheduleNames {
+		data := configs[i]
+		typ := schedule.FindSchedulerTypeByName(name)
+		var cfg config.SchedulerConfig
+		for _, c := range scheduleCfg.Schedulers {
+			if c.Type == typ {
+				cfg = c
+				break
+			}
+		}
+		if len(cfg.Type) == 0 {
+			log.Error("the scheduler type not found", zap.String("scheduler-name", name))
+			continue
+		}
+		if cfg.Disable {
+			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type))
+			continue
+		}
+		s, err := schedule.CreateScheduler(cfg.Type, c.opController, c.cluster.storage, schedule.ConfigJSONDecoder([]byte(data)))
+		if err != nil {
+			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Error(err))
+			continue
+		}
+		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
+		if err = c.addScheduler(s); err != nil {
+			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		}
+	}
+
+	// The old way to create the scheduler.
+	k := 0
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
@@ -174,18 +222,18 @@ func (c *coordinator) run() {
 			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type))
 			continue
 		}
-		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, schedulerCfg.Args...)
+
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args))
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
 			continue
 		}
-		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
-			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
-		}
 
-		// Only records the valid scheduler config.
-		if err == nil {
+		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != errSchedulerExisted {
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		} else {
+			// Only records the valid scheduler config.
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
 		}
@@ -352,7 +400,9 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 func (c *coordinator) removeScheduler(name string) error {
 	c.Lock()
 	defer c.Unlock()
-
+	if c.cluster == nil {
+		return ErrNotBootstrapped
+	}
 	s, ok := c.schedulers[name]
 	if !ok {
 		return errSchedulerNotFound
@@ -362,7 +412,19 @@ func (c *coordinator) removeScheduler(name string) error {
 	schedulerStatusGauge.WithLabelValues(name, "allow").Set(0)
 	delete(c.schedulers, name)
 
-	return c.cluster.opt.RemoveSchedulerCfg(name)
+	var err error
+	opt := c.cluster.opt
+	if err = opt.RemoveSchedulerCfg(name); err != nil {
+		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
+	} else if err = opt.Persist(c.cluster.storage); err != nil {
+		log.Error("the option can not persist scheduler config", zap.Error(err))
+	} else {
+		err = c.cluster.storage.RemoveScheduleConfig(name)
+		if err != nil {
+			log.Error("can not remove the scheduler config", zap.Error(err))
+		}
+	}
+	return err
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {

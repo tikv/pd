@@ -257,7 +257,7 @@ func (bc *BasicCluster) TakeStore(storeID uint64) *StoreInfo {
 }
 
 // PutRegion put a region.
-func (bc *BasicCluster) PutRegion(region *RegionInfo) []*metapb.Region {
+func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	bc.Lock()
 	defer bc.Unlock()
 	return bc.Regions.SetRegion(region)
@@ -293,7 +293,7 @@ func (bc *BasicCluster) ScanRange(startKey, endKey []byte, limit int) []*RegionI
 }
 
 // GetOverlaps returns the regions which are overlapped with the specified region range.
-func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*metapb.Region {
+func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Regions.GetOverlaps(region)

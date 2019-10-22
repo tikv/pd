@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/checker"
@@ -132,7 +133,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	s.opt.SetMaxReplicas(1)
 
 	oc := schedule.NewOperatorController(nil, nil)
-	sched, _ := schedule.CreateScheduler("balance-region", oc)
+	sched, _ := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 
 	// Balance is limited within a namespace.
 	c.Assert(s.tc.addLeaderRegion(1, 2), IsNil)
@@ -173,7 +174,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceLeader(c *C) {
 	s.classifier.setStore(4, "ns2")
 
 	oc := schedule.NewOperatorController(nil, nil)
-	sched, _ := schedule.CreateScheduler("balance-leader", oc)
+	sched, _ := schedule.CreateScheduler("balance-leader", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 
 	// Balance is limited within a namespace.
 	c.Assert(s.tc.addLeaderRegion(1, 2, 1), IsNil)
