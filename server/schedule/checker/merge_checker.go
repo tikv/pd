@@ -61,9 +61,9 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		if time.Now().Before(expireTime) {
 			checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
 			return nil
-		} else {
-			m.recentlyStart = false
 		}
+		// after expireTime
+		m.recentlyStart = false
 	}
 
 	if m.splitCache.Exists(region.GetID()) {
