@@ -802,6 +802,8 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	oc := schedule.NewOperatorController(tc.RaftCluster, hbStreams)
 	lb, err := schedule.CreateScheduler("balance-region", oc)
 	c.Assert(err, IsNil)
+	// scheduling one time needs 60 seconds
+	// and thus it's large enough to make sure that only schedule one time
 	cfg.StoreBalanceRate = 1
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
 	c.Assert(tc.addRegionStore(3, 100), IsNil)
@@ -818,6 +820,8 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 		c.Assert(lb.Schedule(tc), IsNil)
 	}
 
+	// reset all stores' limit
+	// scheduling one time needs 1/10 seconds
 	oc.SetAllStoresLimit(10)
 	for i := 0; i < 10; i++ {
 		op1 = lb.Schedule(tc)[0]
@@ -825,6 +829,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 		c.Assert(oc.AddOperator(op1), IsTrue)
 		c.Assert(oc.RemoveOperator(op1), IsTrue)
 	}
+	// sleep 1 seconds to make sure that the token is filled up
 	time.Sleep(1 * time.Second)
 	for i := 0; i < 100; i++ {
 		c.Assert(lb.Schedule(tc), NotNil)
@@ -835,6 +840,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(cfg, NotNil)
 	c.Assert(err, IsNil)
+	// scheduling one time needs 2 seconds
 	cfg.StoreBalanceRate = 30
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(c, tc)
@@ -862,6 +868,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	c.Assert(oc.AddOperator(op3), IsFalse)
 	c.Assert(lb.Schedule(tc), IsNil)
+	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
 	c.Assert(lb.Schedule(tc), NotNil)
 }
