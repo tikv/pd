@@ -29,6 +29,11 @@ import (
 
 const replicaCheckerName = "replica-checker"
 
+const (
+	offlineStatus = "offline"
+	downStatus    = "down"
+)
+
 // ReplicaChecker ensures region has the best replicas.
 // Including the following:
 // Replica number management.
@@ -185,7 +190,7 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operat
 			continue
 		}
 
-		return r.fixPeer(region, peer, "down")
+		return r.fixPeer(region, peer, downStatus)
 	}
 	return nil
 }
@@ -211,7 +216,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *operator.Ope
 			continue
 		}
 
-		return r.fixPeer(region, peer, "offline")
+		return r.fixPeer(region, peer, offlineStatus)
 	}
 
 	return nil
@@ -277,7 +282,12 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 	}
 
 	replace := fmt.Sprintf("replace-%s-replica", status)
-	op, err := operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	var op *operator.Operator
+	if status == offlineStatus {
+		op, err = operator.CreateOfflinePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	} else {
+		op, err = operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	}
 	if err != nil {
 		reason := fmt.Sprintf("%s-fail", replace)
 		checkerCounter.WithLabelValues("replica_checker", reason).Inc()
