@@ -22,7 +22,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// PluginMapLock is a read/write mutex for pluginMap
 var PluginMapLock = sync.RWMutex{}
+
+// PluginMap is a map for storing plugin(plugin-path -> plugin)
 var PluginMap = make(map[string]*plugin.Plugin)
 
 // GetFunction gets func by funcName from plugin(.so)
