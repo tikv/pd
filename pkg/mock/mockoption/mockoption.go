@@ -186,8 +186,8 @@ func (mso *ScheduleOptions) GetStrictlyMatchLabel() bool {
 	return mso.StrictlyMatchLabel
 }
 
-// GetEnablePlacementRules mocks method
-func (mso *ScheduleOptions) GetEnablePlacementRules() bool {
+// IsPlacementRulesEnabled mocks method
+func (mso *ScheduleOptions) IsPlacementRulesEnabled() bool {
 	return mso.EnablePlacementRules
 }
 
