@@ -691,9 +691,11 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 
 	for k, b := range c.migrateConfigurationMap() {
-		if err := c.parseDeprecatedFlag(meta, k, b[0], b[1]); err != nil {
+		v, err := c.parseDeprecatedFlag(meta, k, *b[0], *b[1])
+		if err != nil {
 			return err
 		}
+		*b[0], *b[1] = false, v // reset old flag false to make it ignored when marshal to JSON
 	}
 
 	return c.Validate()
@@ -710,20 +712,23 @@ func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
 	}
 }
 
-func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new *bool) error {
+func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new bool) (bool, error) {
 	oldName, newName := "disable-"+name, "enable-"+name
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
-	if defineNew && defineOld {
-		if *new == *old {
-			return errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
+	switch {
+	case defineNew && defineOld:
+		if new == old {
+			return false, errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
 		}
-	} else if defineOld {
-		*new = !*old // only define disable-*, use !disable-*.
-	} else if !defineNew {
-		*new = true // default value is true
+		return new, nil
+	case defineNew && !defineOld:
+		return new, nil
+	case !defineNew && defineOld:
+		return !old, nil // use !disable-*
+	case !defineNew && !defineOld:
+		return true, nil // use default value true
 	}
-	*old = false
-	return nil
+	return false, nil // unreachable.
 }
 
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
