@@ -36,8 +36,6 @@ func (s *tableNSTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *tableNSTestSuite) TestTableNS(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()

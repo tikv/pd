@@ -106,10 +106,15 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
 		w.readFlow.IsRegionHot(region, hotDegree)
 }
 
-// CollectMetrics collect the hot cache metrics
+// CollectMetrics collects the hot cache metrics.
 func (w *HotCache) CollectMetrics(stats *StoresStats) {
 	w.writeFlow.CollectMetrics(stats, "write")
 	w.readFlow.CollectMetrics(stats, "read")
+}
+
+// ResetMetrics resets the hot cache metrics.
+func (w *HotCache) ResetMetrics() {
+	hotCacheStatusGauge.Reset()
 }
 
 func (w *HotCache) incMetrics(name string, storeID uint64, kind FlowKind) {

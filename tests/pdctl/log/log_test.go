@@ -36,8 +36,6 @@ func (s *logTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *logTestSuite) TestLog(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()

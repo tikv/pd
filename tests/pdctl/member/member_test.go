@@ -40,8 +40,6 @@ func (s *memberTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *memberTestSuite) TestMember(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()

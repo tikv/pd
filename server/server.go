@@ -221,7 +221,13 @@ func (s *Server) startServer() error {
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
 
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
-	s.tso = tso.NewTimestampOracle(s.client, s.rootPath, s.member.MemberValue(), s.cfg.TsoSaveInterval.Duration)
+	s.tso = tso.NewTimestampOracle(
+		s.client,
+		s.rootPath,
+		s.member.MemberValue(),
+		s.cfg.TsoSaveInterval.Duration,
+		func() time.Duration { return s.scheduleOpt.LoadPDServerConfig().MaxResetTSGap },
+	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
 	regionStorage, err := core.NewRegionStorage(path)
@@ -515,6 +521,19 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.LabelProperty = s.scheduleOpt.LoadLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.scheduleOpt.LoadClusterVersion()
 	cfg.PDServerCfg = *s.scheduleOpt.LoadPDServerConfig()
+	storage := s.GetStorage()
+	if storage == nil {
+		return cfg
+	}
+	sches, configs, err := storage.LoadAllScheduleConfig()
+	if err != nil {
+		return cfg
+	}
+	payload := make(map[string]string)
+	for i, sche := range sches {
+		payload[sche] = configs[i]
+	}
+	cfg.Schedule.SchedulersPayload = payload
 	return cfg
 }
 
