@@ -15,6 +15,7 @@ package store_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -38,8 +39,6 @@ func (s *storeTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *storeTestSuite) TestStore(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
@@ -126,14 +125,24 @@ func (s *storeTestSuite) TestStore(c *C) {
 	limits := leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
 	c.Assert(limits[1]*60, Equals, float64(10))
 
-	// stores set limit <rate>
-	args = []string{"-u", pdAddr, "stores", "set", "limit", "20"}
+	// store limit all <rate>
+	args = []string{"-u", pdAddr, "store", "limit", "all", "20"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
 	c.Assert(limits[1]*60, Equals, float64(20))
 	c.Assert(limits[3]*60, Equals, float64(20))
 	_, ok := limits[2]
+	c.Assert(ok, IsFalse)
+
+	// store limit
+	args = []string{"-u", pdAddr, "store", "limit"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
+	c.Assert(limits[1]*60, Equals, float64(20))
+	c.Assert(limits[3]*60, Equals, float64(20))
+	_, ok = limits[2]
 	c.Assert(ok, IsFalse)
 
 	// store delete <store_id> command
@@ -158,8 +167,8 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
 
-	// stores remove-tombstone
-	args = []string{"-u", pdAddr, "stores", "remove-tombstone"}
+	// store remove-tombstone
+	args = []string{"-u", pdAddr, "store", "remove-tombstone"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store"}
@@ -168,4 +177,8 @@ func (s *storeTestSuite) TestStore(c *C) {
 	storesInfo = new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
 	c.Assert(len([]*api.StoreInfo{storeInfo}), Equals, 1)
+
+	// It should be called after stores remove-tombstone.
+	echo := pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit"})
+	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
 }

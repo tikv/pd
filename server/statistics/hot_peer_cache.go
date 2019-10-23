@@ -82,11 +82,11 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresStats) (ret []*HotPeerStat) {
 	storeIDs := f.getAllStoreIDs(region)
 
-	bytesFlow := f.getBytesFlow(region)
-	keysFlow := f.getKeysFlow(region)
+	totalBytes := float64(f.getTotalBytes(region))
+	totalKeys := float64(f.getTotalKeys(region))
 
-	bytesPerSecInit := uint64(float64(bytesFlow) / float64(RegionHeartBeatReportInterval))
-	keysPerSecInit := uint64(float64(keysFlow) / float64(RegionHeartBeatReportInterval))
+	bytesPerSecInit := totalBytes / RegionHeartBeatReportInterval
+	keysPerSecInit := totalKeys / RegionHeartBeatReportInterval
 
 	for storeID := range storeIDs {
 		bytesPerSec := bytesPerSecInit
@@ -101,8 +101,8 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 			if interval < hotRegionReportMinInterval && !isExpired {
 				continue
 			}
-			bytesPerSec = uint64(float64(bytesFlow) / interval)
-			keysPerSec = uint64(float64(keysFlow) / interval)
+			bytesPerSec = totalBytes / interval
+			keysPerSec = totalKeys / interval
 		}
 
 		newItem := &HotPeerStat{
@@ -142,11 +142,11 @@ func (f *hotPeerCache) CollectMetrics(stats *StoresStats, typ string) {
 		store := storeTag(storeID)
 		threshold := f.calcHotThreshold(stats, storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", store, typ).Set(float64(peers.Len()))
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(float64(threshold))
+		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(threshold)
 	}
 }
 
-func (f *hotPeerCache) getBytesFlow(region *core.RegionInfo) uint64 {
+func (f *hotPeerCache) getTotalBytes(region *core.RegionInfo) uint64 {
 	switch f.kind {
 	case WriteFlow:
 		return region.GetBytesWritten()
@@ -156,7 +156,7 @@ func (f *hotPeerCache) getBytesFlow(region *core.RegionInfo) uint64 {
 	return 0
 }
 
-func (f *hotPeerCache) getKeysFlow(region *core.RegionInfo) uint64 {
+func (f *hotPeerCache) getTotalKeys(region *core.RegionInfo) uint64 {
 	switch f.kind {
 	case WriteFlow:
 		return region.GetKeysWritten()
@@ -185,7 +185,7 @@ func (f *hotPeerCache) isRegionExpired(region *core.RegionInfo, storeID uint64) 
 	return false
 }
 
-func (f *hotPeerCache) calcHotThreshold(stats *StoresStats, storeID uint64) uint64 {
+func (f *hotPeerCache) calcHotThreshold(stats *StoresStats, storeID uint64) float64 {
 	switch f.kind {
 	case WriteFlow:
 		return calculateWriteHotThresholdWithStore(stats, storeID)
@@ -242,7 +242,7 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 	return false
 }
 
-func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytesRate uint64, hotThreshold uint64) *HotPeerStat {
+func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytesRate float64, hotThreshold float64) *HotPeerStat {
 	isHot := bytesRate >= hotThreshold
 	if newItem.needDelete {
 		return newItem
@@ -267,16 +267,15 @@ func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytesRate uint64, hotThres
 		newItem.AntiCount = hotRegionAntiCount
 		newItem.isNew = true
 	}
-	newItem.RollingBytesRate.Add(float64(bytesRate))
+	newItem.RollingBytesRate.Add(bytesRate)
 
 	return newItem
 }
 
 // Utils
-func calculateWriteHotThresholdWithStore(stats *StoresStats, storeID uint64) uint64 {
+func calculateWriteHotThresholdWithStore(stats *StoresStats, storeID uint64) float64 {
 	writeBytes, _ := stats.GetStoreBytesRate(storeID)
-	divisor := float64(hotPeerMaxCount)
-	hotRegionThreshold := uint64(float64(writeBytes) / divisor)
+	hotRegionThreshold := writeBytes / hotPeerMaxCount
 
 	if hotRegionThreshold < hotWriteRegionMinBytesRate {
 		hotRegionThreshold = hotWriteRegionMinBytesRate
@@ -284,10 +283,9 @@ func calculateWriteHotThresholdWithStore(stats *StoresStats, storeID uint64) uin
 	return hotRegionThreshold
 }
 
-func calculateReadHotThresholdWithStore(stats *StoresStats, storeID uint64) uint64 {
+func calculateReadHotThresholdWithStore(stats *StoresStats, storeID uint64) float64 {
 	_, readBytes := stats.GetStoreBytesRate(storeID)
-	divisor := float64(hotPeerMaxCount)
-	hotRegionThreshold := uint64(float64(readBytes) / divisor)
+	hotRegionThreshold := readBytes / hotPeerMaxCount
 
 	if hotRegionThreshold < hotReadRegionMinBytesRate {
 		hotRegionThreshold = hotReadRegionMinBytesRate

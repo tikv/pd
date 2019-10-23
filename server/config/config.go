@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
@@ -202,6 +203,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage    = true
+	defaultMaxResetTsGap       = 24 * time.Hour
 	defaultStrictlyMatchLabel  = false
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
@@ -494,6 +496,8 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
+	// LeaderScheduleStrategy is the option to balance leader, there are some strategics supported: ["count", "size"], default: "count"
+	LeaderScheduleStrategy string `toml:"leader-schedule-strategy,omitempty" json:"leader-schedule-strategy,string"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -548,6 +552,9 @@ type ScheduleConfig struct {
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
+
+	// Only used to display
+	SchedulersPayload map[string]string `json:"schedulers,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -563,6 +570,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
+		LeaderScheduleStrategy:       c.LeaderScheduleStrategy,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
@@ -595,7 +603,7 @@ const (
 	defaultPatrolRegionInterval   = 100 * time.Millisecond
 	defaultMaxStoreDownTime       = 30 * time.Minute
 	defaultLeaderScheduleLimit    = 4
-	defaultRegionScheduleLimit    = 64
+	defaultRegionScheduleLimit    = 2048
 	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 4
@@ -607,6 +615,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
+	defaultLeaderScheduleStrategy      = "count"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -648,6 +657,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
+	}
+	if !meta.IsDefined("leader-schedule-strategy") {
+		adjustString(&c.LeaderScheduleStrategy, defaultLeaderScheduleStrategy)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
@@ -692,9 +704,10 @@ type SchedulerConfigs []SchedulerConfig
 
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
-	Type    string   `toml:"type" json:"type"`
-	Args    []string `toml:"args,omitempty" json:"args"`
-	Disable bool     `toml:"disable" json:"disable"`
+	Type        string   `toml:"type" json:"type"`
+	Args        []string `toml:"args,omitempty" json:"args"`
+	Disable     bool     `toml:"disable" json:"disable"`
+	ArgsPayload string   `toml:"args-payload,omitempty" json:"args-payload"`
 }
 
 var defaultSchedulers = SchedulerConfigs{
@@ -712,6 +725,11 @@ func IsDefaultScheduler(typ string) bool {
 		}
 	}
 	return false
+}
+
+// GetLeaderScheduleStrategy is to get leader schedule strategy
+func (c *ScheduleConfig) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	return core.StringToScheduleStrategy(c.LeaderScheduleStrategy)
 }
 
 // ReplicationConfig is the replication configuration.
@@ -814,11 +832,16 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
+	// MaxResetTSGap is the max gap to reset the tso.
+	MaxResetTSGap time.Duration `toml:"max-reset-ts-gap" json:"max-reset-ts-gap"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
+	}
+	if !meta.IsDefined("max-reset-ts-gap") {
+		c.MaxResetTSGap = defaultMaxResetTsGap
 	}
 	return nil
 }

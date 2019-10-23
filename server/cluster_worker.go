@@ -64,11 +64,10 @@ func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		}
 	}
 
-	c.RLock()
-	defer c.RUnlock()
-	// Disable merge for the 2 regions in a period of time.
-	c.coordinator.mergeChecker.RecordRegionSplit(reqRegion.GetId())
-	c.coordinator.mergeChecker.RecordRegionSplit(newRegionID)
+	if c.IsFeatureSupported(RegionMerge) {
+		// Disable merge for the 2 regions in a period of time.
+		c.GetMergeChecker().RecordRegionSplit([]uint64{reqRegion.GetId(), newRegionID})
+	}
 
 	split := &pdpb.AskSplitResponse{
 		NewRegionId: newRegionID,
@@ -102,11 +101,8 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 		return nil, err
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
+	recordRegions := make([]uint64, splitCount+1)
 
-	c.RLock()
-	defer c.RUnlock()
-	// Disable merge the regions in a period of time.
-	c.coordinator.mergeChecker.RecordRegionSplit(reqRegion.GetId())
 	for i := 0; i < int(splitCount); i++ {
 		newRegionID, err := c.s.idAllocator.Alloc()
 		if err != nil {
@@ -120,11 +116,17 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 			}
 		}
 
-		c.coordinator.mergeChecker.RecordRegionSplit(newRegionID)
+		recordRegions = append(recordRegions, newRegionID)
 		splitIDs = append(splitIDs, &pdpb.SplitID{
 			NewRegionId: newRegionID,
 			NewPeerIds:  peerIDs,
 		})
+	}
+
+	recordRegions = append(recordRegions, reqRegion.GetId())
+	if c.IsFeatureSupported(RegionMerge) {
+		// Disable merge the regions in a period of time.
+		c.GetMergeChecker().RecordRegionSplit(recordRegions)
 	}
 
 	resp := &pdpb.AskBatchSplitResponse{Ids: splitIDs}

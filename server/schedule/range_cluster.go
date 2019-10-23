@@ -17,11 +17,12 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule/opt"
 )
 
 // RangeCluster isolates the cluster by range.
 type RangeCluster struct {
-	Cluster
+	opt.Cluster
 	regions           *core.RegionsInfo
 	tolerantSizeRatio float64
 }
@@ -30,7 +31,7 @@ const scanLimit = 128
 
 // GenRangeCluster gets a range cluster by specifying start key and end key.
 // The cluster can only know the regions within [startKey, endKey].
-func GenRangeCluster(cluster Cluster, startKey, endKey []byte) *RangeCluster {
+func GenRangeCluster(cluster opt.Cluster, startKey, endKey []byte) *RangeCluster {
 	regions := core.NewRegionsInfo()
 	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
 		regions.AddRegion(r)

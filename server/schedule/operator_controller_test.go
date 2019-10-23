@@ -27,6 +27,8 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/operator"
 )
 
@@ -209,7 +211,7 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	c.Assert(next, IsFalse)
 }
 
-func (t *testOperatorControllerSuite) TestStorelimit(c *C) {
+func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
@@ -393,4 +395,82 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	// The Operator has finished, so no message should be sent
 	c.Assert(len(stream.MsgCh()), Equals, 4)
 	c.Assert(controller.GetOperator(1), IsNil)
+}
+
+func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
+	cfg := mockoption.NewScheduleOptions()
+	cfg.MaxMergeRegionSize = 2
+	cfg.MaxMergeRegionKeys = 2
+	tc := mockcluster.NewCluster(cfg)
+	regions := []*core.RegionInfo{
+		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
+		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
+		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
+		newRegionInfo(4, "x", "", 10, 10, []uint64{109, 4}, []uint64{109, 4}),
+	}
+
+	tc.AddLeaderStore(1, 10)
+	tc.AddLeaderStore(4, 10)
+	tc.AddLeaderStore(5, 10)
+	for _, region := range regions {
+		tc.PutRegion(region)
+	}
+
+	mc := checker.NewMergeChecker(tc, namespace.DefaultClassifier)
+	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
+
+	cfg.SplitMergeInterval = time.Hour
+	cfg.StoreBalanceRate = 60
+
+	regions[2] = regions[2].Clone(
+		core.SetPeers([]*metapb.Peer{
+			{Id: 109, StoreId: 2},
+			{Id: 110, StoreId: 3},
+			{Id: 111, StoreId: 6},
+		}),
+		core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}),
+	)
+	tc.PutRegion(regions[2])
+	ops := mc.Check(regions[2])
+	c.Assert(ops, NotNil)
+	// The size of Region is less or equal than 1MB.
+	for i := 0; i < 50; i++ {
+		c.Assert(oc.AddOperator(ops...), IsTrue)
+		for _, op := range ops {
+			oc.RemoveOperator(op)
+		}
+	}
+	regions[2] = regions[2].Clone(
+		core.SetApproximateSize(2),
+		core.SetApproximateKeys(2),
+	)
+	tc.PutRegion(regions[2])
+	ops = mc.Check(regions[2])
+	c.Assert(ops, NotNil)
+	// The size of Region is more than 1MB but no more than 20MB.
+	for i := 0; i < 5; i++ {
+		c.Assert(oc.AddOperator(ops...), IsTrue)
+		for _, op := range ops {
+			oc.RemoveOperator(op)
+		}
+	}
+	c.Assert(oc.AddOperator(ops...), IsFalse)
+}
+
+func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
+	var prs []*metapb.Peer
+	for _, peer := range peers {
+		prs = append(prs, &metapb.Peer{Id: peer[0], StoreId: peer[1]})
+	}
+	return core.NewRegionInfo(
+		&metapb.Region{
+			Id:       id,
+			StartKey: []byte(startKey),
+			EndKey:   []byte(endKey),
+			Peers:    prs,
+		},
+		&metapb.Peer{Id: leader[0], StoreId: leader[1]},
+		core.SetApproximateSize(size),
+		core.SetApproximateKeys(keys),
+	)
 }

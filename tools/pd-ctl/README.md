@@ -120,7 +120,7 @@ Usage:
     "max-store-down-time": "30m0s",
     "merge-schedule-limit": 8,
     "patrol-region-interval": "100ms",
-    "region-schedule-limit": 64,
+    "region-schedule-limit": 2048,
     "replica-schedule-limit": 64,
     "scheduler-max-waiting-operator": 3,
     "schedulers-v2": [
@@ -221,7 +221,7 @@ Usage:
     >> config set leader-schedule-limit 4         // 4 tasks of leader scheduling at the same time at most
     ```
 
-- `region-schedule-limit` controls the number of tasks scheduling the Region at the same time. This value affects the speed of Region balance. A larger value means a higher speed and setting the value to 0 closes the scheduling. Usually the Region scheduling has a large load, so do not set a too large value.
+- `region-schedule-limit` controls the number of tasks scheduling the Region at the same time. This value avoids too many region balance operators being created. The default value is 2048 which suits enough for all kinds sizes of clusters, setting the value to 0 closes the scheduling. Usually the Region scheduling speed is limited by the store-limit, users do not need to customize this value. Only change it when you know exactly what you are doing.
 
     ```bash
     >> config set region-schedule-limit 2         // 2 tasks of Region scheduling at the same time at most
@@ -573,7 +573,7 @@ Usage:
 >> scheduler remove grant-leader-scheduler-1  // Remove the corresponding scheduler
 ```
 
-### `store [delete | label | weight] <store_id>  [--jq="<query string>"]`
+### `store [delete | label | weight | remove-tombstone | limit] <store_id>  [--jq="<query string>"]`
 
 Use this command to view the store information or remove a specified store. For a jq formatted output, see [jq-formatted-json-output-usage](#jq-formatted-json-output-usage).
 
@@ -591,6 +591,10 @@ Usage:
   ......
 >> store label 1 zone cn        // Set the value of the label with the "zone" key to "cn" for the store with the store id of 1
 >> store weight 1 5 10          // Set the leader weight to 5 and region weight to 10 for the store with the store id of 1
+>> store remove-tombstone       // Remove stores that are in tombstone state
+>> store limit                  // Show limits for all stores
+>> store limit all 5            // Limit 5 operators per minute for all stores
+>> store limit 1 5              // Limit 5 operators per minute for store 1
 ```
 
 ### `table_ns [create | add | remove | set_store | rm_store | set_meta | rm_meta]`

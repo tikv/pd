@@ -11,11 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
+package tsoutil
 
-// HotRegionsStat records all hot regions statistics
-type HotRegionsStat struct {
-	TotalBytesRate float64       `json:"total_flow_bytes"`
-	RegionsCount   int           `json:"regions_count"`
-	RegionsStat    []HotPeerStat `json:"statistics"`
+import "time"
+
+const (
+	physicalShiftBits = 18
+	logicalBits       = (1 << physicalShiftBits) - 1
+)
+
+// ParseTS parses the ts to (physical,logical).
+func ParseTS(ts uint64) (time.Time, uint64) {
+	logical := ts & logicalBits
+	physical := ts >> physicalShiftBits
+	physicalTime := time.Unix(int64(physical/1000), int64(physical)%1000*time.Millisecond.Nanoseconds())
+	return physicalTime, logical
 }

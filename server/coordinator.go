@@ -21,8 +21,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
-	"github.com/pingcap/pd/server/checker"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
@@ -36,6 +35,7 @@ const (
 	collectFactor             = 0.8
 	collectTimeout            = 5 * time.Minute
 	maxScheduleRetries        = 10
+	maxLoadConfigRetries      = 10
 
 	regionheartbeatSendChanCap = 1024
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
@@ -58,38 +58,32 @@ var (
 type coordinator struct {
 	sync.RWMutex
 
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	cluster          *RaftCluster
-	learnerChecker   *checker.LearnerChecker
-	replicaChecker   *checker.ReplicaChecker
-	namespaceChecker *checker.NamespaceChecker
-	mergeChecker     *checker.MergeChecker
-	regionScatterer  *schedule.RegionScatterer
-	schedulers       map[string]*scheduleController
-	opController     *schedule.OperatorController
-	classifier       namespace.Classifier
-	hbStreams        *heartbeatStreams
+	wg              sync.WaitGroup
+	ctx             context.Context
+	cancel          context.CancelFunc
+	cluster         *RaftCluster
+	checkers        *schedule.CheckerController
+	regionScatterer *schedule.RegionScatterer
+	schedulers      map[string]*scheduleController
+	opController    *schedule.OperatorController
+	classifier      namespace.Classifier
+	hbStreams       *heartbeatStreams
 }
 
 // newCoordinator creates a new coordinator.
 func newCoordinator(cluster *RaftCluster, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
 	ctx, cancel := context.WithCancel(context.Background())
+	opController := schedule.NewOperatorController(cluster, hbStreams)
 	return &coordinator{
-		ctx:              ctx,
-		cancel:           cancel,
-		cluster:          cluster,
-		learnerChecker:   checker.NewLearnerChecker(),
-		replicaChecker:   checker.NewReplicaChecker(cluster, classifier),
-		namespaceChecker: checker.NewNamespaceChecker(cluster, classifier),
-		mergeChecker:     checker.NewMergeChecker(cluster, classifier),
-		regionScatterer:  schedule.NewRegionScatterer(cluster, classifier),
-		schedulers:       make(map[string]*scheduleController),
-		opController:     schedule.NewOperatorController(cluster, hbStreams),
-		classifier:       classifier,
-		hbStreams:        hbStreams,
+		ctx:             ctx,
+		cancel:          cancel,
+		cluster:         cluster,
+		checkers:        schedule.NewCheckerController(cluster, classifier, opController),
+		regionScatterer: schedule.NewRegionScatterer(cluster, classifier),
+		schedulers:      make(map[string]*scheduleController),
+		opController:    opController,
+		classifier:      classifier,
+		hbStreams:       hbStreams,
 	}
 }
 
@@ -127,10 +121,14 @@ func (c *coordinator) patrolRegions() {
 				continue
 			}
 
-			key = region.GetEndKey()
-
-			if c.checkRegion(region) {
+			checkerIsBusy, ops := c.checkers.CheckRegion(region)
+			if checkerIsBusy {
 				break
+			}
+
+			key = region.GetEndKey()
+			if ops != nil {
+				c.opController.AddWaitingOperator(ops...)
 			}
 		}
 		// Updates the label level isolation statistics.
@@ -161,43 +159,6 @@ func (c *coordinator) drivePushOperator() {
 	}
 }
 
-func (c *coordinator) checkRegion(region *core.RegionInfo) bool {
-	opController := c.opController
-
-	if op := c.learnerChecker.Check(region); op != nil {
-		if opController.AddOperator(op) {
-			return true
-		}
-	}
-
-	if opController.OperatorCount(operator.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
-		opController.OperatorCount(operator.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
-		opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-		if op := c.namespaceChecker.Check(region); op != nil {
-			if opController.AddWaitingOperator(op) {
-				return true
-			}
-		}
-	}
-
-	if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-		if op := c.replicaChecker.Check(region); op != nil {
-			if opController.AddWaitingOperator(op) {
-				return true
-			}
-		}
-	}
-	if c.cluster.IsFeatureSupported(RegionMerge) && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
-		if ops := c.mergeChecker.Check(region); ops != nil {
-			// It makes sure that two operators can be added successfully altogether.
-			if opController.AddWaitingOperator(ops...) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	defer ticker.Stop()
@@ -215,9 +176,55 @@ func (c *coordinator) run() {
 		}
 	}
 	log.Info("coordinator starts to run schedulers")
+	var (
+		scheduleNames []string
+		configs       []string
+		err           error
+	)
+	for i := 0; i < maxLoadConfigRetries; i++ {
+		scheduleNames, configs, err = c.cluster.storage.LoadAllScheduleConfig()
+		if err == nil {
+			break
+		}
+		log.Error("cannot load schedulers' config", zap.Int("retry-times", i), zap.Error(err))
+	}
+	if err != nil {
+		log.Fatal("cannot load schedulers' config", zap.Error(err))
+	}
 
-	k := 0
 	scheduleCfg := c.cluster.opt.Load().Clone()
+	// The new way to create scheduler with the independent configuration.
+	for i, name := range scheduleNames {
+		data := configs[i]
+		typ := schedule.FindSchedulerTypeByName(name)
+		var cfg config.SchedulerConfig
+		for _, c := range scheduleCfg.Schedulers {
+			if c.Type == typ {
+				cfg = c
+				break
+			}
+		}
+		if len(cfg.Type) == 0 {
+			log.Error("the scheduler type not found", zap.String("scheduler-name", name))
+			continue
+		}
+		if cfg.Disable {
+			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type))
+			continue
+		}
+		s, err := schedule.CreateScheduler(cfg.Type, c.opController, c.cluster.storage, schedule.ConfigJSONDecoder([]byte(data)))
+		if err != nil {
+			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Error(err))
+			continue
+		}
+		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
+		if err = c.addScheduler(s); err != nil {
+			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		}
+	}
+
+	// The old way to create the scheduler.
+	k := 0
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
@@ -225,18 +232,18 @@ func (c *coordinator) run() {
 			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type))
 			continue
 		}
-		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, schedulerCfg.Args...)
+
+		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args))
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
 			continue
 		}
-		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil {
-			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
-		}
 
-		// Only records the valid scheduler config.
-		if err == nil {
+		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != errSchedulerExisted {
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		} else {
+			// Only records the valid scheduler config.
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
 		}
@@ -367,6 +374,10 @@ func (c *coordinator) collectSchedulerMetrics() {
 	}
 }
 
+func (c *coordinator) resetSchedulerMetrics() {
+	schedulerStatusGauge.Reset()
+}
+
 func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
 	defer c.RUnlock()
@@ -383,11 +394,8 @@ func (c *coordinator) collectHotSpotMetrics() {
 		storeLabel := fmt.Sprintf("%d", storeID)
 		stat, ok := status.AsPeer[storeID]
 		if ok {
-			totalWriteBytes := float64(stat.TotalBytesRate)
-			hotWriteRegionCount := float64(stat.RegionsCount)
-
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(totalWriteBytes)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(hotWriteRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(stat.TotalBytesRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(float64(stat.RegionsCount))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(0)
@@ -395,11 +403,8 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 		stat, ok = status.AsLeader[storeID]
 		if ok {
-			totalWriteBytes := float64(stat.TotalBytesRate)
-			hotWriteRegionCount := float64(stat.RegionsCount)
-
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(totalWriteBytes)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(hotWriteRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(stat.TotalBytesRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(float64(stat.RegionsCount))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(0)
@@ -414,17 +419,17 @@ func (c *coordinator) collectHotSpotMetrics() {
 		storeLabel := fmt.Sprintf("%d", storeID)
 		stat, ok := status.AsLeader[storeID]
 		if ok {
-			totalReadBytes := float64(stat.TotalBytesRate)
-			hotReadRegionCount := float64(stat.RegionsCount)
-
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(totalReadBytes)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(hotReadRegionCount)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(stat.TotalBytesRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(float64(stat.RegionsCount))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
 		}
 	}
+}
 
+func (c *coordinator) resetHotSpotMetrics() {
+	hotSpotStatusGauge.Reset()
 }
 
 func (c *coordinator) shouldRun() bool {
@@ -478,7 +483,9 @@ func (c *coordinator) addUserScheduler(scheduler schedule.Scheduler, args ...str
 func (c *coordinator) removeScheduler(name string) error {
 	c.Lock()
 	defer c.Unlock()
-
+	if c.cluster == nil {
+		return ErrNotBootstrapped
+	}
 	s, ok := c.schedulers[name]
 	if !ok {
 		return errSchedulerNotFound
@@ -488,7 +495,19 @@ func (c *coordinator) removeScheduler(name string) error {
 	schedulerStatusGauge.WithLabelValues(name, "allow").Set(0)
 	delete(c.schedulers, name)
 
-	return c.cluster.opt.RemoveSchedulerCfg(name)
+	var err error
+	opt := c.cluster.opt
+	if err = opt.RemoveSchedulerCfg(name); err != nil {
+		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
+	} else if err = opt.Persist(c.cluster.storage); err != nil {
+		log.Error("the option can not persist scheduler config", zap.Error(err))
+	} else {
+		err = c.cluster.storage.RemoveScheduleConfig(name)
+		if err != nil {
+			log.Error("can not remove the scheduler config", zap.Error(err))
+		}
+	}
+	return err
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {

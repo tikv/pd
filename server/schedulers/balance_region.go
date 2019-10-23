@@ -20,18 +20,24 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterSliceDecoderBuilder("balance-region", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
+	})
+	schedule.RegisterScheduler("balance-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceRegionScheduler(opController), nil
 	})
 }
@@ -75,7 +81,8 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, opts .
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
-	s.selector = selector.NewBalanceSelector(core.RegionKind, filters)
+	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
+	s.selector = selector.NewBalanceSelector(kind, filters)
 	return s
 }
 
@@ -107,11 +114,11 @@ func (s *balanceRegionScheduler) GetType() string {
 	return "balance-region"
 }
 
-func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 
@@ -177,7 +184,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *operator.Operator {
+func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *operator.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	stores := cluster.GetRegionStores(region)
 	sourceStoreID := oldPeer.GetStoreId()
@@ -205,14 +212,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
 	opInfluence := s.opController.GetOpInfluence(cluster)
-	if !shouldBalance(cluster, source, target, region, core.RegionKind, opInfluence) {
-		log.Debug("skip balance region",
-			zap.String("scheduler", s.GetName()), zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
-			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
-			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(core.RegionKind)),
-			zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
-			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(core.RegionKind)),
-			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
+	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
+	if !shouldBalance(cluster, source, target, region, kind, opInfluence, s.GetName()) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		s.hitsCounter.put(source, target)
 		return nil
@@ -309,7 +310,7 @@ func (h *hitsStoreBuilder) put(source, target *core.StoreInfo) {
 	}
 }
 
-func (h *hitsStoreBuilder) buildSourceFilter(scope string, cluster schedule.Cluster) filter.Filter {
+func (h *hitsStoreBuilder) buildSourceFilter(scope string, cluster opt.Cluster) filter.Filter {
 	f := filter.NewBlacklistStoreFilter(scope, filter.BlacklistSource)
 	for _, source := range cluster.GetStores() {
 		if h.filter(source, nil) {
@@ -319,7 +320,7 @@ func (h *hitsStoreBuilder) buildSourceFilter(scope string, cluster schedule.Clus
 	return f
 }
 
-func (h *hitsStoreBuilder) buildTargetFilter(scope string, cluster schedule.Cluster, source *core.StoreInfo) filter.Filter {
+func (h *hitsStoreBuilder) buildTargetFilter(scope string, cluster opt.Cluster, source *core.StoreInfo) filter.Filter {
 	f := filter.NewBlacklistStoreFilter(scope, filter.BlacklistTarget)
 	for _, target := range cluster.GetStores() {
 		if h.filter(source, target) {

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -40,7 +41,7 @@ type StoreInfo struct {
 	lastHeartbeatTS  time.Time
 	leaderWeight     float64
 	regionWeight     float64
-	overloaded       func() bool
+	available        func() bool
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -59,8 +60,9 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
+	meta := proto.Clone(s.meta).(*metapb.Store)
 	store := &StoreInfo{
-		meta:             s.meta,
+		meta:             meta,
 		stats:            s.stats,
 		blocked:          s.blocked,
 		leaderCount:      s.leaderCount,
@@ -71,7 +73,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		lastHeartbeatTS:  s.lastHeartbeatTS,
 		leaderWeight:     s.leaderWeight,
 		regionWeight:     s.regionWeight,
-		overloaded:       s.overloaded,
+		available:        s.available,
 	}
 
 	for _, opt := range opts {
@@ -85,12 +87,12 @@ func (s *StoreInfo) IsBlocked() bool {
 	return s.blocked
 }
 
-// IsOverloaded returns if the store is overloaded.
-func (s *StoreInfo) IsOverloaded() bool {
-	if s.overloaded == nil {
-		return false
+// IsAvailable returns if the store bucket of limitation is available
+func (s *StoreInfo) IsAvailable() bool {
+	if s.available == nil {
+		return true
 	}
-	return s.overloaded()
+	return s.available()
 }
 
 // IsUp checks if the store's state is Up.
@@ -251,9 +253,16 @@ func (s *StoreInfo) GetLastHeartbeatTS() time.Time {
 const minWeight = 1e-6
 const maxScore = 1024 * 1024 * 1024
 
-// LeaderScore returns the store's leader score: leaderSize / leaderWeight.
-func (s *StoreInfo) LeaderScore(delta int64) float64 {
-	return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
+// LeaderScore returns the store's leader score.
+func (s *StoreInfo) LeaderScore(strategy ScheduleStrategy, delta int64) float64 {
+	switch strategy {
+	case BySize:
+		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
+	case ByCount:
+		return float64(int64(s.GetLeaderCount())+delta) / math.Max(s.GetLeaderWeight(), minWeight)
+	default:
+		return 0
+	}
 }
 
 // RegionScore returns the store's region score.
@@ -345,10 +354,10 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 }
 
 // ResourceScore returns score of leader/region in the store.
-func (s *StoreInfo) ResourceScore(kind ResourceKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
-	switch kind {
+func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
+	switch scheduleKind.Resource {
 	case LeaderKind:
-		return s.LeaderScore(delta)
+		return s.LeaderScore(scheduleKind.Strategy, delta)
 	case RegionKind:
 		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
 	default:
@@ -540,10 +549,10 @@ func (s *StoresInfo) UnblockStore(storeID uint64) {
 	s.stores[storeID] = store.Clone(SetStoreUnBlock())
 }
 
-// AttachOverloadStatus attaches the overload status to a store.
-func (s *StoresInfo) AttachOverloadStatus(storeID uint64, f func() bool) {
+// AttachAvailableFunc attaches f to a specific store.
+func (s *StoresInfo) AttachAvailableFunc(storeID uint64, f func() bool) {
 	if store, ok := s.stores[storeID]; ok {
-		s.stores[storeID] = store.Clone(SetOverloadStatus(f))
+		s.stores[storeID] = store.Clone(SetAvailableFunc(f))
 	}
 }
 

@@ -41,8 +41,6 @@ func (s *hotTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *hotTestSuite) TestHot(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
