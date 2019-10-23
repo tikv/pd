@@ -884,9 +884,9 @@ func BenchmarkPatrolRegion(b *testing.B) {
 	mergeLimit := uint64(4100)
 	regionNum := 10000
 
-	_, scheduleOpt, _ := newTestScheduleConfig()
+	cfg, scheduleOpt, _ := newTestScheduleConfig()
+	cfg.MergeScheduleLimit = mergeLimit
 	scheduleOpt.SetSplitMergeInterval(time.Duration(0))
-	scheduleOpt.SetMergeScheduleLimit(mergeLimit)
 	tc := newTestCluster(scheduleOpt)
 	hbStreams, cleanup := getHeartBeatStreams(&C{}, tc)
 	defer cleanup()
