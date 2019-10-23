@@ -30,7 +30,7 @@ type MergeChecker struct {
 	cluster    opt.Cluster
 	classifier namespace.Classifier
 	splitCache *cache.TTLUint64
-	startTime  time.Time
+	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
