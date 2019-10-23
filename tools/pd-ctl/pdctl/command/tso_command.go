@@ -15,8 +15,8 @@ package command
 
 import (
 	"strconv"
-	"time"
 
+	"github.com/pingcap/pd/pkg/tsoutil"
 	"github.com/spf13/cobra"
 )
 
@@ -45,9 +45,8 @@ func showTSOCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to parse TSO: %s\n", err)
 		return
 	}
-	logical := ts & logicalBits
-	physical := ts >> physicalShiftBits
-	physicalTime := time.Unix(int64(physical/1000), int64(physical%1000)*time.Millisecond.Nanoseconds())
+
+	physicalTime, logical := tsoutil.ParseTS(ts)
 	cmd.Println("system: ", physicalTime)
 	cmd.Println("logic: ", logical)
 }
