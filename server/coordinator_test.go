@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/testutil"
@@ -38,6 +39,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pingcap/pd/server/statistics"
+	"go.uber.org/zap"
 )
 
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.ScheduleOption, error) {
@@ -369,7 +371,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
-
+	log.Info("test checkerIsBusy", zap.Int("region num:", len(operatorKinds)*int(num)))
 	for i, operatorKind := range operatorKinds {
 		for j := uint64(0); j < num; j++ {
 			regionID := j + uint64(i+1)*num
