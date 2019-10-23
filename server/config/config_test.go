@@ -214,7 +214,7 @@ enable-remove-extra-replica = false
 	c.Assert(strings.Contains(string(b), "disable-replace-offline-replica"), IsFalse)
 	c.Assert(strings.Contains(string(b), "disable-remove-down-replica"), IsFalse)
 
-	cfg, err = load(`
+	_, err = load(`
 [schedule]
 enable-make-up-replica = false
 disable-make-up-replica = false
