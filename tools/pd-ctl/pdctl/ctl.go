@@ -39,7 +39,7 @@ func init() {
 // Start run Command
 func Start(args []string) {
 	rootCmd := &cobra.Command{
-		Use:   "pdctl",
+		Use:   "pd-ctl",
 		Short: "Placement Driver control",
 	}
 	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "http://127.0.0.1:2379", "pd address")
@@ -68,7 +68,6 @@ func Start(args []string) {
 	rootCmd.SetArgs(args)
 	rootCmd.SilenceErrors = true
 	rootCmd.ParseFlags(args)
-	rootCmd.SetUsageTemplate(command.UsageTemplate)
 	rootCmd.SetOutput(os.Stdout)
 
 	if len(commandFlags.CAPath) != 0 {

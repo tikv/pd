@@ -59,10 +59,6 @@ func main() {
 	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
 	flag.Parse()
 
-	if help {
-		flag.Usage()
-		os.Exit(0)
-	}
 	if version {
 		server.PrintPDInfo()
 		os.Exit(0)

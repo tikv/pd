@@ -209,6 +209,11 @@ func (o *ScheduleOption) GetMergeScheduleLimit(name string) uint64 {
 	return o.Load().MergeScheduleLimit
 }
 
+// SetMergeScheduleLimit to set the limit for merge schedule.
+func (o *ScheduleOption) SetMergeScheduleLimit(mergeScheduleLimit uint64) {
+	o.Load().MergeScheduleLimit = mergeScheduleLimit
+}
+
 // GetHotRegionScheduleLimit returns the limit for hot region schedule.
 func (o *ScheduleOption) GetHotRegionScheduleLimit(name string) uint64 {
 	if n, ok := o.GetNS(name); ok {
