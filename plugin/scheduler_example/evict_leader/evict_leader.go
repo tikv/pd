@@ -17,25 +17,42 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"github.com/pkg/errors"
 )
 
 func init() {
-	schedule.RegisterScheduler("user-evict-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
-		if len(args) != 1 {
-			return nil, errors.New("user-evict-leader needs 1 argument")
+	schedule.RegisterSliceDecoderBuilder("user-evict-leader", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			if len(args) != 1 {
+				return errors.New("should specify the store-id")
+			}
+			conf, ok := v.(*evictLeaderSchedulerConfig)
+			if !ok {
+				return errors.New("the config does not exist")
+			}
+
+			id, err := strconv.ParseUint(args[0], 10, 64)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			name := fmt.Sprintf("user-evict-leader-scheduler-%d", id)
+			conf.StoreID = id
+			conf.Name = name
+			return nil
+
 		}
-		id, err := strconv.ParseUint(args[0], 10, 64)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		return newEvictLeaderScheduler(opController, id), nil
+	})
+
+	schedule.RegisterScheduler("user-evict-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &evictLeaderSchedulerConfig{}
+		decoder(conf)
+		return newEvictLeaderScheduler(opController, conf), nil
 	})
 }
 
@@ -50,58 +67,63 @@ func SchedulerArgs() []string {
 	return args
 }
 
+type evictLeaderSchedulerConfig struct {
+	Name    string `json:"name"`
+	StoreID uint64 `json:"store-id"`
+}
+
 type evictLeaderScheduler struct {
 	*userBaseScheduler
-	name     string
-	storeID  uint64
+	conf     *evictLeaderSchedulerConfig
 	selector *selector.RandomSelector
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
-func newEvictLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
-	name := fmt.Sprintf("user-evict-leader-scheduler-%d", storeID)
+func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: name, TransferLeader: true},
+		filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true},
 	}
+
 	base := newUserBaseScheduler(opController)
 	return &evictLeaderScheduler{
 		userBaseScheduler: base,
-		name:              name,
-		storeID:           storeID,
+		conf:              conf,
 		selector:          selector.NewRandomSelector(filters),
 	}
 }
 
 func (s *evictLeaderScheduler) GetName() string {
-	return s.name
+	return s.conf.Name
 }
 
 func (s *evictLeaderScheduler) GetType() string {
 	return "user-evict-leader"
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	return cluster.BlockStore(s.storeID)
+func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
-	cluster.UnblockStore(s.storeID)
+func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
+	return cluster.BlockStore(s.conf.StoreID)
 }
 
-func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
+	cluster.UnblockStore(s.conf.StoreID)
+}
+
+func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
-	region := cluster.RandLeaderRegion(s.storeID, core.HealthRegion())
+func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+	region := cluster.RandLeaderRegion(s.conf.StoreID, core.HealthRegion())
 	if region == nil {
-		log.Error("no leader")
 		return nil
 	}
 	target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
 	if target == nil {
-		log.Error("no target store")
 		return nil
 	}
 	op := operator.CreateTransferLeaderOperator("user-evict-leader", region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)

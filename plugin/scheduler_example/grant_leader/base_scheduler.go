@@ -14,42 +14,80 @@
 package main
 
 import (
+	"fmt"
+	"log"
+	"net/http"
 	"time"
 
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/opt"
 )
+
+// options for interval of schedulers
+const (
+	MaxScheduleInterval     = time.Second * 5
+	MinScheduleInterval     = time.Millisecond * 10
+	MinSlowScheduleInterval = time.Second * 3
+
+	ScheduleIntervalFactor = 1.3
+)
+
+type intervalGrowthType int
+
+const (
+	exponentailGrowth intervalGrowthType = iota
+	linearGrowth
+	zeroGrowth
+)
+
+// intervalGrow calculates the next interval of balance.
+func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowthType) time.Duration {
+	switch typ {
+	case exponentailGrowth:
+		return minDuration(time.Duration(float64(x)*ScheduleIntervalFactor), maxInterval)
+	case linearGrowth:
+		return minDuration(x+MinSlowScheduleInterval, maxInterval)
+	case zeroGrowth:
+		return x
+	default:
+		log.Fatal("unknown interval growth type")
+	}
+	return 0
+}
 
 type userBaseScheduler struct {
 	opController *schedule.OperatorController
 }
 
-// options for interval of schedulers
-const (
-	MaxScheduleInterval = time.Second * 5
-	MinScheduleInterval = time.Millisecond * 10
-
-	ScheduleIntervalFactor = 1.3
-)
-
 func newUserBaseScheduler(opController *schedule.OperatorController) *userBaseScheduler {
 	return &userBaseScheduler{opController: opController}
 }
 
-// Prepare is used to do some prepare work before the scheduler runs
-func (s *userBaseScheduler) Prepare(cluster schedule.Cluster) error { return nil }
-
-// Cleanup corresponds to prepare, which is used to do some cleanup work when the scheduler stops
-func (s *userBaseScheduler) Cleanup(cluster schedule.Cluster) {}
+// ServeHTTP is used to serve HTTP request
+func (s *userBaseScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "not implements")
+}
 
 // GetNextInterval is used to get min schedule interval.
 func (s *userBaseScheduler) GetMinInterval() time.Duration {
 	return MinScheduleInterval
 }
 
+// EncodeConfig is used to encode config
+func (s *userBaseScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(nil)
+}
+
 // GetNextInterval is used to get next interval.
 func (s *userBaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
-	return minDuration(time.Duration(float64(interval)*ScheduleIntervalFactor), MaxScheduleInterval)
+	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }
+
+// Prepare is used to do some prepare work before the scheduler runs
+func (s *userBaseScheduler) Prepare(cluster opt.Cluster) error { return nil }
+
+// Cleanup corresponds to prepare, which is used to do some cleanup work when the scheduler stops
+func (s *userBaseScheduler) Cleanup(cluster opt.Cluster) {}
 
 func minDuration(a, b time.Duration) time.Duration {
 	if a < b {

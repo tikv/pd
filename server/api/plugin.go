@@ -16,6 +16,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -46,7 +47,7 @@ func (h *pluginHandler) UnloadPlugin(w http.ResponseWriter, r *http.Request) {
 
 func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Request, action string) {
 	data := make(map[string]string)
-	if err := readJSONRespondError(h.rd, w, r.Body, &data); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &data); err != nil {
 		return
 	}
 	var err error

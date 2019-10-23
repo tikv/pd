@@ -282,7 +282,7 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	}
 	schedulerArgs := SchedulerArgs.(func() []string)
 	// create and add user scheduler
-	s, err := schedule.CreateScheduler(schedulerType(), c.opController, schedulerArgs()...)
+	s, err := schedule.CreateScheduler(schedulerType(), c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerType(), schedulerArgs()))
 	if err != nil {
 		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), zap.Error(err))
 		return
