@@ -199,4 +199,8 @@ func (s *configTestSuite) TestConfig(c *C) {
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "config item not found"), IsTrue)
+	args1 = []string{"-u", pdAddr, "config", "set", "disable-remove-down-replica", "true"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "already been deprecated"), IsTrue)
 }
