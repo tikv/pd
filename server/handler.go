@@ -137,7 +137,7 @@ func (h *Handler) GetHotReadRegions() *statistics.StoreHotRegionInfos {
 }
 
 // GetHotBytesWriteStores gets all hot write stores stats.
-func (h *Handler) GetHotBytesWriteStores() map[uint64]uint64 {
+func (h *Handler) GetHotBytesWriteStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -146,7 +146,7 @@ func (h *Handler) GetHotBytesWriteStores() map[uint64]uint64 {
 }
 
 // GetHotBytesReadStores gets all hot write stores stats.
-func (h *Handler) GetHotBytesReadStores() map[uint64]uint64 {
+func (h *Handler) GetHotBytesReadStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -155,7 +155,7 @@ func (h *Handler) GetHotBytesReadStores() map[uint64]uint64 {
 }
 
 // GetHotKeysWriteStores gets all hot write stores stats.
-func (h *Handler) GetHotKeysWriteStores() map[uint64]uint64 {
+func (h *Handler) GetHotKeysWriteStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -164,7 +164,7 @@ func (h *Handler) GetHotKeysWriteStores() map[uint64]uint64 {
 }
 
 // GetHotKeysReadStores gets all hot write stores stats.
-func (h *Handler) GetHotKeysReadStores() map[uint64]uint64 {
+func (h *Handler) GetHotKeysReadStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
