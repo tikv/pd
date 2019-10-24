@@ -16,68 +16,67 @@ package core
 import (
 	"math"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// SplitRegions split a set of metapb.Region by the middle of regionKey
-func SplitRegions(regions []*metapb.Region) []*metapb.Region {
-	results := make([]*metapb.Region, 0, len(regions)*2)
+// SplitRegions split a set of RegionInfo by the middle of regionKey
+func SplitRegions(regions []*RegionInfo) []*RegionInfo {
+	results := make([]*RegionInfo, 0, len(regions)*2)
 	for _, region := range regions {
 		start, end := byte(0), byte(math.MaxUint8)
-		if len(region.StartKey) > 0 {
-			start = region.StartKey[0]
+		if len(region.GetStartKey()) > 0 {
+			start = region.GetStartKey()[0]
 		}
-		if len(region.EndKey) > 0 {
-			end = region.EndKey[0]
+		if len(region.GetEndKey()) > 0 {
+			end = region.GetEndKey()[0]
 		}
 		middle := []byte{start/2 + end/2}
-		left := proto.Clone(region).(*metapb.Region)
-		left.Id = region.Id + uint64(len(regions))
-		left.EndKey = middle
-		left.RegionEpoch.Version++
-		right := proto.Clone(region).(*metapb.Region)
-		right.Id = region.Id + uint64(len(regions)*2)
-		right.StartKey = middle
-		right.RegionEpoch.Version++
+		left := region.Clone()
+		left.meta.Id = region.GetID() + uint64(len(regions))
+		left.meta.EndKey = middle
+		left.meta.RegionEpoch.Version++
+		right := region.Clone()
+		right.meta.Id = region.GetID() + uint64(len(regions)*2)
+		right.meta.StartKey = middle
+		right.meta.RegionEpoch.Version++
 		results = append(results, left, right)
 	}
 	return results
 }
 
-// MergeRegions merge a set of metapb.Region by regionKey
-func MergeRegions(regions []*metapb.Region) []*metapb.Region {
-	results := make([]*metapb.Region, 0, len(regions)/2)
+// MergeRegions merge a set of RegionInfo by regionKey
+func MergeRegions(regions []*RegionInfo) []*RegionInfo {
+	results := make([]*RegionInfo, 0, len(regions)/2)
 	for i := 0; i < len(regions); i += 2 {
 		left := regions[i]
 		right := regions[i]
 		if i+1 < len(regions) {
 			right = regions[i+1]
 		}
-		region := &metapb.Region{
-			Id:       left.Id + uint64(len(regions)),
-			StartKey: left.StartKey,
-			EndKey:   right.EndKey,
-		}
-		if left.RegionEpoch.Version > right.RegionEpoch.Version {
-			region.RegionEpoch = left.RegionEpoch
+		region := &RegionInfo{meta: &metapb.Region{
+			Id:       left.GetID() + uint64(len(regions)),
+			StartKey: left.GetStartKey(),
+			EndKey:   right.GetEndKey(),
+		}}
+		if left.GetRegionEpoch().GetVersion() > right.GetRegionEpoch().GetVersion() {
+			region.meta.RegionEpoch = left.GetRegionEpoch()
 		} else {
-			region.RegionEpoch = right.RegionEpoch
+			region.meta.RegionEpoch = right.GetRegionEpoch()
 		}
-		region.RegionEpoch.Version++
+		region.meta.RegionEpoch.Version++
 		results = append(results, region)
 	}
 	return results
 }
 
-// NewRegion create a metapb.Region
-func NewRegion(start, end []byte) *metapb.Region {
-	return &metapb.Region{
+// NewTestRegionInfo creates a RegionInfo for test.
+func NewTestRegionInfo(start, end []byte) *RegionInfo {
+	return &RegionInfo{meta: &metapb.Region{
 		StartKey:    start,
 		EndKey:      end,
 		RegionEpoch: &metapb.RegionEpoch{},
-	}
+	}}
 }
 
 // NewStoreInfoWithLabel is create a store with specified labels.

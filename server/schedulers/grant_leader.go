@@ -25,49 +25,73 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("grant-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
-		if len(args) != 1 {
-			return nil, errors.New("grant-leader needs 1 argument")
+	schedule.RegisterSliceDecoderBuilder("grant-leader", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			if len(args) != 1 {
+				return errors.New("should specify the store-id")
+			}
+
+			conf, ok := v.(*grandLeaderConfig)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+
+			id, err := strconv.ParseUint(args[0], 10, 64)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			conf.StoreID = id
+			conf.Name = fmt.Sprintf("grant-leader-scheduler-%d", id)
+			return nil
 		}
-		id, err := strconv.ParseUint(args[0], 10, 64)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		return newGrantLeaderScheduler(opController, id), nil
 	})
+
+	schedule.RegisterScheduler("grant-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &grandLeaderConfig{}
+		decoder(conf)
+		return newGrantLeaderScheduler(opController, conf), nil
+	})
+}
+
+type grandLeaderConfig struct {
+	Name    string `json:"name"`
+	StoreID uint64 `json:"store-id"`
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
 	*baseScheduler
-	name    string
-	storeID uint64
+	conf *grandLeaderConfig
 }
 
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
-func newGrantLeaderScheduler(opController *schedule.OperatorController, storeID uint64) schedule.Scheduler {
+func newGrantLeaderScheduler(opController *schedule.OperatorController, conf *grandLeaderConfig) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 	return &grantLeaderScheduler{
 		baseScheduler: base,
-		name:          fmt.Sprintf("grant-leader-scheduler-%d", storeID),
-		storeID:       storeID,
+		conf:          conf,
 	}
 }
 
 func (s *grantLeaderScheduler) GetName() string {
-	return s.name
+	return s.conf.Name
 }
 
 func (s *grantLeaderScheduler) GetType() string {
 	return "grant-leader"
 }
+
+func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
+}
+
 func (s *grantLeaderScheduler) Prepare(cluster opt.Cluster) error {
-	return cluster.BlockStore(s.storeID)
+	return cluster.BlockStore(s.conf.StoreID)
 }
 
 func (s *grantLeaderScheduler) Cleanup(cluster opt.Cluster) {
-	cluster.UnblockStore(s.storeID)
+	cluster.UnblockStore(s.conf.StoreID)
 }
 
 func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -76,13 +100,13 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 
 func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandFollowerRegion(s.storeID, core.HealthRegion())
+	region := cluster.RandFollowerRegion(s.conf.StoreID, core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator("grant-leader", region, region.GetLeader().GetStoreId(), s.storeID, operator.OpLeader)
+	op := operator.CreateTransferLeaderOperator("grant-leader", region, region.GetLeader().GetStoreId(), s.conf.StoreID, operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }

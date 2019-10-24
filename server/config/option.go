@@ -22,14 +22,16 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/schedule"
 )
 
 // ScheduleOption is a wrapper to access the configuration safely.
 type ScheduleOption struct {
-	v              atomic.Value
-	rep            *Replication
+	schedule       atomic.Value
+	replication    *Replication
 	ns             sync.Map // concurrent map[string]*namespaceOption
 	labelProperty  atomic.Value
 	clusterVersion unsafe.Pointer
@@ -45,7 +47,7 @@ func NewScheduleOption(cfg *Config) *ScheduleOption {
 		nsCfg := nsCfg
 		o.ns.Store(name, NewNamespaceOption(&nsCfg))
 	}
-	o.rep = newReplication(&cfg.Replication)
+	o.replication = newReplication(&cfg.Replication)
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
@@ -54,17 +56,17 @@ func NewScheduleOption(cfg *Config) *ScheduleOption {
 
 // Load returns scheduling configurations.
 func (o *ScheduleOption) Load() *ScheduleConfig {
-	return o.v.Load().(*ScheduleConfig)
+	return o.schedule.Load().(*ScheduleConfig)
 }
 
 // Store sets scheduling configurations.
 func (o *ScheduleOption) Store(cfg *ScheduleConfig) {
-	o.v.Store(cfg)
+	o.schedule.Store(cfg)
 }
 
 // GetReplication returns replication configurations.
 func (o *ScheduleOption) GetReplication() *Replication {
-	return o.rep
+	return o.replication
 }
 
 // SetPDServerConfig sets the PD configuration.
@@ -117,17 +119,17 @@ func (o *ScheduleOption) GetMaxReplicas(name string) int {
 	if n, ok := o.GetNS(name); ok {
 		return n.GetMaxReplicas()
 	}
-	return o.rep.GetMaxReplicas()
+	return o.replication.GetMaxReplicas()
 }
 
 // SetMaxReplicas sets the number of replicas for each region.
 func (o *ScheduleOption) SetMaxReplicas(replicas int) {
-	o.rep.SetMaxReplicas(replicas)
+	o.replication.SetMaxReplicas(replicas)
 }
 
 // GetLocationLabels returns the location labels for each region.
 func (o *ScheduleOption) GetLocationLabels() []string {
-	return o.rep.GetLocationLabels()
+	return o.replication.GetLocationLabels()
 }
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
@@ -153,6 +155,11 @@ func (o *ScheduleOption) GetMaxMergeRegionKeys() uint64 {
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
 func (o *ScheduleOption) GetSplitMergeInterval() time.Duration {
 	return o.Load().SplitMergeInterval.Duration
+}
+
+// SetSplitMergeInterval to set the interval between finishing split and starting to merge. It's only used to test.
+func (o *ScheduleOption) SetSplitMergeInterval(splitMergeInterval time.Duration) {
+	o.Load().SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
 }
 
 // IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
@@ -304,7 +311,8 @@ func (o *ScheduleOption) RemoveSchedulerCfg(name string) error {
 	v := c.Clone()
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
-		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(nil, nil), schedulerCfg.Args...)
+		decoder := schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
+		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), decoder)
 		if err != nil {
 			return err
 		}
@@ -382,7 +390,7 @@ func (o *ScheduleOption) Persist(storage *core.Storage) error {
 
 	cfg := &Config{
 		Schedule:       *o.Load(),
-		Replication:    *o.rep.Load(),
+		Replication:    *o.replication.Load(),
 		Namespace:      namespaces,
 		LabelProperty:  o.LoadLabelPropertyConfig(),
 		ClusterVersion: *o.LoadClusterVersion(),
@@ -398,7 +406,7 @@ func (o *ScheduleOption) Reload(storage *core.Storage) error {
 
 	cfg := &Config{
 		Schedule:       *o.Load().Clone(),
-		Replication:    *o.rep.Load(),
+		Replication:    *o.replication.Load(),
 		Namespace:      namespaces,
 		LabelProperty:  o.LoadLabelPropertyConfig().Clone(),
 		ClusterVersion: *o.LoadClusterVersion(),
@@ -411,7 +419,7 @@ func (o *ScheduleOption) Reload(storage *core.Storage) error {
 	o.adjustScheduleCfg(cfg)
 	if isExist {
 		o.Store(&cfg.Schedule)
-		o.rep.Store(&cfg.Replication)
+		o.replication.Store(&cfg.Replication)
 		for name, nsCfg := range cfg.Namespace {
 			nsCfg := nsCfg
 			o.ns.Store(name, NewNamespaceOption(&nsCfg))

@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
@@ -36,7 +37,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	sl, err := schedule.CreateScheduler("shuffle-leader", schedule.NewOperatorController(nil, nil))
+	sl, err := schedule.CreateScheduler("shuffle-leader", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	c.Assert(sl.Schedule(tc), IsNil)
 
@@ -66,21 +67,21 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(nil, nil), "32", "2")
+	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("adjacent-region", []string{"32", "2"}))
 	c.Assert(err, IsNil)
 
-	c.Assert(sc.(*balanceAdjacentRegionScheduler).leaderLimit, Equals, uint64(32))
-	c.Assert(sc.(*balanceAdjacentRegionScheduler).peerLimit, Equals, uint64(2))
+	c.Assert(sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit, Equals, uint64(32))
+	c.Assert(sc.(*balanceAdjacentRegionScheduler).conf.PeerLimit, Equals, uint64(2))
 
-	sc.(*balanceAdjacentRegionScheduler).leaderLimit = 0
-	sc.(*balanceAdjacentRegionScheduler).peerLimit = 0
+	sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit = 0
+	sc.(*balanceAdjacentRegionScheduler).conf.PeerLimit = 0
 	c.Assert(sc.IsScheduleAllowed(tc), IsFalse)
-	sc.(*balanceAdjacentRegionScheduler).leaderLimit = defaultAdjacentLeaderLimit
+	sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit = defaultAdjacentLeaderLimit
 	c.Assert(sc.IsScheduleAllowed(tc), IsTrue)
-	sc.(*balanceAdjacentRegionScheduler).leaderLimit = 0
-	sc.(*balanceAdjacentRegionScheduler).peerLimit = defaultAdjacentPeerLimit
+	sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit = 0
+	sc.(*balanceAdjacentRegionScheduler).conf.PeerLimit = defaultAdjacentPeerLimit
 	c.Assert(sc.IsScheduleAllowed(tc), IsTrue)
-	sc.(*balanceAdjacentRegionScheduler).leaderLimit = defaultAdjacentLeaderLimit
+	sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit = defaultAdjacentLeaderLimit
 	c.Assert(sc.IsScheduleAllowed(tc), IsTrue)
 
 	c.Assert(sc.Schedule(tc), IsNil)
@@ -134,7 +135,7 @@ func (s *testBalanceAdjacentRegionSuite) TestNoNeedToBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(nil, nil))
+	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("adjacent-region", nil))
 	c.Assert(err, IsNil)
 	c.Assert(sc.Schedule(tc), IsNil)
 
@@ -275,7 +276,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 
 	// The label scheduler transfers leader out of store1.
 	oc := schedule.NewOperatorController(nil, nil)
-	sl, err := schedule.CreateScheduler("label", oc)
+	sl, err := schedule.CreateScheduler("label", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(nil))
 	c.Assert(err, IsNil)
 	op := sl.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 3)
@@ -287,13 +288,13 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
-	bs, err := schedule.CreateScheduler("balance-leader", oc)
+	bs, err := schedule.CreateScheduler("balance-leader", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	op = bs.Schedule(tc)
 	c.Assert(op, IsNil)
 
 	// Can't evict leader from store2, neither.
-	el, err := schedule.CreateScheduler("evict-leader", oc, "2")
+	el, err := schedule.CreateScheduler("evict-leader", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("evict-leader", []string{"2"}))
 	c.Assert(err, IsNil)
 	op = el.Schedule(tc)
 	c.Assert(op, IsNil)
@@ -320,7 +321,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("shuffle-hot-region", schedule.NewOperatorController(nil, nil))
+	hb, err := schedule.CreateScheduler("shuffle-hot-region", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(nil))
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
@@ -371,7 +372,7 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.LeaderScheduleLimit = 0
 	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewOperatorController(nil, nil))
+	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	tc.AddRegionStore(1, 3)
@@ -408,7 +409,7 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	tc.AddLeaderRegion(2, 2, 1)
 	tc.AddLeaderRegion(3, 3, 1)
 
-	sl, err := schedule.CreateScheduler("evict-leader", schedule.NewOperatorController(nil, nil), "1")
+	sl, err := schedule.CreateScheduler("evict-leader", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("evict-leader", []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	op := sl.Schedule(tc)
@@ -423,7 +424,7 @@ func (s *testShuffleRegionSuite) TestShuffle(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	sl, err := schedule.CreateScheduler("shuffle-region", schedule.NewOperatorController(nil, nil))
+	sl, err := schedule.CreateScheduler("shuffle-region", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	c.Assert(sl.Schedule(tc), IsNil)

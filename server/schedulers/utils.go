@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -31,6 +32,9 @@ const (
 	leaderTolerantSizeRatio float64 = 5.0
 	minTolerantSizeRatio    float64 = 1.0
 )
+
+// ErrScheduleConfigNotExist the config is not correct.
+var ErrScheduleConfigNotExist = errors.New("the config does not exist")
 
 func minUint64(a, b uint64) uint64 {
 	if a < b {

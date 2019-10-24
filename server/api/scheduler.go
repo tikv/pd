@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
@@ -44,7 +45,7 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
-	if err := readJSONRespondError(h.r, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}
 
@@ -77,17 +78,23 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 		}
 	case "scatter-range":
 		var args []string
-		startKey, ok := input["start_key"].(string)
-		if ok {
-			args = append(args, startKey)
+
+		collector := func(v string) {
+			args = append(args, v)
 		}
-		endKey, ok := input["end_key"].(string)
-		if ok {
-			args = append(args, endKey)
+		if err := collectEscapeStringOption("start_key", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
 		}
-		name, ok := input["range_name"].(string)
-		if ok {
-			args = append(args, name)
+
+		if err := collectEscapeStringOption("end_key", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if err := collectStringOption("range_name", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 		if err := h.AddScatterRangeScheduler(args...); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -171,4 +178,26 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.r.JSON(w, http.StatusOK, nil)
+}
+
+type schedulerConfigHandler struct {
+	svr *server.Server
+	rd  *render.Render
+}
+
+func newSchedulerConfigHandler(svr *server.Server, rd *render.Render) *schedulerConfigHandler {
+	return &schedulerConfigHandler{
+		svr: svr,
+		rd:  rd,
+	}
+}
+
+func (h *schedulerConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	sh := handler.GetSchedulerConfigHandler()
+	if sh != nil {
+		sh.ServeHTTP(w, r)
+		return
+	}
+	h.rd.JSON(w, http.StatusNotAcceptable, errNoImplement)
 }

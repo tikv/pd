@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 )
 
 func TestReplicaChecker(t *testing.T) {
@@ -42,9 +43,6 @@ func (s *testReplicaCheckerSuite) SetUpTest(c *C) {
 	cfg := mockoption.NewScheduleOptions()
 	s.cluster = mockcluster.NewCluster(cfg)
 	s.rc = NewReplicaChecker(s.cluster, namespace.DefaultClassifier)
-}
-
-func (s *testReplicaCheckerSuite) TestReplacePendingPeer(c *C) {
 	stats := &pdpb.StoreStats{
 		Capacity:  100,
 		Available: 100,
@@ -54,14 +52,6 @@ func (s *testReplicaCheckerSuite) TestReplacePendingPeer(c *C) {
 			&metapb.Store{
 				Id:    1,
 				State: metapb.StoreState_Offline,
-			},
-			core.SetStoreStats(stats),
-			core.SetLastHeartbeatTS(time.Now()),
-		),
-		core.NewStoreInfo(
-			&metapb.Store{
-				Id:    2,
-				State: metapb.StoreState_Up,
 			},
 			core.SetStoreStats(stats),
 			core.SetLastHeartbeatTS(time.Now()),
@@ -85,6 +75,10 @@ func (s *testReplicaCheckerSuite) TestReplacePendingPeer(c *C) {
 	for _, store := range stores {
 		s.cluster.PutStore(store)
 	}
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"noleader": "true"})
+}
+
+func (s *testReplicaCheckerSuite) TestReplacePendingPeer(c *C) {
 	peers := []*metapb.Peer{
 		{
 			Id:      2,
@@ -106,4 +100,32 @@ func (s *testReplicaCheckerSuite) TestReplacePendingPeer(c *C) {
 	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(4))
 	c.Assert(op.Step(1).(operator.PromoteLearner).ToStore, Equals, uint64(4))
 	c.Assert(op.Step(2).(operator.RemovePeer).FromStore, Equals, uint64(1))
+}
+
+func (s *testReplicaCheckerSuite) TestReplaceOfflinePeer(c *C) {
+	s.cluster.LabelProperties = map[string][]*metapb.StoreLabel{
+		opt.RejectLeader: {{Key: "noleader", Value: "true"}},
+	}
+	peers := []*metapb.Peer{
+		{
+			Id:      4,
+			StoreId: 1,
+		},
+		{
+			Id:      5,
+			StoreId: 2,
+		},
+		{
+			Id:      6,
+			StoreId: 3,
+		},
+	}
+	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers}, peers[0])
+	s.cluster.PutRegion(r)
+	op := s.rc.Check(r)
+	c.Assert(op, NotNil)
+	c.Assert(op.Step(0).(operator.TransferLeader).ToStore, Equals, uint64(3))
+	c.Assert(op.Step(1).(operator.AddLearner).ToStore, Equals, uint64(4))
+	c.Assert(op.Step(2).(operator.PromoteLearner).ToStore, Equals, uint64(4))
+	c.Assert(op.Step(3).(operator.RemovePeer).FromStore, Equals, uint64(1))
 }

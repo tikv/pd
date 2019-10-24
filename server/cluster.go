@@ -334,7 +334,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		for _, item := range c.core.GetOverlaps(region) {
 			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
 				c.RUnlock()
-				return ErrRegionIsStale(region.GetMeta(), item)
+				return ErrRegionIsStale(region.GetMeta(), item.GetMeta())
 			}
 		}
 	}
@@ -441,19 +441,19 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		overlaps := c.core.PutRegion(region)
 		if c.storage != nil {
 			for _, item := range overlaps {
-				if err := c.storage.DeleteRegion(item); err != nil {
+				if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
 					log.Error("failed to delete region from storage",
-						zap.Uint64("region-id", item.GetId()),
-						zap.Stringer("region-meta", core.RegionToHexMeta(item)),
+						zap.Uint64("region-id", item.GetID()),
+						zap.Stringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
 						zap.Error(err))
 				}
 			}
 		}
 		for _, item := range overlaps {
 			if c.regionStats != nil {
-				c.regionStats.ClearDefunctRegion(item.GetId())
+				c.regionStats.ClearDefunctRegion(item.GetID())
 			}
-			c.labelLevelStats.ClearDefunctRegion(item.GetId(), c.GetLocationLabels())
+			c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.GetLocationLabels())
 		}
 
 		// Update related stores.
