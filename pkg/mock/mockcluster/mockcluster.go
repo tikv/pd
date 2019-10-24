@@ -66,6 +66,11 @@ func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 	mc.PutRegion(r)
 }
 
+// GetStoresStats gets stores statistics.
+func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
+	return mc.StoresStats
+}
+
 // GetStoreRegionCount gets region count with a given store.
 func (mc *Cluster) GetStoreRegionCount(storeID uint64) int {
 	return mc.Regions.GetStoreRegionCount(storeID)

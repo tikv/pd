@@ -107,6 +107,26 @@ func (s *StoresStats) GetStoreBytesRate(storeID uint64) (writeRate float64, read
 	return 0, 0
 }
 
+// GetStoreBytesWriteRate returns the bytes write stat of the specified store.
+func (s *StoresStats) GetStoreBytesWriteRate(storeID uint64) float64 {
+	s.RLock()
+	defer s.RUnlock()
+	if storeStat, ok := s.rollingStoresStats[storeID]; ok {
+		return storeStat.GetBytesWriteRate()
+	}
+	return 0
+}
+
+// GetStoreBytesReadRate returns the bytes write stat of the specified store.
+func (s *StoresStats) GetStoreBytesReadRate(storeID uint64) float64 {
+	s.RLock()
+	defer s.RUnlock()
+	if storeStat, ok := s.rollingStoresStats[storeID]; ok {
+		return storeStat.GetBytesReadRate()
+	}
+	return 0
+}
+
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
 func (s *StoresStats) GetStoresBytesWriteStat() map[uint64]uint64 {
 	s.RLock()
@@ -194,6 +214,20 @@ func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64)
 	r.RLock()
 	defer r.RUnlock()
 	return r.bytesWriteRate.Median(), r.bytesReadRate.Median()
+}
+
+// GetBytesWriteRate returns the bytes write rate and the bytes read rate.
+func (r *RollingStoreStats) GetBytesWriteRate() float64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.bytesWriteRate.Median()
+}
+
+// GetBytesReadRate returns the bytes write rate and the bytes read rate.
+func (r *RollingStoreStats) GetBytesReadRate() float64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.bytesReadRate.Median()
 }
 
 // GetKeysWriteRate returns the keys write rate.

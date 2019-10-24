@@ -76,6 +76,7 @@ type Cluster interface {
 	core.StoreSetController
 
 	statistics.RegionStatInformer
+	statistics.StoreStatInformer
 	Options
 
 	// get config methods
