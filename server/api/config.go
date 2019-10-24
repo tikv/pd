@@ -22,6 +22,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pkg/errors"
@@ -116,7 +117,7 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetScheduleConfig()
-	if err := readJSONRespondError(h.rd, w, r.Body, &config); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
 	}
 
@@ -133,7 +134,7 @@ func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetReplicationConfig()
-	if err := readJSONRespondError(h.rd, w, r.Body, &config); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
 	}
 
@@ -168,7 +169,7 @@ func (h *confHandler) SetNamespace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	config := h.svr.GetNamespaceConfig(name)
-	if err := readJSONRespondError(h.rd, w, r.Body, &config); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
 	}
 
@@ -201,7 +202,7 @@ func (h *confHandler) GetLabelProperty(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
-	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	var err error
@@ -226,17 +227,17 @@ func (h *confHandler) GetClusterVersion(w http.ResponseWriter, r *http.Request) 
 
 func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
-	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	version, ok := input["cluster-version"]
 	if !ok {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set cluster-version")))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set cluster-version")))
 		return
 	}
 	err := h.svr.SetClusterVersion(version)
 	if err != nil {
-		errorResp(h.rd, w, errcode.NewInternalErr(err))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInternalErr(err))
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, nil)

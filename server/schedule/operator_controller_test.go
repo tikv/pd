@@ -419,7 +419,6 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 	mc := checker.NewMergeChecker(tc, namespace.DefaultClassifier)
 	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
 
-	cfg.SplitMergeInterval = time.Hour
 	cfg.StoreBalanceRate = 60
 
 	regions[2] = regions[2].Clone(

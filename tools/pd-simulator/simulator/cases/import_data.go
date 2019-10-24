@@ -86,9 +86,9 @@ func newImportData() *Case {
 		leaderTotal := 0
 		peerTotal := 0
 		res := make([]*core.RegionInfo, 0, 100)
-		regions.ScanRangeWithIterator([]byte(table2), func(region *metapb.Region) bool {
-			if bytes.Compare(region.EndKey, []byte(table3)) < 0 {
-				res = append(res, regions.GetRegion(region.GetId()))
+		regions.ScanRangeWithIterator([]byte(table2), func(region *core.RegionInfo) bool {
+			if bytes.Compare(region.GetEndKey(), []byte(table3)) < 0 {
+				res = append(res, regions.GetRegion(region.GetID()))
 				return true
 			}
 			return false

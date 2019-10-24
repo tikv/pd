@@ -18,6 +18,8 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/statistics"
@@ -27,12 +29,12 @@ var _ = Suite(&testHotWriteRegionSchedulerSuite{})
 
 type testHotWriteRegionSchedulerSuite struct{}
 
-func (s *testHotWriteRegionSchedulerSuite) TestBalance(c *C) {
+func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	statistics.Denoising = false
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewOperatorController(nil, nil))
+	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5, 6  with region counts 3, 2, 2, 2, 0, 0.
@@ -136,10 +138,10 @@ var _ = Suite(&testHotReadRegionSchedulerSuite{})
 
 type testHotReadRegionSchedulerSuite struct{}
 
-func (s *testHotReadRegionSchedulerSuite) TestBalance(c *C) {
+func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewOperatorController(nil, nil))
+	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.

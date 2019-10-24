@@ -14,6 +14,8 @@
 package schedulers
 
 import (
+	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/pingcap/log"
@@ -61,8 +63,16 @@ func newBaseScheduler(opController *schedule.OperatorController) *baseScheduler 
 	return &baseScheduler{opController: opController}
 }
 
+func (s *baseScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "not implements")
+}
+
 func (s *baseScheduler) GetMinInterval() time.Duration {
 	return MinScheduleInterval
+}
+
+func (s *baseScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(nil)
 }
 
 func (s *baseScheduler) GetNextInterval(interval time.Duration) time.Duration {
