@@ -132,6 +132,11 @@ func (o *ScheduleOption) GetLocationLabels() []string {
 	return o.replication.GetLocationLabels()
 }
 
+// IsPlacementRulesEnabled returns if the placement rules is enabled.
+func (o *ScheduleOption) IsPlacementRulesEnabled() bool {
+	return o.replication.IsPlacementRulesEnabled()
+}
+
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
 func (o *ScheduleOption) GetMaxSnapshotCount() uint64 {
 	return o.Load().MaxSnapshotCount
@@ -519,6 +524,11 @@ func (r *Replication) GetLocationLabels() []string {
 // GetStrictlyMatchLabel returns whether check label strict.
 func (r *Replication) GetStrictlyMatchLabel() bool {
 	return r.Load().StrictlyMatchLabel
+}
+
+// IsPlacementRulesEnabled returns whether the feature is enabled.
+func (r *Replication) IsPlacementRulesEnabled() bool {
+	return r.Load().EnablePlacementRules
 }
 
 // namespaceOption is a wrapper to access the configuration safely.
