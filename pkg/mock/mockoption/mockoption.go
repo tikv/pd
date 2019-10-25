@@ -41,40 +41,48 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true
 	defaultLeaderScheduleStrategy      = "count"
+	defaultEnablePlacementRules        = false
 )
 
 // ScheduleOptions is a mock of ScheduleOptions
 // which implements Options interface
 type ScheduleOptions struct {
-	RegionScheduleLimit         uint64
-	LeaderScheduleLimit         uint64
-	ReplicaScheduleLimit        uint64
-	MergeScheduleLimit          uint64
-	HotRegionScheduleLimit      uint64
-	StoreBalanceRate            float64
-	MaxSnapshotCount            uint64
-	MaxPendingPeerCount         uint64
-	MaxMergeRegionSize          uint64
-	MaxMergeRegionKeys          uint64
-	SchedulerMaxWaitingOperator uint64
-	SplitMergeInterval          time.Duration
-	EnableOneWayMerge           bool
-	MaxStoreDownTime            time.Duration
-	MaxReplicas                 int
-	LocationLabels              []string
-	StrictlyMatchLabel          bool
-	HotRegionCacheHitsThreshold int
-	TolerantSizeRatio           float64
-	LowSpaceRatio               float64
-	HighSpaceRatio              float64
-	EnableRemoveDownReplica     bool
-	EnableReplaceOfflineReplica bool
-	EnableMakeUpReplica         bool
-	EnableRemoveExtraReplica    bool
-	EnableLocationReplacement   bool
-	EnableNamespaceRelocation   bool
-	LeaderScheduleStrategy      string
-	LabelProperties             map[string][]*metapb.StoreLabel
+	RegionScheduleLimit          uint64
+	LeaderScheduleLimit          uint64
+	ReplicaScheduleLimit         uint64
+	MergeScheduleLimit           uint64
+	HotRegionScheduleLimit       uint64
+	StoreBalanceRate             float64
+	MaxSnapshotCount             uint64
+	MaxPendingPeerCount          uint64
+	MaxMergeRegionSize           uint64
+	MaxMergeRegionKeys           uint64
+	SchedulerMaxWaitingOperator  uint64
+	SplitMergeInterval           time.Duration
+	EnableOneWayMerge            bool
+	MaxStoreDownTime             time.Duration
+	MaxReplicas                  int
+	LocationLabels               []string
+	StrictlyMatchLabel           bool
+	HotRegionCacheHitsThreshold  int
+	TolerantSizeRatio            float64
+	LowSpaceRatio                float64
+	HighSpaceRatio               float64
+	EnableRemoveDownReplica      bool
+	EnableReplaceOfflineReplica  bool
+	EnableMakeUpReplica          bool
+	EnableRemoveExtraReplica     bool
+	EnableLocationReplacement    bool
+	EnableNamespaceRelocation    bool
+	EnablePlacementRules         bool
+	DisableRemoveDownReplica     bool
+	DisableReplaceOfflineReplica bool
+	DisableMakeUpReplica         bool
+	DisableRemoveExtraReplica    bool
+	DisableLocationReplacement   bool
+	DisableNamespaceRelocation   bool
+	LeaderScheduleStrategy       string
+	LabelProperties              map[string][]*metapb.StoreLabel
 }
 
 // NewScheduleOptions creates a mock schedule option.
@@ -94,6 +102,7 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.StrictlyMatchLabel = defaultStrictlyMatchLabel
+	mso.EnablePlacementRules = defaultEnablePlacementRules
 	mso.HotRegionCacheHitsThreshold = defaultHotRegionCacheHitsThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
@@ -187,6 +196,11 @@ func (mso *ScheduleOptions) GetLocationLabels() []string {
 // GetStrictlyMatchLabel mocks method
 func (mso *ScheduleOptions) GetStrictlyMatchLabel() bool {
 	return mso.StrictlyMatchLabel
+}
+
+// IsPlacementRulesEnabled mocks method
+func (mso *ScheduleOptions) IsPlacementRulesEnabled() bool {
+	return mso.EnablePlacementRules
 }
 
 // GetHotRegionCacheHitsThreshold mocks method

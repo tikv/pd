@@ -41,6 +41,8 @@ var (
 
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
 	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	// ErrServerNotStarted is error info for server not started.
+	ErrServerNotStarted = errors.New("The server has not been started")
 	// ErrOperatorNotFound is error info for operator not found.
 	ErrOperatorNotFound = errors.New("operator not found")
 	// ErrAddOperator is error info for already have an operator when adding operator.
@@ -142,7 +144,7 @@ func (h *Handler) GetHotReadRegions() *statistics.StoreHotRegionInfos {
 }
 
 // GetHotBytesWriteStores gets all hot write stores stats.
-func (h *Handler) GetHotBytesWriteStores() map[uint64]uint64 {
+func (h *Handler) GetHotBytesWriteStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -151,7 +153,7 @@ func (h *Handler) GetHotBytesWriteStores() map[uint64]uint64 {
 }
 
 // GetHotBytesReadStores gets all hot write stores stats.
-func (h *Handler) GetHotBytesReadStores() map[uint64]uint64 {
+func (h *Handler) GetHotBytesReadStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -160,7 +162,7 @@ func (h *Handler) GetHotBytesReadStores() map[uint64]uint64 {
 }
 
 // GetHotKeysWriteStores gets all hot write stores stats.
-func (h *Handler) GetHotKeysWriteStores() map[uint64]uint64 {
+func (h *Handler) GetHotKeysWriteStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -169,7 +171,7 @@ func (h *Handler) GetHotKeysWriteStores() map[uint64]uint64 {
 }
 
 // GetHotKeysReadStores gets all hot write stores stats.
-func (h *Handler) GetHotKeysReadStores() map[uint64]uint64 {
+func (h *Handler) GetHotKeysReadStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -777,4 +779,13 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 		return nil, ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.EmptyRegion), nil
+}
+
+// ResetTS resets the ts with specified tso.
+func (h *Handler) ResetTS(ts uint64) error {
+	tsoServer := h.s.tso
+	if tsoServer == nil {
+		return ErrServerNotStarted
+	}
+	return tsoServer.ResetUserTimestamp(ts)
 }

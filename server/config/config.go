@@ -203,6 +203,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage    = true
+	defaultMaxResetTsGap       = 24 * time.Hour
 	defaultStrictlyMatchLabel  = false
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
@@ -836,15 +837,19 @@ type ReplicationConfig struct {
 	LocationLabels typeutil.StringSlice `toml:"location-labels,omitempty" json:"location-labels"`
 	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
 	StrictlyMatchLabel bool `toml:"strictly-match-label,omitempty" json:"strictly-match-label,string"`
+
+	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not uesd any more.
+	EnablePlacementRules bool // Keep it false before full feature get merged. `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
 	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{
-		MaxReplicas:        c.MaxReplicas,
-		LocationLabels:     locationLabels,
-		StrictlyMatchLabel: c.StrictlyMatchLabel,
+		MaxReplicas:          c.MaxReplicas,
+		LocationLabels:       locationLabels,
+		StrictlyMatchLabel:   c.StrictlyMatchLabel,
+		EnablePlacementRules: c.EnablePlacementRules,
 	}
 }
 
@@ -924,11 +929,16 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
+	// MaxResetTSGap is the max gap to reset the tso.
+	MaxResetTSGap time.Duration `toml:"max-reset-ts-gap" json:"max-reset-ts-gap"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
+	}
+	if !meta.IsDefined("max-reset-ts-gap") {
+		c.MaxResetTSGap = defaultMaxResetTsGap
 	}
 	return nil
 }

@@ -17,11 +17,13 @@ import (
 	"path"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/tsoutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/member"
@@ -40,23 +42,26 @@ const (
 // TimestampOracle is used to maintain the logic of tso.
 type TimestampOracle struct {
 	// For tso, set after pd becomes leader.
-	ts            atomic.Value
+	ts            unsafe.Pointer
 	lastSavedTime time.Time
 	lease         *member.LeaderLease
 
-	rootPath     string
-	member       string
-	client       *clientv3.Client
-	saveInterval time.Duration
+	rootPath      string
+	member        string
+	client        *clientv3.Client
+	saveInterval  time.Duration
+	maxResetTsGap func() time.Duration
 }
 
 // NewTimestampOracle creates a new TimestampOracle.
-func NewTimestampOracle(client *clientv3.Client, rootPath string, member string, saveInterval time.Duration) *TimestampOracle {
+// TODO: remove saveInterval
+func NewTimestampOracle(client *clientv3.Client, rootPath string, member string, saveInterval time.Duration, maxResetTsGap func() time.Duration) *TimestampOracle {
 	return &TimestampOracle{
-		rootPath:     rootPath,
-		client:       client,
-		saveInterval: saveInterval,
-		member:       member,
+		rootPath:      rootPath,
+		client:        client,
+		saveInterval:  saveInterval,
+		maxResetTsGap: maxResetTsGap,
+		member:        member,
 	}
 }
 
@@ -124,6 +129,7 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 
 	save := next.Add(t.saveInterval)
 	if err = t.saveTimestamp(save); err != nil {
+		tsoCounter.WithLabelValues("err_save_sync_ts").Inc()
 		return err
 	}
 
@@ -134,8 +140,42 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 		physical: next,
 	}
 	t.lease = lease
-	t.ts.Store(current)
+	atomic.StorePointer(&t.ts, unsafe.Pointer(current))
 
+	return nil
+}
+
+// ResetUserTimestamp update the physical part with specified tso.
+func (t *TimestampOracle) ResetUserTimestamp(tso uint64) error {
+	if t.lease == nil || t.lease.IsExpired() {
+		tsoCounter.WithLabelValues("err_lease_reset_ts").Inc()
+		return errors.New("Setup timestamp failed, lease expired")
+	}
+	physical, _ := tsoutil.ParseTS(tso)
+	next := physical.Add(time.Millisecond)
+	prev := (*atomicObject)(atomic.LoadPointer(&t.ts))
+
+	// do not update
+	if typeutil.SubTimeByWallClock(next, prev.physical) <= 3*updateTimestampGuard {
+		tsoCounter.WithLabelValues("err_reset_small_ts").Inc()
+		return errors.New("the specified ts too small than now")
+	}
+
+	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.maxResetTsGap() {
+		tsoCounter.WithLabelValues("err_reset_large_ts").Inc()
+		return errors.New("the specified ts too large than now")
+	}
+
+	save := next.Add(t.saveInterval)
+	if err := t.saveTimestamp(save); err != nil {
+		tsoCounter.WithLabelValues("err_save_reset_ts").Inc()
+		return err
+	}
+	update := &atomicObject{
+		physical: next,
+	}
+	atomic.CompareAndSwapPointer(&t.ts, unsafe.Pointer(prev), unsafe.Pointer(update))
+	tsoCounter.WithLabelValues("reset_tso_ok").Inc()
 	return nil
 }
 
@@ -151,7 +191,7 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 // 2. The saved time is monotonically increasing.
 // 3. The physical time is always less than the saved timestamp.
 func (t *TimestampOracle) UpdateTimestamp() error {
-	prev := t.ts.Load().(*atomicObject)
+	prev := (*atomicObject)(atomic.LoadPointer(&t.ts))
 	now := time.Now()
 
 	failpoint.Inject("fallBackUpdate", func() {
@@ -191,6 +231,7 @@ func (t *TimestampOracle) UpdateTimestamp() error {
 	if typeutil.SubTimeByWallClock(t.lastSavedTime, next) <= updateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		if err := t.saveTimestamp(save); err != nil {
+			tsoCounter.WithLabelValues("err_save_update_ts").Inc()
 			return err
 		}
 	}
@@ -200,7 +241,7 @@ func (t *TimestampOracle) UpdateTimestamp() error {
 		logical:  0,
 	}
 
-	t.ts.Store(current)
+	atomic.StorePointer(&t.ts, unsafe.Pointer(current))
 	tsoGauge.WithLabelValues("tso").Set(float64(next.Unix()))
 
 	return nil
@@ -208,9 +249,10 @@ func (t *TimestampOracle) UpdateTimestamp() error {
 
 // ResetTimestamp is used to reset the timestamp.
 func (t *TimestampOracle) ResetTimestamp() {
-	t.ts.Store(&atomicObject{
+	zero := &atomicObject{
 		physical: typeutil.ZeroTime,
-	})
+	}
+	atomic.StorePointer(&t.ts, unsafe.Pointer(zero))
 }
 
 const maxRetryCount = 100
@@ -224,8 +266,8 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 	}
 
 	for i := 0; i < maxRetryCount; i++ {
-		current, ok := t.ts.Load().(*atomicObject)
-		if !ok || current.physical == typeutil.ZeroTime {
+		current := (*atomicObject)(atomic.LoadPointer(&t.ts))
+		if current.physical == typeutil.ZeroTime {
 			log.Error("we haven't synced timestamp ok, wait and retry", zap.Int("retry-count", i))
 			time.Sleep(200 * time.Millisecond)
 			continue
