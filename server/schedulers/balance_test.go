@@ -25,12 +25,12 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server/checker"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/statistics"
 )
 
 func newTestReplication(mso *mockoption.ScheduleOptions, maxReplicas int, locationLabels ...string) {
@@ -47,6 +47,7 @@ type testBalanceSpeedCase struct {
 	targetCount    uint64
 	regionSize     int64
 	expectedResult bool
+	kind           core.ScheduleStrategy
 }
 
 func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
@@ -55,27 +56,52 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		// size = count * 10
 
 		// target size is zero
-		{2, 0, 1, true},
-		{2, 0, 10, false},
+		{2, 0, 1, true, core.BySize},
+		{2, 0, 10, false, core.BySize},
 		// all in high space stage
-		{10, 5, 1, true},
-		{10, 5, 20, false},
-		{10, 10, 1, false},
-		{10, 10, 20, false},
+		{10, 5, 1, true, core.BySize},
+		{10, 5, 20, false, core.BySize},
+		{10, 10, 1, false, core.BySize},
+		{10, 10, 20, false, core.BySize},
 		// all in transition stage
-		{70, 50, 1, true},
-		{70, 50, 50, false},
-		{70, 70, 1, false},
+		{70, 50, 1, true, core.BySize},
+		{70, 50, 50, false, core.BySize},
+		{70, 70, 1, false, core.BySize},
 		// all in low space stage
-		{90, 80, 1, true},
-		{90, 80, 50, false},
-		{90, 90, 1, false},
+		{90, 80, 1, true, core.BySize},
+		{90, 80, 50, false, core.BySize},
+		{90, 90, 1, false, core.BySize},
 		// one in high space stage, other in transition stage
-		{65, 55, 5, true},
-		{65, 50, 50, false},
+		{65, 55, 5, true, core.BySize},
+		{65, 50, 50, false, core.BySize},
 		// one in transition space stage, other in low space stage
-		{80, 70, 5, true},
-		{80, 70, 50, false},
+		{80, 70, 5, true, core.BySize},
+		{80, 70, 50, false, core.BySize},
+
+		// default leader tolerant ratio is 5, when schedule by count
+		// target size is zero
+		{2, 0, 1, false, core.ByCount},
+		{2, 0, 10, false, core.ByCount},
+		// all in high space stage
+		{10, 5, 1, true, core.ByCount},
+		{10, 5, 20, true, core.ByCount},
+		{10, 6, 20, false, core.ByCount},
+		{10, 10, 1, false, core.ByCount},
+		{10, 10, 20, false, core.ByCount},
+		// all in transition stage
+		{70, 50, 1, true, core.ByCount},
+		{70, 50, 50, true, core.ByCount},
+		{70, 70, 1, false, core.ByCount},
+		// all in low space stage
+		{90, 80, 1, true, core.ByCount},
+		{90, 80, 50, true, core.ByCount},
+		{90, 90, 1, false, core.ByCount},
+		// one in high space stage, other in transition stage
+		{65, 55, 5, true, core.ByCount},
+		{65, 50, 50, true, core.ByCount},
+		// one in transition space stage, other in low space stage
+		{80, 70, 5, true, core.ByCount},
+		{80, 70, 50, true, core.ByCount},
 	}
 
 	opt := mockoption.NewScheduleOptions()
@@ -90,17 +116,22 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		target := tc.GetStore(2)
 		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 		tc.PutRegion(region)
-		c.Assert(shouldBalance(tc, source, target, region, core.LeaderKind, schedule.NewUnfinishedOpInfluence(nil, tc)), Equals, t.expectedResult)
+		tc.LeaderScheduleStrategy = t.kind.String()
+		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
+		c.Assert(shouldBalance(tc, source, target, region, kind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
-		tc.AddRegionStore(1, int(t.sourceCount))
-		tc.AddRegionStore(2, int(t.targetCount))
-		source := tc.GetStore(1)
-		target := tc.GetStore(2)
-		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
-		tc.PutRegion(region)
-		c.Assert(shouldBalance(tc, source, target, region, core.RegionKind, schedule.NewUnfinishedOpInfluence(nil, tc)), Equals, t.expectedResult)
+		if t.kind.String() == core.BySize.String() {
+			tc.AddRegionStore(1, int(t.sourceCount))
+			tc.AddRegionStore(2, int(t.targetCount))
+			source := tc.GetStore(1)
+			target := tc.GetStore(2)
+			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
+			tc.PutRegion(region)
+			kind := core.NewScheduleKind(core.RegionKind, t.kind)
+			c.Assert(shouldBalance(tc, source, target, region, kind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
+		}
 	}
 }
 
@@ -131,7 +162,7 @@ func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	s.tc = mockcluster.NewCluster(opt)
 	s.oc = schedule.NewOperatorController(nil, nil)
-	lb, err := schedule.CreateScheduler("balance-leader", s.oc)
+	lb, err := schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	s.lb = lb
 }
@@ -174,6 +205,64 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	c.Check(s.schedule(), NotNil)
 }
 
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderScheduleStrategy(c *C) {
+	// Stores:			1    	2    	3    	4
+	// Leader Count:		10    	10    	10    	10
+	// Leader Size :		10000   100    	100    	100
+	// Region1:			L    	F   	F    	F
+	s.tc.AddLeaderStore(1, 10, 10000)
+	s.tc.AddLeaderStore(2, 10, 100)
+	s.tc.AddLeaderStore(3, 10, 100)
+	s.tc.AddLeaderStore(4, 10, 100)
+	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
+	c.Assert(s.tc.LeaderScheduleStrategy, Equals, core.ByCount.String()) // default by count
+	c.Check(s.schedule(), IsNil)
+	s.tc.LeaderScheduleStrategy = core.BySize.String()
+	c.Check(s.schedule(), NotNil)
+}
+
+func (s *testBalanceSpeedSuite) TestTolerantRatio(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	// create a region to control average region size.
+	tc.AddLeaderRegion(1, 1, 2)
+	regionSize := int64(96 * 1024)
+	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
+
+	tc.TolerantSizeRatio = 0
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Strategy: core.ByCount}), Equals, int64(leaderTolerantSizeRatio))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Strategy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Strategy: core.ByCount}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Strategy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+
+	tc.TolerantSizeRatio = 10
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Strategy: core.ByCount}), Equals, int64(tc.TolerantSizeRatio))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Strategy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Strategy: core.ByCount}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Strategy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+}
+
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
+	// default leader tolerant ratio is 5, when schedule by count
+	// Stores:			1		2    	3    	4
+	// Leader Count:		14->15		10    	10    	10
+	// Leader Size :		100		100    	100    	100
+	// Region1:			L		F   	F    	F
+	s.tc.AddLeaderStore(1, 14, 100)
+	s.tc.AddLeaderStore(2, 10, 100)
+	s.tc.AddLeaderStore(3, 10, 100)
+	s.tc.AddLeaderStore(4, 10, 100)
+	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
+	c.Assert(s.tc.LeaderScheduleStrategy, Equals, core.ByCount.String()) // default by count
+	c.Check(s.schedule(), IsNil)
+	c.Assert(s.tc.GetStore(1).GetLeaderCount(), Equals, 14)
+	s.tc.AddLeaderStore(1, 15, 100)
+	c.Assert(s.tc.GetStore(1).GetLeaderCount(), Equals, 15)
+	c.Check(s.schedule(), NotNil)
+	s.tc.TolerantSizeRatio = 6 // (15-10)<6
+	c.Check(s.schedule(), IsNil)
+}
+
 func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   14
@@ -189,6 +278,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	// After considering the scheduled operator, leaders of store1 and store4 are 8
 	// and 13 respectively. As the `TolerantSizeRatio` is 2.5, `shouldBalance`
 	// returns false when leader difference is not greater than 5.
+	c.Assert(s.tc.LeaderScheduleStrategy, Equals, core.ByCount.String()) // default by count
+	c.Check(s.schedule(), NotNil)
+	s.tc.LeaderScheduleStrategy = core.BySize.String()
 	c.Check(s.schedule(), IsNil)
 
 	// Stores:     1    2    3    4
@@ -328,7 +420,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(nil, nil)
 
-	sb, err := schedule.CreateScheduler("balance-region", oc)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	opt.SetMaxReplicas(1)
@@ -363,7 +455,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", oc)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
@@ -432,7 +524,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 
 	newTestReplication(opt, 5, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", oc)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	tc.AddLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -487,7 +579,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 
 	opt.TolerantSizeRatio = 1
 
-	sb, err := schedule.CreateScheduler("balance-region", oc)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	tc.AddRegionStore(1, 11)
@@ -527,7 +619,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(nil, nil)
 
-	sb, err := schedule.CreateScheduler("balance-region", oc)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	opt.SetMaxReplicas(1)
 
@@ -554,7 +646,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", oc)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
@@ -911,7 +1003,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	hb := mockhbstream.NewHeartbeatStreams(tc.ID)
 	oc := schedule.NewOperatorController(tc, hb)
 
-	mb, err := schedule.CreateScheduler("random-merge", oc)
+	mb, err := schedule.CreateScheduler("random-merge", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	tc.AddRegionStore(1, 4)
@@ -928,258 +1020,6 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 
 	oc.AddWaitingOperator(ops...)
 	c.Assert(mb.IsScheduleAllowed(tc), IsFalse)
-}
-
-var _ = Suite(&testBalanceHotWriteRegionSchedulerSuite{})
-
-type testBalanceHotWriteRegionSchedulerSuite struct{}
-
-func (s *testBalanceHotWriteRegionSchedulerSuite) TestBalance(c *C) {
-	statistics.Denoising = false
-	opt := mockoption.NewScheduleOptions()
-	newTestReplication(opt, 3, "zone", "host")
-	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewOperatorController(nil, nil))
-	c.Assert(err, IsNil)
-
-	// Add stores 1, 2, 3, 4, 5, 6  with region counts 3, 2, 2, 2, 0, 0.
-
-	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
-	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "host": "h2"})
-	tc.AddLabelsStore(3, 2, map[string]string{"zone": "z3", "host": "h3"})
-	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z4", "host": "h4"})
-	tc.AddLabelsStore(5, 0, map[string]string{"zone": "z2", "host": "h5"})
-	tc.AddLabelsStore(6, 0, map[string]string{"zone": "z5", "host": "h6"})
-	tc.AddLabelsStore(7, 0, map[string]string{"zone": "z5", "host": "h7"})
-	tc.SetStoreDown(7)
-
-	// Report store written bytes.
-	tc.UpdateStorageWrittenBytes(1, 75*1024*1024)
-	tc.UpdateStorageWrittenBytes(2, 45*1024*1024)
-	tc.UpdateStorageWrittenBytes(3, 45*1024*1024)
-	tc.UpdateStorageWrittenBytes(4, 60*1024*1024)
-	tc.UpdateStorageWrittenBytes(5, 0)
-	tc.UpdateStorageWrittenBytes(6, 0)
-
-	// Region 1, 2 and 3 are hot regions.
-	//| region_id | leader_store | follower_store | follower_store | written_bytes |
-	//|-----------|--------------|----------------|----------------|---------------|
-	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       1      |        3       |       4        |      512KB    |
-	//|     3     |       1      |        2       |       4        |      512KB    |
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 3, 4)
-	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 4)
-	opt.HotRegionCacheHitsThreshold = 0
-
-	// Will transfer a hot region from store 1, because the total count of peers
-	// which is hot for store 1 is more larger than other stores.
-	op := hb.Schedule(tc)
-	c.Assert(op, NotNil)
-	switch op[0].Len() {
-	case 1:
-		// balance by leader selected
-		testutil.CheckTransferLeaderFrom(c, op[0], operator.OpHotRegion, 1)
-	case 4:
-		// balance by peer selected
-		if op[0].RegionID() == 2 {
-			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-			testutil.CheckTransferPeerWithLeaderTransferFrom(c, op[0], operator.OpHotRegion, 1)
-		} else {
-			// peer in store 1 of the region 1,2 can only transfer to store 6
-			testutil.CheckTransferPeerWithLeaderTransfer(c, op[0], operator.OpHotRegion, 1, 6)
-		}
-	}
-
-	// hot region scheduler is restricted by `hot-region-schedule-limit`.
-	opt.HotRegionScheduleLimit = 0
-	c.Assert(hb.Schedule(tc), HasLen, 0)
-	// hot region scheduler is not affect by `balance-region-schedule-limit`.
-	opt.HotRegionScheduleLimit = mockoption.NewScheduleOptions().HotRegionScheduleLimit
-	opt.RegionScheduleLimit = 0
-	c.Assert(hb.Schedule(tc), HasLen, 1)
-	// Always produce operator
-	c.Assert(hb.Schedule(tc), HasLen, 1)
-	c.Assert(hb.Schedule(tc), HasLen, 1)
-
-	//| region_id | leader_store | follower_store | follower_store | written_bytes |
-	//|-----------|--------------|----------------|----------------|---------------|
-	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       1      |        2       |       3        |      512KB    |
-	//|     3     |       6      |        1       |       4        |      512KB    |
-	//|     4     |       5      |        6       |       4        |      512KB    |
-	//|     5     |       3      |        4       |       5        |      512KB    |
-	tc.UpdateStorageWrittenBytes(1, 60*1024*1024)
-	tc.UpdateStorageWrittenBytes(2, 30*1024*1024)
-	tc.UpdateStorageWrittenBytes(3, 60*1024*1024)
-	tc.UpdateStorageWrittenBytes(4, 30*1024*1024)
-	tc.UpdateStorageWrittenBytes(5, 0*1024*1024)
-	tc.UpdateStorageWrittenBytes(6, 30*1024*1024)
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(3, 6, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 4)
-	tc.AddLeaderRegionWithWriteInfo(4, 5, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 6, 4)
-	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 4, 5)
-	// We can find that the leader of all hot regions are on store 1,
-	// so one of the leader will transfer to another store.
-	op = hb.Schedule(tc)
-	if op != nil {
-		testutil.CheckTransferLeaderFrom(c, op[0], operator.OpHotRegion, 1)
-	}
-
-	// hot region scheduler is restricted by schedule limit.
-	opt.LeaderScheduleLimit = 0
-	c.Assert(hb.Schedule(tc), HasLen, 0)
-	opt.LeaderScheduleLimit = mockoption.NewScheduleOptions().LeaderScheduleLimit
-
-	// Should not panic if region not found.
-	for i := uint64(1); i <= 3; i++ {
-		tc.Regions.RemoveRegion(tc.GetRegion(i))
-	}
-	hb.Schedule(tc)
-}
-
-var _ = Suite(&testBalanceHotReadRegionSchedulerSuite{})
-
-type testBalanceHotReadRegionSchedulerSuite struct{}
-
-func (s *testBalanceHotReadRegionSchedulerSuite) TestBalance(c *C) {
-	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewOperatorController(nil, nil))
-	c.Assert(err, IsNil)
-
-	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
-	tc.AddRegionStore(1, 3)
-	tc.AddRegionStore(2, 2)
-	tc.AddRegionStore(3, 2)
-	tc.AddRegionStore(4, 2)
-	tc.AddRegionStore(5, 0)
-
-	// Report store read bytes.
-	tc.UpdateStorageReadBytes(1, 75*1024*1024)
-	tc.UpdateStorageReadBytes(2, 45*1024*1024)
-	tc.UpdateStorageReadBytes(3, 45*1024*1024)
-	tc.UpdateStorageReadBytes(4, 60*1024*1024)
-	tc.UpdateStorageReadBytes(5, 0)
-
-	// Region 1, 2 and 3 are hot regions.
-	//| region_id | leader_store | follower_store | follower_store |   read_bytes  |
-	//|-----------|--------------|----------------|----------------|---------------|
-	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       2      |        1       |       3        |      512KB    |
-	//|     3     |       1      |        2       |       3        |      512KB    |
-	tc.AddLeaderRegionWithReadInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithReadInfo(2, 2, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 3)
-	tc.AddLeaderRegionWithReadInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	// lower than hot read flow rate, but higher than write flow rate
-	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	opt.HotRegionCacheHitsThreshold = 0
-	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
-	c.Assert(tc.IsRegionHot(tc.GetRegion(11)), IsFalse)
-	// check randomly pick hot region
-	r := tc.RandHotRegionFromStore(2, statistics.ReadFlow)
-	c.Assert(r, NotNil)
-	c.Assert(r.GetID(), Equals, uint64(2))
-	// check hot items
-	stats := tc.HotCache.RegionStats(statistics.ReadFlow)
-	c.Assert(len(stats), Equals, 2)
-	for _, ss := range stats {
-		for _, s := range ss {
-			c.Assert(s.BytesRate, Equals, uint64(512*1024))
-		}
-	}
-	// Will transfer a hot region leader from store 1 to store 3, because the total count of peers
-	// which is hot for store 1 is more larger than other stores.
-	testutil.CheckTransferLeader(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 3)
-	// assume handle the operator
-	tc.AddLeaderRegionWithReadInfo(3, 3, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 2)
-
-	// After transfer a hot region leader from store 1 to store 3
-	// the tree region leader will be evenly distributed in three stores
-	tc.UpdateStorageReadBytes(1, 60*1024*1024)
-	tc.UpdateStorageReadBytes(2, 30*1024*1024)
-	tc.UpdateStorageReadBytes(3, 60*1024*1024)
-	tc.UpdateStorageReadBytes(4, 30*1024*1024)
-	tc.UpdateStorageReadBytes(5, 30*1024*1024)
-	tc.AddLeaderRegionWithReadInfo(4, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithReadInfo(5, 4, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 5)
-
-	// Now appear two read hot region in store 1 and 4
-	// We will Transfer peer from 1 to 5
-	testutil.CheckTransferPeerWithLeaderTransfer(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 5)
-
-	// Should not panic if region not found.
-	for i := uint64(1); i <= 3; i++ {
-		tc.Regions.RemoveRegion(tc.GetRegion(i))
-	}
-	hb.Schedule(tc)
-}
-
-var _ = Suite(&testBalanceHotCacheSuite{})
-
-type testBalanceHotCacheSuite struct{}
-
-func (s *testBalanceHotCacheSuite) TestUpdateCache(c *C) {
-	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
-
-	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
-	tc.AddRegionStore(1, 3)
-	tc.AddRegionStore(2, 2)
-	tc.AddRegionStore(3, 2)
-	tc.AddRegionStore(4, 2)
-	tc.AddRegionStore(5, 0)
-
-	// Report store read bytes.
-	tc.UpdateStorageReadBytes(1, 75*1024*1024)
-	tc.UpdateStorageReadBytes(2, 45*1024*1024)
-	tc.UpdateStorageReadBytes(3, 45*1024*1024)
-	tc.UpdateStorageReadBytes(4, 60*1024*1024)
-	tc.UpdateStorageReadBytes(5, 0)
-
-	/// For read flow
-	tc.AddLeaderRegionWithReadInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithReadInfo(2, 2, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 3)
-	tc.AddLeaderRegionWithReadInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	// lower than hot read flow rate, but higher than write flow rate
-	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	opt.HotRegionCacheHitsThreshold = 0
-	stats := tc.RegionStats(statistics.ReadFlow)
-	c.Assert(len(stats[1]), Equals, 2)
-	c.Assert(len(stats[2]), Equals, 1)
-	c.Assert(len(stats[3]), Equals, 0)
-
-	tc.AddLeaderRegionWithReadInfo(3, 2, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithReadInfo(11, 1, 24*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	stats = tc.RegionStats(statistics.ReadFlow)
-
-	c.Assert(len(stats[1]), Equals, 1)
-	c.Assert(len(stats[2]), Equals, 2)
-	c.Assert(len(stats[3]), Equals, 0)
-
-	// For write flow
-	tc.UpdateStorageWrittenBytes(1, 60*1024*1024)
-	tc.UpdateStorageWrittenBytes(2, 30*1024*1024)
-	tc.UpdateStorageWrittenBytes(3, 60*1024*1024)
-	tc.UpdateStorageWrittenBytes(4, 30*1024*1024)
-	tc.UpdateStorageWrittenBytes(5, 0*1024*1024)
-	tc.AddLeaderRegionWithWriteInfo(4, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(5, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(6, 1, 12*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-
-	stats = tc.RegionStats(statistics.WriteFlow)
-	c.Assert(len(stats[1]), Equals, 2)
-	c.Assert(len(stats[2]), Equals, 2)
-	c.Assert(len(stats[3]), Equals, 2)
-
-	tc.AddLeaderRegionWithWriteInfo(5, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 5)
-	stats = tc.RegionStats(statistics.WriteFlow)
-
-	c.Assert(len(stats[1]), Equals, 2)
-	c.Assert(len(stats[2]), Equals, 2)
-	c.Assert(len(stats[3]), Equals, 1)
-	c.Assert(len(stats[5]), Equals, 1)
 }
 
 var _ = Suite(&testScatterRangeLeaderSuite{})
@@ -1234,7 +1074,8 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		tc.UpdateStoreStatus(uint64(i))
 	}
 	oc := schedule.NewOperatorController(nil, nil)
-	hb, err := schedule.CreateScheduler("scatter-range", oc, "s_00", "s_50", "t")
+
+	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_50", "t"}))
 	c.Assert(err, IsNil)
 	limit := 0
 	for {
@@ -1254,6 +1095,32 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 		regionCount := tc.Regions.GetStoreRegionCount(uint64(i))
 		c.Check(regionCount, LessEqual, 32)
 	}
+}
+
+func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	oc := schedule.NewOperatorController(nil, nil)
+	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_50", "t"}))
+	sche := hb.(*scatterRangeScheduler)
+	c.Assert(err, IsNil)
+	ch := make(chan struct{})
+	args := []string{"test", "s_00", "s_99"}
+	go func() {
+		for {
+			select {
+			case <-ch:
+				break
+			default:
+			}
+			sche.config.BuildWithArgs(args)
+			c.Assert(sche.config.Persist(), IsNil)
+		}
+	}()
+	for i := 0; i < 1000; i++ {
+		sche.Schedule(tc)
+	}
+	ch <- struct{}{}
 }
 
 func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
@@ -1306,7 +1173,8 @@ func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 	}
 
 	oc := schedule.NewOperatorController(nil, nil)
-	hb := newScatterRangeScheduler(oc, []string{"s_00", "s_09", "t"})
+	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_09", "t"}))
+	c.Assert(err, IsNil)
 
 	limit := 0
 	for {

@@ -20,11 +20,17 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 )
 
 func init() {
-	schedule.RegisterScheduler("random-merge", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterSliceDecoderBuilder("random-merge", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
+	})
+	schedule.RegisterScheduler("random-merge", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newRandomMergeScheduler(opController), nil
 	})
 }
@@ -59,11 +65,11 @@ func (s *randomMergeScheduler) GetType() string {
 	return "random-merge"
 }
 
-func (s *randomMergeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *randomMergeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpMerge) < cluster.GetMergeScheduleLimit()
 }
 
-func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	stores := cluster.GetStores()

@@ -40,8 +40,6 @@ func (s *operatorTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *operatorTestSuite) TestOperator(c *C) {
-	c.Parallel()
-
 	var err error
 	var t time.Time
 	t = t.Add(time.Hour)

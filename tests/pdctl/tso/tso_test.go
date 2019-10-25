@@ -37,7 +37,6 @@ func (s *tsoTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *tsoTestSuite) TestTSO(c *C) {
-	c.Parallel()
 	cmd := pdctl.InitCommand()
 
 	const (

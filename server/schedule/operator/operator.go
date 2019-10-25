@@ -79,11 +79,18 @@ type StoreInfluence struct {
 	StepCost    int64
 }
 
-// ResourceSize returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
-	switch kind {
+// ResourceProperty returns delta size of leader/region by influence.
+func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
+	switch kind.Resource {
 	case core.LeaderKind:
-		return s.LeaderSize
+		switch kind.Strategy {
+		case core.ByCount:
+			return s.LeaderCount
+		case core.BySize:
+			return s.LeaderSize
+		default:
+			return 0
+		}
 	case core.RegionKind:
 		return s.RegionSize
 	default:
@@ -890,6 +897,20 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...), nil
 }
 
+// CreateOfflinePeerOperator creates an operator that replaces an old peer with a new peer when offline a store.
+func CreateOfflinePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
+	k, steps, err := transferLeaderStep(cluster, region, oldStore, append(getRegionFollowerIDs(region)))
+	if err != nil {
+		return nil, err
+	}
+	kind |= k
+	st := CreateAddPeerSteps(newStore, peerID)
+	steps = append(steps, st...)
+	steps = append(steps, RemovePeer{FromStore: oldStore})
+	brief := fmt.Sprintf("mv peer: store %v to %v", oldStore, newStore)
+	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, steps...), nil
+}
+
 // CreateMoveLeaderOperator creates an operator that replaces an old leader with a new leader.
 func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
 	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, []uint64{newStore})
@@ -925,15 +946,24 @@ func getRegionFollowerIDs(region *core.RegionInfo) []uint64 {
 
 // removePeerSteps returns the steps to safely remove a peer. It prevents removing leader by transfer its leadership first.
 func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64, followerIDs []uint64) (kind OpKind, steps []OpStep, err error) {
+	kind, steps, err = transferLeaderStep(cluster, region, storeID, followerIDs)
+	if err != nil {
+		return
+	}
+
+	steps = append(steps, RemovePeer{FromStore: storeID})
+	kind |= OpRegion
+	return
+}
+
+func transferLeaderStep(cluster Cluster, region *core.RegionInfo, storeID uint64, followerIDs []uint64) (kind OpKind, steps []OpStep, err error) {
 	if region.GetLeader() != nil && region.GetLeader().GetStoreId() == storeID {
 		kind, steps, err = transferLeaderToSuitableSteps(cluster, storeID, followerIDs)
 		if err != nil {
-			log.Debug("failed to create remove peer operator", zap.Uint64("region-id", region.GetID()), zap.Error(err))
+			log.Debug("failed to create transfer leader step", zap.Uint64("region-id", region.GetID()), zap.Error(err))
 			return
 		}
 	}
-	steps = append(steps, RemovePeer{FromStore: storeID})
-	kind |= OpRegion
 	return
 }
 

@@ -13,7 +13,11 @@
 
 package statistics
 
-import "time"
+import (
+	"time"
+
+	"github.com/pingcap/pd/server/core"
+)
 
 // ScheduleOptions is an interface to access configurations.
 // TODO: merge the Options to schedule.Options
@@ -37,6 +41,7 @@ type ScheduleOptions interface {
 	GetMaxPendingPeerCount() uint64
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
+	GetLeaderScheduleStrategy() core.ScheduleStrategy
 
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool

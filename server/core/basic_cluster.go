@@ -137,11 +137,11 @@ func (bc *BasicCluster) UnblockStore(storeID uint64) {
 	bc.Stores.UnblockStore(storeID)
 }
 
-// AttachOverloadStatus attaches the overload status to a store.
-func (bc *BasicCluster) AttachOverloadStatus(storeID uint64, f func() bool) {
+// AttachAvailableFunc attaches an available function to a specific store.
+func (bc *BasicCluster) AttachAvailableFunc(storeID uint64, f func() bool) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.AttachOverloadStatus(storeID, f)
+	bc.Stores.AttachAvailableFunc(storeID, f)
 }
 
 // UpdateStoreStatus updates the information of the store.
@@ -257,7 +257,7 @@ func (bc *BasicCluster) TakeStore(storeID uint64) *StoreInfo {
 }
 
 // PutRegion put a region.
-func (bc *BasicCluster) PutRegion(region *RegionInfo) []*metapb.Region {
+func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	bc.Lock()
 	defer bc.Unlock()
 	return bc.Regions.SetRegion(region)
@@ -293,7 +293,7 @@ func (bc *BasicCluster) ScanRange(startKey, endKey []byte, limit int) []*RegionI
 }
 
 // GetOverlaps returns the regions which are overlapped with the specified region range.
-func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*metapb.Region {
+func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Regions.GetOverlaps(region)
@@ -333,5 +333,5 @@ type StoreSetController interface {
 	BlockStore(id uint64) error
 	UnblockStore(id uint64)
 
-	AttachOverloadStatus(id uint64, f func() bool)
+	AttachAvailableFunc(id uint64, f func() bool)
 }

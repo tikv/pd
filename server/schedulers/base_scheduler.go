@@ -14,10 +14,13 @@
 package schedulers
 
 import (
+	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/opt"
 )
 
 // options for interval of schedulers
@@ -60,14 +63,22 @@ func newBaseScheduler(opController *schedule.OperatorController) *baseScheduler 
 	return &baseScheduler{opController: opController}
 }
 
+func (s *baseScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "not implements")
+}
+
 func (s *baseScheduler) GetMinInterval() time.Duration {
 	return MinScheduleInterval
+}
+
+func (s *baseScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(nil)
 }
 
 func (s *baseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
 }
 
-func (s *baseScheduler) Prepare(cluster schedule.Cluster) error { return nil }
+func (s *baseScheduler) Prepare(cluster opt.Cluster) error { return nil }
 
-func (s *baseScheduler) Cleanup(cluster schedule.Cluster) {}
+func (s *baseScheduler) Cleanup(cluster opt.Cluster) {}

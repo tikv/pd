@@ -20,35 +20,40 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"go.uber.org/zap"
 )
 
 const replicaCheckerName = "replica-checker"
 
+const (
+	offlineStatus = "offline"
+	downStatus    = "down"
+)
+
 // ReplicaChecker ensures region has the best replicas.
 // Including the following:
 // Replica number management.
-// Unhealth replica management, mainly used for disaster recovery of TiKV.
+// Unhealthy replica management, mainly used for disaster recovery of TiKV.
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
 	name       string
-	cluster    schedule.Cluster
+	cluster    opt.Cluster
 	classifier namespace.Classifier
 	filters    []filter.Filter
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster schedule.Cluster, classifier namespace.Classifier, n ...string) *ReplicaChecker {
+func NewReplicaChecker(cluster opt.Cluster, classifier namespace.Classifier, n ...string) *ReplicaChecker {
 	name := replicaCheckerName
 	if len(n) != 0 {
 		name = n[0]
 	}
 	filters := []filter.Filter{
-		filter.NewOverloadFilter(name),
+		filter.NewStoreLimitFilter(name),
 		filter.NewHealthFilter(name),
 		filter.NewSnapshotCountFilter(name),
 		filter.NewPendingPeerCountFilter(name),
@@ -185,7 +190,7 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operat
 			continue
 		}
 
-		return r.fixPeer(region, peer, "down")
+		return r.fixPeer(region, peer, downStatus)
 	}
 	return nil
 }
@@ -211,7 +216,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *operator.Ope
 			continue
 		}
 
-		return r.fixPeer(region, peer, "offline")
+		return r.fixPeer(region, peer, offlineStatus)
 	}
 
 	return nil
@@ -277,7 +282,12 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 	}
 
 	replace := fmt.Sprintf("replace-%s-replica", status)
-	op, err := operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	var op *operator.Operator
+	if status == offlineStatus {
+		op, err = operator.CreateOfflinePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	} else {
+		op, err = operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	}
 	if err != nil {
 		reason := fmt.Sprintf("%s-fail", replace)
 		checkerCounter.WithLabelValues("replica_checker", reason).Inc()

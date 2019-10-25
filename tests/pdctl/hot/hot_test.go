@@ -43,8 +43,6 @@ func (s *hotTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *hotTestSuite) TestHot(c *C) {
-	c.Parallel()
-
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
@@ -86,10 +84,10 @@ func (s *hotTestSuite) TestHot(c *C) {
 	c.Assert(err, IsNil)
 	hotStores := api.HotStoreStats{}
 	c.Assert(json.Unmarshal(output, &hotStores), IsNil)
-	c.Assert(hotStores.BytesWriteStats[1], Equals, bytesWritten/10)
-	c.Assert(hotStores.BytesReadStats[1], Equals, bytesRead/10)
-	c.Assert(hotStores.KeysWriteStats[1], Equals, keysWritten/10)
-	c.Assert(hotStores.KeysReadStats[1], Equals, keysRead/10)
+	c.Assert(hotStores.BytesWriteStats[1], Equals, float64(bytesWritten)/10)
+	c.Assert(hotStores.BytesReadStats[1], Equals, float64(bytesRead)/10)
+	c.Assert(hotStores.KeysWriteStats[1], Equals, float64(keysWritten)/10)
+	c.Assert(hotStores.KeysReadStats[1], Equals, float64(keysRead)/10)
 
 	// test hot region
 	statistics.Denoising = false
@@ -115,5 +113,4 @@ func (s *hotTestSuite) TestHot(c *C) {
 	time.Sleep(3200 * time.Millisecond)
 	testHot(hotReadRegionID, hotStoreId, "read")
 	testHot(hotWriteRegionID, hotStoreId, "write")
-
 }

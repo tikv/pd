@@ -22,13 +22,20 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
 func init() {
-	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterSliceDecoderBuilder("balance-leader", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
+	})
+
+	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceLeaderScheduler(opController), nil
 	})
 }
@@ -64,7 +71,8 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, opts .
 		filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true},
 		filter.NewCacheFilter(s.GetName(), taintStores),
 	}
-	s.selector = selector.NewBalanceSelector(core.LeaderKind, filters)
+	kind := core.NewScheduleKind(core.LeaderKind, opController.GetLeaderScheduleStrategy())
+	s.selector = selector.NewBalanceSelector(kind, filters)
 	return s
 }
 
@@ -96,11 +104,11 @@ func (l *balanceLeaderScheduler) GetType() string {
 	return "balance-leader"
 }
 
-func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return l.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
 	stores := cluster.GetStores()
@@ -158,7 +166,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 // transferLeaderOut transfers leader from the source store.
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
-func (l *balanceLeaderScheduler) transferLeaderOut(cluster schedule.Cluster, source *core.StoreInfo) []*operator.Operator {
+func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *core.StoreInfo) []*operator.Operator {
 	sourceID := source.GetID()
 	region := cluster.RandLeaderRegion(sourceID, core.HealthRegion())
 	if region == nil {
@@ -178,7 +186,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster schedule.Cluster, sou
 // transferLeaderIn transfers leader to the target store.
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
-func (l *balanceLeaderScheduler) transferLeaderIn(cluster schedule.Cluster, target *core.StoreInfo) []*operator.Operator {
+func (l *balanceLeaderScheduler) transferLeaderIn(cluster opt.Cluster, target *core.StoreInfo) []*operator.Operator {
 	targetID := target.GetID()
 	region := cluster.RandFollowerRegion(targetID, core.HealthRegion())
 	if region == nil {
@@ -204,7 +212,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster schedule.Cluster, targ
 // If the region is hot or the difference between the two stores is tolerable, then
 // no new operator need to be created, otherwise create an operator that transfers
 // the leader from the source store to the target store for the region.
-func (l *balanceLeaderScheduler) createOperator(cluster schedule.Cluster, region *core.RegionInfo, source, target *core.StoreInfo) []*operator.Operator {
+func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *core.RegionInfo, source, target *core.StoreInfo) []*operator.Operator {
 	if cluster.IsRegionHot(region) {
 		log.Debug("region is hot region, ignore it", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "region-hot").Inc()
@@ -215,14 +223,8 @@ func (l *balanceLeaderScheduler) createOperator(cluster schedule.Cluster, region
 	targetID := target.GetID()
 
 	opInfluence := l.opController.GetOpInfluence(cluster)
-	if !shouldBalance(cluster, source, target, region, core.LeaderKind, opInfluence) {
-		log.Debug("skip balance leader",
-			zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
-			zap.Int64("source-size", source.GetLeaderSize()), zap.Float64("source-score", source.LeaderScore(0)),
-			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(core.LeaderKind)),
-			zap.Int64("target-size", target.GetLeaderSize()), zap.Float64("target-score", target.LeaderScore(0)),
-			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(core.LeaderKind)),
-			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
+	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetLeaderScheduleStrategy())
+	if !shouldBalance(cluster, source, target, region, kind, opInfluence, l.GetName()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil
 	}
