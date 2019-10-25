@@ -1097,6 +1097,32 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	}
 }
 
+func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	oc := schedule.NewOperatorController(nil, nil)
+	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_50", "t"}))
+	sche := hb.(*scatterRangeScheduler)
+	c.Assert(err, IsNil)
+	ch := make(chan struct{})
+	args := []string{"test", "s_00", "s_99"}
+	go func() {
+		for {
+			select {
+			case <-ch:
+				break
+			default:
+			}
+			sche.config.BuildWithArgs(args)
+			c.Assert(sche.config.Persist(), IsNil)
+		}
+	}()
+	for i := 0; i < 1000; i++ {
+		sche.Schedule(tc)
+	}
+	ch <- struct{}{}
+}
+
 func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
