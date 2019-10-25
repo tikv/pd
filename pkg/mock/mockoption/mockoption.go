@@ -41,6 +41,7 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true
 	defaultLeaderScheduleStrategy      = "count"
+	defaultEnablePlacementRules        = false
 )
 
 // ScheduleOptions is a mock of ScheduleOptions
@@ -63,6 +64,7 @@ type ScheduleOptions struct {
 	MaxReplicas                  int
 	LocationLabels               []string
 	StrictlyMatchLabel           bool
+	EnablePlacementRules         bool
 	HotRegionCacheHitsThreshold  int
 	TolerantSizeRatio            float64
 	LowSpaceRatio                float64
@@ -94,6 +96,7 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.StrictlyMatchLabel = defaultStrictlyMatchLabel
+	mso.EnablePlacementRules = defaultEnablePlacementRules
 	mso.HotRegionCacheHitsThreshold = defaultHotRegionCacheHitsThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
@@ -181,6 +184,11 @@ func (mso *ScheduleOptions) GetLocationLabels() []string {
 // GetStrictlyMatchLabel mocks method
 func (mso *ScheduleOptions) GetStrictlyMatchLabel() bool {
 	return mso.StrictlyMatchLabel
+}
+
+// IsPlacementRulesEnabled mocks method
+func (mso *ScheduleOptions) IsPlacementRulesEnabled() bool {
+	return mso.EnablePlacementRules
 }
 
 // GetHotRegionCacheHitsThreshold mocks method

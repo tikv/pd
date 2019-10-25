@@ -44,6 +44,7 @@ type Options interface {
 	GetMaxReplicas() int
 	GetLocationLabels() []string
 	GetStrictlyMatchLabel() bool
+	IsPlacementRulesEnabled() bool
 
 	GetHotRegionCacheHitsThreshold() int
 	GetTolerantSizeRatio() float64
