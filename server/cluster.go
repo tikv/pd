@@ -1363,25 +1363,25 @@ func (c *RaftCluster) isPrepared() bool {
 	return c.prepareChecker.check(c)
 }
 
-func (c *RaftCluster) getStoresBytesWriteStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresBytesWriteStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresBytesWriteStat()
 }
 
-func (c *RaftCluster) getStoresBytesReadStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresBytesReadStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresBytesReadStat()
 }
 
-func (c *RaftCluster) getStoresKeysWriteStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresKeysWriteStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresKeysWriteStat()
 }
 
-func (c *RaftCluster) getStoresKeysReadStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresKeysReadStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresKeysReadStat()
