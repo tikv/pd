@@ -108,47 +108,47 @@ func (s *StoresStats) GetStoreBytesRate(storeID uint64) (writeRate float64, read
 }
 
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
-func (s *StoresStats) GetStoresBytesWriteStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresBytesWriteStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
 		writeRate, _ := stats.GetBytesRate()
-		res[storeID] = uint64(writeRate)
+		res[storeID] = writeRate
 	}
 	return res
 }
 
 // GetStoresBytesReadStat returns the bytes read stat of all StoreInfo.
-func (s *StoresStats) GetStoresBytesReadStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresBytesReadStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
 		_, readRate := stats.GetBytesRate()
-		res[storeID] = uint64(readRate)
+		res[storeID] = readRate
 	}
 	return res
 }
 
 // GetStoresKeysWriteStat returns the keys write stat of all StoreInfo.
-func (s *StoresStats) GetStoresKeysWriteStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresKeysWriteStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = uint64(stats.GetKeysWriteRate())
+		res[storeID] = stats.GetKeysWriteRate()
 	}
 	return res
 }
 
 // GetStoresKeysReadStat returns the bytes read stat of all StoreInfo.
-func (s *StoresStats) GetStoresKeysReadStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = uint64(stats.GetKeysReadRate())
+		res[storeID] = stats.GetKeysReadRate()
 	}
 	return res
 }
