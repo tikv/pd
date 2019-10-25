@@ -160,11 +160,11 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Clust
 	storesStat := cluster.GetStoresStats()
 	switch typ {
 	case hotReadRegionBalance:
-		h.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), storesStat.GetStoreBytesReadRate, cluster, core.LeaderKind)
+		h.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), storesStat.GetStoresBytesReadStat(), cluster, core.LeaderKind)
 		return h.balanceHotReadRegions(cluster)
 	case hotWriteRegionBalance:
-		h.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), storesStat.GetStoreBytesWriteRate, cluster, core.LeaderKind)
-		h.stats.writeStatAsPeer = calcScore(cluster.RegionWriteStats(), storesStat.GetStoreBytesWriteRate, cluster, core.RegionKind)
+		h.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), storesStat.GetStoresBytesWriteStat(), cluster, core.LeaderKind)
+		h.stats.writeStatAsPeer = calcScore(cluster.RegionWriteStats(), storesStat.GetStoresBytesWriteStat(), cluster, core.RegionKind)
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
@@ -231,7 +231,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster)
 	return nil
 }
 
-func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, getStoreBytesRate func(uint64) float64, cluster opt.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
+func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesStat map[uint64]float64, cluster opt.Cluster, kind core.ResourceKind) statistics.StoreHotRegionsStat {
 	stats := make(statistics.StoreHotRegionsStat)
 	for storeID, items := range storeHotPeers {
 		storeHots, ok := stats[storeID]
@@ -272,7 +272,9 @@ func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, getStoreBytes
 			storeHots.RegionsStat = append(storeHots.RegionsStat, s)
 		}
 
-		storeHots.StoreBytesRate = getStoreBytesRate(storeID)
+		if rate, ok := storeBytesStat[storeID]; ok {
+			storeHots.StoreBytesRate = rate
+		}
 	}
 	return stats
 }

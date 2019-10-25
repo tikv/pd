@@ -110,10 +110,10 @@ func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster opt.Cluste
 	storesStats := cluster.GetStoresStats()
 	switch typ {
 	case hotReadRegionBalance:
-		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), storesStats.GetStoreBytesReadRate, cluster, core.LeaderKind)
+		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), storesStats.GetStoresBytesReadStat(), cluster, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stats.readStatAsLeader)
 	case hotWriteRegionBalance:
-		s.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), storesStats.GetStoreBytesWriteRate, cluster, core.LeaderKind)
+		s.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), storesStats.GetStoresBytesWriteStat(), cluster, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stats.writeStatAsLeader)
 	}
 	return nil
