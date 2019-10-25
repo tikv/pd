@@ -39,15 +39,13 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt opt.Opti
 	})
 }
 
-func filterStoresBy(stores []*core.StoreInfo, keepPred func(*core.StoreInfo) bool) []*core.StoreInfo {
-	var i int
-	for j, s := range stores {
+func filterStoresBy(stores []*core.StoreInfo, keepPred func(*core.StoreInfo) bool) (selected []*core.StoreInfo) {
+	for _, s := range stores {
 		if keepPred(s) {
-			stores[i] = stores[j]
-			i++
+			selected = append(selected, s)
 		}
 	}
-	return stores[:i]
+	return
 }
 
 // Filter is an interface to filter source and target store.

@@ -103,8 +103,9 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
 	leaderScheduleStrategy := l.opController.GetLeaderScheduleStrategy()
-	sources := filter.SelectSourceStores(cluster.GetStores(), l.filters, cluster)
-	targets := filter.SelectTargetStores(cluster.GetStores(), l.filters, cluster)
+	stores := cluster.GetStores()
+	sources := filter.SelectSourceStores(stores, l.filters, cluster)
+	targets := filter.SelectTargetStores(stores, l.filters, cluster)
 	sort.Slice(sources, func(i, j int) bool {
 		return sources[i].LeaderScore(leaderScheduleStrategy, 0) > sources[j].LeaderScore(leaderScheduleStrategy, 0)
 	})
