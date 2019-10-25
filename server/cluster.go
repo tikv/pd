@@ -1306,6 +1306,11 @@ func (c *RaftCluster) GetStrictlyMatchLabel() bool {
 	return c.opt.GetReplication().GetStrictlyMatchLabel()
 }
 
+// IsPlacementRulesEnabled returns if the placement rules feature is enabled.
+func (c *RaftCluster) IsPlacementRulesEnabled() bool {
+	return c.opt.IsPlacementRulesEnabled()
+}
+
 // GetHotRegionCacheHitsThreshold gets the threshold of hitting hot region cache.
 func (c *RaftCluster) GetHotRegionCacheHitsThreshold() int {
 	return c.opt.GetHotRegionCacheHitsThreshold()
