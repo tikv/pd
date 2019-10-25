@@ -31,7 +31,7 @@ type testMovingAvg struct{}
 
 func addRandData(ma MovingAvg, n int, mx float64) {
 	rand.Seed(time.Now().UnixNano())
-  for i := 0; i < n; i++ {
+	for i := 0; i < n; i++ {
 		ma.Add(rand.Float64() * mx)
 	}
 }
@@ -39,9 +39,9 @@ func addRandData(ma MovingAvg, n int, mx float64) {
 // checkReset checks the Reset works properly.
 // emptyValue is the moving average of empty data set.
 func (t *testMovingAvg) checkReset(c *C, ma MovingAvg, emptyValue float64) {
-  addRandData(ma, 100, 1000)
-  ma.Reset()
-  c.Assert(ma.Get(), Equals, emptyValue)
+	addRandData(ma, 100, 1000)
+	ma.Reset()
+	c.Assert(ma.Get(), Equals, emptyValue)
 }
 
 // checkAddGet checks Add works properly.
@@ -57,27 +57,27 @@ func (t *testMovingAvg) checkAdd(c *C, ma MovingAvg, data []float64, expected []
 func (t *testMovingAvg) checkSet(c *C, ma MovingAvg, data []float64, expected []float64) {
 	c.Assert(len(data), Equals, len(expected))
 
-  // Reset + Add
-  addRandData(ma, 100, 1000)
+	// Reset + Add
+	addRandData(ma, 100, 1000)
 	ma.Reset()
 	t.checkAdd(c, ma, data, expected)
 
-  // Set
-  addRandData(ma, 100, 1000)
+	// Set
+	addRandData(ma, 100, 1000)
 	ma.Set(data[0])
 	c.Assert(ma.Get(), Equals, expected[0])
 	t.checkAdd(c, ma, data[1:], expected[1:])
 }
 
 func (t *testMovingAvg) TestMedianFilter(c *C) {
-  var empty float64 = 0
+	var empty float64 = 0
 	data := []float64{2, 4, 2, 800, 600, 6, 3}
 	expected := []float64{2, 3, 2, 3, 4, 6, 6}
 
 	mf := NewMedianFilter(5)
 	c.Assert(mf.Get(), Equals, empty)
 
-  t.checkReset(c, mf, empty)
+	t.checkReset(c, mf, empty)
 	t.checkAdd(c, mf, data, expected)
 	t.checkSet(c, mf, data, expected)
 }
