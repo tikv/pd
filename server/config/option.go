@@ -22,6 +22,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/schedule"
@@ -131,6 +132,11 @@ func (o *ScheduleOption) GetLocationLabels() []string {
 	return o.replication.GetLocationLabels()
 }
 
+// IsPlacementRulesEnabled returns if the placement rules is enabled.
+func (o *ScheduleOption) IsPlacementRulesEnabled() bool {
+	return o.replication.IsPlacementRulesEnabled()
+}
+
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
 func (o *ScheduleOption) GetMaxSnapshotCount() uint64 {
 	return o.Load().MaxSnapshotCount
@@ -154,6 +160,11 @@ func (o *ScheduleOption) GetMaxMergeRegionKeys() uint64 {
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
 func (o *ScheduleOption) GetSplitMergeInterval() time.Duration {
 	return o.Load().SplitMergeInterval.Duration
+}
+
+// SetSplitMergeInterval to set the interval between finishing split and starting to merge. It's only used to test.
+func (o *ScheduleOption) SetSplitMergeInterval(splitMergeInterval time.Duration) {
+	o.Load().SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
 }
 
 // IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
@@ -513,6 +524,11 @@ func (r *Replication) GetLocationLabels() []string {
 // GetStrictlyMatchLabel returns whether check label strict.
 func (r *Replication) GetStrictlyMatchLabel() bool {
 	return r.Load().StrictlyMatchLabel
+}
+
+// IsPlacementRulesEnabled returns whether the feature is enabled.
+func (r *Replication) IsPlacementRulesEnabled() bool {
+	return r.Load().EnablePlacementRules
 }
 
 // namespaceOption is a wrapper to access the configuration safely.
