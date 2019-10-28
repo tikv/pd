@@ -68,11 +68,17 @@ var exclusiveLabels = []string{"engine"}
 
 // MatchLabelConstraints checks if a store matches label constraints list.
 func MatchLabelConstraints(store *core.StoreInfo, constraints []LabelConstraint) bool {
-	return store != nil &&
-		slice.AllOf(constraints, func(i int) bool { return constraints[i].MatchStore(store) }) &&
-		slice.NoneOf(exclusiveLabels, func(i int) bool {
-			label := exclusiveLabels[i]
-			return store.GetLabelValue(label) != "" &&
-				slice.NoneOf(constraints, func(i int) bool { return constraints[i].Key == label })
-		})
+	if store == nil {
+		return false
+	}
+
+	if slice.AnyOf(exclusiveLabels, func(i int) bool { // if there is any exclusive label that
+		label := exclusiveLabels[i]
+		return store.GetLabelValue(label) != "" && // ... the store has the label
+			slice.NoneOf(constraints, func(i int) bool { return constraints[i].Key == label }) // ... but label is not in constrints
+	}) {
+		return false // ... then the store should be ignored
+	}
+
+	return slice.AllOf(constraints, func(i int) bool { return constraints[i].MatchStore(store) })
 }
