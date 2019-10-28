@@ -173,7 +173,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
 			return nil
 		}
-		exclude[storeID] = struct{}{} // exlucde next round.
+		exclude[storeID] = struct{}{} // exclude next round.
 
 		target := cluster.GetStore(storeID)
 		if target == nil {

@@ -33,5 +33,8 @@ func NoneOf(s interface{}, p func(int) bool) bool {
 
 // AllOf returns true if all elements in the slice match the predict func.
 func AllOf(s interface{}, p func(int) bool) bool {
-	return NoneOf(s, func(i int) bool { return !p(i) })
+	np := func(i int) bool {
+		return !p(i)
+	}
+	return NoneOf(s, np)
 }
