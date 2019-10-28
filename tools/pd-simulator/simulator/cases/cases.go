@@ -113,15 +113,7 @@ func NewCase(name string) *Case {
 }
 
 func leaderAndRegionIsUniform(leaderCount, regionCount, regionNum int, threshold float64) bool {
-	return leaderIsUniform(leaderCount, regionNum, threshold) && regionIsUniform(regionCount, regionNum, threshold)
-}
-
-func leaderIsUniform(leaderCount, regionNum int, threshold float64) bool {
-	return isUniform(leaderCount, regionNum/3, threshold)
-}
-
-func regionIsUniform(regionCount, regionNum int, threshold float64) bool {
-	return isUniform(regionCount, regionNum, threshold)
+	return isUniform(leaderCount, regionNum/3, threshold) && isUniform(regionCount, regionNum, threshold)
 }
 
 func isUniform(count, meanCount int, threshold float64) bool {
@@ -133,7 +125,7 @@ func isUniform(count, meanCount int, threshold float64) bool {
 func getStoreNum() int {
 	storeNum := simutil.CaseConfigure.StoreNum
 	if storeNum < 3 {
-		simutil.Logger.Fatal("Store num should be larger than 3.")
+		simutil.Logger.Fatal("Store num should be larger than or equal to 3.")
 	}
 	return storeNum
 }
@@ -146,10 +138,10 @@ func getRegionNum() int {
 	return regionNum
 }
 
-func getFullStoreNum(storeNum int, fullRatio float64) uint64 {
-	fullStoreNum := uint64(float64(storeNum) * fullRatio)
-	if fullStoreNum < 3 || fullStoreNum == uint64(storeNum) {
-		fullStoreNum = 3
+func getNoEmptyStoreNum(storeNum int, noEmptyRatio float64) uint64 {
+	noEmptyStoreNum := uint64(float64(storeNum) * noEmptyRatio)
+	if noEmptyStoreNum < 3 || noEmptyStoreNum == uint64(storeNum) {
+		noEmptyStoreNum = 3
 	}
-	return fullStoreNum
+	return noEmptyStoreNum
 }

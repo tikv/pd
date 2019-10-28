@@ -23,7 +23,7 @@ import (
 func newMakeupDownReplicas() *Case {
 	var simCase Case
 	storeNum, regionNum := getStoreNum(), getRegionNum()
-	fullStoreNum := storeNum - 1
+	noEmptyStoreNum := storeNum - 1
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
@@ -53,7 +53,7 @@ func newMakeupDownReplicas() *Case {
 	down := false
 	e := &DeleteNodesDescriptor{}
 	e.Step = func(tick int64) uint64 {
-		if numNodes > fullStoreNum && tick%100 == 0 {
+		if numNodes > noEmptyStoreNum && tick%100 == 0 {
 			numNodes--
 			return uint64(1)
 		}
@@ -87,7 +87,7 @@ func newMakeupDownReplicas() *Case {
 			if index == 0 { // storeId == 1
 				continue
 			}
-			res = res && isUniform(regionCount, storeNum*regionNum/fullStoreNum, threshold)
+			res = res && isUniform(regionCount, storeNum*regionNum/noEmptyStoreNum, threshold)
 		}
 		return res
 	}

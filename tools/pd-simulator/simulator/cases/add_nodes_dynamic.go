@@ -26,10 +26,10 @@ func newAddNodesDynamic() *Case {
 	var simCase Case
 
 	storeNum, regionNum := getStoreNum(), getRegionNum()
-	fullRatio := rand.Float64() // the ratio of full store to total store
-	fullStoreNum := getFullStoreNum(storeNum, fullRatio)
+	noEmptyRatio := rand.Float64() // the ratio of noEmpty store to total store
+	noEmptyStoreNum := getNoEmptyStoreNum(storeNum, noEmptyRatio)
 
-	for i := 1; i <= int(fullStoreNum); i++ {
+	for i := 1; i <= int(noEmptyStoreNum); i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
@@ -40,15 +40,15 @@ func newAddNodesDynamic() *Case {
 	}
 
 	var ids []uint64
-	for i := 1; i <= storeNum-int(fullStoreNum); i++ {
+	for i := 1; i <= storeNum-int(noEmptyStoreNum); i++ {
 		ids = append(ids, IDAllocator.nextID())
 	}
 
 	for i := 0; i < regionNum*storeNum/3; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i)%fullStoreNum + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%fullStoreNum + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%fullStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i)%noEmptyStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%noEmptyStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%noEmptyStoreNum + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -59,7 +59,7 @@ func newAddNodesDynamic() *Case {
 		})
 	}
 
-	numNodes := int(fullStoreNum)
+	numNodes := int(noEmptyStoreNum)
 	e := &AddNodesDescriptor{}
 	e.Step = func(tick int64) uint64 {
 		if tick%100 == 0 && numNodes < storeNum {

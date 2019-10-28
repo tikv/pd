@@ -26,8 +26,8 @@ func newAddNodes() *Case {
 	var simCase Case
 
 	storeNum, regionNum := getStoreNum(), getRegionNum()
-	fullRatio := rand.Float64() // the ratio of full store to total store
-	fullStoreNum := getFullStoreNum(storeNum, fullRatio)
+	noEmptyRatio := rand.Float64() // the ratio of noEmpty store to total store
+	noEmptyStoreNum := getNoEmptyStoreNum(storeNum, noEmptyRatio)
 
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
@@ -41,9 +41,9 @@ func newAddNodes() *Case {
 
 	for i := 0; i < regionNum*storeNum/3; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i)%fullStoreNum + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%fullStoreNum + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%fullStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i)%noEmptyStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%noEmptyStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%noEmptyStoreNum + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),

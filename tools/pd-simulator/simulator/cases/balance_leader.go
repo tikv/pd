@@ -58,7 +58,7 @@ func newBalanceLeader() *Case {
 		for i := 1; i <= storeNum; i++ {
 			leaderCount := regions.GetStoreLeaderCount(uint64(i))
 			leaderCounts = append(leaderCounts, leaderCount)
-			res = res && leaderIsUniform(leaderCount, regionNum, threshold)
+			res = res && isUniform(leaderCount, regionNum/3, threshold)
 		}
 		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts))
 		return res
