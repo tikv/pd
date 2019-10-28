@@ -75,7 +75,7 @@ func MatchLabelConstraints(store *core.StoreInfo, constraints []LabelConstraint)
 	if slice.AnyOf(exclusiveLabels, func(i int) bool { // if there is any exclusive label that
 		label := exclusiveLabels[i]
 		return store.GetLabelValue(label) != "" && // ... the store has the label
-			slice.NoneOf(constraints, func(i int) bool { return constraints[i].Key == label }) // ... but label is not in constrints
+			slice.NoneOf(constraints, func(i int) bool { return constraints[i].Key == label }) // ... but label is not in constraints
 	}) {
 		return false // ... then the store should be ignored
 	}
