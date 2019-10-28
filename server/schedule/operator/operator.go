@@ -29,7 +29,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -51,15 +50,8 @@ const (
 
 // Cluster provides an overview of a cluster's regions distribution.
 type Cluster interface {
-	core.RegionSetInformer
-	core.StoreSetInformer
-	core.StoreSetController
-
-	statistics.RegionStatInformer
-	opt.Options
-
-	// TODO: it should be removed. Schedulers don't need to know anything
-	// about peers.
+	GetStore(id uint64) *core.StoreInfo
+	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 	AllocPeer(storeID uint64) (*metapb.Peer, error)
 }
 
@@ -87,11 +79,18 @@ type StoreInfluence struct {
 	StepCost    int64
 }
 
-// ResourceSize returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
-	switch kind {
+// ResourceProperty returns delta size of leader/region by influence.
+func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
+	switch kind.Resource {
 	case core.LeaderKind:
-		return s.LeaderSize
+		switch kind.Strategy {
+		case core.ByCount:
+			return s.LeaderCount
+		case core.BySize:
+			return s.LeaderSize
+		default:
+			return 0
+		}
 	case core.RegionKind:
 		return s.RegionSize
 	default:
@@ -352,6 +351,7 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 type SplitRegion struct {
 	StartKey, EndKey []byte
 	Policy           pdpb.CheckPolicy
+	SplitKeys        [][]byte
 }
 
 // ConfVerChanged returns true if the conf version has been changed by this step
@@ -701,14 +701,14 @@ func (o *Operator) History() []OpHistory {
 }
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
-func CreateAddPeerOperator(desc string, cluster Cluster, region *core.RegionInfo, peerID uint64, toStoreID uint64, kind OpKind) *Operator {
-	steps := CreateAddPeerSteps(cluster, toStoreID, peerID)
+func CreateAddPeerOperator(desc string, region *core.RegionInfo, peerID uint64, toStoreID uint64, kind OpKind) *Operator {
+	steps := CreateAddPeerSteps(toStoreID, peerID)
 	brief := fmt.Sprintf("add peer: store %v", toStoreID)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, steps...)
 }
 
 // CreateAddLearnerOperator creates an operator that adds a new learner.
-func CreateAddLearnerOperator(desc string, cluster Cluster, region *core.RegionInfo, peerID uint64, toStoreID uint64, kind OpKind) *Operator {
+func CreateAddLearnerOperator(desc string, region *core.RegionInfo, peerID uint64, toStoreID uint64, kind OpKind) *Operator {
 	step := AddLearner{ToStore: toStoreID, PeerID: peerID}
 	brief := fmt.Sprintf("add learner: store %v", toStoreID)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, step)
@@ -735,33 +735,19 @@ func CreateRemovePeerOperator(desc string, cluster Cluster, kind OpKind, region 
 }
 
 // CreateAddPeerSteps creates an OpStep list that add a new peer.
-func CreateAddPeerSteps(cluster Cluster, newStore uint64, peerID uint64) []OpStep {
-	var st []OpStep
-	if cluster.IsRaftLearnerEnabled() {
-		st = []OpStep{
-			AddLearner{ToStore: newStore, PeerID: peerID},
-			PromoteLearner{ToStore: newStore, PeerID: peerID},
-		}
-	} else {
-		st = []OpStep{
-			AddPeer{ToStore: newStore, PeerID: peerID},
-		}
+func CreateAddPeerSteps(newStore uint64, peerID uint64) []OpStep {
+	st := []OpStep{
+		AddLearner{ToStore: newStore, PeerID: peerID},
+		PromoteLearner{ToStore: newStore, PeerID: peerID},
 	}
 	return st
 }
 
 // CreateAddLightPeerSteps creates an OpStep list that add a new peer without considering the influence.
-func CreateAddLightPeerSteps(cluster Cluster, newStore uint64, peerID uint64) []OpStep {
-	var st []OpStep
-	if cluster.IsRaftLearnerEnabled() {
-		st = []OpStep{
-			AddLightLearner{ToStore: newStore, PeerID: peerID},
-			PromoteLearner{ToStore: newStore, PeerID: peerID},
-		}
-	} else {
-		st = []OpStep{
-			AddLightPeer{ToStore: newStore, PeerID: peerID},
-		}
+func CreateAddLightPeerSteps(newStore uint64, peerID uint64) []OpStep {
+	st := []OpStep{
+		AddLightLearner{ToStore: newStore, PeerID: peerID},
+		PromoteLearner{ToStore: newStore, PeerID: peerID},
 	}
 	return st
 }
@@ -832,7 +818,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 			log.Debug("peer alloc failed", zap.Error(err))
 			return kind, nil, err
 		}
-		addPeerSteps = append(addPeerSteps, CreateAddPeerSteps(cluster, id, peer.Id))
+		addPeerSteps = append(addPeerSteps, CreateAddPeerSteps(id, peer.Id))
 		kind |= OpRegion
 	}
 
@@ -905,10 +891,24 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 	if err != nil {
 		return nil, err
 	}
-	st := CreateAddPeerSteps(cluster, newStore, peerID)
+	st := CreateAddPeerSteps(newStore, peerID)
 	steps = append(st, steps...)
 	brief := fmt.Sprintf("mv peer: store %v to %v", oldStore, newStore)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...), nil
+}
+
+// CreateOfflinePeerOperator creates an operator that replaces an old peer with a new peer when offline a store.
+func CreateOfflinePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
+	k, steps, err := transferLeaderStep(cluster, region, oldStore, append(getRegionFollowerIDs(region)))
+	if err != nil {
+		return nil, err
+	}
+	kind |= k
+	st := CreateAddPeerSteps(newStore, peerID)
+	steps = append(steps, st...)
+	steps = append(steps, RemovePeer{FromStore: oldStore})
+	brief := fmt.Sprintf("mv peer: store %v to %v", oldStore, newStore)
+	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, steps...), nil
 }
 
 // CreateMoveLeaderOperator creates an operator that replaces an old leader with a new leader.
@@ -917,7 +917,7 @@ func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionI
 	if err != nil {
 		return nil, err
 	}
-	st := CreateAddPeerSteps(cluster, newStore, peerID)
+	st := CreateAddPeerSteps(newStore, peerID)
 	st = append(st, TransferLeader{ToStore: newStore, FromStore: oldStore})
 	steps = append(st, steps...)
 	brief := fmt.Sprintf("mv leader: store %v to %v", oldStore, newStore)
@@ -925,11 +925,12 @@ func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionI
 }
 
 // CreateSplitRegionOperator creates an operator that splits a region.
-func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy string) *Operator {
+func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, keys [][]byte) *Operator {
 	step := SplitRegion{
-		StartKey: region.GetStartKey(),
-		EndKey:   region.GetEndKey(),
-		Policy:   pdpb.CheckPolicy(pdpb.CheckPolicy_value[strings.ToUpper(policy)]),
+		StartKey:  region.GetStartKey(),
+		EndKey:    region.GetEndKey(),
+		Policy:    policy,
+		SplitKeys: keys,
 	}
 	brief := fmt.Sprintf("split: region %v", region.GetID())
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind, step)
@@ -945,15 +946,24 @@ func getRegionFollowerIDs(region *core.RegionInfo) []uint64 {
 
 // removePeerSteps returns the steps to safely remove a peer. It prevents removing leader by transfer its leadership first.
 func removePeerSteps(cluster Cluster, region *core.RegionInfo, storeID uint64, followerIDs []uint64) (kind OpKind, steps []OpStep, err error) {
+	kind, steps, err = transferLeaderStep(cluster, region, storeID, followerIDs)
+	if err != nil {
+		return
+	}
+
+	steps = append(steps, RemovePeer{FromStore: storeID})
+	kind |= OpRegion
+	return
+}
+
+func transferLeaderStep(cluster Cluster, region *core.RegionInfo, storeID uint64, followerIDs []uint64) (kind OpKind, steps []OpStep, err error) {
 	if region.GetLeader() != nil && region.GetLeader().GetStoreId() == storeID {
 		kind, steps, err = transferLeaderToSuitableSteps(cluster, storeID, followerIDs)
 		if err != nil {
-			log.Debug("failed to create remove peer operator", zap.Uint64("region-id", region.GetID()), zap.Error(err))
+			log.Debug("failed to create transfer leader step", zap.Uint64("region-id", region.GetID()), zap.Error(err))
 			return
 		}
 	}
-	steps = append(steps, RemovePeer{FromStore: storeID})
-	kind |= OpRegion
 	return
 }
 
@@ -1066,7 +1076,7 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 
 	// Creates the first step
 	if _, ok := originStoreIDs[targetLeaderPeer.GetStoreId()]; !ok {
-		st := CreateAddLightPeerSteps(cluster, targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId())
+		st := CreateAddLightPeerSteps(targetLeaderPeer.GetStoreId(), targetLeaderPeer.GetId())
 		steps = append(steps, st...)
 		// Do not transfer leader to the newly added peer
 		// Ref: https://github.com/tikv/tikv/issues/3819
@@ -1090,13 +1100,13 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 			continue
 		}
 		if replacedPeers[j].GetStoreId() == originLeaderStoreID {
-			st := CreateAddLightPeerSteps(cluster, peer.GetStoreId(), peer.GetId())
+			st := CreateAddLightPeerSteps(peer.GetStoreId(), peer.GetId())
 			st = append(st, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
 			deferSteps = append(deferSteps, st...)
 			kind |= OpRegion | OpLeader
 			continue
 		}
-		st := CreateAddLightPeerSteps(cluster, peer.GetStoreId(), peer.GetId())
+		st := CreateAddLightPeerSteps(peer.GetStoreId(), peer.GetId())
 		steps = append(steps, st...)
 		steps = append(steps, RemovePeer{FromStore: replacedPeers[j].GetStoreId()})
 		kind |= OpRegion

@@ -20,6 +20,11 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
+const (
+	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
+	StoreHeartBeatReportInterval = 10
+)
+
 // StoresStats is a cache hold hot regions.
 type StoresStats struct {
 	sync.RWMutex
@@ -103,67 +108,58 @@ func (s *StoresStats) GetStoreBytesRate(storeID uint64) (writeRate float64, read
 }
 
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
-func (s *StoresStats) GetStoresBytesWriteStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresBytesWriteStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
 		writeRate, _ := stats.GetBytesRate()
-		res[storeID] = uint64(writeRate)
+		res[storeID] = writeRate
 	}
 	return res
 }
 
 // GetStoresBytesReadStat returns the bytes read stat of all StoreInfo.
-func (s *StoresStats) GetStoresBytesReadStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresBytesReadStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
 		_, readRate := stats.GetBytesRate()
-		res[storeID] = uint64(readRate)
+		res[storeID] = readRate
 	}
 	return res
 }
 
 // GetStoresKeysWriteStat returns the keys write stat of all StoreInfo.
-func (s *StoresStats) GetStoresKeysWriteStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresKeysWriteStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = uint64(stats.GetKeysWriteRate())
+		res[storeID] = stats.GetKeysWriteRate()
 	}
 	return res
 }
 
 // GetStoresKeysReadStat returns the bytes read stat of all StoreInfo.
-func (s *StoresStats) GetStoresKeysReadStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = uint64(stats.GetKeysReadRate())
+		res[storeID] = stats.GetKeysReadRate()
 	}
 	return res
 }
 
-// StoreHotRegionInfos : used to get human readable description for hot regions.
-type StoreHotRegionInfos struct {
-	AsPeer   StoreHotRegionsStat `json:"as_peer"`
-	AsLeader StoreHotRegionsStat `json:"as_leader"`
-}
-
-// StoreHotRegionsStat used to record the hot region statistics group by store
-type StoreHotRegionsStat map[uint64]*HotRegionsStat
-
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex
-	bytesWriteRate *RollingStats
-	bytesReadRate  *RollingStats
-	keysWriteRate  *RollingStats
-	keysReadRate   *RollingStats
+	bytesWriteRate MovingAvg
+	bytesReadRate  MovingAvg
+	keysWriteRate  MovingAvg
+	keysReadRate   MovingAvg
 }
 
 const storeStatsRollingWindows = 3
@@ -171,10 +167,10 @@ const storeStatsRollingWindows = 3
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate: NewRollingStats(storeStatsRollingWindows),
-		bytesReadRate:  NewRollingStats(storeStatsRollingWindows),
-		keysWriteRate:  NewRollingStats(storeStatsRollingWindows),
-		keysReadRate:   NewRollingStats(storeStatsRollingWindows),
+		bytesWriteRate: NewMedianFilter(storeStatsRollingWindows),
+		bytesReadRate:  NewMedianFilter(storeStatsRollingWindows),
+		keysWriteRate:  NewMedianFilter(storeStatsRollingWindows),
+		keysReadRate:   NewMedianFilter(storeStatsRollingWindows),
 	}
 }
 
@@ -187,29 +183,29 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	}
 	r.Lock()
 	defer r.Unlock()
-	r.bytesWriteRate.Add(float64(stats.BytesWritten / interval))
-	r.bytesReadRate.Add(float64(stats.BytesRead / interval))
-	r.keysWriteRate.Add(float64(stats.KeysWritten / interval))
-	r.keysReadRate.Add(float64(stats.KeysRead / interval))
+	r.bytesWriteRate.Add(float64(stats.BytesWritten) / float64(interval))
+	r.bytesReadRate.Add(float64(stats.BytesRead) / float64(interval))
+	r.keysWriteRate.Add(float64(stats.KeysWritten) / float64(interval))
+	r.keysReadRate.Add(float64(stats.KeysRead) / float64(interval))
 }
 
 // GetBytesRate returns the bytes write rate and the bytes read rate.
 func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64) {
 	r.RLock()
 	defer r.RUnlock()
-	return r.bytesWriteRate.Median(), r.bytesReadRate.Median()
+	return r.bytesWriteRate.Get(), r.bytesReadRate.Get()
 }
 
 // GetKeysWriteRate returns the keys write rate.
 func (r *RollingStoreStats) GetKeysWriteRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
-	return r.keysWriteRate.Median()
+	return r.keysWriteRate.Get()
 }
 
 // GetKeysReadRate returns the keys read rate.
 func (r *RollingStoreStats) GetKeysReadRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
-	return r.keysReadRate.Median()
+	return r.keysReadRate.Get()
 }

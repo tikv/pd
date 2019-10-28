@@ -22,6 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pkg/errors"
@@ -155,7 +156,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 	}
 
 	var input map[string]interface{}
-	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 	for k, v := range input {

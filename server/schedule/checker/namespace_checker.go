@@ -18,9 +18,9 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"go.uber.org/zap"
 )
@@ -30,13 +30,13 @@ const namespaceCheckerName = "namespace-checker"
 // NamespaceChecker ensures region to go to the right place.
 type NamespaceChecker struct {
 	name       string
-	cluster    schedule.Cluster
+	cluster    opt.Cluster
 	filters    []filter.Filter
 	classifier namespace.Classifier
 }
 
 // NewNamespaceChecker creates a namespace checker.
-func NewNamespaceChecker(cluster schedule.Cluster, classifier namespace.Classifier) *NamespaceChecker {
+func NewNamespaceChecker(cluster opt.Cluster, classifier namespace.Classifier) *NamespaceChecker {
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: namespaceCheckerName, MoveRegion: true},
 	}

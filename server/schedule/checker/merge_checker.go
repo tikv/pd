@@ -20,42 +20,42 @@ import (
 	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
-// As region split history is not persisted. We put a special marker into
-// splitCache to prevent merging any regions when server is recently started.
-const mergeBlockMarker = 0
-
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
-	cluster    schedule.Cluster
+	cluster    opt.Cluster
 	classifier namespace.Classifier
 	splitCache *cache.TTLUint64
+	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(cluster schedule.Cluster, classifier namespace.Classifier) *MergeChecker {
+func NewMergeChecker(cluster opt.Cluster, classifier namespace.Classifier) *MergeChecker {
 	splitCache := cache.NewIDTTL(time.Minute, cluster.GetSplitMergeInterval())
-	splitCache.Put(mergeBlockMarker)
 	return &MergeChecker{
 		cluster:    cluster,
 		classifier: classifier,
 		splitCache: splitCache,
+		startTime:  time.Now(),
 	}
 }
 
-// RecordRegionSplit put the recently splitted region into cache. MergeChecker
+// RecordRegionSplit put the recently split region into cache. MergeChecker
 // will skip check it for a while.
-func (m *MergeChecker) RecordRegionSplit(regionID uint64) {
-	m.splitCache.PutWithTTL(regionID, nil, m.cluster.GetSplitMergeInterval())
+func (m *MergeChecker) RecordRegionSplit(regionIDs []uint64) {
+	for _, regionID := range regionIDs {
+		m.splitCache.PutWithTTL(regionID, nil, m.cluster.GetSplitMergeInterval())
+	}
 }
 
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
-	if m.splitCache.Exists(mergeBlockMarker) {
+	expireTime := m.startTime.Add(m.cluster.GetSplitMergeInterval())
+	if time.Now().Before(expireTime) {
 		checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
 		return nil
 	}
@@ -102,9 +102,14 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	prev, next := m.cluster.GetAdjacentRegions(region)
 
-	target := m.checkTarget(region, next, nil)
-	if !m.cluster.GetEnableOneWayMerge() {
-		target = m.checkTarget(region, prev, target)
+	var target *core.RegionInfo
+	if m.checkTarget(region, next) {
+		target = next
+	}
+	if !m.cluster.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow a region can be merged by two ways.
+		if target == nil || prev.GetApproximateSize() < next.GetApproximateSize() { // pick smaller
+			target = prev
+		}
 	}
 
 	if target == nil {
@@ -126,18 +131,9 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	return ops
 }
 
-func (m *MergeChecker) checkTarget(region, adjacent, target *core.RegionInfo) *core.RegionInfo {
-	// if is not hot region and under same namespace
-	if adjacent != nil && !m.cluster.IsRegionHot(adjacent) &&
+func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
+	return adjacent != nil && !m.cluster.IsRegionHot(adjacent) &&
 		m.classifier.AllowMerge(region, adjacent) &&
-		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 {
-		// if both region is not hot, prefer the one with smaller size
-		if target == nil || target.GetApproximateSize() > adjacent.GetApproximateSize() {
-			// peer count should equal
-			if len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() {
-				target = adjacent
-			}
-		}
-	}
-	return target
+		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 && // no special peer
+		len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() // peer count should equal
 }

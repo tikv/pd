@@ -42,6 +42,7 @@ type MetaStore struct {
 type StoreStatus struct {
 	Capacity           typeutil.ByteSize  `json:"capacity,omitempty"`
 	Available          typeutil.ByteSize  `json:"available,omitempty"`
+	UsedSize           typeutil.ByteSize  `json:"used_size,omitempty"`
 	LeaderCount        int                `json:"leader_count,omitempty"`
 	LeaderWeight       float64            `json:"leader_weight,omitempty"`
 	LeaderScore        float64            `json:"leader_score,omitempty"`
@@ -79,9 +80,10 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 		Status: &StoreStatus{
 			Capacity:           typeutil.ByteSize(store.GetCapacity()),
 			Available:          typeutil.ByteSize(store.GetAvailable()),
+			UsedSize:           typeutil.ByteSize(store.GetUsedSize()),
 			LeaderCount:        store.GetLeaderCount(),
 			LeaderWeight:       store.GetLeaderWeight(),
-			LeaderScore:        store.LeaderScore(0),
+			LeaderScore:        store.LeaderScore(opt.GetLeaderScheduleStrategy(), 0),
 			LeaderSize:         store.GetLeaderSize(),
 			RegionCount:        store.GetRegionCount(),
 			RegionWeight:       store.GetRegionWeight(),
@@ -144,7 +146,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -161,14 +163,14 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	cluster := h.GetRaftCluster()
 	if cluster == nil {
-		errorResp(h.rd, w, errcode.NewInternalErr(server.ErrNotBootstrapped))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInternalErr(server.ErrNotBootstrapped))
 		return
 	}
 
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -181,7 +183,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		errorResp(h.rd, w, err)
+		apiutil.ErrorResp(h.rd, w, err)
 		return
 	}
 
@@ -198,7 +200,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
@@ -228,12 +230,12 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
 	var input map[string]string
-	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 
@@ -246,7 +248,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := config.ValidateLabels(labels); err != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
 
@@ -268,12 +270,12 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
 	var input map[string]interface{}
-	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 
@@ -310,12 +312,12 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		errorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
 
 	var input map[string]interface{}
-	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 
@@ -353,13 +355,13 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
 	cluster := h.GetRaftCluster()
 	if cluster == nil {
-		errorResp(h.rd, w, errcode.NewInternalErr(server.ErrNotBootstrapped))
+		apiutil.ErrorResp(h.rd, w, errcode.NewInternalErr(server.ErrNotBootstrapped))
 		return
 	}
 
 	err := cluster.RemoveTombStoneRecords()
 	if err != nil {
-		errorResp(h.rd, w, err)
+		apiutil.ErrorResp(h.rd, w, err)
 		return
 	}
 
@@ -368,7 +370,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 
 func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
-	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
 

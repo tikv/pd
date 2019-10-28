@@ -25,7 +25,13 @@ import (
 )
 
 func init() {
-	schedule.RegisterScheduler("label", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
+	schedule.RegisterSliceDecoderBuilder("label", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
+	})
+
+	schedule.RegisterScheduler("label", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newLabelScheduler(opController), nil
 	})
 }
@@ -45,10 +51,11 @@ func newLabelScheduler(opController *schedule.OperatorController) schedule.Sched
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: labelSchedulerName, TransferLeader: true},
 	}
+	kind := core.NewScheduleKind(core.LeaderKind, core.ByCount)
 	return &labelScheduler{
 		name:          labelSchedulerName,
 		baseScheduler: newBaseScheduler(opController),
-		selector:      selector.NewBalanceSelector(core.LeaderKind, filters),
+		selector:      selector.NewBalanceSelector(kind, filters),
 	}
 }
 
@@ -60,11 +67,11 @@ func (s *labelScheduler) GetType() string {
 	return "label"
 }
 
-func (s *labelScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *labelScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})

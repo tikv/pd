@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/unrolled/render"
@@ -92,7 +93,7 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
-	if err := readJSONRespondError(h.r, w, r.Body, &input); err != nil {
+	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}
 
@@ -228,7 +229,18 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing split policy")
 			return
 		}
-		if err := h.AddSplitRegionOperator(uint64(regionID), policy); err != nil {
+		var keys []string
+		if ks, ok := input["keys"]; ok {
+			for _, k := range ks.([]interface{}) {
+				key, ok := k.(string)
+				if !ok {
+					h.r.JSON(w, http.StatusBadRequest, "bad format keys")
+					return
+				}
+				keys = append(keys, key)
+			}
+		}
+		if err := h.AddSplitRegionOperator(uint64(regionID), policy, keys); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

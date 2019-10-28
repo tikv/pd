@@ -134,6 +134,7 @@ types:
         enum: [ Up, Disconnected, Down, Offline, Tombstone ]
       labels?: StoreLabel[]
       version?: string
+      peer_address: string
   StoreLabel:
     type: object
     properties:
@@ -144,6 +145,7 @@ types:
     properties:
       capacity: string
       available: string
+      used_size: string
       leader_count?: integer
       leader_weight?: number
       leader_score?: number
@@ -307,7 +309,8 @@ types:
       region_id: integer
       policy:
         type: string
-        enum: [ scan, approximate ]
+        enum: [ scan, approximate, usekey ]
+      keys?: string[]
   ScatterRegionOperator:
     type: Operator
     discriminatorValue: scatter-region
@@ -361,10 +364,10 @@ types:
       start_ts?: string
       last_heartbeat_ts?: string
       uptime?: string
-      hot_write_flow: integer
-      hot_write_region_flows: integer[]
-      hot_read_flow: integer
-      hot_read_region_flows: integer[]
+      hot_write_flow: number
+      hot_write_region_flows: number[]
+      hot_read_flow: number
+      hot_read_region_flows: number[]
   TrendHistory:
     type: object
     properties:
@@ -867,6 +870,16 @@ types:
             type: Regions
       500:
         description: PD server failed to proceed the request.
+  /count:
+    get:
+      description: Get region count in the cluster.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Regions
+        500:
+          description: PD server failed to proceed the request.
   /writeflow:
     get:
       description: List regions with the highest write flow.

@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
@@ -202,6 +203,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage    = true
+	defaultMaxResetTsGap       = 24 * time.Hour
 	defaultStrictlyMatchLabel  = false
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
@@ -268,6 +270,10 @@ func (c *Config) Parse(arguments []string) error {
 		if c.LogLevelDeprecated != "" && c.Log.Level == "" {
 			c.Log.Level = c.LogLevelDeprecated
 			msg := fmt.Sprintf("log-level in %s is deprecated, use [log] instead", c.configFile)
+			c.WarningMsgs = append(c.WarningMsgs, msg)
+		}
+		if meta.IsDefined("schedule", "disable-raft-learner") {
+			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 	}
@@ -481,7 +487,7 @@ type ScheduleConfig struct {
 	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys,omitempty" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
-	// EnableOneWayMerge is the option to enable one way merge
+	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge,omitempty" json:"enable-one-way-merge,string"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
 	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
@@ -490,6 +496,8 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
+	// LeaderScheduleStrategy is the option to balance leader, there are some strategics supported: ["count", "size"], default: "count"
+	LeaderScheduleStrategy string `toml:"leader-schedule-strategy,omitempty" json:"leader-schedule-strategy,string"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -520,9 +528,9 @@ type ScheduleConfig struct {
 	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
 	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
 	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator,omitempty" json:"scheduler-max-waiting-operator"`
+	// WARN: DisableLearner is deprecated.
 	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
 	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
-
 	// DisableRemoveDownReplica is the option to prevent replica checker from
 	// removing down replicas.
 	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
@@ -544,6 +552,9 @@ type ScheduleConfig struct {
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
+
+	// Only used to display
+	SchedulersPayload map[string]string `json:"schedulers,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -559,6 +570,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
+		LeaderScheduleStrategy:       c.LeaderScheduleStrategy,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
@@ -591,7 +603,7 @@ const (
 	defaultPatrolRegionInterval   = 100 * time.Millisecond
 	defaultMaxStoreDownTime       = 30 * time.Minute
 	defaultLeaderScheduleLimit    = 4
-	defaultRegionScheduleLimit    = 64
+	defaultRegionScheduleLimit    = 2048
 	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 4
@@ -603,6 +615,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
+	defaultLeaderScheduleStrategy      = "count"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -645,6 +658,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
+	if !meta.IsDefined("leader-schedule-strategy") {
+		adjustString(&c.LeaderScheduleStrategy, defaultLeaderScheduleStrategy)
+	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
@@ -675,14 +691,23 @@ func (c *ScheduleConfig) Validate() error {
 	return nil
 }
 
+// Deprecated is used to find if there is an option has beed deprecated.
+func (c *ScheduleConfig) Deprecated() error {
+	if c.DisableLearner {
+		return errors.New("disable-raft-learner has already been deprecated")
+	}
+	return nil
+}
+
 // SchedulerConfigs is a slice of customized scheduler configuration.
 type SchedulerConfigs []SchedulerConfig
 
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
-	Type    string   `toml:"type" json:"type"`
-	Args    []string `toml:"args,omitempty" json:"args"`
-	Disable bool     `toml:"disable" json:"disable"`
+	Type        string   `toml:"type" json:"type"`
+	Args        []string `toml:"args,omitempty" json:"args"`
+	Disable     bool     `toml:"disable" json:"disable"`
+	ArgsPayload string   `toml:"args-payload,omitempty" json:"args-payload"`
 }
 
 var defaultSchedulers = SchedulerConfigs{
@@ -702,6 +727,11 @@ func IsDefaultScheduler(typ string) bool {
 	return false
 }
 
+// GetLeaderScheduleStrategy is to get leader schedule strategy
+func (c *ScheduleConfig) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	return core.StringToScheduleStrategy(c.LeaderScheduleStrategy)
+}
+
 // ReplicationConfig is the replication configuration.
 type ReplicationConfig struct {
 	// MaxReplicas is the number of replicas for each region.
@@ -714,15 +744,19 @@ type ReplicationConfig struct {
 	LocationLabels typeutil.StringSlice `toml:"location-labels,omitempty" json:"location-labels"`
 	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
 	StrictlyMatchLabel bool `toml:"strictly-match-label,omitempty" json:"strictly-match-label,string"`
+
+	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not uesd any more.
+	EnablePlacementRules bool // Keep it false before full feature get merged. `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
 	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{
-		MaxReplicas:        c.MaxReplicas,
-		LocationLabels:     locationLabels,
-		StrictlyMatchLabel: c.StrictlyMatchLabel,
+		MaxReplicas:          c.MaxReplicas,
+		LocationLabels:       locationLabels,
+		StrictlyMatchLabel:   c.StrictlyMatchLabel,
+		EnablePlacementRules: c.EnablePlacementRules,
 	}
 }
 
@@ -802,11 +836,16 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
+	// MaxResetTSGap is the max gap to reset the tso.
+	MaxResetTSGap time.Duration `toml:"max-reset-ts-gap" json:"max-reset-ts-gap"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
+	}
+	if !meta.IsDefined("max-reset-ts-gap") {
+		c.MaxResetTSGap = defaultMaxResetTsGap
 	}
 	return nil
 }

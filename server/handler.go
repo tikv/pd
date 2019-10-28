@@ -15,11 +15,16 @@ package server
 
 import (
 	"bytes"
+	"encoding/hex"
+	"net/http"
+	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
@@ -31,8 +36,13 @@ import (
 )
 
 var (
+	// ScheduleConfigHandlerPath is the api router path of the schedule config handler.
+	ScheduleConfigHandlerPath = "/api/v1/schedule-config"
+
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
 	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	// ErrServerNotStarted is error info for server not started.
+	ErrServerNotStarted = errors.New("The server has not been started")
 	// ErrOperatorNotFound is error info for operator not found.
 	ErrOperatorNotFound = errors.New("operator not found")
 	// ErrAddOperator is error info for already have an operator when adding operator.
@@ -134,7 +144,7 @@ func (h *Handler) GetHotReadRegions() *statistics.StoreHotRegionInfos {
 }
 
 // GetHotBytesWriteStores gets all hot write stores stats.
-func (h *Handler) GetHotBytesWriteStores() map[uint64]uint64 {
+func (h *Handler) GetHotBytesWriteStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -143,7 +153,7 @@ func (h *Handler) GetHotBytesWriteStores() map[uint64]uint64 {
 }
 
 // GetHotBytesReadStores gets all hot write stores stats.
-func (h *Handler) GetHotBytesReadStores() map[uint64]uint64 {
+func (h *Handler) GetHotBytesReadStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -152,7 +162,7 @@ func (h *Handler) GetHotBytesReadStores() map[uint64]uint64 {
 }
 
 // GetHotKeysWriteStores gets all hot write stores stats.
-func (h *Handler) GetHotKeysWriteStores() map[uint64]uint64 {
+func (h *Handler) GetHotKeysWriteStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -161,7 +171,7 @@ func (h *Handler) GetHotKeysWriteStores() map[uint64]uint64 {
 }
 
 // GetHotKeysReadStores gets all hot write stores stats.
-func (h *Handler) GetHotKeysReadStores() map[uint64]uint64 {
+func (h *Handler) GetHotKeysReadStores() map[uint64]float64 {
 	cluster := h.s.GetRaftCluster()
 	if cluster == nil {
 		return nil
@@ -175,7 +185,8 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	s, err := schedule.CreateScheduler(name, c.opController, args...)
+
+	s, err := schedule.CreateScheduler(name, c.opController, h.s.storage, schedule.ConfigSliceDecoder(name, args))
 	if err != nil {
 		return err
 	}
@@ -196,8 +207,6 @@ func (h *Handler) RemoveScheduler(name string) error {
 	}
 	if err = c.removeScheduler(name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
-	} else if err = h.opt.Persist(c.cluster.storage); err != nil {
-		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err
 }
@@ -534,7 +543,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return err
 	}
 
-	op := operator.CreateAddPeerOperator("admin-add-peer", c.cluster, region, newPeer.GetId(), toStoreID, operator.OpAdmin)
+	op := operator.CreateAddPeerOperator("admin-add-peer", region, newPeer.GetId(), toStoreID, operator.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -548,16 +557,12 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 		return err
 	}
 
-	if !c.cluster.IsRaftLearnerEnabled() {
-		return ErrOperatorNotFound
-	}
-
 	newPeer, err := c.cluster.AllocPeer(toStoreID)
 	if err != nil {
 		return err
 	}
 
-	op := operator.CreateAddLearnerOperator("admin-add-learner", c.cluster, region, newPeer.GetId(), toStoreID, operator.OpAdmin)
+	op := operator.CreateAddLearnerOperator("admin-add-learner", region, newPeer.GetId(), toStoreID, operator.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -634,7 +639,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 }
 
 // AddSplitRegionOperator adds an operator to split a region.
-func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
+func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys []string) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return err
@@ -645,7 +650,23 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policy string) error {
 		return ErrRegionNotFound(regionID)
 	}
 
-	op := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, policy)
+	policy, ok := pdpb.CheckPolicy_value[strings.ToUpper(policyStr)]
+	if !ok {
+		return errors.Errorf("check policy %s is not supported", policyStr)
+	}
+
+	var splitKeys [][]byte
+	if pdpb.CheckPolicy(policy) == pdpb.CheckPolicy_USEKEY {
+		for i := range keys {
+			k, err := hex.DecodeString(keys[i])
+			if err != nil {
+				return errors.Errorf("split key %s is not in hex format", keys[i])
+			}
+			splitKeys = append(splitKeys, k)
+		}
+	}
+
+	op := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, pdpb.CheckPolicy(policy), splitKeys)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -727,6 +748,21 @@ func (h *Handler) GetIncorrectNamespaceRegions() ([]*core.RegionInfo, error) {
 	return c.GetRegionStatsByType(statistics.IncorrectNamespace), nil
 }
 
+// GetSchedulerConfigHandler gets the handler of schedulers.
+func (h *Handler) GetSchedulerConfigHandler() http.Handler {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return nil
+	}
+	mux := http.NewServeMux()
+	for name, handler := range c.schedulers {
+		prefix := path.Join(pdRootPath, ScheduleConfigHandlerPath, name)
+		urlPath := prefix + "/"
+		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
+	}
+	return mux
+}
+
 // GetOfflinePeer gets the region with offline peer.
 func (h *Handler) GetOfflinePeer() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
@@ -743,4 +779,13 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 		return nil, ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.EmptyRegion), nil
+}
+
+// ResetTS resets the ts with specified tso.
+func (h *Handler) ResetTS(ts uint64) error {
+	tsoServer := h.s.tso
+	if tsoServer == nil {
+		return ErrServerNotStarted
+	}
+	return tsoServer.ResetUserTimestamp(ts)
 }

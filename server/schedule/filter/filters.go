@@ -94,27 +94,27 @@ func (f *excludedFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return ok
 }
 
-type overloadFilter struct{ scope string }
+type storeLimitFilter struct{ scope string }
 
-// NewOverloadFilter creates a Filter that filters all stores that are overloaded from balance.
-func NewOverloadFilter(scope string) Filter {
-	return &overloadFilter{scope: scope}
+// NewStoreLimitFilter creates a Filter that filters all stores those exceed the limit of a store.
+func NewStoreLimitFilter(scope string) Filter {
+	return &storeLimitFilter{scope: scope}
 }
 
-func (f *overloadFilter) Scope() string {
+func (f *storeLimitFilter) Scope() string {
 	return f.scope
 }
 
-func (f *overloadFilter) Type() string {
-	return "overload-filter"
+func (f *storeLimitFilter) Type() string {
+	return "store-limit-filter"
 }
 
-func (f *overloadFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsOverloaded()
+func (f *storeLimitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return !store.IsAvailable()
 }
 
-func (f *overloadFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsOverloaded()
+func (f *storeLimitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	return !store.IsAvailable()
 }
 
 type stateFilter struct{ scope string }
@@ -431,7 +431,7 @@ func (f StoreStateFilter) filterMoveRegion(opt opt.Options, store *core.StoreInf
 		return true
 	}
 
-	if store.IsOverloaded() {
+	if !store.IsAvailable() {
 		return true
 	}
 

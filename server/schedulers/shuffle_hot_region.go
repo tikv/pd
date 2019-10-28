@@ -23,23 +23,39 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/statistics"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
 func init() {
-	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
-		limit := uint64(1)
-		if len(args) == 1 {
-			l, err := strconv.ParseUint(args[0], 10, 64)
-			if err != nil {
-				return nil, errors.WithStack(err)
+	schedule.RegisterSliceDecoderBuilder("shuffle-hot-region", func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			conf, ok := v.(*shuffleHotRegionSchedulerConfig)
+			if !ok {
+				return ErrScheduleConfigNotExist
 			}
-			limit = l
+			conf.Limit = uint64(1)
+			if len(args) == 1 {
+				limit, err := strconv.ParseUint(args[0], 10, 64)
+				if err != nil {
+					return err
+				}
+				conf.Limit = limit
+			}
+			return nil
 		}
-		return newShuffleHotRegionScheduler(opController, limit), nil
 	})
+
+	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &shuffleHotRegionSchedulerConfig{Limit: uint64(1)}
+		decoder(conf)
+		return newShuffleHotRegionScheduler(opController, conf), nil
+	})
+}
+
+type shuffleHotRegionSchedulerConfig struct {
+	Limit uint64 `json:"limit"`
 }
 
 // ShuffleHotRegionScheduler mainly used to test.
@@ -50,16 +66,16 @@ type shuffleHotRegionScheduler struct {
 	*baseScheduler
 	stats *storeStatistics
 	r     *rand.Rand
-	limit uint64
+	conf  *shuffleHotRegionSchedulerConfig
 	types []BalanceType
 }
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
-func newShuffleHotRegionScheduler(opController *schedule.OperatorController, limit uint64) schedule.Scheduler {
+func newShuffleHotRegionScheduler(opController *schedule.OperatorController, conf *shuffleHotRegionSchedulerConfig) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 	return &shuffleHotRegionScheduler{
 		baseScheduler: base,
-		limit:         limit,
+		conf:          conf,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotReadRegionBalance, hotWriteRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
@@ -74,19 +90,23 @@ func (s *shuffleHotRegionScheduler) GetType() string {
 	return "shuffle-hot-region"
 }
 
-func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpHotRegion) < s.limit &&
+func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
+}
+
+func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+	return s.opController.OperatorCount(operator.OpHotRegion) < s.conf.Limit &&
 		s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit() &&
 		s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	i := s.r.Int() % len(s.types)
 	return s.dispatch(s.types[i], cluster)
 }
 
-func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster schedule.Cluster) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster opt.Cluster) []*operator.Operator {
 	switch typ {
 	case hotReadRegionBalance:
 		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
@@ -98,9 +118,9 @@ func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster schedule.C
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, storeStats statistics.StoreHotRegionsStat) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeStats statistics.StoreHotRegionsStat) []*operator.Operator {
 	for _, stats := range storeStats {
-		i := s.r.Intn(stats.RegionsStat.Len())
+		i := s.r.Intn(len(stats.RegionsStat))
 		r := stats.RegionsStat[i]
 		// select src region
 		srcRegion := cluster.GetRegion(r.RegionID)

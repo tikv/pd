@@ -28,6 +28,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -111,6 +112,7 @@ func CreateServer(cfg *config.Config, apiRegister func(*Server) http.Handler) (*
 	s := &Server{
 		cfg:         cfg,
 		scheduleOpt: config.NewScheduleOption(cfg),
+		member:      &member.Member{},
 	}
 	s.handler = newHandler(s)
 
@@ -198,6 +200,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		}
 	}
 	s.client = client
+	failpoint.Inject("memberNil", func() {
+		time.Sleep(1500 * time.Millisecond)
+	})
 	s.member = member.NewMember(etcd, client, etcdServerID)
 	return nil
 }
@@ -216,7 +221,13 @@ func (s *Server) startServer() error {
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
 
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
-	s.tso = tso.NewTimestampOracle(s.client, s.rootPath, s.member.MemberValue(), s.cfg.TsoSaveInterval.Duration)
+	s.tso = tso.NewTimestampOracle(
+		s.client,
+		s.rootPath,
+		s.member.MemberValue(),
+		s.cfg.TsoSaveInterval.Duration,
+		func() time.Duration { return s.scheduleOpt.LoadPDServerConfig().MaxResetTSGap },
+	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
 	regionStorage, err := core.NewRegionStorage(path)
@@ -510,6 +521,19 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.LabelProperty = s.scheduleOpt.LoadLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.scheduleOpt.LoadClusterVersion()
 	cfg.PDServerCfg = *s.scheduleOpt.LoadPDServerConfig()
+	storage := s.GetStorage()
+	if storage == nil {
+		return cfg
+	}
+	sches, configs, err := storage.LoadAllScheduleConfig()
+	if err != nil {
+		return cfg
+	}
+	payload := make(map[string]string)
+	for i, sche := range sches {
+		payload[sche] = configs[i]
+	}
+	cfg.Schedule.SchedulersPayload = payload
 	return cfg
 }
 
@@ -523,6 +547,9 @@ func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
 // SetScheduleConfig sets the balance config information.
 func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	if err := cfg.Deprecated(); err != nil {
 		return err
 	}
 	old := s.scheduleOpt.Load()

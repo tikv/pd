@@ -16,7 +16,6 @@ package statistics
 import (
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
@@ -27,38 +26,6 @@ const (
 	unknown   = "unknown"
 	labelType = "label"
 )
-
-// ScheduleOptions is an interface to access configurations.
-// TODO: merge the Options to schedule.Options
-type ScheduleOptions interface {
-	GetLocationLabels() []string
-
-	GetLowSpaceRatio() float64
-	GetHighSpaceRatio() float64
-	GetTolerantSizeRatio() float64
-	GetStoreBalanceRate() float64
-
-	GetSchedulerMaxWaitingOperator() uint64
-	GetLeaderScheduleLimit(name string) uint64
-	GetRegionScheduleLimit(name string) uint64
-	GetReplicaScheduleLimit(name string) uint64
-	GetMergeScheduleLimit(name string) uint64
-	GetHotRegionScheduleLimit(name string) uint64
-	GetMaxReplicas(name string) int
-	GetHotRegionCacheHitsThreshold() int
-	GetMaxSnapshotCount() uint64
-	GetMaxPendingPeerCount() uint64
-	GetMaxMergeRegionSize() uint64
-	GetMaxMergeRegionKeys() uint64
-
-	IsRaftLearnerEnabled() bool
-	IsMakeUpReplicaEnabled() bool
-	IsRemoveExtraReplicaEnabled() bool
-	IsRemoveDownReplicaEnabled() bool
-	IsReplaceOfflineReplicaEnabled() bool
-
-	GetMaxStoreDownTime() time.Duration
-}
 
 type storeStatistics struct {
 	opt             ScheduleOptions
@@ -126,7 +93,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	s.LeaderCount += store.GetLeaderCount()
 
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_score").Set(store.LeaderScore(0))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderScheduleStrategy(), 0))
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_size").Set(float64(store.GetRegionSize()))
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_count").Set(float64(store.GetRegionCount()))
 	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_size").Set(float64(store.GetLeaderSize()))
@@ -138,11 +105,11 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	// Store flows.
 	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
 	storeWriteRateBytes, storeReadRateBytes := storeFlowStats.GetBytesRate()
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_bytes").Set(float64(storeWriteRateBytes))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_bytes").Set(float64(storeReadRateBytes))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_bytes").Set(storeWriteRateBytes)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_bytes").Set(storeReadRateBytes)
 	storeWriteRateKeys, storeReadRateKeys := storeFlowStats.GetKeysWriteRate(), storeFlowStats.GetKeysReadRate()
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_keys").Set(float64(storeWriteRateKeys))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_keys").Set(float64(storeReadRateKeys))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_keys").Set(storeWriteRateKeys)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_keys").Set(storeReadRateKeys)
 }
 
 func (s *storeStatistics) Collect() {
@@ -181,12 +148,9 @@ func (s *storeStatistics) Collect() {
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
 
-	var disableMakeUpReplica, disableLearner, disableRemoveDownReplica, disableRemoveExtraReplica, disableReplaceOfflineReplica float64
+	var disableMakeUpReplica, disableRemoveDownReplica, disableRemoveExtraReplica, disableReplaceOfflineReplica float64
 	if !s.opt.IsMakeUpReplicaEnabled() {
 		disableMakeUpReplica = 1
-	}
-	if !s.opt.IsRaftLearnerEnabled() {
-		disableLearner = 1
 	}
 	if !s.opt.IsRemoveDownReplicaEnabled() {
 		disableRemoveDownReplica = 1
@@ -199,7 +163,6 @@ func (s *storeStatistics) Collect() {
 	}
 
 	configs["disable-makeup-replica"] = disableMakeUpReplica
-	configs["disable-learner"] = disableLearner
 	configs["disable-remove-down-replica"] = disableRemoveDownReplica
 	configs["disable-remove-extra-replica"] = disableRemoveExtraReplica
 	configs["disable-replace-offline-replica"] = disableReplaceOfflineReplica
@@ -214,15 +177,24 @@ func (s *storeStatistics) Collect() {
 }
 
 func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_score").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_score").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_size").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_count").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_size").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_count").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_available").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_used").Set(0)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_capacity").Set(0)
+	metrics := []string{
+		"region_score",
+		"leader_score",
+		"region_size",
+		"region_count",
+		"leader_size",
+		"leader_count",
+		"store_available",
+		"store_used",
+		"store_capacity",
+		"store_write_rate_bytes",
+		"store_read_rate_bytes",
+		"store_write_rate_keys",
+		"store_read_rate_keys",
+	}
+	for _, m := range metrics {
+		storeStatusGauge.DeleteLabelValues(s.namespace, storeAddress, id, m)
+	}
 }
 
 type storeStatisticsMap struct {
@@ -254,4 +226,9 @@ func (m *storeStatisticsMap) Collect() {
 	for _, s := range m.stats {
 		s.Collect()
 	}
+}
+
+func (m *storeStatisticsMap) Reset() {
+	storeStatusGauge.Reset()
+	clusterStatusGauge.Reset()
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/server/core"
 )
 
 const (
@@ -39,6 +40,8 @@ const (
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true
+	defaultLeaderScheduleStrategy      = "count"
+	defaultEnablePlacementRules        = false
 )
 
 // ScheduleOptions is a mock of ScheduleOptions
@@ -61,17 +64,18 @@ type ScheduleOptions struct {
 	MaxReplicas                  int
 	LocationLabels               []string
 	StrictlyMatchLabel           bool
+	EnablePlacementRules         bool
 	HotRegionCacheHitsThreshold  int
 	TolerantSizeRatio            float64
 	LowSpaceRatio                float64
 	HighSpaceRatio               float64
-	DisableLearner               bool
 	DisableRemoveDownReplica     bool
 	DisableReplaceOfflineReplica bool
 	DisableMakeUpReplica         bool
 	DisableRemoveExtraReplica    bool
 	DisableLocationReplacement   bool
 	DisableNamespaceRelocation   bool
+	LeaderScheduleStrategy       string
 	LabelProperties              map[string][]*metapb.StoreLabel
 }
 
@@ -92,11 +96,13 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.StrictlyMatchLabel = defaultStrictlyMatchLabel
+	mso.EnablePlacementRules = defaultEnablePlacementRules
 	mso.HotRegionCacheHitsThreshold = defaultHotRegionCacheHitsThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
 	mso.HighSpaceRatio = defaultHighSpaceRatio
+	mso.LeaderScheduleStrategy = defaultLeaderScheduleStrategy
 	return mso
 }
 
@@ -155,8 +161,8 @@ func (mso *ScheduleOptions) GetSplitMergeInterval() time.Duration {
 	return mso.SplitMergeInterval
 }
 
-// GetEnableOneWayMerge mocks method
-func (mso *ScheduleOptions) GetEnableOneWayMerge() bool {
+// IsOneWayMergeEnabled mocks method
+func (mso *ScheduleOptions) IsOneWayMergeEnabled() bool {
 	return mso.EnableOneWayMerge
 }
 
@@ -178,6 +184,11 @@ func (mso *ScheduleOptions) GetLocationLabels() []string {
 // GetStrictlyMatchLabel mocks method
 func (mso *ScheduleOptions) GetStrictlyMatchLabel() bool {
 	return mso.StrictlyMatchLabel
+}
+
+// IsPlacementRulesEnabled mocks method
+func (mso *ScheduleOptions) IsPlacementRulesEnabled() bool {
+	return mso.EnablePlacementRules
 }
 
 // GetHotRegionCacheHitsThreshold mocks method
@@ -210,11 +221,6 @@ func (mso *ScheduleOptions) SetMaxReplicas(replicas int) {
 	mso.MaxReplicas = replicas
 }
 
-// IsRaftLearnerEnabled mocks method
-func (mso *ScheduleOptions) IsRaftLearnerEnabled() bool {
-	return !mso.DisableLearner
-}
-
 // IsRemoveDownReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsRemoveDownReplicaEnabled() bool {
 	return !mso.DisableRemoveDownReplica
@@ -243,4 +249,9 @@ func (mso *ScheduleOptions) IsLocationReplacementEnabled() bool {
 // IsNamespaceRelocationEnabled mocks method.
 func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
 	return !mso.DisableNamespaceRelocation
+}
+
+// GetLeaderScheduleStrategy is to get leader schedule strategy
+func (mso *ScheduleOptions) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	return core.StringToScheduleStrategy(mso.LeaderScheduleStrategy)
 }
