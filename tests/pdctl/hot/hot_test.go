@@ -63,7 +63,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
 	defer cluster.Destroy()
 
-	//test hot store
+	// test hot store
 	ss := leaderServer.GetStore(1)
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}
