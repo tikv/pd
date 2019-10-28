@@ -23,32 +23,44 @@ func storeTag(id uint64) string {
 	return fmt.Sprintf("store-%d", id)
 }
 
-// RollingStats provides rolling statistics with specified window size.
-// There are window size records for calculating.
-type RollingStats struct {
-	records []float64
-	size    int
-	count   int
+// MovingAvg provides moving average.
+// Ref: https://en.wikipedia.org/wiki/Moving_average
+type MovingAvg interface {
+	// Add adds a data point to the data set.
+	Add(data float64)
+	// Get returns the moving average.
+	Get() float64
+	// Reset cleans the data set.
+	Reset()
+	// Set = Reset + Add
+	Set(data float64)
 }
 
-// NewRollingStats returns a RollingStats.
-func NewRollingStats(size int) *RollingStats {
-	return &RollingStats{
+// MedianFilter works as a median filter with specified window size.
+// There are at most `size` data points for calculating.
+// References: https://en.wikipedia.org/wiki/Median_filter.
+type MedianFilter struct {
+	records []float64
+	size    uint64
+	count   uint64
+}
+
+// NewMedianFilter returns a MedianFilter.
+func NewMedianFilter(size int) *MedianFilter {
+	return &MedianFilter{
 		records: make([]float64, size),
-		size:    size,
+		size:    uint64(size),
 	}
 }
 
-// Add adds an element.
-func (r *RollingStats) Add(n float64) {
+// Add adds a data point.
+func (r *MedianFilter) Add(n float64) {
 	r.records[r.count%r.size] = n
 	r.count++
 }
 
-// Median returns the median of the records.
-// it can be used to filter noise.
-// References: https://en.wikipedia.org/wiki/Median_filter.
-func (r *RollingStats) Median() float64 {
+// Get returns the median of the data set.
+func (r *MedianFilter) Get() float64 {
 	if r.count == 0 {
 		return 0
 	}
@@ -58,4 +70,15 @@ func (r *RollingStats) Median() float64 {
 	}
 	median, _ := stats.Median(records)
 	return median
+}
+
+// Reset cleans the data set.
+func (r *MedianFilter) Reset() {
+	r.count = 0
+}
+
+// Set = Reset + Add.
+func (r *MedianFilter) Set(n float64) {
+	r.records[0] = n
+	r.count = 1
 }
