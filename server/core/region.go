@@ -378,21 +378,14 @@ func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
 type regionMap struct {
-	m         map[uint64]*regionEntry
-	ids       []uint64
+	m         map[uint64]*RegionInfo
 	totalSize int64
 	totalKeys int64
 }
 
-type regionEntry struct {
-	*RegionInfo
-	pos int
-}
-
 func newRegionMap() *regionMap {
 	return &regionMap{
-		m:         make(map[uint64]*regionEntry),
-		totalSize: 0,
+		m: make(map[uint64]*RegionInfo),
 	}
 }
 
@@ -407,24 +400,18 @@ func (rm *regionMap) Get(id uint64) *RegionInfo {
 	if rm == nil {
 		return nil
 	}
-	if entry, ok := rm.m[id]; ok {
-		return entry.RegionInfo
+	if r, ok := rm.m[id]; ok {
+		return r
 	}
 	return nil
 }
 
 func (rm *regionMap) Put(region *RegionInfo) {
 	if old, ok := rm.m[region.GetID()]; ok {
-		rm.totalSize += region.approximateSize - old.approximateSize
-		rm.totalKeys += region.approximateKeys - old.approximateKeys
-		old.RegionInfo = region
-		return
+		rm.totalSize -= old.approximateSize
+		rm.totalKeys -= old.approximateKeys
 	}
-	rm.m[region.GetID()] = &regionEntry{
-		RegionInfo: region,
-		pos:        len(rm.ids),
-	}
-	rm.ids = append(rm.ids, region.GetID())
+	rm.m[region.GetID()] = region
 	rm.totalSize += region.approximateSize
 	rm.totalKeys += region.approximateKeys
 }
@@ -434,12 +421,7 @@ func (rm *regionMap) Delete(id uint64) {
 		return
 	}
 	if old, ok := rm.m[id]; ok {
-		len := rm.Len()
-		last := rm.m[rm.ids[len-1]]
-		last.pos = old.pos
-		rm.ids[last.pos] = last.GetID()
 		delete(rm.m, id)
-		rm.ids = rm.ids[:len-1]
 		rm.totalSize -= old.approximateSize
 		rm.totalKeys -= old.approximateKeys
 	}
@@ -665,7 +647,7 @@ func (r *RegionsInfo) SearchPrevRegion(regionKey []byte) *RegionInfo {
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.regions.Len())
 	for _, region := range r.regions.m {
-		regions = append(regions, region.RegionInfo)
+		regions = append(regions, region)
 	}
 	return regions
 }

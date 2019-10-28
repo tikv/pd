@@ -744,15 +744,19 @@ type ReplicationConfig struct {
 	LocationLabels typeutil.StringSlice `toml:"location-labels,omitempty" json:"location-labels"`
 	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
 	StrictlyMatchLabel bool `toml:"strictly-match-label,omitempty" json:"strictly-match-label,string"`
+
+	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not uesd any more.
+	EnablePlacementRules bool // Keep it false before full feature get merged. `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
 	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
 	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{
-		MaxReplicas:        c.MaxReplicas,
-		LocationLabels:     locationLabels,
-		StrictlyMatchLabel: c.StrictlyMatchLabel,
+		MaxReplicas:          c.MaxReplicas,
+		LocationLabels:       locationLabels,
+		StrictlyMatchLabel:   c.StrictlyMatchLabel,
+		EnablePlacementRules: c.EnablePlacementRules,
 	}
 }
 

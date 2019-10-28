@@ -45,43 +45,38 @@ func NewCheckerController(cluster opt.Cluster, classifier namespace.Classifier, 
 }
 
 // CheckRegion will check the region and add a new operator if needed.
-func (c *CheckerController) CheckRegion(region *core.RegionInfo) bool {
+func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*operator.Operator) { //return checkerIsBusy,ops
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
-
+	checkerIsBusy := true
 	if op := c.learnerChecker.Check(region); op != nil {
-		if opController.AddOperator(op) {
-			return true
-		}
+		return false, []*operator.Operator{op}
 	}
 
 	if opController.OperatorCount(operator.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
 		opController.OperatorCount(operator.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
 		opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+		checkerIsBusy = false
 		if op := c.namespaceChecker.Check(region); op != nil {
-			if opController.AddWaitingOperator(op) {
-				return true
-			}
+			return checkerIsBusy, []*operator.Operator{op}
 		}
 	}
 
 	if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+		checkerIsBusy = false
 		if op := c.replicaChecker.Check(region); op != nil {
-			if opController.AddWaitingOperator(op) {
-				return true
-			}
+			return checkerIsBusy, []*operator.Operator{op}
 		}
 	}
 	if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
+		checkerIsBusy = false
 		if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
-			if opController.AddWaitingOperator(ops...) {
-				return true
-			}
+			return checkerIsBusy, ops
 		}
 	}
-	return false
+	return checkerIsBusy, nil
 }
 
 // GetMergeChecker returns the merge checker.

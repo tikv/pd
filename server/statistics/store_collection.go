@@ -105,11 +105,11 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	// Store flows.
 	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
 	storeWriteRateBytes, storeReadRateBytes := storeFlowStats.GetBytesRate()
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_bytes").Set(float64(storeWriteRateBytes))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_bytes").Set(float64(storeReadRateBytes))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_bytes").Set(storeWriteRateBytes)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_bytes").Set(storeReadRateBytes)
 	storeWriteRateKeys, storeReadRateKeys := storeFlowStats.GetKeysWriteRate(), storeFlowStats.GetKeysReadRate()
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_keys").Set(float64(storeWriteRateKeys))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_keys").Set(float64(storeReadRateKeys))
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_keys").Set(storeWriteRateKeys)
+	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_keys").Set(storeReadRateKeys)
 }
 
 func (s *storeStatistics) Collect() {

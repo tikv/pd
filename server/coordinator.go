@@ -115,10 +115,14 @@ func (c *coordinator) patrolRegions() {
 				continue
 			}
 
-			key = region.GetEndKey()
-
-			if c.checkers.CheckRegion(region) {
+			checkerIsBusy, ops := c.checkers.CheckRegion(region)
+			if checkerIsBusy {
 				break
+			}
+
+			key = region.GetEndKey()
+			if ops != nil {
+				c.opController.AddWaitingOperator(ops...)
 			}
 		}
 		// Updates the label level isolation statistics.
