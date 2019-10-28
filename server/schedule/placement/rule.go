@@ -74,9 +74,8 @@ func compareRule(a, b *Rule) int {
 	}
 }
 
-func sortRules(rules []*Rule) []*Rule {
+func sortRules(rules []*Rule) {
 	sort.Slice(rules, func(i, j int) bool { return compareRule(rules[i], rules[j]) < 0 })
-	return rules
 }
 
 // Sort Rules, trim concealed rules.
