@@ -24,8 +24,10 @@ type LabelConstraintOp string
 
 const (
 	// In restricts the store label value should in the value list.
+	// If label does not exist, `in` is always false.
 	In LabelConstraintOp = "in"
 	// NotIn restricts the store label value should not in the value list.
+	// If label does not exist, `notIn` is always true.
 	NotIn LabelConstraintOp = "notIn"
 	// Exists restricts the store should have the label.
 	Exists LabelConstraintOp = "exists"
@@ -52,7 +54,7 @@ func (c *LabelConstraint) MatchStore(store *core.StoreInfo) bool {
 		return label != "" && slice.AnyOf(c.Values, func(i int) bool { return c.Values[i] == label })
 	case NotIn:
 		label := store.GetLabelValue(c.Key)
-		return label != "" && slice.NoneOf(c.Values, func(i int) bool { return c.Values[i] == label })
+		return label == "" || slice.NoneOf(c.Values, func(i int) bool { return c.Values[i] == label })
 	case Exists:
 		return store.GetLabelValue(c.Key) != ""
 	case NotExists:

@@ -48,8 +48,8 @@ func (s *testLabelConstraintsSuite) TestLabelConstraint(c *C) {
 	expect := [][]int{
 		{1, 2, 4},
 		{1, 2, 3, 4},
-		{3, 6},
-		{6},
+		{3, 5, 6},
+		{5, 6},
 		{1, 2, 3, 4, 6},
 		{1, 2, 3, 6},
 	}
