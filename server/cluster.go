@@ -1306,6 +1306,11 @@ func (c *RaftCluster) GetStrictlyMatchLabel() bool {
 	return c.opt.GetReplication().GetStrictlyMatchLabel()
 }
 
+// IsPlacementRulesEnabled returns if the placement rules feature is enabled.
+func (c *RaftCluster) IsPlacementRulesEnabled() bool {
+	return c.opt.IsPlacementRulesEnabled()
+}
+
 // GetHotRegionCacheHitsThreshold gets the threshold of hitting hot region cache.
 func (c *RaftCluster) GetHotRegionCacheHitsThreshold() int {
 	return c.opt.GetHotRegionCacheHitsThreshold()
@@ -1358,25 +1363,25 @@ func (c *RaftCluster) isPrepared() bool {
 	return c.prepareChecker.check(c)
 }
 
-func (c *RaftCluster) getStoresBytesWriteStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresBytesWriteStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresBytesWriteStat()
 }
 
-func (c *RaftCluster) getStoresBytesReadStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresBytesReadStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresBytesReadStat()
 }
 
-func (c *RaftCluster) getStoresKeysWriteStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresKeysWriteStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresKeysWriteStat()
 }
 
-func (c *RaftCluster) getStoresKeysReadStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresKeysReadStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresKeysReadStat()

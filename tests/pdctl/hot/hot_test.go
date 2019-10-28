@@ -94,8 +94,8 @@ func (s *hotTestSuite) TestHot(c *C) {
 	c.Assert(err, IsNil)
 	hotStores := api.HotStoreStats{}
 	c.Assert(json.Unmarshal(output, &hotStores), IsNil)
-	c.Assert(hotStores.BytesWriteStats[1], Equals, bytesWritten/10)
-	c.Assert(hotStores.BytesReadStats[1], Equals, bytesRead/10)
-	c.Assert(hotStores.KeysWriteStats[1], Equals, keysWritten/10)
-	c.Assert(hotStores.KeysReadStats[1], Equals, keysRead/10)
+	c.Assert(hotStores.BytesWriteStats[1], Equals, float64(bytesWritten)/10)
+	c.Assert(hotStores.BytesReadStats[1], Equals, float64(bytesRead)/10)
+	c.Assert(hotStores.KeysWriteStats[1], Equals, float64(keysWritten)/10)
+	c.Assert(hotStores.KeysReadStats[1], Equals, float64(keysRead)/10)
 }

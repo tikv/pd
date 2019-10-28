@@ -108,47 +108,47 @@ func (s *StoresStats) GetStoreBytesRate(storeID uint64) (writeRate float64, read
 }
 
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
-func (s *StoresStats) GetStoresBytesWriteStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresBytesWriteStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
 		writeRate, _ := stats.GetBytesRate()
-		res[storeID] = uint64(writeRate)
+		res[storeID] = writeRate
 	}
 	return res
 }
 
 // GetStoresBytesReadStat returns the bytes read stat of all StoreInfo.
-func (s *StoresStats) GetStoresBytesReadStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresBytesReadStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
 		_, readRate := stats.GetBytesRate()
-		res[storeID] = uint64(readRate)
+		res[storeID] = readRate
 	}
 	return res
 }
 
 // GetStoresKeysWriteStat returns the keys write stat of all StoreInfo.
-func (s *StoresStats) GetStoresKeysWriteStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresKeysWriteStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = uint64(stats.GetKeysWriteRate())
+		res[storeID] = stats.GetKeysWriteRate()
 	}
 	return res
 }
 
 // GetStoresKeysReadStat returns the bytes read stat of all StoreInfo.
-func (s *StoresStats) GetStoresKeysReadStat() map[uint64]uint64 {
+func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = uint64(stats.GetKeysReadRate())
+		res[storeID] = stats.GetKeysReadRate()
 	}
 	return res
 }
@@ -156,10 +156,10 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]uint64 {
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex
-	bytesWriteRate *RollingStats
-	bytesReadRate  *RollingStats
-	keysWriteRate  *RollingStats
-	keysReadRate   *RollingStats
+	bytesWriteRate MovingAvg
+	bytesReadRate  MovingAvg
+	keysWriteRate  MovingAvg
+	keysReadRate   MovingAvg
 }
 
 const storeStatsRollingWindows = 3
@@ -167,10 +167,10 @@ const storeStatsRollingWindows = 3
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate: NewRollingStats(storeStatsRollingWindows),
-		bytesReadRate:  NewRollingStats(storeStatsRollingWindows),
-		keysWriteRate:  NewRollingStats(storeStatsRollingWindows),
-		keysReadRate:   NewRollingStats(storeStatsRollingWindows),
+		bytesWriteRate: NewMedianFilter(storeStatsRollingWindows),
+		bytesReadRate:  NewMedianFilter(storeStatsRollingWindows),
+		keysWriteRate:  NewMedianFilter(storeStatsRollingWindows),
+		keysReadRate:   NewMedianFilter(storeStatsRollingWindows),
 	}
 }
 
@@ -193,19 +193,19 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64) {
 	r.RLock()
 	defer r.RUnlock()
-	return r.bytesWriteRate.Median(), r.bytesReadRate.Median()
+	return r.bytesWriteRate.Get(), r.bytesReadRate.Get()
 }
 
 // GetKeysWriteRate returns the keys write rate.
 func (r *RollingStoreStats) GetKeysWriteRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
-	return r.keysWriteRate.Median()
+	return r.keysWriteRate.Get()
 }
 
 // GetKeysReadRate returns the keys read rate.
 func (r *RollingStoreStats) GetKeysReadRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
-	return r.keysReadRate.Median()
+	return r.keysReadRate.Get()
 }

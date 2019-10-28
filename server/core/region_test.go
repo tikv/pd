@@ -71,10 +71,6 @@ func (s *testRegionMapSuite) regionInfo(id uint64) *RegionInfo {
 }
 
 func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
-	// Check position.
-	for _, r := range rm.m {
-		c.Assert(rm.ids[r.pos], Equals, r.meta.GetId())
-	}
 	// Check Get.
 	for _, id := range ids {
 		c.Assert(rm.Get(id).GetID(), Equals, id)
@@ -90,12 +86,7 @@ func (s *testRegionMapSuite) check(c *C, rm *regionMap, ids ...uint64) {
 	for _, r := range rm.m {
 		set1[r.GetID()] = struct{}{}
 	}
-	set2 := make(map[uint64]struct{})
-	for _, id := range rm.ids {
-		set2[id] = struct{}{}
-	}
 	c.Assert(set1, DeepEquals, expect)
-	c.Assert(set2, DeepEquals, expect)
 	// Check region size.
 	var total int64
 	for _, id := range ids {

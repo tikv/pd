@@ -29,7 +29,7 @@ type HotPeerStat struct {
 	BytesRate float64  `json:"flow_bytes"`
 	KeysRate  float64  `json:"flow_keys"`
 	// RollingBytesRate is a rolling statistics, recording some recently added records.
-	RollingBytesRate *RollingStats
+	RollingBytesRate MovingAvg
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
@@ -61,5 +61,5 @@ func (stat *HotPeerStat) GetBytesRate() float64 {
 	if stat.RollingBytesRate == nil {
 		return stat.BytesRate
 	}
-	return stat.RollingBytesRate.Median()
+	return stat.RollingBytesRate.Get()
 }
