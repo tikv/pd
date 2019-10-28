@@ -18,7 +18,9 @@ import (
 	"math/rand"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -271,9 +273,9 @@ func (s *Server) campaignLeader() error {
 	if err = s.syncTimestamp(); err != nil {
 		return err
 	}
-	defer s.ts.Store(&atomicObject{
+	defer atomic.StorePointer(&s.ts, unsafe.Pointer(&atomicObject{
 		physical: zeroTime,
-	})
+	}))
 
 	s.enableLeader()
 	defer s.disableLeader()

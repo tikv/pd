@@ -51,3 +51,20 @@ func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Requ
 	cluster.DropCacheRegion(regionID)
 	h.rd.JSON(w, http.StatusOK, nil)
 }
+
+func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	var input map[string]interface{}
+	if err := readJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	ts, ok := input["tso"].(float64)
+	if !ok || ts < 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "invalid tso value")
+		return
+	}
+
+	if err := handler.ResetTS(uint64(ts)); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+}

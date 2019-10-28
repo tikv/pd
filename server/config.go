@@ -202,6 +202,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage    = true
+	defaultMaxResetTsGap       = 24 * time.Hour
 	defaultStrictlyMatchLabel  = false
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
@@ -796,11 +797,16 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
+	// MaxResetTSGap is the max gap to reset the tso.
+	MaxResetTSGap time.Duration `toml:"max-reset-ts-gap" json:"max-reset-ts-gap"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
+	}
+	if !meta.IsDefined("max-reset-ts-gap") {
+		c.MaxResetTSGap = defaultMaxResetTsGap
 	}
 	return nil
 }
