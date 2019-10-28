@@ -33,7 +33,9 @@ func validateRole(s PeerRoleType) bool {
 	return s == Voter || s == Leader || s == Follower || s == Learner
 }
 
-// Rule is the placement rule that can be checked against a region.
+// Rule is the placement rule that can be checked against a region. When
+// applying rules (apply means schedule regions to match selected rules), the
+// apply order is defined by the tuple [GroupID, Index, ID].
 type Rule struct {
 	GroupID          string            `json:"group_id"`                    // mark the source that add the rule
 	ID               string            `json:"id"`                          // unique ID within a group
@@ -54,7 +56,7 @@ func (r Rule) Key() [2]string {
 	return [2]string{r.GroupID, r.ID}
 }
 
-// Rules are ordered by (groupID, Index, ID).
+// Rules are ordered by (GroupID, Index, ID).
 func compareRule(a, b *Rule) int {
 	switch {
 	case a.GroupID < b.GroupID:
