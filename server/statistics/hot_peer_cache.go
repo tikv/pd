@@ -263,7 +263,7 @@ func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytesRate float64, hotThre
 		if !isHot {
 			return nil
 		}
-		newItem.RollingBytesRate = NewRollingStats(rollingWindowsSize)
+		newItem.RollingBytesRate = NewMedianFilter(rollingWindowsSize)
 		newItem.AntiCount = hotRegionAntiCount
 		newItem.isNew = true
 	}
