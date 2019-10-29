@@ -34,6 +34,7 @@ const (
 	configPath   = "config"
 	schedulePath = "schedule"
 	gcPath       = "gc"
+	rulesPath    = "rules"
 
 	customScheduleConfigPath = "scheduler_config"
 )
@@ -193,6 +194,31 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 		return false, nil
 	}
 	err = json.Unmarshal([]byte(value), cfg)
+	if err != nil {
+		return false, errors.WithStack(err)
+	}
+	return true, nil
+}
+
+// SaveRules stores rule cfg to the rulesPath.
+func (s *Storage) SaveRules(rules interface{}) error {
+	value, err := json.Marshal(rules)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	return s.Save(rulesPath, string(value))
+}
+
+// LoadRules loads placement rules from storage.
+func (s *Storage) LoadRules(rules interface{}) (bool, error) {
+	value, err := s.Load(rulesPath)
+	if err != nil {
+		return false, err
+	}
+	if value == "" {
+		return false, nil
+	}
+	err = json.Unmarshal([]byte(value), rules)
 	if err != nil {
 		return false, errors.WithStack(err)
 	}
