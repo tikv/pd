@@ -197,7 +197,7 @@ func newTestScheduleOption() (*ScheduleOption, error) {
 	return opt, nil
 }
 
-func (s *testConfigSuite) TestDefaultStoreLimit_Upgrading(c *C) {
+func (s *testConfigSuite) TestDefaultStoreLimitUpgrade(c *C) {
 	var cfgData = `
 	[schedule]
 	store-balance-rate = 128.0
@@ -218,7 +218,7 @@ func (s *testConfigSuite) TestDefaultStoreLimit_Upgrading(c *C) {
 	c.Assert(conf.Schedule.StoreBalanceRate, Equals, 128.0)
 }
 
-func (s *testConfigSuite) TestDefaultStoreLimit_Overwrite(c *C) {
+func (s *testConfigSuite) TestDefaultStoreLimitOverwrite(c *C) {
 	var cfgData = `
 	[schedule]
 	store-balance-rate = 128.0
