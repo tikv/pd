@@ -91,6 +91,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	regionsHandler := newRegionsHandler(svr, rd)
 	router.HandleFunc("/api/v1/regions", regionsHandler.GetAll).Methods("GET")
 	router.HandleFunc("/api/v1/regions/key", regionsHandler.ScanRegions).Methods("GET")
+	router.HandleFunc("/api/v1/regions/count", regionsHandler.GetRegionCount).Methods("GET")
 	router.HandleFunc("/api/v1/regions/store/{id}", regionsHandler.GetStoreRegions).Methods("GET")
 	router.HandleFunc("/api/v1/regions/writeflow", regionsHandler.GetTopWriteFlow).Methods("GET")
 	router.HandleFunc("/api/v1/regions/readflow", regionsHandler.GetTopReadFlow).Methods("GET")
