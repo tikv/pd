@@ -183,7 +183,7 @@ func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo) map[ui
 	stores := r.cluster.GetStores()
 	targets := make(map[uint64]*core.StoreInfo, len(stores))
 	for _, store := range stores {
-		if !filter.Target(r.cluster, store, filters) && !store.GetIsBusy() {
+		if !filter.Target(r.cluster, store, filters) && !store.IsBusy() {
 			targets[store.GetID()] = store
 		}
 	}
