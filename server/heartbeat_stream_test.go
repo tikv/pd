@@ -36,7 +36,7 @@ type testHeartbeatStreamSuite struct {
 func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	s.svr.cfg.HeartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
 	mustWaitLeader(c, []*Server{s.svr})

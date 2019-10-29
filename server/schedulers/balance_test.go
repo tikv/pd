@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/rand"
@@ -153,18 +154,25 @@ func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})
 
 type testBalanceLeaderSchedulerSuite struct {
-	tc *mockcluster.Cluster
-	lb schedule.Scheduler
-	oc *schedule.OperatorController
+	ctx    context.Context
+	cancel context.CancelFunc
+	tc     *mockcluster.Cluster
+	lb     schedule.Scheduler
+	oc     *schedule.OperatorController
 }
 
 func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	opt := mockoption.NewScheduleOptions()
 	s.tc = mockcluster.NewCluster(opt)
-	s.oc = schedule.NewOperatorController(nil, nil)
+	s.oc = schedule.NewOperatorController(s.ctx, nil, nil)
 	lb, err := schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	s.lb = lb
+}
+
+func (s *testBalanceLeaderSchedulerSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testBalanceLeaderSchedulerSuite) schedule() []*operator.Operator {
@@ -413,12 +421,23 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
 
-type testBalanceRegionSchedulerSuite struct{}
+type testBalanceRegionSchedulerSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testBalanceRegionSchedulerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testBalanceRegionSchedulerSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
 
 func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -451,7 +470,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
@@ -520,7 +539,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	newTestReplication(opt, 5, "zone", "rack", "host")
 
@@ -575,7 +594,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	opt.TolerantSizeRatio = 1
 
@@ -617,7 +636,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -642,7 +661,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
@@ -997,11 +1016,13 @@ var _ = Suite(&testRandomMergeSchedulerSuite{})
 type testRandomMergeSchedulerSuite struct{}
 
 func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := mockoption.NewScheduleOptions()
 	opt.MergeScheduleLimit = 1
 	tc := mockcluster.NewCluster(opt)
 	hb := mockhbstream.NewHeartbeatStreams(tc.ID)
-	oc := schedule.NewOperatorController(tc, hb)
+	oc := schedule.NewOperatorController(ctx, tc, hb)
 
 	mb, err := schedule.CreateScheduler("random-merge", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -1024,7 +1045,18 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 
 var _ = Suite(&testScatterRangeLeaderSuite{})
 
-type testScatterRangeLeaderSuite struct{}
+type testScatterRangeLeaderSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testScatterRangeLeaderSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testScatterRangeLeaderSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
 
 func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
@@ -1073,7 +1105,7 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	for i := 1; i <= 5; i++ {
 		tc.UpdateStoreStatus(uint64(i))
 	}
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_50", "t"}))
 	c.Assert(err, IsNil)
@@ -1100,7 +1132,7 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_50", "t"}))
 	sche := hb.(*scatterRangeScheduler)
 	c.Assert(err, IsNil)
@@ -1172,7 +1204,7 @@ func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 		tc.UpdateStoreStatus(uint64(i))
 	}
 
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_09", "t"}))
 	c.Assert(err, IsNil)
 

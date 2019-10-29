@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"sync"
@@ -54,6 +55,7 @@ var (
 // region 1 -> /1/raft/r/1, value is metapb.Region
 type RaftCluster struct {
 	sync.RWMutex
+	ctx context.Context
 
 	s *Server
 
@@ -90,8 +92,9 @@ type ClusterStatus struct {
 	IsInitialized     bool      `json:"is_initialized"`
 }
 
-func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
+func newRaftCluster(ctx context.Context, s *Server, clusterID uint64) *RaftCluster {
 	return &RaftCluster{
+		ctx:          ctx,
 		s:            s,
 		running:      false,
 		clusterID:    clusterID,
@@ -175,7 +178,7 @@ func (c *RaftCluster) start() error {
 		return err
 	}
 
-	c.coordinator = newCoordinator(cluster, c.s.hbStreams, c.s.classifier)
+	c.coordinator = newCoordinator(c.ctx, cluster, c.s.hbStreams, c.s.classifier)
 	c.regionStats = statistics.NewRegionStatistics(c.s.scheduleOpt, c.s.classifier)
 	c.quit = make(chan struct{})
 

@@ -14,6 +14,7 @@
 package cache
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ type ttlCacheItem struct {
 // TTL is a cache that assigns TTL(Time-To-Live) for each items.
 type TTL struct {
 	sync.RWMutex
+	ctx context.Context
 
 	items      map[uint64]ttlCacheItem
 	ttl        time.Duration
@@ -36,8 +38,9 @@ type TTL struct {
 }
 
 // NewTTL returns a new TTL cache.
-func NewTTL(gcInterval time.Duration, ttl time.Duration) *TTL {
+func NewTTL(ctx context.Context, gcInterval time.Duration, ttl time.Duration) *TTL {
 	c := &TTL{
+		ctx:        ctx,
 		items:      make(map[uint64]ttlCacheItem),
 		ttl:        ttl,
 		gcInterval: gcInterval,
@@ -111,21 +114,24 @@ func (c *TTL) doGC() {
 	defer ticker.Stop()
 
 	for {
-		<-ticker.C
-		count := 0
-		now := time.Now()
-		c.Lock()
-		for key := range c.items {
-			if value, ok := c.items[key]; ok {
-				if value.expire.Before(now) {
-					count++
-					delete(c.items, key)
+		select {
+		case <-ticker.C:
+			count := 0
+			now := time.Now()
+			c.Lock()
+			for key := range c.items {
+				if value, ok := c.items[key]; ok {
+					if value.expire.Before(now) {
+						count++
+						delete(c.items, key)
+					}
 				}
 			}
+			c.Unlock()
+			log.Debug("TTL GC items", zap.Int("count", count))
+		case <-c.ctx.Done():
+			return
 		}
-		c.Unlock()
-
-		log.Debug("TTL GC items", zap.Int("count", count))
 	}
 }
 
@@ -135,9 +141,9 @@ type TTLUint64 struct {
 }
 
 // NewIDTTL creates a new TTLUint64 cache.
-func NewIDTTL(gcInterval, ttl time.Duration) *TTLUint64 {
+func NewIDTTL(ctx context.Context, gcInterval, ttl time.Duration) *TTLUint64 {
 	return &TTLUint64{
-		TTL: NewTTL(gcInterval, ttl),
+		TTL: NewTTL(ctx, gcInterval, ttl),
 	}
 }
 

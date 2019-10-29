@@ -260,19 +260,22 @@ func (s *serverTestSuite) TestMoveLeader(c *C) {
 var _ = Suite(&leaderTestSuite{})
 
 type leaderTestSuite struct {
-	svr  *server.Server
-	wg   sync.WaitGroup
-	done chan bool
-	cfg  *config.Config
+	ctx    context.Context
+	cancel context.CancelFunc
+	svr    *server.Server
+	wg     sync.WaitGroup
+	done   chan bool
+	cfg    *config.Config
 }
 
 func (s *leaderTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.cfg = server.NewTestSingleConfig(c)
 	s.wg.Add(1)
 	s.done = make(chan bool)
 	svr, err := server.CreateServer(s.cfg, nil)
 	c.Assert(err, IsNil)
-	err = svr.Run(context.TODO())
+	err = svr.Run(s.ctx)
 	// Send requests after server has started.
 	go s.sendRequest(c, s.cfg.ClientUrls)
 	time.Sleep(100 * time.Millisecond)
@@ -282,6 +285,7 @@ func (s *leaderTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *leaderTestSuite) TearDownSuite(c *C) {
+	s.cancel()
 	s.svr.Close()
 	testutil.CleanServer(s.cfg)
 }

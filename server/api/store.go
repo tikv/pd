@@ -92,7 +92,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
 			ApplyingSnapCount:  store.GetApplyingSnapCount(),
-			IsBusy:             store.GetIsBusy(),
+			IsBusy:             store.IsBusy(),
 		},
 	}
 

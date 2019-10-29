@@ -65,9 +65,11 @@ func (s *testStoreNsSuite) SetUpSuite(c *C) {
 	cfg.NamespaceClassifier = "table"
 	svr, err := server.CreateServer(cfg, NewHandler)
 	c.Assert(err, IsNil)
-	c.Assert(svr.Run(context.TODO()), IsNil)
+	ctx, cancel := context.WithCancel(context.Background())
+	c.Assert(svr.Run(ctx), IsNil)
 	s.svr = svr
 	s.cleanup = func() {
+		cancel()
 		svr.Close()
 		testutil.CleanServer(cfg)
 	}
