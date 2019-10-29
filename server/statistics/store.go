@@ -176,10 +176,10 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex
-	bytesWriteRate *RollingStats
-	bytesReadRate  *RollingStats
-	keysWriteRate  *RollingStats
-	keysReadRate   *RollingStats
+	bytesWriteRate MovingAvg
+	bytesReadRate  MovingAvg
+	keysWriteRate  MovingAvg
+	keysReadRate   MovingAvg
 }
 
 const storeStatsRollingWindows = 3
@@ -187,10 +187,10 @@ const storeStatsRollingWindows = 3
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate: NewRollingStats(storeStatsRollingWindows),
-		bytesReadRate:  NewRollingStats(storeStatsRollingWindows),
-		keysWriteRate:  NewRollingStats(storeStatsRollingWindows),
-		keysReadRate:   NewRollingStats(storeStatsRollingWindows),
+		bytesWriteRate: NewMedianFilter(storeStatsRollingWindows),
+		bytesReadRate:  NewMedianFilter(storeStatsRollingWindows),
+		keysWriteRate:  NewMedianFilter(storeStatsRollingWindows),
+		keysReadRate:   NewMedianFilter(storeStatsRollingWindows),
 	}
 }
 
@@ -213,7 +213,7 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64) {
 	r.RLock()
 	defer r.RUnlock()
-	return r.bytesWriteRate.Median(), r.bytesReadRate.Median()
+	return r.bytesWriteRate.Get(), r.bytesReadRate.Get()
 }
 
 // GetBytesWriteRate returns the bytes write rate and the bytes read rate.
@@ -234,12 +234,12 @@ func (r *RollingStoreStats) GetBytesReadRate() float64 {
 func (r *RollingStoreStats) GetKeysWriteRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
-	return r.keysWriteRate.Median()
+	return r.keysWriteRate.Get()
 }
 
 // GetKeysReadRate returns the keys read rate.
 func (r *RollingStoreStats) GetKeysReadRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
-	return r.keysReadRate.Median()
+	return r.keysReadRate.Get()
 }

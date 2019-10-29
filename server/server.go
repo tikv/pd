@@ -207,7 +207,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) startServer() error {
+func (s *Server) startServer(ctx context.Context) error {
 	var err error
 	if err = s.initClusterID(); err != nil {
 		return err
@@ -230,13 +230,13 @@ func (s *Server) startServer() error {
 	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
-	regionStorage, err := core.NewRegionStorage(path)
+	regionStorage, err := core.NewRegionStorage(ctx, path)
 	if err != nil {
 		return err
 	}
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
-	s.cluster = newRaftCluster(s, s.clusterID)
-	s.hbStreams = newHeartbeatStreams(s.clusterID, s.cluster)
+	s.cluster = newRaftCluster(ctx, s, s.clusterID)
+	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.storage, s.idAllocator); err != nil {
 		return err
 	}
@@ -295,26 +295,22 @@ func (s *Server) IsClosed() bool {
 	return atomic.LoadInt64(&s.isServing) == 0
 }
 
-var timeMonitorOnce sync.Once
-
 // Run runs the pd server.
 func (s *Server) Run(ctx context.Context) error {
-	timeMonitorOnce.Do(func() {
-		go StartMonitor(time.Now, func() {
-			log.Error("system time jumps backward")
-			timeJumpBackCounter.Inc()
-		})
+	go StartMonitor(ctx, time.Now, func() {
+		log.Error("system time jumps backward")
+		timeJumpBackCounter.Inc()
 	})
 
 	if err := s.startEtcd(ctx); err != nil {
 		return err
 	}
 
-	if err := s.startServer(); err != nil {
+	if err := s.startServer(ctx); err != nil {
 		return err
 	}
 
-	s.startServerLoop()
+	s.startServerLoop(ctx)
 
 	return nil
 }
@@ -324,8 +320,8 @@ func (s *Server) Context() context.Context {
 	return s.serverLoopCtx
 }
 
-func (s *Server) startServerLoop() {
-	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(context.Background())
+func (s *Server) startServerLoop(ctx context.Context) {
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
 	s.serverLoopWg.Add(3)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()

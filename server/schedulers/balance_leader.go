@@ -55,7 +55,7 @@ type balanceLeaderScheduler struct {
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
 func newBalanceLeaderScheduler(opController *schedule.OperatorController, opts ...BalanceLeaderCreateOption) schedule.Scheduler {
-	taintStores := newTaintCache()
+	taintStores := newTaintCache(opController.Ctx())
 	base := newBaseScheduler(opController)
 
 	s := &balanceLeaderScheduler{

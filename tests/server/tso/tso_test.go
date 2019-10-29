@@ -126,12 +126,15 @@ func (s *testTsoSuite) TestTsoCount0(c *C) {
 var _ = Suite(&testTimeFallBackSuite{})
 
 type testTimeFallBackSuite struct {
+	ctx          context.Context
+	cancel       context.CancelFunc
 	cluster      *tests.TestCluster
 	grpcPDClient pdpb.PDClient
 	server       *tests.TestServer
 }
 
 func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/fallBackSync", `return(true)`), IsNil)
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/fallBackUpdate", `return(true)`), IsNil)
 	var err error
@@ -148,12 +151,13 @@ func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	svr.Close()
 	failpoint.Disable("github.com/pingcap/pd/server/tso/fallBackSync")
 	failpoint.Disable("github.com/pingcap/pd/server/tso/fallBackUpdate")
-	err = svr.Run(context.TODO())
+	err = svr.Run(s.ctx)
 	c.Assert(err, IsNil)
 	s.cluster.WaitLeader()
 }
 
 func (s *testTimeFallBackSuite) TearDownSuite(c *C) {
+	s.cancel()
 	s.cluster.Destroy()
 }
 

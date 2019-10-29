@@ -31,14 +31,14 @@ var dirtyFlushTick = time.Second
 // RegionStorage is used to save regions.
 type RegionStorage struct {
 	*kv.LeveldbKV
-	mu           sync.RWMutex
-	batchRegions map[string]*metapb.Region
-	batchSize    int
-	cacheSize    int
-	flushRate    time.Duration
-	flushTime    time.Time
-	ctx          context.Context
-	cancel       context.CancelFunc
+	mu                  sync.RWMutex
+	batchRegions        map[string]*metapb.Region
+	batchSize           int
+	cacheSize           int
+	flushRate           time.Duration
+	flushTime           time.Time
+	regionStorageCtx    context.Context
+	regionStorageCancel context.CancelFunc
 }
 
 const (
@@ -49,20 +49,20 @@ const (
 )
 
 // NewRegionStorage returns a region storage that is used to save regions.
-func NewRegionStorage(path string) (*RegionStorage, error) {
+func NewRegionStorage(ctx context.Context, path string) (*RegionStorage, error) {
 	levelDB, err := kv.NewLeveldbKV(path)
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	regionStorageCtx, regionStorageCancel := context.WithCancel(ctx)
 	s := &RegionStorage{
-		LeveldbKV:    levelDB,
-		batchSize:    defaultBatchSize,
-		flushRate:    defaultFlushRegionRate,
-		batchRegions: make(map[string]*metapb.Region, defaultBatchSize),
-		flushTime:    time.Now().Add(defaultFlushRegionRate),
-		ctx:          ctx,
-		cancel:       cancel,
+		LeveldbKV:           levelDB,
+		batchSize:           defaultBatchSize,
+		flushRate:           defaultFlushRegionRate,
+		batchRegions:        make(map[string]*metapb.Region, defaultBatchSize),
+		flushTime:           time.Now().Add(defaultFlushRegionRate),
+		regionStorageCtx:    regionStorageCtx,
+		regionStorageCancel: regionStorageCancel,
 	}
 	s.backgroundFlush()
 	return s, nil
@@ -88,7 +88,7 @@ func (s *RegionStorage) backgroundFlush() {
 				if err = s.FlushRegion(); err != nil {
 					log.Error("flush regions meet error", zap.Error(err))
 				}
-			case <-s.ctx.Done():
+			case <-s.regionStorageCtx.Done():
 				return
 			}
 		}
@@ -180,6 +180,6 @@ func (s *RegionStorage) Close() error {
 	if err != nil {
 		log.Error("meet error before close the region storage", zap.Error(err))
 	}
-	s.cancel()
+	s.regionStorageCancel()
 	return errors.WithStack(s.LeveldbKV.Close())
 }
