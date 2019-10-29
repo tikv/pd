@@ -41,11 +41,11 @@ func (s *RegionSyncer) reset() {
 	s.Lock()
 	defer s.Unlock()
 
-	if s.cancel == nil {
+	if s.regionSyncerCancel == nil {
 		return
 	}
-	s.cancel()
-	s.cancel, s.ctx = nil, nil
+	s.regionSyncerCancel()
+	s.regionSyncerCancel, s.regionSyncerCtx = nil, nil
 }
 
 func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
@@ -72,7 +72,7 @@ func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
 		return nil, err
 	}
 	s.Lock()
-	s.ctx, s.cancel = ctx, cancel
+	s.regionSyncerCtx, s.regionSyncerCancel = ctx, cancel
 	s.Unlock()
 	return client, nil
 }

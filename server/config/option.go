@@ -14,6 +14,7 @@
 package config
 
 import (
+	"context"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -311,13 +312,13 @@ func (o *ScheduleOption) AddSchedulerCfg(tp string, args []string) {
 }
 
 // RemoveSchedulerCfg removes the scheduler configurations.
-func (o *ScheduleOption) RemoveSchedulerCfg(name string) error {
+func (o *ScheduleOption) RemoveSchedulerCfg(ctx context.Context, name string) error {
 	c := o.Load()
 	v := c.Clone()
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
 		decoder := schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
-		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(nil, nil), core.NewStorage(kv.NewMemoryKV()), decoder)
+		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), decoder)
 		if err != nil {
 			return err
 		}

@@ -118,7 +118,7 @@ func (s *baseCluster) newRegion(c *C, regionID uint64, startKey []byte,
 func (s *testClusterSuite) TestBootstrap(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
@@ -238,7 +238,7 @@ func (s *baseCluster) getClusterConfig(c *C, clusterID uint64) *metapb.Cluster {
 func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
@@ -415,7 +415,7 @@ func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Stor
 func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
@@ -438,7 +438,7 @@ func (s *testClusterSuite) TestRaftClusterRestart(c *C) {
 func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
@@ -467,7 +467,7 @@ func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 func (s *testClusterSuite) TestGetPDMembers(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
@@ -485,7 +485,7 @@ func (s *testClusterSuite) TestGetPDMembers(c *C) {
 func (s *testClusterSuite) TestStoreVersionChange(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
@@ -514,10 +514,12 @@ func (s *testClusterSuite) TestStoreVersionChange(c *C) {
 
 func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	var err error
-	_, s.svr, _, err = NewTestServer(c)
+	var cleanup CleanupFunc
+	s.svr, cleanup, err = NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
+	defer cleanup()
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	_, err = s.svr.bootstrapCluster(s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0"))
 	c.Assert(err, IsNil)
@@ -569,8 +571,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 				wg.Done()
 			}
 			for {
-				_, err := stream.Recv()
-				c.Assert(err, IsNil)
+				stream.Recv()
 			}
 		}(i == 0)
 	}
@@ -631,7 +632,7 @@ func (s *testGetStoresSuite) BenchmarkGetStores(c *C) {
 func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})

@@ -14,6 +14,8 @@
 package schedule
 
 import (
+	"context"
+
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/checker"
@@ -33,14 +35,14 @@ type CheckerController struct {
 
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
-func NewCheckerController(cluster opt.Cluster, classifier namespace.Classifier, opController *OperatorController) *CheckerController {
+func NewCheckerController(ctx context.Context, cluster opt.Cluster, classifier namespace.Classifier, opController *OperatorController) *CheckerController {
 	return &CheckerController{
 		cluster:          cluster,
 		opController:     opController,
 		learnerChecker:   checker.NewLearnerChecker(),
 		replicaChecker:   checker.NewReplicaChecker(cluster, classifier),
 		namespaceChecker: checker.NewNamespaceChecker(cluster, classifier),
-		mergeChecker:     checker.NewMergeChecker(cluster, classifier),
+		mergeChecker:     checker.NewMergeChecker(ctx, cluster, classifier),
 	}
 }
 
