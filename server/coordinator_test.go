@@ -394,6 +394,11 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
+	c.Assert(tc.addRegionStore(4, 4), IsNil)
+	c.Assert(tc.addRegionStore(3, 3), IsNil)
+	c.Assert(tc.addRegionStore(2, 2), IsNil)
+	c.Assert(tc.addRegionStore(1, 1), IsNil)
+
 	num := MaxUint64(co.cluster.GetLeaderScheduleLimit(), co.cluster.GetRegionScheduleLimit(), co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
