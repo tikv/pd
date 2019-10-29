@@ -24,6 +24,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
 )
@@ -61,6 +63,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
 	defer cluster.Destroy()
 
+	// test hot store
 	ss := leaderServer.GetStore(1)
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}
@@ -76,20 +79,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	newStats.Interval = interval
 	rc := leaderServer.GetRaftCluster()
 	rc.GetStoresStats().Observe(ss.GetID(), newStats)
-
-	// TODO: Provide a way to test the result of hot read and hot write commands
-	// hot read
-	args := []string{"-u", pdAddr, "hot", "read"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-
-	// hot write
-	args = []string{"-u", pdAddr, "hot", "write"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-
-	// hot store
-	args = []string{"-u", pdAddr, "hot", "store"}
+	args := []string{"-u", pdAddr, "hot", "store"}
 	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	hotStores := api.HotStoreStats{}
@@ -98,4 +88,29 @@ func (s *hotTestSuite) TestHot(c *C) {
 	c.Assert(hotStores.BytesReadStats[1], Equals, float64(bytesRead)/10)
 	c.Assert(hotStores.KeysWriteStats[1], Equals, float64(keysWritten)/10)
 	c.Assert(hotStores.KeysReadStats[1], Equals, float64(keysRead)/10)
+
+	// test hot region
+	statistics.Denoising = false
+	reportInterval := uint64(3) // need to be minHotRegionReportInterval < reportInterval < 3*RegionHeartBeatReportInterval
+	args = []string{"-u", pdAddr, "config", "set", "hot-region-cache-hits-threshold", "0"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+
+	testHot := func(hotRegionID, hotStoreID uint64, hotType string) {
+		args = []string{"-u", pdAddr, "hot", hotType}
+		_, output, e := pdctl.ExecuteCommandC(cmd, args...)
+		hotRegion := statistics.StoreHotRegionInfos{}
+		c.Assert(e, IsNil)
+		c.Assert(json.Unmarshal(output, &hotRegion), IsNil)
+		c.Assert(hotRegion.AsLeader, HasKey, hotStoreID)
+		c.Assert(hotRegion.AsLeader[hotStoreID].RegionsCount, Equals, 1)
+		c.Assert(hotRegion.AsLeader[hotStoreID].RegionsStat[0].RegionID, Equals, hotRegionID)
+	}
+
+	hotReadRegionID, hotWriteRegionID, hotStoreId := uint64(3), uint64(2), uint64(1)
+	pdctl.MustPutRegion(c, cluster, hotReadRegionID, hotStoreId, []byte("b"), []byte("c"), core.SetReadBytes(1000000000), core.SetReportInterval(reportInterval))
+	pdctl.MustPutRegion(c, cluster, hotWriteRegionID, hotStoreId, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000), core.SetReportInterval(reportInterval))
+	time.Sleep(3200 * time.Millisecond)
+	testHot(hotReadRegionID, hotStoreId, "read")
+	testHot(hotWriteRegionID, hotStoreId, "write")
 }
