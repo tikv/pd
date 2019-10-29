@@ -120,9 +120,9 @@ func (s *testNamespaceSuite) TestNamespaceChecker(c *C) {
 	s.classifier.setRegion(5, "ns1")
 	c.Assert(s.tc.addLeaderRegion(5, 1, 1, 3), IsNil)
 
-	s.scheduleConfig.DisableNamespaceRelocation = true
+	s.scheduleConfig.EnableNamespaceRelocation = false
 	c.Assert(nc.Check(s.tc.GetRegion(5)), IsNil)
-	s.scheduleConfig.DisableNamespaceRelocation = false
+	s.scheduleConfig.EnableNamespaceRelocation = true
 
 	op = nc.Check(s.tc.GetRegion(5))
 	testutil.CheckTransferPeer(c, op, operator.OpReplica, 3, 2)

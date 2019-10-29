@@ -530,25 +530,44 @@ type ScheduleConfig struct {
 	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator,omitempty" json:"scheduler-max-waiting-operator"`
 	// WARN: DisableLearner is deprecated.
 	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
-	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
+	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
 	// DisableRemoveDownReplica is the option to prevent replica checker from
 	// removing down replicas.
-	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
+	// WARN: DisableRemoveDownReplica is deprecated.
+	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string,omitempty"`
 	// DisableReplaceOfflineReplica is the option to prevent replica checker from
 	// replacing offline replicas.
-	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string"`
+	// WARN: DisableReplaceOfflineReplica is deprecated.
+	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string,omitempty"`
 	// DisableMakeUpReplica is the option to prevent replica checker from making up
 	// replicas when replica count is less than expected.
-	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string"`
+	// WARN: DisableMakeUpReplica is deprecated.
+	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string,omitempty"`
 	// DisableRemoveExtraReplica is the option to prevent replica checker from
 	// removing extra replicas.
-	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string"`
+	// WARN: DisableRemoveExtraReplica is deprecated.
+	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string,omitempty"`
 	// DisableLocationReplacement is the option to prevent replica checker from
 	// moving replica to a better location.
-	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string"`
+	// WARN: DisableLocationReplacement is deprecated.
+	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string,omitempty"`
 	// DisableNamespaceRelocation is the option to prevent namespace checker
 	// from moving replica to the target namespace.
-	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string"`
+	// WARN: DisableNamespaceRelocation is deprecated.
+	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string,omitempty"`
+
+	// EnableRemoveDownReplica is the option to enable replica checker to remove down replica.
+	EnableRemoveDownReplica bool `toml:"enable-remove-down-replica" json:"enable-remove-down-replica,string"`
+	// EnableReplaceOfflineReplica is the option to enable replica checker to replace offline replica.
+	EnableReplaceOfflineReplica bool `toml:"enable-replace-offline-replica" json:"enable-replace-offline-replica,string"`
+	// EnableMakeUpReplica is the option to enable replica checker to make up replica.
+	EnableMakeUpReplica bool `toml:"enable-make-up-replica" json:"enable-make-up-replica,string"`
+	// EnableRemoveExtraReplica is the option to enable replica checker to remove extra replica.
+	EnableRemoveExtraReplica bool `toml:"enable-remove-extra-replica" json:"enable-remove-extra-replica,string"`
+	// EnableLocationReplacement is the option to enable replica checker to move replica to a better location.
+	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
+	// EnableNamespaceRelocation is the option to enable namespace checker to move replica to the target namespace.
+	EnableNamespaceRelocation bool `toml:"enable-namespace-relocation" json:"enable-namespace-relocation,string"`
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
@@ -589,6 +608,12 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		DisableRemoveExtraReplica:    c.DisableRemoveExtraReplica,
 		DisableLocationReplacement:   c.DisableLocationReplacement,
 		DisableNamespaceRelocation:   c.DisableNamespaceRelocation,
+		EnableRemoveDownReplica:      c.EnableRemoveDownReplica,
+		EnableReplaceOfflineReplica:  c.EnableReplaceOfflineReplica,
+		EnableMakeUpReplica:          c.EnableMakeUpReplica,
+		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
+		EnableLocationReplacement:    c.EnableLocationReplacement,
+		EnableNamespaceRelocation:    c.EnableNamespaceRelocation,
 		Schedulers:                   schedulers,
 	}
 }
@@ -666,7 +691,57 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 
+	for k, b := range c.migrateConfigurationMap() {
+		v, err := c.parseDeprecatedFlag(meta, k, *b[0], *b[1])
+		if err != nil {
+			return err
+		}
+		*b[0], *b[1] = false, v // reset old flag false to make it ignored when marshal to JSON
+	}
+
 	return c.Validate()
+}
+
+func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
+	return map[string][2]*bool{
+		"remove-down-replica":     {&c.DisableRemoveDownReplica, &c.EnableRemoveDownReplica},
+		"replace-offline-replica": {&c.DisableReplaceOfflineReplica, &c.EnableReplaceOfflineReplica},
+		"make-up-replica":         {&c.DisableMakeUpReplica, &c.EnableMakeUpReplica},
+		"remove-extra-replica":    {&c.DisableRemoveExtraReplica, &c.EnableRemoveExtraReplica},
+		"location-replacement":    {&c.DisableLocationReplacement, &c.EnableLocationReplacement},
+		"namespace-relocation":    {&c.DisableNamespaceRelocation, &c.EnableNamespaceRelocation},
+	}
+}
+
+// revive:disable-next-line:flag-parameter
+func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new bool) (bool, error) {
+	oldName, newName := "disable-"+name, "enable-"+name
+	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
+	switch {
+	case defineNew && defineOld:
+		if new == old {
+			return false, errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
+		}
+		return new, nil
+	case defineNew && !defineOld:
+		return new, nil
+	case !defineNew && defineOld:
+		return !old, nil // use !disable-*
+	case !defineNew && !defineOld:
+		return true, nil // use default value true
+	}
+	return false, nil // unreachable.
+}
+
+// MigrateDeprecatedFlags updates new flags according to deprecated flags.
+func (c *ScheduleConfig) MigrateDeprecatedFlags() {
+	c.DisableLearner = false
+	for _, b := range c.migrateConfigurationMap() {
+		// If old=false (previously disabled), set both old and new to false.
+		if *b[0] {
+			*b[0], *b[1] = false, false
+		}
+	}
 }
 
 // Validate is used to validate if some scheduling configurations are right.
@@ -695,6 +770,24 @@ func (c *ScheduleConfig) Validate() error {
 func (c *ScheduleConfig) Deprecated() error {
 	if c.DisableLearner {
 		return errors.New("disable-raft-learner has already been deprecated")
+	}
+	if c.DisableRemoveDownReplica {
+		return errors.New("disable-remove-down-replica has already been deprecated")
+	}
+	if c.DisableReplaceOfflineReplica {
+		return errors.New("disable-replace-offline-replica has already been deprecated")
+	}
+	if c.DisableMakeUpReplica {
+		return errors.New("disable-make-up-replica has already been deprecated")
+	}
+	if c.DisableRemoveExtraReplica {
+		return errors.New("disable-remove-extra-replica has already been deprecated")
+	}
+	if c.DisableLocationReplacement {
+		return errors.New("disable-location-replacement has already been deprecated")
+	}
+	if c.DisableNamespaceRelocation {
+		return errors.New("disable-namespace-relocation has already been deprecated")
 	}
 	return nil
 }

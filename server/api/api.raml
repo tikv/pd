@@ -78,12 +78,11 @@ types:
       low-space-ratio?: number
       high-space-ratio?: number
       scheduler-max-waiting-operator?: integer
-      disable-raft-learner?: boolean
-      disable-remove-down-replica?: boolean
-      disable-replace-offline-replica?: boolean
-      disable-make-up-replica?: boolean
-      disable-remove-extra-replica?: boolean
-      disable-location-replacement?: boolean
+      enable-remove-down-replica?: boolean
+      enable-replace-offline-replica?: boolean
+      enable-make-up-replica?: boolean
+      enable-remove-extra-replica?: boolean
+      enable-location-replacement?: boolean
       schedulers-v2?: SchedulerConfigs # FIXME: now the output is a map.
   SchedulerConfigs:
     type: object
