@@ -398,7 +398,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
-	log.Info("test checkerIsBusy", zap.Int("region num:", len(operatorKinds)*int(num)))
+	log.Info("test checkerIsBusy", zap.Int("region num:", 4*len(operatorKinds)*int(num)))
 	for i, operatorKind := range operatorKinds {
 		for j := uint64(0); j < num; j++ {
 			regionID := j + uint64(i+1)*num
