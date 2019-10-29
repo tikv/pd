@@ -64,11 +64,17 @@ type ScheduleOptions struct {
 	MaxReplicas                  int
 	LocationLabels               []string
 	StrictlyMatchLabel           bool
-	EnablePlacementRules         bool
 	HotRegionCacheHitsThreshold  int
 	TolerantSizeRatio            float64
 	LowSpaceRatio                float64
 	HighSpaceRatio               float64
+	EnableRemoveDownReplica      bool
+	EnableReplaceOfflineReplica  bool
+	EnableMakeUpReplica          bool
+	EnableRemoveExtraReplica     bool
+	EnableLocationReplacement    bool
+	EnableNamespaceRelocation    bool
+	EnablePlacementRules         bool
 	DisableRemoveDownReplica     bool
 	DisableReplaceOfflineReplica bool
 	DisableMakeUpReplica         bool
@@ -102,6 +108,12 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
 	mso.HighSpaceRatio = defaultHighSpaceRatio
+	mso.EnableRemoveDownReplica = true
+	mso.EnableReplaceOfflineReplica = true
+	mso.EnableMakeUpReplica = true
+	mso.EnableRemoveExtraReplica = true
+	mso.EnableLocationReplacement = true
+	mso.EnableNamespaceRelocation = true
 	mso.LeaderScheduleStrategy = defaultLeaderScheduleStrategy
 	return mso
 }
@@ -223,32 +235,32 @@ func (mso *ScheduleOptions) SetMaxReplicas(replicas int) {
 
 // IsRemoveDownReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsRemoveDownReplicaEnabled() bool {
-	return !mso.DisableRemoveDownReplica
+	return mso.EnableRemoveDownReplica
 }
 
 // IsReplaceOfflineReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsReplaceOfflineReplicaEnabled() bool {
-	return !mso.DisableReplaceOfflineReplica
+	return mso.EnableReplaceOfflineReplica
 }
 
 // IsMakeUpReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsMakeUpReplicaEnabled() bool {
-	return !mso.DisableMakeUpReplica
+	return mso.EnableMakeUpReplica
 }
 
 // IsRemoveExtraReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsRemoveExtraReplicaEnabled() bool {
-	return !mso.DisableRemoveExtraReplica
+	return mso.EnableRemoveExtraReplica
 }
 
 // IsLocationReplacementEnabled mocks method.
 func (mso *ScheduleOptions) IsLocationReplacementEnabled() bool {
-	return !mso.DisableLocationReplacement
+	return mso.EnableLocationReplacement
 }
 
 // IsNamespaceRelocationEnabled mocks method.
 func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
-	return !mso.DisableNamespaceRelocation
+	return mso.EnableNamespaceRelocation
 }
 
 // GetLeaderScheduleStrategy is to get leader schedule strategy

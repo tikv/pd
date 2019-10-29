@@ -250,22 +250,22 @@ func (o *ScheduleOption) GetSchedulerMaxWaitingOperator() uint64 {
 
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (o *ScheduleOption) IsRemoveDownReplicaEnabled() bool {
-	return !o.Load().DisableRemoveDownReplica
+	return o.Load().EnableRemoveDownReplica
 }
 
 // IsReplaceOfflineReplicaEnabled returns if replace offline replica is enabled.
 func (o *ScheduleOption) IsReplaceOfflineReplicaEnabled() bool {
-	return !o.Load().DisableReplaceOfflineReplica
+	return o.Load().EnableReplaceOfflineReplica
 }
 
 // IsMakeUpReplicaEnabled returns if make up replica is enabled.
 func (o *ScheduleOption) IsMakeUpReplicaEnabled() bool {
-	return !o.Load().DisableMakeUpReplica
+	return o.Load().EnableMakeUpReplica
 }
 
 // IsRemoveExtraReplicaEnabled returns if remove extra replica is enabled.
 func (o *ScheduleOption) IsRemoveExtraReplicaEnabled() bool {
-	return !o.Load().DisableRemoveExtraReplica
+	return o.Load().EnableRemoveExtraReplica
 }
 
 // GetLeaderScheduleStrategy is to get leader schedule strategy.
@@ -275,12 +275,12 @@ func (o *ScheduleOption) GetLeaderScheduleStrategy() core.ScheduleStrategy {
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *ScheduleOption) IsLocationReplacementEnabled() bool {
-	return !o.Load().DisableLocationReplacement
+	return o.Load().EnableLocationReplacement
 }
 
 // IsNamespaceRelocationEnabled returns if namespace relocation is enabled.
 func (o *ScheduleOption) IsNamespaceRelocationEnabled() bool {
-	return !o.Load().DisableNamespaceRelocation
+	return o.Load().EnableNamespaceRelocation
 }
 
 // GetSchedulers gets the scheduler configurations.
@@ -462,6 +462,7 @@ func (o *ScheduleOption) adjustScheduleCfg(persistentCfg *Config) {
 	}
 	scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, restoredSchedulers...)
 	persistentCfg.Schedule.Schedulers = scheduleCfg.Schedulers
+	persistentCfg.Schedule.MigrateDeprecatedFlags()
 	o.Store(scheduleCfg)
 }
 

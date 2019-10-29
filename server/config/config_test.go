@@ -14,6 +14,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -186,6 +187,39 @@ address = "localhost:9090"
 
 	c.Assert(cfg.Metric.PushInterval.Duration, Equals, 35*time.Second)
 	c.Assert(cfg.Metric.PushAddress, Equals, "localhost:9090")
+}
+
+func (s *testConfigSuite) TestMigrateFlags(c *C) {
+	load := func(s string) (*Config, error) {
+		cfg := NewConfig()
+		meta, err := toml.Decode(s, &cfg)
+		c.Assert(err, IsNil)
+		err = cfg.Adjust(&meta)
+		return cfg, err
+	}
+	cfg, err := load(`
+[schedule]
+disable-remove-down-replica = true
+enable-make-up-replica = false
+disable-remove-extra-replica = true
+enable-remove-extra-replica = false
+`)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Schedule.EnableReplaceOfflineReplica, IsTrue)
+	c.Assert(cfg.Schedule.EnableRemoveDownReplica, IsFalse)
+	c.Assert(cfg.Schedule.EnableMakeUpReplica, IsFalse)
+	c.Assert(cfg.Schedule.EnableRemoveExtraReplica, IsFalse)
+	b, err := json.Marshal(cfg)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(b), "disable-replace-offline-replica"), IsFalse)
+	c.Assert(strings.Contains(string(b), "disable-remove-down-replica"), IsFalse)
+
+	_, err = load(`
+[schedule]
+enable-make-up-replica = false
+disable-make-up-replica = false
+`)
+	c.Assert(err, NotNil)
 }
 
 func newTestScheduleOption() (*ScheduleOption, error) {
