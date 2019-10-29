@@ -185,8 +185,8 @@ func (s *StoreInfo) GetKeysRead() uint64 {
 	return s.stats.GetKeysRead()
 }
 
-// GetIsBusy returns if the store is busy.
-func (s *StoreInfo) GetIsBusy() bool {
+// IsBusy returns if the store is busy.
+func (s *StoreInfo) IsBusy() bool {
 	return s.stats.GetIsBusy()
 }
 

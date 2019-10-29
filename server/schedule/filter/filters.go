@@ -180,7 +180,7 @@ func (f *healthFilter) Type() string {
 }
 
 func (f *healthFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
-	if store.GetIsBusy() {
+	if store.IsBusy() {
 		return true
 	}
 	return store.DownTime() > opt.GetMaxStoreDownTime()
@@ -432,7 +432,7 @@ func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
 	if f.TransferLeader &&
 		(store.IsDisconnected() ||
 			store.IsBlocked() ||
-			store.GetIsBusy() ||
+			store.IsBusy() ||
 			opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())) {
 		return true
 	}
@@ -451,7 +451,7 @@ func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
 }
 
 func (f StoreStateFilter) filterMoveRegion(opt opt.Options, store *core.StoreInfo) bool {
-	if store.GetIsBusy() {
+	if store.IsBusy() {
 		return true
 	}
 
