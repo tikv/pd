@@ -394,11 +394,11 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	c.Assert(tc.addRegionStore(4, 4), IsNil)
-	c.Assert(tc.addRegionStore(3, 3), IsNil)
-	c.Assert(tc.addRegionStore(2, 2), IsNil)
-	c.Assert(tc.addRegionStore(1, 1), IsNil)
-
+	storeNum := uint64(4)
+	for i := uint64(1); i <= storeNum; i++ {
+		c.Assert(tc.addRegionStore(i, 1), IsNil)
+	}
+	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
 	num := MaxUint64(co.cluster.GetLeaderScheduleLimit(), co.cluster.GetRegionScheduleLimit(), co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
@@ -407,7 +407,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	for i, operatorKind := range operatorKinds {
 		for j := uint64(0); j < num; j++ {
 			regionID := j + uint64(i+1)*num
-			c.Assert(tc.addLeaderRegion(regionID, regionID+1, regionID+2), IsNil)
+			c.Assert(tc.addLeaderRegion(regionID, (regionID+1)%storeNum+1, (regionID+2)%storeNum+1), IsNil)
 			switch operatorKind {
 			case operator.OpReplica:
 				op := newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
