@@ -443,6 +443,17 @@ func (o *ScheduleOption) adjustScheduleCfg(persistentCfg *Config) {
 	}
 	scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, restoredSchedulers...)
 	persistentCfg.Schedule.Schedulers = scheduleCfg.Schedulers
+
+	// the first time load from an old version
+	if persistentCfg.Schedule.DefaultStoreLimit ==
+		scheduleCfg.DefaultStoreLimit &&
+		persistentCfg.Schedule.StoreBalanceRate != 0 {
+		persistentCfg.Schedule.DefaultStoreLimit = persistentCfg.Schedule.StoreBalanceRate
+		scheduleCfg.DefaultStoreLimit = persistentCfg.Schedule.DefaultStoreLimit
+
+		persistentCfg.Schedule.StoreBalanceRate = 0
+		scheduleCfg.StoreBalanceRate = 0
+	}
 	o.Store(scheduleCfg)
 }
 

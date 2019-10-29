@@ -215,7 +215,7 @@ func (s *testConfigSuite) TestDefaultStoreLimitUpgrade(c *C) {
 	// After adjusting, default-store-limit has the save value of store-blance-rate
 	c.Assert(conf.Adjust(&meta), IsNil)
 	c.Assert(conf.Schedule.DefaultStoreLimit, Equals, 128.0)
-	c.Assert(conf.Schedule.StoreBalanceRate, Equals, 128.0)
+	c.Assert(conf.Schedule.StoreBalanceRate, Equals, 0.0)
 }
 
 func (s *testConfigSuite) TestDefaultStoreLimitOverwrite(c *C) {
@@ -237,5 +237,22 @@ func (s *testConfigSuite) TestDefaultStoreLimitOverwrite(c *C) {
 	// After adjusting, default-store-limit overwrites store-balance-rate
 	c.Assert(conf.Adjust(&meta), IsNil)
 	c.Assert(conf.Schedule.DefaultStoreLimit, Equals, 256.0)
-	c.Assert(conf.Schedule.StoreBalanceRate, Equals, 256.0)
+	c.Assert(conf.Schedule.StoreBalanceRate, Equals, 0.0)
+}
+
+func (s *testConfigSuite) TestDefaultStoreLimitPersist(c *C) {
+	opt, err := newTestScheduleOption()
+	c.Assert(err, IsNil)
+	storage := core.NewStorage(kv.NewMemoryKV())
+	scheduleCfg := opt.Load()
+	scheduleCfg.StoreBalanceRate = 10.0
+	scheduleCfg.DefaultStoreLimit = 0.0
+	c.Assert(opt.Persist(storage), IsNil)
+
+	newOpt, err := newTestScheduleOption()
+	c.Assert(err, IsNil)
+	c.Assert(newOpt.Reload(storage), IsNil)
+	scheduleCfg = newOpt.Load()
+	c.Assert(scheduleCfg.DefaultStoreLimit, Equals, 10.0)
+	c.Assert(scheduleCfg.StoreBalanceRate, Equals, 0.0)
 }
