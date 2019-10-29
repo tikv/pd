@@ -14,6 +14,7 @@
 package cache
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -30,7 +31,9 @@ type testRegionCacheSuite struct {
 }
 
 func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
-	cache := NewTTL(time.Second, 2*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache := NewTTL(ctx, time.Second, 2*time.Second)
 	cache.PutWithTTL(1, 1, 1*time.Second)
 	cache.PutWithTTL(2, "v2", 5*time.Second)
 	cache.PutWithTTL(3, 3.0, 5*time.Second)

@@ -15,6 +15,7 @@ package schedule
 
 import (
 	"container/heap"
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -38,13 +39,24 @@ func Test(t *testing.T) {
 
 var _ = Suite(&testOperatorControllerSuite{})
 
-type testOperatorControllerSuite struct{}
+type testOperatorControllerSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (t *testOperatorControllerSuite) SetUpSuite(c *C) {
+	t.ctx, t.cancel = context.WithCancel(context.Background())
+}
+
+func (t *testOperatorControllerSuite) TearDownSuite(c *C) {
+	t.cancel()
+}
 
 // issue #1338
 func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(tc, nil)
+	oc := NewOperatorController(t.ctx, tc, nil)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
@@ -55,17 +67,27 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	op2 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	oc.SetOperator(op1)
 	oc.SetOperator(op2)
-	go func() {
+	go func(ctx context.Context) {
 		c.Assert(oc.RemoveOperator(op1), IsTrue)
 		for {
-			c.Assert(oc.RemoveOperator(op1), IsFalse)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				c.Assert(oc.RemoveOperator(op1), IsFalse)
+			}
 		}
-	}()
-	go func() {
+	}(t.ctx)
+	go func(ctx context.Context) {
 		for {
-			oc.GetOpInfluence(tc)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				oc.GetOpInfluence(tc)
+			}
 		}
-	}()
+	}(t.ctx)
 	time.Sleep(1 * time.Second)
 	c.Assert(oc.GetOperator(2), NotNil)
 }
@@ -73,7 +95,7 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
+	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)
@@ -108,7 +130,7 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
+	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 2, 1)
@@ -147,7 +169,7 @@ func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
+	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
@@ -214,7 +236,7 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
+	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
 	tc.AddLeaderStore(1, 0)
 	tc.UpdateLeaderCount(1, 1000)
 	tc.AddLeaderStore(2, 0)
@@ -252,7 +274,7 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
 	stream := mockhbstream.NewHeartbeatStreams(cluster.ID)
-	controller := NewOperatorController(cluster, stream)
+	controller := NewOperatorController(t.ctx, cluster, stream)
 
 	cluster.AddLeaderStore(1, 2)
 	cluster.AddLeaderStore(2, 0)
@@ -304,7 +326,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
 	stream := mockhbstream.NewHeartbeatStreams(cluster.ID)
-	controller := NewOperatorController(cluster, stream)
+	controller := NewOperatorController(t.ctx, cluster, stream)
 
 	// Create a new region with epoch(0, 0)
 	// the region has two peers with its peer id allocated incrementally.
@@ -416,8 +438,8 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 		tc.PutRegion(region)
 	}
 
-	mc := checker.NewMergeChecker(tc, namespace.DefaultClassifier)
-	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
+	mc := checker.NewMergeChecker(t.ctx, tc, namespace.DefaultClassifier)
+	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
 
 	cfg.StoreBalanceRate = 60
 

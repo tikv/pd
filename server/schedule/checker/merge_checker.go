@@ -14,6 +14,7 @@
 package checker
 
 import (
+	"context"
 	"time"
 
 	"github.com/pingcap/log"
@@ -34,8 +35,8 @@ type MergeChecker struct {
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(cluster opt.Cluster, classifier namespace.Classifier) *MergeChecker {
-	splitCache := cache.NewIDTTL(time.Minute, cluster.GetSplitMergeInterval())
+func NewMergeChecker(ctx context.Context, cluster opt.Cluster, classifier namespace.Classifier) *MergeChecker {
+	splitCache := cache.NewIDTTL(ctx, time.Minute, cluster.GetSplitMergeInterval())
 	return &MergeChecker{
 		cluster:    cluster,
 		classifier: classifier,

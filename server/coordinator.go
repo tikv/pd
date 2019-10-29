@@ -65,14 +65,14 @@ type coordinator struct {
 }
 
 // newCoordinator creates a new coordinator.
-func newCoordinator(cluster *RaftCluster, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
-	ctx, cancel := context.WithCancel(context.Background())
-	opController := schedule.NewOperatorController(cluster, hbStreams)
+func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
+	ctx, cancel := context.WithCancel(ctx)
+	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
 	return &coordinator{
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
-		checkers:        schedule.NewCheckerController(cluster, classifier, opController),
+		checkers:        schedule.NewCheckerController(ctx, cluster, classifier, opController),
 		regionScatterer: schedule.NewRegionScatterer(cluster, classifier),
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
@@ -418,7 +418,7 @@ func (c *coordinator) removeScheduler(name string) error {
 
 	var err error
 	opt := c.cluster.opt
-	if err = opt.RemoveSchedulerCfg(name); err != nil {
+	if err = opt.RemoveSchedulerCfg(s.Ctx(), name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
 	} else if err = opt.Persist(c.cluster.storage); err != nil {
 		log.Error("the option can not persist scheduler config", zap.Error(err))

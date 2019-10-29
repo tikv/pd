@@ -39,26 +39,26 @@ type streamUpdate struct {
 }
 
 type heartbeatStreams struct {
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
-	clusterID uint64
-	streams   map[uint64]heartbeatStream
-	msgCh     chan *pdpb.RegionHeartbeatResponse
-	streamCh  chan streamUpdate
-	cluster   *RaftCluster
+	wg             sync.WaitGroup
+	hbStreamCtx    context.Context
+	hbStreamCancel context.CancelFunc
+	clusterID      uint64
+	streams        map[uint64]heartbeatStream
+	msgCh          chan *pdpb.RegionHeartbeatResponse
+	streamCh       chan streamUpdate
+	cluster        *RaftCluster
 }
 
-func newHeartbeatStreams(clusterID uint64, cluster *RaftCluster) *heartbeatStreams {
-	ctx, cancel := context.WithCancel(context.Background())
+func newHeartbeatStreams(ctx context.Context, clusterID uint64, cluster *RaftCluster) *heartbeatStreams {
+	hbStreamCtx, hbStreamCancel := context.WithCancel(ctx)
 	hs := &heartbeatStreams{
-		ctx:       ctx,
-		cancel:    cancel,
-		clusterID: clusterID,
-		streams:   make(map[uint64]heartbeatStream),
-		msgCh:     make(chan *pdpb.RegionHeartbeatResponse, regionheartbeatSendChanCap),
-		streamCh:  make(chan streamUpdate, 1),
-		cluster:   cluster,
+		hbStreamCtx:    hbStreamCtx,
+		hbStreamCancel: hbStreamCancel,
+		clusterID:      clusterID,
+		streams:        make(map[uint64]heartbeatStream),
+		msgCh:          make(chan *pdpb.RegionHeartbeatResponse, regionheartbeatSendChanCap),
+		streamCh:       make(chan streamUpdate, 1),
+		cluster:        cluster,
 	}
 	hs.wg.Add(1)
 	go hs.run()
@@ -126,14 +126,14 @@ func (s *heartbeatStreams) run() {
 					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "keepalive", "ok").Inc()
 				}
 			}
-		case <-s.ctx.Done():
+		case <-s.hbStreamCtx.Done():
 			return
 		}
 	}
 }
 
 func (s *heartbeatStreams) Close() {
-	s.cancel()
+	s.hbStreamCancel()
 	s.wg.Wait()
 }
 
@@ -144,7 +144,7 @@ func (s *heartbeatStreams) bindStream(storeID uint64, stream heartbeatStream) {
 	}
 	select {
 	case s.streamCh <- update:
-	case <-s.ctx.Done():
+	case <-s.hbStreamCtx.Done():
 	}
 }
 
@@ -160,7 +160,7 @@ func (s *heartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHear
 
 	select {
 	case s.msgCh <- msg:
-	case <-s.ctx.Done():
+	case <-s.hbStreamCtx.Done():
 	}
 }
 
@@ -180,6 +180,6 @@ func (s *heartbeatStreams) sendErr(errType pdpb.ErrorType, errMsg string, target
 
 	select {
 	case s.msgCh <- msg:
-	case <-s.ctx.Done():
+	case <-s.hbStreamCtx.Done():
 	}
 }

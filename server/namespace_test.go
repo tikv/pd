@@ -14,6 +14,8 @@
 package server
 
 import (
+	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/config"
@@ -28,6 +30,8 @@ import (
 var _ = Suite(&testNamespaceSuite{})
 
 type testNamespaceSuite struct {
+	ctx            context.Context
+	cancel         context.CancelFunc
 	classifier     *mapClassifer
 	tc             *testCluster
 	opt            *config.ScheduleOption
@@ -35,11 +39,16 @@ type testNamespaceSuite struct {
 }
 
 func (s *testNamespaceSuite) SetUpTest(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	var err error
 	s.classifier = newMapClassifer()
 	s.scheduleConfig, s.opt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	s.tc = newTestCluster(s.opt)
+}
+
+func (s *testNamespaceSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testNamespaceSuite) TestReplica(c *C) {
@@ -132,7 +141,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceRegion(c *C) {
 	s.classifier.setStore(3, "ns2")
 	s.opt.SetMaxReplicas(1)
 
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	sched, _ := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 
 	// Balance is limited within a namespace.
@@ -173,7 +182,7 @@ func (s *testNamespaceSuite) TestSchedulerBalanceLeader(c *C) {
 	s.classifier.setStore(3, "ns2")
 	s.classifier.setStore(4, "ns2")
 
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	sched, _ := schedule.CreateScheduler("balance-leader", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 
 	// Balance is limited within a namespace.
