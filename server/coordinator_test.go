@@ -315,36 +315,40 @@ func MaxUint64(nums ...uint64) uint64 {
 	return result
 }
 
-func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
-	_, opt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
+func (s *testCoordinatorSuite) prepare(cfg *config.ScheduleConfig, opt *config.ScheduleOption, c *C) (*testCluster, *heartbeatStreams, func(), *coordinator) {
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(s.ctx, c, tc)
-	defer cleanup()
-	defer hbStreams.Close()
-
 	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
 	co.run()
+	return tc, hbStreams, cleanup, co
+}
 
-	testCheckRegion := func(regionID uint64, expectCheckerIsBusy, expectAddOperator bool) {
-		checkerIsBusy, ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
-		c.Assert(checkerIsBusy, Equals, expectCheckerIsBusy)
-		if ops == nil {
-			c.Assert(expectAddOperator, IsFalse)
-		} else {
-			c.Assert(co.opController.AddWaitingOperator(ops...), Equals, expectAddOperator)
-		}
+func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy, expectAddOperator bool) {
+	checkerIsBusy, ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
+	c.Assert(checkerIsBusy, Equals, expectCheckerIsBusy)
+	if ops == nil {
+		c.Assert(expectAddOperator, IsFalse)
+	} else {
+		c.Assert(co.opController.AddWaitingOperator(ops...), Equals, expectAddOperator)
 	}
+}
+
+func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
+	cfg, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	tc, hbStreams, cleanup, co := s.prepare(cfg, opt, c)
+	defer cleanup()
+	defer hbStreams.Close()
 
 	c.Assert(tc.addRegionStore(4, 4), IsNil)
 	c.Assert(tc.addRegionStore(3, 3), IsNil)
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
-	testCheckRegion(1, false, true)
+	s.checkRegion(c, tc, co, 1, false, true)
 	waitOperator(c, co, 1)
 	testutil.CheckAddPeer(c, co.opController.GetOperator(1), operator.OpReplica, 1)
-	testCheckRegion(1, false, false)
+	s.checkRegion(c, tc, co, 1, false, false)
 
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
@@ -353,7 +357,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
 	)
 	c.Assert(tc.putRegion(r), IsNil)
-	testCheckRegion(1, false, false)
+	s.checkRegion(c, tc, co, 1, false, false)
 	co.stop()
 	co.wg.Wait()
 
@@ -368,21 +372,28 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.putRegion(r), IsNil)
-	testCheckRegion(1, false, false)
+	s.checkRegion(c, tc, co, 1, false, false)
 	r = r.Clone(core.WithPendingPeers(nil))
 	c.Assert(tc.putRegion(r), IsNil)
-	testCheckRegion(1, false, true)
+	s.checkRegion(c, tc, co, 1, false, true)
 	waitOperator(c, co, 1)
 	op := co.opController.GetOperator(1)
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
-	testCheckRegion(1, false, false)
+	s.checkRegion(c, tc, co, 1, false, false)
+}
 
-	//test checkerIsBusy
-	co.cluster.opt.Load().ReplicaScheduleLimit = 10
-	co.cluster.opt.Load().LeaderScheduleLimit = 10
-	co.cluster.opt.Load().RegionScheduleLimit = 10
-	co.cluster.opt.Load().MergeScheduleLimit = 10
+func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
+	cfg, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cfg.ReplicaScheduleLimit = 10
+	cfg.LeaderScheduleLimit = 10
+	cfg.RegionScheduleLimit = 10
+	cfg.MergeScheduleLimit = 10
+	tc, hbStreams, cleanup, co := s.prepare(cfg, opt, c)
+	defer cleanup()
+	defer hbStreams.Close()
+
 	num := MaxUint64(co.cluster.GetLeaderScheduleLimit(), co.cluster.GetRegionScheduleLimit(), co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
@@ -394,7 +405,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 			c.Assert(tc.addLeaderRegion(regionID, regionID+1, regionID+2), IsNil)
 			switch operatorKind {
 			case operator.OpReplica:
-				op = newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
+				op := newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
 				c.Assert(co.opController.AddWaitingOperator(op), IsTrue)
 			case operator.OpRegion | operator.OpMerge:
 				if regionID%2 == 1 {
@@ -406,7 +417,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 
 		}
 	}
-	testCheckRegion(num, true, false)
+	s.checkRegion(c, tc, co, num, true, false)
 }
 
 func (s *testCoordinatorSuite) TestReplica(c *C) {
