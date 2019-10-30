@@ -16,6 +16,7 @@ package server
 import (
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/slice"
@@ -119,6 +120,9 @@ func (s *CPUStatEntries) Append(stat *StatEntry, threads ...string) bool {
 	if usages == nil {
 		return false
 	}
+	if steps > s.total {
+		steps = s.total
+	}
 
 	cpu := float64(0)
 	appended := 0
@@ -143,6 +147,55 @@ func (s *CPUStatEntries) Append(stat *StatEntry, threads ...string) bool {
 // CPU returns the cpu usage
 func (s *CPUStatEntries) CPU() float64 {
 	return s.cpu.Get()
+}
+
+// Keys returns the average written and read keys duration
+// an interval of heartbeats
+func (s *StatEntries) Keys(steps int) (int64, int64) {
+	cap := cap(s.entries)
+	if steps > cap {
+		steps = cap
+	}
+	if steps > s.total {
+		steps = s.total
+	}
+
+	var read, written int64
+	idx := (s.total - 1) % cap
+	for i := 0; i < steps; i++ {
+		stat := s.entries[idx]
+		read += int64(stat.KeysRead)
+		written += int64(stat.KeysWritten)
+		idx--
+		if idx < 0 {
+			idx += cap
+		}
+	}
+	return read / int64(steps), written / int64(steps)
+}
+
+// Bytes returns the average written and read bytes duration
+// an interval of heartbeats
+func (s *StatEntries) Bytes(steps int) (int64, int64) {
+	cap := cap(s.entries)
+	if steps > cap {
+		steps = cap
+	}
+	if steps > s.total {
+		steps = s.total
+	}
+	var read, written int64
+	idx := (s.total - 1) % cap
+	for i := 0; i < steps; i++ {
+		stat := s.entries[idx]
+		read += int64(stat.BytesRead)
+		written += int64(stat.BytesWritten)
+		idx--
+		if idx < 0 {
+			idx += cap
+		}
+	}
+	return read / int64(steps), written / int64(steps)
 }
 
 // ClusterStatEntries saves the StatEntries for each store in the cluster

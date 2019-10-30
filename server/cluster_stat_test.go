@@ -25,14 +25,6 @@ var _ = Suite(&testClusterStatSuite{})
 type testClusterStatSuite struct {
 }
 
-func cpu(usage int64) []*pdpb.RecordPair {
-	n := 10
-	name := "cpu"
-	pairs := make([]*pdpb.RecordPair, n)
-	for i := 0; i < n; i++ {
-		pairs[i] = &pdpb.RecordPair{
-			Key:   fmt.Sprintf("%s:%d", name, i),
-			Value: uint64(usage),
 		}
 	}
 	return pairs
