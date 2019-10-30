@@ -314,12 +314,15 @@ func MaxUint64(nums ...uint64) uint64 {
 	return result
 }
 
-func (s *testCoordinatorSuite) prepare(cfg *config.ScheduleConfig, opt *config.ScheduleOption, c *C) (*testCluster, *heartbeatStreams, func(), *coordinator) {
+func (s *testCoordinatorSuite) prepare(cfg *config.ScheduleConfig, opt *config.ScheduleOption, c *C) (*testCluster, *coordinator, func()) {
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(s.ctx, c, tc)
 	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
-	return tc, hbStreams, cleanup, co
+	return tc, co, func() {
+		cleanup()
+		hbStreams.Close()
+	}
 }
 
 func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy, expectAddOperator bool) {
@@ -335,9 +338,8 @@ func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinato
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	tc, hbStreams, cleanup, co := s.prepare(cfg, opt, c)
+	tc, co, cleanup := s.prepare(cfg, opt, c)
 	defer cleanup()
-	defer hbStreams.Close()
 
 	c.Assert(tc.addRegionStore(4, 4), IsNil)
 	c.Assert(tc.addRegionStore(3, 3), IsNil)
@@ -357,6 +359,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	)
 	c.Assert(tc.putRegion(r), IsNil)
 	s.checkRegion(c, tc, co, 1, false, false)
+	hbStreams := co.hbStreams
 	co.stop()
 	co.wg.Wait()
 
@@ -389,9 +392,8 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	cfg.LeaderScheduleLimit = 10
 	cfg.RegionScheduleLimit = 10
 	cfg.MergeScheduleLimit = 10
-	tc, hbStreams, cleanup, co := s.prepare(cfg, opt, c)
+	tc, co, cleanup := s.prepare(cfg, opt, c)
 	defer cleanup()
-	defer hbStreams.Close()
 
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
