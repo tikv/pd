@@ -293,6 +293,27 @@ func MaxUint64(nums ...uint64) uint64 {
 }
 
 func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), c *C) (*testCluster, *coordinator, func()) {
+	ctx, tc, hbStreams, cleanup := prepareTc(setCfg, setTc, c)
+	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
+	co.run()
+	return tc, co, func() {
+		co.stop()
+		co.wg.Wait()
+		cleanup()
+		hbStreams.Close()
+	}
+}
+
+func prepareWithoutRun(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), c *C) (*testCluster, *coordinator, func()) {
+	ctx, tc, hbStreams, cleanup := prepareTc(setCfg, setTc, c)
+	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
+	return tc, co, func() {
+		cleanup()
+		hbStreams.Close()
+	}
+}
+
+func prepareTc(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), c *C) (context.Context, *testCluster, *heartbeatStreams, func()) {
 	ctx, _ := context.WithCancel(context.Background())
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
@@ -304,14 +325,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), c *C
 	if setTc != nil {
 		setTc(tc)
 	}
-	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
-	co.run()
-	return tc, co, func() {
-		co.stop()
-		co.wg.Wait()
-		cleanup()
-		hbStreams.Close()
-	}
+	return ctx, tc, hbStreams, cleanup
 }
 
 func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy, expectAddOperator bool) {
@@ -508,14 +522,8 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestShouldRun(c *C) {
-	_, opt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
-	tc := newTestCluster(opt)
-	hbStreams, cleanup := getHeartBeatStreams(s.ctx, c, tc)
+	tc, co, cleanup := prepareWithoutRun(nil, nil, c)
 	defer cleanup()
-	defer hbStreams.Close()
-
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 
 	c.Assert(tc.addLeaderStore(1, 5), IsNil)
 	c.Assert(tc.addLeaderStore(2, 2), IsNil)
@@ -558,14 +566,8 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
-	_, opt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
-	tc := newTestCluster(opt)
-	hbStreams, cleanup := getHeartBeatStreams(s.ctx, c, tc)
+	tc, co, cleanup := prepareWithoutRun(nil, nil, c)
 	defer cleanup()
-	defer hbStreams.Close()
-
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 
 	c.Assert(tc.addLeaderStore(1, 10), IsNil)
 	c.Assert(tc.addLeaderStore(2, 0), IsNil)
@@ -841,19 +843,15 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 }
 
 func BenchmarkPatrolRegion(b *testing.B) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	mergeLimit := uint64(4100)
 	regionNum := 10000
 
-	cfg, scheduleOpt, _ := newTestScheduleConfig()
-	cfg.MergeScheduleLimit = mergeLimit
-	scheduleOpt.SetSplitMergeInterval(time.Duration(0))
-	tc := newTestCluster(scheduleOpt)
-	hbStreams, cleanup := getHeartBeatStreams(ctx, &C{}, tc)
+	tc, co, cleanup := prepareWithoutRun(func(cfg *config.ScheduleConfig) {
+		cfg.MergeScheduleLimit = mergeLimit
+	}, nil, &C{})
 	defer cleanup()
-	defer hbStreams.Close()
 
+	tc.opt.SetSplitMergeInterval(time.Duration(0))
 	for i := 1; i < 4; i++ {
 		if err := tc.addRegionStore(uint64(i), regionNum, 96); err != nil {
 			return
@@ -864,7 +862,6 @@ func BenchmarkPatrolRegion(b *testing.B) {
 			return
 		}
 	}
-	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
 
 	listen := make(chan int)
 	go func() {
