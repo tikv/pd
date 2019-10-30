@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pingcap/pd/server/statistics"
 )
 
@@ -84,4 +85,6 @@ type Cluster interface {
 	// TODO: it should be removed. Schedulers don't need to know anything
 	// about peers.
 	AllocPeer(storeID uint64) (*metapb.Peer, error)
+
+	FitRegion(*core.RegionInfo) *placement.RegionFit
 }

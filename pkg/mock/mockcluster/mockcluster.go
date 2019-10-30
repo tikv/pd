@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -34,6 +35,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*mockoption.ScheduleOptions
+	*placement.RuleManager
 	*statistics.HotCache
 	*statistics.StoresStats
 	ID uint64
@@ -112,6 +114,11 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 		StoreId: storeID,
 	}
 	return peer, nil
+}
+
+// FitRegion fits a region to the rules it matches.
+func (mc *Cluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
+	return mc.RuleManager.FitRegion(mc.BasicCluster, region)
 }
 
 // SetStoreUp sets store state to be up.
