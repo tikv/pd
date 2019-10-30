@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
@@ -69,20 +68,18 @@ func (s *selectedStores) newFilter(scope string) filter.Filter {
 
 // RegionScatterer scatters regions.
 type RegionScatterer struct {
-	name       string
-	cluster    opt.Cluster
-	classifier namespace.Classifier
-	filters    []filter.Filter
-	selected   *selectedStores
+	name     string
+	cluster  opt.Cluster
+	filters  []filter.Filter
+	selected *selectedStores
 }
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(cluster opt.Cluster, classifier namespace.Classifier) *RegionScatterer {
+func NewRegionScatterer(cluster opt.Cluster) *RegionScatterer {
 	return &RegionScatterer{
-		name:       regionScatterName,
-		cluster:    cluster,
-		classifier: classifier,
+		name:    regionScatterName,
+		cluster: cluster,
 		filters: []filter.Filter{
 			filter.StoreStateFilter{ActionScope: regionScatterName},
 		},
@@ -172,11 +169,9 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 }
 
 func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo) map[uint64]*core.StoreInfo {
-	namespace := r.classifier.GetRegionNamespace(region)
 	filters := []filter.Filter{
 		r.selected.newFilter(r.name),
 		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
-		filter.NewNamespaceFilter(r.name, r.classifier, namespace),
 	}
 	filters = append(filters, r.filters...)
 

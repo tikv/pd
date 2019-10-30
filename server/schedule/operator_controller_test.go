@@ -28,7 +28,6 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/operator"
 )
@@ -438,7 +437,7 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 		tc.PutRegion(region)
 	}
 
-	mc := checker.NewMergeChecker(t.ctx, tc, namespace.DefaultClassifier)
+	mc := checker.NewMergeChecker(t.ctx, tc)
 	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
 
 	cfg.StoreBalanceRate = 60

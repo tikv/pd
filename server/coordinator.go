@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/statistics"
@@ -60,23 +59,21 @@ type coordinator struct {
 	regionScatterer *schedule.RegionScatterer
 	schedulers      map[string]*scheduleController
 	opController    *schedule.OperatorController
-	classifier      namespace.Classifier
 	hbStreams       *heartbeatStreams
 }
 
 // newCoordinator creates a new coordinator.
-func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *heartbeatStreams, classifier namespace.Classifier) *coordinator {
+func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *heartbeatStreams) *coordinator {
 	ctx, cancel := context.WithCancel(ctx)
 	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
 	return &coordinator{
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
-		checkers:        schedule.NewCheckerController(ctx, cluster, classifier, opController),
-		regionScatterer: schedule.NewRegionScatterer(cluster, classifier),
+		checkers:        schedule.NewCheckerController(ctx, cluster, opController),
+		regionScatterer: schedule.NewRegionScatterer(cluster),
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
-		classifier:      classifier,
 		hbStreams:       hbStreams,
 	}
 }
@@ -464,7 +461,6 @@ type scheduleController struct {
 	schedule.Scheduler
 	cluster      *RaftCluster
 	opController *schedule.OperatorController
-	classifier   namespace.Classifier
 	nextInterval time.Duration
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -478,7 +474,6 @@ func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleContro
 		cluster:      c.cluster,
 		opController: c.opController,
 		nextInterval: s.GetMinInterval(),
-		classifier:   c.classifier,
 		ctx:          ctx,
 		cancel:       cancel,
 	}
@@ -495,7 +490,7 @@ func (s *scheduleController) Stop() {
 func (s *scheduleController) Schedule() []*operator.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// If we have schedule, reset interval to the minimal interval.
-		if op := scheduleByNamespace(s.cluster, s.classifier, s.Scheduler); op != nil {
+		if op := s.Scheduler.Schedule(s.cluster); op != nil {
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return op
 		}

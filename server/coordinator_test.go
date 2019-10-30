@@ -33,7 +33,6 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/namespace"
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
@@ -188,7 +187,7 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	oc := co.opController
 
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
@@ -218,7 +217,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	defer co.wg.Wait()
 	defer co.stop()
@@ -284,8 +283,8 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	tc.regionStats = statistics.NewRegionStatistics(tc.s.scheduleOpt, tc.s.classifier)
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	tc.regionStats = statistics.NewRegionStatistics(tc.s.scheduleOpt)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	// Make sure there are no problem when concurrent write and read
 	for i := 0; i <= 10; i++ {
@@ -323,7 +322,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 
 	testCheckRegion := func(regionID uint64, expectCheckerIsBusy, expectAddOperator bool) {
@@ -358,7 +357,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	co.wg.Wait()
 
 	tc = newTestCluster(opt)
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	defer co.wg.Wait()
 	defer co.stop()
@@ -421,7 +420,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	defer co.wg.Wait()
 	defer co.stop()
@@ -485,7 +484,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	defer co.wg.Wait()
 	defer co.stop()
@@ -536,7 +535,7 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 
 	c.Assert(tc.addLeaderStore(1, 5), IsNil)
 	c.Assert(tc.addLeaderStore(2, 2), IsNil)
@@ -586,7 +585,7 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 
 	c.Assert(tc.addLeaderStore(1, 10), IsNil)
 	c.Assert(tc.addLeaderStore(2, 0), IsNil)
@@ -636,7 +635,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	hbStreams, cleanup := getHeartBeatStreams(s.ctx, c, tc)
 	defer cleanup()
 	defer hbStreams.Close()
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	defer co.wg.Wait()
 	defer co.stop()
@@ -697,7 +696,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 
 	// Add stores 1,2
@@ -746,7 +745,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(newOpt.Persist(storage), IsNil)
 	tc.RaftCluster.opt = newOpt
 
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	c.Assert(co.schedulers, HasLen, 3)
 	co.stop()
@@ -756,7 +755,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(newOpt.Reload(storage), IsNil)
 	tc.RaftCluster.opt = newOpt
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	storage = tc.RaftCluster.storage
 	c.Assert(co.schedulers, HasLen, 3)
@@ -782,7 +781,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
 	tc.RaftCluster.opt = newOpt
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 
 	co.run()
 	defer co.wg.Wait()
@@ -802,7 +801,7 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 
 	// Add stores 1,2
@@ -841,7 +840,7 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(newOpt.Reload(tc.storage), IsNil)
 	tc.RaftCluster.opt = newOpt
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	c.Assert(co.schedulers, HasLen, 0)
 	// the option remains default scheduler
@@ -871,7 +870,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	tc.prepareChecker.collect(region)
 
 	// Add 1 replica on store 2.
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	stream := mockhbstream.NewHeartbeatStream()
 	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
@@ -882,7 +881,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co.wg.Wait()
 
 	// Recreate coodinator then add another replica on store 3.
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 3)
@@ -916,7 +915,7 @@ func BenchmarkPatrolRegion(b *testing.B) {
 			return
 		}
 	}
-	co := newCoordinator(ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
 
 	listen := make(chan int)
 	go func() {
@@ -1108,7 +1107,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 2), IsNil)
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	oc := co.opController
 	scheduler, err := schedule.CreateScheduler("balance-leader", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -1184,7 +1183,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	defer cleanup()
 	defer hbStreams.Close()
 
-	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams, namespace.DefaultClassifier)
+	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	lb, err := schedule.CreateScheduler("balance-leader", co.opController, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
