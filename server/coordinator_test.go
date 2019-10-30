@@ -178,7 +178,7 @@ func (s *testCoordinatorSuite) TearDownSuite(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestBasic(c *C) {
-	tc, co, cleanup := prepare(nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 	oc := co.opController
 
@@ -202,7 +202,7 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
-	tc, co, cleanup := prepare(nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
 	// Transfer peer from store 4 to store 1.
@@ -261,7 +261,7 @@ func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream mo
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
 		tc.regionStats = statistics.NewRegionStatistics(tc.s.scheduleOpt)
-	}, c)
+	}, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
 	// Make sure there are no problem when concurrent write and read
@@ -292,28 +292,7 @@ func MaxUint64(nums ...uint64) uint64 {
 	return result
 }
 
-func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), c *C) (*testCluster, *coordinator, func()) {
-	ctx, tc, hbStreams, cleanup := prepareTc(setCfg, setTc, c)
-	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
-	co.run()
-	return tc, co, func() {
-		co.stop()
-		co.wg.Wait()
-		cleanup()
-		hbStreams.Close()
-	}
-}
-
-func prepareWithoutRun(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), c *C) (*testCluster, *coordinator, func()) {
-	ctx, tc, hbStreams, cleanup := prepareTc(setCfg, setTc, c)
-	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
-	return tc, co, func() {
-		cleanup()
-		hbStreams.Close()
-	}
-}
-
-func prepareTc(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), c *C) (context.Context, *testCluster, *heartbeatStreams, func()) {
+func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run func(*coordinator), c *C) (*testCluster, *coordinator, func()) {
 	ctx, _ := context.WithCancel(context.Background())
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
@@ -325,7 +304,16 @@ func prepareTc(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), c 
 	if setTc != nil {
 		setTc(tc)
 	}
-	return ctx, tc, hbStreams, cleanup
+	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
+	if run != nil {
+		run(co)
+	}
+	return tc, co, func() {
+		co.stop()
+		co.wg.Wait()
+		cleanup()
+		hbStreams.Close()
+	}
 }
 
 func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy, expectAddOperator bool) {
@@ -339,7 +327,7 @@ func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinato
 }
 
 func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
-	tc, co, cleanup := prepare(nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	hbStreams, opt := co.hbStreams, tc.opt
 	defer cleanup()
 
@@ -390,7 +378,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 		cfg.LeaderScheduleLimit = 10
 		cfg.RegionScheduleLimit = 10
 		cfg.MergeScheduleLimit = 10
-	}, nil, c)
+	}, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
@@ -425,7 +413,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 		// Turn off balance.
 		cfg.LeaderScheduleLimit = 0
 		cfg.RegionScheduleLimit = 0
-	}, nil, c)
+	}, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
@@ -480,7 +468,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestPeerState(c *C) {
-	tc, co, cleanup := prepare(nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
 	// Transfer peer from store 4 to store 1.
@@ -522,7 +510,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestShouldRun(c *C) {
-	tc, co, cleanup := prepareWithoutRun(nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 
 	c.Assert(tc.addLeaderStore(1, 5), IsNil)
@@ -566,7 +554,7 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
-	tc, co, cleanup := prepareWithoutRun(nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 
 	c.Assert(tc.addLeaderStore(1, 10), IsNil)
@@ -609,7 +597,7 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
-	tc, co, cleanup := prepare(nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
 	c.Assert(co.schedulers, HasLen, 4)
@@ -659,7 +647,7 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
-	tc, co, cleanup := prepare(nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	hbStreams := co.hbStreams
 	defer cleanup()
 
@@ -756,7 +744,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0
-	}, nil, c)
+	}, nil, func(co *coordinator) { co.run() }, c)
 	hbStreams := co.hbStreams
 	defer cleanup()
 
@@ -810,7 +798,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 		// Turn off balance, we test add replica only.
 		cfg.LeaderScheduleLimit = 0
 		cfg.RegionScheduleLimit = 0
-	}, nil, c)
+	}, nil, func(co *coordinator) { co.run() }, c)
 	hbStreams := co.hbStreams
 	defer cleanup()
 
@@ -846,9 +834,9 @@ func BenchmarkPatrolRegion(b *testing.B) {
 	mergeLimit := uint64(4100)
 	regionNum := 10000
 
-	tc, co, cleanup := prepareWithoutRun(func(cfg *config.ScheduleConfig) {
+	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		cfg.MergeScheduleLimit = mergeLimit
-	}, nil, &C{})
+	}, nil, nil, &C{})
 	defer cleanup()
 
 	tc.opt.SetSplitMergeInterval(time.Duration(0))
@@ -903,7 +891,7 @@ func (s *testOperatorControllerSuite) TearDownSuite(c *C) {
 }
 
 func (s *testOperatorControllerSuite) TestOperatorCount(c *C) {
-	tc, co, cleanup := prepare(nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 	oc := co.opController
 	c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(0))
@@ -936,7 +924,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 		// scheduling one time needs 60 seconds
 		// and thus it's large enough to make sure that only schedule one time
 		cfg.StoreBalanceRate = 1
-	}, nil, c)
+	}, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 	oc := co.opController
 	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, nil)
@@ -976,7 +964,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		// scheduling one time needs 2 seconds
 		cfg.StoreBalanceRate = 30
-	}, nil, c)
+	}, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 	oc := co.opController
 	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, nil)
@@ -1033,7 +1021,7 @@ func (s *mockLimitScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (s *testScheduleControllerSuite) TestController(c *C) {
-	tc, co, cleanup := prepare(nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 	oc := co.opController
 
@@ -1106,7 +1094,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 }
 
 func (s *testScheduleControllerSuite) TestInterval(c *C) {
-	_, co, cleanup := prepare(nil, nil, c)
+	_, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
 	lb, err := schedule.CreateScheduler("balance-leader", co.opController, core.NewStorage(kv.NewMemoryKV()), nil)
