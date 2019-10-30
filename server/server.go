@@ -25,6 +25,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
@@ -96,7 +97,7 @@ type Server struct {
 	// for raft cluster
 	cluster *RaftCluster
 	// For tso, set after pd becomes leader.
-	ts            atomic.Value
+	ts            unsafe.Pointer
 	lastSavedTime time.Time
 	// For async region heartbeat.
 	hbStreams *heartbeatStreams

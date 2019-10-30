@@ -17,10 +17,12 @@ import (
 	"path"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/tsoutil"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -98,6 +100,7 @@ func (s *Server) syncTimestamp() error {
 
 	save := next.Add(s.cfg.TsoSaveInterval.Duration)
 	if err = s.saveTimestamp(save); err != nil {
+		tsoCounter.WithLabelValues("err_save_sync_ts").Inc()
 		return err
 	}
 
@@ -107,8 +110,40 @@ func (s *Server) syncTimestamp() error {
 	current := &atomicObject{
 		physical: next,
 	}
-	s.ts.Store(current)
+	atomic.StorePointer(&s.ts, unsafe.Pointer(current))
+	return nil
+}
 
+// ResetUserTimestamp update the physical part with specified tso.
+func (s *Server) ResetUserTimestamp(tso uint64) error {
+	if !s.IsLeader() {
+		return ErrServerNotStarted
+	}
+	physical, _ := tsoutil.ParseTS(tso)
+	next := physical.Add(time.Millisecond)
+	prev := (*atomicObject)(atomic.LoadPointer(&s.ts))
+
+	// do not update
+	if subTimeByWallClock(next, prev.physical) <= 3*updateTimestampGuard {
+		tsoCounter.WithLabelValues("err_reset_small_ts").Inc()
+		return errors.New("the specified ts too small than now")
+	}
+
+	if subTimeByWallClock(next, prev.physical) >= s.cfg.PDServerCfg.MaxResetTSGap {
+		tsoCounter.WithLabelValues("err_reset_large_ts").Inc()
+		return errors.New("the specified ts too large than now")
+	}
+
+	save := next.Add(s.cfg.TsoSaveInterval.Duration)
+	if err := s.saveTimestamp(save); err != nil {
+		tsoCounter.WithLabelValues("err_save_reset_ts").Inc()
+		return err
+	}
+	update := &atomicObject{
+		physical: next,
+	}
+	atomic.CompareAndSwapPointer(&s.ts, unsafe.Pointer(prev), unsafe.Pointer(update))
+	tsoCounter.WithLabelValues("reset_tso_ok").Inc()
 	return nil
 }
 
@@ -123,7 +158,7 @@ func (s *Server) syncTimestamp() error {
 // 2. The saved time is monotonically increasing.
 // 3. The physical time is always less than the saved timestamp.
 func (s *Server) updateTimestamp() error {
-	prev := s.ts.Load().(*atomicObject)
+	prev := (*atomicObject)(atomic.LoadPointer(&s.ts))
 	now := time.Now()
 
 	failpoint.Inject("fallBackUpdate", func() {
@@ -163,6 +198,7 @@ func (s *Server) updateTimestamp() error {
 	if subTimeByWallClock(s.lastSavedTime, next) <= updateTimestampGuard {
 		save := next.Add(s.cfg.TsoSaveInterval.Duration)
 		if err := s.saveTimestamp(save); err != nil {
+			tsoCounter.WithLabelValues("err_save_update_ts").Inc()
 			return err
 		}
 	}
@@ -172,7 +208,7 @@ func (s *Server) updateTimestamp() error {
 		logical:  0,
 	}
 
-	s.ts.Store(current)
+	atomic.StorePointer(&s.ts, unsafe.Pointer(current))
 	metadataGauge.WithLabelValues("tso").Set(float64(next.Unix()))
 
 	return nil
@@ -188,8 +224,8 @@ func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 	}
 
 	for i := 0; i < maxRetryCount; i++ {
-		current, ok := s.ts.Load().(*atomicObject)
-		if !ok || current.physical == zeroTime {
+		current := (*atomicObject)(atomic.LoadPointer(&s.ts))
+		if current.physical == zeroTime {
 			log.Error("we haven't synced timestamp ok, wait and retry", zap.Int("retry-count", i))
 			time.Sleep(200 * time.Millisecond)
 			continue

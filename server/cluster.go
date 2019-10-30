@@ -319,6 +319,11 @@ func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	return c.cachedCluster.getRegions()
 }
 
+// GetRegionCount returns total count of regions
+func (c *RaftCluster) GetRegionCount() int {
+	return c.cachedCluster.getRegionCount()
+}
+
 // GetStoreRegions returns all regions' information with a given storeID.
 func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	c.RLock()

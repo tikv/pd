@@ -173,6 +173,16 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
+func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) {
+	cluster := h.svr.GetRaftCluster()
+	if cluster == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		return
+	}
+	count := cluster.GetRegionCount()
+	h.rd.JSON(w, http.StatusOK, &RegionsInfo{Count: count})
+}
+
 func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request) {
 	cluster := h.svr.GetRaftCluster()
 	if cluster == nil {
