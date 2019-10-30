@@ -65,7 +65,24 @@ func (s *StoresStats) GetRollingStoreStats(storeID uint64) *RollingStoreStats {
 func (s *StoresStats) Observe(storeID uint64, stats *pdpb.StoreStats) {
 	s.RLock()
 	defer s.RUnlock()
-	s.rollingStoresStats[storeID].Observe(stats)
+	store, ok := s.rollingStoresStats[storeID]
+	if !ok {
+		store = newRollingStoreStats()
+		s.rollingStoresStats[storeID] = store
+	}
+	store.Observe(stats)
+}
+
+// Set sets the store statistics (for test).
+func (s *StoresStats) Set(storeID uint64, stats *pdpb.StoreStats) {
+	s.RLock()
+	defer s.RUnlock()
+	store, ok := s.rollingStoresStats[storeID]
+	if !ok {
+		store = newRollingStoreStats()
+		s.rollingStoresStats[storeID] = store
+	}
+	store.Set(stats)
 }
 
 // UpdateTotalBytesRate updates the total bytes write rate and read rate.
@@ -209,6 +226,21 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	r.keysReadRate.Add(float64(stats.KeysRead) / float64(interval))
 }
 
+// Set sets the statistics (for test).
+func (r *RollingStoreStats) Set(stats *pdpb.StoreStats) {
+	statInterval := stats.GetInterval()
+	interval := statInterval.GetEndTimestamp() - statInterval.GetStartTimestamp()
+	if interval == 0 {
+		return
+	}
+	r.Lock()
+	defer r.Unlock()
+	r.bytesWriteRate.Set(float64(stats.BytesWritten) / float64(interval))
+	r.bytesReadRate.Set(float64(stats.BytesRead) / float64(interval))
+	r.keysWriteRate.Set(float64(stats.KeysWritten) / float64(interval))
+	r.keysReadRate.Set(float64(stats.KeysRead) / float64(interval))
+}
+
 // GetBytesRate returns the bytes write rate and the bytes read rate.
 func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64) {
 	r.RLock()
@@ -220,14 +252,14 @@ func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64)
 func (r *RollingStoreStats) GetBytesWriteRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
-	return r.bytesWriteRate.Median()
+	return r.bytesWriteRate.Get()
 }
 
 // GetBytesReadRate returns the bytes write rate and the bytes read rate.
 func (r *RollingStoreStats) GetBytesReadRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
-	return r.bytesReadRate.Median()
+	return r.bytesReadRate.Get()
 }
 
 // GetKeysWriteRate returns the keys write rate.
