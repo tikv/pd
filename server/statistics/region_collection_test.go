@@ -17,7 +17,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/mock/mockclassifier"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
 )
@@ -58,7 +57,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
 	region2 := core.NewRegionInfo(r2, peers[0])
-	regionStats := NewRegionStatistics(opt, mockclassifier.Classifier{})
+	regionStats := NewRegionStatistics(opt)
 	regionStats.Observe(region1, stores)
 	c.Assert(len(regionStats.stats[ExtraPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
@@ -75,7 +74,6 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[DownPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[IncorrectNamespace]), Equals, 1)
 	c.Assert(len(regionStats.stats[EmptyRegion]), Equals, 0)
 
 	region2 = region2.Clone(core.WithDownPeers(downPeers[0:1]))
@@ -86,7 +84,6 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[OfflinePeer]), Equals, 1)
-	c.Assert(len(regionStats.stats[IncorrectNamespace]), Equals, 1)
 
 	region1 = region1.Clone(core.WithRemoveStorePeer(7))
 	regionStats.Observe(region1, stores[0:3])
@@ -96,7 +93,6 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(len(regionStats.stats[PendingPeer]), Equals, 1)
 	c.Assert(len(regionStats.stats[LearnerPeer]), Equals, 0)
 	c.Assert(len(regionStats.stats[OfflinePeer]), Equals, 0)
-	c.Assert(len(regionStats.stats[IncorrectNamespace]), Equals, 0)
 
 	store3 = stores[3].Clone(core.SetStoreState(metapb.StoreState_Up))
 	stores[3] = store3

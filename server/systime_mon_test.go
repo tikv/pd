@@ -14,16 +14,19 @@
 package server
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestSystimeMonitor(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var jumpForward int32
 
 	trigged := false
-	go StartMonitor(
+	go StartMonitor(ctx,
 		func() time.Time {
 			if !trigged {
 				trigged = true

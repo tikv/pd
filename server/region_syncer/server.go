@@ -66,15 +66,15 @@ type Server interface {
 // RegionSyncer is used to sync the region information without raft.
 type RegionSyncer struct {
 	sync.RWMutex
-	streams        map[string]ServerStream
-	ctx            context.Context
-	cancel         context.CancelFunc
-	server         Server
-	closed         chan struct{}
-	wg             sync.WaitGroup
-	history        *historyBuffer
-	limit          *ratelimit.Bucket
-	securityConfig *config.SecurityConfig
+	streams            map[string]ServerStream
+	regionSyncerCtx    context.Context
+	regionSyncerCancel context.CancelFunc
+	server             Server
+	closed             chan struct{}
+	wg                 sync.WaitGroup
+	history            *historyBuffer
+	limit              *ratelimit.Bucket
+	securityConfig     *config.SecurityConfig
 }
 
 // NewRegionSyncer returns a region syncer.

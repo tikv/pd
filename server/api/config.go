@@ -16,11 +16,9 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 
-	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
@@ -139,57 +137,6 @@ func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svr.SetReplicationConfig(*config); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.rd.JSON(w, http.StatusOK, nil)
-}
-
-func (h *confHandler) GetNamespace(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	name := vars["name"]
-
-	if !h.svr.IsNamespaceExist(name) {
-		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("invalid namespace Name %s, not found", name))
-		return
-	}
-
-	// adjust field that is zero value to global value
-	cfg := h.svr.GetNamespaceConfigWithAdjust(name)
-	h.rd.JSON(w, http.StatusOK, cfg)
-}
-
-func (h *confHandler) SetNamespace(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	name := vars["name"]
-
-	if !h.svr.IsNamespaceExist(name) {
-		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("invalid namespace Name %s, not found", name))
-		return
-	}
-
-	config := h.svr.GetNamespaceConfig(name)
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
-		return
-	}
-
-	if err := h.svr.SetNamespaceConfig(name, *config); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.rd.JSON(w, http.StatusOK, nil)
-}
-
-func (h *confHandler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	name := vars["name"]
-
-	if !h.svr.IsNamespaceExist(name) {
-		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("invalid namespace Name %s, not found", name))
-		return
-	}
-
-	if err := h.svr.DeleteNamespaceConfig(name); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

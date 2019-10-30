@@ -54,7 +54,7 @@ func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
 func (s *testClusterWorkerSuite) TestValidRequestRegion(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
@@ -94,7 +94,7 @@ func (s *testClusterWorkerSuite) TestValidRequestRegion(c *C) {
 func (s *testClusterWorkerSuite) TestAskSplit(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})

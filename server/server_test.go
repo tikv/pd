@@ -30,7 +30,7 @@ func TestServer(t *testing.T) {
 
 func mustRunTestServer(c *C) (*Server, CleanupFunc) {
 	var err error
-	_, server, cleanup, err := NewTestServer(c)
+	server, cleanup, err := NewTestServer(c)
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{server})
 	return server, cleanup
@@ -53,11 +53,14 @@ func mustWaitLeader(c *C, svrs []*Server) *Server {
 var _ = Suite(&testLeaderServerSuite{})
 
 type testLeaderServerSuite struct {
+	ctx        context.Context
+	cancel     context.CancelFunc
 	svrs       map[string]*Server
 	leaderPath string
 }
 
 func (s *testLeaderServerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.svrs = make(map[string]*Server)
 
 	cfgs := NewTestMultiConfig(c, 3)
@@ -69,7 +72,7 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 		go func() {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
-			err = svr.Run(context.TODO())
+			err = svr.Run(s.ctx)
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()
@@ -83,6 +86,7 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 }
 
 func (s *testLeaderServerSuite) TearDownSuite(c *C) {
+	s.cancel()
 	for _, svr := range s.svrs {
 		svr.Close()
 		testutil.CleanServer(svr.cfg)
@@ -93,7 +97,7 @@ var _ = Suite(&testServerSuite{})
 
 type testServerSuite struct{}
 
-func newTestServersWithCfgs(c *C, cfgs []*config.Config) ([]*Server, CleanupFunc) {
+func newTestServersWithCfgs(ctx context.Context, c *C, cfgs []*config.Config) ([]*Server, CleanupFunc) {
 	svrs := make([]*Server, 0, len(cfgs))
 
 	ch := make(chan *Server)
@@ -101,7 +105,7 @@ func newTestServersWithCfgs(c *C, cfgs []*config.Config) ([]*Server, CleanupFunc
 		go func(cfg *config.Config) {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
-			err = svr.Run(context.TODO())
+			err = svr.Run(ctx)
 			c.Assert(err, IsNil)
 			ch <- svr
 		}(cfg)
@@ -125,6 +129,8 @@ func newTestServersWithCfgs(c *C, cfgs []*config.Config) ([]*Server, CleanupFunc
 }
 
 func (s *testServerSuite) TestCheckClusterID(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cfgs := NewTestMultiConfig(c, 2)
 	for i, cfg := range cfgs {
 		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_check_clusterID_%d", i)
@@ -140,7 +146,7 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	// Start a standalone cluster
 	// TODO: clean up. For now tests failed because:
 	//    etcdserver: failed to purge snap file ...
-	svrsA, cleanA := newTestServersWithCfgs(c, []*config.Config{cfgA})
+	svrsA, cleanA := newTestServersWithCfgs(ctx, c, []*config.Config{cfgA})
 	defer cleanA()
 	// Close it.
 	for _, svr := range svrsA {
@@ -148,13 +154,13 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	}
 
 	// Start another cluster.
-	_, cleanB := newTestServersWithCfgs(c, []*config.Config{cfgB})
+	_, cleanB := newTestServersWithCfgs(ctx, c, []*config.Config{cfgB})
 	defer cleanB()
 
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
 	svr, err := CreateServer(cfgA, nil)
 	c.Assert(err, IsNil)
-	err = svr.Run(context.TODO())
+	err = svr.Run(ctx)
 	c.Assert(err, NotNil)
 }

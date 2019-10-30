@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/rand"
@@ -27,7 +28,6 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/operator"
@@ -153,18 +153,25 @@ func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
 var _ = Suite(&testBalanceLeaderSchedulerSuite{})
 
 type testBalanceLeaderSchedulerSuite struct {
-	tc *mockcluster.Cluster
-	lb schedule.Scheduler
-	oc *schedule.OperatorController
+	ctx    context.Context
+	cancel context.CancelFunc
+	tc     *mockcluster.Cluster
+	lb     schedule.Scheduler
+	oc     *schedule.OperatorController
 }
 
 func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	opt := mockoption.NewScheduleOptions()
 	s.tc = mockcluster.NewCluster(opt)
-	s.oc = schedule.NewOperatorController(nil, nil)
+	s.oc = schedule.NewOperatorController(s.ctx, nil, nil)
 	lb, err := schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	s.lb = lb
+}
+
+func (s *testBalanceLeaderSchedulerSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testBalanceLeaderSchedulerSuite) schedule() []*operator.Operator {
@@ -378,10 +385,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.AddLeaderStore(2, 2)
 	s.tc.AddLeaderRegion(1, 3, 2, 4)
 	s.tc.AddLeaderRegion(2, 1, 2, 3)
-	// No leader in store16, no follower in store1. No operator is created.
-	c.Assert(s.schedule(), IsNil)
-	// store4 and store1 are marked taint.
-	// Now source and target are store3 and store2.
+	// No leader in store16, no follower in store1. Now source and target are store3 and store2.
 	testutil.CheckTransferLeader(c, s.schedule()[0], operator.OpBalance, 3, 2)
 
 	// Stores:     1    2    3    4
@@ -395,8 +399,8 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.AddLeaderRegion(1, 4, 2, 3)
 	s.tc.AddLeaderRegion(2, 1, 2, 3)
 	// The cluster is balanced.
-	c.Assert(s.schedule(), IsNil) // store1, store4 are marked taint.
-	c.Assert(s.schedule(), IsNil) // store2, store3 are marked taint.
+	c.Assert(s.schedule(), IsNil)
+	c.Assert(s.schedule(), IsNil)
 
 	// store3's leader drops:
 	// Stores:     1    2    3    4
@@ -407,18 +411,28 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.AddLeaderStore(2, 13)
 	s.tc.AddLeaderStore(3, 0)
 	s.tc.AddLeaderStore(4, 16)
-	c.Assert(s.schedule(), IsNil)                                              // All stores are marked taint.
-	testutil.CheckTransferLeader(c, s.schedule()[0], operator.OpBalance, 4, 3) // The taint store will be clear.
+	testutil.CheckTransferLeader(c, s.schedule()[0], operator.OpBalance, 4, 3)
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
 
-type testBalanceRegionSchedulerSuite struct{}
+type testBalanceRegionSchedulerSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testBalanceRegionSchedulerSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testBalanceRegionSchedulerSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
 
 func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -451,7 +465,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
@@ -464,16 +478,8 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc.AddLabelsStore(3, 14, map[string]string{"zone": "z1", "rack": "r2", "host": "h2"})
 
 	tc.AddLeaderRegion(1, 1, 2, 3)
-	// This schedule try to replace peer in store 1, but we have no other stores,
-	// so store 1 will be set in the cache and skipped next schedule.
+	// This schedule try to replace peer in store 1, but we have no other stores.
 	c.Assert(sb.Schedule(tc), IsNil)
-	for i := 0; i <= hitsStoreCountThreshold/balanceRegionRetryLimit; i++ {
-		sb.Schedule(tc)
-	}
-	hit := sb.(*balanceRegionScheduler).hitsCounter
-	c.Assert(hit.buildSourceFilter(sb.GetName(), tc).Source(tc, tc.GetStore(1)), IsTrue)
-	c.Assert(hit.buildSourceFilter(sb.GetName(), tc).Source(tc, tc.GetStore(2)), IsFalse)
-	c.Assert(hit.buildSourceFilter(sb.GetName(), tc).Source(tc, tc.GetStore(3)), IsFalse)
 
 	// Store 4 has smaller region score than store 2.
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -481,7 +487,6 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	// Store 5 has smaller region score than store 1.
 	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	hit.remove(tc.GetStore(1), nil)
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], operator.OpBalance, 1, 5)
 
 	// Store 6 has smaller region score than store 5.
@@ -506,11 +511,6 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc.SetStoreDown(6)
 	tc.SetStoreDown(7)
 	tc.SetStoreDown(8)
-	for i := 0; i <= hitsStoreCountThreshold/balanceRegionRetryLimit; i++ {
-		c.Assert(sb.Schedule(tc), IsNil)
-	}
-	c.Assert(hit.buildSourceFilter(sb.GetName(), tc).Source(tc, tc.GetStore(1)), IsTrue)
-	hit.remove(tc.GetStore(1), nil)
 
 	// Store 9 has different zone with other stores but larger region score than store 1.
 	tc.AddLabelsStore(9, 20, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
@@ -520,7 +520,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	newTestReplication(opt, 5, "zone", "rack", "host")
 
@@ -575,7 +575,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	opt.TolerantSizeRatio = 1
 
@@ -603,21 +603,16 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	store5 := origin.Clone(core.SetStoreStats(stats))
 	tc.PutStore(store5)
 
-	// the scheduler always pick store 1 as source store,
+	// the scheduler first picks store 1 as source store,
 	// and store 5 as target store, but cannot pass `shouldBalance`.
-	c.Assert(sb.Schedule(tc), IsNil)
-	// hits the store many times
-	for i := 0; i < 1000; i++ {
-		sb.Schedule(tc)
-	}
-	// now filter the store 5, and can transfer store 1 to store 4
+	// Then it will try store4.
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], operator.OpBalance, 1, 4)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -642,7 +637,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
@@ -676,7 +671,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc)
 
 	opt.MaxSnapshotCount = 2
 
@@ -693,9 +688,9 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 4)
 
 	// Disable make up replica feature.
-	opt.DisableMakeUpReplica = true
+	opt.EnableMakeUpReplica = false
 	c.Assert(rc.Check(region), IsNil)
-	opt.DisableMakeUpReplica = false
+	opt.EnableMakeUpReplica = true
 
 	// Test healthFilter.
 	// If store 4 is down, we add to store 3.
@@ -723,9 +718,9 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
 
 	// Disable remove extra replica feature.
-	opt.DisableRemoveExtraReplica = true
+	opt.EnableRemoveExtraReplica = false
 	c.Assert(rc.Check(region), IsNil)
-	opt.DisableRemoveExtraReplica = false
+	opt.EnableRemoveExtraReplica = true
 
 	region = region.Clone(core.WithRemoveStorePeer(1))
 
@@ -753,7 +748,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 
-	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc)
 
 	// now region peer in store 1,2,3.but we just have store 1,2
 	// This happens only in recovering the PD tc
@@ -770,7 +765,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc)
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
@@ -827,7 +822,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc)
 
 	tc.AddLabelsStore(1, 9, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 8, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -872,9 +867,9 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	// Replace peer in store 1 with store 6 because it has a different rack.
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 1, 6)
 	// Disable locationReplacement feature.
-	opt.DisableLocationReplacement = true
+	opt.EnableLocationReplacement = false
 	c.Assert(rc.Check(region), IsNil)
-	opt.DisableLocationReplacement = false
+	opt.EnableLocationReplacement = true
 	peer6, _ := tc.AllocPeer(6)
 	region = region.Clone(core.WithAddPeer(peer6))
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
@@ -905,7 +900,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 
 	newTestReplication(opt, 5, "zone", "host")
 
-	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc)
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
@@ -932,7 +927,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.LocationLabels = []string{"zone"}
 	tc := mockcluster.NewCluster(opt)
-	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc)
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(1, 0.5, 0.5)
@@ -966,7 +961,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	rc := checker.NewReplicaChecker(tc, namespace.DefaultClassifier)
+	rc := checker.NewReplicaChecker(tc)
 
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -986,9 +981,9 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	tc.SetStoreOffline(2)
 	// RemoveDownReplica has higher priority than replaceOfflineReplica.
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 1, 4)
-	opt.DisableRemoveDownReplica = true
+	opt.EnableRemoveDownReplica = false
 	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 2, 4)
-	opt.DisableReplaceOfflineReplica = true
+	opt.EnableReplaceOfflineReplica = false
 	c.Assert(rc.Check(region), IsNil)
 }
 
@@ -997,11 +992,13 @@ var _ = Suite(&testRandomMergeSchedulerSuite{})
 type testRandomMergeSchedulerSuite struct{}
 
 func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := mockoption.NewScheduleOptions()
 	opt.MergeScheduleLimit = 1
 	tc := mockcluster.NewCluster(opt)
 	hb := mockhbstream.NewHeartbeatStreams(tc.ID)
-	oc := schedule.NewOperatorController(tc, hb)
+	oc := schedule.NewOperatorController(ctx, tc, hb)
 
 	mb, err := schedule.CreateScheduler("random-merge", oc, core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
@@ -1024,7 +1021,18 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 
 var _ = Suite(&testScatterRangeLeaderSuite{})
 
-type testScatterRangeLeaderSuite struct{}
+type testScatterRangeLeaderSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testScatterRangeLeaderSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+}
+
+func (s *testScatterRangeLeaderSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
 
 func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
@@ -1073,7 +1081,7 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 	for i := 1; i <= 5; i++ {
 		tc.UpdateStoreStatus(uint64(i))
 	}
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_50", "t"}))
 	c.Assert(err, IsNil)
@@ -1100,7 +1108,7 @@ func (s *testScatterRangeLeaderSuite) TestBalance(c *C) {
 func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_50", "t"}))
 	sche := hb.(*scatterRangeScheduler)
 	c.Assert(err, IsNil)
@@ -1172,7 +1180,7 @@ func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 		tc.UpdateStoreStatus(uint64(i))
 	}
 
-	oc := schedule.NewOperatorController(nil, nil)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	hb, err := schedule.CreateScheduler("scatter-range", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("scatter-range", []string{"s_00", "s_09", "t"}))
 	c.Assert(err, IsNil)
 
