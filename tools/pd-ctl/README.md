@@ -101,10 +101,10 @@ Usage:
     "strictly-match-label": "true"
   },
   "schedule": {
+    "enable-one-way-merge": "false",
+    "enable-cross-table-merge": "false",
     "disable-location-replacement": "false",
     "disable-make-up-replica": "false",
-    "disable-namespace-relocation": "false",
-    "disable-raft-learner": "false",
     "disable-remove-down-replica": "false",
     "disable-remove-extra-replica": "false",
     "disable-replace-offline-replica": "false",
@@ -119,6 +119,7 @@ Usage:
     "max-snapshot-count": 3,
     "max-store-down-time": "30m0s",
     "merge-schedule-limit": 8,
+    "merge-strategy": "table",
     "patrol-region-interval": "100ms",
     "region-schedule-limit": 2048,
     "replica-schedule-limit": 64,
@@ -146,18 +147,11 @@ Usage:
       }
     ],
     "split-merge-interval": "1h0m0s",
-    "store-balance-rate": 1,
+    "store-balance-rate": 15,
     "tolerant-size-ratio": 0
   }
 }
 >> config show all                            // Display all config information
->> config show namespace ts1                  // Display the config information of the namespace named ts1
-{
-  "leader-schedule-limit": 4,
-  "region-schedule-limit": 4,
-  "replica-schedule-limit": 8,
-  "max-replicas": 3,
-}
 >> config show replication                    // Display the config information of replication
 {
   "max-replicas": 3,
@@ -203,6 +197,13 @@ Usage:
     >> config set enable-one-way-merge true  // Enable one way merge.
     ```
 
+- `enable-cross-table-merge` controls the merge scheduler behavior. This means two Regions can be merged with different table IDs.
+This option only works when merge strategy is "table".
+
+    ```bash
+    >> config set enable-cross-table-merge true  // Enable cross table merge.
+    ```
+
 - `patrol-region-interval` controls the execution frequency that `replicaChecker` checks the health status of Regions. A shorter interval indicates a higher execution frequency. Generally, you do not need to adjust it.
 
     ```bash
@@ -239,15 +240,6 @@ Usage:
     >> config set merge-schedule-limit 16       // 16 tasks of Merge scheduling at the same time at most
     ```
 
-The configuration above is global. You can also tune the configuration by configuring different namespaces. The global configuration is used if the corresponding configuration of the namespace is not set.
-
-> **Note:** The configuration of the namespace only supports editing `leader-schedule-limit`, `region-schedule-limit`, `replica-schedule-limit` and `max-replicas`.
-
-    ```bash
-    >> config set namespace ts1 leader-schedule-limit 4 // 4 tasks of leader scheduling at the same time at most for the namespace named ts1
-    >> config set namespace ts2 region-schedule-limit 2 // 2 tasks of region scheduling at the same time at most for the namespace named ts2
-    ```
-
 - `tolerant-size-ratio` controls the size of the balance buffer area. When the score difference between the leader or Region of the two stores is less than specified multiple times of the Region size, it is considered in balance by PD.
 
     ```bash
@@ -281,26 +273,6 @@ The configuration above is global. You can also tune the configuration by config
 - `disable-remove-extra-replica` is used to disable the feature of removing extra replicas. When you set it to `true`, PD does not remove extra replicas for Regions with redundant replicas.
 
 - `disable-location-replacement` is used to disable the isolation level check. When you set it to `true`, PD does not improve the isolation level of Region replicas by scheduling.
-
-- `disable-namespace-relocation` is used to disable Region relocation to the store of its namespace. When you set it to `true`, PD does not move Regions to stores where they belong to.
-
-### `config delete namespace <name> [<option>]`
-
-Use this command to delete the configuration of namespace.
-
-Usage:
-
-After you configure the namespace, if you want it to continue to use global configuration, delete the configuration information of the namespace using the following command:
-
-```bash
->> config delete namespace ts1                      // Delete the configuration of the namespace named ts1
-```
-
-If you want to use global configuration only for a certain configuration of the namespace, use the following command:
-
-```bash
->> config delete namespace region-schedule-limit ts2 // Delete the region-schedule-limit configuration of the namespace named ts2
-```
 
 ### `health`
 
@@ -546,7 +518,6 @@ Description of various types:
 - extra-peer: the Region with extra replicas
 - down-peer: the Region in which some replicas are Down
 - pending-peer：the Region in which some replicas are Pending
-- incorrect-ns：the Region in which some replicas deviate from the namespace constraints
 
 Usage:
 
@@ -595,22 +566,6 @@ Usage:
 >> store limit                  // Show limits for all stores
 >> store limit all 5            // Limit 5 operators per minute for all stores
 >> store limit 1 5              // Limit 5 operators per minute for store 1
-```
-
-### `table_ns [create | add | remove | set_store | rm_store | set_meta | rm_meta]`
-
-Use this command to view the namespace information of the table.
-
-Usage:
-
-```bash
->> table_ns add ts1 1            // Add the table with the table id of 1 to the namespace named ts1
->> table_ns create ts1           // Add the namespace named ts1
->> table_ns remove ts1 1         // Remove the table with the table id of 1 from the namespace named ts1
->> table_ns rm_meta ts1          // Remove the metadata from the namespace named ts1
->> table_ns rm_store 1 ts1       // Remove the table with the store id of 1 from the namespace named ts1
->> table_ns set_meta ts1         // Add the metadata to namespace named ts1
->> table_ns set_store 1 ts1      // Add the table with the store id of 1 to the namespace named ts1
 ```
 
 ### `tso`

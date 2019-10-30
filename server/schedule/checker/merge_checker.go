@@ -19,8 +19,8 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/cache"
+	"github.com/pingcap/pd/pkg/codec"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"go.uber.org/zap"
@@ -29,17 +29,15 @@ import (
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	cluster    opt.Cluster
-	classifier namespace.Classifier
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(ctx context.Context, cluster opt.Cluster, classifier namespace.Classifier) *MergeChecker {
+func NewMergeChecker(ctx context.Context, cluster opt.Cluster) *MergeChecker {
 	splitCache := cache.NewIDTTL(ctx, time.Minute, cluster.GetSplitMergeInterval())
 	return &MergeChecker{
 		cluster:    cluster,
-		classifier: classifier,
 		splitCache: splitCache,
 		startTime:  time.Now(),
 	}
@@ -133,8 +131,29 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 }
 
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
-	return adjacent != nil && !m.cluster.IsRegionHot(adjacent) &&
-		m.classifier.AllowMerge(region, adjacent) &&
+	return adjacent != nil && !m.cluster.IsRegionHot(adjacent) && m.allowMerge(region, adjacent) &&
 		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 && // no special peer
 		len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() // peer count should equal
+}
+
+// allowMerge returns true if two regions can be merged according to the merge strategy.
+func (m *MergeChecker) allowMerge(region *core.RegionInfo, adjacent *core.RegionInfo) bool {
+	strategy := m.cluster.GetKeyType()
+	switch strategy {
+	case core.Table:
+		if m.cluster.IsCrossTableMergeEnabled() {
+			return true
+		}
+		return isTableIDSame(region, adjacent)
+	case core.Raw:
+		return true
+	case core.Txn:
+		return true
+	default:
+		return isTableIDSame(region, adjacent)
+	}
+}
+
+func isTableIDSame(region *core.RegionInfo, adjacent *core.RegionInfo) bool {
+	return codec.Key(region.GetStartKey()).TableID() == codec.Key(adjacent.GetStartKey()).TableID()
 }

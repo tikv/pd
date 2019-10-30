@@ -21,8 +21,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/codec"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/table"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
 )
@@ -61,9 +61,9 @@ func newImportData() *Case {
 	simCase.TableNumber = 10
 	// Events description
 	e := &WriteFlowOnSpotDescriptor{}
-	table2 := string(table.EncodeBytes(table.GenerateTableKey(2)))
-	table3 := string(table.EncodeBytes(table.GenerateTableKey(3)))
-	table5 := string(table.EncodeBytes(table.GenerateTableKey(5)))
+	table2 := string(codec.EncodeBytes(codec.GenerateTableKey(2)))
+	table3 := string(codec.EncodeBytes(codec.GenerateTableKey(3)))
+	table5 := string(codec.EncodeBytes(codec.GenerateTableKey(5)))
 	e.Step = func(tick int64) map[string]int64 {
 		if tick < 100 {
 			return map[string]int64{

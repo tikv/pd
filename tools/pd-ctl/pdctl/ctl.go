@@ -60,7 +60,6 @@ func Start(args []string) {
 		command.NewTSOCommand(),
 		command.NewHotSpotCommand(),
 		command.NewClusterCommand(),
-		command.NewTableNamespaceCommand(),
 		command.NewHealthCommand(),
 		command.NewLogCommand(),
 	)

@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 )
@@ -122,7 +121,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 		s.cluster.PutRegion(region)
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.mc = NewMergeChecker(s.ctx, s.cluster, namespace.DefaultClassifier)
+	s.mc = NewMergeChecker(s.ctx, s.cluster)
 }
 
 func (s *testMergeCheckerSuite) TearDownTest(c *C) {
@@ -447,7 +446,7 @@ func (s *testMergeCheckerSuite) TestCache(c *C) {
 		s.cluster.PutRegion(region)
 	}
 
-	s.mc = NewMergeChecker(s.ctx, s.cluster, namespace.DefaultClassifier)
+	s.mc = NewMergeChecker(s.ctx, s.cluster)
 
 	ops := s.mc.Check(s.regions[1])
 	c.Assert(ops, IsNil)

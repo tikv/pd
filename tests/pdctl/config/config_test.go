@@ -96,42 +96,6 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(json.Unmarshal(output, &clusterVersion), IsNil)
 	c.Assert(clusterVersion, DeepEquals, svr.GetClusterVersion())
 
-	args2 = []string{"-u", pdAddr, "config", "set", "namespace", "ts1", "region-schedule-limit", "128"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "Failed"), IsTrue)
-	// config show namespace <name> && config set namespace <type> <key> <value>
-	args = []string{"-u", pdAddr, "table_ns", "create", "ts1"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	args = []string{"-u", pdAddr, "table_ns", "set_store", "1", "ts1"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	args1 = []string{"-u", pdAddr, "config", "show", "namespace", "ts1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	namespaceCfg := config.NamespaceConfig{}
-	c.Assert(json.Unmarshal(output, &namespaceCfg), IsNil)
-	args2 = []string{"-u", pdAddr, "config", "set", "namespace", "ts1", "region-schedule-limit", "128"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
-	c.Assert(err, IsNil)
-	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
-	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	namespaceCfg = config.NamespaceConfig{}
-	c.Assert(json.Unmarshal(output, &namespaceCfg), IsNil)
-	c.Assert(namespaceCfg.RegionScheduleLimit, Equals, svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
-
-	// config delete namespace <name>
-	args3 := []string{"-u", pdAddr, "config", "delete", "namespace", "ts1"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args3...)
-	c.Assert(err, IsNil)
-	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	namespaceCfg = config.NamespaceConfig{}
-	c.Assert(json.Unmarshal(output, &namespaceCfg), IsNil)
-	c.Assert(namespaceCfg.RegionScheduleLimit, Not(Equals), svr.GetNamespaceConfig("ts1").RegionScheduleLimit)
-
 	// config show label-property
 	args1 = []string{"-u", pdAddr, "config", "show", "label-property"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
@@ -152,7 +116,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
 	// config delete label-property <type> <key> <value>
-	args3 = []string{"-u", pdAddr, "config", "delete", "label-property", "reject-leader", "zone", "cn"}
+	args3 := []string{"-u", pdAddr, "config", "delete", "label-property", "reject-leader", "zone", "cn"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args3...)
 	c.Assert(err, IsNil)
 	c.Assert(labelPropertyCfg, Not(DeepEquals), svr.GetLabelProperty())

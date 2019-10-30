@@ -75,7 +75,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 		c.Assert(s.Type, Equals, defaultSchedulers[i])
 		c.Assert(s.Disable, IsFalse)
 	}
-	c.Assert(newOpt.GetMaxReplicas("default"), Equals, 5)
+	c.Assert(newOpt.GetMaxReplicas(), Equals, 5)
 	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
 }
 

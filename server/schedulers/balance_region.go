@@ -164,7 +164,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
 	}
 	scoreGuard := filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), stores, source)
-	checker := checker.NewReplicaChecker(cluster, nil, s.GetName())
+	checker := checker.NewReplicaChecker(cluster, s.GetName())
 	exclude := make(map[uint64]struct{})
 	excludeFilter := filter.NewExcludedFilter(s.name, nil, exclude)
 	for {

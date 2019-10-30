@@ -27,7 +27,6 @@ var (
 	configPrefix         = "pd/api/v1/config"
 	schedulePrefix       = "pd/api/v1/config/schedule"
 	replicationPrefix    = "pd/api/v1/config/replicate"
-	namespacePrefix      = "pd/api/v1/config/namespace"
 	labelPropertyPrefix  = "pd/api/v1/config/label-property"
 	clusterVersionPrefix = "pd/api/v1/config/cluster-version"
 )
@@ -47,25 +46,14 @@ func NewConfigCommand() *cobra.Command {
 // NewShowConfigCommand return a show subcommand of configCmd
 func NewShowConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "show [namespace|replication|label-property|all]",
+		Use:   "show [replication|label-property|all]",
 		Short: "show replication and schedule config of PD",
 		Run:   showConfigCommandFunc,
 	}
 	sc.AddCommand(NewShowAllConfigCommand())
-	sc.AddCommand(NewShowNamespaceConfigCommand())
 	sc.AddCommand(NewShowReplicationConfigCommand())
 	sc.AddCommand(NewShowLabelPropertyCommand())
 	sc.AddCommand(NewShowClusterVersionCommand())
-	return sc
-}
-
-// NewShowNamespaceConfigCommand return a show all subcommand of show subcommand
-func NewShowNamespaceConfigCommand() *cobra.Command {
-	sc := &cobra.Command{
-		Use:   "namespace <name>",
-		Short: "show namespace config of PD",
-		Run:   showNamespaceConfigCommandFunc,
-	}
 	return sc
 }
 
@@ -112,23 +100,12 @@ func NewShowClusterVersionCommand() *cobra.Command {
 // NewSetConfigCommand return a set subcommand of configCmd
 func NewSetConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "set <option> <value>, set namespace <name> <option> <value>, set label-property <type> <key> <value>, set cluster-version <version>",
+		Use:   "set <option> <value>, set label-property <type> <key> <value>, set cluster-version <version>",
 		Short: "set the option with value",
 		Run:   setConfigCommandFunc,
 	}
-	sc.AddCommand(NewSetNamespaceConfigCommand())
 	sc.AddCommand(NewSetLabelPropertyCommand())
 	sc.AddCommand(NewSetClusterVersionCommand())
-	return sc
-}
-
-// NewSetNamespaceConfigCommand a set subcommand of set subcommand
-func NewSetNamespaceConfigCommand() *cobra.Command {
-	sc := &cobra.Command{
-		Use:   "namespace <name> <option> <value>",
-		Short: "set the namespace config's option with value",
-		Run:   setNamespaceConfigCommandFunc,
-	}
 	return sc
 }
 
@@ -155,21 +132,10 @@ func NewSetClusterVersionCommand() *cobra.Command {
 // NewDeleteConfigCommand a set subcommand of cfgCmd
 func NewDeleteConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "delete namespace|label-property",
+		Use:   "delete label-property",
 		Short: "delete the config option",
 	}
-	sc.AddCommand(NewDeleteNamespaceConfigCommand())
 	sc.AddCommand(NewDeleteLabelPropertyConfigCommand())
-	return sc
-}
-
-// NewDeleteNamespaceConfigCommand a set subcommand of delete subcommand
-func NewDeleteNamespaceConfigCommand() *cobra.Command {
-	sc := &cobra.Command{
-		Use:   "namespace <name>",
-		Short: "delete the namespace config's all options or given option",
-		Run:   deleteNamespaceConfigCommandFunc,
-	}
 	return sc
 }
 
@@ -235,20 +201,6 @@ func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
-		cmd.Println(cmd.UsageString())
-		return
-	}
-	prefix := path.Join(namespacePrefix, args[0])
-	r, err := doRequest(cmd, prefix, http.MethodGet)
-	if err != nil {
-		cmd.Printf("Failed to get config: %s\n", err)
-		return
-	}
-	cmd.Println(r)
-}
-
 func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, clusterVersionPrefix, http.MethodGet)
 	if err != nil {
@@ -288,48 +240,6 @@ func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if err != nil {
 		cmd.Printf("Failed to set config: %s\n", err)
 		return
-	}
-	cmd.Println("Success!")
-}
-
-func setNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 3 {
-		cmd.Println(cmd.UsageString())
-		return
-	}
-	name, opt, val := args[0], args[1], args[2]
-	prefix := path.Join(namespacePrefix, name)
-	err := postConfigDataWithPath(cmd, opt, val, prefix)
-	if err != nil {
-		cmd.Printf("Failed to set namespace: %s error: %s\n", name, err)
-		return
-	}
-	cmd.Println("Success!")
-}
-
-func deleteNamespaceConfigCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 && len(args) != 2 {
-		cmd.Println(cmd.UsageString())
-		return
-	}
-
-	name := args[0]
-	prefix := path.Join(namespacePrefix, name)
-
-	if len(args) == 2 {
-		// delete namespace config's option by setting the option with zero value
-		opt := args[1]
-		err := postConfigDataWithPath(cmd, opt, "0", prefix)
-		if err != nil {
-			cmd.Printf("Failed to delete namespace %s config, option: %s, error: %s\n", name, opt, err)
-			return
-		}
-	} else {
-		_, err := doRequest(cmd, prefix, http.MethodDelete)
-		if err != nil {
-			cmd.Printf("Failed to delete namespace %s config, error: %s\n", name, err)
-			return
-		}
 	}
 	cmd.Println("Success!")
 }

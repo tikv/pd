@@ -19,7 +19,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 )
 
 const (
@@ -29,7 +28,6 @@ const (
 
 type storeStatistics struct {
 	opt             ScheduleOptions
-	namespace       string
 	Up              int
 	Disconnect      int
 	Unhealth        int
@@ -44,10 +42,9 @@ type storeStatistics struct {
 	LabelCounter    map[string]int
 }
 
-func newStoreStatistics(opt ScheduleOptions, namespace string) *storeStatistics {
+func newStoreStatistics(opt ScheduleOptions) *storeStatistics {
 	return &storeStatistics{
 		opt:          opt,
-		namespace:    namespace,
 		LabelCounter: make(map[string]int),
 	}
 }
@@ -92,24 +89,24 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	s.RegionCount += store.GetRegionCount()
 	s.LeaderCount += store.GetLeaderCount()
 
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderScheduleStrategy(), 0))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_size").Set(float64(store.GetRegionSize()))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "region_count").Set(float64(store.GetRegionCount()))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_size").Set(float64(store.GetLeaderSize()))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "leader_count").Set(float64(store.GetLeaderCount()))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_available").Set(float64(store.GetAvailable()))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_used").Set(float64(store.GetUsedSize()))
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_capacity").Set(float64(store.GetCapacity()))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderScheduleStrategy(), 0))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "region_size").Set(float64(store.GetRegionSize()))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "region_count").Set(float64(store.GetRegionCount()))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_size").Set(float64(store.GetLeaderSize()))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_count").Set(float64(store.GetLeaderCount()))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_available").Set(float64(store.GetAvailable()))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_used").Set(float64(store.GetUsedSize()))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_capacity").Set(float64(store.GetCapacity()))
 
 	// Store flows.
 	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
 	storeWriteRateBytes, storeReadRateBytes := storeFlowStats.GetBytesRate()
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_bytes").Set(storeWriteRateBytes)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_bytes").Set(storeReadRateBytes)
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes").Set(storeWriteRateBytes)
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes").Set(storeReadRateBytes)
 	storeWriteRateKeys, storeReadRateKeys := storeFlowStats.GetKeysWriteRate(), storeFlowStats.GetKeysReadRate()
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_write_rate_keys").Set(storeWriteRateKeys)
-	storeStatusGauge.WithLabelValues(s.namespace, storeAddress, id, "store_read_rate_keys").Set(storeReadRateKeys)
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys").Set(storeWriteRateKeys)
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys").Set(storeReadRateKeys)
 }
 
 func (s *storeStatistics) Collect() {
@@ -127,21 +124,21 @@ func (s *storeStatistics) Collect() {
 	metrics["storage_capacity"] = float64(s.StorageCapacity)
 
 	for typ, value := range metrics {
-		clusterStatusGauge.WithLabelValues(typ, s.namespace).Set(value)
+		clusterStatusGauge.WithLabelValues(typ).Set(value)
 	}
 
 	// Current scheduling configurations of the cluster
 	configs := make(map[string]float64)
-	configs["leader-schedule-limit"] = float64(s.opt.GetLeaderScheduleLimit(s.namespace))
-	configs["region-schedule-limit"] = float64(s.opt.GetRegionScheduleLimit(s.namespace))
-	configs["merge-schedule-limit"] = float64(s.opt.GetMergeScheduleLimit(s.namespace))
-	configs["replica-schedule-limit"] = float64(s.opt.GetReplicaScheduleLimit(s.namespace))
-	configs["max-replicas"] = float64(s.opt.GetMaxReplicas(s.namespace))
+	configs["leader-schedule-limit"] = float64(s.opt.GetLeaderScheduleLimit())
+	configs["region-schedule-limit"] = float64(s.opt.GetRegionScheduleLimit())
+	configs["merge-schedule-limit"] = float64(s.opt.GetMergeScheduleLimit())
+	configs["replica-schedule-limit"] = float64(s.opt.GetReplicaScheduleLimit())
+	configs["max-replicas"] = float64(s.opt.GetMaxReplicas())
 	configs["high-space-ratio"] = float64(s.opt.GetHighSpaceRatio())
 	configs["low-space-ratio"] = float64(s.opt.GetLowSpaceRatio())
 	configs["tolerant-size-ratio"] = float64(s.opt.GetTolerantSizeRatio())
 	configs["store-balance-rate"] = float64(s.opt.GetStoreBalanceRate())
-	configs["hot-region-schedule-limit"] = float64(s.opt.GetHotRegionScheduleLimit(s.namespace))
+	configs["hot-region-schedule-limit"] = float64(s.opt.GetHotRegionScheduleLimit())
 	configs["hot-region-cache-hits-threshold"] = float64(s.opt.GetHotRegionCacheHitsThreshold())
 	configs["max-pending-peer-count"] = float64(s.opt.GetMaxPendingPeerCount())
 	configs["max-snapshot-count"] = float64(s.opt.GetMaxSnapshotCount())
@@ -168,11 +165,11 @@ func (s *storeStatistics) Collect() {
 	configs["enable-replace-offline-replica"] = enableReplaceOfflineReplica
 
 	for typ, value := range configs {
-		configStatusGauge.WithLabelValues(typ, s.namespace).Set(value)
+		configStatusGauge.WithLabelValues(typ).Set(value)
 	}
 
 	for name, value := range s.LabelCounter {
-		placementStatusGauge.WithLabelValues(labelType, name, s.namespace).Set(float64(value))
+		placementStatusGauge.WithLabelValues(labelType, name).Set(float64(value))
 	}
 }
 
@@ -193,39 +190,29 @@ func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
 		"store_read_rate_keys",
 	}
 	for _, m := range metrics {
-		storeStatusGauge.DeleteLabelValues(s.namespace, storeAddress, id, m)
+		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
 	}
 }
 
 type storeStatisticsMap struct {
-	opt        ScheduleOptions
-	classifier namespace.Classifier
-	stats      map[string]*storeStatistics
+	opt   ScheduleOptions
+	stats *storeStatistics
 }
 
 // NewStoreStatisticsMap creates a new storeStatisticsMap.
-func NewStoreStatisticsMap(opt ScheduleOptions, classifier namespace.Classifier) *storeStatisticsMap {
+func NewStoreStatisticsMap(opt ScheduleOptions) *storeStatisticsMap {
 	return &storeStatisticsMap{
-		opt:        opt,
-		classifier: classifier,
-		stats:      make(map[string]*storeStatistics),
+		opt:   opt,
+		stats: newStoreStatistics(opt),
 	}
 }
 
 func (m *storeStatisticsMap) Observe(store *core.StoreInfo, stats *StoresStats) {
-	namespace := m.classifier.GetStoreNamespace(store)
-	stat, ok := m.stats[namespace]
-	if !ok {
-		stat = newStoreStatistics(m.opt, namespace)
-		m.stats[namespace] = stat
-	}
-	stat.Observe(store, stats)
+	m.stats.Observe(store, stats)
 }
 
 func (m *storeStatisticsMap) Collect() {
-	for _, s := range m.stats {
-		s.Collect()
-	}
+	m.stats.Collect()
 }
 
 func (m *storeStatisticsMap) Reset() {
