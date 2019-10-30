@@ -15,6 +15,7 @@ package server
 
 import (
 	"sync"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -66,39 +67,41 @@ type LoadState int
 
 // LoadStates that supported, None means no state determined
 const (
-	None LoadState = iota
-	Idle
-	LowLoad
-	NormalLoad
-	HighLoad
+	LoadStateIdle LoadState = iota
+	LoadStateLow
+	LoadStateNormal
+	LoadStateHigh
+	LoadStateNone
 )
 
+// NumberOfEntries is the max number of StatEntry that preserved,
+// it is the history of a store's hearbeats. The interval of store
+// hearbeats from TiKV is 10s, so we can preserve 300 entries per
+// store which is about 5 minutes.
+const NumberOfEntries = 30
+
 // StatEntry is an entry of store statistics
-type StatEntry *pdpb.StoreStats
+type StatEntry pdpb.StoreStats
 
 // StatEntries saves a history of store statistics
 type StatEntries struct {
-	// The index is used to indicate the latest position, there is no oldest
-	// position so that it may waste some cpu to do caculation if the array
-	// is not full. It will not affects the correctness because the empty
-	// entry has empty values(Ex. 0 for CPU usage)
-	index   int
-	entries []StatEntry
+	total   int
+	entries []*StatEntry
 }
 
 // NewStatEntries returns the StateEntries with a fixed size
 func NewStatEntries(size int) *StatEntries {
 	return &StatEntries{
-		index:   0,
-		entries: make([]StatEntry, size, size),
+		total:   0,
+		entries: make([]*StatEntry, size, size),
 	}
 }
 
 // Append a StatEntry
-func (s *StatEntries) Append(stat StatEntry) {
-	idx := (s.index + 1) % cap(s.entries)
+func (s *StatEntries) Append(stat *StatEntry) {
+	idx := s.total % cap(s.entries)
 	s.entries[idx] = stat
-	s.index = idx
+	s.total++
 }
 
 // CPU returns the cpu usage
@@ -107,9 +110,12 @@ func (s *StatEntries) CPU(steps int) float64 {
 	if steps > cap {
 		steps = cap
 	}
+	if steps > s.total {
+		steps = s.total
+	}
 
 	usage := 0.0
-	idx := s.index
+	idx := (s.total - 1) % cap
 	for i := 0; i < steps; i++ {
 		stat := s.entries[idx]
 		usage += cpuUsageAll(stat.CpuUsages)
@@ -129,18 +135,85 @@ func cpuUsageAll(usages []*pdpb.RecordPair) float64 {
 	return sum / float64(len(usages))
 }
 
+// Keys returns the average written and read keys duration
+// an interval of heartbeats
+func (s *StatEntries) Keys(steps int) (int64, int64) {
+	cap := cap(s.entries)
+	if steps > cap {
+		steps = cap
+	}
+	if steps > s.total {
+		steps = s.total
+	}
+
+	var read, written int64
+	idx := (s.total - 1) % cap
+	for i := 0; i < steps; i++ {
+		stat := s.entries[idx]
+		read += int64(stat.KeysRead)
+		written += int64(stat.KeysWritten)
+		idx--
+		if idx < 0 {
+			idx += cap
+		}
+	}
+	return read / int64(steps), written / int64(steps)
+}
+
+// Bytes returns the average written and read bytes duration
+// an interval of heartbeats
+func (s *StatEntries) Bytes(steps int) (int64, int64) {
+	cap := cap(s.entries)
+	if steps > cap {
+		steps = cap
+	}
+	if steps > s.total {
+		steps = s.total
+	}
+	var read, written int64
+	idx := (s.total - 1) % cap
+	for i := 0; i < steps; i++ {
+		stat := s.entries[idx]
+		read += int64(stat.BytesRead)
+		written += int64(stat.BytesWritten)
+		idx--
+		if idx < 0 {
+			idx += cap
+		}
+	}
+	return read / int64(steps), written / int64(steps)
+}
+
 // ClusterStatEntries saves the StatEntries for each store in the cluster
 type ClusterStatEntries struct {
-	m     sync.Mutex
-	stats map[uint64]*StatEntries
-	size  int // size of entries to keep for each store
+	m        sync.RWMutex
+	stats    map[uint64]*StatEntries
+	size     int   // size of entries to keep for each store
+	interval int64 // average interval of heartbeats
+	total    int64 // total of StatEntry appended
+}
+
+// NewClusterStatEntries returns a statistics object for the cluster
+func NewClusterStatEntries(size int) *ClusterStatEntries {
+	return &ClusterStatEntries{
+		stats: make(map[uint64]*StatEntries),
+		size:  size,
+	}
 }
 
 // Append an store StatEntry
-func (cst *ClusterStatEntries) Append(stat StatEntry) {
+func (cst *ClusterStatEntries) Append(stat *StatEntry) {
 	cst.m.Lock()
 	defer cst.m.Unlock()
 
+	// update interval
+	interval := int64(stat.Interval.GetEndTimestamp() -
+		stat.Interval.GetStartTimestamp())
+	cst.interval = (cst.interval*cst.total + interval) /
+		(cst.total + 1)
+	cst.total++
+
+	// append the entry
 	storeID := stat.StoreId
 	entries, ok := cst.stats[storeID]
 	if !ok {
@@ -152,10 +225,87 @@ func (cst *ClusterStatEntries) Append(stat StatEntry) {
 }
 
 // CPU returns the cpu usage of the cluster
-func (cst *ClusterStatEntries) CPU(steps int) float64 {
+func (cst *ClusterStatEntries) CPU(d time.Duration) float64 {
+	cst.m.RLock()
+	defer cst.m.RUnlock()
+	steps := int64(d) / cst.interval
+
 	sum := 0.0
 	for _, stat := range cst.stats {
-		sum += stat.CPU(steps)
+		sum += stat.CPU(int(steps))
 	}
 	return sum / float64(len(cst.stats))
+}
+
+// Keys returns the average written and read keys duration
+// an interval of heartbeats for the cluster
+func (cst *ClusterStatEntries) Keys(d time.Duration) (int64, int64) {
+	cst.m.RLock()
+	defer cst.m.RUnlock()
+	steps := int64(d) / cst.interval
+
+	var read, written int64
+	for _, stat := range cst.stats {
+		r, w := stat.Keys(int(steps))
+		read += r
+		written += w
+	}
+	return read / int64(len(cst.stats)), written / int64(len(cst.stats))
+}
+
+// Bytes returns the average written and read bytes duration
+// an interval of heartbeats for the cluster
+func (cst *ClusterStatEntries) Bytes(d time.Duration) (int64, int64) {
+	cst.m.RLock()
+	defer cst.m.RUnlock()
+	steps := int64(d) / cst.interval
+
+	var read, written int64
+	for _, stat := range cst.stats {
+		r, w := stat.Bytes(int(steps))
+		read += r
+		written += w
+	}
+	return read / int64(len(cst.stats)), written / int64(len(cst.stats))
+}
+
+// ClusterState collects information from store heartbeat
+// and caculates the load state of the cluster
+type ClusterState struct {
+	cst *ClusterStatEntries
+}
+
+// NewClusterState return the ClusterState object which collects
+// information from store heartbeats and gives the current state of
+// the cluster
+func NewClusterState() *ClusterState {
+	return &ClusterState{
+		cst: NewClusterStatEntries(NumberOfEntries),
+	}
+}
+
+// State returns the state of the cluster
+func (cs *ClusterState) State(d time.Duration) LoadState {
+	// Return LoadStateNone if there is not enough hearbeats
+	// collected.
+	if cs.cst.total < NumberOfEntries {
+		return LoadStateNone
+	}
+	cpu := cs.cst.CPU(d)
+	switch {
+	case cpu == 0:
+		return LoadStateIdle
+	case cpu > 0 && cpu < 30:
+		return LoadStateLow
+	case cpu >= 30 && cpu < 80:
+		return LoadStateNormal
+	case cpu >= 80:
+		return LoadStateHigh
+	}
+	return LoadStateNone
+}
+
+// Collect statistics from store heartbeat
+func (cs *ClusterState) Collect(stat *StatEntry) {
+	cs.cst.Append(stat)
 }
