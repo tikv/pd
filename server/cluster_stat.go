@@ -74,6 +74,21 @@ const (
 	LoadStateNone
 )
 
+// String representation of LoadState
+func (s LoadState) String() string {
+	switch s {
+	case LoadStateIdle:
+		return "idle"
+	case LoadStateLow:
+		return "low"
+	case LoadStateNormal:
+		return "normal"
+	case LoadStateHigh:
+		return "high"
+	}
+	return "none"
+}
+
 // NumberOfEntries is the max number of StatEntry that preserved,
 // it is the history of a store's hearbeats. The interval of store
 // hearbeats from TiKV is 10s, so we can preserve 300 entries per
