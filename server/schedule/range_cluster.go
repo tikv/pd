@@ -23,7 +23,7 @@ import (
 // RangeCluster isolates the cluster by range.
 type RangeCluster struct {
 	opt.Cluster
-	subCluster        *core.BasicCluster
+	subCluster        *core.BasicCluster // Collect all regions belong to the range.
 	tolerantSizeRatio float64
 }
 
