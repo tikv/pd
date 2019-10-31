@@ -239,14 +239,27 @@ func (cst *ClusterStatEntries) Append(stat *StatEntry) {
 	entries.Append(stat)
 }
 
+func contains(slice []uint64, value uint64) bool {
+	for i := range slice {
+		if slice[i] == value {
+			return true
+		}
+	}
+	return false
+}
+
 // CPU returns the cpu usage of the cluster
-func (cst *ClusterStatEntries) CPU(d time.Duration) float64 {
+func (cst *ClusterStatEntries) CPU(d time.Duration, excludes ...uint64) float64 {
 	cst.m.RLock()
 	defer cst.m.RUnlock()
+
 	steps := int64(d) / cst.interval
 
 	sum := 0.0
-	for _, stat := range cst.stats {
+	for sid, stat := range cst.stats {
+		if contains(excludes, sid) {
+			continue
+		}
 		sum += stat.CPU(int(steps))
 	}
 	return sum / float64(len(cst.stats))
@@ -254,13 +267,16 @@ func (cst *ClusterStatEntries) CPU(d time.Duration) float64 {
 
 // Keys returns the average written and read keys duration
 // an interval of heartbeats for the cluster
-func (cst *ClusterStatEntries) Keys(d time.Duration) (int64, int64) {
+func (cst *ClusterStatEntries) Keys(d time.Duration, excludes ...uint64) (int64, int64) {
 	cst.m.RLock()
 	defer cst.m.RUnlock()
 	steps := int64(d) / cst.interval
 
 	var read, written int64
-	for _, stat := range cst.stats {
+	for sid, stat := range cst.stats {
+		if contains(excludes, sid) {
+			continue
+		}
 		r, w := stat.Keys(int(steps))
 		read += r
 		written += w
@@ -270,13 +286,16 @@ func (cst *ClusterStatEntries) Keys(d time.Duration) (int64, int64) {
 
 // Bytes returns the average written and read bytes duration
 // an interval of heartbeats for the cluster
-func (cst *ClusterStatEntries) Bytes(d time.Duration) (int64, int64) {
+func (cst *ClusterStatEntries) Bytes(d time.Duration, excludes ...uint64) (int64, int64) {
 	cst.m.RLock()
 	defer cst.m.RUnlock()
 	steps := int64(d) / cst.interval
 
 	var read, written int64
-	for _, stat := range cst.stats {
+	for sid, stat := range cst.stats {
+		if contains(excludes, sid) {
+			continue
+		}
 		r, w := stat.Bytes(int(steps))
 		read += r
 		written += w
@@ -299,14 +318,15 @@ func NewClusterState() *ClusterState {
 	}
 }
 
-// State returns the state of the cluster
-func (cs *ClusterState) State(d time.Duration) LoadState {
+// State returns the state of the cluster, excludes is the list of store ID
+// to be excluded
+func (cs *ClusterState) State(d time.Duration, excludes ...uint64) LoadState {
 	// Return LoadStateNone if there is not enough hearbeats
 	// collected.
 	if cs.cst.total < NumberOfEntries {
 		return LoadStateNone
 	}
-	cpu := cs.cst.CPU(d)
+	cpu := cs.cst.CPU(d, excludes...)
 	switch {
 	case cpu == 0:
 		return LoadStateIdle
