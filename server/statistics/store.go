@@ -92,7 +92,7 @@ func (s *StoresStats) UpdateTotalBytesRate(f func() []*core.StoreInfo) {
 	var writeRate, readRate float64
 	ss := f()
 	s.RLock()
-	defer s.Unlock()
+	defer s.RUnlock()
 	for _, store := range ss {
 		if store.IsUp() {
 			stats, ok := s.rollingStoresStats[store.GetID()]
