@@ -136,7 +136,7 @@ func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 		len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() // peer count should equal
 }
 
-// allowMerge returns true if two regions can be merged according to the merge strategy.
+// allowMerge returns true if two regions can be merged according to the key type.
 func (m *MergeChecker) allowMerge(region *core.RegionInfo, adjacent *core.RegionInfo) bool {
 	strategy := m.cluster.GetKeyType()
 	switch strategy {
