@@ -375,14 +375,12 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0
-		cfg.LeaderScheduleLimit = 10
-		cfg.RegionScheduleLimit = 10
 		cfg.MergeScheduleLimit = 10
 	}, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
 	c.Assert(tc.addRegionStore(1, 0), IsNil)
-	num := 4 * MaxUint64(co.cluster.GetLeaderScheduleLimit(), co.cluster.GetRegionScheduleLimit(), co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
+	num := 4 * MaxUint64(co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
