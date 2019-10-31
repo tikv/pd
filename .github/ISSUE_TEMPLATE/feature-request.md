@@ -6,7 +6,7 @@ labels: type/enhancement
 
 ## Feature Request
 
-### Is your feature request related to a problem? Please describe:
+### Describe your feature request related problem: 
 <!-- A description of what the problem is. -->
 
 ### Describe the feature you'd like:
