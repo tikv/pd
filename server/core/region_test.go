@@ -134,12 +134,18 @@ func (*testRegionKey) TestRegionKey(c *C) {
 func BenchmarkRandomRegion(b *testing.B) {
 	regions := NewRegionsInfo()
 	for i := 0; i < 5000000; i++ {
-		item := &RegionInfo{meta: &metapb.Region{StartKey: []byte(fmt.Sprintf("%20d", i)), EndKey: []byte(fmt.Sprintf("%20d", i+1))}}
-		regions.AddRegion(item)
+		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+		region := NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			Peers:    []*metapb.Peer{peer},
+			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+		}, peer)
+		regions.AddRegion(region)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		regions.RandRegion()
+		regions.RandLeaderRegion(1)
 	}
 }
 
