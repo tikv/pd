@@ -85,7 +85,7 @@ func compareRuleFit(a, b *RuleFit) int {
 		return -1
 	case len(a.Peers) > len(b.Peers):
 		return 1
-	case len(a.LooseMatchedPeers) < len(b.LooseMatchedPeers):
+	case len(a.LooseMatchedPeers) > len(b.LooseMatchedPeers):
 		return -1
 	case len(a.LooseMatchedPeers) < len(b.LooseMatchedPeers):
 		return 1
