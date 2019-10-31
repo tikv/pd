@@ -24,9 +24,7 @@ import (
 func newBalanceLeader() *Case {
 	var simCase Case
 
-	storeNum, regionNum := getStoreNum(), getRegionNum()
-
-	for i := 1; i <= storeNum; i++ {
+	for i := 1; i <= 3; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
@@ -36,11 +34,11 @@ func newBalanceLeader() *Case {
 		})
 	}
 
-	for i := 0; i < storeNum*regionNum/3; i++ {
+	for i := 0; i < 1000; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeNum)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%(storeNum-1)) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%(storeNum-1)) + 1},
+			{Id: IDAllocator.nextID(), StoreId: 1},
+			{Id: IDAllocator.nextID(), StoreId: 2},
+			{Id: IDAllocator.nextID(), StoreId: 3},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -51,17 +49,18 @@ func newBalanceLeader() *Case {
 		})
 	}
 
-	threshold := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		res := true
-		leaderCounts := make([]int, 0, storeNum)
-		for i := 1; i <= storeNum; i++ {
-			leaderCount := regions.GetStoreLeaderCount(uint64(i))
-			leaderCounts = append(leaderCounts, leaderCount)
-			res = res && isUniform(leaderCount, regionNum/3, threshold)
-		}
-		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts))
-		return res
+		count1 := regions.GetStoreLeaderCount(1)
+		count2 := regions.GetStoreLeaderCount(2)
+		count3 := regions.GetStoreLeaderCount(3)
+		simutil.Logger.Info("current leader counts",
+			zap.Int("first-store", count1),
+			zap.Int("second-store", count2),
+			zap.Int("third-store", count3))
+
+		return count1 <= 350 &&
+			count2 >= 300 &&
+			count3 >= 300
 	}
 	return &simCase
 }

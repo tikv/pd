@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/testutil"
@@ -38,6 +39,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pingcap/pd/server/statistics"
+	"go.uber.org/zap"
 )
 
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.ScheduleOption, error) {
@@ -312,42 +314,36 @@ func MaxUint64(nums ...uint64) uint64 {
 	return result
 }
 
-func (s *testCoordinatorSuite) prepare(cfg *config.ScheduleConfig, opt *config.ScheduleOption, c *C) (*testCluster, *coordinator, func()) {
+func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
 	tc := newTestCluster(opt)
 	hbStreams, cleanup := getHeartBeatStreams(s.ctx, c, tc)
+	defer cleanup()
+	defer hbStreams.Close()
+
 	co := newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
-	return tc, co, func() {
-		cleanup()
-		hbStreams.Close()
-	}
-}
 
-func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy, expectAddOperator bool) {
-	checkerIsBusy, ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
-	c.Assert(checkerIsBusy, Equals, expectCheckerIsBusy)
-	if ops == nil {
-		c.Assert(expectAddOperator, IsFalse)
-	} else {
-		c.Assert(co.opController.AddWaitingOperator(ops...), Equals, expectAddOperator)
+	testCheckRegion := func(regionID uint64, expectCheckerIsBusy, expectAddOperator bool) {
+		checkerIsBusy, ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
+		c.Assert(checkerIsBusy, Equals, expectCheckerIsBusy)
+		if ops == nil {
+			c.Assert(expectAddOperator, IsFalse)
+		} else {
+			c.Assert(co.opController.AddWaitingOperator(ops...), Equals, expectAddOperator)
+		}
 	}
-}
-
-func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
-	cfg, opt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
-	tc, co, cleanup := s.prepare(cfg, opt, c)
-	defer cleanup()
 
 	c.Assert(tc.addRegionStore(4, 4), IsNil)
 	c.Assert(tc.addRegionStore(3, 3), IsNil)
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
-	s.checkRegion(c, tc, co, 1, false, true)
+	testCheckRegion(1, false, true)
 	waitOperator(c, co, 1)
 	testutil.CheckAddPeer(c, co.opController.GetOperator(1), operator.OpReplica, 1)
-	s.checkRegion(c, tc, co, 1, false, false)
+	testCheckRegion(1, false, false)
 
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
@@ -356,8 +352,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
 	)
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, false)
-	hbStreams := co.hbStreams
+	testCheckRegion(1, false, false)
 	co.stop()
 	co.wg.Wait()
 
@@ -372,39 +367,33 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, false)
+	testCheckRegion(1, false, false)
 	r = r.Clone(core.WithPendingPeers(nil))
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, true)
+	testCheckRegion(1, false, true)
 	waitOperator(c, co, 1)
 	op := co.opController.GetOperator(1)
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
-	s.checkRegion(c, tc, co, 1, false, false)
-}
+	testCheckRegion(1, false, false)
 
-func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
-	cfg, opt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
-	cfg.ReplicaScheduleLimit = 0 // ensure replica checker is busy
-	cfg.LeaderScheduleLimit = 10
-	cfg.RegionScheduleLimit = 10
-	cfg.MergeScheduleLimit = 10
-	tc, co, cleanup := s.prepare(cfg, opt, c)
-	defer cleanup()
-
-	c.Assert(tc.addRegionStore(1, 0), IsNil)
-	num := 1 + MaxUint64(co.cluster.GetLeaderScheduleLimit(), co.cluster.GetRegionScheduleLimit(), co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit()) // to ensure all checkers are busy
+	//test checkerIsBusy
+	co.cluster.opt.Load().ReplicaScheduleLimit = 10
+	co.cluster.opt.Load().LeaderScheduleLimit = 10
+	co.cluster.opt.Load().RegionScheduleLimit = 10
+	co.cluster.opt.Load().MergeScheduleLimit = 10
+	num := MaxUint64(co.cluster.GetLeaderScheduleLimit(), co.cluster.GetRegionScheduleLimit(), co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
+	log.Info("test checkerIsBusy", zap.Int("region num:", len(operatorKinds)*int(num)))
 	for i, operatorKind := range operatorKinds {
 		for j := uint64(0); j < num; j++ {
 			regionID := j + uint64(i+1)*num
-			c.Assert(tc.addLeaderRegion(regionID, 1), IsNil)
+			c.Assert(tc.addLeaderRegion(regionID, regionID+1, regionID+2), IsNil)
 			switch operatorKind {
 			case operator.OpReplica:
-				op := newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
+				op = newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
 				c.Assert(co.opController.AddWaitingOperator(op), IsTrue)
 			case operator.OpRegion | operator.OpMerge:
 				if regionID%2 == 1 {
@@ -416,7 +405,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 
 		}
 	}
-	s.checkRegion(c, tc, co, num, true, false)
+	testCheckRegion(num, true, false)
 }
 
 func (s *testCoordinatorSuite) TestReplica(c *C) {

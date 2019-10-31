@@ -25,9 +25,7 @@ import (
 func newDeleteNodes() *Case {
 	var simCase Case
 
-	storeNum, regionNum := getStoreNum(), getRegionNum()
-	noEmptyStoreNum := storeNum - 1
-	for i := 1; i <= storeNum; i++ {
+	for i := 1; i <= 8; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
@@ -37,11 +35,11 @@ func newDeleteNodes() *Case {
 		})
 	}
 
-	for i := 0; i < regionNum*storeNum/3; i++ {
+	for i := 0; i < 1000; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum) + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i)%8 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%8 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%8 + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -57,10 +55,10 @@ func newDeleteNodes() *Case {
 		ids = append(ids, store.ID)
 	}
 
-	numNodes := storeNum
+	numNodes := 8
 	e := &DeleteNodesDescriptor{}
 	e.Step = func(tick int64) uint64 {
-		if numNodes > noEmptyStoreNum && tick%100 == 0 {
+		if numNodes > 7 && tick%100 == 0 {
 			idx := rand.Intn(numNodes)
 			numNodes--
 			nodeID := ids[idx]
@@ -71,9 +69,8 @@ func newDeleteNodes() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	threshold := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		res := numNodes == int(noEmptyStoreNum)
+		res := true
 		leaderCounts := make([]int, 0, numNodes)
 		regionCounts := make([]int, 0, numNodes)
 		for _, i := range ids {
@@ -81,7 +78,12 @@ func newDeleteNodes() *Case {
 			regionCount := regions.GetStoreRegionCount(i)
 			leaderCounts = append(leaderCounts, leaderCount)
 			regionCounts = append(regionCounts, regionCount)
-			res = res && leaderAndRegionIsUniform(leaderCount, regionCount, regionNum*storeNum/int(noEmptyStoreNum), threshold)
+			if leaderCount > 152 || leaderCount < 132 {
+				res = false
+			}
+			if regionCount > 443 || regionCount < 413 {
+				res = false
+			}
 		}
 
 		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts), zap.Ints("region", regionCounts))

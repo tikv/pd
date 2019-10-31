@@ -26,10 +26,8 @@ import (
 func newHotRead() *Case {
 	var simCase Case
 
-	storeNum, regionNum := getStoreNum(), getRegionNum()
-
 	// Initialize the cluster
-	for i := 1; i <= storeNum; i++ {
+	for i := 1; i <= 5; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
@@ -39,8 +37,8 @@ func newHotRead() *Case {
 		})
 	}
 
-	for i := 0; i < storeNum*regionNum/3; i++ {
-		storeIDs := rand.Perm(storeNum)
+	for i := 0; i < 500; i++ {
+		storeIDs := rand.Perm(5)
 		peers := []*metapb.Peer{
 			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[0] + 1)},
 			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[1] + 1)},
@@ -56,13 +54,12 @@ func newHotRead() *Case {
 	}
 
 	// Events description
-	// select regions on store 1 as hot read regions.
-	selectRegionNum := 4 * storeNum
-	readFlow := make(map[uint64]int64, selectRegionNum)
+	// select 20 regions on store 1 as hot read regions.
+	readFlow := make(map[uint64]int64, 20)
 	for _, r := range simCase.Regions {
 		if r.Leader.GetStoreId() == 1 {
 			readFlow[r.ID] = 128 * MB
-			if len(readFlow) == selectRegionNum {
+			if len(readFlow) == 20 {
 				break
 			}
 		}
@@ -74,7 +71,7 @@ func newHotRead() *Case {
 	simCase.Events = []EventDescriptor{e}
 	// Checker description
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		leaderCount := make([]int, storeNum)
+		var leaderCount [5]int
 		for id := range readFlow {
 			leaderStore := regions.GetRegion(id).GetLeader().GetStoreId()
 			leaderCount[int(leaderStore-1)]++
