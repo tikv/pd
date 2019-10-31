@@ -201,7 +201,7 @@ func (c *client) initClusterID() error {
 		members, err := c.getMembers(timeoutCtx, u)
 		timeoutCancel()
 		if err != nil || members.GetHeader() == nil {
-			log.Error("[pd] failed to get cluster id", zap.Error(err))
+			log.Warn("[pd] failed to get cluster id", zap.String("url", u), zap.Error(err))
 			continue
 		}
 		c.clusterID = members.GetHeader().GetClusterId()
