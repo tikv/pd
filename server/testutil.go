@@ -29,8 +29,6 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"go.etcd.io/etcd/embed"
 
-	// Register namespace classifiers.
-	_ "github.com/pingcap/pd/table"
 	// Register schedulers
 	_ "github.com/pingcap/pd/server/schedulers"
 )

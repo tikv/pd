@@ -98,14 +98,6 @@ types:
     properties:
       max-replicas: integer
       location-labels: string[]
-  NamespaceConfig:
-    type: object
-    properties:
-      leader-schedule-limit: integer
-      region-schedule-limit: integer
-      replica-schedule-limit: integer
-      merge-schedule-limit: integer
-      max-replicas: integer
   LabelPropertyConfig:
     type: object
     # FIXME: It is a map of StoreLabel[], cannot be described using RAML now.
@@ -587,41 +579,6 @@ types:
           description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
-  /namespace/{namespaceName}:
-    description: The config of a namespace.
-    uriParameters:
-      namespaceName:
-        description: The name of the namespace.
-        type: string
-    get:
-      description: Get configuration of a namespace.
-      responses:
-        200:
-          body:
-            application/json:
-              type: NamespaceConfig
-        404:
-          description: The namespace does not exist.
-    post:
-      description: Update a namespace config item.
-      body:
-        application/json:
-          description: key-value pair.
-          type: object
-      responses:
-        200:
-          description: The config is updated.
-        400:
-          description: The input is invalid.
-        404:
-          description: The namespace does not exist.
-    delete:
-      description: Delete a namespace config.
-      responses:
-        200:
-          description: The config is removed.
-        404:
-          description: The namespace does not exist.
   /label-property:
     description: The label property configuration.
     get:
@@ -1203,7 +1160,3 @@ types:
           description: The input is invalid.
         500:
           description: PD server failed to proceed the request.
-
-
-/classifier:
-  description: The namespace classifier. Methods depend on current classifier.

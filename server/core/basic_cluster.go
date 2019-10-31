@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/slice"
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
@@ -151,25 +152,47 @@ func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regio
 	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderSize, regionSize)
 }
 
+const randomRegionMaxRetry = 10
+
 // RandFollowerRegion returns a random region that has a follower on the store.
 func (bc *BasicCluster) RandFollowerRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
 	bc.RLock()
-	defer bc.RUnlock()
-	return bc.Regions.RandFollowerRegion(storeID, opts...)
+	regions := bc.Regions.RandFollowerRegions(storeID, randomRegionMaxRetry)
+	bc.RUnlock()
+	return bc.selectRegion(regions, opts...)
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
 func (bc *BasicCluster) RandLeaderRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
 	bc.RLock()
-	defer bc.RUnlock()
-	return bc.Regions.RandLeaderRegion(storeID, opts...)
+	regions := bc.Regions.RandLeaderRegions(storeID, randomRegionMaxRetry)
+	bc.RUnlock()
+	return bc.selectRegion(regions, opts...)
 }
 
 // RandPendingRegion returns a random region that has a pending peer on the store.
 func (bc *BasicCluster) RandPendingRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
 	bc.RLock()
-	defer bc.RUnlock()
-	return bc.Regions.RandPendingRegion(storeID, opts...)
+	regions := bc.Regions.RandPendingRegions(storeID, randomRegionMaxRetry)
+	bc.RUnlock()
+	return bc.selectRegion(regions, opts...)
+}
+
+// RandLearnerRegion returns a random region that has a learner peer on the store.
+func (bc *BasicCluster) RandLearnerRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
+	bc.RLock()
+	regions := bc.Regions.RandLearnerRegions(storeID, randomRegionMaxRetry)
+	bc.RUnlock()
+	return bc.selectRegion(regions, opts...)
+}
+
+func (bc *BasicCluster) selectRegion(regions []*RegionInfo, opts ...RegionOption) *RegionInfo {
+	for _, r := range regions {
+		if slice.AllOf(opts, func(i int) bool { return opts[i](r) }) {
+			return r
+		}
+	}
+	return nil
 }
 
 // GetRegionCount gets the total count of RegionInfo of regionMap.
@@ -310,6 +333,7 @@ func (bc *BasicCluster) Length() int {
 type RegionSetInformer interface {
 	RandFollowerRegion(storeID uint64, opts ...RegionOption) *RegionInfo
 	RandLeaderRegion(storeID uint64, opts ...RegionOption) *RegionInfo
+	RandLearnerRegion(storeID uint64, opts ...RegionOption) *RegionInfo
 	RandPendingRegion(storeID uint64, opts ...RegionOption) *RegionInfo
 	GetAverageRegionSize() int64
 	GetStoreRegionCount(storeID uint64) int

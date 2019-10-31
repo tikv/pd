@@ -18,7 +18,7 @@ import (
 	"math/rand"
 	"sort"
 
-	"github.com/pingcap/pd/table"
+	"github.com/pingcap/pd/pkg/codec"
 	"github.com/pkg/errors"
 )
 
@@ -49,11 +49,11 @@ func GenerateKeys(size int) []string {
 
 // GenerateTableKey generates the table key according to the table ID and row ID.
 func GenerateTableKey(tableID, rowID int64) []byte {
-	key := table.GenerateRowKey(tableID, rowID)
+	key := codec.GenerateRowKey(tableID, rowID)
 	// append 0xFF use to split
 	key = append(key, 0xFF)
 
-	return table.EncodeBytes(key)
+	return codec.EncodeBytes(key)
 }
 
 // GenerateTableKeys generates the table keys according to the table count and size.
@@ -103,7 +103,7 @@ func mustDecodeMvccKey(key []byte) ([]byte, error) {
 		return nil, nil
 	}
 
-	left, res, err := table.DecodeBytes(key)
+	left, res, err := codec.DecodeBytes(key)
 	if len(left) > 0 {
 		return nil, errors.Errorf("decode key left some bytes, key: %s", string(key))
 	}
@@ -167,5 +167,5 @@ func GenerateTiDBEncodedSplitKey(start, end []byte) ([]byte, error) {
 	if bytes.Equal(end, start) {
 		end = append(end, 0xFF)
 	}
-	return table.EncodeBytes(end), nil
+	return codec.EncodeBytes(end), nil
 }

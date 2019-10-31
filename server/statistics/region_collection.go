@@ -15,7 +15,6 @@ package statistics
 
 import (
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 )
 
 // RegionStatisticType represents the type of the region's status.
@@ -28,7 +27,6 @@ const (
 	DownPeer
 	PendingPeer
 	OfflinePeer
-	IncorrectNamespace
 	LearnerPeer
 	EmptyRegion
 )
@@ -37,26 +35,23 @@ const nonIsolation = "none"
 
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
-	opt        ScheduleOptions
-	classifier namespace.Classifier
-	stats      map[RegionStatisticType]map[uint64]*core.RegionInfo
-	index      map[uint64]RegionStatisticType
+	opt   ScheduleOptions
+	stats map[RegionStatisticType]map[uint64]*core.RegionInfo
+	index map[uint64]RegionStatisticType
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
-func NewRegionStatistics(opt ScheduleOptions, classifier namespace.Classifier) *RegionStatistics {
+func NewRegionStatistics(opt ScheduleOptions) *RegionStatistics {
 	r := &RegionStatistics{
-		opt:        opt,
-		classifier: classifier,
-		stats:      make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
-		index:      make(map[uint64]RegionStatisticType),
+		opt:   opt,
+		stats: make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
+		index: make(map[uint64]RegionStatisticType),
 	}
 	r.stats[MissPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[DownPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[PendingPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
-	r.stats[IncorrectNamespace] = make(map[uint64]*core.RegionInfo)
 	r.stats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
 	r.stats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
 	return r
@@ -83,15 +78,14 @@ func (r *RegionStatistics) deleteEntry(deleteIndex RegionStatisticType, regionID
 func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo) {
 	// Region state.
 	regionID := region.GetID()
-	namespace := r.classifier.GetRegionNamespace(region)
 	var (
 		peerTypeIndex RegionStatisticType
 		deleteIndex   RegionStatisticType
 	)
-	if len(region.GetPeers()) < r.opt.GetMaxReplicas(namespace) {
+	if len(region.GetPeers()) < r.opt.GetMaxReplicas() {
 		r.stats[MissPeer][regionID] = region
 		peerTypeIndex |= MissPeer
-	} else if len(region.GetPeers()) > r.opt.GetMaxReplicas(namespace) {
+	} else if len(region.GetPeers()) > r.opt.GetMaxReplicas() {
 		r.stats[ExtraPeer][regionID] = region
 		peerTypeIndex |= ExtraPeer
 	}
@@ -124,13 +118,6 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 				peerTypeIndex |= OfflinePeer
 			}
 		}
-		ns := r.classifier.GetStoreNamespace(store)
-		if ns == namespace {
-			continue
-		}
-		r.stats[IncorrectNamespace][regionID] = region
-		peerTypeIndex |= IncorrectNamespace
-		break
 	}
 
 	if oldIndex, ok := r.index[regionID]; ok {
@@ -154,7 +141,6 @@ func (r *RegionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.stats[DownPeer])))
 	regionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.stats[PendingPeer])))
 	regionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.stats[OfflinePeer])))
-	regionStatusGauge.WithLabelValues("incorrect-namespace-region-count").Set(float64(len(r.stats[IncorrectNamespace])))
 	regionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.stats[LearnerPeer])))
 	regionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.stats[EmptyRegion])))
 }

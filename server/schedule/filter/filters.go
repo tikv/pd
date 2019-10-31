@@ -19,7 +19,6 @@ import (
 	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/pkg/slice"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/opt"
 )
 
@@ -346,42 +345,6 @@ func (f *distinctScoreFilter) Source(opt opt.Options, store *core.StoreInfo) boo
 
 func (f *distinctScoreFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return core.DistinctScore(f.labels, f.stores, store) < f.safeScore
-}
-
-type namespaceFilter struct {
-	scope      string
-	classifier namespace.Classifier
-	namespace  string
-}
-
-// NewNamespaceFilter creates a Filter that filters all stores that are not
-// belong to a namespace.
-func NewNamespaceFilter(scope string, classifier namespace.Classifier, namespace string) Filter {
-	return &namespaceFilter{
-		scope:      scope,
-		classifier: classifier,
-		namespace:  namespace,
-	}
-}
-
-func (f *namespaceFilter) Scope() string {
-	return f.scope
-}
-
-func (f *namespaceFilter) Type() string {
-	return "namespace-filter"
-}
-
-func (f *namespaceFilter) filter(store *core.StoreInfo) bool {
-	return f.classifier.GetStoreNamespace(store) != f.namespace
-}
-
-func (f *namespaceFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return f.filter(store)
-}
-
-func (f *namespaceFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return f.filter(store)
 }
 
 // StoreStateFilter is used to determine whether a store can be selected as the

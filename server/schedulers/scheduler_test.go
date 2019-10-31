@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
@@ -217,7 +216,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
 	}
 
-	scatterer := schedule.NewRegionScatterer(tc, namespace.DefaultClassifier)
+	scatterer := schedule.NewRegionScatterer(tc)
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
@@ -261,7 +260,7 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
 	}
 
-	scatterer := schedule.NewRegionScatterer(tc, namespace.DefaultClassifier)
+	scatterer := schedule.NewRegionScatterer(tc)
 
 	for i := uint64(1); i <= 5; i++ {
 		region := tc.GetRegion(i)

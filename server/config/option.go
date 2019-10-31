@@ -16,7 +16,6 @@ package config
 import (
 	"context"
 	"reflect"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -33,7 +32,6 @@ import (
 type ScheduleOption struct {
 	schedule       atomic.Value
 	replication    *Replication
-	ns             sync.Map // concurrent map[string]*namespaceOption
 	labelProperty  atomic.Value
 	clusterVersion unsafe.Pointer
 	pdServerConfig atomic.Value
@@ -43,11 +41,6 @@ type ScheduleOption struct {
 func NewScheduleOption(cfg *Config) *ScheduleOption {
 	o := &ScheduleOption{}
 	o.Store(&cfg.Schedule)
-	o.ns = sync.Map{}
-	for name, nsCfg := range cfg.Namespace {
-		nsCfg := nsCfg
-		o.ns.Store(name, NewNamespaceOption(&nsCfg))
-	}
 	o.replication = newReplication(&cfg.Replication)
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
 	o.labelProperty.Store(cfg.LabelProperty)
@@ -75,51 +68,8 @@ func (o *ScheduleOption) SetPDServerConfig(cfg *PDServerConfig) {
 	o.pdServerConfig.Store(cfg)
 }
 
-// SetNS sets the namespace configurations.
-func (o *ScheduleOption) SetNS(name string, nsOpt *namespaceOption) {
-	o.ns.Store(name, nsOpt)
-}
-
-// DeleteNS deletes the namespace configurations.
-func (o *ScheduleOption) DeleteNS(name string) {
-	o.ns.Delete(name)
-}
-
-// GetNS gets the namespace configurations.
-func (o *ScheduleOption) GetNS(name string) (*namespaceOption, bool) {
-	if n, ok := o.ns.Load(name); ok {
-		if n, ok := n.(*namespaceOption); ok {
-			return n, true
-		}
-	}
-	return nil, false
-}
-
-// LoadNSConfig loads the namespace configurations.
-func (o *ScheduleOption) LoadNSConfig() map[string]NamespaceConfig {
-	namespaces := make(map[string]NamespaceConfig)
-	f := func(k, v interface{}) bool {
-		var kstr string
-		var ok bool
-		if kstr, ok = k.(string); !ok {
-			return false
-		}
-		if ns, ok := v.(*namespaceOption); ok {
-			namespaces[kstr] = *ns.Load()
-			return true
-		}
-		return false
-	}
-	o.ns.Range(f)
-
-	return namespaces
-}
-
 // GetMaxReplicas returns the number of replicas for each region.
-func (o *ScheduleOption) GetMaxReplicas(name string) int {
-	if n, ok := o.GetNS(name); ok {
-		return n.GetMaxReplicas()
-	}
+func (o *ScheduleOption) GetMaxReplicas() int {
 	return o.replication.GetMaxReplicas()
 }
 
@@ -173,6 +123,11 @@ func (o *ScheduleOption) IsOneWayMergeEnabled() bool {
 	return o.Load().EnableOneWayMerge
 }
 
+// IsCrossTableMergeEnabled returns if across table merge is enabled.
+func (o *ScheduleOption) IsCrossTableMergeEnabled() bool {
+	return o.Load().EnableCrossTableMerge
+}
+
 // GetPatrolRegionInterval returns the interval of patroling region.
 func (o *ScheduleOption) GetPatrolRegionInterval() time.Duration {
 	return o.Load().PatrolRegionInterval.Duration
@@ -184,42 +139,27 @@ func (o *ScheduleOption) GetMaxStoreDownTime() time.Duration {
 }
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.
-func (o *ScheduleOption) GetLeaderScheduleLimit(name string) uint64 {
-	if n, ok := o.GetNS(name); ok {
-		return n.GetLeaderScheduleLimit()
-	}
+func (o *ScheduleOption) GetLeaderScheduleLimit() uint64 {
 	return o.Load().LeaderScheduleLimit
 }
 
 // GetRegionScheduleLimit returns the limit for region schedule.
-func (o *ScheduleOption) GetRegionScheduleLimit(name string) uint64 {
-	if n, ok := o.GetNS(name); ok {
-		return n.GetRegionScheduleLimit()
-	}
+func (o *ScheduleOption) GetRegionScheduleLimit() uint64 {
 	return o.Load().RegionScheduleLimit
 }
 
 // GetReplicaScheduleLimit returns the limit for replica schedule.
-func (o *ScheduleOption) GetReplicaScheduleLimit(name string) uint64 {
-	if n, ok := o.GetNS(name); ok {
-		return n.GetReplicaScheduleLimit()
-	}
+func (o *ScheduleOption) GetReplicaScheduleLimit() uint64 {
 	return o.Load().ReplicaScheduleLimit
 }
 
 // GetMergeScheduleLimit returns the limit for merge schedule.
-func (o *ScheduleOption) GetMergeScheduleLimit(name string) uint64 {
-	if n, ok := o.GetNS(name); ok {
-		return n.GetMergeScheduleLimit()
-	}
+func (o *ScheduleOption) GetMergeScheduleLimit() uint64 {
 	return o.Load().MergeScheduleLimit
 }
 
 // GetHotRegionScheduleLimit returns the limit for hot region schedule.
-func (o *ScheduleOption) GetHotRegionScheduleLimit(name string) uint64 {
-	if n, ok := o.GetNS(name); ok {
-		return n.GetHotRegionScheduleLimit()
-	}
+func (o *ScheduleOption) GetHotRegionScheduleLimit() uint64 {
 	return o.Load().HotRegionScheduleLimit
 }
 
@@ -248,6 +188,16 @@ func (o *ScheduleOption) GetSchedulerMaxWaitingOperator() uint64 {
 	return o.Load().SchedulerMaxWaitingOperator
 }
 
+// GetLeaderScheduleStrategy is to get leader schedule strategy.
+func (o *ScheduleOption) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	return core.StringToScheduleStrategy(o.Load().LeaderScheduleStrategy)
+}
+
+// GetKeyType is to get key type.
+func (o *ScheduleOption) GetKeyType() core.KeyType {
+	return core.StringToKeyType(o.LoadPDServerConfig().KeyType)
+}
+
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (o *ScheduleOption) IsRemoveDownReplicaEnabled() bool {
 	return o.Load().EnableRemoveDownReplica
@@ -268,19 +218,9 @@ func (o *ScheduleOption) IsRemoveExtraReplicaEnabled() bool {
 	return o.Load().EnableRemoveExtraReplica
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule strategy.
-func (o *ScheduleOption) GetLeaderScheduleStrategy() core.ScheduleStrategy {
-	return o.Load().GetLeaderScheduleStrategy()
-}
-
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *ScheduleOption) IsLocationReplacementEnabled() bool {
 	return o.Load().EnableLocationReplacement
-}
-
-// IsNamespaceRelocationEnabled returns if namespace relocation is enabled.
-func (o *ScheduleOption) IsNamespaceRelocationEnabled() bool {
-	return o.Load().EnableNamespaceRelocation
 }
 
 // GetSchedulers gets the scheduler configurations.
@@ -392,12 +332,9 @@ func (o *ScheduleOption) LoadPDServerConfig() *PDServerConfig {
 
 // Persist saves the configuration to the storage.
 func (o *ScheduleOption) Persist(storage *core.Storage) error {
-	namespaces := o.LoadNSConfig()
-
 	cfg := &Config{
 		Schedule:       *o.Load(),
 		Replication:    *o.replication.Load(),
-		Namespace:      namespaces,
 		LabelProperty:  o.LoadLabelPropertyConfig(),
 		ClusterVersion: *o.LoadClusterVersion(),
 		PDServerCfg:    *o.LoadPDServerConfig(),
@@ -408,12 +345,9 @@ func (o *ScheduleOption) Persist(storage *core.Storage) error {
 
 // Reload reloads the configuration from the storage.
 func (o *ScheduleOption) Reload(storage *core.Storage) error {
-	namespaces := o.LoadNSConfig()
-
 	cfg := &Config{
 		Schedule:       *o.Load().Clone(),
 		Replication:    *o.replication.Load(),
-		Namespace:      namespaces,
 		LabelProperty:  o.LoadLabelPropertyConfig().Clone(),
 		ClusterVersion: *o.LoadClusterVersion(),
 		PDServerCfg:    *o.LoadPDServerConfig(),
@@ -426,10 +360,6 @@ func (o *ScheduleOption) Reload(storage *core.Storage) error {
 	if isExist {
 		o.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
-		for name, nsCfg := range cfg.Namespace {
-			nsCfg := nsCfg
-			o.ns.Store(name, NewNamespaceOption(&nsCfg))
-		}
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.SetClusterVersion(&cfg.ClusterVersion)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
@@ -531,54 +461,4 @@ func (r *Replication) GetStrictlyMatchLabel() bool {
 // IsPlacementRulesEnabled returns whether the feature is enabled.
 func (r *Replication) IsPlacementRulesEnabled() bool {
 	return r.Load().EnablePlacementRules
-}
-
-// namespaceOption is a wrapper to access the configuration safely.
-type namespaceOption struct {
-	namespaceCfg atomic.Value
-}
-
-// NewNamespaceOption creates a new namespaceOption.
-func NewNamespaceOption(cfg *NamespaceConfig) *namespaceOption {
-	n := &namespaceOption{}
-	n.Store(cfg)
-	return n
-}
-
-func (n *namespaceOption) Load() *NamespaceConfig {
-	return n.namespaceCfg.Load().(*NamespaceConfig)
-}
-
-func (n *namespaceOption) Store(cfg *NamespaceConfig) {
-	n.namespaceCfg.Store(cfg)
-}
-
-// GetMaxReplicas returns the number of replicas for each region.
-func (n *namespaceOption) GetMaxReplicas() int {
-	return int(n.Load().MaxReplicas)
-}
-
-// GetLeaderScheduleLimit returns the limit for leader schedule.
-func (n *namespaceOption) GetLeaderScheduleLimit() uint64 {
-	return n.Load().LeaderScheduleLimit
-}
-
-// GetRegionScheduleLimit returns the limit for region schedule.
-func (n *namespaceOption) GetRegionScheduleLimit() uint64 {
-	return n.Load().RegionScheduleLimit
-}
-
-// GetReplicaScheduleLimit returns the limit for replica schedule.
-func (n *namespaceOption) GetReplicaScheduleLimit() uint64 {
-	return n.Load().ReplicaScheduleLimit
-}
-
-// GetMergeScheduleLimit returns the limit for merge schedule.
-func (n *namespaceOption) GetMergeScheduleLimit() uint64 {
-	return n.Load().MergeScheduleLimit
-}
-
-// GetHotRegionScheduleLimit returns the limit for hot region schedule.
-func (n *namespaceOption) GetHotRegionScheduleLimit() uint64 {
-	return n.Load().HotRegionScheduleLimit
 }

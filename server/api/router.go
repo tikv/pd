@@ -15,7 +15,6 @@ package api
 
 import (
 	"net/http"
-	"path"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
@@ -56,9 +55,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/config/schedule", confHandler.GetSchedule).Methods("GET")
 	router.HandleFunc("/api/v1/config/replicate", confHandler.SetReplication).Methods("POST")
 	router.HandleFunc("/api/v1/config/replicate", confHandler.GetReplication).Methods("GET")
-	router.HandleFunc("/api/v1/config/namespace/{name}", confHandler.GetNamespace).Methods("GET")
-	router.HandleFunc("/api/v1/config/namespace/{name}", confHandler.SetNamespace).Methods("POST")
-	router.HandleFunc("/api/v1/config/namespace/{name}", confHandler.DeleteNamespace).Methods("DELETE")
 	router.HandleFunc("/api/v1/config/label-property", confHandler.GetLabelProperty).Methods("GET")
 	router.HandleFunc("/api/v1/config/label-property", confHandler.SetLabelProperty).Methods("POST")
 	router.HandleFunc("/api/v1/config/cluster-version", confHandler.GetClusterVersion).Methods("GET")
@@ -107,7 +103,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/regions/check/offline-peer", regionsHandler.GetOfflinePeer).Methods("GET")
 	router.HandleFunc("/api/v1/regions/check/empty-region", regionsHandler.GetEmptyRegion).Methods("GET")
 	router.HandleFunc("/api/v1/regions/sibling/{id}", regionsHandler.GetRegionSiblings).Methods("GET")
-	router.HandleFunc("/api/v1/regions/check/incorrect-ns", regionsHandler.GetIncorrectNamespaceRegions).Methods("GET")
 
 	router.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
 	router.Handle("/api/v1/status", newStatusHandler(rd)).Methods("GET")
@@ -122,10 +117,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/leader", leaderHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/leader/resign", leaderHandler.Resign).Methods("POST")
 	router.HandleFunc("/api/v1/leader/transfer/{next_leader}", leaderHandler.Transfer).Methods("POST")
-
-	classifierPrefix := path.Join(prefix, "/api/v1/classifier")
-	classifierHandler := newClassifierHandler(svr, rd, classifierPrefix)
-	router.PathPrefix("/api/v1/classifier/").Handler(classifierHandler)
 
 	statsHandler := newStatsHandler(svr, rd)
 	router.HandleFunc("/api/v1/stats/region", statsHandler.Region).Methods("GET")
