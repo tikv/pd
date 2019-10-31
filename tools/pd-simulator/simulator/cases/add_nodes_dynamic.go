@@ -14,8 +14,6 @@
 package cases
 
 import (
-	"math/rand"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/info"
@@ -26,11 +24,7 @@ import (
 func newAddNodesDynamic() *Case {
 	var simCase Case
 
-	storeNum, regionNum := getStoreNum(), getRegionNum()
-	noEmptyRatio := rand.Float64() // the ratio of noEmpty store to total store
-	noEmptyStoreNum := getNoEmptyStoreNum(storeNum, noEmptyRatio)
-
-	for i := 1; i <= int(noEmptyStoreNum); i++ {
+	for i := 1; i <= 8; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
@@ -41,15 +35,15 @@ func newAddNodesDynamic() *Case {
 	}
 
 	var ids []uint64
-	for i := 1; i <= storeNum-int(noEmptyStoreNum); i++ {
+	for i := 1; i <= 8; i++ {
 		ids = append(ids, IDAllocator.nextID())
 	}
 
-	for i := 0; i < regionNum*storeNum/3; i++ {
+	for i := 0; i < 2000; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i)%noEmptyStoreNum + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%noEmptyStoreNum + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%noEmptyStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i)%8 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%8 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%8 + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -60,10 +54,10 @@ func newAddNodesDynamic() *Case {
 		})
 	}
 
-	numNodes := int(noEmptyStoreNum)
+	numNodes := 8
 	e := &AddNodesDescriptor{}
 	e.Step = func(tick int64) uint64 {
-		if tick%100 == 0 && numNodes < storeNum {
+		if tick%100 == 0 && numNodes < 16 {
 			numNodes++
 			nodeID := ids[0]
 			ids = append(ids[:0], ids[1:]...)
@@ -73,9 +67,8 @@ func newAddNodesDynamic() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	threshold := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		res := numNodes == storeNum
+		res := true
 		leaderCounts := make([]int, 0, numNodes)
 		regionCounts := make([]int, 0, numNodes)
 		for i := 1; i <= numNodes; i++ {
@@ -83,7 +76,12 @@ func newAddNodesDynamic() *Case {
 			regionCount := regions.GetStoreRegionCount(uint64(i))
 			leaderCounts = append(leaderCounts, leaderCount)
 			regionCounts = append(regionCounts, regionCount)
-			res = res && leaderAndRegionIsUniform(leaderCount, regionCount, regionNum, threshold)
+			if leaderCount > 135 || leaderCount < 115 {
+				res = false
+			}
+			if regionCount > 390 || regionCount < 360 {
+				res = false
+			}
 		}
 
 		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts), zap.Ints("region", regionCounts))

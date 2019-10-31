@@ -266,8 +266,32 @@ func (bc *BasicCluster) GetAverageRegionSize() int64 {
 // PutStore put a store.
 func (bc *BasicCluster) PutStore(store *StoreInfo) {
 	bc.Lock()
-	defer bc.Unlock()
 	bc.Stores.SetStore(store)
+	bc.Unlock()
+	bc.updateMaxScore(store)
+}
+
+func (bc *BasicCluster) updateMaxScore(store *StoreInfo) {
+	stores := bc.GetStores()
+	if len(stores) == 0 {
+		store.SetMaxScore(store.CalculateMaxScore())
+		return
+	}
+	currentMaxScore := float64(0)
+	for _, store := range stores {
+		if store.GetMaxScore() > currentMaxScore {
+			currentMaxScore = store.GetMaxScore()
+		}
+	}
+	if float64(store.GetCapacity()) > currentMaxScore {
+		newMaxScore := store.CalculateMaxScore()
+		store.SetMaxScore(newMaxScore)
+		for _, store := range stores {
+			store.SetMaxScore(newMaxScore)
+		}
+	} else {
+		store.SetMaxScore(currentMaxScore)
+	}
 }
 
 // DeleteStore deletes a store.

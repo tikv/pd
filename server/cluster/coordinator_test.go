@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server/config"
@@ -35,6 +36,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/schedulers"
 	"github.com/pingcap/pd/v4/server/statistics"
+	"go.uber.org/zap"
 )
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
@@ -366,10 +368,11 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
+	log.Info("test checkerIsBusy", zap.Int("region num:", len(operatorKinds)*int(num)))
 	for i, operatorKind := range operatorKinds {
 		for j := uint64(0); j < num; j++ {
 			regionID := j + uint64(i+1)*num
-			c.Assert(tc.addLeaderRegion(regionID, 1), IsNil)
+			c.Assert(tc.addLeaderRegion(regionID, regionID+1, regionID+2), IsNil)
 			switch operatorKind {
 			case operator.OpReplica:
 				op := newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)

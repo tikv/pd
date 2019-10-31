@@ -24,8 +24,7 @@ import (
 func newRegionSplit() *Case {
 	var simCase Case
 	// Initialize the cluster
-	storeNum := getStoreNum()
-	for i := 1; i <= storeNum; i++ {
+	for i := 1; i <= 3; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        uint64(i),
 			Status:    metapb.StoreState_Up,
@@ -58,15 +57,14 @@ func newRegionSplit() *Case {
 
 	// Checker description
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		res := true
-		regionCounts := make([]int, 0, storeNum)
-		for i := 1; i <= storeNum; i++ {
-			regionCount := regions.GetStoreRegionCount(uint64(i))
-			regionCounts = append(regionCounts, regionCount)
-			res = res && regionCount > 5
-		}
-		simutil.Logger.Info("current counts", zap.Ints("region", regionCounts))
-		return res
+		count1 := regions.GetStoreRegionCount(1)
+		count2 := regions.GetStoreRegionCount(2)
+		count3 := regions.GetStoreRegionCount(3)
+		simutil.Logger.Info("current region counts",
+			zap.Int("first-store", count1),
+			zap.Int("second-store", count2),
+			zap.Int("third-store", count3))
+		return count1 > 5 && count2 > 5 && count3 > 5
 	}
 	return &simCase
 }

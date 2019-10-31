@@ -44,6 +44,8 @@ type StoreInfo struct {
 	lastPersistTime  time.Time
 	leaderWeight     float64
 	regionWeight     float64
+	overloaded       func() bool
+	maxScore         float64
 	available        func() bool
 }
 
@@ -254,7 +256,6 @@ func (s *StoreInfo) NeedPersist() bool {
 }
 
 const minWeight = 1e-6
-const maxScore = 1024 * 1024 * 1024
 
 // LeaderScore returns the store's leader score.
 func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
@@ -290,7 +291,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	if available-float64(delta)/amplification >= highSpaceBound {
 		score = float64(s.GetRegionSize() + delta)
 	} else if available-float64(delta)/amplification <= lowSpaceBound {
-		score = maxScore - (available - float64(delta)/amplification)
+		score = s.maxScore - (available - float64(delta)/amplification)
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
@@ -304,7 +305,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 		// we can conclude that size = (capacity - irrelative - lowSpaceBound) * amp = (used + available - lowSpaceBound) * amp
 		// These are the two fixed points' x-coordinates, and y-coordinates which can be easily obtained from the above two functions.
 		x1, y1 := (used+available-highSpaceBound)*amplification, (used+available-highSpaceBound)*amplification
-		x2, y2 := (used+available-lowSpaceBound)*amplification, maxScore-lowSpaceBound
+		x2, y2 := (used+available-lowSpaceBound)*amplification, s.maxScore-lowSpaceBound
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1
@@ -362,7 +363,7 @@ func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, low
 	case LeaderKind:
 		return s.LeaderScore(scheduleKind.Policy, delta)
 	case RegionKind:
-		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
+		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta) //source,target
 	default:
 		return 0
 	}
@@ -400,6 +401,21 @@ func (s *StoreInfo) GetUptime() time.Duration {
 		return uptime
 	}
 	return 0
+}
+
+// GetMaxScore return the maxScore
+func (s *StoreInfo) GetMaxScore() float64 {
+	return s.maxScore
+}
+
+// SetMaxScore is used to set maxScore
+func (s *StoreInfo) SetMaxScore(maxScore float64) {
+	s.maxScore = maxScore
+}
+
+// CalculateMaxScore is used to calculate max score according to capacity.
+func (s *StoreInfo) CalculateMaxScore() float64 {
+	return float64(s.GetCapacity() + 10*1024*1024)
 }
 
 var (
