@@ -25,10 +25,11 @@ import (
 type StoreCreateOption func(region *StoreInfo)
 
 // SetStoreAddress sets the address for the store.
-func SetStoreAddress(address, peerAddress string) StoreCreateOption {
+func SetStoreAddress(address, statusAddress, peerAddress string) StoreCreateOption {
 	return func(store *StoreInfo) {
 		meta := proto.Clone(store.meta).(*metapb.Store)
 		meta.Address = address
+		meta.StatusAddress = statusAddress
 		meta.PeerAddress = peerAddress
 		store.meta = meta
 	}
@@ -44,10 +45,11 @@ func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 }
 
 // SetStoreVersion sets the version for the store.
-func SetStoreVersion(version string) StoreCreateOption {
+func SetStoreVersion(githash, version string) StoreCreateOption {
 	return func(store *StoreInfo) {
 		meta := proto.Clone(store.meta).(*metapb.Store)
 		meta.Version = version
+		meta.GitHash = githash
 		store.meta = meta
 	}
 }

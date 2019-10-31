@@ -14,6 +14,8 @@
 package server
 
 import (
+	"time"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -52,7 +54,7 @@ func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
 func (s *testClusterWorkerSuite) TestValidRequestRegion(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
@@ -92,7 +94,7 @@ func (s *testClusterWorkerSuite) TestValidRequestRegion(c *C) {
 func (s *testClusterWorkerSuite) TestAskSplit(c *C) {
 	var err error
 	var cleanup func()
-	_, s.svr, cleanup, err = NewTestServer(c)
+	s.svr, cleanup, err = NewTestServer(c)
 	defer cleanup()
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})
@@ -103,6 +105,7 @@ func (s *testClusterWorkerSuite) TestAskSplit(c *C) {
 
 	cluster := s.svr.GetRaftCluster()
 	c.Assert(cluster, NotNil)
+	cluster.opt.SetSplitMergeInterval(time.Hour)
 	regions := cluster.GetRegions()
 
 	req := &pdpb.AskSplitRequest{
@@ -124,5 +127,10 @@ func (s *testClusterWorkerSuite) TestAskSplit(c *C) {
 	}
 
 	_, err = cluster.handleAskBatchSplit(req1)
+	c.Assert(err, IsNil)
+	// test region id whether valid
+	cluster.opt.SetSplitMergeInterval(time.Duration(0))
+	mergeChecker := cluster.GetMergeChecker()
+	mergeChecker.Check(regions[0])
 	c.Assert(err, IsNil)
 }

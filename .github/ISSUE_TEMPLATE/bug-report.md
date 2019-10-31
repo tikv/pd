@@ -1,7 +1,7 @@
 ---
 name: "🐛 Bug Report"
 about: Something isn't working as expected
-title: 'PCP: '
+title: ''
 labels: 'kind/bug'
 ---
 

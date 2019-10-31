@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"sync"
@@ -31,7 +32,6 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
-	"github.com/pingcap/pd/server/namespace"
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/checker"
@@ -54,6 +54,7 @@ var (
 // region 1 -> /1/raft/r/1, value is metapb.Region
 type RaftCluster struct {
 	sync.RWMutex
+	ctx context.Context
 
 	s *Server
 
@@ -90,8 +91,9 @@ type ClusterStatus struct {
 	IsInitialized     bool      `json:"is_initialized"`
 }
 
-func newRaftCluster(s *Server, clusterID uint64) *RaftCluster {
+func newRaftCluster(ctx context.Context, s *Server, clusterID uint64) *RaftCluster {
 	return &RaftCluster{
+		ctx:          ctx,
 		s:            s,
 		running:      false,
 		clusterID:    clusterID,
@@ -170,13 +172,8 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 
-	err = c.s.classifier.ReloadNamespaces()
-	if err != nil {
-		return err
-	}
-
-	c.coordinator = newCoordinator(cluster, c.s.hbStreams, c.s.classifier)
-	c.regionStats = statistics.NewRegionStatistics(c.s.scheduleOpt, c.s.classifier)
+	c.coordinator = newCoordinator(c.ctx, cluster, c.s.hbStreams)
+	c.regionStats = statistics.NewRegionStatistics(c.s.scheduleOpt)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(3)
@@ -611,6 +608,11 @@ func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	return c.core.GetRegions()
 }
 
+// GetRegionCount returns total count of regions
+func (c *RaftCluster) GetRegionCount() int {
+	return c.core.GetRegionCount()
+}
+
 // GetStoreRegions returns all regions' information with a given storeID.
 func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	return c.core.GetStoreRegions(storeID)
@@ -771,8 +773,8 @@ func (c *RaftCluster) putStore(store *metapb.Store) error {
 		labels := s.MergeLabels(store.GetLabels())
 
 		s = s.Clone(
-			core.SetStoreAddress(store.Address, store.PeerAddress),
-			core.SetStoreVersion(store.Version),
+			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
+			core.SetStoreVersion(store.GitHash, store.Version),
 			core.SetStoreLabels(labels),
 		)
 	}
@@ -1005,7 +1007,7 @@ func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) collectMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.GetNamespaceClassifier())
+	statsMap := statistics.NewStoreStatisticsMap(c.opt)
 	stores := c.GetStores()
 	for _, s := range stores {
 		statsMap.Observe(s, c.storesStats)
@@ -1019,7 +1021,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.GetNamespaceClassifier())
+	statsMap := statistics.NewStoreStatisticsMap(c.opt)
 	statsMap.Reset()
 
 	c.coordinator.resetSchedulerMetrics()
@@ -1184,11 +1186,6 @@ func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
 	return c.putMetaLocked(proto.Clone(meta).(*metapb.Cluster))
 }
 
-// GetNamespaceClassifier returns current namespace classifier.
-func (c *RaftCluster) GetNamespaceClassifier() namespace.Classifier {
-	return c.s.classifier
-}
-
 // GetMergeChecker returns merge checker.
 func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 	c.RLock()
@@ -1197,33 +1194,33 @@ func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 }
 
 // GetOpt returns the scheduling options.
-func (c *RaftCluster) GetOpt() namespace.ScheduleOptions {
+func (c *RaftCluster) GetOpt() *config.ScheduleOption {
 	return c.opt
 }
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (c *RaftCluster) GetLeaderScheduleLimit() uint64 {
-	return c.opt.GetLeaderScheduleLimit(namespace.DefaultNamespace)
+	return c.opt.GetLeaderScheduleLimit()
 }
 
 // GetRegionScheduleLimit returns the limit for region schedule.
 func (c *RaftCluster) GetRegionScheduleLimit() uint64 {
-	return c.opt.GetRegionScheduleLimit(namespace.DefaultNamespace)
+	return c.opt.GetRegionScheduleLimit()
 }
 
 // GetReplicaScheduleLimit returns the limit for replica schedule.
 func (c *RaftCluster) GetReplicaScheduleLimit() uint64 {
-	return c.opt.GetReplicaScheduleLimit(namespace.DefaultNamespace)
+	return c.opt.GetReplicaScheduleLimit()
 }
 
 // GetMergeScheduleLimit returns the limit for merge schedule.
 func (c *RaftCluster) GetMergeScheduleLimit() uint64 {
-	return c.opt.GetMergeScheduleLimit(namespace.DefaultNamespace)
+	return c.opt.GetMergeScheduleLimit()
 }
 
 // GetHotRegionScheduleLimit returns the limit for hot region schedule.
 func (c *RaftCluster) GetHotRegionScheduleLimit() uint64 {
-	return c.opt.GetHotRegionScheduleLimit(namespace.DefaultNamespace)
+	return c.opt.GetHotRegionScheduleLimit()
 }
 
 // GetStoreBalanceRate returns the balance rate of a store.
@@ -1281,6 +1278,11 @@ func (c *RaftCluster) IsOneWayMergeEnabled() bool {
 	return c.opt.IsOneWayMergeEnabled()
 }
 
+// IsCrossTableMergeEnabled returns if across table merge is enabled.
+func (c *RaftCluster) IsCrossTableMergeEnabled() bool {
+	return c.opt.IsCrossTableMergeEnabled()
+}
+
 // GetPatrolRegionInterval returns the interval of patroling region.
 func (c *RaftCluster) GetPatrolRegionInterval() time.Duration {
 	return c.opt.GetPatrolRegionInterval()
@@ -1293,7 +1295,7 @@ func (c *RaftCluster) GetMaxStoreDownTime() time.Duration {
 
 // GetMaxReplicas returns the number of replicas.
 func (c *RaftCluster) GetMaxReplicas() int {
-	return c.opt.GetMaxReplicas(namespace.DefaultNamespace)
+	return c.opt.GetMaxReplicas()
 }
 
 // GetLocationLabels returns the location labels for each region
@@ -1306,6 +1308,11 @@ func (c *RaftCluster) GetStrictlyMatchLabel() bool {
 	return c.opt.GetReplication().GetStrictlyMatchLabel()
 }
 
+// IsPlacementRulesEnabled returns if the placement rules feature is enabled.
+func (c *RaftCluster) IsPlacementRulesEnabled() bool {
+	return c.opt.IsPlacementRulesEnabled()
+}
+
 // GetHotRegionCacheHitsThreshold gets the threshold of hitting hot region cache.
 func (c *RaftCluster) GetHotRegionCacheHitsThreshold() int {
 	return c.opt.GetHotRegionCacheHitsThreshold()
@@ -1316,9 +1323,14 @@ func (c *RaftCluster) IsRemoveDownReplicaEnabled() bool {
 	return c.opt.IsRemoveDownReplicaEnabled()
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule strategy
+// GetLeaderScheduleStrategy is to get leader schedule strategy.
 func (c *RaftCluster) GetLeaderScheduleStrategy() core.ScheduleStrategy {
 	return c.opt.GetLeaderScheduleStrategy()
+}
+
+// GetKeyType is to get key type.
+func (c *RaftCluster) GetKeyType() core.KeyType {
+	return c.opt.GetKeyType()
 }
 
 // IsReplaceOfflineReplicaEnabled returns if replace offline replica is enabled.
@@ -1341,11 +1353,6 @@ func (c *RaftCluster) IsLocationReplacementEnabled() bool {
 	return c.opt.IsLocationReplacementEnabled()
 }
 
-// IsNamespaceRelocationEnabled returns if namespace relocation is enabled.
-func (c *RaftCluster) IsNamespaceRelocationEnabled() bool {
-	return c.opt.IsNamespaceRelocationEnabled()
-}
-
 // CheckLabelProperty is used to check label property.
 func (c *RaftCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
 	return c.opt.CheckLabelProperty(typ, labels)
@@ -1358,25 +1365,25 @@ func (c *RaftCluster) isPrepared() bool {
 	return c.prepareChecker.check(c)
 }
 
-func (c *RaftCluster) getStoresBytesWriteStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresBytesWriteStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresBytesWriteStat()
 }
 
-func (c *RaftCluster) getStoresBytesReadStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresBytesReadStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresBytesReadStat()
 }
 
-func (c *RaftCluster) getStoresKeysWriteStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresKeysWriteStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresKeysWriteStat()
 }
 
-func (c *RaftCluster) getStoresKeysReadStat() map[uint64]uint64 {
+func (c *RaftCluster) getStoresKeysReadStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresKeysReadStat()

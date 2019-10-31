@@ -17,7 +17,7 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/table"
+	"github.com/pingcap/pd/pkg/codec"
 )
 
 func Test(t *testing.T) {
@@ -50,8 +50,8 @@ func (t *testTableKeySuite) TestGenerateTableKeys(c *C) {
 }
 
 func (t *testTableKeySuite) TestGenerateSplitKey(c *C) {
-	s := []byte(table.EncodeBytes([]byte("a")))
-	e := []byte(table.EncodeBytes([]byte("ab")))
+	s := []byte(codec.EncodeBytes([]byte("a")))
+	e := []byte(codec.EncodeBytes([]byte("ab")))
 	for i := 0; i <= 1000; i++ {
 		cc, err := GenerateTiDBEncodedSplitKey(s, e)
 		c.Assert(err, IsNil)
@@ -69,8 +69,8 @@ func (t *testTableKeySuite) TestGenerateSplitKey(c *C) {
 	c.Assert(splitKey, Less, e)
 
 	// split equal key
-	s = table.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1})
-	e = table.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1, 1})
+	s = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1})
+	e = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1, 1})
 	for i := 0; i <= 1000; i++ {
 		c.Assert(s, Less, e)
 		splitKey, err = GenerateTiDBEncodedSplitKey(s, e)

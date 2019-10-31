@@ -30,18 +30,19 @@ type ScheduleOptions interface {
 	GetStoreBalanceRate() float64
 
 	GetSchedulerMaxWaitingOperator() uint64
-	GetLeaderScheduleLimit(name string) uint64
-	GetRegionScheduleLimit(name string) uint64
-	GetReplicaScheduleLimit(name string) uint64
-	GetMergeScheduleLimit(name string) uint64
-	GetHotRegionScheduleLimit(name string) uint64
-	GetMaxReplicas(name string) int
+	GetLeaderScheduleLimit() uint64
+	GetRegionScheduleLimit() uint64
+	GetReplicaScheduleLimit() uint64
+	GetMergeScheduleLimit() uint64
+	GetHotRegionScheduleLimit() uint64
+	GetMaxReplicas() int
 	GetHotRegionCacheHitsThreshold() int
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
 	GetLeaderScheduleStrategy() core.ScheduleStrategy
+	GetKeyType() core.KeyType
 
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool

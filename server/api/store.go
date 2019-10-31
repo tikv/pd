@@ -42,6 +42,7 @@ type MetaStore struct {
 type StoreStatus struct {
 	Capacity           typeutil.ByteSize  `json:"capacity,omitempty"`
 	Available          typeutil.ByteSize  `json:"available,omitempty"`
+	UsedSize           typeutil.ByteSize  `json:"used_size,omitempty"`
 	LeaderCount        int                `json:"leader_count,omitempty"`
 	LeaderWeight       float64            `json:"leader_weight,omitempty"`
 	LeaderScore        float64            `json:"leader_score,omitempty"`
@@ -79,9 +80,10 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 		Status: &StoreStatus{
 			Capacity:           typeutil.ByteSize(store.GetCapacity()),
 			Available:          typeutil.ByteSize(store.GetAvailable()),
+			UsedSize:           typeutil.ByteSize(store.GetUsedSize()),
 			LeaderCount:        store.GetLeaderCount(),
 			LeaderWeight:       store.GetLeaderWeight(),
-			LeaderScore:        store.LeaderScore(opt.GetLeaderScheduleStrategy(), 0),
+			LeaderScore:        store.LeaderScore(core.StringToScheduleStrategy(opt.LeaderScheduleStrategy), 0),
 			LeaderSize:         store.GetLeaderSize(),
 			RegionCount:        store.GetRegionCount(),
 			RegionWeight:       store.GetRegionWeight(),
@@ -90,7 +92,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
 			ApplyingSnapCount:  store.GetApplyingSnapCount(),
-			IsBusy:             store.GetIsBusy(),
+			IsBusy:             store.IsBusy(),
 		},
 	}
 

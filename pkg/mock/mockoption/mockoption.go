@@ -41,6 +41,8 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true
 	defaultLeaderScheduleStrategy      = "count"
+	defaultEnablePlacementRules        = false
+	defaultKeyType                     = "table"
 )
 
 // ScheduleOptions is a mock of ScheduleOptions
@@ -59,6 +61,8 @@ type ScheduleOptions struct {
 	SchedulerMaxWaitingOperator  uint64
 	SplitMergeInterval           time.Duration
 	EnableOneWayMerge            bool
+	EnableCrossTableMerge        bool
+	KeyType                      string
 	MaxStoreDownTime             time.Duration
 	MaxReplicas                  int
 	LocationLabels               []string
@@ -67,12 +71,17 @@ type ScheduleOptions struct {
 	TolerantSizeRatio            float64
 	LowSpaceRatio                float64
 	HighSpaceRatio               float64
+	EnableRemoveDownReplica      bool
+	EnableReplaceOfflineReplica  bool
+	EnableMakeUpReplica          bool
+	EnableRemoveExtraReplica     bool
+	EnableLocationReplacement    bool
+	EnablePlacementRules         bool
 	DisableRemoveDownReplica     bool
 	DisableReplaceOfflineReplica bool
 	DisableMakeUpReplica         bool
 	DisableRemoveExtraReplica    bool
 	DisableLocationReplacement   bool
-	DisableNamespaceRelocation   bool
 	LeaderScheduleStrategy       string
 	LabelProperties              map[string][]*metapb.StoreLabel
 }
@@ -94,37 +103,44 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.StrictlyMatchLabel = defaultStrictlyMatchLabel
+	mso.EnablePlacementRules = defaultEnablePlacementRules
 	mso.HotRegionCacheHitsThreshold = defaultHotRegionCacheHitsThreshold
 	mso.MaxPendingPeerCount = defaultMaxPendingPeerCount
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
 	mso.HighSpaceRatio = defaultHighSpaceRatio
+	mso.EnableRemoveDownReplica = true
+	mso.EnableReplaceOfflineReplica = true
+	mso.EnableMakeUpReplica = true
+	mso.EnableRemoveExtraReplica = true
+	mso.EnableLocationReplacement = true
 	mso.LeaderScheduleStrategy = defaultLeaderScheduleStrategy
+	mso.KeyType = defaultKeyType
 	return mso
 }
 
 // GetLeaderScheduleLimit mocks method
-func (mso *ScheduleOptions) GetLeaderScheduleLimit(name string) uint64 {
+func (mso *ScheduleOptions) GetLeaderScheduleLimit() uint64 {
 	return mso.LeaderScheduleLimit
 }
 
 // GetRegionScheduleLimit mocks method
-func (mso *ScheduleOptions) GetRegionScheduleLimit(name string) uint64 {
+func (mso *ScheduleOptions) GetRegionScheduleLimit() uint64 {
 	return mso.RegionScheduleLimit
 }
 
 // GetReplicaScheduleLimit mocks method
-func (mso *ScheduleOptions) GetReplicaScheduleLimit(name string) uint64 {
+func (mso *ScheduleOptions) GetReplicaScheduleLimit() uint64 {
 	return mso.ReplicaScheduleLimit
 }
 
 // GetMergeScheduleLimit mocks method
-func (mso *ScheduleOptions) GetMergeScheduleLimit(name string) uint64 {
+func (mso *ScheduleOptions) GetMergeScheduleLimit() uint64 {
 	return mso.MergeScheduleLimit
 }
 
 // GetHotRegionScheduleLimit mocks method
-func (mso *ScheduleOptions) GetHotRegionScheduleLimit(name string) uint64 {
+func (mso *ScheduleOptions) GetHotRegionScheduleLimit() uint64 {
 	return mso.HotRegionScheduleLimit
 }
 
@@ -163,13 +179,18 @@ func (mso *ScheduleOptions) IsOneWayMergeEnabled() bool {
 	return mso.EnableOneWayMerge
 }
 
+// IsCrossTableMergeEnabled mocks method
+func (mso *ScheduleOptions) IsCrossTableMergeEnabled() bool {
+	return mso.EnableCrossTableMerge
+}
+
 // GetMaxStoreDownTime mocks method
 func (mso *ScheduleOptions) GetMaxStoreDownTime() time.Duration {
 	return mso.MaxStoreDownTime
 }
 
 // GetMaxReplicas mocks method
-func (mso *ScheduleOptions) GetMaxReplicas(name string) int {
+func (mso *ScheduleOptions) GetMaxReplicas() int {
 	return mso.MaxReplicas
 }
 
@@ -181,6 +202,11 @@ func (mso *ScheduleOptions) GetLocationLabels() []string {
 // GetStrictlyMatchLabel mocks method
 func (mso *ScheduleOptions) GetStrictlyMatchLabel() bool {
 	return mso.StrictlyMatchLabel
+}
+
+// IsPlacementRulesEnabled mocks method
+func (mso *ScheduleOptions) IsPlacementRulesEnabled() bool {
+	return mso.EnablePlacementRules
 }
 
 // GetHotRegionCacheHitsThreshold mocks method
@@ -215,35 +241,35 @@ func (mso *ScheduleOptions) SetMaxReplicas(replicas int) {
 
 // IsRemoveDownReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsRemoveDownReplicaEnabled() bool {
-	return !mso.DisableRemoveDownReplica
+	return mso.EnableRemoveDownReplica
 }
 
 // IsReplaceOfflineReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsReplaceOfflineReplicaEnabled() bool {
-	return !mso.DisableReplaceOfflineReplica
+	return mso.EnableReplaceOfflineReplica
 }
 
 // IsMakeUpReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsMakeUpReplicaEnabled() bool {
-	return !mso.DisableMakeUpReplica
+	return mso.EnableMakeUpReplica
 }
 
 // IsRemoveExtraReplicaEnabled mocks method.
 func (mso *ScheduleOptions) IsRemoveExtraReplicaEnabled() bool {
-	return !mso.DisableRemoveExtraReplica
+	return mso.EnableRemoveExtraReplica
 }
 
 // IsLocationReplacementEnabled mocks method.
 func (mso *ScheduleOptions) IsLocationReplacementEnabled() bool {
-	return !mso.DisableLocationReplacement
+	return mso.EnableLocationReplacement
 }
 
-// IsNamespaceRelocationEnabled mocks method.
-func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
-	return !mso.DisableNamespaceRelocation
-}
-
-// GetLeaderScheduleStrategy is to get leader schedule strategy
+// GetLeaderScheduleStrategy is to get leader schedule strategy.
 func (mso *ScheduleOptions) GetLeaderScheduleStrategy() core.ScheduleStrategy {
 	return core.StringToScheduleStrategy(mso.LeaderScheduleStrategy)
+}
+
+// GetKeyType is to get key type.
+func (mso *ScheduleOptions) GetKeyType() core.KeyType {
+	return core.StringToKeyType(mso.KeyType)
 }

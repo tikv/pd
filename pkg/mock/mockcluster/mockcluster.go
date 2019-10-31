@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -400,38 +399,38 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerI
 }
 
 // GetOpt mocks method.
-func (mc *Cluster) GetOpt() namespace.ScheduleOptions {
+func (mc *Cluster) GetOpt() *mockoption.ScheduleOptions {
 	return mc.ScheduleOptions
 }
 
 // GetLeaderScheduleLimit mocks method.
 func (mc *Cluster) GetLeaderScheduleLimit() uint64 {
-	return mc.ScheduleOptions.GetLeaderScheduleLimit(namespace.DefaultNamespace)
+	return mc.ScheduleOptions.GetLeaderScheduleLimit()
 }
 
 // GetRegionScheduleLimit mocks method.
 func (mc *Cluster) GetRegionScheduleLimit() uint64 {
-	return mc.ScheduleOptions.GetRegionScheduleLimit(namespace.DefaultNamespace)
+	return mc.ScheduleOptions.GetRegionScheduleLimit()
 }
 
 // GetReplicaScheduleLimit mocks method.
 func (mc *Cluster) GetReplicaScheduleLimit() uint64 {
-	return mc.ScheduleOptions.GetReplicaScheduleLimit(namespace.DefaultNamespace)
+	return mc.ScheduleOptions.GetReplicaScheduleLimit()
 }
 
 // GetMergeScheduleLimit mocks method.
 func (mc *Cluster) GetMergeScheduleLimit() uint64 {
-	return mc.ScheduleOptions.GetMergeScheduleLimit(namespace.DefaultNamespace)
+	return mc.ScheduleOptions.GetMergeScheduleLimit()
 }
 
 // GetHotRegionScheduleLimit mocks method.
 func (mc *Cluster) GetHotRegionScheduleLimit() uint64 {
-	return mc.ScheduleOptions.GetHotRegionScheduleLimit(namespace.DefaultNamespace)
+	return mc.ScheduleOptions.GetHotRegionScheduleLimit()
 }
 
 // GetMaxReplicas mocks method.
 func (mc *Cluster) GetMaxReplicas() int {
-	return mc.ScheduleOptions.GetMaxReplicas(namespace.DefaultNamespace)
+	return mc.ScheduleOptions.GetMaxReplicas()
 }
 
 // CheckLabelProperty checks label property.
