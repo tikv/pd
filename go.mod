@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/BurntSushi/toml v0.3.1
+	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/chzyer/logex v1.1.10 // indirect
 	github.com/chzyer/readline v0.0.0-20171208011716-f6d7a1f6fbf3
 	github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1 // indirect
@@ -13,6 +14,7 @@ require (
 	github.com/dustin/go-humanize v0.0.0-20180421182945-02af3965c54e // indirect
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32
+	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/gogo/protobuf v1.0.0
 	github.com/golang/groupcache v0.0.0-20181024230925-c65c006176ff // indirect
 	github.com/golang/protobuf v1.2.0
@@ -36,13 +38,16 @@ require (
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v0.8.0
 	github.com/prometheus/client_model v0.0.0-20171117100541-99fa1f4be8e5 // indirect
+	github.com/shirou/gopsutil v2.19.9+incompatible
 	github.com/sirupsen/logrus v1.0.5
 	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.1
+	github.com/stretchr/testify v1.3.0
 	github.com/syndtr/goleveldb v0.0.0-20180815032940-ae2bd5eed72d
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20171017195756-830351dc03c6 // indirect
 	github.com/unrolled/render v0.0.0-20171102162132-65450fb6b2d3
 	github.com/urfave/negroni v0.3.0
+	github.com/zcalusic/sysinfo v0.0.0-20190913181835-ba6cb5edfaf3
 	go.etcd.io/etcd v0.0.0-20190320044326-77d4b742cdbf
 	go.uber.org/zap v1.9.1
 	golang.org/x/crypto v0.0.0-20190909091759-094676da4a83 // indirect
@@ -53,3 +58,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+replace github.com/zcalusic/sysinfo => github.com/gzptgo/sysinfo v0.0.0-20191026181732-d224e19c3be2
