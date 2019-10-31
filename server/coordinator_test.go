@@ -178,7 +178,7 @@ func (s *testCoordinatorSuite) TearDownSuite(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestBasic(c *C) {
-	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
 
@@ -374,15 +374,14 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 
 func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
-		cfg.ReplicaScheduleLimit = 10
+		cfg.ReplicaScheduleLimit = 0
 		cfg.LeaderScheduleLimit = 10
 		cfg.RegionScheduleLimit = 10
 		cfg.MergeScheduleLimit = 10
 	}, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
-	c.Assert(tc.addRegionStore(1, 1), IsNil)
-	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
+	c.Assert(tc.addRegionStore(1, 0), IsNil)
 	num := 4 * MaxUint64(co.cluster.GetLeaderScheduleLimit(), co.cluster.GetRegionScheduleLimit(), co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
@@ -891,7 +890,7 @@ func (s *testOperatorControllerSuite) TearDownSuite(c *C) {
 }
 
 func (s *testOperatorControllerSuite) TestOperatorCount(c *C) {
-	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
 	c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(0))
@@ -924,7 +923,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 		// scheduling one time needs 60 seconds
 		// and thus it's large enough to make sure that only schedule one time
 		cfg.StoreBalanceRate = 1
-	}, nil, func(co *coordinator) { co.run() }, c)
+	}, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
 	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, nil)
@@ -964,7 +963,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		// scheduling one time needs 2 seconds
 		cfg.StoreBalanceRate = 30
-	}, nil, func(co *coordinator) { co.run() }, c)
+	}, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
 	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, nil)
@@ -1021,7 +1020,7 @@ func (s *mockLimitScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (s *testScheduleControllerSuite) TestController(c *C) {
-	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
 
@@ -1094,7 +1093,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 }
 
 func (s *testScheduleControllerSuite) TestInterval(c *C) {
-	_, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+	_, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 
 	lb, err := schedule.CreateScheduler("balance-leader", co.opController, core.NewStorage(kv.NewMemoryKV()), nil)
