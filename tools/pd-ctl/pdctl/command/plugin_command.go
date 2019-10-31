@@ -105,7 +105,7 @@ func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
 		return
 	}
 	if err != nil {
-		cmd.Printf("Failed to load plugin %s: %s\n", args[0], err)
+		cmd.Printf("Failed to %s plugin %s: %s\n", action, args[0], err)
 		return
 	}
 	cmd.Println("Success!")

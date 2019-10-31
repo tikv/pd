@@ -60,6 +60,7 @@ func InitCommand() *cobra.Command {
 		command.NewTableNamespaceCommand(),
 		command.NewHealthCommand(),
 		command.NewLogCommand(),
+		command.NewPluginCommand(),
 	)
 	return rootCmd
 }
