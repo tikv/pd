@@ -47,7 +47,7 @@ func newRedirector(s *server.Server) *redirector {
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !h.s.IsClosed() && h.s.GetMember().IsLeader() {
+	if (!h.s.IsClosed() && h.s.GetMember().IsLeader()) || strings.Contains(r.RequestURI, "cluster_stats") {
 		next(w, r)
 		return
 	}
