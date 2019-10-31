@@ -160,7 +160,7 @@ func (d *Driver) TickCount() int64 {
 
 // GetBootstrapInfo returns a valid bootstrap store and region.
 func (d *Driver) GetBootstrapInfo(r *RaftEngine) (*metapb.Store, *metapb.Region, error) {
-	origin := r.RandRegion()
+	origin := r.BootstrapRegion()
 	if origin == nil {
 		return nil, nil, errors.New("no region found for bootstrap")
 	}
