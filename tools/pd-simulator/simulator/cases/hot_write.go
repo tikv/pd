@@ -27,8 +27,9 @@ import (
 func newHotWrite() *Case {
 	var simCase Case
 
+	storeNum, regionNum := getStoreNum(), getRegionNum()
 	// Initialize the cluster
-	for i := 1; i <= 10; i++ {
+	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
@@ -38,8 +39,8 @@ func newHotWrite() *Case {
 		})
 	}
 
-	for i := 0; i < 500; i++ {
-		storeIDs := rand.Perm(10)
+	for i := 0; i < storeNum*regionNum/3; i++ {
+		storeIDs := rand.Perm(storeNum)
 		peers := []*metapb.Peer{
 			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[0] + 1)},
 			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[1] + 1)},
@@ -55,12 +56,13 @@ func newHotWrite() *Case {
 	}
 
 	// Events description
-	// select 5 regions on store 1 as hot write regions.
-	writeFlow := make(map[uint64]int64, 5)
+	// select regions on store 1 as hot write regions.
+	selectStoreNum := storeNum
+	writeFlow := make(map[uint64]int64, selectStoreNum)
 	for _, r := range simCase.Regions {
 		if r.Leader.GetStoreId() == 1 {
 			writeFlow[r.ID] = 2 * MB
-			if len(writeFlow) == 5 {
+			if len(writeFlow) == selectStoreNum {
 				break
 			}
 		}
@@ -74,7 +76,8 @@ func newHotWrite() *Case {
 
 	// Checker description
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		var leaderCount, peerCount [10]int
+		leaderCount := make([]int, storeNum)
+		peerCount := make([]int, storeNum)
 		for id := range writeFlow {
 			region := regions.GetRegion(id)
 			leaderCount[int(region.GetLeader().GetStoreId()-1)]++
