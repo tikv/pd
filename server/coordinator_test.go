@@ -386,16 +386,15 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	cfg.ReplicaScheduleLimit = 10
+	cfg.ReplicaScheduleLimit = 0
 	cfg.LeaderScheduleLimit = 10
 	cfg.RegionScheduleLimit = 10
 	cfg.MergeScheduleLimit = 10
 	tc, co, cleanup := s.prepare(cfg, opt, c)
 	defer cleanup()
 
-	c.Assert(tc.addRegionStore(1, 1), IsNil)
-	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
-	num := 4 * MaxUint64(co.cluster.GetLeaderScheduleLimit(), co.cluster.GetRegionScheduleLimit(), co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
+	c.Assert(tc.addRegionStore(1, 0), IsNil)
+	num := 1 + MaxUint64(co.cluster.GetLeaderScheduleLimit(), co.cluster.GetRegionScheduleLimit(), co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit()) // to ensure all checkers are busy
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
