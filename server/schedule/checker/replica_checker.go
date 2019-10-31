@@ -19,7 +19,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
@@ -40,14 +39,13 @@ const (
 // Unhealthy replica management, mainly used for disaster recovery of TiKV.
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
-	name       string
-	cluster    opt.Cluster
-	classifier namespace.Classifier
-	filters    []filter.Filter
+	name    string
+	cluster opt.Cluster
+	filters []filter.Filter
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster opt.Cluster, classifier namespace.Classifier, n ...string) *ReplicaChecker {
+func NewReplicaChecker(cluster opt.Cluster, n ...string) *ReplicaChecker {
 	name := replicaCheckerName
 	if len(n) != 0 {
 		name = n[0]
@@ -60,10 +58,9 @@ func NewReplicaChecker(cluster opt.Cluster, classifier namespace.Classifier, n .
 	}
 
 	return &ReplicaChecker{
-		name:       name,
-		cluster:    cluster,
-		classifier: classifier,
-		filters:    filters,
+		name:    name,
+		cluster: cluster,
+		filters: filters,
 	}
 }
 
@@ -143,9 +140,6 @@ func (r *ReplicaChecker) selectBestStoreToAddReplica(region *core.RegionInfo, fi
 	}
 	filters = append(filters, r.filters...)
 	filters = append(filters, newFilters...)
-	if r.classifier != nil {
-		filters = append(filters, filter.NewNamespaceFilter(r.name, r.classifier, r.classifier.GetRegionNamespace(region)))
-	}
 	regionStores := r.cluster.GetRegionStores(region)
 	s := selector.NewReplicaSelector(regionStores, r.cluster.GetLocationLabels(), r.filters...)
 	target := s.SelectTarget(r.cluster, r.cluster.GetStores(), filters...)

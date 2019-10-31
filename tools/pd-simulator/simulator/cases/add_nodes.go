@@ -13,6 +13,8 @@
 package cases
 
 import (
+	"math/rand"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
@@ -23,7 +25,11 @@ import (
 func newAddNodes() *Case {
 	var simCase Case
 
-	for i := 1; i <= 8; i++ {
+	storeNum, regionNum := getStoreNum(), getRegionNum()
+	noEmptyRatio := rand.Float64() // the ratio of noEmpty store to total store
+	noEmptyStoreNum := getNoEmptyStoreNum(storeNum, noEmptyRatio)
+
+	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
@@ -33,11 +39,11 @@ func newAddNodes() *Case {
 		})
 	}
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < regionNum*storeNum/3; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i)%4 + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%4 + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%4 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i)%noEmptyStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%noEmptyStoreNum + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%noEmptyStoreNum + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -48,21 +54,17 @@ func newAddNodes() *Case {
 		})
 	}
 
+	threshold := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
-		leaderCounts := make([]int, 0, 8)
-		regionCounts := make([]int, 0, 8)
-		for i := 1; i <= 8; i++ {
+		leaderCounts := make([]int, 0, storeNum)
+		regionCounts := make([]int, 0, storeNum)
+		for i := 1; i <= storeNum; i++ {
 			leaderCount := regions.GetStoreLeaderCount(uint64(i))
 			regionCount := regions.GetStoreRegionCount(uint64(i))
 			leaderCounts = append(leaderCounts, leaderCount)
 			regionCounts = append(regionCounts, regionCount)
-			if leaderCount > 135 || leaderCount < 115 {
-				res = false
-			}
-			if regionCount > 390 || regionCount < 360 {
-				res = false
-			}
+			res = res && leaderAndRegionIsUniform(leaderCount, regionCount, regionNum, threshold)
 		}
 
 		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts), zap.Ints("region", regionCounts))

@@ -14,6 +14,7 @@
 package server
 
 import (
+	"context"
 	"time"
 
 	"github.com/pingcap/log"
@@ -21,16 +22,20 @@ import (
 )
 
 // StartMonitor calls systimeErrHandler if system time jump backward.
-func StartMonitor(now func() time.Time, systimeErrHandler func()) {
+func StartMonitor(ctx context.Context, now func() time.Time, systimeErrHandler func()) {
 	log.Info("start system time monitor")
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		last := now().UnixNano()
-		<-tick.C
-		if now().UnixNano() < last {
-			log.Error("system time jump backward", zap.Int64("last", last))
-			systimeErrHandler()
+		select {
+		case <-tick.C:
+			if now().UnixNano() < last {
+				log.Error("system time jump backward", zap.Int64("last", last))
+				systimeErrHandler()
+			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }

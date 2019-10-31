@@ -16,6 +16,7 @@ package schedule
 import (
 	"container/heap"
 	"container/list"
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
@@ -59,6 +60,7 @@ type HeartbeatStreams interface {
 // OperatorController is used to limit the speed of scheduling.
 type OperatorController struct {
 	sync.RWMutex
+	ctx       context.Context
 	cluster   opt.Cluster
 	operators map[uint64]*operator.Operator
 	hbStreams HeartbeatStreams
@@ -73,19 +75,26 @@ type OperatorController struct {
 }
 
 // NewOperatorController creates a OperatorController.
-func NewOperatorController(cluster opt.Cluster, hbStreams HeartbeatStreams) *OperatorController {
+func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams HeartbeatStreams) *OperatorController {
 	return &OperatorController{
+		ctx:             ctx,
 		cluster:         cluster,
 		operators:       make(map[uint64]*operator.Operator),
 		hbStreams:       hbStreams,
 		histories:       list.New(),
 		counts:          make(map[operator.OpKind]uint64),
-		opRecords:       NewOperatorRecords(),
+		opRecords:       NewOperatorRecords(ctx),
 		storesLimit:     make(map[uint64]*ratelimit.Bucket),
 		wop:             NewRandBuckets(),
 		wopStatus:       NewWaitingOperatorStatus(),
 		opNotifierQueue: make(operatorQueue, 0),
 	}
+}
+
+// Ctx returns a context which will be canceled once RaftCluster is stopped.
+// For now, it is only used to control the lifetime of TTL cache in schedulers.
+func (oc *OperatorController) Ctx() context.Context {
+	return oc.ctx
 }
 
 // Dispatch is used to dispatch the operator of a region.
@@ -661,9 +670,9 @@ type OperatorRecords struct {
 const operatorStatusRemainTime = 10 * time.Minute
 
 // NewOperatorRecords returns a OperatorRecords.
-func NewOperatorRecords() *OperatorRecords {
+func NewOperatorRecords(ctx context.Context) *OperatorRecords {
 	return &OperatorRecords{
-		ttl: cache.NewTTL(time.Minute, operatorStatusRemainTime),
+		ttl: cache.NewTTL(ctx, time.Minute, operatorStatusRemainTime),
 	}
 }
 

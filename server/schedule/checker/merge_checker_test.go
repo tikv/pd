@@ -14,6 +14,7 @@
 package checker
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -22,7 +23,6 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 )
@@ -34,6 +34,8 @@ func TestMergeChecker(t *testing.T) {
 var _ = Suite(&testMergeCheckerSuite{})
 
 type testMergeCheckerSuite struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
 	cluster *mockcluster.Cluster
 	mc      *MergeChecker
 	regions []*core.RegionInfo
@@ -118,8 +120,12 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	for _, region := range s.regions {
 		s.cluster.PutRegion(region)
 	}
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.mc = NewMergeChecker(s.ctx, s.cluster)
+}
 
-	s.mc = NewMergeChecker(s.cluster, namespace.DefaultClassifier)
+func (s *testMergeCheckerSuite) TearDownTest(c *C) {
+	s.cancel()
 }
 
 func (s *testMergeCheckerSuite) TestBasic(c *C) {
@@ -440,7 +446,7 @@ func (s *testMergeCheckerSuite) TestCache(c *C) {
 		s.cluster.PutRegion(region)
 	}
 
-	s.mc = NewMergeChecker(s.cluster, namespace.DefaultClassifier)
+	s.mc = NewMergeChecker(s.ctx, s.cluster)
 
 	ops := s.mc.Check(s.regions[1])
 	c.Assert(ops, IsNil)

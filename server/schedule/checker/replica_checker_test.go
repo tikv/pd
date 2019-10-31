@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 )
@@ -42,7 +41,7 @@ type testReplicaCheckerSuite struct {
 func (s *testReplicaCheckerSuite) SetUpTest(c *C) {
 	cfg := mockoption.NewScheduleOptions()
 	s.cluster = mockcluster.NewCluster(cfg)
-	s.rc = NewReplicaChecker(s.cluster, namespace.DefaultClassifier)
+	s.rc = NewReplicaChecker(s.cluster)
 	stats := &pdpb.StoreStats{
 		Capacity:  100,
 		Available: 100,

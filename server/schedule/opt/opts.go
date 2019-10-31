@@ -18,7 +18,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/statistics"
 )
 
@@ -40,6 +39,7 @@ type Options interface {
 	GetMaxMergeRegionKeys() uint64
 	GetSplitMergeInterval() time.Duration
 	IsOneWayMergeEnabled() bool
+	IsCrossTableMergeEnabled() bool
 
 	GetMaxReplicas() int
 	GetLocationLabels() []string
@@ -57,8 +57,8 @@ type Options interface {
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool
 	IsLocationReplacementEnabled() bool
-	IsNamespaceRelocationEnabled() bool
 	GetLeaderScheduleStrategy() core.ScheduleStrategy
+	GetKeyType() core.KeyType
 
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
@@ -79,8 +79,6 @@ type Cluster interface {
 	statistics.RegionStatInformer
 	Options
 
-	// get config methods
-	GetOpt() namespace.ScheduleOptions
 	// TODO: it should be removed. Schedulers don't need to know anything
 	// about peers.
 	AllocPeer(storeID uint64) (*metapb.Peer, error)

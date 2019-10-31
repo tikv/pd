@@ -24,7 +24,7 @@ type LearnerChecker struct{}
 // NewLearnerChecker creates a learner checker.
 func NewLearnerChecker() *LearnerChecker { return &LearnerChecker{} }
 
-// Check verifies a region's namespace, creating an Operator if need.
+// Check verifies a region's role, creating an Operator if need.
 func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
 	for _, p := range region.GetLearners() {
 		if region.GetPendingLearner(p.GetId()) != nil {

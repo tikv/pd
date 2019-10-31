@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package table
+package codec
 
 import (
 	"bytes"
@@ -142,7 +142,6 @@ func decodeCmpUintToInt(u uint64) int64 {
 // DecodeBytes decodes bytes which is encoded by EncodeBytes before,
 // returns the leftover bytes and decoded value if no error.
 func DecodeBytes(b []byte) ([]byte, []byte, error) {
-
 	data := make([]byte, 0, len(b))
 	for {
 		if len(b) < encGroupSize+1 {

@@ -29,8 +29,6 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"go.etcd.io/etcd/embed"
 
-	// Register namespace classifiers.
-	_ "github.com/pingcap/pd/table"
 	// Register schedulers
 	_ "github.com/pingcap/pd/server/schedulers"
 )
@@ -39,21 +37,23 @@ import (
 type CleanupFunc func()
 
 // NewTestServer creates a pd server for testing.
-func NewTestServer(c *check.C) (*config.Config, *Server, CleanupFunc, error) {
+func NewTestServer(c *check.C) (*Server, CleanupFunc, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
 	s, err := CreateServer(cfg, nil)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	if err = s.Run(context.TODO()); err != nil {
-		return nil, nil, nil, err
+	if err = s.Run(ctx); err != nil {
+		return nil, nil, err
 	}
 
 	cleanup := func() {
+		cancel()
 		s.Close()
 		testutil.CleanServer(cfg)
 	}
-	return cfg, s, cleanup, nil
+	return s, cleanup, nil
 }
 
 var zapLogOnce sync.Once

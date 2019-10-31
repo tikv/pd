@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"context"
 	"time"
 
 	"github.com/montanaflynn/stats"
@@ -145,6 +146,6 @@ const (
 
 // newTaintCache creates a TTL cache to hold stores that are not able to
 // schedule operators.
-func newTaintCache() *cache.TTLUint64 {
-	return cache.NewIDTTL(taintCacheGCInterval, taintCacheTTL)
+func newTaintCache(ctx context.Context) *cache.TTLUint64 {
+	return cache.NewIDTTL(ctx, taintCacheGCInterval, taintCacheTTL)
 }

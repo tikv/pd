@@ -22,8 +22,9 @@ import (
 
 func newMakeupDownReplicas() *Case {
 	var simCase Case
-
-	for i := 1; i <= 4; i++ {
+	storeNum, regionNum := getStoreNum(), getRegionNum()
+	noEmptyStoreNum := storeNum - 1
+	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
@@ -33,11 +34,11 @@ func newMakeupDownReplicas() *Case {
 		})
 	}
 
-	for i := 0; i < 400; i++ {
+	for i := 0; i < storeNum*regionNum/3; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i)%4 + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%4 + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%4 + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64((i)%storeNum) + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum) + 1},
+			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum) + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -48,11 +49,11 @@ func newMakeupDownReplicas() *Case {
 		})
 	}
 
-	numNodes := 4
+	numNodes := storeNum
 	down := false
 	e := &DeleteNodesDescriptor{}
 	e.Step = func(tick int64) uint64 {
-		if numNodes > 3 && tick%100 == 0 {
+		if numNodes > noEmptyStoreNum && tick%100 == 0 {
 			numNodes--
 			return uint64(1)
 		}
@@ -65,29 +66,30 @@ func newMakeupDownReplicas() *Case {
 
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		sum := 0
-		regionCounts := make([]int, 0, 3)
-		for i := 1; i <= 4; i++ {
+		regionCounts := make([]int, 0, storeNum)
+		for i := 1; i <= storeNum; i++ {
 			regionCount := regions.GetStoreRegionCount(uint64(i))
-			if i != 1 {
-				regionCounts = append(regionCounts, regionCount)
-			}
+			regionCounts = append(regionCounts, regionCount)
 			sum += regionCount
 		}
 		simutil.Logger.Info("current region counts", zap.Ints("region", regionCounts))
 
-		if down && sum < 1200 {
+		if down && sum < storeNum*regionNum {
 			// only need to print once
 			down = false
 			simutil.Logger.Error("making up replicas don't start immediately")
 			return false
 		}
 
-		for _, regionCount := range regionCounts {
-			if regionCount != 400 {
-				return false
+		res := true
+		threshold := 0.05
+		for index, regionCount := range regionCounts {
+			if index == 0 { // storeId == 1
+				continue
 			}
+			res = res && isUniform(regionCount, storeNum*regionNum/noEmptyStoreNum, threshold)
 		}
-		return true
+		return res
 	}
 	return &simCase
 }
