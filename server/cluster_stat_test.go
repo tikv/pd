@@ -112,6 +112,40 @@ func (s *testClusterStatSuite) TestStatEntriesCPU(c *C) {
 	c.Assert(entries.CPU(N), Equals, float64(40))
 }
 
+func (s *testClusterStatSuite) TestStatEntriesKeys(c *C) {
+	N := 10
+	entries := NewStatEntries(N)
+	c.Assert(entries, NotNil)
+
+	for i := 0; i < N; i++ {
+		entry := &StatEntry{
+			KeysWritten: 10,
+			KeysRead:    20,
+		}
+		entries.Append(entry)
+	}
+	read, written := entries.Keys(N)
+	c.Assert(written, Equals, int64(10))
+	c.Assert(read, Equals, int64(20))
+}
+
+func (s *testClusterStatSuite) TestStatEntriesBytes(c *C) {
+	N := 10
+	entries := NewStatEntries(N)
+	c.Assert(entries, NotNil)
+
+	for i := 0; i < N; i++ {
+		entry := &StatEntry{
+			BytesWritten: 2048,
+			BytesRead:    4096,
+		}
+		entries.Append(entry)
+	}
+	read, written := entries.Bytes(N)
+	c.Assert(written, Equals, int64(2048))
+	c.Assert(read, Equals, int64(4096))
+}
+
 func (s *testClusterStatSuite) TestClusterStatEntriesAppend(c *C) {
 	N := 10
 	cst := NewClusterStatEntries(N)
