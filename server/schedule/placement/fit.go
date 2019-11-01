@@ -27,7 +27,7 @@ type RegionFit struct {
 }
 
 // IsSatisfied returns if the rules are properly satisfied.
-// It means all Rules are fullfilled and there is no orphan peers.
+// It means all Rules are fulfilled and there is no orphan peers.
 func (f *RegionFit) IsSatisfied() bool {
 	if len(f.RuleFits) == 0 {
 		return false
