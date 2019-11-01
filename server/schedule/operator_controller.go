@@ -60,14 +60,13 @@ type HeartbeatStreams interface {
 // OperatorController is used to limit the speed of scheduling.
 type OperatorController struct {
 	sync.RWMutex
-	ctx       context.Context
-	cluster   opt.Cluster
-	operators map[uint64]*operator.Operator
-	hbStreams HeartbeatStreams
-	histories *list.List
-	counts    map[operator.OpKind]uint64
-	opRecords *OperatorRecords
-	// TODO: Need to clean up the unused store ID.
+	ctx             context.Context
+	cluster         opt.Cluster
+	operators       map[uint64]*operator.Operator
+	hbStreams       HeartbeatStreams
+	histories       *list.List
+	counts          map[operator.OpKind]uint64
+	opRecords       *OperatorRecords
 	storesLimit     map[uint64]*ratelimit.Bucket
 	wop             WaitingOperator
 	wopStatus       *WaitingOperatorStatus

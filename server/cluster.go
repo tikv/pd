@@ -830,6 +830,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 
 	// Remove an offline store should be OK, nothing to do.
 	if store.IsOffline() {
+		c.coordinator.opController.RemoveStoreLimit(store.GetID())
 		return nil
 	}
 
