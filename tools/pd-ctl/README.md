@@ -98,20 +98,21 @@ Usage:
   "replication": {
     "location-labels": "",
     "max-replicas": 3,
-    "strictly-match-label": "true"
+    "strictly-match-label": "false"
   },
   "schedule": {
-    "enable-one-way-merge": "false",
     "enable-cross-table-merge": "false",
-    "disable-location-replacement": "false",
-    "disable-make-up-replica": "false",
-    "disable-remove-down-replica": "false",
-    "disable-remove-extra-replica": "false",
-    "disable-replace-offline-replica": "false",
+    "enable-location-replacement": "true",
+    "enable-make-up-replica": "true",
+    "enable-one-way-merge": "false",
+    "enable-remove-down-replica": "true",
+    "enable-remove-extra-replica": "true",
+    "enable-replace-offline-replica": "true",
     "high-space-ratio": 0.6,
     "hot-region-cache-hits-threshold": 3,
-    "hot-region-schedule-limit": 2,
+    "hot-region-schedule-limit": 4,
     "leader-schedule-limit": 4,
+    "leader-schedule-strategy": "\"count\"",
     "low-space-ratio": 0.8,
     "max-merge-region-keys": 200000,
     "max-merge-region-size": 20,
@@ -119,29 +120,38 @@ Usage:
     "max-snapshot-count": 3,
     "max-store-down-time": "30m0s",
     "merge-schedule-limit": 8,
-    "merge-strategy": "table",
     "patrol-region-interval": "100ms",
     "region-schedule-limit": 2048,
     "replica-schedule-limit": 64,
     "scheduler-max-waiting-operator": 3,
+    "schedulers": {
+      "balance-hot-region-scheduler": "null",
+      "balance-leader-scheduler": "null",
+      "balance-region-scheduler": "null",
+      "label-scheduler": "null"
+    },
     "schedulers-v2": [
       {
         "args": null,
+        "args-payload": "",
         "disable": false,
         "type": "balance-region"
       },
       {
         "args": null,
+        "args-payload": "",
         "disable": false,
         "type": "balance-leader"
       },
       {
         "args": null,
+        "args-payload": "",
         "disable": false,
         "type": "hot-region"
       },
       {
         "args": null,
+        "args-payload": "",
         "disable": false,
         "type": "label"
       }
@@ -198,7 +208,7 @@ Usage:
     ```
 
 - `enable-cross-table-merge` controls the merge scheduler behavior. This means two Regions can be merged with different table IDs.
-This option only works when merge strategy is "table".
+This option only works when key type is "table".
 
     ```bash
     >> config set enable-cross-table-merge true  // Enable cross table merge.
@@ -264,15 +274,15 @@ This option only works when merge strategy is "table".
     config set cluster-version 1.0.8              // Set the version of the cluster to 1.0.8
     ```
 
-- `disable-remove-down-replica` is used to disable the feature of automatically deleting DownReplica. When you set it to `true`, PD does not automatically clean up the downtime replicas.
+- `enable-remove-down-replica` is used to enable the feature of automatically deleting DownReplica. When you set it to `false`, PD does not automatically clean up the downtime replicas.
 
-- `disable-replace-offline-replica` is used to disable the feature of migrating OfflineReplica. When you set it to `true`, PD does not migrate the offline replicas.
+- `enable-replace-offline-replica` is used to enable the feature of migrating OfflineReplica. When you set it to `false`, PD does not migrate the offline replicas.
 
-- `disable-make-up-replica` is used to disable the feature of making up replicas. When you set it to `true`, PD does not adding replicas for Regions without sufficient replicas.
+- `enable-make-up-replica` is used to enable the feature of making up replicas. When you set it to `false`, PD does not adding replicas for Regions without sufficient replicas.
 
-- `disable-remove-extra-replica` is used to disable the feature of removing extra replicas. When you set it to `true`, PD does not remove extra replicas for Regions with redundant replicas.
+- `enable-remove-extra-replica` is used to enable the feature of removing extra replicas. When you set it to `false`, PD does not remove extra replicas for Regions with redundant replicas.
 
-- `disable-location-replacement` is used to disable the isolation level check. When you set it to `true`, PD does not improve the isolation level of Region replicas by scheduling.
+- `enable-location-replacement` is used to enable the isolation level check. When you set it to `false`, PD does not improve the isolation level of Region replicas by scheduling.
 
 ### `health`
 
