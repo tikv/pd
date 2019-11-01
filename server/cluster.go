@@ -317,6 +317,12 @@ func (c *RaftCluster) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		return core.NewStoreNotFoundErr(storeID)
 	}
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+	if newStore.IsLowSpace(c.GetLowSpaceRatio()) {
+		log.Warn("store does not have enough disk space",
+			zap.Uint64("store-id", newStore.GetID()),
+			zap.Uint64("capacity", newStore.GetCapacity()),
+			zap.Uint64("available", newStore.GetAvailable()))
+	}
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
