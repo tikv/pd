@@ -363,7 +363,7 @@ func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, low
 	case LeaderKind:
 		return s.LeaderScore(scheduleKind.Policy, delta)
 	case RegionKind:
-		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta) //source,target
+		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
 	default:
 		return 0
 	}
