@@ -339,57 +339,62 @@ func (s *baseCluster) resetStoreState(c *C, storeID uint64, state metapb.StoreSt
 	c.Assert(err, IsNil)
 }
 
-func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Store) {
+func (s *baseCluster) testState(c *C, clusterID uint64, store *metapb.Store, beforeState metapb.StoreState, run func(*RaftCluster) error, states ...metapb.StoreState) {
 	cluster := s.getRaftCluster(c)
-
-	// When store is up:
-	{
-		// Case 1: RemoveStore should be OK;
-		s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
-		err := cluster.RemoveStore(store.GetId())
+	s.resetStoreState(c, store.GetId(), beforeState)
+	err := run(cluster)
+	if len(states) != 0 {
 		c.Assert(err, IsNil)
-		removedStore := s.getStore(c, clusterID, store.GetId())
-		c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Offline)
-		// Case 2: BuryStore w/ force should be OK;
-		s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
-		err = cluster.BuryStore(store.GetId(), true)
-		c.Assert(err, IsNil)
-		buriedStore := s.getStore(c, clusterID, store.GetId())
-		c.Assert(buriedStore.GetState(), Equals, metapb.StoreState_Tombstone)
-		// Case 3: BuryStore w/o force should fail.
-		s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
-		err = cluster.BuryStore(store.GetId(), false)
+		store := s.getStore(c, clusterID, store.GetId())
+		c.Assert(store.GetState(), Equals, states[0])
+	} else {
 		c.Assert(err, NotNil)
+	}
+}
+
+func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Store) {
+	//When store is up:
+	{
+		beforeState := metapb.StoreState_Up
+		// Case 1: RemoveStore should be OK;
+		s.testState(c, clusterID, store, beforeState, func(cluster *RaftCluster) error {
+			return cluster.RemoveStore(store.GetId())
+		}, metapb.StoreState_Offline)
+		// Case 2: BuryStore w/ force should be OK;
+		s.testState(c, clusterID, store, beforeState, func(cluster *RaftCluster) error {
+			return cluster.BuryStore(store.GetId(), true)
+		}, metapb.StoreState_Tombstone)
+		// Case 3: BuryStore w/o force should fail.
+		// Case 2: BuryStore w/ force should be OK;
+		s.testState(c, clusterID, store, beforeState, func(cluster *RaftCluster) error {
+			return cluster.BuryStore(store.GetId(), false)
+		})
 	}
 
 	// When store is offline:
 	{
+		beforeState := metapb.StoreState_Offline
 		// Case 1: RemoveStore should be OK;
-		s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
-		err := cluster.RemoveStore(store.GetId())
-		c.Assert(err, IsNil)
-		removedStore := s.getStore(c, clusterID, store.GetId())
-		c.Assert(removedStore.GetState(), Equals, metapb.StoreState_Offline)
+		s.testState(c, clusterID, store, beforeState, func(cluster *RaftCluster) error {
+			return cluster.RemoveStore(store.GetId())
+		}, metapb.StoreState_Offline)
 		// Case 2: BuryStore w/ or w/o force should be OK.
-		s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
-		err = cluster.BuryStore(store.GetId(), false)
-		c.Assert(err, IsNil)
-		buriedStore := s.getStore(c, clusterID, store.GetId())
-		c.Assert(buriedStore.GetState(), Equals, metapb.StoreState_Tombstone)
+		s.testState(c, clusterID, store, beforeState, func(cluster *RaftCluster) error {
+			return cluster.BuryStore(store.GetId(), false)
+		}, metapb.StoreState_Tombstone)
 	}
 
 	// When store is tombstone:
 	{
+		beforeState := metapb.StoreState_Tombstone
 		// Case 1: RemoveStore should should fail;
-		s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
-		err := cluster.RemoveStore(store.GetId())
-		c.Assert(err, NotNil)
+		s.testState(c, clusterID, store, beforeState, func(cluster *RaftCluster) error {
+			return cluster.RemoveStore(store.GetId())
+		})
 		// Case 2: BuryStore w/ or w/o force should be OK.
-		s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
-		err = cluster.BuryStore(store.GetId(), false)
-		c.Assert(err, IsNil)
-		buriedStore := s.getStore(c, clusterID, store.GetId())
-		c.Assert(buriedStore.GetState(), Equals, metapb.StoreState_Tombstone)
+		s.testState(c, clusterID, store, beforeState, func(cluster *RaftCluster) error {
+			return cluster.BuryStore(store.GetId(), false)
+		}, metapb.StoreState_Tombstone)
 	}
 
 	{
