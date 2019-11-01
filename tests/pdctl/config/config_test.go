@@ -41,17 +41,16 @@ func (s *configTestSuite) SetUpSuite(c *C) {
 }
 
 type testItem struct {
-	c     *C
 	name  string
 	value interface{}
 	read  func(scheduleConfig *config.ScheduleConfig) interface{}
 }
 
-func (t *testItem) judge(scheduleConfigs ...*config.ScheduleConfig) {
+func (t *testItem) judge(c *C, scheduleConfigs ...*config.ScheduleConfig) {
 	value := t.value
 	for _, scheduleConfig := range scheduleConfigs {
-		t.c.Assert(scheduleConfig, NotNil)
-		t.c.Assert(reflect.TypeOf(t.read(scheduleConfig)), Equals, reflect.TypeOf(value))
+		c.Assert(scheduleConfig, NotNil)
+		c.Assert(reflect.TypeOf(t.read(scheduleConfig)), Equals, reflect.TypeOf(value))
 	}
 }
 
@@ -143,16 +142,13 @@ func (s *configTestSuite) TestConfig(c *C) {
 
 	// test config read and write
 	testItems := []testItem{
-		{c, "leader-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		{"leader-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
 			return scheduleConfig.LeaderScheduleLimit
-		}},
-		{c, "hot-region-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
 			return scheduleConfig.HotRegionScheduleLimit
-		}},
-		{c, "hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *config.ScheduleConfig) interface{} {
 			return scheduleConfig.HotRegionCacheHitsThreshold
-		}},
-		{c, "enable-remove-down-replica", false, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"enable-remove-down-replica", false, func(scheduleConfig *config.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableRemoveDownReplica
 		}},
 	}
@@ -168,7 +164,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 		cfg = config.Config{}
 		c.Assert(json.Unmarshal(output, &cfg), IsNil)
 		//judge
-		item.judge(&cfg.Schedule, svr.GetScheduleConfig())
+		item.judge(c, &cfg.Schedule, svr.GetScheduleConfig())
 	}
 
 	// test error or deprecated config name
