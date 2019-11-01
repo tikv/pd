@@ -301,7 +301,7 @@ func (bc *BasicCluster) updateMaxScore(store *StoreInfo) {
 }
 
 func (bc *BasicCluster) calculateMaxScore(s *StoreInfo) float64 {
-	return float64(s.GetCapacity() + bc.FlexibleScore)
+	return float64(s.GetCapacity() + bc.flexibleScore)
 }
 
 // DeleteStore deletes a store.
