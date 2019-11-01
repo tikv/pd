@@ -23,7 +23,7 @@ var _ = Suite(&testBasicClusterSuite{})
 type testBasicClusterSuite struct{}
 
 func (s *testBasicClusterSuite) TestUpdateMaxScore(c *C) {
-	bc := NewBasicCluster()
+	bc := NewBasicCluster(10 * 1024 * 1024)
 	c.Assert(bc.GetStoreCount(), Equals, 0)
 	// 6 tikv store of 1t
 	num := 6
@@ -36,7 +36,7 @@ func (s *testBasicClusterSuite) TestUpdateMaxScore(c *C) {
 		})))
 	}
 	c.Assert(bc.GetStoreCount(), Equals, num)
-	maxScore := bc.GetStores()[0].CalculateMaxScore()
+	maxScore := bc.calculateMaxScore(bc.GetStores()[0])
 	for _, store := range bc.GetStores() {
 		c.Assert(store.maxScore, Equals, maxScore)
 	}

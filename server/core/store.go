@@ -413,11 +413,6 @@ func (s *StoreInfo) SetMaxScore(maxScore float64) {
 	s.maxScore = maxScore
 }
 
-// CalculateMaxScore is used to calculate max score according to capacity.
-func (s *StoreInfo) CalculateMaxScore() float64 {
-	return float64(s.GetCapacity() + 10*1024*1024)
-}
-
 var (
 	// If a store's last heartbeat is storeDisconnectDuration ago, the store will
 	// be marked as disconnected state. The value should be greater than tikv's

@@ -70,9 +70,15 @@ region-schedule-limit = 2048
 replica-schedule-limit = 64
 merge-schedule-limit = 8
 hot-region-schedule-limit = 4
+
 ## There are some policies supported: ["count", "size"], default: "count"
 # leader-schedule-policy = "count"
-## When the score difference between the leader or Region of the two stores is 
+
+## When add new store, get the maximum capacity in the cluster, and then let max_score = max_capacity + flexible_score.
+## If capacity of the new store is lower than max_score, it will not be adjusted.
+## Otherwise, we will set the max_score of all the store to the new one.
+# flexible-score = 10485760
+## When the score difference between the leader or Region of the two stores is
 ## less than specified multiple times of the Region size, it is considered in balance by PD.
 ## If it equals 0.0, PD will automatically adjust it.
 # tolerant-size-ratio = 0.0

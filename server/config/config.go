@@ -507,6 +507,8 @@ type ScheduleConfig struct {
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
 	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
 	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
+	// FlexibleScore is the option to set max score.
+	FlexibleScore uint64 `toml:"flexible-score" json:"flexible-score"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -656,6 +658,7 @@ const (
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
+	defaultFlexibleScore               = 10 * 1024 * 1024
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -703,6 +706,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("store-limit-mode") {
 		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
+	}
+	if !meta.IsDefined("flexible-score") {
+		adjustUint64(&c.FlexibleScore, defaultFlexibleScore)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)

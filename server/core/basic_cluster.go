@@ -25,15 +25,17 @@ import (
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
 	sync.RWMutex
-	Stores  *StoresInfo
-	Regions *RegionsInfo
+	Stores        *StoresInfo
+	Regions       *RegionsInfo
+	FlexibleScore uint64
 }
 
 // NewBasicCluster creates a BasicCluster.
-func NewBasicCluster() *BasicCluster {
+func NewBasicCluster(FlexibleScore uint64) *BasicCluster {
 	return &BasicCluster{
-		Stores:  NewStoresInfo(),
-		Regions: NewRegionsInfo(),
+		Stores:        NewStoresInfo(),
+		Regions:       NewRegionsInfo(),
+		FlexibleScore: FlexibleScore,
 	}
 }
 
@@ -274,7 +276,7 @@ func (bc *BasicCluster) PutStore(store *StoreInfo) {
 func (bc *BasicCluster) updateMaxScore(store *StoreInfo) {
 	stores := bc.GetStores()
 	if len(stores) == 0 {
-		store.SetMaxScore(store.CalculateMaxScore())
+		store.SetMaxScore(bc.calculateMaxScore(store))
 		return
 	}
 	currentMaxScore := float64(0)
@@ -284,7 +286,7 @@ func (bc *BasicCluster) updateMaxScore(store *StoreInfo) {
 		}
 	}
 	if float64(store.GetCapacity()) > currentMaxScore {
-		newMaxScore := store.CalculateMaxScore()
+		newMaxScore := bc.calculateMaxScore(store)
 		store.SetMaxScore(newMaxScore)
 		for _, store := range stores {
 			store.SetMaxScore(newMaxScore)
@@ -292,6 +294,10 @@ func (bc *BasicCluster) updateMaxScore(store *StoreInfo) {
 	} else {
 		store.SetMaxScore(currentMaxScore)
 	}
+}
+
+func (bc *BasicCluster) calculateMaxScore(s *StoreInfo) float64 {
+	return float64(s.GetCapacity() + bc.FlexibleScore)
 }
 
 // DeleteStore deletes a store.
