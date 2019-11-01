@@ -786,8 +786,11 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 
 func (s *testRegionsInfoSuite) Test(c *C) {
 	n, np := uint64(10), uint64(3)
-	cache := core.NewRegionsInfo()
 	regions := newTestRegions(n, np)
+	_, opts, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := createTestRaftCluster(mockid.NewIDAllocator(), opts, core.NewStorage(kv.NewMemoryKV()))
+	cache := cluster.core.Regions
 
 	for i := uint64(0); i < n; i++ {
 		region := regions[i]
@@ -830,10 +833,10 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := cache.RandLeaderRegion(i, core.HealthRegion())
+		region := cluster.RandLeaderRegion(i, core.HealthRegion())
 		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
 
-		region = cache.RandFollowerRegion(i, core.HealthRegion())
+		region = cluster.RandFollowerRegion(i, core.HealthRegion())
 		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -849,14 +852,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := cache.RandLeaderRegion(i, core.HealthRegion())
+			region := cluster.RandLeaderRegion(i, core.HealthRegion())
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		c.Assert(cache.RandLeaderRegion(i, core.HealthRegion()), IsNil)
+		c.Assert(cluster.RandLeaderRegion(i, core.HealthRegion()), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(cache.RandFollowerRegion(i, core.HealthRegion()), IsNil)
+		c.Assert(cluster.RandFollowerRegion(i, core.HealthRegion()), IsNil)
 	}
 }
 
