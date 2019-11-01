@@ -41,7 +41,6 @@ type StoreInfo struct {
 	lastHeartbeatTS  time.Time
 	leaderWeight     float64
 	regionWeight     float64
-	overloaded       func() bool
 	maxScore         float64
 	available        func() bool
 }
