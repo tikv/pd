@@ -842,7 +842,11 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", newStore.GetID()),
 		zap.String("store-address", newStore.GetAddress()))
-	return c.putStoreLocked(newStore)
+	err := c.putStoreLocked(newStore)
+	if err == nil {
+		c.coordinator.opController.RemoveStoreLimit(store.GetID())
+	}
+	return err
 }
 
 // BuryStore marks a store as tombstone in cluster.
