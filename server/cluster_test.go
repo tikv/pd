@@ -353,9 +353,8 @@ func (s *baseCluster) testState(c *C, clusterID uint64, store *metapb.Store, bef
 }
 
 func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Store) {
-	//When store is up:
 	{
-		beforeState := metapb.StoreState_Up
+		beforeState := metapb.StoreState_Up // When store is up
 		// Case 1: RemoveStore should be OK;
 		s.testState(c, clusterID, store, beforeState, func(cluster *RaftCluster) error {
 			return cluster.RemoveStore(store.GetId())
@@ -370,10 +369,8 @@ func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Stor
 			return cluster.BuryStore(store.GetId(), false)
 		})
 	}
-
-	// When store is offline:
 	{
-		beforeState := metapb.StoreState_Offline
+		beforeState := metapb.StoreState_Offline // When store is offline
 		// Case 1: RemoveStore should be OK;
 		s.testState(c, clusterID, store, beforeState, func(cluster *RaftCluster) error {
 			return cluster.RemoveStore(store.GetId())
@@ -383,10 +380,8 @@ func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Stor
 			return cluster.BuryStore(store.GetId(), false)
 		}, metapb.StoreState_Tombstone)
 	}
-
-	// When store is tombstone:
 	{
-		beforeState := metapb.StoreState_Tombstone
+		beforeState := metapb.StoreState_Tombstone // When store is tombstone
 		// Case 1: RemoveStore should should fail;
 		s.testState(c, clusterID, store, beforeState, func(cluster *RaftCluster) error {
 			return cluster.RemoveStore(store.GetId())
@@ -396,7 +391,6 @@ func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Stor
 			return cluster.BuryStore(store.GetId(), false)
 		}, metapb.StoreState_Tombstone)
 	}
-
 	{
 		// Put after removed should return tombstone error.
 		resp, err := putStore(c, s.grpcPDClient, clusterID, store)
