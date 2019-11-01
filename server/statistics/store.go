@@ -61,27 +61,27 @@ func (s *StoresStats) GetRollingStoreStats(storeID uint64) *RollingStoreStats {
 	return s.rollingStoresStats[storeID]
 }
 
+// GetOrCreateRollingStoreStats gets or creates RollingStoreStats with a given store ID.
+func (s *StoresStats) GetOrCreateRollingStoreStats(storeID uint64) *RollingStoreStats {
+	s.Lock()
+	defer s.Unlock()
+	ret, ok := s.rollingStoresStats[storeID]
+	if !ok {
+		ret = newRollingStoreStats()
+		s.rollingStoresStats[storeID] = ret
+	}
+	return ret
+}
+
 // Observe records the current store status with a given store.
 func (s *StoresStats) Observe(storeID uint64, stats *pdpb.StoreStats) {
-	s.Lock()
-	store, ok := s.rollingStoresStats[storeID]
-	if !ok {
-		store = newRollingStoreStats()
-		s.rollingStoresStats[storeID] = store
-	}
-	s.Unlock()
+	store := s.GetOrCreateRollingStoreStats(storeID)
 	store.Observe(stats)
 }
 
 // Set sets the store statistics (for test).
 func (s *StoresStats) Set(storeID uint64, stats *pdpb.StoreStats) {
-	s.Lock()
-	store, ok := s.rollingStoresStats[storeID]
-	if !ok {
-		store = newRollingStoreStats()
-		s.rollingStoresStats[storeID] = store
-	}
-	s.Unlock()
+	store := s.GetOrCreateRollingStoreStats(storeID)
 	store.Set(stats)
 }
 
