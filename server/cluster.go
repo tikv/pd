@@ -317,6 +317,12 @@ func (c *RaftCluster) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		return core.NewStoreNotFoundErr(storeID)
 	}
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+	if newStore.IsLowSpace(c.GetLowSpaceRatio()) {
+		log.Warn("store does not have enough disk space",
+			zap.Uint64("store-id", newStore.GetID()),
+			zap.Uint64("capacity", newStore.GetCapacity()),
+			zap.Uint64("available", newStore.GetAvailable()))
+	}
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
@@ -631,6 +637,11 @@ func (c *RaftCluster) RandFollowerRegion(storeID uint64, opts ...core.RegionOpti
 // RandPendingRegion returns a random region that has a pending peer on the store.
 func (c *RaftCluster) RandPendingRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
 	return c.core.RandPendingRegion(storeID, opts...)
+}
+
+// RandLearnerRegion returns a random region that has a learner peer on the store.
+func (c *RaftCluster) RandLearnerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
+	return c.core.RandLearnerRegion(storeID, opts...)
 }
 
 // RandHotRegionFromStore randomly picks a hot region in specified store.
