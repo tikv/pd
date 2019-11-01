@@ -27,15 +27,19 @@ type BasicCluster struct {
 	sync.RWMutex
 	Stores        *StoresInfo
 	Regions       *RegionsInfo
-	FlexibleScore uint64
+	flexibleScore uint64
 }
 
 // NewBasicCluster creates a BasicCluster.
-func NewBasicCluster(FlexibleScore uint64) *BasicCluster {
+func NewBasicCluster(flexibleScores ...uint64) *BasicCluster {
+	flexibleScore := uint64(10 * 1024 * 1024)
+	if len(flexibleScores) != 0 {
+		flexibleScore = flexibleScores[0]
+	}
 	return &BasicCluster{
 		Stores:        NewStoresInfo(),
 		Regions:       NewRegionsInfo(),
-		FlexibleScore: FlexibleScore,
+		flexibleScore: flexibleScore,
 	}
 }
 
