@@ -106,7 +106,7 @@ func (h *trendHandler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *trendHandler) getTrendStores() ([]trendStore, error) {
-	var readStats, writeStats statistics.StoreHotRegionsStat
+	var readStats, writeStats statistics.StoreHotPeersStat
 	if hotRead := h.GetHotReadRegions(); hotRead != nil {
 		readStats = hotRead.AsLeader
 	}
@@ -140,13 +140,13 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	return trendStores, nil
 }
 
-func (h *trendHandler) getStoreFlow(stats statistics.StoreHotRegionsStat, storeID uint64) (storeFlow float64, regionFlows []float64) {
+func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, storeID uint64) (storeFlow float64, regionFlows []float64) {
 	if stats == nil {
 		return
 	}
 	if stat, ok := stats[storeID]; ok {
 		storeFlow = stat.TotalBytesRate
-		for _, flow := range stat.RegionsStat {
+		for _, flow := range stat.Stats {
 			regionFlows = append(regionFlows, flow.GetBytesRate())
 		}
 	}

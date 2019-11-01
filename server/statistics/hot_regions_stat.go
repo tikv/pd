@@ -13,10 +13,10 @@
 
 package statistics
 
-// HotRegionsStat records all hot regions statistics
-type HotRegionsStat struct {
+// HotPeersStat records all hot regions statistics
+type HotPeersStat struct {
 	StoreBytesRate float64       `json:"-"`
 	TotalBytesRate float64       `json:"total_flow_bytes"`
-	RegionsCount   int           `json:"regions_count"`
-	RegionsStat    []HotPeerStat `json:"statistics"`
+	Count          int           `json:"regions_count"`
+	Stats          []HotPeerStat `json:"statistics"`
 }

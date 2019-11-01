@@ -119,13 +119,13 @@ func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster opt.Cluste
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeStats statistics.StoreHotRegionsStat) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeStats statistics.StoreHotPeersStat) []*operator.Operator {
 	for _, stats := range storeStats {
-		if len(stats.RegionsStat) < 1 {
+		if len(stats.Stats) < 1 {
 			continue
 		}
-		i := s.r.Intn(len(stats.RegionsStat))
-		r := stats.RegionsStat[i]
+		i := s.r.Intn(len(stats.Stats))
+		r := stats.Stats[i]
 		// select src region
 		srcRegion := cluster.GetRegion(r.RegionID)
 		if srcRegion == nil || len(srcRegion.GetDownPeers()) != 0 || len(srcRegion.GetPendingPeers()) != 0 {
