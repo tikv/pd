@@ -490,6 +490,8 @@ type ScheduleConfig struct {
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
 	// LeaderScheduleStrategy is the option to balance leader, there are some strategics supported: ["count", "size"], default: "count"
 	LeaderScheduleStrategy string `toml:"leader-schedule-strategy,omitempty" json:"leader-schedule-strategy,string"`
+	// FlexibleScore is the option to set max score.
+	FlexibleScore uint64 `toml:"flexible-score,omitempty" json:"flexible-score"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -625,6 +627,7 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultLeaderScheduleStrategy      = "count"
+	defaultFlexibleScore               = 10 * 1024 * 1024
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -669,6 +672,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("leader-schedule-strategy") {
 		adjustString(&c.LeaderScheduleStrategy, defaultLeaderScheduleStrategy)
+	}
+	if !meta.IsDefined("flexible-score") {
+		adjustUint64(&c.FlexibleScore, defaultFlexibleScore)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)

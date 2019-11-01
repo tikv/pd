@@ -193,6 +193,11 @@ func (o *ScheduleOption) GetLeaderScheduleStrategy() core.ScheduleStrategy {
 	return core.StringToScheduleStrategy(o.Load().LeaderScheduleStrategy)
 }
 
+// GetFlexibleScore is to get flexible to calculate max score.
+func (o *ScheduleOption) GetFlexibleScore() uint64 {
+	return o.Load().FlexibleScore
+}
+
 // GetKeyType is to get key type.
 func (o *ScheduleOption) GetKeyType() core.KeyType {
 	return core.StringToKeyType(o.LoadPDServerConfig().KeyType)

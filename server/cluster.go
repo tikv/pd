@@ -143,7 +143,7 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 func (c *RaftCluster) initCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage) {
-	c.core = core.NewBasicCluster()
+	c.core = core.NewBasicCluster(opt.GetFlexibleScore())
 	c.opt = opt
 	c.storage = storage
 	c.id = id
