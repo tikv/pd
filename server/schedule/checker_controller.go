@@ -17,7 +17,6 @@ import (
 	"context"
 
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
@@ -25,24 +24,22 @@ import (
 
 // CheckerController is used to manage all checkers.
 type CheckerController struct {
-	cluster          opt.Cluster
-	opController     *OperatorController
-	learnerChecker   *checker.LearnerChecker
-	replicaChecker   *checker.ReplicaChecker
-	namespaceChecker *checker.NamespaceChecker
-	mergeChecker     *checker.MergeChecker
+	cluster        opt.Cluster
+	opController   *OperatorController
+	learnerChecker *checker.LearnerChecker
+	replicaChecker *checker.ReplicaChecker
+	mergeChecker   *checker.MergeChecker
 }
 
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
-func NewCheckerController(ctx context.Context, cluster opt.Cluster, classifier namespace.Classifier, opController *OperatorController) *CheckerController {
+func NewCheckerController(ctx context.Context, cluster opt.Cluster, opController *OperatorController) *CheckerController {
 	return &CheckerController{
-		cluster:          cluster,
-		opController:     opController,
-		learnerChecker:   checker.NewLearnerChecker(),
-		replicaChecker:   checker.NewReplicaChecker(cluster, classifier),
-		namespaceChecker: checker.NewNamespaceChecker(cluster, classifier),
-		mergeChecker:     checker.NewMergeChecker(ctx, cluster, classifier),
+		cluster:        cluster,
+		opController:   opController,
+		learnerChecker: checker.NewLearnerChecker(),
+		replicaChecker: checker.NewReplicaChecker(cluster),
+		mergeChecker:   checker.NewMergeChecker(ctx, cluster),
 	}
 }
 
@@ -55,16 +52,6 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 	if op := c.learnerChecker.Check(region); op != nil {
 		return false, []*operator.Operator{op}
 	}
-
-	if opController.OperatorCount(operator.OpLeader) < c.cluster.GetLeaderScheduleLimit() &&
-		opController.OperatorCount(operator.OpRegion) < c.cluster.GetRegionScheduleLimit() &&
-		opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-		checkerIsBusy = false
-		if op := c.namespaceChecker.Check(region); op != nil {
-			return checkerIsBusy, []*operator.Operator{op}
-		}
-	}
-
 	if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 		checkerIsBusy = false
 		if op := c.replicaChecker.Check(region); op != nil {

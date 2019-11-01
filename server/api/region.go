@@ -249,17 +249,6 @@ func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Reque
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
-func (h *regionsHandler) GetIncorrectNamespaceRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetIncorrectNamespaceRegions()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
-}
-
 func (h *regionsHandler) GetOfflinePeer(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	regions, err := handler.GetOfflinePeer()

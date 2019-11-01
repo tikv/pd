@@ -40,7 +40,6 @@ import (
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/member"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/tso"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
@@ -93,8 +92,6 @@ type Server struct {
 	storage *core.Storage
 	// for tso.
 	tso *tso.TimestampOracle
-	// for namespace.
-	classifier namespace.Classifier
 	// for raft cluster
 	cluster *RaftCluster
 	// For async region heartbeat.
@@ -237,9 +234,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.cluster = newRaftCluster(ctx, s, s.clusterID)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
-	if s.classifier, err = namespace.CreateClassifier(s.cfg.NamespaceClassifier, s.storage, s.idAllocator); err != nil {
-		return err
-	}
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
 	return nil
@@ -501,19 +495,11 @@ func (s *Server) ClusterID() uint64 {
 	return s.clusterID
 }
 
-// GetClassifier returns the classifier of this server.
-func (s *Server) GetClassifier() namespace.Classifier {
-	return s.classifier
-}
-
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
 	cfg.Schedule = *s.scheduleOpt.Load()
 	cfg.Replication = *s.scheduleOpt.GetReplication().Load()
-	namespaces := s.scheduleOpt.LoadNSConfig()
-
-	cfg.Namespace = namespaces
 	cfg.LabelProperty = s.scheduleOpt.LoadLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.scheduleOpt.LoadClusterVersion()
 	cfg.PDServerCfg = *s.scheduleOpt.LoadPDServerConfig()
@@ -604,78 +590,6 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 	return nil
 }
 
-// GetNamespaceConfig get the namespace config.
-func (s *Server) GetNamespaceConfig(name string) *config.NamespaceConfig {
-	if _, ok := s.scheduleOpt.GetNS(name); !ok {
-		return &config.NamespaceConfig{}
-	}
-
-	cfg := &config.NamespaceConfig{
-		LeaderScheduleLimit:    s.scheduleOpt.GetLeaderScheduleLimit(name),
-		RegionScheduleLimit:    s.scheduleOpt.GetRegionScheduleLimit(name),
-		ReplicaScheduleLimit:   s.scheduleOpt.GetReplicaScheduleLimit(name),
-		HotRegionScheduleLimit: s.scheduleOpt.GetHotRegionScheduleLimit(name),
-		MergeScheduleLimit:     s.scheduleOpt.GetMergeScheduleLimit(name),
-		MaxReplicas:            uint64(s.scheduleOpt.GetMaxReplicas(name)),
-	}
-
-	return cfg
-}
-
-// GetNamespaceConfigWithAdjust get the namespace config that replace zero value with global config value.
-func (s *Server) GetNamespaceConfigWithAdjust(name string) *config.NamespaceConfig {
-	cfg := s.GetNamespaceConfig(name)
-	cfg.Adjust(s.scheduleOpt)
-	return cfg
-}
-
-// SetNamespaceConfig sets the namespace config.
-func (s *Server) SetNamespaceConfig(name string, cfg config.NamespaceConfig) error {
-	if n, ok := s.scheduleOpt.GetNS(name); ok {
-		old := n.Load()
-		n.Store(&cfg)
-		if err := s.scheduleOpt.Persist(s.storage); err != nil {
-			s.scheduleOpt.SetNS(name, config.NewNamespaceOption(old))
-			log.Error("failed to update namespace config",
-				zap.String("name", name),
-				zap.Reflect("new", cfg),
-				zap.Reflect("old", old),
-				zap.Error(err))
-			return err
-		}
-		log.Info("namespace config is updated", zap.String("name", name), zap.Reflect("new", cfg), zap.Reflect("old", old))
-	} else {
-		s.scheduleOpt.SetNS(name, config.NewNamespaceOption(&cfg))
-		if err := s.scheduleOpt.Persist(s.storage); err != nil {
-			s.scheduleOpt.DeleteNS(name)
-			log.Error("failed to add namespace config",
-				zap.String("name", name),
-				zap.Reflect("new", cfg),
-				zap.Error(err))
-			return err
-		}
-		log.Info("namespace config is added", zap.String("name", name), zap.Reflect("new", cfg))
-	}
-	return nil
-}
-
-// DeleteNamespaceConfig deletes the namespace config.
-func (s *Server) DeleteNamespaceConfig(name string) error {
-	if n, ok := s.scheduleOpt.GetNS(name); ok {
-		cfg := n.Load()
-		s.scheduleOpt.DeleteNS(name)
-		if err := s.scheduleOpt.Persist(s.storage); err != nil {
-			s.scheduleOpt.SetNS(name, config.NewNamespaceOption(cfg))
-			log.Error("failed to delete namespace config",
-				zap.String("name", name),
-				zap.Error(err))
-			return err
-		}
-		log.Info("namespace config is deleted", zap.String("name", name), zap.Reflect("config", *cfg))
-	}
-	return nil
-}
-
 // SetLabelProperty inserts a label property config.
 func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
@@ -746,11 +660,6 @@ func (s *Server) GetClusterVersion() semver.Version {
 // GetSecurityConfig get the security config.
 func (s *Server) GetSecurityConfig() *config.SecurityConfig {
 	return &s.cfg.Security
-}
-
-// IsNamespaceExist returns whether the namespace exists.
-func (s *Server) IsNamespaceExist(name string) bool {
-	return s.classifier.IsNamespaceExist(name)
 }
 
 func (s *Server) getClusterRootPath() string {

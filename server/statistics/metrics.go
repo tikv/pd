@@ -30,7 +30,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "store_status",
 			Help:      "Store status for schedule",
-		}, []string{"namespace", "address", "store", "type"})
+		}, []string{"address", "store", "type"})
 
 	regionStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -46,7 +46,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "status",
 			Help:      "Status of the cluster.",
-		}, []string{"type", "namespace"})
+		}, []string{"type"})
 
 	placementStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -54,7 +54,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "placement_status",
 			Help:      "Status of the cluster placement.",
-		}, []string{"type", "name", "namespace"})
+		}, []string{"type", "name"})
 
 	configStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -62,7 +62,7 @@ var (
 			Subsystem: "config",
 			Name:      "status",
 			Help:      "Status of the scheduling configurations.",
-		}, []string{"type", "namespace"})
+		}, []string{"type"})
 
 	regionLabelLevelGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

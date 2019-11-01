@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pkg/errors"
@@ -655,12 +654,10 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	scheduleCfg.MaxSnapshotCount = 10
 	pdServerCfg.UseRegionStorage = true
 	typ, labelKey, labelValue := "testTyp", "testKey", "testValue"
-	nsConfig := config.NamespaceConfig{LeaderScheduleLimit: uint64(200)}
 
 	c.Assert(s.svr.SetScheduleConfig(*scheduleCfg), IsNil)
 	c.Assert(s.svr.SetPDServerConfig(*pdServerCfg), IsNil)
 	c.Assert(s.svr.SetLabelProperty(typ, labelKey, labelValue), IsNil)
-	c.Assert(s.svr.SetNamespaceConfig("testNS", nsConfig), IsNil)
 	c.Assert(s.svr.SetReplicationConfig(*replicateCfg), IsNil)
 
 	c.Assert(s.svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
@@ -668,12 +665,9 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(s.svr.scheduleOpt.LoadPDServerConfig().UseRegionStorage, Equals, true)
 	c.Assert(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
 	c.Assert(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
-	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(200))
 
-	c.Assert(s.svr.DeleteNamespaceConfig("testNS"), IsNil)
 	c.Assert(s.svr.DeleteLabelProperty(typ, labelKey, labelValue), IsNil)
 
-	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(0))
 	c.Assert(len(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ]), Equals, 0)
 
 	//PUT GET failed
@@ -687,25 +681,19 @@ func (s *testClusterSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(s.svr.SetReplicationConfig(*replicateCfg), NotNil)
 	c.Assert(s.svr.SetPDServerConfig(*pdServerCfg), NotNil)
 	c.Assert(s.svr.SetLabelProperty(typ, labelKey, labelValue), NotNil)
-	c.Assert(s.svr.SetNamespaceConfig("testNS", nsConfig), NotNil)
 
 	c.Assert(s.svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
 	c.Assert(s.svr.scheduleOpt.GetMaxSnapshotCount(), Equals, uint64(10))
 	c.Assert(s.svr.scheduleOpt.LoadPDServerConfig().UseRegionStorage, Equals, true)
-	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(0))
 	c.Assert(len(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ]), Equals, 0)
 
 	//DELETE failed
 	s.svr.storage = oldStorage
-	c.Assert(s.svr.SetNamespaceConfig("testNS", nsConfig), IsNil)
 	c.Assert(s.svr.SetReplicationConfig(*replicateCfg), IsNil)
 
 	s.svr.storage = core.NewStorage(&testErrorKV{})
 	c.Assert(s.svr.DeleteLabelProperty(typ, labelKey, labelValue), NotNil)
-	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(200))
-	c.Assert(s.svr.DeleteNamespaceConfig("testNS"), NotNil)
 
-	c.Assert(s.svr.GetNamespaceConfig("testNS").LeaderScheduleLimit, Equals, uint64(200))
 	c.Assert(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
 	c.Assert(s.svr.scheduleOpt.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
 }
@@ -798,8 +786,11 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 
 func (s *testRegionsInfoSuite) Test(c *C) {
 	n, np := uint64(10), uint64(3)
-	cache := core.NewRegionsInfo()
 	regions := newTestRegions(n, np)
+	_, opts, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := createTestRaftCluster(mockid.NewIDAllocator(), opts, core.NewStorage(kv.NewMemoryKV()))
+	cache := cluster.core.Regions
 
 	for i := uint64(0); i < n; i++ {
 		region := regions[i]
@@ -842,10 +833,10 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := cache.RandLeaderRegion(i, core.HealthRegion())
+		region := cluster.RandLeaderRegion(i, core.HealthRegion())
 		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
 
-		region = cache.RandFollowerRegion(i, core.HealthRegion())
+		region = cluster.RandFollowerRegion(i, core.HealthRegion())
 		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -861,14 +852,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := cache.RandLeaderRegion(i, core.HealthRegion())
+			region := cluster.RandLeaderRegion(i, core.HealthRegion())
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		c.Assert(cache.RandLeaderRegion(i, core.HealthRegion()), IsNil)
+		c.Assert(cluster.RandLeaderRegion(i, core.HealthRegion()), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(cache.RandFollowerRegion(i, core.HealthRegion()), IsNil)
+		c.Assert(cluster.RandFollowerRegion(i, core.HealthRegion()), IsNil)
 	}
 }
 

@@ -29,8 +29,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
@@ -85,8 +83,6 @@ type Config struct {
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
-	Namespace map[string]NamespaceConfig `json:"namespace"`
-
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
 	ClusterVersion semver.Version `json:"cluster-version"`
@@ -122,10 +118,6 @@ type Config struct {
 
 	// For all warnings during parsing.
 	WarningMsgs []string
-
-	// NamespaceClassifier is for classifying stores/regions into different
-	// namespaces.
-	NamespaceClassifier string `toml:"namespace-classifier" json:"namespace-classifier"`
 
 	// Only test can change them.
 	nextRetryDelay             time.Duration
@@ -165,14 +157,11 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
-	fs.StringVar(&cfg.NamespaceClassifier, "namespace-classifier", "table", "namespace classifier (default 'table')")
 
 	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "Path of file that contains list of trusted TLS CAs")
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
-
-	cfg.Namespace = make(map[string]NamespaceConfig)
 
 	return cfg
 }
@@ -202,8 +191,10 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage    = true
-	defaultMaxResetTsGap       = 24 * time.Hour
+	defaultUseRegionStorage = true
+	defaultMaxResetTsGap    = 24 * time.Hour
+	defaultKeyType          = "table"
+
 	defaultStrictlyMatchLabel  = false
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
@@ -418,8 +409,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
-	adjustString(&c.NamespaceClassifier, "table")
-
 	adjustString(&c.Metric.PushJob, c.Name)
 
 	if err := c.Schedule.adjust(configMetaData.Child("schedule")); err != nil {
@@ -489,6 +478,9 @@ type ScheduleConfig struct {
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge,omitempty" json:"enable-one-way-merge,string"`
+	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
+	// This option only works when key type is "table".
+	EnableCrossTableMerge bool `toml:"enable-cross-table-merge,omitempty" json:"enable-cross-table-merge,string"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
 	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
 	// MaxStoreDownTime is the max duration after which
@@ -530,26 +522,38 @@ type ScheduleConfig struct {
 	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator,omitempty" json:"scheduler-max-waiting-operator"`
 	// WARN: DisableLearner is deprecated.
 	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
-	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string"`
+	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
 	// DisableRemoveDownReplica is the option to prevent replica checker from
 	// removing down replicas.
-	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string"`
+	// WARN: DisableRemoveDownReplica is deprecated.
+	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string,omitempty"`
 	// DisableReplaceOfflineReplica is the option to prevent replica checker from
 	// replacing offline replicas.
-	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string"`
+	// WARN: DisableReplaceOfflineReplica is deprecated.
+	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string,omitempty"`
 	// DisableMakeUpReplica is the option to prevent replica checker from making up
 	// replicas when replica count is less than expected.
-	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string"`
+	// WARN: DisableMakeUpReplica is deprecated.
+	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string,omitempty"`
 	// DisableRemoveExtraReplica is the option to prevent replica checker from
 	// removing extra replicas.
-	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string"`
+	// WARN: DisableRemoveExtraReplica is deprecated.
+	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string,omitempty"`
 	// DisableLocationReplacement is the option to prevent replica checker from
 	// moving replica to a better location.
-	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string"`
-	// DisableNamespaceRelocation is the option to prevent namespace checker
-	// from moving replica to the target namespace.
-	DisableNamespaceRelocation bool `toml:"disable-namespace-relocation" json:"disable-namespace-relocation,string"`
+	// WARN: DisableLocationReplacement is deprecated.
+	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string,omitempty"`
 
+	// EnableRemoveDownReplica is the option to enable replica checker to remove down replica.
+	EnableRemoveDownReplica bool `toml:"enable-remove-down-replica" json:"enable-remove-down-replica,string"`
+	// EnableReplaceOfflineReplica is the option to enable replica checker to replace offline replica.
+	EnableReplaceOfflineReplica bool `toml:"enable-replace-offline-replica" json:"enable-replace-offline-replica,string"`
+	// EnableMakeUpReplica is the option to enable replica checker to make up replica.
+	EnableMakeUpReplica bool `toml:"enable-make-up-replica" json:"enable-make-up-replica,string"`
+	// EnableRemoveExtraReplica is the option to enable replica checker to remove extra replica.
+	EnableRemoveExtraReplica bool `toml:"enable-remove-extra-replica" json:"enable-remove-extra-replica,string"`
+	// EnableLocationReplacement is the option to enable replica checker to move replica to a better location.
+	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
@@ -575,6 +579,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
 		EnableOneWayMerge:            c.EnableOneWayMerge,
+		EnableCrossTableMerge:        c.EnableCrossTableMerge,
 		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
 		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
 		StoreBalanceRate:             c.StoreBalanceRate,
@@ -588,7 +593,11 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		DisableMakeUpReplica:         c.DisableMakeUpReplica,
 		DisableRemoveExtraReplica:    c.DisableRemoveExtraReplica,
 		DisableLocationReplacement:   c.DisableLocationReplacement,
-		DisableNamespaceRelocation:   c.DisableNamespaceRelocation,
+		EnableRemoveDownReplica:      c.EnableRemoveDownReplica,
+		EnableReplaceOfflineReplica:  c.EnableReplaceOfflineReplica,
+		EnableMakeUpReplica:          c.EnableMakeUpReplica,
+		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
+		EnableLocationReplacement:    c.EnableLocationReplacement,
 		Schedulers:                   schedulers,
 	}
 }
@@ -666,7 +675,56 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
 
+	for k, b := range c.migrateConfigurationMap() {
+		v, err := c.parseDeprecatedFlag(meta, k, *b[0], *b[1])
+		if err != nil {
+			return err
+		}
+		*b[0], *b[1] = false, v // reset old flag false to make it ignored when marshal to JSON
+	}
+
 	return c.Validate()
+}
+
+func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
+	return map[string][2]*bool{
+		"remove-down-replica":     {&c.DisableRemoveDownReplica, &c.EnableRemoveDownReplica},
+		"replace-offline-replica": {&c.DisableReplaceOfflineReplica, &c.EnableReplaceOfflineReplica},
+		"make-up-replica":         {&c.DisableMakeUpReplica, &c.EnableMakeUpReplica},
+		"remove-extra-replica":    {&c.DisableRemoveExtraReplica, &c.EnableRemoveExtraReplica},
+		"location-replacement":    {&c.DisableLocationReplacement, &c.EnableLocationReplacement},
+	}
+}
+
+// revive:disable-next-line:flag-parameter
+func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new bool) (bool, error) {
+	oldName, newName := "disable-"+name, "enable-"+name
+	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
+	switch {
+	case defineNew && defineOld:
+		if new == old {
+			return false, errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
+		}
+		return new, nil
+	case defineNew && !defineOld:
+		return new, nil
+	case !defineNew && defineOld:
+		return !old, nil // use !disable-*
+	case !defineNew && !defineOld:
+		return true, nil // use default value true
+	}
+	return false, nil // unreachable.
+}
+
+// MigrateDeprecatedFlags updates new flags according to deprecated flags.
+func (c *ScheduleConfig) MigrateDeprecatedFlags() {
+	c.DisableLearner = false
+	for _, b := range c.migrateConfigurationMap() {
+		// If old=false (previously disabled), set both old and new to false.
+		if *b[0] {
+			*b[0], *b[1] = false, false
+		}
+	}
 }
 
 // Validate is used to validate if some scheduling configurations are right.
@@ -695,6 +753,21 @@ func (c *ScheduleConfig) Validate() error {
 func (c *ScheduleConfig) Deprecated() error {
 	if c.DisableLearner {
 		return errors.New("disable-raft-learner has already been deprecated")
+	}
+	if c.DisableRemoveDownReplica {
+		return errors.New("disable-remove-down-replica has already been deprecated")
+	}
+	if c.DisableReplaceOfflineReplica {
+		return errors.New("disable-replace-offline-replica has already been deprecated")
+	}
+	if c.DisableMakeUpReplica {
+		return errors.New("disable-make-up-replica has already been deprecated")
+	}
+	if c.DisableRemoveExtraReplica {
+		return errors.New("disable-remove-extra-replica has already been deprecated")
+	}
+	if c.DisableLocationReplacement {
+		return errors.New("disable-location-replacement has already been deprecated")
 	}
 	return nil
 }
@@ -725,11 +798,6 @@ func IsDefaultScheduler(typ string) bool {
 		}
 	}
 	return false
-}
-
-// GetLeaderScheduleStrategy is to get leader schedule strategy
-func (c *ScheduleConfig) GetLeaderScheduleStrategy() core.ScheduleStrategy {
-	return core.StringToScheduleStrategy(c.LeaderScheduleStrategy)
 }
 
 // ReplicationConfig is the replication configuration.
@@ -779,32 +847,6 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	return c.Validate()
 }
 
-// NamespaceConfig is to overwrite the global setting for specific namespace
-type NamespaceConfig struct {
-	// LeaderScheduleLimit is the max coexist leader schedules.
-	LeaderScheduleLimit uint64 `json:"leader-schedule-limit"`
-	// RegionScheduleLimit is the max coexist region schedules.
-	RegionScheduleLimit uint64 `json:"region-schedule-limit"`
-	// ReplicaScheduleLimit is the max coexist replica schedules.
-	ReplicaScheduleLimit uint64 `json:"replica-schedule-limit"`
-	// MergeScheduleLimit is the max coexist merge schedules.
-	MergeScheduleLimit uint64 `json:"merge-schedule-limit"`
-	// HotRegionScheduleLimit is the max coexist hot region schedules.
-	HotRegionScheduleLimit uint64 `json:"hot-region-schedule-limit"`
-	// MaxReplicas is the number of replicas for each region.
-	MaxReplicas uint64 `json:"max-replicas"`
-}
-
-// Adjust is used to adjust the namespace configurations.
-func (c *NamespaceConfig) Adjust(opt *ScheduleOption) {
-	adjustUint64(&c.LeaderScheduleLimit, opt.GetLeaderScheduleLimit(namespace.DefaultNamespace))
-	adjustUint64(&c.RegionScheduleLimit, opt.GetRegionScheduleLimit(namespace.DefaultNamespace))
-	adjustUint64(&c.ReplicaScheduleLimit, opt.GetReplicaScheduleLimit(namespace.DefaultNamespace))
-	adjustUint64(&c.MergeScheduleLimit, opt.GetMergeScheduleLimit(namespace.DefaultNamespace))
-	adjustUint64(&c.HotRegionScheduleLimit, opt.GetHotRegionScheduleLimit(namespace.DefaultNamespace))
-	adjustUint64(&c.MaxReplicas, uint64(opt.GetMaxReplicas(namespace.DefaultNamespace)))
-}
-
 // SecurityConfig is the configuration for supporting tls.
 type SecurityConfig struct {
 	// CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
@@ -838,6 +880,9 @@ type PDServerConfig struct {
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
 	// MaxResetTSGap is the max gap to reset the tso.
 	MaxResetTSGap time.Duration `toml:"max-reset-ts-gap" json:"max-reset-ts-gap"`
+	// KeyType is option to specify the type of keys.
+	// There are some types supported: ["table", "raw", "txn"], default: "table"
+	KeyType string `toml:"key-type" json:"key-type"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -846,6 +891,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("max-reset-ts-gap") {
 		c.MaxResetTSGap = defaultMaxResetTsGap
+	}
+	if !meta.IsDefined("key-type") {
+		c.KeyType = defaultKeyType
 	}
 	return nil
 }
