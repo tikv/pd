@@ -19,12 +19,15 @@ import (
 )
 
 // RegionFit is the result of fitting a region's peers to rule list.
+// All peers are divided into corresponding rules according to the matching
+// rules, and the remaining Peers are placed in the OrphanPeers list.
 type RegionFit struct {
 	RuleFits    []*RuleFit
 	OrphanPeers []*metapb.Peer
 }
 
 // IsSatisfied returns if the rules are properly satisfied.
+// It means all Rules are fullfilled and there is no orphan peers.
 func (f *RegionFit) IsSatisfied() bool {
 	if len(f.RuleFits) == 0 {
 		return false
@@ -50,6 +53,7 @@ func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 }
 
 // CompareRegionFit determines the superiority of 2 fits.
+// It returns 1 when the first fit result is better.
 func CompareRegionFit(a, b *RegionFit) int {
 	for i := range a.RuleFits {
 		if cmp := compareRuleFit(a.RuleFits[i], b.RuleFits[i]); cmp != 0 {
@@ -68,10 +72,16 @@ func CompareRegionFit(a, b *RegionFit) int {
 
 // RuleFit is the result of fitting status of a Rule.
 type RuleFit struct {
-	Rule              *Rule
-	Peers             []*metapb.Peer
+	Rule *Rule
+	// Peers of the Region that are divided to this Rule.
+	Peers []*metapb.Peer
+	// LoosematchedPeers is subset of `Peers`. It contains all Peers that have
+	// different Role from configuration (the Role can be migrated to target role
+	// by scheduling).
 	LooseMatchedPeers []*metapb.Peer
-	IsolationLevel    int
+	// IsolationLevel indicates at which level of labeling these Peers are
+	// isolated. A larger value indicates a higher isolation level.
+	IsolationLevel int
 }
 
 // IsSatisfied returns if the rule is properly satisfied.

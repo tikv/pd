@@ -180,7 +180,7 @@ func (m *RuleManager) updateSplitKeys() {
 	}
 }
 
-// GetSplitKeys returns all split keys in the range.
+// GetSplitKeys returns all split keys in the range (start, end).
 func (m *RuleManager) GetSplitKeys(start, end []byte) [][]byte {
 	m.RLock()
 	defer m.RUnlock()
@@ -268,7 +268,7 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 		// or
 		//   |<-- rule -->|
 		// |<--- region --->|
-		return nil
+		return nil // It will considered abnormal when no rules for the regoin. Then Rule checker will try to split the region.
 	}
 	return prepareRulesForApply(rules)
 }
