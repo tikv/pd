@@ -345,23 +345,23 @@ func (s *baseCluster) testStateAndLimit(c *C, clusterID uint64, store *metapb.St
 	cluster := s.getRaftCluster(c)
 	cluster.coordinator.opController.SetAllStoresLimit(1.0)
 	s.resetStoreState(c, store.GetId(), beforeState)
-	_, beforeLimit := cluster.coordinator.opController.GetAllStoresLimit()[storeID]
+	_, isOKBefore := cluster.coordinator.opController.GetAllStoresLimit()[storeID]
 	// run
 	err := run(cluster)
 	// judge
-	_, currentLimit := cluster.coordinator.opController.GetAllStoresLimit()[storeID]
+	_, isOKAfter := cluster.coordinator.opController.GetAllStoresLimit()[storeID]
 	if len(expectStates) != 0 {
 		c.Assert(err, IsNil)
 		expectState := expectStates[0]
 		c.Assert(s.getStore(c, clusterID, storeID).GetState(), Equals, expectState)
 		if expectState == metapb.StoreState_Offline {
-			c.Assert(currentLimit, IsTrue)
+			c.Assert(isOKAfter, IsTrue)
 		} else if expectState == metapb.StoreState_Tombstone {
-			c.Assert(currentLimit, IsFalse)
+			c.Assert(isOKAfter, IsFalse)
 		}
 	} else {
 		c.Assert(err, NotNil)
-		c.Assert(currentLimit, Equals, beforeLimit)
+		c.Assert(isOKAfter, Equals, isOKBefore)
 	}
 }
 
