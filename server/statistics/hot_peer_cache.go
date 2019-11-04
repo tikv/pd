@@ -99,7 +99,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 		// This is used for the simulator.
 		if oldItem != nil && !isExpired {
 			// ignore if report too fast or an old report
-			isOldReport := endTime.After(oldItem.LastUpdateTime)
+			isOldReport := endTime.Before(oldItem.LastUpdateTime)
 			if (interval < hotRegionReportMinInterval && Denoising) || isOldReport {
 				continue
 			}
