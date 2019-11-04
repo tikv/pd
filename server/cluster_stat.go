@@ -74,6 +74,10 @@ const (
 	LoadStateNone
 )
 
+// DefaultIntervalHint is a hint of the interval of the store heartbeats,
+// it is used when we can not infer the interval from heartbeats.
+const DefaultIntervalHint = 10
+
 // String representation of LoadState
 func (s LoadState) String() string {
 	switch s {
@@ -224,6 +228,9 @@ func (cst *ClusterStatEntries) Append(stat *StatEntry) {
 	// update interval
 	interval := int64(stat.Interval.GetEndTimestamp() -
 		stat.Interval.GetStartTimestamp())
+	if interval == 0 {
+		interval = DefaultIntervalHint
+	}
 	cst.interval = (cst.interval*cst.total + interval) /
 		(cst.total + 1)
 	cst.total++
