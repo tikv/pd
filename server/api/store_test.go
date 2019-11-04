@@ -116,19 +116,19 @@ func checkStoresInfo(c *C, ss []*StoreInfo, want []*metapb.Store) {
 func (s *testStoreSuite) TestStoresList(c *C) {
 	url := fmt.Sprintf("%s/stores", s.urlPrefix)
 	info := new(StoresInfo)
-	err := readJSONWithURL(url, info)
+	err := readJSON(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[:3])
 
 	url = fmt.Sprintf("%s/stores?state=0", s.urlPrefix)
 	info = new(StoresInfo)
-	err = readJSONWithURL(url, info)
+	err = readJSON(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[:2])
 
 	url = fmt.Sprintf("%s/stores?state=1", s.urlPrefix)
 	info = new(StoresInfo)
-	err = readJSONWithURL(url, info)
+	err = readJSON(url, info)
 	c.Assert(err, IsNil)
 	checkStoresInfo(c, info.Stores, s.stores[2:3])
 
@@ -149,8 +149,7 @@ func (s *testStoreSuite) TestStoreGet(c *C) {
 	)
 
 	info := new(StoreInfo)
-	err := readJSONWithURL(url, info)
-
+	err := readJSON(url, info)
 	c.Assert(err, IsNil)
 	capacity, _ := units.RAMInBytes("1.636TiB")
 	available, _ := units.RAMInBytes("1.555TiB")
@@ -162,7 +161,7 @@ func (s *testStoreSuite) TestStoreGet(c *C) {
 func (s *testStoreSuite) TestStoreLabel(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
 	var info StoreInfo
-	err := readJSONWithURL(url, &info)
+	err := readJSON(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.Labels, HasLen, 0)
 
@@ -185,7 +184,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	err = postJSON(url+"/label", b)
 	c.Assert(err, IsNil)
 
-	err = readJSONWithURL(url, &info)
+	err = readJSON(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.Labels, HasLen, len(labels))
 	for _, l := range info.Store.Labels {
@@ -206,7 +205,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	c.Assert(err, IsNil)
 
 	expectLabel := map[string]string{"zone": "cn", "zack": "zack1", "host": "host1"}
-	err = readJSONWithURL(url, &info)
+	err = readJSON(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.Labels, HasLen, len(expectLabel))
 	for _, l := range info.Store.Labels {
@@ -230,10 +229,9 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 			status: http.StatusGone,
 		},
 	}
-	client := newHTTPClient()
 	for _, t := range table {
 		url := fmt.Sprintf("%s/store/%d", s.urlPrefix, t.id)
-		status, _ := requestStatusBody(c, client, http.MethodDelete, url)
+		status, _ := requestStatusBody(c, dialClient, http.MethodDelete, url)
 		c.Assert(status, Equals, t.status)
 	}
 }
@@ -241,7 +239,7 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 func (s *testStoreSuite) TestStoreSetState(c *C) {
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
 	info := StoreInfo{}
-	err := readJSONWithURL(url, &info)
+	err := readJSON(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
 
@@ -249,7 +247,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	info = StoreInfo{}
 	err = postJSON(url+"/state?state=Offline", nil)
 	c.Assert(err, IsNil)
-	err = readJSONWithURL(url, &info)
+	err = readJSON(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
 
@@ -257,7 +255,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	info = StoreInfo{}
 	err = postJSON(url+"/state?state=Foo", nil)
 	c.Assert(err, NotNil)
-	err = readJSONWithURL(url, &info)
+	err = readJSON(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
 
@@ -265,7 +263,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	info = StoreInfo{}
 	err = postJSON(url+"/state?state=Up", nil)
 	c.Assert(err, IsNil)
-	err = readJSONWithURL(url, &info)
+	err = readJSON(url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
 }

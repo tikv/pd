@@ -16,7 +16,6 @@ package api
 import (
 	"encoding/json"
 	"io/ioutil"
-	"net/http"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
@@ -25,18 +24,11 @@ import (
 
 var _ = Suite(&testStatusAPISuite{})
 
-type testStatusAPISuite struct {
-	hc *http.Client
-}
-
-func (s *testStatusAPISuite) SetUpSuite(c *C) {
-	s.hc = newHTTPClient()
-}
+type testStatusAPISuite struct{}
 
 func checkStatusResponse(c *C, body []byte, cfgs []*config.Config) {
 	got := status{}
 	c.Assert(json.Unmarshal(body, &got), IsNil)
-
 	c.Assert(got.BuildTS, Equals, server.PDBuildTS)
 	c.Assert(got.GitHash, Equals, server.PDGitHash)
 }
@@ -47,11 +39,11 @@ func (s *testStatusAPISuite) TestStatus(c *C) {
 
 	for _, cfg := range cfgs {
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/status"
-		resp, err := s.hc.Get(addr)
+		resp, err := dialClient.Get(addr)
 		c.Assert(err, IsNil)
-		defer resp.Body.Close()
 		buf, err := ioutil.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
 		checkStatusResponse(c, buf, cfgs)
+		resp.Body.Close()
 	}
 }

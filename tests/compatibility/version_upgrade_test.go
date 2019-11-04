@@ -31,10 +31,18 @@ func Test(t *testing.T) {
 
 var _ = Suite(&compatibilityTestSuite{})
 
-type compatibilityTestSuite struct{}
+type compatibilityTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
 
 func (s *compatibilityTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
+}
+
+func (s *compatibilityTestSuite) TearDownSuite(c *C) {
+	s.cancel()
 }
 
 func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
@@ -42,7 +50,7 @@ func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
@@ -66,7 +74,7 @@ func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
 	// Restart all PDs.
 	err = cluster.StopAll()
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -92,7 +100,7 @@ func (s *compatibilityTestSuite) TestRollingUpgrade(c *C) {
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())

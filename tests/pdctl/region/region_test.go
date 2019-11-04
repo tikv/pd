@@ -14,6 +14,7 @@
 package region_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -41,9 +42,11 @@ func (s *regionTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	url := cluster.GetConfig().GetClientURLs()
@@ -60,9 +63,11 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 }
 
 func (s *regionTestSuite) TestRegion(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()
