@@ -75,10 +75,10 @@ type RuleFit struct {
 	Rule *Rule
 	// Peers of the Region that are divided to this Rule.
 	Peers []*metapb.Peer
-	// LoosematchedPeers is subset of `Peers`. It contains all Peers that have
+	// PeersWithDifferentRole is subset of `Peers`. It contains all Peers that have
 	// different Role from configuration (the Role can be migrated to target role
 	// by scheduling).
-	LooseMatchedPeers []*metapb.Peer
+	PeersWithDifferentRole []*metapb.Peer
 	// IsolationLevel indicates at which level of labeling these Peers are
 	// isolated. A larger value indicates a higher isolation level.
 	IsolationLevel int
@@ -86,7 +86,7 @@ type RuleFit struct {
 
 // IsSatisfied returns if the rule is properly satisfied.
 func (f *RuleFit) IsSatisfied() bool {
-	return len(f.Peers) == f.Rule.Count && len(f.LooseMatchedPeers) == 0
+	return len(f.Peers) == f.Rule.Count && len(f.PeersWithDifferentRole) == 0
 }
 
 func compareRuleFit(a, b *RuleFit) int {
@@ -95,9 +95,9 @@ func compareRuleFit(a, b *RuleFit) int {
 		return -1
 	case len(a.Peers) > len(b.Peers):
 		return 1
-	case len(a.LooseMatchedPeers) > len(b.LooseMatchedPeers):
+	case len(a.PeersWithDifferentRole) > len(b.PeersWithDifferentRole):
 		return -1
-	case len(a.LooseMatchedPeers) < len(b.LooseMatchedPeers):
+	case len(a.PeersWithDifferentRole) < len(b.PeersWithDifferentRole):
 		return 1
 	case a.IsolationLevel < b.IsolationLevel:
 		return -1

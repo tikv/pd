@@ -268,7 +268,7 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 		// or
 		//   |<-- rule -->|
 		// |<--- region --->|
-		return nil // It will considered abnormal when no rules for the regoin. Then Rule checker will try to split the region.
+		return nil // It will considered abnormal when a region is not covered by any rule. Then Rule checker will try to split the region.
 	}
 	return prepareRulesForApply(rules)
 }
