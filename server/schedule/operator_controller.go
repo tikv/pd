@@ -67,6 +67,35 @@ type OperatorController struct {
 	opNotifierQueue operatorQueue
 }
 
+// StoreLimitMode indicates the strategy to set store limit
+type StoreLimitMode int
+
+// There are two modes supported now, "auto" indicates the value
+// is set by PD itself. "manual" means it is set by the user.
+// An auto set value can be overwrite by a manual set value.
+const (
+	StoreLimitAuto = iota
+	StoreLimitManual
+)
+
+// String returns the representation of the StoreLimitMode
+func (m StoreLimitMode) String() string {
+	switch m {
+	case StoreLimitAuto:
+		return "auto"
+	case StoreLimitManual:
+		return "manual"
+	}
+	// default to be auto
+	return "auto"
+}
+
+// StoreLimit limits the operators of a store
+type StoreLimit struct {
+	bucket *ratelimit.Bucket
+	mode   StoreLimitMode
+}
+
 // NewOperatorController creates a OperatorController.
 func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams opt.HeartbeatStreams) *OperatorController {
 	return &OperatorController{
