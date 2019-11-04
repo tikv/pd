@@ -627,24 +627,6 @@ func NewTotalOpInfluence(operators []*operator.Operator, cluster opt.Cluster) op
 	return influence
 }
 
-// NewUnfinishedOpInfluence creates a OpInfluence.
-func NewUnfinishedOpInfluence(operators []*operator.Operator, cluster opt.Cluster) operator.OpInfluence {
-	influence := operator.OpInfluence{
-		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
-	}
-
-	for _, op := range operators {
-		if !op.IsTimeout() && !op.IsFinish() {
-			region := cluster.GetRegion(op.RegionID())
-			if region != nil {
-				op.UnfinishedInfluence(influence, region)
-			}
-		}
-	}
-
-	return influence
-}
-
 // SetOperator is only used for test.
 func (oc *OperatorController) SetOperator(op *operator.Operator) {
 	oc.Lock()
