@@ -13,7 +13,7 @@
 
 package statistics
 
-// StoreHotPeersInfos : used to get human readable description for hot regions.
+// StoreHotPeersInfos is used to get human-readable description for hot regions.
 type StoreHotPeersInfos struct {
 	AsPeer   StoreHotPeersStat `json:"as_peer"`
 	AsLeader StoreHotPeersStat `json:"as_leader"`
