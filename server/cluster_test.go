@@ -533,6 +533,8 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		c.Assert(err, IsNil)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var wg sync.WaitGroup
 	// register store and bind stream
 	for i, store := range stores {
@@ -546,7 +548,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		}
 		_, err := s.svr.StoreHeartbeat(context.TODO(), req)
 		c.Assert(err, IsNil)
-		stream, err := s.grpcPDClient.RegionHeartbeat(context.Background())
+		stream, err := s.grpcPDClient.RegionHeartbeat(ctx)
 		c.Assert(err, IsNil)
 		peer := &metapb.Peer{Id: s.allocID(c), StoreId: store.GetId()}
 		regionReq := &pdpb.RegionHeartbeatRequest{
@@ -570,7 +572,12 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 				wg.Done()
 			}
 			for {
-				stream.Recv()
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					stream.Recv()
+				}
 			}
 		}(i == 0)
 	}
@@ -786,8 +793,11 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 
 func (s *testRegionsInfoSuite) Test(c *C) {
 	n, np := uint64(10), uint64(3)
-	cache := core.NewRegionsInfo()
 	regions := newTestRegions(n, np)
+	_, opts, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := createTestRaftCluster(mockid.NewIDAllocator(), opts, core.NewStorage(kv.NewMemoryKV()))
+	cache := cluster.core.Regions
 
 	for i := uint64(0); i < n; i++ {
 		region := regions[i]
@@ -830,10 +840,10 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := cache.RandLeaderRegion(i, core.HealthRegion())
+		region := cluster.RandLeaderRegion(i, core.HealthRegion())
 		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
 
-		region = cache.RandFollowerRegion(i, core.HealthRegion())
+		region = cluster.RandFollowerRegion(i, core.HealthRegion())
 		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -849,14 +859,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := cache.RandLeaderRegion(i, core.HealthRegion())
+			region := cluster.RandLeaderRegion(i, core.HealthRegion())
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		c.Assert(cache.RandLeaderRegion(i, core.HealthRegion()), IsNil)
+		c.Assert(cluster.RandLeaderRegion(i, core.HealthRegion()), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(cache.RandFollowerRegion(i, core.HealthRegion()), IsNil)
+		c.Assert(cluster.RandFollowerRegion(i, core.HealthRegion()), IsNil)
 	}
 }
 

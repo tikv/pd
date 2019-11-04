@@ -85,24 +85,24 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 	totalBytes := float64(f.getTotalBytes(region))
 	totalKeys := float64(f.getTotalKeys(region))
 
-	bytesPerSecInit := totalBytes / RegionHeartBeatReportInterval
-	keysPerSecInit := totalKeys / RegionHeartBeatReportInterval
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	endTime := time.Unix(int64(reportInterval.GetEndTimestamp()), 0)
+
+	bytesPerSec := totalBytes / float64(interval)
+	keysPerSec := totalKeys / float64(interval)
 
 	for storeID := range storeIDs {
-		bytesPerSec := bytesPerSecInit
-		keysPerSec := keysPerSecInit
 		isExpired := f.isRegionExpired(region, storeID)
 		oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
 
 		// This is used for the simulator.
-		if oldItem != nil && Denoising {
-			interval := time.Since(oldItem.LastUpdateTime).Seconds()
-			// ignore if report too fast
-			if interval < hotRegionReportMinInterval && !isExpired {
+		if oldItem != nil && !isExpired {
+			// ignore if report too fast or an old report
+			isOldReport := endTime.Before(oldItem.LastUpdateTime)
+			if (interval < hotRegionReportMinInterval && Denoising) || isOldReport {
 				continue
 			}
-			bytesPerSec = totalBytes / interval
-			keysPerSec = totalKeys / interval
 		}
 
 		newItem := &HotPeerStat{
@@ -111,7 +111,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 			Kind:           f.kind,
 			BytesRate:      bytesPerSec,
 			KeysRate:       keysPerSec,
-			LastUpdateTime: time.Now(),
+			LastUpdateTime: endTime,
 			Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
 			needDelete:     isExpired,
 			isLeader:       region.GetLeader().GetStoreId() == storeID,

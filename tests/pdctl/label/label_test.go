@@ -14,6 +14,7 @@
 package label_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -40,9 +41,11 @@ func (s *labelTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *labelTestSuite) TestLabel(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(1, func(cfg *config.Config) { cfg.Replication.StrictlyMatchLabel = false })
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()

@@ -479,7 +479,7 @@ type ScheduleConfig struct {
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge,omitempty" json:"enable-one-way-merge,string"`
 	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
-	// This option only works when merge strategy is "table".
+	// This option only works when key type is "table".
 	EnableCrossTableMerge bool `toml:"enable-cross-table-merge,omitempty" json:"enable-cross-table-merge,string"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
 	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`

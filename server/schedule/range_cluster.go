@@ -23,7 +23,7 @@ import (
 // RangeCluster isolates the cluster by range.
 type RangeCluster struct {
 	opt.Cluster
-	regions           *core.RegionsInfo
+	subCluster        *core.BasicCluster // Collect all regions belong to the range.
 	tolerantSizeRatio float64
 }
 
@@ -32,13 +32,13 @@ const scanLimit = 128
 // GenRangeCluster gets a range cluster by specifying start key and end key.
 // The cluster can only know the regions within [startKey, endKey].
 func GenRangeCluster(cluster opt.Cluster, startKey, endKey []byte) *RangeCluster {
-	regions := core.NewRegionsInfo()
+	subCluster := core.NewBasicCluster()
 	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
-		regions.AddRegion(r)
+		subCluster.Regions.AddRegion(r)
 	}
 	return &RangeCluster{
-		Cluster: cluster,
-		regions: regions,
+		Cluster:    cluster,
+		subCluster: subCluster,
 	}
 }
 
@@ -50,11 +50,11 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 		return s
 	}
 	amplification := float64(s.GetRegionSize()) / used
-	leaderCount := r.regions.GetStoreLeaderCount(id)
-	leaderSize := r.regions.GetStoreLeaderRegionSize(id)
-	regionCount := r.regions.GetStoreRegionCount(id)
-	regionSize := r.regions.GetStoreRegionSize(id)
-	pendingPeerCount := r.regions.GetStorePendingPeerCount(id)
+	leaderCount := r.subCluster.GetStoreLeaderCount(id)
+	leaderSize := r.subCluster.GetStoreLeaderRegionSize(id)
+	regionCount := r.subCluster.GetStoreRegionCount(id)
+	regionSize := r.subCluster.GetStoreRegionSize(id)
+	pendingPeerCount := r.subCluster.GetStorePendingPeerCount(id)
 	newStats := proto.Clone(s.GetStoreStats()).(*pdpb.StoreStats)
 	newStats.UsedSize = uint64(float64(regionSize)/amplification) * (1 << 20)
 	newStats.Available = s.GetCapacity() - newStats.UsedSize
@@ -103,17 +103,17 @@ func (r *RangeCluster) GetTolerantSizeRatio() float64 {
 
 // RandFollowerRegion returns a random region that has a follower on the store.
 func (r *RangeCluster) RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
-	return r.regions.RandFollowerRegion(storeID, opts...)
+	return r.subCluster.RandFollowerRegion(storeID, opts...)
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
 func (r *RangeCluster) RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
-	return r.regions.RandLeaderRegion(storeID, opts...)
+	return r.subCluster.RandLeaderRegion(storeID, opts...)
 }
 
 // GetAverageRegionSize returns the average region approximate size.
 func (r *RangeCluster) GetAverageRegionSize() int64 {
-	return r.regions.GetAverageRegionSize()
+	return r.subCluster.GetAverageRegionSize()
 }
 
 // GetRegionStores returns all stores that contains the region's peer.

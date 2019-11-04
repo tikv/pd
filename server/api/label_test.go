@@ -126,7 +126,7 @@ func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
 func (s *testLabelsStoreSuite) TestLabelsGet(c *C) {
 	url := fmt.Sprintf("%s/labels", s.urlPrefix)
 	labels := make([]*metapb.StoreLabel, 0, len(s.stores))
-	err := readJSONWithURL(url, &labels)
+	err := readJSON(url, &labels)
 	c.Assert(err, IsNil)
 }
 
@@ -168,7 +168,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 	for _, t := range table {
 		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", s.urlPrefix, t.name, t.value)
 		info := new(StoresInfo)
-		err := readJSONWithURL(url, info)
+		err := readJSON(url, info)
 		c.Assert(err, IsNil)
 		checkStoresInfo(c, info.Stores, t.want)
 	}

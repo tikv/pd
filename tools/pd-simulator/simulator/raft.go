@@ -286,11 +286,15 @@ func (r *RaftEngine) SearchRegion(regionKey []byte) *core.RegionInfo {
 	return r.regionsInfo.SearchRegion(regionKey)
 }
 
-// RandRegion gets a region by random
-func (r *RaftEngine) RandRegion() *core.RegionInfo {
+// BootstrapRegion gets a region to construct bootstrap info.
+func (r *RaftEngine) BootstrapRegion() *core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
-	return r.regionsInfo.RandRegion()
+	regions := r.regionsInfo.ScanRange(nil, nil, 1)
+	if len(regions) > 0 {
+		return regions[0]
+	}
+	return nil
 }
 
 func (r *RaftEngine) allocID(storeID uint64) (uint64, error) {

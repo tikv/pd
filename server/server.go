@@ -216,7 +216,6 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
-
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tso = tso.NewTimestampOracle(
 		s.client,

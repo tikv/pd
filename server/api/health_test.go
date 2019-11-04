@@ -16,7 +16,6 @@ package api
 import (
 	"encoding/json"
 	"io/ioutil"
-	"net/http"
 	"strings"
 
 	. "github.com/pingcap/check"
@@ -26,13 +25,7 @@ import (
 
 var _ = Suite(&testHealthAPISuite{})
 
-type testHealthAPISuite struct {
-	hc *http.Client
-}
-
-func (s *testHealthAPISuite) SetUpSuite(c *C) {
-	s.hc = newHTTPClient()
-}
+type testHealthAPISuite struct{}
 
 func checkSliceResponse(c *C, body []byte, cfgs []*config.Config, unhealth string) {
 	got := []Health{}
@@ -69,8 +62,9 @@ func (s *testHealthAPISuite) TestHealthSlice(c *C) {
 	}
 	addr := leader.GetConfig().ClientUrls + apiPrefix + "/health"
 	follow.Close()
-	resp, err := s.hc.Get(addr)
+	resp, err := dialClient.Get(addr)
 	c.Assert(err, IsNil)
+	defer resp.Body.Close()
 	buf, err := ioutil.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	checkSliceResponse(c, buf, cfgs, follow.GetConfig().Name)

@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"net/http"
 	"strings"
 
 	. "github.com/pingcap/check"
@@ -154,7 +153,7 @@ func mustRegionHeartbeat(c *C, svr *server.Server, region *core.RegionInfo) {
 }
 
 func mustReadURL(c *C, url string) string {
-	res, err := http.Get(url)
+	res, err := dialClient.Get(url)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()
 	data, err := ioutil.ReadAll(res.Body)

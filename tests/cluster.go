@@ -368,12 +368,12 @@ func (c *TestCluster) RunServers(ctx context.Context, servers []*TestServer) err
 }
 
 // RunInitialServers starts to run servers in InitialServers.
-func (c *TestCluster) RunInitialServers() error {
+func (c *TestCluster) RunInitialServers(ctx context.Context) error {
 	var servers []*TestServer
 	for _, conf := range c.config.InitialServers {
 		servers = append(servers, c.GetServer(conf.Name))
 	}
-	return c.RunServers(context.Background(), servers)
+	return c.RunServers(ctx, servers)
 }
 
 // StopAll is used to stop all servers.

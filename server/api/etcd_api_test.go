@@ -23,13 +23,7 @@ import (
 
 var _ = Suite(&testEtcdAPISuite{})
 
-type testEtcdAPISuite struct {
-	hc *http.Client
-}
-
-func (s *testEtcdAPISuite) SetUpSuite(c *C) {
-	s.hc = newHTTPClient()
-}
+type testEtcdAPISuite struct{}
 
 func (s *testEtcdAPISuite) TestGRPCGateway(c *C) {
 	svr, clean := mustNewServer(c)
@@ -43,9 +37,9 @@ func (s *testEtcdAPISuite) TestGRPCGateway(c *C) {
 	addr = svr.GetConfig().ClientUrls + "/v3/kv/range"
 	getKey := map[string]string{"key": "Zm9v"}
 	v, _ = json.Marshal(getKey)
-	err = postJSON(addr, v, func(res []byte) bool {
+	err = postJSON(addr, v, func(res []byte, code int) {
 		c.Assert(strings.Contains(string(res), "Zm9v"), IsTrue)
-		return true
+		c.Assert(code, Equals, http.StatusOK)
 	})
 	c.Assert(err, IsNil)
 }

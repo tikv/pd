@@ -20,7 +20,6 @@ import (
 
 	check "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/config"
 	"google.golang.org/grpc"
 )
 
@@ -33,7 +32,7 @@ const (
 // may call c.Fatal() to abort the test, or c.Log() to add more information.
 type CheckFunc func(c *check.C) bool
 
-// WaitUntil repeatly evaluates f() for a period of time, util it returns true.
+// WaitUntil repeatedly evaluates f() for a period of time, util it returns true.
 func WaitUntil(c *check.C, f CheckFunc) {
 	c.Log("wait start")
 	for i := 0; i < waitMaxRetry; i++ {
@@ -61,7 +60,7 @@ func MustNewGrpcClient(c *check.C, addr string) pdpb.PDClient {
 }
 
 // CleanServer is used to clean data directory.
-func CleanServer(cfg *config.Config) {
+func CleanServer(dataDir string) {
 	// Clean data directory
-	os.RemoveAll(cfg.DataDir)
+	os.RemoveAll(dataDir)
 }

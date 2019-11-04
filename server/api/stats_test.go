@@ -15,7 +15,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 	"net/url"
 
 	. "github.com/pingcap/check"
@@ -140,7 +139,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 		StorePeerSize:    map[uint64]int64{1: 301, 2: 100, 3: 100, 4: 250, 5: 201},
 		StorePeerKeys:    map[uint64]int64{1: 201, 2: 50, 3: 50, 4: 170, 5: 151},
 	}
-	res, err := http.Get(statsURL)
+	res, err := dialClient.Get(statsURL)
 	c.Assert(err, IsNil)
 	stats := &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, stats)
@@ -148,7 +147,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	c.Assert(stats, DeepEquals, statsAll)
 
 	args := fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("\x01\x02"), url.QueryEscape("xyz\x00\x00"))
-	res, err = http.Get(statsURL + args)
+	res, err = dialClient.Get(statsURL + args)
 	c.Assert(err, IsNil)
 	stats = &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, stats)
@@ -169,7 +168,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	}
 
 	args = fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("a"), url.QueryEscape("x"))
-	res, err = http.Get(statsURL + args)
+	res, err = dialClient.Get(statsURL + args)
 	c.Assert(err, IsNil)
 	stats = &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, stats)
