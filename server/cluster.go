@@ -830,7 +830,6 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 
 	// Remove an offline store should be OK, nothing to do.
 	if store.IsOffline() {
-		c.coordinator.opController.RemoveStoreLimit(store.GetID())
 		return nil
 	}
 
@@ -842,11 +841,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", newStore.GetID()),
 		zap.String("store-address", newStore.GetAddress()))
-	err := c.putStoreLocked(newStore)
-	if err == nil {
-		c.coordinator.opController.RemoveStoreLimit(store.GetID())
-	}
-	return err
+	return c.putStoreLocked(newStore)
 }
 
 // BuryStore marks a store as tombstone in cluster.
@@ -864,6 +859,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:di
 
 	// Bury a tombstone store should be OK, nothing to do.
 	if store.IsTombstone() {
+		c.coordinator.opController.RemoveStoreLimit(store.GetID())
 		return nil
 	}
 
@@ -878,7 +874,11 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:di
 	log.Warn("store has been Tombstone",
 		zap.Uint64("store-id", newStore.GetID()),
 		zap.String("store-address", newStore.GetAddress()))
-	return c.putStoreLocked(newStore)
+	err := c.putStoreLocked(newStore)
+	if err == nil {
+		c.coordinator.opController.RemoveStoreLimit(store.GetID())
+	}
+	return err
 }
 
 // BlockStore stops balancer from selecting the store.
