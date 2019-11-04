@@ -51,7 +51,7 @@ func NewTestServer(c *check.C) (*Server, CleanupFunc, error) {
 	cleanup := func() {
 		cancel()
 		s.Close()
-		testutil.CleanServer(cfg)
+		testutil.CleanServer(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }

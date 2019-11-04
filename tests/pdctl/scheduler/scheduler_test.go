@@ -14,6 +14,7 @@
 package scheduler_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -39,9 +40,11 @@ func (s *schedulerTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *schedulerTestSuite) TestScheduler(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()

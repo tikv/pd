@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"math/rand"
-	"net/http"
 	"sort"
 	"strings"
 
@@ -30,14 +29,12 @@ import (
 var _ = Suite(&testMemberAPISuite{})
 
 type testMemberAPISuite struct {
-	hc      *http.Client
 	cfgs    []*config.Config
 	servers []*server.Server
 	clean   func()
 }
 
 func (s *testMemberAPISuite) SetUpSuite(c *C) {
-	s.hc = newHTTPClient()
 	s.cfgs, s.servers, s.clean = mustNewCluster(c, 3)
 }
 
@@ -76,10 +73,11 @@ func checkListResponse(c *C, body []byte, cfgs []*config.Config) {
 func (s *testMemberAPISuite) TestMemberList(c *C) {
 	for _, cfg := range s.cfgs {
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/members"
-		resp, err := s.hc.Get(addr)
+		resp, err := dialClient.Get(addr)
 		c.Assert(err, IsNil)
 		buf, err := ioutil.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
+		resp.Body.Close()
 		checkListResponse(c, buf, s.cfgs)
 	}
 }
@@ -87,7 +85,7 @@ func (s *testMemberAPISuite) TestMemberList(c *C) {
 func (s *testMemberAPISuite) TestMemberLeader(c *C) {
 	leader := s.servers[0].GetLeader()
 	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
-	resp, err := s.hc.Get(addr)
+	resp, err := dialClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	buf, err := ioutil.ReadAll(resp.Body)

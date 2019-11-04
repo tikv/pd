@@ -75,7 +75,7 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 		os.Remove(fname)
 		svr.Close()
 		cancel()
-		testutil.CleanServer(cfg)
+		testutil.CleanServer(cfg.DataDir)
 	}()
 	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/memberNil"), IsNil)
 }

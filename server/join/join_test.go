@@ -32,7 +32,7 @@ type testJoinServerSuite struct{}
 // A PD joins itself.
 func (s *testJoinServerSuite) TestPDJoinsItself(c *C) {
 	cfg := server.NewTestSingleConfig(c)
-	defer testutil.CleanServer(cfg)
+	defer testutil.CleanServer(cfg.DataDir)
 	cfg.Join = cfg.AdvertiseClientUrls
 	c.Assert(PrepareJoinCluster(cfg), NotNil)
 }

@@ -31,18 +31,31 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/tests"
 	"github.com/pkg/errors"
+	"go.uber.org/goleak"
 )
 
 func Test(t *testing.T) {
 	TestingT(t)
 }
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 var _ = Suite(&serverTestSuite{})
 
-type serverTestSuite struct{}
+type serverTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
+}
+
+func (s *serverTestSuite) TearDownSuite(c *C) {
+	s.cancel()
 }
 
 func (s *serverTestSuite) TestMemberDelete(c *C) {
@@ -50,7 +63,7 @@ func (s *serverTestSuite) TestMemberDelete(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	leaderName := cluster.WaitLeader()
 	c.Assert(leaderName, Not(Equals), "")
@@ -136,7 +149,7 @@ func (s *serverTestSuite) TestLeaderPriority(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 
 	cluster.WaitLeader()
@@ -193,7 +206,7 @@ func (s *serverTestSuite) TestLeaderResign(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 
 	leader1 := cluster.WaitLeader()
@@ -226,7 +239,7 @@ func (s *serverTestSuite) TestMoveLeader(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -287,7 +300,7 @@ func (s *leaderTestSuite) SetUpSuite(c *C) {
 func (s *leaderTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 	s.svr.Close()
-	testutil.CleanServer(s.cfg)
+	testutil.CleanServer(s.cfg.DataDir)
 }
 
 func (s *leaderTestSuite) TestGetLeader(c *C) {
