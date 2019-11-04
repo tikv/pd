@@ -118,13 +118,19 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = t1
 	values, err := json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values)
+	err = postJSON(url, values,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"success\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+
 	c.Assert(err, IsNil)
 	t2 := makeTS(32 * time.Hour)
 	args["tso"] = t2
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "too large"), IsTrue)
 
@@ -132,7 +138,8 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = t3
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "small"), IsTrue)
 
@@ -140,7 +147,8 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = t4
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
 
