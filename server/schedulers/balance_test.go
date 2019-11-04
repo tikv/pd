@@ -106,6 +106,9 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	oc := schedule.NewOperatorController(ctx, nil, nil)
 	// create a region to control average region size.
 	tc.AddLeaderRegion(1, 1, 2)
 
@@ -118,7 +121,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		tc.PutRegion(region)
 		tc.LeaderScheduleStrategy = t.kind.String()
 		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
-		c.Assert(shouldBalance(tc, source, target, region, kind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
+		c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -130,7 +133,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 			tc.PutRegion(region)
 			kind := core.NewScheduleKind(core.RegionKind, t.kind)
-			c.Assert(shouldBalance(tc, source, target, region, kind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
+			c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
 		}
 	}
 }
