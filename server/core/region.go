@@ -483,9 +483,10 @@ func (rst *regionSubTree) remove(region *RegionInfo) {
 	if rst.length() == 0 {
 		return
 	}
-	rst.totalSize -= region.approximateSize
-	rst.totalKeys -= region.approximateKeys
-	rst.regionTree.remove(region)
+	if rst.regionTree.remove(region) != nil {
+		rst.totalSize -= region.approximateSize
+		rst.totalKeys -= region.approximateKeys
+	}
 }
 
 func (rst *regionSubTree) length() int {

@@ -136,6 +136,9 @@ func (s *testRegionSuite) TestRegionSubTree(c *C) {
 	tree.remove(s.newRegionWithStat("a", "b", 1, 2))
 	c.Assert(tree.totalSize, Equals, int64(5))
 	c.Assert(tree.totalKeys, Equals, int64(6))
+	tree.remove(s.newRegionWithStat("f", "g", 1, 2))
+	c.Assert(tree.totalSize, Equals, int64(5))
+	c.Assert(tree.totalKeys, Equals, int64(6))
 }
 
 func (s *testRegionSuite) TestRegionTree(c *C) {
