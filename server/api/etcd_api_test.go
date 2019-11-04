@@ -15,6 +15,7 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 
 	. "github.com/pingcap/check"
