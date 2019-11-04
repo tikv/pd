@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/ratelimit"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -60,46 +59,18 @@ type HeartbeatStreams interface {
 // OperatorController is used to limit the speed of scheduling.
 type OperatorController struct {
 	sync.RWMutex
-	ctx             context.Context
-	cluster         opt.Cluster
-	operators       map[uint64]*operator.Operator
-	hbStreams       HeartbeatStreams
-	histories       *list.List
-	counts          map[operator.OpKind]uint64
-	opRecords       *OperatorRecords
-	storesLimit     map[uint64]*ratelimit.Bucket
+	ctx       context.Context
+	cluster   opt.Cluster
+	operators map[uint64]*operator.Operator
+	hbStreams HeartbeatStreams
+	histories *list.List
+	counts    map[operator.OpKind]uint64
+	opRecords *OperatorRecords
+	// TODO: Need to clean up the unused store ID.
+	storesLimit     map[uint64]*StoreLimit
 	wop             WaitingOperator
 	wopStatus       *WaitingOperatorStatus
 	opNotifierQueue operatorQueue
-}
-
-// StoreLimitMode indicates the strategy to set store limit
-type StoreLimitMode int
-
-// There are two modes supported now, "auto" indicates the value
-// is set by PD itself. "manual" means it is set by the user.
-// An auto set value can be overwrite by a manual set value.
-const (
-	StoreLimitAuto = iota
-	StoreLimitManual
-)
-
-// String returns the representation of the StoreLimitMode
-func (m StoreLimitMode) String() string {
-	switch m {
-	case StoreLimitAuto:
-		return "auto"
-	case StoreLimitManual:
-		return "manual"
-	}
-	// default to be auto
-	return "auto"
-}
-
-// StoreLimit limits the operators of a store
-type StoreLimit struct {
-	bucket *ratelimit.Bucket
-	mode   StoreLimitMode
 }
 
 // NewOperatorController creates a OperatorController.
@@ -112,7 +83,7 @@ func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams H
 		histories:       list.New(),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
-		storesLimit:     make(map[uint64]*ratelimit.Bucket),
+		storesLimit:     make(map[uint64]*StoreLimit),
 		wop:             NewRandBuckets(),
 		wopStatus:       NewWaitingOperatorStatus(),
 		opNotifierQueue: make(operatorQueue, 0),
@@ -719,7 +690,7 @@ func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
 			continue
 		}
 
-		available := oc.getOrCreateStoreLimit(storeID).Available()
+		available := oc.getOrCreateStoreLimit(storeID).bucket.Available()
 		storeLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), "available").Set(float64(available) / float64(operator.RegionInfluence))
 		if available < stepCost {
 			return true
@@ -729,37 +700,32 @@ func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
-func (oc *OperatorController) SetAllStoresLimit(rate float64) {
+func (oc *OperatorController) SetAllStoresLimit(rate float64, mode StoreLimitMode) {
 	oc.Lock()
 	defer oc.Unlock()
 	stores := oc.cluster.GetStores()
 	for _, s := range stores {
-		oc.newStoreLimit(s.GetID(), rate)
+		oc.newStoreLimit(s.GetID(), rate, mode)
 	}
 }
 
 // SetStoreLimit is used to set the limit of a store.
-func (oc *OperatorController) SetStoreLimit(storeID uint64, rate float64) {
+func (oc *OperatorController) SetStoreLimit(storeID uint64, rate float64, mode StoreLimitMode) {
 	oc.Lock()
 	defer oc.Unlock()
-	oc.newStoreLimit(storeID, rate)
+	oc.newStoreLimit(storeID, rate, mode)
 }
 
 // newStoreLimit is used to create the limit of a store.
-func (oc *OperatorController) newStoreLimit(storeID uint64, rate float64) {
-	capacity := operator.RegionInfluence
-	if rate > 1 {
-		capacity = int64(rate * float64(operator.RegionInfluence))
-	}
-	rate *= float64(operator.RegionInfluence)
-	oc.storesLimit[storeID] = ratelimit.NewBucketWithRate(rate, capacity)
+func (oc *OperatorController) newStoreLimit(storeID uint64, rate float64, mode StoreLimitMode) {
+	oc.storesLimit[storeID] = NewStoreLimit(rate, mode)
 }
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
-func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64) *ratelimit.Bucket {
+func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64) *StoreLimit {
 	if oc.storesLimit[storeID] == nil {
 		rate := oc.cluster.GetStoreBalanceRate() / StoreBalanceBaseTime
-		oc.newStoreLimit(storeID, rate)
+		oc.newStoreLimit(storeID, rate, StoreLimitAuto)
 		oc.cluster.AttachAvailableFunc(storeID, func() bool {
 			oc.RLock()
 			defer oc.RUnlock()
@@ -770,17 +736,17 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64) *ratelimit.B
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
+func (oc *OperatorController) GetAllStoresLimit() map[uint64]*StoreLimit {
 	oc.RLock()
 	defer oc.RUnlock()
-	ret := make(map[uint64]float64)
+	limits := make(map[uint64]*StoreLimit)
 	for storeID, limit := range oc.storesLimit {
 		store := oc.cluster.GetStore(storeID)
 		if !store.IsTombstone() {
-			ret[storeID] = limit.Rate() / float64(operator.RegionInfluence)
+			limits[storeID] = limit
 		}
 	}
-	return ret
+	return limits
 }
 
 // GetLeaderScheduleStrategy is to get leader schedule strategy

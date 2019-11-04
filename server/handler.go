@@ -382,12 +382,12 @@ func (h *Handler) SetAllStoresLimit(rate float64) error {
 	if err != nil {
 		return err
 	}
-	c.opController.SetAllStoresLimit(rate)
+	c.opController.SetAllStoresLimit(rate, schedule.StoreLimitManual)
 	return nil
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetAllStoresLimit() (map[uint64]float64, error) {
+func (h *Handler) GetAllStoresLimit() (map[uint64]*schedule.StoreLimit, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil, err
@@ -401,7 +401,7 @@ func (h *Handler) SetStoreLimit(storeID uint64, rate float64) error {
 	if err != nil {
 		return err
 	}
-	c.opController.SetStoreLimit(storeID, rate)
+	c.opController.SetStoreLimit(storeID, rate, schedule.StoreLimitManual)
 	return nil
 }
 

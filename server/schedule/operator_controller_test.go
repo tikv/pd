@@ -242,7 +242,7 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	for i := uint64(1); i <= 1000; i++ {
 		tc.AddLeaderRegion(i, i)
 	}
-	oc.SetStoreLimit(2, 1)
+	oc.SetStoreLimit(2, 1, StoreLimitManual)
 	for i := uint64(1); i <= 5; i++ {
 		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
@@ -252,13 +252,13 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
-	oc.SetStoreLimit(2, 2)
+	oc.SetStoreLimit(2, 2, StoreLimitManual)
 	for i := uint64(1); i <= 10; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
-	oc.SetAllStoresLimit(1)
+	oc.SetAllStoresLimit(1, StoreLimitManual)
 	for i := uint64(1); i <= 5; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
