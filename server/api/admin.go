@@ -65,6 +65,11 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := handler.ResetTS(uint64(ts)); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		if err == server.ErrServerNotStarted {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		} else {
+			h.rd.JSON(w, http.StatusForbidden, err.Error())
+		}
 	}
+	h.rd.JSON(w, http.StatusOK, "success")
 }
