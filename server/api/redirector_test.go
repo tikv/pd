@@ -49,6 +49,30 @@ func (s *testRedirectorSuite) TestRedirect(c *C) {
 	}
 }
 
+func (s *testRedirectorSuite) TestAllowFollowerHandle(c *C) {
+	// Find a follower.
+	var follower *server.Server
+	leader := mustWaitLeader(c, s.servers)
+	for _, svr := range s.servers {
+		if svr != leader {
+			follower = svr
+			break
+		}
+	}
+
+	addr := follower.GetAddr() + apiPrefix + "/api/v1/version"
+	request, err := http.NewRequest("GET", addr, nil)
+	c.Assert(err, IsNil)
+	request.Header.Add(allowFollowerHandle, "true")
+	resp, err := dialClient.Do(request)
+	c.Assert(err, IsNil)
+	c.Assert(resp.Header.Get(followerHandle), Equals, "true")
+	defer resp.Body.Close()
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	_, err = ioutil.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+}
+
 func (s *testRedirectorSuite) TestNotLeader(c *C) {
 	// Find a follower.
 	var follower *server.Server
