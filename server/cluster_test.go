@@ -345,8 +345,7 @@ func (s *baseCluster) testState(c *C, clusterID uint64, store *metapb.Store, bef
 	err := run(cluster)
 	if len(states) != 0 {
 		c.Assert(err, IsNil)
-		store := s.getStore(c, clusterID, store.GetId())
-		c.Assert(store.GetState(), Equals, states[0])
+		c.Assert(s.getStore(c, clusterID, store.GetId()).GetState(), Equals, states[0])
 	} else {
 		c.Assert(err, NotNil)
 	}
