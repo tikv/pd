@@ -19,5 +19,5 @@ type StoreHotPeersInfos struct {
 	AsLeader StoreHotPeersStat `json:"as_leader"`
 }
 
-// StoreHotPeersStat used to record the hot region statistics group by store
+// StoreHotPeersStat is used to record the hot region statistics group by store.
 type StoreHotPeersStat map[uint64]*HotPeersStat
