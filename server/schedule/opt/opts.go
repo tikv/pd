@@ -78,6 +78,7 @@ type Cluster interface {
 	core.StoreSetController
 
 	statistics.RegionStatInformer
+	statistics.StoreStatInformer
 	Options
 
 	// TODO: it should be removed. Schedulers don't need to know anything
