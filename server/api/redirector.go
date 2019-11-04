@@ -28,7 +28,9 @@ import (
 )
 
 const (
-	redirectorHeader = "PD-Redirector"
+	redirectorHeader    = "PD-Redirector"
+	allowFollowerHandle = "PD-Allow-follower-handle"
+	followerHandle      = "PD-Follwer-handle"
 )
 
 const (
@@ -47,7 +49,11 @@ func newRedirector(s *server.Server) *redirector {
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !h.s.IsClosed() && h.s.GetMember().IsLeader() {
+	allowFollowerHandle := len(r.Header.Get(allowFollowerHandle)) > 0
+	if !h.s.IsClosed() && (h.s.GetMember().IsLeader() || allowFollowerHandle) {
+		if allowFollowerHandle {
+			w.Header().Add(followerHandle, "true")
+		}
 		next(w, r)
 		return
 	}
