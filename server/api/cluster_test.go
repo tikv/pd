@@ -23,15 +23,15 @@ import (
 	"github.com/pingcap/pd/server/config"
 )
 
-var _ = Suite(&testCluster{})
+var _ = Suite(&testClusterSuite{})
 
-type testCluster struct {
+type testClusterSuite struct {
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *testCluster) SetUpSuite(c *C) {
+func (s *testClusterSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = mustNewServer(c)
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -39,41 +39,41 @@ func (s *testCluster) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 }
 
-func (s *testCluster) TearDownSuite(c *C) {
+func (s *testClusterSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testCluster) TestCluster(c *C) {
+func (s *testClusterSuite) TestCluster(c *C) {
 	url := fmt.Sprintf("%s/cluster", s.urlPrefix)
 	c1 := &metapb.Cluster{}
-	err := readJSONWithURL(url, c1)
+	err := readJSON(url, c1)
 	c.Assert(err, IsNil)
 
 	c2 := &metapb.Cluster{}
 	r := config.ReplicationConfig{MaxReplicas: 6}
 	c.Assert(s.svr.SetReplicationConfig(r), IsNil)
-	err = readJSONWithURL(url, c2)
+	err = readJSON(url, c2)
 	c.Assert(err, IsNil)
 
 	c1.MaxPeerCount = 6
 	c.Assert(c1, DeepEquals, c2)
 }
 
-func (s *testCluster) TestGetClusterStatus(c *C) {
+func (s *testClusterSuite) TestGetClusterStatus(c *C) {
 	url := fmt.Sprintf("%s/cluster/status", s.urlPrefix)
 	status := server.ClusterStatus{}
-	err := readJSONWithURL(url, &status)
+	err := readJSON(url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.IsZero(), IsTrue)
 	c.Assert(status.IsInitialized, IsFalse)
 	now := time.Now()
 	mustBootstrapCluster(c, s.svr)
-	err = readJSONWithURL(url, &status)
+	err = readJSON(url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.After(now), IsTrue)
 	c.Assert(status.IsInitialized, IsFalse)
 	s.svr.SetReplicationConfig(config.ReplicationConfig{MaxReplicas: 1})
-	err = readJSONWithURL(url, &status)
+	err = readJSON(url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.After(now), IsTrue)
 	c.Assert(status.IsInitialized, IsTrue)

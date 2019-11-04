@@ -14,6 +14,7 @@
 package server_test
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -25,6 +26,8 @@ import (
 )
 
 func (s *serverTestSuite) TestReconnect(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(3, func(conf *config.Config) {
 		conf.TickInterval = typeutil.Duration{50 * time.Millisecond}
 		conf.ElectionInterval = typeutil.Duration{250 * time.Millisecond}
@@ -32,7 +35,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 
 	// Make connections to followers.

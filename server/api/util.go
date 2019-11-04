@@ -16,7 +16,6 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -60,13 +59,22 @@ func collectStringOption(option string, input map[string]interface{}, collectors
 	return errOptionNotExist(option)
 }
 
-func readJSON(r io.ReadCloser, data interface{}) error {
-	defer r.Close()
+func readJSON(url string, data interface{}) error {
+	resp, err := dialClient.Get(url)
+	if err != nil {
+		return err
+	}
 
-	b, err := ioutil.ReadAll(r)
+	defer resp.Body.Close()
+	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return errors.WithStack(err)
 	}
+
+	if resp.StatusCode != http.StatusOK {
+		return errors.Errorf("http get url %s return code %d", url, resp.StatusCode)
+	}
+
 	err = json.Unmarshal(b, data)
 	if err != nil {
 		return errors.WithStack(err)
@@ -80,8 +88,8 @@ func postJSON(url string, data []byte, checkOpts ...func(res []byte) bool) error
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	res, err := ioutil.ReadAll(resp.Body)
 	defer resp.Body.Close()
+	res, err := ioutil.ReadAll(resp.Body)
 
 	if err != nil {
 		return err
@@ -109,15 +117,4 @@ func doDelete(url string) error {
 	}
 	res.Body.Close()
 	return nil
-}
-
-func doGet(url string) (*http.Response, error) {
-	resp, err := dialClient.Get(url)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.Errorf("http get url %s return code %d", url, resp.StatusCode)
-	}
-	return resp, nil
 }

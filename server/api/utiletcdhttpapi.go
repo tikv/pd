@@ -41,12 +41,7 @@ type PeerStats struct {
 
 func getEtcdPeerStats(etcdClientURL string) (*PeerStats, error) {
 	ps := &PeerStats{}
-	resp, err := doGet(fmt.Sprintf("%s%s", etcdClientURL, etcdPeerStatsAPI))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if err := readJSON(resp.Body, ps); err != nil {
+	if err := readJSON(fmt.Sprintf("%s%s", etcdClientURL, etcdPeerStatsAPI), ps); err != nil {
 		return nil, err
 	}
 	return ps, nil

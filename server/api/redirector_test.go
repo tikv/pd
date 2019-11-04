@@ -14,6 +14,7 @@
 package api
 
 import (
+	"io/ioutil"
 	"net/http"
 
 	. "github.com/pingcap/check"
@@ -59,32 +60,34 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 		}
 	}
 
-	client := newHTTPClient()
-
 	addr := follower.GetAddr() + apiPrefix + "/api/v1/version"
 	// Request to follower without redirectorHeader is OK.
 	request, err := http.NewRequest("GET", addr, nil)
 	c.Assert(err, IsNil)
-	resp, err := client.Do(request)
+	resp, err := dialClient.Do(request)
 	c.Assert(err, IsNil)
+	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	_, err = ioutil.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
 
 	// Request to follower with redirectorHeader will fail.
 	request.RequestURI = ""
 	request.Header.Set(redirectorHeader, "pd")
-	resp, err = client.Do(request)
+	resp1, err := dialClient.Do(request)
 	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Not(Equals), http.StatusOK)
-}
-
-func mustRequest(c *C, s *server.Server) *http.Response {
-	resp, err := http.Get(s.GetAddr() + apiPrefix + "/api/v1/version")
+	defer resp1.Body.Close()
+	c.Assert(resp1.StatusCode, Not(Equals), http.StatusOK)
+	_, err = ioutil.ReadAll(resp1.Body)
 	c.Assert(err, IsNil)
-	return resp
 }
 
 func mustRequestSuccess(c *C, s *server.Server) http.Header {
-	resp := mustRequest(c, s)
+	resp, err := dialClient.Get(s.GetAddr() + apiPrefix + "/api/v1/version")
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	_, err = ioutil.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	return resp.Header
 }

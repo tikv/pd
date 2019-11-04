@@ -14,6 +14,7 @@
 package operator_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,8 @@ func (s *operatorTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *operatorTestSuite) TestOperator(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var err error
 	var t time.Time
 	t = t.Add(time.Hour)
@@ -49,7 +52,7 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 		func(conf *config.Config) { conf.Schedule.StoreBalanceRate = 240 },
 	)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()

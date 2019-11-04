@@ -15,10 +15,8 @@ package api
 
 import (
 	"context"
-	"net/http"
 	"sync"
 	"testing"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -27,6 +25,7 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/config"
+	"go.uber.org/goleak"
 )
 
 var (
@@ -55,10 +54,8 @@ func TestAPIServer(t *testing.T) {
 	TestingT(t)
 }
 
-func newHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: 15 * time.Second,
-	}
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
 type cleanUpFunc func()
@@ -99,8 +96,7 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 		svrs = append(svrs, svr)
 	}
 	close(ch)
-
-	// wait etcds and http servers
+	// wait etcd and http servers
 	mustWaitLeader(c, svrs)
 
 	// clean up
@@ -110,7 +106,7 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 			s.Close()
 		}
 		for _, cfg := range cfgs {
-			testutil.CleanServer(cfg)
+			testutil.CleanServer(cfg.DataDir)
 		}
 	}
 
@@ -149,13 +145,4 @@ func mustBootstrapCluster(c *C, s *server.Server) {
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
 	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
-}
-
-func readJSONWithURL(url string, data interface{}) error {
-	resp, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	return readJSON(resp.Body, data)
 }

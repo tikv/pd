@@ -14,6 +14,7 @@
 package server_test
 
 import (
+	"context"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -21,6 +22,7 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
+	"go.uber.org/goleak"
 
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"
@@ -30,12 +32,24 @@ func Test(t *testing.T) {
 	TestingT(t)
 }
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 var _ = Suite(&serverTestSuite{})
 
-type serverTestSuite struct{}
+type serverTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
+}
+
+func (s *serverTestSuite) TearDownSuite(c *C) {
+	s.cancel()
 }
 
 func (s *serverTestSuite) TestUpdateAdvertiseUrls(c *C) {
@@ -43,7 +57,7 @@ func (s *serverTestSuite) TestUpdateAdvertiseUrls(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 
 	// AdvertisePeerUrls should equals to PeerUrls.
@@ -68,7 +82,7 @@ func (s *serverTestSuite) TestUpdateAdvertiseUrls(c *C) {
 		c.Assert(e, IsNil)
 		cluster.GetServers()[conf.Name] = s
 	}
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	for _, conf := range cluster.GetConfig().InitialServers {
 		serverConf := cluster.GetServer(conf.Name).GetConfig()
@@ -81,7 +95,7 @@ func (s *serverTestSuite) TestClusterID(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 
 	clusterID := cluster.GetServer("pd1").GetClusterID()
@@ -92,7 +106,7 @@ func (s *serverTestSuite) TestClusterID(c *C) {
 	// Restart all PDs.
 	err = cluster.StopAll()
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 
 	// All PDs should have the same cluster ID as before.
@@ -106,7 +120,7 @@ func (s *serverTestSuite) TestLeader(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 
 	leader1 := cluster.WaitLeader()

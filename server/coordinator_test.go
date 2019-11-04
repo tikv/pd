@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math/rand"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -265,9 +266,13 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	defer cleanup()
 
 	// Make sure there are no problem when concurrent write and read
-	for i := 0; i <= 10; i++ {
+	var wg sync.WaitGroup
+	count := 10
+	wg.Add(count + 1)
+	for i := 0; i <= count; i++ {
 		go func(i int) {
-			for j := 0; j < 10000; j++ {
+			defer wg.Done()
+			for j := 0; j < 1000; j++ {
 				c.Assert(tc.addRegionStore(uint64(i%5), rand.Intn(200)), IsNil)
 			}
 		}(i)
@@ -280,6 +285,7 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	co.resetHotSpotMetrics()
 	co.resetSchedulerMetrics()
 	co.cluster.resetClusterMetrics()
+	wg.Wait()
 }
 
 func MaxUint64(nums ...uint64) uint64 {
@@ -293,7 +299,7 @@ func MaxUint64(nums ...uint64) uint64 {
 }
 
 func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run func(*coordinator), c *C) (*testCluster, *coordinator, func()) {
-	ctx, _ := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	cfg, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	if setCfg != nil {
@@ -313,6 +319,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 		co.wg.Wait()
 		cleanup()
 		hbStreams.Close()
+		cancel()
 	}
 }
 
@@ -1194,7 +1201,7 @@ func getHeartBeatStreams(ctx context.Context, c *C, tc *testCluster) (*heartbeat
 	cluster.clusterRoot = svr.getClusterRootPath()
 	cluster.regionSyncer = syncer.NewRegionSyncer(svr)
 	hbStreams := newHeartbeatStreams(ctx, tc.getClusterID(), cluster)
-	return hbStreams, func() { testutil.CleanServer(config) }
+	return hbStreams, func() { testutil.CleanServer(config.DataDir) }
 }
 
 func createTestRaftCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage) *RaftCluster {

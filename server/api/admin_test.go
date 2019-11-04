@@ -72,7 +72,7 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	url := fmt.Sprintf("%s/admin/cache/region/%d", s.urlPrefix, region.GetID())
 	req, err := http.NewRequest("DELETE", url, nil)
 	c.Assert(err, IsNil)
-	res, err := http.DefaultClient.Do(req)
+	res, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, http.StatusOK)
 	res.Body.Close()

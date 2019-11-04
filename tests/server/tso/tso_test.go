@@ -23,28 +23,41 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
+	"go.uber.org/goleak"
 )
 
 func Test(t *testing.T) {
 	TestingT(t)
 }
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 var _ = Suite(&testTsoSuite{})
 
 type testTsoSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func (s *testTsoSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
 }
 
+func (s *testTsoSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
 func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 	var err error
 	cluster, err := tests.NewTestCluster(1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -57,7 +70,9 @@ func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 		Count:  uint32(n),
 	}
 
-	tsoClient, err := grpcPDClient.Tso(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
 	err = tsoClient.Send(req)
@@ -105,7 +120,7 @@ func (s *testTsoSuite) TestTsoCount0(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -114,7 +129,9 @@ func (s *testTsoSuite) TestTsoCount0(c *C) {
 	clusterID := leaderServer.GetClusterID()
 
 	req := &pdpb.TsoRequest{Header: testutil.NewRequestHeader(clusterID)}
-	tsoClient, err := grpcPDClient.Tso(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
 	err = tsoClient.Send(req)
@@ -141,7 +158,7 @@ func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	s.cluster, err = tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 
-	err = s.cluster.RunInitialServers()
+	err = s.cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	s.cluster.WaitLeader()
 
@@ -168,7 +185,9 @@ func (s *testTimeFallBackSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 		Count:  uint32(n),
 	}
 
-	tsoClient, err := s.grpcPDClient.Tso(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tsoClient, err := s.grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
 	err = tsoClient.Send(req)
