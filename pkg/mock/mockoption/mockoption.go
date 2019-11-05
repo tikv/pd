@@ -39,7 +39,7 @@ const (
 	defaultHighSpaceRatio              = 0.6
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultHotRegionCacheHitsThreshold = 3
-	defaultFlexibleScore               = 10 * 1024 * 1024
+	defaultFlexibleScore               = 4 * 1024 * 1024
 	defaultStrictlyMatchLabel          = true
 	defaultLeaderSchedulePolicy        = "count"
 	defaultEnablePlacementRules        = false

@@ -23,7 +23,7 @@ var _ = Suite(&testBasicClusterSuite{})
 type testBasicClusterSuite struct{}
 
 func (s *testBasicClusterSuite) TestUpdateMaxScore(c *C) {
-	flexibleScore := uint64(10 * 1024 * 1024)
+	flexibleScore := uint64(4 * 1024 * 1024)
 	bc := NewBasicCluster(flexibleScore)
 	c.Assert(flexibleScore, Equals, bc.flexibleScore)
 	c.Assert(bc.GetStoreCount(), Equals, 0)

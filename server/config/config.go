@@ -658,7 +658,7 @@ const (
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
-	defaultFlexibleScore               = 10 * 1024 * 1024
+	defaultFlexibleScore               = 4 * 1024 * 1024
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {

@@ -35,7 +35,7 @@ type BasicCluster struct {
 
 // NewBasicCluster creates a BasicCluster.
 func NewBasicCluster(flexibleScores ...uint64) *BasicCluster {
-	flexibleScore := uint64(10 * 1024 * 1024)
+	flexibleScore := uint64(4 * 1024 * 1024)
 	if len(flexibleScores) != 0 {
 		flexibleScore = flexibleScores[0]
 	}
