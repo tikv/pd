@@ -680,11 +680,11 @@ types:
         500:
           description: PD server failed to proceed the request.
   /rules/key/{key}:
-    description: Placement Rules matched by a key.
+    description: Placement rules matched by a key.
     uriParameters:
       key: string
     get:
-      description: Get Placement Rules matched by a key.
+      description: Get placement rules matched by a key.
       responses:
         200:
           body:
@@ -693,7 +693,7 @@ types:
         400:
           description: The key is not in hex format.
         412:
-          description: Placement Rules feature is not enabled.
+          description: Placement rules feature is not enabled.
         500:
           description: PD server failed to proceed the request.
   /rule/{group}/{id}:
@@ -711,7 +711,7 @@ types:
         404:
           description: The Rule is not found.
         412:
-          description: Placement Rules feature is not enabled.
+          description: Placement rules feature is not enabled.
         500:
           description: PD server failed to proceed the request.
     delete:
@@ -720,7 +720,7 @@ types:
         200:
           description: The Rule is delete.
         412:
-          description: Placement Rules feature is not enabled.
+          description: Placement rules feature is not enabled.
         500:
           description: PD server failed to proceed the request.
   /rule:
@@ -737,7 +737,7 @@ types:
         400:
           description: The input is invalid.
         412:
-          description: Placement Rules feature is not enabled.
+          description: Placement rules feature is not enabled.
         500:
           description: PD server failed to proceed the request.
   
