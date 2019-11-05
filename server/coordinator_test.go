@@ -477,8 +477,8 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 	// Transfer peer from store 4 to store 1.
 	c.Assert(tc.addRegionStore(1, 10), IsNil)
-	c.Assert(tc.addRegionStore(2, 20), IsNil)
-	c.Assert(tc.addRegionStore(3, 30), IsNil)
+	c.Assert(tc.addRegionStore(2, 10), IsNil)
+	c.Assert(tc.addRegionStore(3, 10), IsNil)
 	c.Assert(tc.addRegionStore(4, 40), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3, 4), IsNil)
 
