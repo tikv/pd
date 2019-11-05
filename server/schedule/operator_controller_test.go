@@ -361,7 +361,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		c.Assert(controller.AddOperator(op), Equals, true)
 		c.Assert(len(stream.MsgCh()), Equals, 1)
 
-		// Create region2 witch is cloned from the original region.
+		// Create region2 which is cloned from the original region.
 		// region2 has peer 2 in pending state, so the AddPeer step
 		// is left unfinished
 		region2 := region.Clone(
@@ -376,7 +376,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		controller.Dispatch(region2, DispatchFromHeartBeat)
 
 		// In this case, the conf version has been changed, but the
-		// peer added is in peeding state, the operator should not be
+		// peer added is in pending state, the operator should not be
 		// removed by the stale checker
 		c.Assert(op.ConfVerChanged(region2), Equals, 1)
 		c.Assert(controller.GetOperator(1), NotNil)
