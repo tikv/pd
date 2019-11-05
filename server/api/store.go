@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -376,7 +377,7 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	resp := make(map[uint64]*LimitResp)
 	for s, l := range limits {
 		resp[s] = &LimitResp{
-			Rate: l.Rate() * schedule.StoreBalanceBaseTime,
+			Rate: l.Rate() / float64(operator.RegionInfluence) * schedule.StoreBalanceBaseTime,
 			Mode: l.Mode().String(),
 		}
 	}
