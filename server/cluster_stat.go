@@ -367,6 +367,14 @@ func (cs *ClusterState) State(d time.Duration, excludes ...uint64) LoadState {
 	if cs.cst.total < NumberOfEntries {
 		return LoadStateNone
 	}
+	read, written := cs.cst.Bytes(d, excludes...)
+	if read == 0 && written == 0 {
+		return LoadStateIdle
+	}
+	read, written = cs.cst.Keys(d, excludes...)
+	if read == 0 && written == 0 {
+		return LoadStateIdle
+	}
 	cpu := cs.cst.CPU(d, excludes...)
 	switch {
 	case cpu == 0:
