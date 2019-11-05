@@ -25,11 +25,6 @@ var _ = Suite(&testClusterStatSuite{})
 type testClusterStatSuite struct {
 }
 
-		}
-	}
-	return pairs
-}
-
 func (s *testClusterStatSuite) TestCPUStatEntriesAppend(c *C) {
 	N := 10
 
