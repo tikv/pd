@@ -55,14 +55,14 @@ import (
 )
 
 const (
-	etcdTimeout           = time.Second * 3
-	etcdStartTimeout      = time.Minute * 5
-	serverMetricsInterval = time.Minute
-	leaderTickInterval    = 50 * time.Millisecond
+	etcdTimeout		= time.Second * 3
+	etcdStartTimeout	= time.Minute * 5
+	serverMetricsInterval	= time.Minute
+	leaderTickInterval	= 50 * time.Millisecond
 	// pdRootPath for all pd servers.
-	pdRootPath      = "/pd"
-	pdAPIPrefix     = "/pd/"
-	pdClusterIDPath = "/pd/cluster_id"
+	pdRootPath	= "/pd"
+	pdAPIPrefix	= "/pd/"
+	pdClusterIDPath	= "/pd/cluster_id"
 )
 
 // EnableZap enable the zap logger in embed etcd.
@@ -71,39 +71,39 @@ var EnableZap = false
 // Server is the pd server.
 type Server struct {
 	// Server state.
-	isServing int64
+	isServing	int64
 
 	// Configs and initial fields.
-	cfg         *config.Config
-	etcdCfg     *embed.Config
-	scheduleOpt *config.ScheduleOption
-	handler     *Handler
+	cfg		*config.Config
+	etcdCfg		*embed.Config
+	scheduleOpt	*config.ScheduleOption
+	handler		*Handler
 
-	serverLoopCtx    context.Context
-	serverLoopCancel func()
-	serverLoopWg     sync.WaitGroup
+	serverLoopCtx		context.Context
+	serverLoopCancel	func()
+	serverLoopWg		sync.WaitGroup
 
-	member    *member.Member
-	client    *clientv3.Client
-	clusterID uint64 // pd cluster id.
-	rootPath  string
+	member		*member.Member
+	client		*clientv3.Client
+	clusterID	uint64	// pd cluster id.
+	rootPath	string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
 	// store, region and peer, because we just need
 	// a unique ID.
-	idAllocator *id.AllocatorImpl
+	idAllocator	*id.AllocatorImpl
 	// for storage operation.
-	storage *core.Storage
+	storage	*core.Storage
 	// for tso.
-	tso *tso.TimestampOracle
+	tso	*tso.TimestampOracle
 	// for raft cluster
 	cluster *cluster.RaftCluster
 	// For async region heartbeat.
-	hbStreams *heartbeatStreams
+	hbStreams	*heartbeatStreams
 	// Zap logger
-	lg       *zap.Logger
-	logProps *log.ZapProperties
+	lg		*zap.Logger
+	logProps	*log.ZapProperties
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -167,9 +167,9 @@ func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, e
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
-		cfg:         cfg,
-		scheduleOpt: config.NewScheduleOption(cfg),
-		member:      &member.Member{},
+		cfg:		cfg,
+		scheduleOpt:	config.NewScheduleOption(cfg),
+		member:		&member.Member{},
 	}
 	s.handler = newHandler(s)
 
@@ -236,9 +236,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
 
 	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: etcdTimeout,
-		TLS:         tlsConfig,
+		Endpoints:	endpoints,
+		DialTimeout:	etcdTimeout,
+		TLS:		tlsConfig,
 	})
 	if err != nil {
 		return errors.WithStack(err)
@@ -425,8 +425,8 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	clusterMeta := metapb.Cluster{
-		Id:           clusterID,
-		MaxPeerCount: uint32(s.scheduleOpt.GetReplication().GetMaxReplicas()),
+		Id:		clusterID,
+		MaxPeerCount:	uint32(s.scheduleOpt.GetReplication().GetMaxReplicas()),
 	}
 
 	// Set cluster meta
@@ -758,8 +758,8 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 // GetCluster gets cluster.
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
-		Id:           s.clusterID,
-		MaxPeerCount: uint32(s.scheduleOpt.GetReplication().GetMaxReplicas()),
+		Id:		s.clusterID,
+		MaxPeerCount:	uint32(s.scheduleOpt.GetReplication().GetMaxReplicas()),
 	}
 }
 

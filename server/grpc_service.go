@@ -272,6 +272,7 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	rc := s.GetRaftCluster()
 	if rc == nil {
 		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
+
 	}
 
 	if pberr := checkStore2(rc, request.GetStats().GetStoreId()); pberr != nil {

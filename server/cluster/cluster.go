@@ -87,6 +87,7 @@ type RaftCluster struct {
 	opt     *config.ScheduleOption
 	storage *core.Storage
 	id      id.Allocator
+	limiter *StoreLimiter
 
 	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
@@ -206,6 +207,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt)
+	c.limiter = NewStoreLimiter(c.coordinator.opController)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(3)
@@ -388,6 +390,12 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
+
+	// c.limiter is nil before "start" is called
+	if c.limiter != nil {
+		c.limiter.Collect(newStore.GetStoreStats())
+	}
+
 	return nil
 }
 
@@ -832,7 +840,13 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			}
 		}
 	}
+	// Set the store limit according to current state of the cluster
+	c.updateStoreLimit(s)
 	return c.putStoreLocked(s)
+}
+
+func (c *RaftCluster) updateStoreLimit(s *core.StoreInfo) {
+
 }
 
 // RemoveStore marks a store as offline in cluster.
