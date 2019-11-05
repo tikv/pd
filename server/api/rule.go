@@ -105,7 +105,7 @@ func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusPreconditionFailed, "placement rules feature is disabled")
 		return
 	}
-	keyHex := mux.Vars(r)["region"]
+	keyHex := mux.Vars(r)["key"]
 	key, err := hex.DecodeString(keyHex)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, "key should be hex format")
@@ -127,6 +127,10 @@ func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	group, id := mux.Vars(r)["group"], mux.Vars(r)["id"]
 	rule := cluster.GetRuleManager().GetRule(group, id)
+	if rule == nil {
+		h.rd.JSON(w, http.StatusNotFound, nil)
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, rule)
 }
 
