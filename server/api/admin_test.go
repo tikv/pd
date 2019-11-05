@@ -115,7 +115,7 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args := make(map[string]interface{})
 	t1 := makeTS(time.Hour)
 	url := s.urlPrefix
-	args["tso"] = t1
+	args["tso"] = fmt.Sprintf("%d", uint64(t1))
 	values, err := json.Marshal(args)
 	c.Assert(err, IsNil)
 	err = postJSON(url, values,
@@ -126,7 +126,7 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 
 	c.Assert(err, IsNil)
 	t2 := makeTS(32 * time.Hour)
-	args["tso"] = t2
+	args["tso"] = fmt.Sprintf("%d", uint64(t2))
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
 	err = postJSON(url, values,
@@ -135,7 +135,7 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	c.Assert(strings.Contains(err.Error(), "too large"), IsTrue)
 
 	t3 := makeTS(-2 * time.Hour)
-	args["tso"] = t3
+	args["tso"] = fmt.Sprintf("%d", uint64(t3))
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
 	err = postJSON(url, values,
@@ -144,7 +144,7 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	c.Assert(strings.Contains(err.Error(), "small"), IsTrue)
 
 	t4 := math.MinInt64
-	args["tso"] = t4
+	args["tso"] = fmt.Sprintf("%d", uint64(t4))
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
 	err = postJSON(url, values,
@@ -152,4 +152,19 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
 
+	args["tso"] = ""
+	values, err = json.Marshal(args)
+	c.Assert(err, IsNil)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
+	c.Assert(err, NotNil)
+	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
+
+	args["tso"] = "test"
+	values, err = json.Marshal(args)
+	c.Assert(err, IsNil)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
+	c.Assert(err, NotNil)
+	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
 }
