@@ -627,7 +627,7 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultLeaderScheduleStrategy      = "count"
-	defaultFlexibleScore               = 10 * 1024 * 1024
+	defaultFlexibleScore               = 4 * 1024 * 1024
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
