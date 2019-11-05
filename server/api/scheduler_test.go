@@ -80,7 +80,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 			extraTestFunc: func(name string, c *C) {
 				resp := make(map[string]interface{})
 				listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name)
-				c.Assert(readJSONWithURL(listURL, &resp), IsNil)
+				c.Assert(readJSON(listURL, &resp), IsNil)
 				c.Assert(resp["start-key"], Equals, "")
 				c.Assert(resp["end-key"], Equals, "")
 				c.Assert(resp["range-name"], Equals, "test")
@@ -91,7 +91,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				c.Assert(err, IsNil)
 				c.Assert(postJSON(updateURL, body), IsNil)
 				resp = make(map[string]interface{})
-				c.Assert(readJSONWithURL(listURL, &resp), IsNil)
+				c.Assert(readJSON(listURL, &resp), IsNil)
 				c.Assert(resp["start-key"], Equals, "a_00")
 				c.Assert(resp["end-key"], Equals, "a_99")
 				c.Assert(resp["range-name"], Equals, "test")

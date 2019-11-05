@@ -35,6 +35,7 @@ import (
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/checker"
+	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -83,6 +84,8 @@ type RaftCluster struct {
 	wg           sync.WaitGroup
 	quit         chan struct{}
 	regionSyncer *syncer.RegionSyncer
+
+	ruleManager *placement.RuleManager
 }
 
 // ClusterStatus saves some state information
@@ -1432,6 +1435,18 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	}
 	c.core.PutRegion(region)
 	return nil
+}
+
+// GetRuleManager returns the rule manager reference.
+func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
+	c.RLock()
+	defer c.RUnlock()
+	return c.ruleManager
+}
+
+// FitRegion tries to fit the region with placement rules.
+func (c *RaftCluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
+	return c.GetRuleManager().FitRegion(c, region)
 }
 
 type prepareChecker struct {

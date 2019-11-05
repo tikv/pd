@@ -16,7 +16,6 @@ package api
 import (
 	"encoding/json"
 	"io/ioutil"
-	"net/http"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
@@ -24,13 +23,7 @@ import (
 
 var _ = Suite(&testDiagnoseAPISuite{})
 
-type testDiagnoseAPISuite struct {
-	hc *http.Client
-}
-
-func (s *testDiagnoseAPISuite) SetUpSuite(c *C) {
-	s.hc = newHTTPClient()
-}
+type testDiagnoseAPISuite struct{}
 
 func checkDiagnoseResponse(c *C, body []byte) {
 	got := []Recommendation{}
@@ -46,19 +39,20 @@ func checkDiagnoseResponse(c *C, body []byte) {
 func (s *testDiagnoseAPISuite) TestDiagnoseSlice(c *C) {
 	_, svrs, clean := mustNewCluster(c, 3)
 	defer clean()
-	var leader, follow *server.Server
+	var leader, follower *server.Server
 
 	for _, svr := range svrs {
 		if !svr.IsClosed() && svr.GetMember().IsLeader() {
 			leader = svr
 		} else {
-			follow = svr
+			follower = svr
 		}
 	}
 	addr := leader.GetConfig().ClientUrls + apiPrefix + "/diagnose"
-	follow.Close()
-	resp, err := s.hc.Get(addr)
+	follower.Close()
+	resp, err := dialClient.Get(addr)
 	c.Assert(err, IsNil)
+	defer resp.Body.Close()
 	buf, err := ioutil.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	checkDiagnoseResponse(c, buf)

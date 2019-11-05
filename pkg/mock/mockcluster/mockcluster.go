@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -33,6 +34,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*mockoption.ScheduleOptions
+	*placement.RuleManager
 	*statistics.HotCache
 	*statistics.StoresStats
 	ID uint64
@@ -63,6 +65,11 @@ func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 	//  regions load from etcd will have no leader
 	r := mc.newMockRegionInfo(regionID, 0, followerIds...).Clone(core.WithLeader(nil))
 	mc.PutRegion(r)
+}
+
+// GetStoresStats gets stores statistics.
+func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
+	return mc.StoresStats
 }
 
 // GetStoreRegionCount gets region count with a given store.
@@ -111,6 +118,11 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 		StoreId: storeID,
 	}
 	return peer, nil
+}
+
+// FitRegion fits a region to the rules it matches.
+func (mc *Cluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
+	return mc.RuleManager.FitRegion(mc.BasicCluster, region)
 }
 
 // SetStoreUp sets store state to be up.
@@ -356,6 +368,7 @@ func (mc *Cluster) UpdateStorageWrittenBytes(storeID uint64, bytesWritten uint64
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
 	newStore := store.Clone(core.SetStoreStats(newStats))
+	mc.Set(storeID, newStats)
 	mc.PutStore(newStore)
 }
 
@@ -368,6 +381,7 @@ func (mc *Cluster) UpdateStorageReadBytes(storeID uint64, bytesRead uint64) {
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
 	newStore := store.Clone(core.SetStoreStats(newStats))
+	mc.Set(storeID, newStats)
 	mc.PutStore(newStore)
 }
 
