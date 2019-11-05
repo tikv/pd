@@ -60,6 +60,15 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	router.HandleFunc("/api/v1/config/cluster-version", confHandler.GetClusterVersion).Methods("GET")
 	router.HandleFunc("/api/v1/config/cluster-version", confHandler.SetClusterVersion).Methods("POST")
 
+	rulesHandler := newRulesHandler(svr, rd)
+	router.HandleFunc("/api/v1/config/rules", rulesHandler.GetAll).Methods("GET")
+	router.HandleFunc("/api/v1/config/rules/group/{group}", rulesHandler.GetAllByGroup).Methods("GET")
+	router.HandleFunc("/api/v1/config/rules/region/{region}", rulesHandler.GetAllByRegion).Methods("GET")
+	router.HandleFunc("/api/v1/config/rules/key/{key}", rulesHandler.GetAllByKey).Methods("GET")
+	router.HandleFunc("/api/v1/config/rule/{group}/{id}", rulesHandler.Get).Methods("GET")
+	router.HandleFunc("/api/v1/config/rule", rulesHandler.Set).Methods("POST")
+	router.HandleFunc("/api/v1/config/rule/{group}/{id}", rulesHandler.Delete).Methods("DELETE")
+
 	storeHandler := newStoreHandler(handler, rd)
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Get).Methods("GET")
 	router.HandleFunc("/api/v1/store/{id}", storeHandler.Delete).Methods("DELETE")
