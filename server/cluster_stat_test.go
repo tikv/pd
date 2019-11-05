@@ -172,8 +172,8 @@ func (s *testClusterStatSuite) TestClusterStatCPU(c *C) {
 
 	// heartbeat per 10s
 	interval := &pdpb.TimeInterval{
-		StartTimestamp: 0,
-		EndTimestamp:   10 * uint64(time.Second),
+		StartTimestamp: 1,
+		EndTimestamp:   11,
 	}
 	// the average cpu usage is 20%
 	usages := cpu(20)

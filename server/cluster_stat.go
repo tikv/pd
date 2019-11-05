@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 // Cluster State Statistics
@@ -132,7 +134,11 @@ func (s *StatEntries) CPU(steps int) float64 {
 	if steps > s.total {
 		steps = s.total
 	}
+	if steps == 0 {
+		return float64(0)
+	}
 
+	log.Debug("caculate CPU", zap.Int("steps", steps))
 	usage := 0.0
 	idx := (s.total - 1) % cap
 	for i := 0; i < steps; i++ {
@@ -148,6 +154,9 @@ func (s *StatEntries) CPU(steps int) float64 {
 
 func cpuUsageAll(usages []*pdpb.RecordPair) float64 {
 	sum := 0.0
+	if len(usages) == 0 {
+		return sum
+	}
 	for _, usage := range usages {
 		sum += float64(usage.Value)
 	}
@@ -163,6 +172,9 @@ func (s *StatEntries) Keys(steps int) (int64, int64) {
 	}
 	if steps > s.total {
 		steps = s.total
+	}
+	if steps == 0 {
+		return 0, 0
 	}
 
 	var read, written int64
@@ -188,6 +200,9 @@ func (s *StatEntries) Bytes(steps int) (int64, int64) {
 	}
 	if steps > s.total {
 		steps = s.total
+	}
+	if steps == 0 {
+		return 0, 0
 	}
 	var read, written int64
 	idx := (s.total - 1) % cap
@@ -226,13 +241,17 @@ func (cst *ClusterStatEntries) Append(stat *StatEntry) {
 	defer cst.m.Unlock()
 
 	// update interval
-	interval := int64(stat.Interval.GetEndTimestamp() -
-		stat.Interval.GetStartTimestamp())
-	if interval == 0 {
+	start, end := stat.Interval.GetStartTimestamp(),
+		stat.Interval.GetEndTimestamp()
+	interval := int64(end - start)
+	if start == 0 || end == 0 || interval == 0 {
 		interval = DefaultIntervalHint
 	}
-	cst.interval = (cst.interval*cst.total + interval) /
-		(cst.total + 1)
+	if cst.total == 0 {
+		cst.interval = interval
+	} else {
+		cst.interval = cst.interval + (interval-cst.interval)/cst.total
+	}
 	cst.total++
 
 	// append the entry
@@ -260,6 +279,11 @@ func (cst *ClusterStatEntries) CPU(d time.Duration, excludes ...uint64) float64 
 	cst.m.RLock()
 	defer cst.m.RUnlock()
 
+	// no entries have been collected
+	if cst.total == 0 {
+		return 0
+	}
+
 	steps := int64(d) / cst.interval
 
 	sum := 0.0
@@ -277,6 +301,11 @@ func (cst *ClusterStatEntries) CPU(d time.Duration, excludes ...uint64) float64 
 func (cst *ClusterStatEntries) Keys(d time.Duration, excludes ...uint64) (int64, int64) {
 	cst.m.RLock()
 	defer cst.m.RUnlock()
+	// no entries have been collected
+	if cst.total == 0 {
+		return 0, 0
+	}
+
 	steps := int64(d) / cst.interval
 
 	var read, written int64
@@ -296,6 +325,11 @@ func (cst *ClusterStatEntries) Keys(d time.Duration, excludes ...uint64) (int64,
 func (cst *ClusterStatEntries) Bytes(d time.Duration, excludes ...uint64) (int64, int64) {
 	cst.m.RLock()
 	defer cst.m.RUnlock()
+	// no entries have been collected
+	if cst.total == 0 {
+		return 0, 0
+	}
+
 	steps := int64(d) / cst.interval
 
 	var read, written int64
