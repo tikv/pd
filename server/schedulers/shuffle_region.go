@@ -104,9 +104,9 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.
 		return nil, nil
 	}
 
-	region := cluster.RandFollowerRegion(source.GetID(), core.HealthRegion())
+	region := cluster.RandFollowerRegion(source.GetID(), opt.HealthRegion(cluster))
 	if region == nil {
-		region = cluster.RandLeaderRegion(source.GetID(), core.HealthRegion())
+		region = cluster.RandLeaderRegion(source.GetID(), opt.HealthRegion(cluster))
 	}
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()

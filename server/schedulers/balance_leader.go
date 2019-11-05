@@ -154,7 +154,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 // the best follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *core.StoreInfo) []*operator.Operator {
 	sourceID := source.GetID()
-	region := cluster.RandLeaderRegion(sourceID, core.HealthRegion())
+	region := cluster.RandLeaderRegion(sourceID, opt.HealthRegion(cluster))
 	if region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", sourceID))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
@@ -181,7 +181,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(cluster opt.Cluster, target *core.StoreInfo) []*operator.Operator {
 	targetID := target.GetID()
-	region := cluster.RandFollowerRegion(targetID, core.HealthRegion())
+	region := cluster.RandFollowerRegion(targetID, opt.HealthRegion(cluster))
 	if region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", targetID))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()
