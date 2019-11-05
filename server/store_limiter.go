@@ -48,16 +48,10 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 	s.m.Lock()
 	defer s.m.Unlock()
 
+	log.Info("collected statistics", zap.Reflect("stats", stats))
 	s.state.Collect((*StatEntry)(stats))
 
 	rate := float64(0)
-	read, written := s.state.cst.Keys(StateCalcDuration)
-	if read == 0 && written == 0 {
-		log.Info("no keys read or written, the cluster is idle")
-		rate = float64(s.scene.Idle) / schedule.StoreBalanceBaseTime
-		s.oc.SetAllStoresLimit(rate, schedule.StoreLimitAuto)
-		return
-	}
 	state := s.state.State(StateCalcDuration)
 	switch state {
 	case LoadStateIdle:
@@ -71,7 +65,7 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 	}
 
 	if rate > 0 {
-		s.oc.SetAllStoresLimit(rate, schedule.StoreLimitAuto)
+		s.oc.SetAllStoresLimitAuto(rate)
 		log.Info("change store limit for cluster", zap.Stringer("state", state), zap.Float64("rate", rate))
 	}
 }

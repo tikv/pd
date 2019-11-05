@@ -847,6 +847,22 @@ func (oc *OperatorController) SetAllStoresLimit(rate float64, mode StoreLimitMod
 	}
 }
 
+// SetAllStoresLimitAuto updates the store limit in StoreLimitAuto mode
+func (oc *OperatorController) SetAllStoresLimitAuto(rate float64) {
+	oc.Lock()
+	defer oc.Unlock()
+	stores := oc.cluster.GetStores()
+	for _, s := range stores {
+		sid := s.GetID()
+		if old, ok := oc.storesLimit[sid]; ok {
+			if old.Mode() == StoreLimitManual {
+				continue
+			}
+		}
+		oc.storesLimit[sid] = NewStoreLimit(rate, StoreLimitAuto)
+	}
+}
+
 // SetStoreLimit is used to set the limit of a store.
 func (oc *OperatorController) SetStoreLimit(storeID uint64, rate float64, mode StoreLimitMode) {
 	oc.Lock()
