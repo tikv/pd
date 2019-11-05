@@ -508,6 +508,9 @@ type ScheduleConfig struct {
 	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
 	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
 	// FlexibleScore is the option to set max score.
+	// When start cluster, get the maximum capacity in the cluster, and then let max_score = max_capacity + flexible_score.
+	// When add new store, if capacity of the new store is lower than max_score, max_score will not be adjusted.
+	// Otherwise, we will set the max_score of all the store to the new one.
 	FlexibleScore uint64 `toml:"flexible-score" json:"flexible-score"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
