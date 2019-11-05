@@ -215,7 +215,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 	// Transfer leader from store 4 to store 2.
 	c.Assert(tc.updateLeaderCount(4, 50), IsNil)
-	c.Assert(tc.updateLeaderCount(3, 30), IsNil)
+	c.Assert(tc.updateLeaderCount(3, 50), IsNil)
 	c.Assert(tc.updateLeaderCount(2, 20), IsNil)
 	c.Assert(tc.updateLeaderCount(1, 10), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 4, 3, 2), IsNil)
