@@ -385,12 +385,17 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
-	scene := schedule.DefaultStoreLimitScene()
+	scene := h.Handler.GetStoreLimitScene()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &scene); err != nil {
 		return
 	}
 	h.Handler.SetStoreLimitScene(scene)
 	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
+	scene := h.Handler.GetStoreLimitScene()
+	h.rd.JSON(w, http.StatusOK, scene)
 }
 
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

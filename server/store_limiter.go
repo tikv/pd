@@ -76,3 +76,10 @@ func (s *StoreLimiter) ReplaceStoreLimitScene(scene *schedule.StoreLimitScene) {
 	defer s.m.Unlock()
 	s.scene = scene
 }
+
+// StoreLimitScene returns the current limit for different scenes
+func (s *StoreLimiter) StoreLimitScene() *schedule.StoreLimitScene {
+	s.m.RLock()
+	defer s.m.RUnlock()
+	return s.scene
+}

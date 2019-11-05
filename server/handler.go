@@ -819,3 +819,9 @@ func (h *Handler) SetStoreLimitScene(scene *schedule.StoreLimitScene) {
 	cluster := h.s.GetRaftCluster()
 	cluster.limiter.ReplaceStoreLimitScene(scene)
 }
+
+// GetStoreLimitScene returns the limit valus for different scenes
+func (h *Handler) GetStoreLimitScene() *schedule.StoreLimitScene {
+	cluster := h.s.GetRaftCluster()
+	return cluster.limiter.StoreLimitScene()
+}
