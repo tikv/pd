@@ -693,14 +693,20 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 	}
 	start := time.Now()
 	defer cmdDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
-	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.leaderClient().ScanRegions(ctx, &pdpb.ScanRegionsRequest{
+
+	var cancel context.CancelFunc
+	scanCtx := ctx
+	if _, ok := ctx.Deadline(); !ok {
+		scanCtx, cancel = context.WithTimeout(ctx, pdTimeout)
+		defer cancel()
+	}
+
+	resp, err := c.leaderClient().ScanRegions(scanCtx, &pdpb.ScanRegionsRequest{
 		Header:   c.requestHeader(),
 		StartKey: key,
 		EndKey:   endKey,
 		Limit:    int32(limit),
 	})
-	cancel()
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
