@@ -813,3 +813,9 @@ func (h *Handler) ResetTS(ts uint64) error {
 	}
 	return tsoServer.ResetUserTimestamp(ts)
 }
+
+// SetStoreLimitScene sets the limit values for differents scenes
+func (h *Handler) SetStoreLimitScene(scene *schedule.StoreLimitScene) {
+	cluster := h.s.GetRaftCluster()
+	cluster.limiter.ReplaceStoreLimitScene(scene)
+}
