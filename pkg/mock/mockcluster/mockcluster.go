@@ -67,6 +67,11 @@ func (mc *Cluster) LoadRegion(regionID uint64, followerIds ...uint64) {
 	mc.PutRegion(r)
 }
 
+// GetStoresStats gets stores statistics.
+func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
+	return mc.StoresStats
+}
+
 // GetStoreRegionCount gets region count with a given store.
 func (mc *Cluster) GetStoreRegionCount(storeID uint64) int {
 	return mc.Regions.GetStoreRegionCount(storeID)
@@ -363,6 +368,7 @@ func (mc *Cluster) UpdateStorageWrittenBytes(storeID uint64, bytesWritten uint64
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
 	newStore := store.Clone(core.SetStoreStats(newStats))
+	mc.Set(storeID, newStats)
 	mc.PutStore(newStore)
 }
 
@@ -375,6 +381,7 @@ func (mc *Cluster) UpdateStorageReadBytes(storeID uint64, bytesRead uint64) {
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
 	newStore := store.Clone(core.SetStoreStats(newStats))
+	mc.Set(storeID, newStats)
 	mc.PutStore(newStore)
 }
 

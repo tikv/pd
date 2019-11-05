@@ -102,12 +102,12 @@ func (s *hotTestSuite) TestHot(c *C) {
 	testHot := func(hotRegionID, hotStoreID uint64, hotType string) {
 		args = []string{"-u", pdAddr, "hot", hotType}
 		_, output, e := pdctl.ExecuteCommandC(cmd, args...)
-		hotRegion := statistics.StoreHotRegionInfos{}
+		hotRegion := statistics.StoreHotPeersInfos{}
 		c.Assert(e, IsNil)
 		c.Assert(json.Unmarshal(output, &hotRegion), IsNil)
 		c.Assert(hotRegion.AsLeader, HasKey, hotStoreID)
-		c.Assert(hotRegion.AsLeader[hotStoreID].RegionsCount, Equals, 1)
-		c.Assert(hotRegion.AsLeader[hotStoreID].RegionsStat[0].RegionID, Equals, hotRegionID)
+		c.Assert(hotRegion.AsLeader[hotStoreID].Count, Equals, 1)
+		c.Assert(hotRegion.AsLeader[hotStoreID].Stats[0].RegionID, Equals, hotRegionID)
 	}
 
 	hotReadRegionID, hotWriteRegionID, hotStoreId := uint64(3), uint64(2), uint64(1)
