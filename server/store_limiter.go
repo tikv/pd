@@ -48,7 +48,7 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 	s.m.Lock()
 	defer s.m.Unlock()
 
-	log.Info("collected statistics", zap.Reflect("stats", stats))
+	log.Debug("collected statistics", zap.Reflect("stats", stats))
 	s.state.Collect((*StatEntry)(stats))
 
 	rate := float64(0)
