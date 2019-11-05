@@ -107,16 +107,16 @@ func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
 // remove removes a region if the region is in the tree.
 // It will do nothing if it cannot find the region or the found region
 // is not the same with the region.
-func (t *regionTree) remove(region *RegionInfo) {
+func (t *regionTree) remove(region *RegionInfo) btree.Item {
 	if t.length() == 0 {
-		return
+		return nil
 	}
 	result := t.find(region)
 	if result == nil || result.region.GetID() != region.GetID() {
-		return
+		return nil
 	}
 
-	t.tree.Delete(result)
+	return t.tree.Delete(result)
 }
 
 // search returns a region that contains the key.

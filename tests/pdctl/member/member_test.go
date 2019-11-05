@@ -14,6 +14,7 @@
 package member_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -40,9 +41,11 @@ func (s *memberTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *memberTestSuite) TestMember(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())

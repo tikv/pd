@@ -36,10 +36,18 @@ func Test(t *testing.T) {
 
 var _ = Suite(&serverTestSuite{})
 
-type serverTestSuite struct{}
+type serverTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
+}
+
+func (s *serverTestSuite) TearDownSuite(c *C) {
+	s.cancel()
 }
 
 type client interface {
@@ -53,7 +61,7 @@ func (s *serverTestSuite) TestClientLeaderChange(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -107,7 +115,7 @@ func (s *serverTestSuite) TestLeaderTransfer(c *C) {
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 

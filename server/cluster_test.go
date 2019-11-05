@@ -533,6 +533,8 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		c.Assert(err, IsNil)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var wg sync.WaitGroup
 	// register store and bind stream
 	for i, store := range stores {
@@ -546,7 +548,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 		}
 		_, err := s.svr.StoreHeartbeat(context.TODO(), req)
 		c.Assert(err, IsNil)
-		stream, err := s.grpcPDClient.RegionHeartbeat(context.Background())
+		stream, err := s.grpcPDClient.RegionHeartbeat(ctx)
 		c.Assert(err, IsNil)
 		peer := &metapb.Peer{Id: s.allocID(c), StoreId: store.GetId()}
 		regionReq := &pdpb.RegionHeartbeatRequest{
@@ -570,7 +572,12 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 				wg.Done()
 			}
 			for {
-				stream.Recv()
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					stream.Recv()
+				}
 			}
 		}(i == 0)
 	}

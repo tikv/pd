@@ -28,11 +28,16 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"go.uber.org/goleak"
 )
 
 func TestClient(t *testing.T) {
 	server.EnableZap = true
 	TestingT(t)
+}
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
 var _ = Suite(&testClientSuite{})
@@ -81,6 +86,8 @@ var (
 
 type testClientSuite struct {
 	cleanup         server.CleanupFunc
+	ctx             context.Context
+	clean           context.CancelFunc
 	srv             *server.Server
 	client          Client
 	grpcPDClient    pdpb.PDClient
@@ -98,7 +105,8 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 
 	s.client, err = NewClient(s.srv.GetEndpoints(), SecurityOption{})
 	c.Assert(err, IsNil)
-	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(context.Background())
+	s.ctx, s.clean = context.WithCancel(context.Background())
+	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(s.ctx)
 	c.Assert(err, IsNil)
 	cluster := s.srv.GetRaftCluster()
 	c.Assert(cluster, NotNil)
@@ -109,6 +117,7 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 
 func (s *testClientSuite) TearDownSuite(c *C) {
 	s.client.Close()
+	s.clean()
 	s.cleanup()
 }
 

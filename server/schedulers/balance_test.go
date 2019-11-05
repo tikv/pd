@@ -233,7 +233,7 @@ func (s *testBalanceSpeedSuite) TestTolerantRatio(c *C) {
 	tc := mockcluster.NewCluster(opt)
 	// create a region to control average region size.
 	tc.AddLeaderRegion(1, 1, 2)
-	regionSize := int64(96 * 1024)
+	regionSize := int64(96 * KB)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
 
 	tc.TolerantSizeRatio = 0
@@ -931,10 +931,10 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(1, 0.5, 0.5)
-	tc.UpdateStoreRegionSize(1, 500*1024*1024)
+	tc.UpdateStoreRegionSize(1, 500*MB)
 	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(2, 0.1, 0.9)
-	tc.UpdateStoreRegionSize(2, 100*1024*1024)
+	tc.UpdateStoreRegionSize(2, 100*MB)
 	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
 	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3"})
 

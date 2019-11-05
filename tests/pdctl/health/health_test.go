@@ -14,6 +14,7 @@
 package health_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -37,9 +38,11 @@ func (s *healthTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *healthTestSuite) TestHealth(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()
