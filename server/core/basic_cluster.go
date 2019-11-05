@@ -25,8 +25,11 @@ import (
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
 	sync.RWMutex
-	Stores        *StoresInfo
-	Regions       *RegionsInfo
+	Stores  *StoresInfo
+	Regions *RegionsInfo
+	// When start cluster, get the maximum capacity in the cluster, and then let max_score = max_capacity + flexible_score.
+	// When add new store, if capacity of the new store is lower than max_score, max_score will not be adjusted.
+	// Otherwise, we will set the max_score of all the store to the new one.
 	flexibleScore uint64
 }
 
