@@ -491,6 +491,9 @@ type ScheduleConfig struct {
 	// LeaderScheduleStrategy is the option to balance leader, there are some strategics supported: ["count", "size"], default: "count"
 	LeaderScheduleStrategy string `toml:"leader-schedule-strategy,omitempty" json:"leader-schedule-strategy,string"`
 	// FlexibleScore is the option to set max score.
+	// When start cluster, get the maximum capacity in the cluster, and then let max_score = max_capacity + flexible_score.
+	// When add new store, if capacity of the new store is lower than max_score, max_score will not be adjusted.
+	// Otherwise, we will set the max_score of all the store to the new one.
 	FlexibleScore uint64 `toml:"flexible-score,omitempty" json:"flexible-score"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
