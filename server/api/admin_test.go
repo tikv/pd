@@ -16,7 +16,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -136,15 +135,6 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 
 	t3 := makeTS(-2 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t3)
-	values, err = json.Marshal(args)
-	c.Assert(err, IsNil)
-	err = postJSON(url, values,
-		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
-	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "small"), IsTrue)
-
-	t4 := uint64(math.MinInt64)
-	args["tso"] = fmt.Sprintf("%d", t4)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
 	err = postJSON(url, values,
