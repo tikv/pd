@@ -29,7 +29,7 @@ import (
 	"github.com/unrolled/render"
 )
 
-var placementDisabledErr = errors.New("placement rules feature is disabled")
+var errPlacementDisabled = errors.New("placement rules feature is disabled")
 
 type ruleHandler struct {
 	svr *server.Server
@@ -50,7 +50,7 @@ func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !cluster.IsPlacementRulesEnabled() {
-		h.rd.JSON(w, http.StatusPreconditionFailed, placementDisabledErr.Error())
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
 	rules := cluster.GetRuleManager().GetAllRules()
@@ -64,7 +64,7 @@ func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !cluster.IsPlacementRulesEnabled() {
-		h.rd.JSON(w, http.StatusPreconditionFailed, placementDisabledErr.Error())
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
 	group := mux.Vars(r)["group"]
@@ -79,7 +79,7 @@ func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !cluster.IsPlacementRulesEnabled() {
-		h.rd.JSON(w, http.StatusPreconditionFailed, placementDisabledErr.Error())
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
 	regionStr := mux.Vars(r)["region"]
@@ -104,7 +104,7 @@ func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !cluster.IsPlacementRulesEnabled() {
-		h.rd.JSON(w, http.StatusPreconditionFailed, placementDisabledErr.Error())
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
 	keyHex := mux.Vars(r)["key"]
@@ -124,7 +124,7 @@ func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !cluster.IsPlacementRulesEnabled() {
-		h.rd.JSON(w, http.StatusPreconditionFailed, placementDisabledErr.Error())
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
 	group, id := mux.Vars(r)["group"], mux.Vars(r)["id"]
@@ -143,7 +143,7 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !cluster.IsPlacementRulesEnabled() {
-		h.rd.JSON(w, http.StatusPreconditionFailed, placementDisabledErr.Error())
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
 	var rule placement.Rule
@@ -198,7 +198,7 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !cluster.IsPlacementRulesEnabled() {
-		h.rd.JSON(w, http.StatusPreconditionFailed, placementDisabledErr.Error())
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
 	group, id := mux.Vars(r)["group"], mux.Vars(r)["id"]
