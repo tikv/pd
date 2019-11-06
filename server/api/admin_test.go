@@ -148,9 +148,9 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
 	err = postJSON(url, values,
-		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
+	c.Assert(strings.Contains(err.Error(), "small"), IsTrue)
 
 	args["tso"] = ""
 	values, err = json.Marshal(args)
