@@ -91,7 +91,7 @@ func (s *testClusterStatSuite) TestStatEntriesCPU(c *C) {
 	}
 	c.Assert(entries.CPU(N), Equals, float64(20))
 
-	// fullfill the entries
+	// fulfill the entries
 	usages = cpu(40)
 	for i := N - 5; i < N; i++ {
 		entry := &StatEntry{
