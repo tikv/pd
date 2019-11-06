@@ -44,6 +44,7 @@ const (
 	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
 	balanceRegionRetryLimit = 10
 	balanceRegionName       = "balance-region-scheduler"
+	balanceRegionType       = "balance-region"
 )
 
 type balanceRegionScheduler struct {
@@ -95,7 +96,7 @@ func (s *balanceRegionScheduler) GetName() string {
 }
 
 func (s *balanceRegionScheduler) GetType() string {
-	return "balance-region"
+	return balanceRegionType
 }
 
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {

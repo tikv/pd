@@ -39,8 +39,12 @@ func init() {
 	})
 }
 
-// balanceLeaderRetryLimit is the limit to retry schedule for selected source store and target store.
-const balanceLeaderRetryLimit = 10
+const (
+	// balanceLeaderRetryLimit is the limit to retry schedule for selected source store and target store.
+	balanceLeaderRetryLimit = 10
+	balanceLeaderName       = "balance-leader-scheduler"
+	balanceLeaderType       = "balance-leader"
+)
 
 type balanceLeaderScheduler struct {
 	*baseScheduler
@@ -88,11 +92,11 @@ func (l *balanceLeaderScheduler) GetName() string {
 	if l.name != "" {
 		return l.name
 	}
-	return "balance-leader-scheduler"
+	return balanceLeaderName
 }
 
 func (l *balanceLeaderScheduler) GetType() string {
-	return "balance-leader"
+	return balanceLeaderType
 }
 
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
