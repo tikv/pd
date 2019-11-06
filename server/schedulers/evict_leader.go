@@ -41,9 +41,14 @@ func init() {
 			if err != nil {
 				return errors.WithStack(err)
 			}
+			ranges, err := getKeyRanges(args[1:])
+			if err != nil {
+				return errors.WithStack(err)
+			}
 			name := fmt.Sprintf("evict-leader-scheduler-%d", id)
 			conf.StoreID = id
 			conf.Name = name
+			conf.Ranges = ranges
 			return nil
 
 		}
@@ -57,8 +62,9 @@ func init() {
 }
 
 type evictLeaderSchedulerConfig struct {
-	Name    string `json:"name"`
-	StoreID uint64 `json:"store-id"`
+	Name    string          `json:"name"`
+	StoreID uint64          `json:"store-id"`
+	Ranges  []core.KeyRange `json:"ranges"`
 }
 
 type evictLeaderScheduler struct {
@@ -108,7 +114,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 
 func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandLeaderRegion(s.conf.StoreID, core.HealthRegion())
+	region := cluster.RandLeaderRegion(s.conf.StoreID, s.conf.Ranges, core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 		return nil

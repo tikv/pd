@@ -15,6 +15,7 @@ package schedulers
 
 import (
 	"context"
+	"net/url"
 	"time"
 
 	"github.com/montanaflynn/stats"
@@ -148,4 +149,24 @@ const (
 // schedule operators.
 func newTaintCache(ctx context.Context) *cache.TTLUint64 {
 	return cache.NewIDTTL(ctx, taintCacheGCInterval, taintCacheTTL)
+}
+
+func getKeyRanges(args []string) ([]core.KeyRange, error) {
+	var ranges []core.KeyRange
+	for len(args) > 1 {
+		startKey, err := url.QueryUnescape(args[0])
+		if err != nil {
+			return nil, err
+		}
+		endKey, err := url.QueryUnescape(args[1])
+		if err != nil {
+			return nil, err
+		}
+		args = args[2:]
+		ranges = append(ranges, core.NewKeyRange(startKey, endKey))
+	}
+	if len(ranges) == 0 {
+		return []core.KeyRange{core.NewKeyRange("", "")}, nil
+	}
+	return ranges, nil
 }

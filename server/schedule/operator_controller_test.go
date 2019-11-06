@@ -339,83 +339,96 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 
 	// The next allocated peer should have peerid 3, so we add this peer
 	// to store 3
-	steps := []operator.OpStep{
-		operator.AddLearner{ToStore: 3, PeerID: 3},
-		operator.PromoteLearner{ToStore: 3, PeerID: 3},
-		operator.TransferLeader{ToStore: 3},
-		operator.RemovePeer{FromStore: 1},
+	testSteps := [][]operator.OpStep{
+		{
+			operator.AddLearner{ToStore: 3, PeerID: 3},
+			operator.PromoteLearner{ToStore: 3, PeerID: 3},
+			operator.TransferLeader{ToStore: 3},
+			operator.RemovePeer{FromStore: 1},
+		},
+		{
+			operator.AddLightLearner{ToStore: 3, PeerID: 3},
+			operator.PromoteLearner{ToStore: 3, PeerID: 3},
+			operator.TransferLeader{ToStore: 3},
+			operator.RemovePeer{FromStore: 1},
+		},
 	}
 
-	// Create an operator
-	op := operator.NewOperator("test", "test", 1, epoch,
-		operator.OpRegion, steps...)
-	c.Assert(controller.AddOperator(op), Equals, true)
-	c.Assert(len(stream.MsgCh()), Equals, 1)
+	for _, steps := range testSteps {
+		// Create an operator
+		op := operator.NewOperator("test", "test", 1, epoch,
+			operator.OpRegion, steps...)
+		c.Assert(controller.AddOperator(op), Equals, true)
+		c.Assert(len(stream.MsgCh()), Equals, 1)
 
-	// Create region2 witch is cloned from the original region.
-	// region2 has peer 3 in pending state, so the AddPeer step
-	// is left unfinished
-	region2 := region.Clone(
-		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, IsLearner: true}),
-		core.WithPendingPeers([]*metapb.Peer{
-			{Id: 3, StoreId: 3, IsLearner: true},
-		}),
-		core.WithIncConfVer(),
-	)
-	c.Assert(region2.GetPendingPeers(), NotNil)
-	c.Assert(steps[0].IsFinish(region2), Equals, false)
-	controller.Dispatch(region2, DispatchFromHeartBeat)
+		// Create region2 which is cloned from the original region.
+		// region2 has peer 2 in pending state, so the AddPeer step
+		// is left unfinished
+		region2 := region.Clone(
+			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, IsLearner: true}),
+			core.WithPendingPeers([]*metapb.Peer{
+				{Id: 3, StoreId: 3, IsLearner: true},
+			}),
+			core.WithIncConfVer(),
+		)
+		c.Assert(region2.GetPendingPeers(), NotNil)
+		c.Assert(steps[0].IsFinish(region2), Equals, false)
+		controller.Dispatch(region2, DispatchFromHeartBeat)
 
-	// In this case, the conf version has been changed, but the
-	// peer added is in peeding state, the operator should not be
-	// removed by the stale checker
-	c.Assert(op.ConfVerChanged(region2), Equals, 1)
-	c.Assert(controller.GetOperator(1), NotNil)
-	// The operator is valid yet, but the step should not be sent
-	// again, because it is in pending state, so the message channel
-	// should not be increased
-	c.Assert(len(stream.MsgCh()), Equals, 1)
+		// In this case, the conf version has been changed, but the
+		// peer added is in pending state, the operator should not be
+		// removed by the stale checker
+		c.Assert(op.ConfVerChanged(region2), Equals, 1)
+		c.Assert(controller.GetOperator(1), NotNil)
+		// The operator is valid yet, but the step should not be sent
+		// again, because it is in pending state, so the message channel
+		// should not be increased
+		c.Assert(len(stream.MsgCh()), Equals, 1)
 
-	// Finish the step by clearing the pending state
-	region3 := region.Clone(
-		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, IsLearner: true}),
-		core.WithIncConfVer(),
-	)
-	c.Assert(steps[0].IsFinish(region3), Equals, true)
-	controller.Dispatch(region3, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerChanged(region3), Equals, 1)
-	c.Assert(len(stream.MsgCh()), Equals, 2)
+		// Finish the step by clearing the pending state
+		region3 := region.Clone(
+			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, IsLearner: true}),
+			core.WithIncConfVer(),
+		)
+		c.Assert(steps[0].IsFinish(region3), Equals, true)
+		controller.Dispatch(region3, DispatchFromHeartBeat)
+		c.Assert(op.ConfVerChanged(region3), Equals, 1)
+		c.Assert(len(stream.MsgCh()), Equals, 2)
 
-	region4 := region3.Clone(
-		core.WithPromoteLearner(3),
-		core.WithIncConfVer(),
-	)
-	c.Assert(steps[1].IsFinish(region4), Equals, true)
-	controller.Dispatch(region4, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerChanged(region4), Equals, 2)
-	c.Assert(len(stream.MsgCh()), Equals, 3)
+		region4 := region3.Clone(
+			core.WithPromoteLearner(3),
+			core.WithIncConfVer(),
+		)
+		c.Assert(steps[1].IsFinish(region4), Equals, true)
+		controller.Dispatch(region4, DispatchFromHeartBeat)
+		c.Assert(op.ConfVerChanged(region4), Equals, 2)
+		c.Assert(len(stream.MsgCh()), Equals, 3)
 
-	// Transfer leader
-	region5 := region4.Clone(
-		core.WithLeader(region4.GetStorePeer(3)),
-	)
-	c.Assert(steps[2].IsFinish(region5), Equals, true)
-	controller.Dispatch(region5, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerChanged(region5), Equals, 2)
-	c.Assert(len(stream.MsgCh()), Equals, 4)
+		// Transfer leader
+		region5 := region4.Clone(
+			core.WithLeader(region4.GetStorePeer(3)),
+		)
+		c.Assert(steps[2].IsFinish(region5), Equals, true)
+		controller.Dispatch(region5, DispatchFromHeartBeat)
+		c.Assert(op.ConfVerChanged(region5), Equals, 2)
+		c.Assert(len(stream.MsgCh()), Equals, 4)
 
-	// Remove peer
-	region6 := region5.Clone(
-		core.WithRemoveStorePeer(1),
-		core.WithIncConfVer(),
-	)
-	c.Assert(steps[3].IsFinish(region6), Equals, true)
-	controller.Dispatch(region6, DispatchFromHeartBeat)
-	c.Assert(op.ConfVerChanged(region6), Equals, 3)
+		// Remove peer
+		region6 := region5.Clone(
+			core.WithRemoveStorePeer(1),
+			core.WithIncConfVer(),
+		)
+		c.Assert(steps[3].IsFinish(region6), Equals, true)
+		controller.Dispatch(region6, DispatchFromHeartBeat)
+		c.Assert(op.ConfVerChanged(region6), Equals, 3)
 
-	// The Operator has finished, so no message should be sent
-	c.Assert(len(stream.MsgCh()), Equals, 4)
-	c.Assert(controller.GetOperator(1), IsNil)
+		// The Operator has finished, so no message should be sent
+		c.Assert(len(stream.MsgCh()), Equals, 4)
+		c.Assert(controller.GetOperator(1), IsNil)
+		for i := 0; i < 4; i++ {
+			<-stream.MsgCh()
+		}
+	}
 }
 
 func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {

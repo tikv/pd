@@ -29,7 +29,6 @@ import (
 )
 
 func init() {
-
 	// args: [start-key, end-key, range-name].
 	schedule.RegisterSliceDecoderBuilder("scatter-range", func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
@@ -154,11 +153,13 @@ func newScatterRangeScheduler(opController *schedule.OperatorController, storage
 		name:          name,
 		balanceLeader: newBalanceLeaderScheduler(
 			opController,
+			&balanceLeaderSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
 			WithBalanceLeaderName("scatter-range-leader"),
 			WithBalanceLeaderCounter(scatterRangeLeaderCounter),
 		),
 		balanceRegion: newBalanceRegionScheduler(
 			opController,
+			&balanceRegionSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
 			WithBalanceRegionName("scatter-range-region"),
 			WithBalanceRegionCounter(scatterRangeRegionCounter),
 		),

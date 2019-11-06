@@ -119,8 +119,13 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 				changes > uint64(op.ConfVerChanged(region)) {
 
 				if oc.RemoveOperator(op) {
-					log.Info("stale operator", zap.Uint64("region-id", region.GetID()), zap.Duration("takes", op.RunningTime()),
-						zap.Reflect("operator", op), zap.Uint64("diff", changes))
+					log.Info("stale operator",
+						zap.Uint64("region-id", region.GetID()),
+						zap.Duration("takes", op.RunningTime()),
+						zap.Reflect("operator", op),
+						zap.Reflect("latest-epoch", region.GetRegionEpoch()),
+						zap.Uint64("diff", changes),
+					)
 					operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
 					oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
 					oc.PromoteWaitingOperator()

@@ -60,6 +60,7 @@ func init() {
 			}
 			conf.LeaderLimit = defaultAdjacentLeaderLimit
 			conf.PeerLimit = defaultAdjacentPeerLimit
+			conf.Name = balanceAdjacentRegionName
 			return nil
 		}
 	})
@@ -77,6 +78,7 @@ func init() {
 }
 
 type balanceAdjacentRegionConfig struct {
+	Name        string `json:"name"`
 	LeaderLimit uint64 `json:"leader-limit"`
 	PeerLimit   uint64 `json:"peer-limit"`
 }
@@ -128,7 +130,7 @@ func newBalanceAdjacentRegionScheduler(opController *schedule.OperatorController
 }
 
 func (l *balanceAdjacentRegionScheduler) GetName() string {
-	return balanceAdjacentRegionName
+	return l.conf.Name
 }
 
 func (l *balanceAdjacentRegionScheduler) GetType() string {
