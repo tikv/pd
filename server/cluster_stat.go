@@ -165,7 +165,7 @@ func cpuUsageAll(usages []*pdpb.RecordPair) float64 {
 
 // Keys returns the average written and read keys duration
 // an interval of heartbeats
-func (s *StatEntries) Keys(steps int) (int64, int64) {
+func (s *StatEntries) Keys(steps int) (read int64, written int64) {
 	cap := cap(s.entries)
 	if steps > cap {
 		steps = cap
@@ -177,7 +177,6 @@ func (s *StatEntries) Keys(steps int) (int64, int64) {
 		return 0, 0
 	}
 
-	var read, written int64
 	idx := (s.total - 1) % cap
 	for i := 0; i < steps; i++ {
 		stat := s.entries[idx]
@@ -193,7 +192,7 @@ func (s *StatEntries) Keys(steps int) (int64, int64) {
 
 // Bytes returns the average written and read bytes duration
 // an interval of heartbeats
-func (s *StatEntries) Bytes(steps int) (int64, int64) {
+func (s *StatEntries) Bytes(steps int) (read int64, written int64) {
 	cap := cap(s.entries)
 	if steps > cap {
 		steps = cap
@@ -204,7 +203,6 @@ func (s *StatEntries) Bytes(steps int) (int64, int64) {
 	if steps == 0 {
 		return 0, 0
 	}
-	var read, written int64
 	idx := (s.total - 1) % cap
 	for i := 0; i < steps; i++ {
 		stat := s.entries[idx]
@@ -298,7 +296,7 @@ func (cst *ClusterStatEntries) CPU(d time.Duration, excludes ...uint64) float64 
 
 // Keys returns the average written and read keys duration
 // an interval of heartbeats for the cluster
-func (cst *ClusterStatEntries) Keys(d time.Duration, excludes ...uint64) (int64, int64) {
+func (cst *ClusterStatEntries) Keys(d time.Duration, excludes ...uint64) (read int64, written int64) {
 	cst.m.RLock()
 	defer cst.m.RUnlock()
 	// no entries have been collected
@@ -308,7 +306,6 @@ func (cst *ClusterStatEntries) Keys(d time.Duration, excludes ...uint64) (int64,
 
 	steps := int64(d) / cst.interval
 
-	var read, written int64
 	for sid, stat := range cst.stats {
 		if contains(excludes, sid) {
 			continue
@@ -322,7 +319,7 @@ func (cst *ClusterStatEntries) Keys(d time.Duration, excludes ...uint64) (int64,
 
 // Bytes returns the average written and read bytes duration
 // an interval of heartbeats for the cluster
-func (cst *ClusterStatEntries) Bytes(d time.Duration, excludes ...uint64) (int64, int64) {
+func (cst *ClusterStatEntries) Bytes(d time.Duration, excludes ...uint64) (read int64, written int64) {
 	cst.m.RLock()
 	defer cst.m.RUnlock()
 	// no entries have been collected
@@ -332,7 +329,6 @@ func (cst *ClusterStatEntries) Bytes(d time.Duration, excludes ...uint64) (int64
 
 	steps := int64(d) / cst.interval
 
-	var read, written int64
 	for sid, stat := range cst.stats {
 		if contains(excludes, sid) {
 			continue
