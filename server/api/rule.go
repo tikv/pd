@@ -164,7 +164,7 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 func (h *ruleHandler) checkRule(r *placement.Rule) error {
 	start, err := hex.DecodeString(r.StartKeyHex)
 	if err != nil {
-		return errors.Wrap(err, "start key is not hex format")
+		return errors.Wrap(err, "start key is not in hex format")
 	}
 	end, err := hex.DecodeString(r.EndKeyHex)
 	if err != nil {
