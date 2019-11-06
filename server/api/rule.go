@@ -110,7 +110,7 @@ func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 	keyHex := mux.Vars(r)["key"]
 	key, err := hex.DecodeString(keyHex)
 	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, "key should be hex format")
+		h.rd.JSON(w, http.StatusBadRequest, "key should be in hex format")
 		return
 	}
 	rules := cluster.GetRuleManager().GetRulesByKey(key)
