@@ -16,6 +16,7 @@ package config_test
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -38,6 +39,20 @@ type configTestSuite struct{}
 
 func (s *configTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
+}
+
+type testItem struct {
+	name  string
+	value interface{}
+	read  func(scheduleConfig *config.ScheduleConfig) interface{}
+}
+
+func (t *testItem) judge(c *C, scheduleConfigs ...*config.ScheduleConfig) {
+	value := t.value
+	for _, scheduleConfig := range scheduleConfigs {
+		c.Assert(scheduleConfig, NotNil)
+		c.Assert(reflect.TypeOf(t.read(scheduleConfig)), Equals, reflect.TypeOf(value))
+	}
 }
 
 func (s *configTestSuite) TestConfig(c *C) {
@@ -65,7 +80,6 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args := []string{"-u", pdAddr, "config", "show"}
 	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	scheduleCfg := config.ScheduleConfig{}
 	cfg := config.Config{}
 	cfg.Adjust(nil)
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
@@ -129,39 +143,34 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(json.Unmarshal(output, &labelPropertyCfg), IsNil)
 	c.Assert(labelPropertyCfg, DeepEquals, svr.GetLabelProperty())
 
-	// config set <option> <value>
-	args1 = []string{"-u", pdAddr, "config", "set", "leader-schedule-limit", "64"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	args1 = []string{"-u", pdAddr, "config", "set", "hot-region-schedule-limit", "64"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	args1 = []string{"-u", pdAddr, "config", "set", "hot-region-cache-hits-threshold", "5"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	args2 = []string{"-u", pdAddr, "config", "show"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
-	c.Assert(err, IsNil)
-	cfg = config.Config{}
-	c.Assert(json.Unmarshal(output, &cfg), IsNil)
-	scheduleCfg = cfg.Schedule
-	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, svr.GetScheduleConfig().LeaderScheduleLimit)
-	c.Assert(scheduleCfg.HotRegionScheduleLimit, Equals, svr.GetScheduleConfig().HotRegionScheduleLimit)
-	c.Assert(scheduleCfg.HotRegionCacheHitsThreshold, Equals, svr.GetScheduleConfig().HotRegionCacheHitsThreshold)
-	c.Assert(scheduleCfg.HotRegionCacheHitsThreshold, Equals, uint64(5))
-	c.Assert(scheduleCfg.HotRegionScheduleLimit, Equals, uint64(64))
-	c.Assert(scheduleCfg.LeaderScheduleLimit, Equals, uint64(64))
-	args1 = []string{"-u", pdAddr, "config", "set", "enable-remove-down-replica", "false"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	args2 = []string{"-u", pdAddr, "config", "show"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
-	c.Assert(err, IsNil)
-	cfg = config.Config{}
-	c.Assert(json.Unmarshal(output, &cfg), IsNil)
-	scheduleCfg = cfg.Schedule
-	c.Assert(scheduleCfg.EnableRemoveDownReplica, Equals, svr.GetScheduleConfig().EnableRemoveDownReplica)
-	c.Assert(scheduleCfg.EnableRemoveDownReplica, IsFalse)
+	// test config read and write
+	testItems := []testItem{
+		{"leader-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
+			return scheduleConfig.LeaderScheduleLimit
+		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
+			return scheduleConfig.HotRegionScheduleLimit
+		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *config.ScheduleConfig) interface{} {
+			return scheduleConfig.HotRegionCacheHitsThreshold
+		}}, {"enable-remove-down-replica", false, func(scheduleConfig *config.ScheduleConfig) interface{} {
+			return scheduleConfig.EnableRemoveDownReplica
+		}},
+	}
+	for _, item := range testItems {
+		// write
+		args1 = []string{"-u", pdAddr, "config", "set", item.name, reflect.TypeOf(item.value).String()}
+		_, _, err = pdctl.ExecuteCommandC(cmd, args1...)
+		c.Assert(err, IsNil)
+		//read
+		args2 = []string{"-u", pdAddr, "config", "show"}
+		_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
+		c.Assert(err, IsNil)
+		cfg = config.Config{}
+		c.Assert(json.Unmarshal(output, &cfg), IsNil)
+		//judge
+		item.judge(c, &cfg.Schedule, svr.GetScheduleConfig())
+	}
+
+	// test error or deprecated config name
 	args1 = []string{"-u", pdAddr, "config", "set", "foo-bar", "1"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
