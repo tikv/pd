@@ -264,9 +264,9 @@ type RollingStoreStats struct {
 	bytesReadRate           MovingAvg
 	keysWriteRate           MovingAvg
 	keysReadRate            MovingAvg
-	totalCPUUsage           *MedianFilter
-	totalBytesDiskReadRate  *MedianFilter
-	totalBytesDiskWriteRate *MedianFilter
+	totalCPUUsage           MovingAvg
+	totalBytesDiskReadRate  MovingAvg
+	totalBytesDiskWriteRate MovingAvg
 }
 
 const storeStatsRollingWindows = 3
@@ -284,6 +284,14 @@ func newRollingStoreStats() *RollingStoreStats {
 	}
 }
 
+func collect(records []*pdpb.RecordPair) float64 {
+	var total uint64
+	for _, record := range records {
+		total += record.GetValue()
+	}
+	return float64(total)
+}
+
 // Observe records current statistics.
 func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	statInterval := stats.GetInterval()
@@ -299,26 +307,9 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	r.keysReadRate.Add(float64(stats.KeysRead) / float64(interval))
 
 	// Updates the cpu usages and disk rw rates of store.
-	cpuUsages := stats.GetCpuUsages()
-	var totalCPUUsage uint64
-	for _, records := range cpuUsages {
-		totalCPUUsage += records.GetValue()
-	}
-	r.totalCPUUsage.Add(float64(totalCPUUsage))
-
-	readIoRates := stats.GetReadIoRates()
-	var totalBytesDiskReadRate uint64
-	for _, records := range readIoRates {
-		totalBytesDiskReadRate += records.GetValue()
-	}
-	r.totalBytesDiskReadRate.Add(float64(totalBytesDiskReadRate))
-
-	writeIoRates := stats.GetWriteIoRates()
-	var totalBytesDiskWriteRate uint64
-	for _, records := range writeIoRates {
-		totalBytesDiskWriteRate += records.GetValue()
-	}
-	r.totalBytesDiskWriteRate.Add(float64(totalBytesDiskWriteRate))
+	r.totalCPUUsage.Add(collect(stats.GetCpuUsages()))
+	r.totalBytesDiskReadRate.Add(collect(stats.GetReadIoRates()))
+	r.totalBytesDiskWriteRate.Add(collect(stats.GetWriteIoRates()))
 }
 
 // Set sets the statistics (for test).

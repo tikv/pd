@@ -152,105 +152,107 @@ func newTaintCache(ctx context.Context) *cache.TTLUint64 {
 	return cache.NewIDTTL(ctx, taintCacheGCInterval, taintCacheTTL)
 }
 
-// ScorePair stores storeID and record of a store.
-type ScorePair struct {
+// ScoreInfo stores storeID and record of a store.
+type ScoreInfo struct {
 	storeID uint64
 	score   float64
 }
 
-// NewScorePair returns a ScorePair.
-func NewScorePair(storeID uint64, score float64) *ScorePair {
-	return &ScorePair{
+// NewScoreInfo returns a ScoreInfo.
+func NewScoreInfo(storeID uint64, score float64) *ScoreInfo {
+	return &ScoreInfo{
 		storeID: storeID,
 		score:   score,
 	}
 }
 
 // GetStoreID returns the storeID.
-func (s *ScorePair) GetStoreID() uint64 {
+func (s *ScoreInfo) GetStoreID() uint64 {
 	return s.storeID
 }
 
 // GetScore returns the score.
-func (s *ScorePair) GetScore() float64 {
+func (s *ScoreInfo) GetScore() float64 {
 	return s.score
 }
 
 // SetScore sets the score.
-func (s *ScorePair) SetScore(score float64) {
+func (s *ScoreInfo) SetScore(score float64) {
 	s.score = score
 }
 
-// ScorePairSlice is used for sorting Score Pairs.
-type ScorePairSlice struct {
-	pairs    []*ScorePair
-	isSorted bool
+// ScoreInfos is used for sorting ScoreInfo.
+type ScoreInfos struct {
+	scoreInfos []*ScoreInfo
+	isSorted   bool
 }
 
-// NewScorePairSlice returns a ScorePairSlice.
-func NewScorePairSlice() *ScorePairSlice {
-	return &ScorePairSlice{
-		pairs: make([]*ScorePair, 0),
+// NewScoreInfos returns a ScoreInfos.
+func NewScoreInfos() *ScoreInfos {
+	return &ScoreInfos{
+		scoreInfos: make([]*ScoreInfo, 0),
 	}
 }
 
-// Add adds a pair into the slice.
-func (s *ScorePairSlice) Add(pair *ScorePair) {
-	s.pairs = append(s.pairs, pair)
+// Add adds a scoreInfo into the slice.
+func (s *ScoreInfos) Add(scoreInfo *ScoreInfo) {
+	s.scoreInfos = append(s.scoreInfos, scoreInfo)
 }
 
 // Len returns length of slice.
-func (s *ScorePairSlice) Len() int { return len(s.pairs) }
+func (s *ScoreInfos) Len() int { return len(s.scoreInfos) }
 
 // Less returns if one number is less than another.
-func (s *ScorePairSlice) Less(i, j int) bool { return s.pairs[i].score < s.pairs[j].score }
+func (s *ScoreInfos) Less(i, j int) bool { return s.scoreInfos[i].score < s.scoreInfos[j].score }
 
 // Swap switches out two numbers in slice.
-func (s *ScorePairSlice) Swap(i, j int) { s.pairs[i], s.pairs[j] = s.pairs[j], s.pairs[i] }
+func (s *ScoreInfos) Swap(i, j int) {
+	s.scoreInfos[i], s.scoreInfos[j] = s.scoreInfos[j], s.scoreInfos[i]
+}
 
 // Sort sorts the slice.
-func (s *ScorePairSlice) Sort() {
+func (s *ScoreInfos) Sort() {
 	sort.Sort(s)
 	s.isSorted = true
 }
 
-// GetPairs returns the pairs.
-func (s *ScorePairSlice) GetPairs() []*ScorePair {
-	return s.pairs
+// GetScoreInfo returns the scoreInfos.
+func (s *ScoreInfos) GetScoreInfo() []*ScoreInfo {
+	return s.scoreInfos
 }
 
 // GetMin returns the min of the slice.
-func (s *ScorePairSlice) GetMin() *ScorePair {
+func (s *ScoreInfos) GetMin() *ScoreInfo {
 	if !s.isSorted {
 		sort.Sort(s)
 	}
-	return s.pairs[0]
+	return s.scoreInfos[0]
 }
 
 // Mean returns the mean of the slice.
-func (s *ScorePairSlice) Mean() float64 {
+func (s *ScoreInfos) Mean() float64 {
 	if s.Len() == 0 {
 		return 0
 	}
 
 	var sum float64
-	for _, pair := range s.pairs {
-		sum += pair.score
+	for _, info := range s.scoreInfos {
+		sum += info.score
 	}
 
 	return sum / float64(s.Len())
 }
 
 // StdDeviation returns the standard deviation of the slice.
-func (s *ScorePairSlice) StdDeviation() float64 {
+func (s *ScoreInfos) StdDeviation() float64 {
 	if s.Len() == 0 {
 		return 0
 	}
 
 	var res float64
 	mean := s.Mean()
-	for _, pair := range s.GetPairs() {
-		res += (pair.GetScore() - mean) * (pair.GetScore() - mean)
+	for _, info := range s.GetScoreInfo() {
+		res += (info.GetScore() - mean) * (info.GetScore() - mean)
 	}
 	res /= float64(s.Len())
 	res = math.Sqrt(res)
@@ -271,43 +273,41 @@ func MeanStoresStats(storesStats map[uint64]float64) float64 {
 	return sum / float64(len(storesStats))
 }
 
-// NormalizeStoresStats returns the normalized score pairs. Normolize: x_i => (x_i - x_min)/x_avg.
-func NormalizeStoresStats(storesStats map[uint64]float64) *ScorePairSlice {
-	scorePairSlice := NewScorePairSlice()
+// NormalizeStoresStats returns the normalized score scoreInfos. Normolize: x_i => (x_i - x_min)/x_avg.
+func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
+	scoreInfos := NewScoreInfos()
 
 	for storeID, stats := range storesStats {
-		pair := NewScorePair(storeID, stats)
-		scorePairSlice.Add(pair)
+		scoreInfos.Add(NewScoreInfo(storeID, stats))
 	}
 
-	mean := scorePairSlice.Mean()
+	mean := scoreInfos.Mean()
 	if mean == 0 {
-		return scorePairSlice
+		return scoreInfos
 	}
 
-	scorePairSlice.Sort()
-	minScore := scorePairSlice.GetMin().GetScore()
+	scoreInfos.Sort()
+	minScore := scoreInfos.GetMin().GetScore()
 
-	for _, pair := range scorePairSlice.GetPairs() {
-		pair.SetScore((pair.GetScore() - minScore) / mean)
+	for _, info := range scoreInfos.GetScoreInfo() {
+		info.SetScore((info.GetScore() - minScore) / mean)
 	}
 
-	return scorePairSlice
+	return scoreInfos
 }
 
 // AggregateScores aggregates stores' scores by using their weights.
-func AggregateScores(scorePairSliceVec []*ScorePairSlice, weights []float64) *ScorePairSlice {
+func AggregateScores(storesStats []*ScoreInfos, weights []float64) *ScoreInfos {
 	scoreMap := make(map[uint64]float64, 0)
-	for i, scorePairSlice := range scorePairSliceVec {
-		for _, pair := range scorePairSlice.GetPairs() {
-			scoreMap[pair.GetStoreID()] += pair.GetScore() * weights[i]
+	for i, scoreInfos := range storesStats {
+		for _, info := range scoreInfos.GetScoreInfo() {
+			scoreMap[info.GetStoreID()] += info.GetScore() * weights[i]
 		}
 	}
 
-	res := NewScorePairSlice()
+	res := NewScoreInfos()
 	for storeID, score := range scoreMap {
-		pair := NewScorePair(storeID, score)
-		res.Add(pair)
+		res.Add(NewScoreInfo(storeID, score))
 	}
 
 	res.Sort()

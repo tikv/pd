@@ -89,9 +89,9 @@ type balanceHotRegionsScheduler struct {
 	types       []BalanceType
 
 	// store id -> hot regions statistics as the role of leader
-	stats       *storeStatistics
-	r           *rand.Rand
-	storesScore *ScorePairSlice
+	stats      *storeStatistics
+	r          *rand.Rand
+	scoreInfos *ScoreInfos
 }
 
 func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
@@ -104,7 +104,7 @@ func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *b
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
-		storesScore:   NewScorePairSlice(),
+		scoreInfos:    NewScoreInfos(),
 	}
 }
 
@@ -176,8 +176,8 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Clust
 }
 
 func (h *balanceHotRegionsScheduler) analyzeStoreLoad(storesStats *statistics.StoresStats) {
-	readFlowScorePairs := NormalizeStoresStats(storesStats.GetStoresBytesReadStat())
-	writeFlowScorePairs := NormalizeStoresStats(storesStats.GetStoresBytesWriteStat())
+	readFlowScoreInfos := NormalizeStoresStats(storesStats.GetStoresBytesReadStat())
+	writeFlowScoreInfos := NormalizeStoresStats(storesStats.GetStoresBytesWriteStat())
 	readFlowMean := MeanStoresStats(storesStats.GetStoresBytesReadStat())
 	writeFlowMean := MeanStoresStats(storesStats.GetStoresBytesWriteStat())
 
@@ -189,8 +189,7 @@ func (h *balanceHotRegionsScheduler) analyzeStoreLoad(storesStats *statistics.St
 		weights = append(weights, readFlowMean/means, writeFlowMean/means)
 	}
 
-	scorePairSliceVec := []*ScorePairSlice{readFlowScorePairs, writeFlowScorePairs}
-	h.storesScore = AggregateScores(scorePairSliceVec, weights)
+	h.scoreInfos = AggregateScores([]*ScoreInfos{readFlowScoreInfos, writeFlowScoreInfos}, weights)
 }
 
 func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
@@ -526,8 +525,8 @@ func (h *balanceHotRegionsScheduler) GetStoresScore() map[uint64]float64 {
 	h.RLock()
 	defer h.RUnlock()
 	storesScore := make(map[uint64]float64, 0)
-	for _, pair := range h.storesScore.GetPairs() {
-		storesScore[pair.GetStoreID()] = pair.GetScore()
+	for _, info := range h.scoreInfos.GetScoreInfo() {
+		storesScore[info.GetStoreID()] = info.GetScore()
 	}
 	return storesScore
 }
