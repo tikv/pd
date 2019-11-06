@@ -263,7 +263,7 @@ func (c *coordinator) stop() {
 type hasHotStatus interface {
 	GetHotReadStatus() *statistics.StoreHotPeersInfos
 	GetHotWriteStatus() *statistics.StoreHotPeersInfos
-	GetScores() map[uint64]float64
+	GetStoresScore() map[uint64]float64
 }
 
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
@@ -371,7 +371,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	}
 
 	// Collects score of stores stats metrics.
-	scores := s.Scheduler.(hasHotStatus).GetScores()
+	scores := s.Scheduler.(hasHotStatus).GetStoresScore()
 	for _, store := range stores {
 		storeAddress := store.GetAddress()
 		storeID := store.GetID()
