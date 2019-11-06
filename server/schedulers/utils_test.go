@@ -23,6 +23,11 @@ import (
 	"github.com/pingcap/pd/server/core"
 )
 
+const (
+	KB = 1024
+	MB = 1024 * KB
+)
+
 func TestSchedulers(t *testing.T) {
 	TestingT(t)
 }

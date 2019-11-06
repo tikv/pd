@@ -260,11 +260,11 @@ func (c *coordinator) stop() {
 // Hack to retrieve info from scheduler.
 // TODO: remove it.
 type hasHotStatus interface {
-	GetHotReadStatus() *statistics.StoreHotRegionInfos
-	GetHotWriteStatus() *statistics.StoreHotRegionInfos
+	GetHotReadStatus() *statistics.StoreHotPeersInfos
+	GetHotWriteStatus() *statistics.StoreHotPeersInfos
 }
 
-func (c *coordinator) getHotWriteRegions() *statistics.StoreHotRegionInfos {
+func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
 	c.RLock()
 	defer c.RUnlock()
 	s, ok := c.schedulers[hotRegionScheduleName]
@@ -277,7 +277,7 @@ func (c *coordinator) getHotWriteRegions() *statistics.StoreHotRegionInfos {
 	return nil
 }
 
-func (c *coordinator) getHotReadRegions() *statistics.StoreHotRegionInfos {
+func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
 	c.RLock()
 	defer c.RUnlock()
 	s, ok := c.schedulers[hotRegionScheduleName]
@@ -336,7 +336,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		stat, ok := status.AsPeer[storeID]
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(stat.TotalBytesRate)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(float64(stat.RegionsCount))
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(0)
@@ -345,7 +345,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		stat, ok = status.AsLeader[storeID]
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(stat.TotalBytesRate)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(float64(stat.RegionsCount))
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(0)
@@ -361,7 +361,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		stat, ok := status.AsLeader[storeID]
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(stat.TotalBytesRate)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(float64(stat.RegionsCount))
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)

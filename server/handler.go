@@ -126,7 +126,7 @@ func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 }
 
 // GetHotWriteRegions gets all hot write regions stats.
-func (h *Handler) GetHotWriteRegions() *statistics.StoreHotRegionInfos {
+func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil
@@ -135,7 +135,7 @@ func (h *Handler) GetHotWriteRegions() *statistics.StoreHotRegionInfos {
 }
 
 // GetHotReadRegions gets all hot read regions stats.
-func (h *Handler) GetHotReadRegions() *statistics.StoreHotRegionInfos {
+func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil

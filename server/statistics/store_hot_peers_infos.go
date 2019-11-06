@@ -13,10 +13,11 @@
 
 package statistics
 
-// HotPeersStat records all hot regions statistics
-type HotPeersStat struct {
-	StoreBytesRate float64       `json:"-"`
-	TotalBytesRate float64       `json:"total_flow_bytes"`
-	Count          int           `json:"regions_count"`
-	Stats          []HotPeerStat `json:"statistics"`
+// StoreHotPeersInfos is used to get human-readable description for hot regions.
+type StoreHotPeersInfos struct {
+	AsPeer   StoreHotPeersStat `json:"as_peer"`
+	AsLeader StoreHotPeersStat `json:"as_leader"`
 }
+
+// StoreHotPeersStat is used to record the hot region statistics group by store.
+type StoreHotPeersStat map[uint64]*HotPeersStat

@@ -83,7 +83,7 @@ func readJSON(url string, data interface{}) error {
 	return nil
 }
 
-func postJSON(url string, data []byte, checkOpts ...func(res []byte) bool) error {
+func postJSON(url string, data []byte, checkOpts ...func([]byte, int)) error {
 	resp, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return errors.WithStack(err)
@@ -99,9 +99,7 @@ func postJSON(url string, data []byte, checkOpts ...func(res []byte) bool) error
 		return errors.New(string(res))
 	}
 	for _, opt := range checkOpts {
-		if !opt(res) {
-			return errors.New("check failed")
-		}
+		opt(res, resp.StatusCode)
 	}
 	return nil
 }
