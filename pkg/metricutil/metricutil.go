@@ -14,6 +14,7 @@
 package metricutil
 
 import (
+	"os"
 	"time"
 	"unicode"
 
@@ -60,12 +61,12 @@ func camelCaseToSnakeCase(str string) string {
 
 // prometheusPushClient pushs metrics to Prometheus Pushgateway.
 func prometheusPushClient(job, addr string, interval time.Duration) {
+	pusher := push.New(addr, job)
+	pusher = pusher.Gatherer(prometheus.DefaultGatherer)
+	pusher = pusher.Grouping("instance", instanceName())
+
 	for {
-		err := push.FromGatherer(
-			job, push.HostnameGroupingKey(),
-			addr,
-			prometheus.DefaultGatherer,
-		)
+		err := pusher.Push()
 		if err != nil {
 			log.Error("could not push metrics to Prometheus Pushgateway", zap.Error(err))
 		}
@@ -85,4 +86,12 @@ func Push(cfg *MetricConfig) {
 
 	interval := cfg.PushInterval.Duration
 	go prometheusPushClient(cfg.PushJob, cfg.PushAddress, interval)
+}
+
+func instanceName() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	return hostname
 }
