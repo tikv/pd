@@ -46,7 +46,7 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 	ruleManager := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()))
 	ruleManager.Initialize(opt.MaxReplicas, opt.GetLocationLabels())
 	return &Cluster{
-		BasicCluster:    core.NewBasicCluster(opt.GetFlexibleScore()),
+		BasicCluster:    core.NewBasicCluster(),
 		IDAllocator:     mockid.NewIDAllocator(),
 		ScheduleOptions: opt,
 		RuleManager:     ruleManager,

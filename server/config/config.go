@@ -633,6 +633,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableLocationReplacement:    c.EnableLocationReplacement,
 		EnableDebugMetrics:           c.EnableDebugMetrics,
 		StoreLimitMode:               c.StoreLimitMode,
+		FlexibleScore:                c.FlexibleScore,
 		Schedulers:                   schedulers,
 	}
 }

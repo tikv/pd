@@ -403,6 +403,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
 		}
 	}
+	newStore = c.updateMaxStore(newStore)
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
@@ -985,9 +986,36 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 			return err
 		}
 	}
+	store = c.updateMaxStore(store)
 	c.core.PutStore(store)
 	c.storesStats.CreateRollingStoreStats(store.GetID())
 	return nil
+}
+
+func (c *RaftCluster) updateMaxStore(store *core.StoreInfo) *core.StoreInfo {
+	var maxScore uint64
+	newMaxStore := c.calculateMaxScore(store)
+	stores := c.core.GetStores()
+
+	if len(stores) == 0 {
+		maxScore = newMaxStore
+	} else {
+		currentMaxScore := stores[0].GetMaxScore()
+		if store.GetCapacity() > currentMaxScore {
+			maxScore = newMaxStore
+			for _, store := range stores {
+				newStore := store.Clone(core.SetMaxScore(maxScore))
+				c.core.PutStore(newStore)
+			}
+		} else {
+			maxScore = currentMaxScore
+		}
+	}
+	return store.Clone(core.SetMaxScore(maxScore))
+}
+
+func (c *RaftCluster) calculateMaxScore(store *core.StoreInfo) uint64 {
+	return store.GetCapacity()/1024/1024 + c.opt.GetFlexibleScore()
 }
 
 func (c *RaftCluster) checkStores() {

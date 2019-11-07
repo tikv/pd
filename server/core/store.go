@@ -44,7 +44,7 @@ type StoreInfo struct {
 	lastPersistTime  time.Time
 	leaderWeight     float64
 	regionWeight     float64
-	maxScore         float64
+	maxScore         uint64
 	available        func() bool
 }
 
@@ -290,7 +290,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	if available-float64(delta)/amplification >= highSpaceBound {
 		score = float64(s.GetRegionSize() + delta)
 	} else if available-float64(delta)/amplification <= lowSpaceBound {
-		score = s.maxScore - (available - float64(delta)/amplification)
+		score = float64(s.maxScore) - (available - float64(delta)/amplification)
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
@@ -304,7 +304,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 		// we can conclude that size = (capacity - irrelative - lowSpaceBound) * amp = (used + available - lowSpaceBound) * amp
 		// These are the two fixed points' x-coordinates, and y-coordinates which can be easily obtained from the above two functions.
 		x1, y1 := (used+available-highSpaceBound)*amplification, (used+available-highSpaceBound)*amplification
-		x2, y2 := (used+available-lowSpaceBound)*amplification, s.maxScore-lowSpaceBound
+		x2, y2 := (used+available-lowSpaceBound)*amplification, float64(s.maxScore)-lowSpaceBound
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1
@@ -403,7 +403,7 @@ func (s *StoreInfo) GetUptime() time.Duration {
 }
 
 // GetMaxScore return the maxScore
-func (s *StoreInfo) GetMaxScore() float64 {
+func (s *StoreInfo) GetMaxScore() uint64 {
 	return s.maxScore
 }
 
