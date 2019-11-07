@@ -22,47 +22,69 @@ import (
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
+	"github.com/pkg/errors"
 )
+
+const randomMergeName = "random-merge-scheduler"
 
 func init() {
 	schedule.RegisterSliceDecoderBuilder("random-merge", func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
+			conf, ok := v.(*randomMergeSchedulerConfig)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+			ranges, err := getKeyRanges(args)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			conf.Ranges = ranges
+			conf.Name = randomMergeName
 			return nil
 		}
 	})
 	schedule.RegisterScheduler("random-merge", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newRandomMergeScheduler(opController), nil
+		conf := &randomMergeSchedulerConfig{}
+		decoder(conf)
+		return newRandomMergeScheduler(opController, conf), nil
 	})
 }
 
-const randomMergeName = "random-merge-scheduler"
+type randomMergeSchedulerConfig struct {
+	Name   string          `json:"name"`
+	Ranges []core.KeyRange `json:"ranges"`
+}
 
 type randomMergeScheduler struct {
-	name string
 	*baseScheduler
+	conf     *randomMergeSchedulerConfig
 	selector *selector.RandomSelector
 }
 
 // newRandomMergeScheduler creates an admin scheduler that randomly picks two adjacent regions
 // then merges them.
-func newRandomMergeScheduler(opController *schedule.OperatorController) schedule.Scheduler {
+func newRandomMergeScheduler(opController *schedule.OperatorController, conf *randomMergeSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: randomMergeName, MoveRegion: true},
+		filter.StoreStateFilter{ActionScope: conf.Name, MoveRegion: true},
 	}
 	base := newBaseScheduler(opController)
 	return &randomMergeScheduler{
-		name:          randomMergeName,
 		baseScheduler: base,
+		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
 func (s *randomMergeScheduler) GetName() string {
-	return s.name
+	return s.conf.Name
 }
 
 func (s *randomMergeScheduler) GetType() string {
 	return "random-merge"
+}
+
+func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
 }
 
 func (s *randomMergeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -78,7 +100,7 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
 		return nil
 	}
-	region := cluster.RandLeaderRegion(store.GetID(), core.HealthRegion())
+	region := cluster.RandLeaderRegion(store.GetID(), s.conf.Ranges, core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 		return nil

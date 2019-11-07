@@ -423,7 +423,7 @@ type AddLightLearner struct {
 
 // ConfVerChanged returns true if the conf version has been changed by this step
 func (al AddLightLearner) ConfVerChanged(region *core.RegionInfo) bool {
-	if p := region.GetStoreLearner(al.ToStore); p != nil {
+	if p := region.GetStorePeer(al.ToStore); p != nil {
 		return p.GetId() == al.PeerID
 	}
 	return false
@@ -650,7 +650,7 @@ func (o *Operator) UnfinishedInfluence(opInfluence OpInfluence, region *core.Reg
 // TotalInfluence calculates the store difference which whole operator steps make.
 func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionInfo) {
 	for step := 0; step < len(o.steps); step++ {
-		o.steps[int(step)].Influence(opInfluence, region)
+		o.steps[step].Influence(opInfluence, region)
 	}
 }
 

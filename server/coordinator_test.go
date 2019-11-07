@@ -715,13 +715,14 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	co.run()
 	storage = tc.RaftCluster.storage
 	c.Assert(co.schedulers, HasLen, 3)
-	bls, err := schedule.CreateScheduler("balance-leader", oc, storage, nil)
+	bls, err := schedule.CreateScheduler("balance-leader", oc, storage, schedule.ConfigSliceDecoder("balance-leader", []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls), IsNil)
-	brs, err := schedule.CreateScheduler("balance-region", oc, storage, nil)
+	brs, err := schedule.CreateScheduler("balance-region", oc, storage, schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
+
 	// the scheduler option should contain 7 items
 	// the `hot scheduler` and `label scheduler` are disabled
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 7)
@@ -732,7 +733,6 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
 	co.stop()
 	co.wg.Wait()
-
 	_, newOpt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
@@ -931,7 +931,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	}, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, nil)
+	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
 	c.Assert(tc.addRegionStore(3, 100), IsNil)
@@ -971,7 +971,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	}, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, nil)
+	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
@@ -1031,7 +1031,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 2), IsNil)
-	scheduler, err := schedule.CreateScheduler("balance-leader", oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	scheduler, err := schedule.CreateScheduler("balance-leader", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"", ""}))
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
@@ -1101,7 +1101,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	_, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 
-	lb, err := schedule.CreateScheduler("balance-leader", co.opController, core.NewStorage(kv.NewMemoryKV()), nil)
+	lb, err := schedule.CreateScheduler("balance-leader", co.opController, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"", ""}))
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
 
