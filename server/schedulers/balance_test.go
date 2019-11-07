@@ -694,7 +694,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	stats.Capacity = 50
 	stats.Available = 28
 	stats.UsedSize = 20
-	store5 := origin.Clone(core.SetStoreStats(stats))
+	store5 := origin.Clone(core.SetStoreStats(stats), core.SetMaxScore(4*1024*1024))
 	tc.PutStore(store5)
 
 	// the scheduler first picks store 1 as source store,
