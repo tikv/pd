@@ -36,7 +36,7 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 }
 
 func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Request) {
-	cluster := getCtxCluster(r.Context())
+	cluster := getCluster(r.Context())
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)

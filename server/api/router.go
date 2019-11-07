@@ -28,40 +28,40 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 		IndentJSON: true,
 	})
 
-	root := mux.NewRouter().PathPrefix(prefix).Subrouter()
+	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
 
-	clusterRouter := root.NewRoute().Subrouter()
+	clusterRouter := rootRouter.NewRoute().Subrouter()
 	clusterRouter.Use(newClusterMiddleware(svr).Middleware)
 
 	operatorHandler := newOperatorHandler(handler, rd)
-	root.HandleFunc("/api/v1/operators", operatorHandler.List).Methods("GET")
-	root.HandleFunc("/api/v1/operators", operatorHandler.Post).Methods("POST")
-	root.HandleFunc("/api/v1/operators/{region_id}", operatorHandler.Get).Methods("GET")
-	root.HandleFunc("/api/v1/operators/{region_id}", operatorHandler.Delete).Methods("DELETE")
+	rootRouter.HandleFunc("/api/v1/operators", operatorHandler.List).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/operators", operatorHandler.Post).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/operators/{region_id}", operatorHandler.Get).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/operators/{region_id}", operatorHandler.Delete).Methods("DELETE")
 
 	schedulerHandler := newSchedulerHandler(handler, rd)
-	root.HandleFunc("/api/v1/schedulers", schedulerHandler.List).Methods("GET")
-	root.HandleFunc("/api/v1/schedulers", schedulerHandler.Post).Methods("POST")
-	root.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
+	rootRouter.HandleFunc("/api/v1/schedulers", schedulerHandler.List).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/schedulers", schedulerHandler.Post).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	root.PathPrefix(server.ScheduleConfigHandlerPath).Handler(schedulerConfigHandler)
+	rootRouter.PathPrefix(server.ScheduleConfigHandlerPath).Handler(schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
-	root.Handle("/api/v1/cluster", clusterHandler).Methods("GET")
-	root.HandleFunc("/api/v1/cluster/status", clusterHandler.GetClusterStatus).Methods("GET")
+	rootRouter.Handle("/api/v1/cluster", clusterHandler).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/cluster/status", clusterHandler.GetClusterStatus).Methods("GET")
 
 	confHandler := newConfHandler(svr, rd)
-	root.HandleFunc("/api/v1/config", confHandler.Get).Methods("GET")
-	root.HandleFunc("/api/v1/config", confHandler.Post).Methods("POST")
-	root.HandleFunc("/api/v1/config/schedule", confHandler.SetSchedule).Methods("POST")
-	root.HandleFunc("/api/v1/config/schedule", confHandler.GetSchedule).Methods("GET")
-	root.HandleFunc("/api/v1/config/replicate", confHandler.SetReplication).Methods("POST")
-	root.HandleFunc("/api/v1/config/replicate", confHandler.GetReplication).Methods("GET")
-	root.HandleFunc("/api/v1/config/label-property", confHandler.GetLabelProperty).Methods("GET")
-	root.HandleFunc("/api/v1/config/label-property", confHandler.SetLabelProperty).Methods("POST")
-	root.HandleFunc("/api/v1/config/cluster-version", confHandler.GetClusterVersion).Methods("GET")
-	root.HandleFunc("/api/v1/config/cluster-version", confHandler.SetClusterVersion).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/config", confHandler.Get).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/config", confHandler.Post).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/config/schedule", confHandler.SetSchedule).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/config/schedule", confHandler.GetSchedule).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/config/replicate", confHandler.SetReplication).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/config/replicate", confHandler.GetReplication).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/config/label-property", confHandler.GetLabelProperty).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/config/label-property", confHandler.SetLabelProperty).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/config/cluster-version", confHandler.GetClusterVersion).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/config/cluster-version", confHandler.SetClusterVersion).Methods("POST")
 
 	rulesHandler := newRulesHandler(svr, rd)
 	clusterRouter.HandleFunc("/api/v1/config/rules", rulesHandler.GetAll).Methods("GET")
@@ -90,9 +90,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/api/v1/labels/stores", labelsHandler.GetStores).Methods("GET")
 
 	hotStatusHandler := newHotStatusHandler(handler, rd)
-	root.HandleFunc("/api/v1/hotspot/regions/write", hotStatusHandler.GetHotWriteRegions).Methods("GET")
-	root.HandleFunc("/api/v1/hotspot/regions/read", hotStatusHandler.GetHotReadRegions).Methods("GET")
-	root.HandleFunc("/api/v1/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/hotspot/regions/write", hotStatusHandler.GetHotWriteRegions).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/hotspot/regions/read", hotStatusHandler.GetHotReadRegions).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/hotspot/stores", hotStatusHandler.GetHotStores).Methods("GET")
 
 	regionHandler := newRegionHandler(svr, rd)
 	clusterRouter.HandleFunc("/api/v1/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")
@@ -116,42 +116,42 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/api/v1/regions/check/empty-region", regionsHandler.GetEmptyRegion).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/sibling/{id}", regionsHandler.GetRegionSiblings).Methods("GET")
 
-	root.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
-	root.Handle("/api/v1/status", newStatusHandler(rd)).Methods("GET")
+	rootRouter.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
+	rootRouter.Handle("/api/v1/status", newStatusHandler(rd)).Methods("GET")
 
 	memberHandler := newMemberHandler(svr, rd)
-	root.HandleFunc("/api/v1/members", memberHandler.ListMembers).Methods("GET")
-	root.HandleFunc("/api/v1/members/name/{name}", memberHandler.DeleteByName).Methods("DELETE")
-	root.HandleFunc("/api/v1/members/id/{id}", memberHandler.DeleteByID).Methods("DELETE")
-	root.HandleFunc("/api/v1/members/name/{name}", memberHandler.SetMemberPropertyByName).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/members", memberHandler.ListMembers).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/members/name/{name}", memberHandler.DeleteByName).Methods("DELETE")
+	rootRouter.HandleFunc("/api/v1/members/id/{id}", memberHandler.DeleteByID).Methods("DELETE")
+	rootRouter.HandleFunc("/api/v1/members/name/{name}", memberHandler.SetMemberPropertyByName).Methods("POST")
 
 	leaderHandler := newLeaderHandler(svr, rd)
-	root.HandleFunc("/api/v1/leader", leaderHandler.Get).Methods("GET")
-	root.HandleFunc("/api/v1/leader/resign", leaderHandler.Resign).Methods("POST")
-	root.HandleFunc("/api/v1/leader/transfer/{next_leader}", leaderHandler.Transfer).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/leader", leaderHandler.Get).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/leader/resign", leaderHandler.Resign).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/leader/transfer/{next_leader}", leaderHandler.Transfer).Methods("POST")
 
 	statsHandler := newStatsHandler(svr, rd)
 	clusterRouter.HandleFunc("/api/v1/stats/region", statsHandler.Region).Methods("GET")
 
 	trendHandler := newTrendHandler(svr, rd)
-	root.HandleFunc("/api/v1/trend", trendHandler.Handle).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/trend", trendHandler.Handle).Methods("GET")
 
 	adminHandler := newAdminHandler(svr, rd)
 	clusterRouter.HandleFunc("/api/v1/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion).Methods("DELETE")
 	clusterRouter.HandleFunc("/api/v1/admin/reset-ts", adminHandler.ResetTS).Methods("POST")
 
 	logHanler := newlogHandler(svr, rd)
-	root.HandleFunc("/api/v1/admin/log", logHanler.Handle).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/admin/log", logHanler.Handle).Methods("POST")
 
-	root.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
-	root.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
+	rootRouter.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
+	rootRouter.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 
 	// Deprecated
-	root.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
+	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
 	// Deprecated
-	root.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
+	rootRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 
-	root.HandleFunc(pingAPI, func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	rootRouter.HandleFunc(pingAPI, func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
-	return root
+	return rootRouter
 }

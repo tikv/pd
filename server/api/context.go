@@ -29,6 +29,6 @@ func withClusterCtx(ctx context.Context, cluster *server.RaftCluster) context.Co
 	return context.WithValue(ctx, clusterKey, cluster)
 }
 
-func getCtxCluster(ctx context.Context) *server.RaftCluster {
+func getCluster(ctx context.Context) *server.RaftCluster {
 	return ctx.Value(clusterKey).(*server.RaftCluster)
 }
