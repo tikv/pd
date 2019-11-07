@@ -21,50 +21,72 @@ import (
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
+
+const labelSchedulerName = "label-scheduler"
 
 func init() {
 	schedule.RegisterSliceDecoderBuilder("label", func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
+			conf, ok := v.(*labelSchedulerConfig)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+			ranges, err := getKeyRanges(args)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			conf.Ranges = ranges
+			conf.Name = labelSchedulerName
 			return nil
 		}
 	})
 
 	schedule.RegisterScheduler("label", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newLabelScheduler(opController), nil
+		conf := &labelSchedulerConfig{}
+		decoder(conf)
+		return newLabelScheduler(opController, conf), nil
 	})
 }
 
-const labelSchedulerName = "label-scheduler"
+type labelSchedulerConfig struct {
+	Name   string          `json:"name"`
+	Ranges []core.KeyRange `json:"ranges"`
+}
 
 type labelScheduler struct {
-	name string
 	*baseScheduler
+	conf     *labelSchedulerConfig
 	selector *selector.BalanceSelector
 }
 
 // LabelScheduler is mainly based on the store's label information for scheduling.
 // Now only used for reject leader schedule, that will move the leader out of
 // the store with the specific label.
-func newLabelScheduler(opController *schedule.OperatorController) schedule.Scheduler {
+func newLabelScheduler(opController *schedule.OperatorController, conf *labelSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: labelSchedulerName, TransferLeader: true},
 	}
 	kind := core.NewScheduleKind(core.LeaderKind, core.ByCount)
 	return &labelScheduler{
-		name:          labelSchedulerName,
 		baseScheduler: newBaseScheduler(opController),
+		conf:          conf,
 		selector:      selector.NewBalanceSelector(kind, filters),
 	}
 }
 
 func (s *labelScheduler) GetName() string {
-	return s.name
+	return s.conf.Name
 }
 
 func (s *labelScheduler) GetType() string {
 	return "label"
+}
+
+func (s *labelScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
 }
 
 func (s *labelScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -86,7 +108,7 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	}
 	log.Debug("label scheduler reject leader store list", zap.Reflect("stores", rejectLeaderStores))
 	for id := range rejectLeaderStores {
-		if region := cluster.RandLeaderRegion(id); region != nil {
+		if region := cluster.RandLeaderRegion(id, s.conf.Ranges); region != nil {
 			log.Debug("label scheduler selects region to transfer leader", zap.Uint64("region-id", region.GetID()))
 			excludeStores := make(map[uint64]struct{})
 			for _, p := range region.GetDownPeers() {

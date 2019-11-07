@@ -155,39 +155,42 @@ func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regio
 const randomRegionMaxRetry = 10
 
 // RandFollowerRegion returns a random region that has a follower on the store.
-func (bc *BasicCluster) RandFollowerRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
+func (bc *BasicCluster) RandFollowerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
 	bc.RLock()
-	regions := bc.Regions.RandFollowerRegions(storeID, randomRegionMaxRetry)
+	regions := bc.Regions.RandFollowerRegions(storeID, ranges, randomRegionMaxRetry)
 	bc.RUnlock()
 	return bc.selectRegion(regions, opts...)
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
-func (bc *BasicCluster) RandLeaderRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
+func (bc *BasicCluster) RandLeaderRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
 	bc.RLock()
-	regions := bc.Regions.RandLeaderRegions(storeID, randomRegionMaxRetry)
+	regions := bc.Regions.RandLeaderRegions(storeID, ranges, randomRegionMaxRetry)
 	bc.RUnlock()
 	return bc.selectRegion(regions, opts...)
 }
 
 // RandPendingRegion returns a random region that has a pending peer on the store.
-func (bc *BasicCluster) RandPendingRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
+func (bc *BasicCluster) RandPendingRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
 	bc.RLock()
-	regions := bc.Regions.RandPendingRegions(storeID, randomRegionMaxRetry)
+	regions := bc.Regions.RandPendingRegions(storeID, ranges, randomRegionMaxRetry)
 	bc.RUnlock()
 	return bc.selectRegion(regions, opts...)
 }
 
 // RandLearnerRegion returns a random region that has a learner peer on the store.
-func (bc *BasicCluster) RandLearnerRegion(storeID uint64, opts ...RegionOption) *RegionInfo {
+func (bc *BasicCluster) RandLearnerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
 	bc.RLock()
-	regions := bc.Regions.RandLearnerRegions(storeID, randomRegionMaxRetry)
+	regions := bc.Regions.RandLearnerRegions(storeID, ranges, randomRegionMaxRetry)
 	bc.RUnlock()
 	return bc.selectRegion(regions, opts...)
 }
 
 func (bc *BasicCluster) selectRegion(regions []*RegionInfo, opts ...RegionOption) *RegionInfo {
 	for _, r := range regions {
+		if r == nil {
+			break
+		}
 		if slice.AllOf(opts, func(i int) bool { return opts[i](r) }) {
 			return r
 		}
@@ -331,10 +334,10 @@ func (bc *BasicCluster) Length() int {
 
 // RegionSetInformer provides access to a shared informer of regions.
 type RegionSetInformer interface {
-	RandFollowerRegion(storeID uint64, opts ...RegionOption) *RegionInfo
-	RandLeaderRegion(storeID uint64, opts ...RegionOption) *RegionInfo
-	RandLearnerRegion(storeID uint64, opts ...RegionOption) *RegionInfo
-	RandPendingRegion(storeID uint64, opts ...RegionOption) *RegionInfo
+	RandFollowerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
+	RandLeaderRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
+	RandLearnerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
+	RandPendingRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	GetAverageRegionSize() int64
 	GetStoreRegionCount(storeID uint64) int
 	GetRegion(id uint64) *RegionInfo
@@ -358,4 +361,18 @@ type StoreSetController interface {
 	UnblockStore(id uint64)
 
 	AttachAvailableFunc(id uint64, f func() bool)
+}
+
+// KeyRange is a key range.
+type KeyRange struct {
+	StartKey []byte `json:"start-key"`
+	EndKey   []byte `json:"end-key"`
+}
+
+// NewKeyRange create a KeyRange with the given start key and end key.
+func NewKeyRange(startKey, endKey string) KeyRange {
+	return KeyRange{
+		StartKey: []byte(startKey),
+		EndKey:   []byte(endKey),
+	}
 }
