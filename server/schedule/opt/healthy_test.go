@@ -81,11 +81,11 @@ func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
 	for _, t := range cases {
 		opt.EnablePlacementRules = false
 		c.Assert(IsRegionHealthy(tc, t.region), Equals, t.healthy1)
-		c.Assert(IsRegionHealthyAllowPending(tc, t.region), Equals, t.healthyAllowPending1)
+		c.Assert(IsHealthyAllowPending(tc, t.region), Equals, t.healthyAllowPending1)
 		c.Assert(IsRegionReplicated(tc, t.region), Equals, t.replicated1)
 		opt.EnablePlacementRules = true
 		c.Assert(IsRegionHealthy(tc, t.region), Equals, t.healthy2)
-		c.Assert(IsRegionHealthyAllowPending(tc, t.region), Equals, t.healthyAllowPending2)
+		c.Assert(IsHealthyAllowPending(tc, t.region), Equals, t.healthyAllowPending2)
 		c.Assert(IsRegionReplicated(tc, t.region), Equals, t.replicated2)
 	}
 }

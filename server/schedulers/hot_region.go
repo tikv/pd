@@ -303,7 +303,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster opt.Cluster, storesSt
 			continue
 		}
 
-		if !opt.IsRegionHealthyAllowPending(cluster, srcRegion) {
+		if !opt.IsHealthyAllowPending(cluster, srcRegion) {
 			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy-replica").Inc()
 			continue
 		}
@@ -375,7 +375,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster opt.Cluster, stores
 			continue
 		}
 
-		if !opt.IsRegionHealthyAllowPending(cluster, srcRegion) {
+		if !opt.IsHealthyAllowPending(cluster, srcRegion) {
 			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy-replica").Inc()
 			continue
 		}
