@@ -14,7 +14,6 @@
 package schedulers
 
 import (
-	"context"
 	"net/url"
 	"time"
 

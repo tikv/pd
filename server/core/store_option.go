@@ -146,3 +146,10 @@ func SetAvailableFunc(f func() bool) StoreCreateOption {
 		store.available = f
 	}
 }
+
+// SetMaxScore is used to set maxScore
+func SetMaxScore(maxScore float64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.maxScore = maxScore
+	}
+}
