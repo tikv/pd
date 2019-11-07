@@ -85,9 +85,9 @@ func (s *testRegionUnhealthySuite) TestIsRegionUnhealthy(c *C) {
 
 var _ = Suite(&testScoreInfosSuite{})
 
-type testScorInfosSuite struct{}
+type testScoreInfosSuite struct{}
 
-func (s *testScorInfosSuite) TestSortScoreInfos(c *C) {
+func (s *testScoreInfosSuite) TestSortScoreInfos(c *C) {
 	scoreInfos := NewScoreInfos()
 	scoreInfos.Add(NewScoreInfo(1, 0.5))
 	scoreInfos.Add(NewScoreInfo(2, 0.25))

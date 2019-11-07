@@ -16,7 +16,7 @@ package schedulers
 import (
 	"context"
 	"math"
-  "net/url"
+	"net/url"
 	"sort"
 	"time"
 
@@ -279,8 +279,8 @@ func MeanStoresStats(storesStats map[uint64]float64) float64 {
 func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
 	scoreInfos := NewScoreInfos()
 
-	for storeID, stats := range storesStats {
-		scoreInfos.Add(NewScoreInfo(storeID, stats))
+	for storeID, score := range storesStats {
+		scoreInfos.Add(NewScoreInfo(storeID, score))
 	}
 
 	mean := scoreInfos.Mean()
@@ -288,7 +288,6 @@ func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
 		return scoreInfos
 	}
 
-	scoreInfos.Sort()
 	minScore := scoreInfos.GetMin().GetScore()
 
 	for _, info := range scoreInfos.GetScoreInfo() {
