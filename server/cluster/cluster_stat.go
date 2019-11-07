@@ -234,13 +234,13 @@ func (cs *ClusterState) State(excludes ...uint64) LoadState {
 
 	cpu := cs.cst.CPU(excludes...)
 	switch {
-	case cpu == 0:
+	case cpu < 10:
 		return LoadStateIdle
-	case cpu > 0 && cpu < 30:
+	case cpu >= 10 && cpu < 30:
 		return LoadStateLow
-	case cpu >= 30 && cpu < 80:
+	case cpu >= 30 && cpu < 60:
 		return LoadStateNormal
-	case cpu >= 80:
+	case cpu >= 60:
 		return LoadStateHigh
 	}
 	return LoadStateNone
