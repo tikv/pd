@@ -407,11 +407,6 @@ func (s *StoreInfo) GetMaxScore() float64 {
 	return s.maxScore
 }
 
-// SetMaxScore is used to set maxScore
-func (s *StoreInfo) SetMaxScore(maxScore float64) {
-	s.maxScore = maxScore
-}
-
 var (
 	// If a store's last heartbeat is storeDisconnectDuration ago, the store will
 	// be marked as disconnected state. The value should be greater than tikv's

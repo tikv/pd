@@ -280,7 +280,7 @@ func (bc *BasicCluster) PutStore(store *StoreInfo) {
 func (bc *BasicCluster) updateMaxScore(store *StoreInfo) {
 	stores := bc.GetStores()
 	if len(stores) == 0 {
-		store.SetMaxScore(bc.calculateMaxScore(store))
+		store = store.Clone(SetMaxScore(bc.calculateMaxScore(store)))
 		return
 	}
 	currentMaxScore := float64(0)
@@ -291,12 +291,12 @@ func (bc *BasicCluster) updateMaxScore(store *StoreInfo) {
 	}
 	if float64(store.GetCapacity()) > currentMaxScore {
 		newMaxScore := bc.calculateMaxScore(store)
-		store.SetMaxScore(newMaxScore)
+		store = store.Clone(SetMaxScore(newMaxScore))
 		for _, store := range stores {
-			store.SetMaxScore(newMaxScore)
+			store = store.Clone(SetMaxScore(newMaxScore))
 		}
 	} else {
-		store.SetMaxScore(currentMaxScore)
+		store = store.Clone(SetMaxScore(currentMaxScore))
 	}
 }
 
