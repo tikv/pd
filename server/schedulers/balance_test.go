@@ -106,6 +106,9 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	oc := schedule.NewOperatorController(ctx, nil, nil)
 	// create a region to control average region size.
 	tc.AddLeaderRegion(1, 1, 2)
 
@@ -118,7 +121,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		tc.PutRegion(region)
 		tc.LeaderScheduleStrategy = t.kind.String()
 		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
-		c.Assert(shouldBalance(tc, source, target, region, kind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
+		c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -130,7 +133,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 			tc.PutRegion(region)
 			kind := core.NewScheduleKind(core.RegionKind, t.kind)
-			c.Assert(shouldBalance(tc, source, target, region, kind, schedule.NewUnfinishedOpInfluence(nil, tc), ""), Equals, t.expectedResult)
+			c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
 		}
 	}
 }
@@ -165,7 +168,7 @@ func (s *testBalanceLeaderSchedulerSuite) SetUpTest(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	s.tc = mockcluster.NewCluster(opt)
 	s.oc = schedule.NewOperatorController(s.ctx, nil, nil)
-	lb, err := schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	lb, err := schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"", ""}))
 	c.Assert(err, IsNil)
 	s.lb = lb
 }
@@ -213,10 +216,10 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderScheduleStrategy(c *C) {
-	// Stores:			1    	2    	3    	4
-	// Leader Count:		10    	10    	10    	10
-	// Leader Size :		10000   100    	100    	100
-	// Region1:			L    	F   	F    	F
+	// Stores:          1       2       3       4
+	// Leader Count:    10      10      10      10
+	// Leader Size :    10000   100    	100    	100
+	// Region1:         L       F       F       F
 	s.tc.AddLeaderStore(1, 10, 10000)
 	s.tc.AddLeaderStore(2, 10, 100)
 	s.tc.AddLeaderStore(3, 10, 100)
@@ -251,10 +254,10 @@ func (s *testBalanceSpeedSuite) TestTolerantRatio(c *C) {
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
 	// default leader tolerant ratio is 5, when schedule by count
-	// Stores:			1		2    	3    	4
-	// Leader Count:		14->15		10    	10    	10
-	// Leader Size :		100		100    	100    	100
-	// Region1:			L		F   	F    	F
+	// Stores:          1       2       3       4
+	// Leader Count:    14->15  10      10      10
+	// Leader Size :    100     100     100     100
+	// Region1:         L       F       F       F
 	s.tc.AddLeaderStore(1, 14, 100)
 	s.tc.AddLeaderStore(2, 10, 100)
 	s.tc.AddLeaderStore(3, 10, 100)
@@ -335,10 +338,10 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceFilter(c *C) {
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
-	// Stores:	1	2	3	4
+	// Stores:     1       2       3       4
 	// Leaders:    10      10      10      10
-	// Weight:    0.5     0.9       1       2
-	// Region1:     L       F       F       F
+	// Weight:     0.5     0.9     1       2
+	// Region1:    L       F       F       F
 
 	s.tc.AddLeaderStore(1, 10)
 	s.tc.AddLeaderStore(2, 10)
@@ -414,6 +417,97 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	testutil.CheckTransferLeader(c, s.schedule()[0], operator.OpBalance, 4, 3)
 }
 
+var _ = Suite(&testBalanceLeaderRangeSchedulerSuite{})
+
+type testBalanceLeaderRangeSchedulerSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	tc     *mockcluster.Cluster
+	lb     schedule.Scheduler
+	oc     *schedule.OperatorController
+}
+
+func (s *testBalanceLeaderRangeSchedulerSuite) SetUpTest(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	opt := mockoption.NewScheduleOptions()
+	s.tc = mockcluster.NewCluster(opt)
+	s.oc = schedule.NewOperatorController(s.ctx, nil, nil)
+}
+
+func (s *testBalanceLeaderRangeSchedulerSuite) TearDownTest(c *C) {
+	s.cancel()
+}
+
+func (s *testBalanceLeaderRangeSchedulerSuite) TestSingleRangeBalance(c *C) {
+	// Stores:     1       2       3       4
+	// Leaders:    10      10      10      10
+	// Weight:     0.5     0.9     1       2
+	// Region1:    L       F       F       F
+
+	s.tc.AddLeaderStore(1, 10)
+	s.tc.AddLeaderStore(2, 10)
+	s.tc.AddLeaderStore(3, 10)
+	s.tc.AddLeaderStore(4, 10)
+	s.tc.UpdateStoreLeaderWeight(1, 0.5)
+	s.tc.UpdateStoreLeaderWeight(2, 0.9)
+	s.tc.UpdateStoreLeaderWeight(3, 1)
+	s.tc.UpdateStoreLeaderWeight(4, 2)
+	s.tc.AddLeaderRegionWithRange(1, "a", "g", 1, 2, 3, 4)
+	lb, err := schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"", ""}))
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), NotNil)
+	lb, err = schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"h", "n"}))
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), IsNil)
+	lb, err = schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"b", "f"}))
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), IsNil)
+	lb, err = schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"", "a"}))
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), IsNil)
+	lb, err = schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"g", ""}))
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), IsNil)
+	lb, err = schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"", "f"}))
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), IsNil)
+	lb, err = schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"b", ""}))
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), IsNil)
+}
+
+func (s *testBalanceLeaderRangeSchedulerSuite) TestMultiRangeBalance(c *C) {
+	// Stores:     1       2       3       4
+	// Leaders:    10      10      10      10
+	// Weight:     0.5     0.9     1       2
+	// Region1:    L       F       F       F
+
+	s.tc.AddLeaderStore(1, 10)
+	s.tc.AddLeaderStore(2, 10)
+	s.tc.AddLeaderStore(3, 10)
+	s.tc.AddLeaderStore(4, 10)
+	s.tc.UpdateStoreLeaderWeight(1, 0.5)
+	s.tc.UpdateStoreLeaderWeight(2, 0.9)
+	s.tc.UpdateStoreLeaderWeight(3, 1)
+	s.tc.UpdateStoreLeaderWeight(4, 2)
+	s.tc.AddLeaderRegionWithRange(1, "a", "g", 1, 2, 3, 4)
+	lb, err := schedule.CreateScheduler("balance-leader", s.oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"", "g", "o", "t"}))
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc)[0].RegionID(), Equals, uint64(1))
+	s.tc.RemoveRegion(s.tc.GetRegion(1))
+	s.tc.AddLeaderRegionWithRange(2, "p", "r", 1, 2, 3, 4)
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc)[0].RegionID(), Equals, uint64(2))
+	s.tc.RemoveRegion(s.tc.GetRegion(2))
+	s.tc.AddLeaderRegionWithRange(3, "u", "w", 1, 2, 3, 4)
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), IsNil)
+	s.tc.RemoveRegion(s.tc.GetRegion(3))
+	s.tc.AddLeaderRegionWithRange(4, "", "", 1, 2, 3, 4)
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), IsNil)
+}
+
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
 
 type testBalanceRegionSchedulerSuite struct {
@@ -434,7 +528,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
-	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	opt.SetMaxReplicas(1)
@@ -469,7 +563,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
@@ -524,7 +618,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 
 	newTestReplication(opt, 5, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	tc.AddLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -579,7 +673,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 
 	opt.TolerantSizeRatio = 1
 
-	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	tc.AddRegionStore(1, 11)
@@ -614,7 +708,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
-	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 	opt.SetMaxReplicas(1)
 
@@ -641,7 +735,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 
 	newTestReplication(opt, 3, "zone", "rack", "host")
 
-	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	sb, err := schedule.CreateScheduler("balance-region", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	// Store 1 has the largest region score, so the balancer try to replace peer in store 1.
@@ -1000,7 +1094,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	hb := mockhbstream.NewHeartbeatStreams(tc.ID)
 	oc := schedule.NewOperatorController(ctx, tc, hb)
 
-	mb, err := schedule.CreateScheduler("random-merge", oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	mb, err := schedule.CreateScheduler("random-merge", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("random-merge", []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	tc.AddRegionStore(1, 4)

@@ -40,8 +40,13 @@ func init() {
 			if err != nil {
 				return errors.WithStack(err)
 			}
+			ranges, err := getKeyRanges(args[1:])
+			if err != nil {
+				return errors.WithStack(err)
+			}
 			conf.StoreID = id
 			conf.Name = fmt.Sprintf("grant-leader-scheduler-%d", id)
+			conf.Ranges = ranges
 			return nil
 		}
 	})
@@ -54,8 +59,9 @@ func init() {
 }
 
 type grandLeaderConfig struct {
-	Name    string `json:"name"`
-	StoreID uint64 `json:"store-id"`
+	Name    string          `json:"name"`
+	StoreID uint64          `json:"store-id"`
+	Ranges  []core.KeyRange `json:"ranges"`
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
@@ -100,7 +106,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 
 func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandFollowerRegion(s.conf.StoreID, core.HealthRegion())
+	region := cluster.RandFollowerRegion(s.conf.StoreID, s.conf.Ranges, core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 		return nil
