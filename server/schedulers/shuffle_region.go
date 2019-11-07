@@ -22,48 +22,70 @@ import (
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
+
+const shuffleRegionName = "shuffle-region-scheduler"
 
 func init() {
 	schedule.RegisterSliceDecoderBuilder("shuffle-region", func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
+			conf, ok := v.(*shuffleRegionSchedulerConfig)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+			ranges, err := getKeyRanges(args)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			conf.Ranges = ranges
+			conf.Name = shuffleRegionName
 			return nil
 		}
 	})
-	schedule.RegisterScheduler("shuffle-region", func(opController *schedule.OperatorController, straoge *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newShuffleRegionScheduler(opController), nil
+	schedule.RegisterScheduler("shuffle-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &shuffleRegionSchedulerConfig{}
+		decoder(conf)
+		return newShuffleRegionScheduler(opController, conf), nil
 	})
 }
 
-const shuffleRegionName = "shuffle-region-scheduler"
+type shuffleRegionSchedulerConfig struct {
+	Name   string          `json:"name"`
+	Ranges []core.KeyRange `json:"ranges"`
+}
 
 type shuffleRegionScheduler struct {
-	name string
 	*baseScheduler
+	conf     *shuffleRegionSchedulerConfig
 	selector *selector.RandomSelector
 }
 
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
-func newShuffleRegionScheduler(opController *schedule.OperatorController) schedule.Scheduler {
+func newShuffleRegionScheduler(opController *schedule.OperatorController, conf *shuffleRegionSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: shuffleRegionName, MoveRegion: true},
+		filter.StoreStateFilter{ActionScope: conf.Name, MoveRegion: true},
 	}
 	base := newBaseScheduler(opController)
 	return &shuffleRegionScheduler{
-		name:          shuffleRegionName,
 		baseScheduler: base,
+		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
 func (s *shuffleRegionScheduler) GetName() string {
-	return s.name
+	return s.conf.Name
 }
 
 func (s *shuffleRegionScheduler) GetType() string {
 	return "shuffle-region"
+}
+
+func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
 }
 
 func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -104,9 +126,9 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.
 		return nil, nil
 	}
 
-	region := cluster.RandFollowerRegion(source.GetID(), core.HealthRegion())
+	region := cluster.RandFollowerRegion(source.GetID(), s.conf.Ranges, core.HealthRegion())
 	if region == nil {
-		region = cluster.RandLeaderRegion(source.GetID(), core.HealthRegion())
+		region = cluster.RandLeaderRegion(source.GetID(), s.conf.Ranges, core.HealthRegion())
 	}
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()

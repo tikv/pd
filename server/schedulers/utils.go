@@ -16,6 +16,7 @@ package schedulers
 import (
 	"context"
 	"math"
+  "net/url"
 	"sort"
 	"time"
 
@@ -312,6 +313,25 @@ func AggregateScores(storesStats []*ScoreInfos, weights []float64) *ScoreInfos {
 	}
 
 	res.Sort()
-
 	return res
+}
+
+func getKeyRanges(args []string) ([]core.KeyRange, error) {
+	var ranges []core.KeyRange
+	for len(args) > 1 {
+		startKey, err := url.QueryUnescape(args[0])
+		if err != nil {
+			return nil, err
+		}
+		endKey, err := url.QueryUnescape(args[1])
+		if err != nil {
+			return nil, err
+		}
+		args = args[2:]
+		ranges = append(ranges, core.NewKeyRange(startKey, endKey))
+	}
+	if len(ranges) == 0 {
+		return []core.KeyRange{core.NewKeyRange("", "")}, nil
+	}
+	return ranges, nil
 }
