@@ -59,10 +59,6 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func isRegionUnhealthy(region *core.RegionInfo) bool {
-	return len(region.GetDownPeers()) != 0 || len(region.GetLearners()) != 0
-}
-
 func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
