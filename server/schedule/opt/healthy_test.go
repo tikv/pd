@@ -33,8 +33,6 @@ var _ = Suite(&testRegionHealthySuite{})
 type testRegionHealthySuite struct{}
 
 func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
-	c.Skip("enable it after rule fit merged")
-
 	peers := func(ids ...uint64) []*metapb.Peer {
 		var peers []*metapb.Peer
 		for _, id := range ids {
