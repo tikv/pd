@@ -271,33 +271,29 @@ func (bc *BasicCluster) GetAverageRegionSize() int64 {
 
 // PutStore put a store.
 func (bc *BasicCluster) PutStore(store *StoreInfo) {
-	bc.Lock()
-	bc.Stores.SetStore(store)
-	bc.Unlock()
-	bc.updateMaxScore(store)
-}
-
-func (bc *BasicCluster) updateMaxScore(store *StoreInfo) {
+	var maxScore float64
+	newMaxStore := bc.calculateMaxScore(store)
 	stores := bc.GetStores()
+	bc.Lock()
+	defer bc.Unlock()
+
 	if len(stores) == 0 {
-		store = store.Clone(SetMaxScore(bc.calculateMaxScore(store)))
-		return
-	}
-	currentMaxScore := float64(0)
-	for _, store := range stores {
-		if store.GetMaxScore() > currentMaxScore {
-			currentMaxScore = store.GetMaxScore()
-		}
-	}
-	if float64(store.GetCapacity()) > currentMaxScore {
-		newMaxScore := bc.calculateMaxScore(store)
-		store = store.Clone(SetMaxScore(newMaxScore))
-		for _, store := range stores {
-			store = store.Clone(SetMaxScore(newMaxScore))
-		}
+		maxScore = newMaxStore
 	} else {
-		store = store.Clone(SetMaxScore(currentMaxScore))
+		currentMaxScore := stores[0].GetMaxScore()
+		if float64(store.GetCapacity()) > currentMaxScore {
+			maxScore = newMaxStore
+			for _, store := range stores {
+				bc.Stores.SetStore(store.Clone(SetMaxScore(maxScore)))
+			}
+		} else {
+			maxScore = currentMaxScore
+		}
 	}
+
+	store = store.Clone(SetMaxScore(maxScore))
+	bc.Stores.SetStore(store)
+	return
 }
 
 func (bc *BasicCluster) calculateMaxScore(s *StoreInfo) float64 {
