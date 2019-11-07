@@ -190,7 +190,7 @@ func (p *fitPeer) matchRoleLoose(role PeerRoleType) bool {
 	// non-learner cannot become learner. All other roles can migrate to
 	// others by scheduling. For example, Leader->Follower, Learner->Leader
 	// are possible, but Voter->Learner is impossible.
-	return !(role == Learner && !p.IsLearner)
+	return role != Learner || p.IsLearner
 }
 
 func prepareFitPeers(stores core.StoreSetInformer, region *core.RegionInfo) []*fitPeer {
