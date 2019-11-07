@@ -152,7 +152,7 @@ func newTaintCache(ctx context.Context) *cache.TTLUint64 {
 	return cache.NewIDTTL(ctx, taintCacheGCInterval, taintCacheTTL)
 }
 
-// ScoreInfo stores storeID and record of a store.
+// ScoreInfo stores storeID and score of a store.
 type ScoreInfo struct {
 	storeID uint64
 	score   float64
@@ -252,7 +252,8 @@ func (s *ScoreInfos) StdDeviation() float64 {
 	var res float64
 	mean := s.Mean()
 	for _, info := range s.GetScoreInfo() {
-		res += (info.GetScore() - mean) * (info.GetScore() - mean)
+		diff := info.GetScore() - mean
+		res += diff * diff
 	}
 	res /= float64(s.Len())
 	res = math.Sqrt(res)

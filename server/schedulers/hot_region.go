@@ -89,8 +89,9 @@ type balanceHotRegionsScheduler struct {
 	types       []BalanceType
 
 	// store id -> hot regions statistics as the role of leader
-	stats      *storeStatistics
-	r          *rand.Rand
+	stats *storeStatistics
+	r     *rand.Rand
+	// ScoreInfos stores storeID and score of all stores.
 	scoreInfos *ScoreInfos
 }
 

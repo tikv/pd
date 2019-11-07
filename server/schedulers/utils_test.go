@@ -83,7 +83,7 @@ func (s *testRegionUnhealthySuite) TestIsRegionUnhealthy(c *C) {
 	c.Assert(isRegionUnhealthy(r4), IsFalse)
 }
 
-var _ = Suite(&testScorInfosSuite{})
+var _ = Suite(&testScoreInfosSuite{})
 
 type testScorInfosSuite struct{}
 
