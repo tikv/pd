@@ -603,6 +603,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableMakeUpReplica:          c.EnableMakeUpReplica,
 		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
 		EnableLocationReplacement:    c.EnableLocationReplacement,
+		FlexibleScore:                c.FlexibleScore,
 		Schedulers:                   schedulers,
 	}
 }

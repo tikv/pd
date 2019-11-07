@@ -47,6 +47,7 @@ type StoreStatus struct {
 	LeaderWeight       float64            `json:"leader_weight,omitempty"`
 	LeaderScore        float64            `json:"leader_score,omitempty"`
 	LeaderSize         int64              `json:"leader_size,omitempty"`
+	MaxScore           uint64             `json:"max_score,omitempty"`
 	RegionCount        int                `json:"region_count,omitempty"`
 	RegionWeight       float64            `json:"region_weight,omitempty"`
 	RegionScore        float64            `json:"region_score,omitempty"`
@@ -85,6 +86,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			LeaderWeight:       store.GetLeaderWeight(),
 			LeaderScore:        store.LeaderScore(core.StringToScheduleStrategy(opt.LeaderScheduleStrategy), 0),
 			LeaderSize:         store.GetLeaderSize(),
+			MaxScore:           store.GetMaxScore(),
 			RegionCount:        store.GetRegionCount(),
 			RegionWeight:       store.GetRegionWeight(),
 			RegionScore:        store.RegionScore(opt.HighSpaceRatio, opt.LowSpaceRatio, 0),

@@ -43,7 +43,7 @@ type Cluster struct {
 // NewCluster creates a new Cluster
 func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 	return &Cluster{
-		BasicCluster:    core.NewBasicCluster(opt.GetFlexibleScore()),
+		BasicCluster:    core.NewBasicCluster(),
 		IDAllocator:     mockid.NewIDAllocator(),
 		ScheduleOptions: opt,
 		HotCache:        statistics.NewHotCache(),
