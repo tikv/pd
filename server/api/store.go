@@ -137,7 +137,7 @@ func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 }
 
 func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
-	cluster := getClusterCtx(r.Context())
+	cluster := getCtxCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -156,7 +156,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	cluster := getClusterCtx(r.Context())
+	cluster := getCtxCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -181,7 +181,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
-	cluster := getClusterCtx(r.Context())
+	cluster := getCtxCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -206,7 +206,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
-	cluster := getClusterCtx(r.Context())
+	cluster := getCtxCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -241,7 +241,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
-	cluster := getClusterCtx(r.Context())
+	cluster := getCtxCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -328,7 +328,7 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 }
 
 func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
-	cluster := getClusterCtx(r.Context())
+	cluster := getCtxCluster(r.Context())
 	err := cluster.RemoveTombStoneRecords()
 	if err != nil {
 		apiutil.ErrorResp(h.rd, w, err)
@@ -380,7 +380,7 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster := getClusterCtx(r.Context())
+	cluster := getCtxCluster(r.Context())
 	stores := cluster.GetMetaStores()
 	StoresInfo := &StoresInfo{
 		Stores: make([]*StoreInfo, 0, len(stores)),

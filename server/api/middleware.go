@@ -14,7 +14,6 @@
 package api
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/pingcap/pd/server"
@@ -40,7 +39,7 @@ func (m clusterMiddleware) Middleware(h http.Handler) http.Handler {
 			m.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
 			return
 		}
-		ctx := context.WithValue(r.Context(), clusterKey, cluster)
+		ctx := withClusterCtx(r.Context(), cluster)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
