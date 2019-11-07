@@ -44,11 +44,7 @@ func newRulesHandler(svr *server.Server, rd *render.Render) *ruleHandler {
 }
 
 func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
@@ -58,11 +54,7 @@ func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
@@ -73,11 +65,7 @@ func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
@@ -98,11 +86,7 @@ func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
@@ -118,11 +102,7 @@ func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
@@ -137,11 +117,7 @@ func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
@@ -192,11 +168,7 @@ func (h *ruleHandler) checkRule(r *placement.Rule) error {
 }
 
 func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
