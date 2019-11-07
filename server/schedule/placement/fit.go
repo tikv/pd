@@ -177,7 +177,7 @@ func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 	case Voter: // Voter matches either Leader or Follower.
 		return !p.IsLearner
 	case Leader:
-		return !p.IsLearner && p.isLeader
+		return p.isLeader
 	case Follower:
 		return !p.IsLearner && !p.isLeader
 	case Learner:
