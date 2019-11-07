@@ -21,20 +21,6 @@ import (
 // RegionOption is used to select region.
 type RegionOption func(region *RegionInfo) bool
 
-// HealthRegion checks if the region is healthy.
-func HealthRegion() RegionOption {
-	return func(region *RegionInfo) bool {
-		return len(region.downPeers) == 0 && len(region.pendingPeers) == 0 && len(region.learners) == 0
-	}
-}
-
-// HealthRegionAllowPending checks if the region is healthy with allowing the pending peer.
-func HealthRegionAllowPending() RegionOption {
-	return func(region *RegionInfo) bool {
-		return len(region.downPeers) == 0 && len(region.learners) == 0
-	}
-}
-
 // RegionCreateOption used to create region.
 type RegionCreateOption func(region *RegionInfo)
 
@@ -55,7 +41,15 @@ func WithPendingPeers(pengdingPeers []*metapb.Peer) RegionCreateOption {
 // WithLearners sets the learners for the region.
 func WithLearners(learners []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.learners = learners
+		peers := region.meta.GetPeers()
+		for i := range peers {
+			for _, l := range learners {
+				if peers[i].GetId() == l.GetId() {
+					peers[i] = &metapb.Peer{Id: l.GetId(), StoreId: l.GetStoreId(), IsLearner: true}
+					break
+				}
+			}
+		}
 	}
 }
 
