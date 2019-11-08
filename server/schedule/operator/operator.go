@@ -650,7 +650,7 @@ func (o *Operator) UnfinishedInfluence(opInfluence OpInfluence, region *core.Reg
 // TotalInfluence calculates the store difference which whole operator steps make.
 func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionInfo) {
 	for step := 0; step < len(o.steps); step++ {
-		o.steps[int(step)].Influence(opInfluence, region)
+		o.steps[step].Influence(opInfluence, region)
 	}
 }
 

@@ -87,11 +87,7 @@ func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
 }
 
 func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
@@ -106,11 +102,7 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	vars := mux.Vars(r)
 	key := vars["key"]
 	regionInfo := cluster.GetRegionInfoByKey([]byte(key))
@@ -141,23 +133,14 @@ func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
 }
 
 func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	regions := cluster.GetRegions()
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
 func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
-
+	cluster := getCluster(r.Context())
 	startKey := r.URL.Query().Get("key")
 
 	limit := defaultRegionLimit
@@ -178,21 +161,13 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	count := cluster.GetRegionCount()
 	h.rd.JSON(w, http.StatusOK, &RegionsInfo{Count: count})
 }
 
 func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
@@ -272,11 +247,7 @@ func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
@@ -327,11 +298,7 @@ func (h *regionsHandler) GetTopSize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
+	cluster := getCluster(r.Context())
 	limit := defaultRegionLimit
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		var err error

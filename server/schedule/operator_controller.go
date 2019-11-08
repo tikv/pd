@@ -600,19 +600,20 @@ func (oc *OperatorController) OperatorCount(mask operator.OpKind) uint64 {
 
 // GetOpInfluence gets OpInfluence.
 func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInfluence {
+	influence := operator.OpInfluence{
+		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
+	}
 	oc.RLock()
 	defer oc.RUnlock()
-
-	var res []*operator.Operator
 	for _, op := range oc.operators {
 		if !op.IsTimeout() && !op.IsFinish() {
 			region := cluster.GetRegion(op.RegionID())
 			if region != nil {
-				res = append(res, op)
+				op.UnfinishedInfluence(influence, region)
 			}
 		}
 	}
-	return NewUnfinishedOpInfluence(res, cluster)
+	return influence
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
@@ -625,24 +626,6 @@ func NewTotalOpInfluence(operators []*operator.Operator, cluster opt.Cluster) op
 		region := cluster.GetRegion(op.RegionID())
 		if region != nil {
 			op.TotalInfluence(influence, region)
-		}
-	}
-
-	return influence
-}
-
-// NewUnfinishedOpInfluence creates a OpInfluence.
-func NewUnfinishedOpInfluence(operators []*operator.Operator, cluster opt.Cluster) operator.OpInfluence {
-	influence := operator.OpInfluence{
-		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
-	}
-
-	for _, op := range operators {
-		if !op.IsTimeout() && !op.IsFinish() {
-			region := cluster.GetRegion(op.RegionID())
-			if region != nil {
-				op.UnfinishedInfluence(influence, region)
-			}
 		}
 	}
 
