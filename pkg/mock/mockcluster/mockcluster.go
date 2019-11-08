@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
@@ -42,10 +43,12 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
+	ruleManager, _ := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()), opt.MaxReplicas, opt.GetLocationLabels())
 	return &Cluster{
 		BasicCluster:    core.NewBasicCluster(),
 		IDAllocator:     mockid.NewIDAllocator(),
 		ScheduleOptions: opt,
+		RuleManager:     ruleManager,
 		HotCache:        statistics.NewHotCache(),
 		StoresStats:     statistics.NewStoresStats(),
 	}

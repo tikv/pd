@@ -135,27 +135,20 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		for i := 0; i < balanceRegionRetryLimit; i++ {
 			// Priority picks the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
-			region := cluster.RandPendingRegion(sourceID, s.conf.Ranges, core.HealthRegionAllowPending())
+			region := cluster.RandPendingRegion(sourceID, s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster))
 			if region == nil {
 				// Then picks the region that has a follower in the source store.
-				region = cluster.RandFollowerRegion(sourceID, s.conf.Ranges, core.HealthRegion())
+				region = cluster.RandFollowerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
 			}
 			if region == nil {
 				// Last, picks the region has the leader in the source store.
-				region = cluster.RandLeaderRegion(sourceID, s.conf.Ranges, core.HealthRegion())
+				region = cluster.RandLeaderRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
 			}
 			if region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 				continue
 			}
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
-
-			// We don't schedule region with abnormal number of replicas.
-			if len(region.GetPeers()) != cluster.GetMaxReplicas() {
-				log.Debug("region has abnormal replica count", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "abnormal-replica").Inc()
-				continue
-			}
 
 			// Skip hot regions.
 			if cluster.IsRegionHot(region) {

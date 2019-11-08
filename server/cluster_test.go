@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pkg/errors"
 )
 
@@ -840,10 +841,10 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := cache.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")})
+		region := cluster.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")})
 		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
 
-		region = cache.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")})
+		region = cluster.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")})
 		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -859,14 +860,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := cluster.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, core.HealthRegion())
+			region := cluster.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(cluster))
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		c.Assert(cluster.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, core.HealthRegion()), IsNil)
+		c.Assert(cluster.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(cluster)), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(cluster.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, core.HealthRegion()), IsNil)
+		c.Assert(cluster.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(cluster)), IsNil)
 	}
 }
 
