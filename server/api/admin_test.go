@@ -14,10 +14,14 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 )
@@ -77,4 +81,80 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	region = cluster.GetRegionInfoByKey([]byte("foo"))
 	c.Assert(region.GetRegionEpoch().ConfVer, Equals, uint64(50))
 	c.Assert(region.GetRegionEpoch().Version, Equals, uint64(50))
+}
+
+var _ = Suite(&testTSOSuite{})
+
+type testTSOSuite struct {
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
+}
+
+func makeTS(offset time.Duration) uint64 {
+	physical := time.Now().Add(offset).UnixNano() / int64(time.Millisecond)
+	return uint64(physical << 18)
+}
+
+func (s *testTSOSuite) SetUpSuite(c *C) {
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/reset-ts", addr, apiPrefix)
+
+	mustBootstrapCluster(c, s.svr)
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, nil)
+}
+
+func (s *testTSOSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
+func (s *testTSOSuite) TestResetTS(c *C) {
+	args := make(map[string]interface{})
+	t1 := makeTS(time.Hour)
+	url := s.urlPrefix
+	args["tso"] = fmt.Sprintf("%d", t1)
+	values, err := json.Marshal(args)
+	c.Assert(err, IsNil)
+	err = postJSON(url, values,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"success\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+
+	c.Assert(err, IsNil)
+	t2 := makeTS(32 * time.Hour)
+	args["tso"] = fmt.Sprintf("%d", t2)
+	values, err = json.Marshal(args)
+	c.Assert(err, IsNil)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "too large"), IsTrue)
+
+	t3 := makeTS(-2 * time.Hour)
+	args["tso"] = fmt.Sprintf("%d", t3)
+	values, err = json.Marshal(args)
+	c.Assert(err, IsNil)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "small"), IsTrue)
+
+	args["tso"] = ""
+	values, err = json.Marshal(args)
+	c.Assert(err, IsNil)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
+	c.Assert(err, NotNil)
+	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
+
+	args["tso"] = "test"
+	values, err = json.Marshal(args)
+	c.Assert(err, IsNil)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
+	c.Assert(err, NotNil)
+	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
 }

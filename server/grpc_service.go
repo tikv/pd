@@ -31,7 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-//revive:disable:unused-parameter
+const slowThreshold = 5 * time.Millisecond
 
 // notLeaderError is returned when current server is not the leader and not possible to process request.
 // TODO: work as proxy.
@@ -82,6 +82,11 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 		ts, err := s.getRespTS(count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
+		}
+
+		elapsed := time.Since(start)
+		if elapsed > slowThreshold {
+			log.Warn("get timestamp too slow", zap.Duration("cost", elapsed))
 		}
 		response := &pdpb.TsoResponse{
 			Header:    s.header(),

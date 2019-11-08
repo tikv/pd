@@ -201,7 +201,7 @@ func (c *client) initClusterID() error {
 		members, err := c.getMembers(timeoutCtx, u)
 		timeoutCancel()
 		if err != nil || members.GetHeader() == nil {
-			log.Error("[pd] failed to get cluster id", zap.Error(err))
+			log.Warn("[pd] failed to get cluster id", zap.String("url", u), zap.Error(err))
 			continue
 		}
 		c.clusterID = members.GetHeader().GetClusterId()
@@ -693,14 +693,20 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 	}
 	start := time.Now()
 	defer cmdDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
-	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	resp, err := c.leaderClient().ScanRegions(ctx, &pdpb.ScanRegionsRequest{
+
+	var cancel context.CancelFunc
+	scanCtx := ctx
+	if _, ok := ctx.Deadline(); !ok {
+		scanCtx, cancel = context.WithTimeout(ctx, pdTimeout)
+		defer cancel()
+	}
+
+	resp, err := c.leaderClient().ScanRegions(scanCtx, &pdpb.ScanRegionsRequest{
 		Header:   c.requestHeader(),
 		StartKey: key,
 		EndKey:   endKey,
 		Limit:    int32(limit),
 	})
-	cancel()
 	if err != nil {
 		cmdFailedDuration.WithLabelValues("scan_regions").Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
