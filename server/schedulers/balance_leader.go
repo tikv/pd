@@ -23,32 +23,50 @@ import (
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+)
+
+const (
+	balanceLeaderName = "balance-leader-scheduler"
+	// balanceLeaderRetryLimit is the limit to retry schedule for selected source store and target store.
+	balanceLeaderRetryLimit = 10
+  balanceLeaderType       = "balance-leader"
 )
 
 func init() {
 	schedule.RegisterSliceDecoderBuilder("balance-leader", func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
+			conf, ok := v.(*balanceLeaderSchedulerConfig)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+			ranges, err := getKeyRanges(args)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			conf.Ranges = ranges
+			conf.Name = balanceLeaderName
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, storage *core.Storage, mapper schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newBalanceLeaderScheduler(opController), nil
+	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &balanceLeaderSchedulerConfig{}
+		decoder(conf)
+		return newBalanceLeaderScheduler(opController, conf), nil
 	})
 }
 
-const (
-	// balanceLeaderRetryLimit is the limit to retry schedule for selected source store and target store.
-	balanceLeaderRetryLimit = 10
-	balanceLeaderName       = "balance-leader-scheduler"
-	balanceLeaderType       = "balance-leader"
-)
+type balanceLeaderSchedulerConfig struct {
+	Name   string          `json:"name"`
+	Ranges []core.KeyRange `json:"ranges"`
+}
 
 type balanceLeaderScheduler struct {
 	*baseScheduler
-	name         string
+	conf         *balanceLeaderSchedulerConfig
 	opController *schedule.OperatorController
 	filters      []filter.Filter
 	counter      *prometheus.CounterVec
@@ -56,11 +74,12 @@ type balanceLeaderScheduler struct {
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newBalanceLeaderScheduler(opController *schedule.OperatorController, opts ...BalanceLeaderCreateOption) schedule.Scheduler {
+func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *balanceLeaderSchedulerConfig, opts ...BalanceLeaderCreateOption) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 
 	s := &balanceLeaderScheduler{
 		baseScheduler: base,
+		conf:          conf,
 		opController:  opController,
 		counter:       balanceLeaderCounter,
 	}
@@ -84,19 +103,20 @@ func WithBalanceLeaderCounter(counter *prometheus.CounterVec) BalanceLeaderCreat
 // WithBalanceLeaderName sets the name for the scheduler.
 func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
 	return func(s *balanceLeaderScheduler) {
-		s.name = name
+		s.conf.Name = name
 	}
 }
 
 func (l *balanceLeaderScheduler) GetName() string {
-	if l.name != "" {
-		return l.name
-	}
-	return balanceLeaderName
+	return l.conf.Name
 }
 
 func (l *balanceLeaderScheduler) GetType() string {
 	return balanceLeaderType
+}
+
+func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(l.conf)
 }
 
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -158,7 +178,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 // the best follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *core.StoreInfo) []*operator.Operator {
 	sourceID := source.GetID()
-	region := cluster.RandLeaderRegion(sourceID, core.HealthRegion())
+	region := cluster.RandLeaderRegion(sourceID, l.conf.Ranges, opt.HealthRegion(cluster))
 	if region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", sourceID))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
@@ -185,7 +205,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(cluster opt.Cluster, target *core.StoreInfo) []*operator.Operator {
 	targetID := target.GetID()
-	region := cluster.RandFollowerRegion(targetID, core.HealthRegion())
+	region := cluster.RandFollowerRegion(targetID, l.conf.Ranges, opt.HealthRegion(cluster))
 	if region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", targetID))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()

@@ -14,7 +14,10 @@
 package placement
 
 import (
+	"sort"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/pkg/slice"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -110,5 +113,148 @@ func compareRuleFit(a, b *RuleFit) int {
 
 // FitRegion tries to fit peers of a region to the rules.
 func FitRegion(stores core.StoreSetInformer, region *core.RegionInfo, rules []*Rule) *RegionFit {
-	return nil
+	peers := prepareFitPeers(stores, region)
+
+	var regionFit RegionFit
+	if len(rules) == 0 {
+		return &regionFit
+	}
+	for _, rule := range rules {
+		rf := fitRule(peers, rule)
+		regionFit.RuleFits = append(regionFit.RuleFits, rf)
+		// Remove selected.
+		peers = filterPeersBy(peers, func(p *fitPeer) bool {
+			return slice.NoneOf(rf.Peers, func(i int) bool { return rf.Peers[i].Id == p.Peer.Id })
+		})
+	}
+	for _, p := range peers {
+		regionFit.OrphanPeers = append(regionFit.OrphanPeers, p.Peer)
+	}
+	return &regionFit
+}
+
+func fitRule(peers []*fitPeer, rule *Rule) *RuleFit {
+	// Ignore peers that does not match label constraints, and that cannot be
+	// transformed to expected role type.
+	peers = filterPeersBy(peers,
+		func(p *fitPeer) bool { return MatchLabelConstraints(p.store, rule.LabelConstraints) },
+		func(p *fitPeer) bool { return p.matchRoleLoose(rule.Role) })
+
+	if len(peers) <= rule.Count {
+		return newRuleFit(rule, peers)
+	}
+
+	// TODO: brute force can be improved.
+	var best *RuleFit
+	iterPeers(peers, rule.Count, func(candidates []*fitPeer) {
+		rf := newRuleFit(rule, candidates)
+		if best == nil || compareRuleFit(rf, best) > 0 {
+			best = rf
+		}
+	})
+	return best
+}
+
+func newRuleFit(rule *Rule, peers []*fitPeer) *RuleFit {
+	rf := &RuleFit{Rule: rule, IsolationLevel: isolationLevel(peers, rule.LocationLabels)}
+	for _, p := range peers {
+		rf.Peers = append(rf.Peers, p.Peer)
+		if !p.matchRoleStrict(rule.Role) {
+			rf.PeersWithDifferentRole = append(rf.PeersWithDifferentRole, p.Peer)
+		}
+	}
+	return rf
+}
+
+type fitPeer struct {
+	*metapb.Peer
+	store    *core.StoreInfo
+	isLeader bool
+}
+
+func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
+	switch role {
+	case Voter: // Voter matches either Leader or Follower.
+		return !p.IsLearner
+	case Leader:
+		return p.isLeader
+	case Follower:
+		return !p.IsLearner && !p.isLeader
+	case Learner:
+		return p.IsLearner
+	}
+	return false
+}
+
+func (p *fitPeer) matchRoleLoose(role PeerRoleType) bool {
+	// non-learner cannot become learner. All other roles can migrate to
+	// others by scheduling. For example, Leader->Follower, Learner->Leader
+	// are possible, but Voter->Learner is impossible.
+	return role != Learner || p.IsLearner
+}
+
+func prepareFitPeers(stores core.StoreSetInformer, region *core.RegionInfo) []*fitPeer {
+	var peers []*fitPeer
+	for _, p := range region.GetPeers() {
+		peers = append(peers, &fitPeer{
+			Peer:     p,
+			store:    stores.GetStore(p.GetStoreId()),
+			isLeader: region.GetLeader().GetId() == p.GetId(),
+		})
+	}
+	// Sort peers to keep the match result deterministic.
+	sort.Slice(peers, func(i, j int) bool { return peers[i].GetId() < peers[j].GetId() })
+	return peers
+}
+
+func filterPeersBy(peers []*fitPeer, preds ...func(*fitPeer) bool) (selected []*fitPeer) {
+	for _, p := range peers {
+		if slice.AllOf(preds, func(i int) bool { return preds[i](p) }) {
+			selected = append(selected, p)
+		}
+	}
+	return
+}
+
+// Iterate all combinations of select N peers from the list.
+func iterPeers(peers []*fitPeer, n int, f func([]*fitPeer)) {
+	out := make([]*fitPeer, n)
+	iterPeersRecr(peers, 0, out, func() { f(out) })
+}
+
+func iterPeersRecr(peers []*fitPeer, index int, out []*fitPeer, f func()) {
+	for i := index; i <= len(peers)-len(out); i++ {
+		out[0] = peers[i]
+		if len(out) > 1 {
+			iterPeersRecr(peers, i+1, out[1:], f)
+		} else {
+			f()
+		}
+	}
+}
+
+func isolationLevel(peers []*fitPeer, labels []string) int {
+	if len(labels) == 0 || len(peers) == 0 {
+		return 0
+	}
+	if len(peers) == 1 {
+		return len(labels)
+	}
+	if len(peers) == 2 {
+		for l, label := range labels {
+			if peers[0].store.GetLabelValue(label) != peers[1].store.GetLabelValue(label) {
+				return len(labels) - l
+			}
+		}
+		return 0
+	}
+
+	// TODO: brute force can be improved.
+	level := len(labels)
+	iterPeers(peers, 2, func(pair []*fitPeer) {
+		if l := isolationLevel(pair, labels); l < level {
+			level = l
+		}
+	})
+	return level
 }
