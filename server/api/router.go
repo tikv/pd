@@ -21,8 +21,6 @@ import (
 	"github.com/unrolled/render"
 )
 
-const pingAPI = "/ping"
-
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := render.New(render.Options{
 		IndentJSON: true,
@@ -145,13 +143,14 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	rootRouter.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
 	rootRouter.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
+	rootRouter.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
 	// Deprecated
 	rootRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
-
-	rootRouter.HandleFunc(pingAPI, func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	// Deprecated
+	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
 	return rootRouter
 }
