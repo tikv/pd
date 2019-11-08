@@ -47,7 +47,7 @@ type StoreStatus struct {
 	LeaderWeight       float64            `json:"leader_weight,omitempty"`
 	LeaderScore        float64            `json:"leader_score,omitempty"`
 	LeaderSize         int64              `json:"leader_size,omitempty"`
-	MaxScore           uint64             `json:"max_score,omitempty"`
+	MaxScore           float64            `json:"max_score,omitempty"`
 	RegionCount        int                `json:"region_count,omitempty"`
 	RegionWeight       float64            `json:"region_weight,omitempty"`
 	RegionScore        float64            `json:"region_score,omitempty"`
