@@ -32,7 +32,7 @@ const (
 	balanceLeaderName = "balance-leader-scheduler"
 	// balanceLeaderRetryLimit is the limit to retry schedule for selected source store and target store.
 	balanceLeaderRetryLimit = 10
-  balanceLeaderType       = "balance-leader"
+	balanceLeaderType       = "balance-leader"
 )
 
 func init() {
