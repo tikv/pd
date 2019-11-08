@@ -329,7 +329,7 @@ func (c *RaftCluster) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
-	stores := c.core.GetUpdatedMaxScoreStores(c.opt.GetFlexibleScore(), store)
+	stores := c.core.GetUpdatedMaxScoreStores(c.opt.GetFlexibleScore(), newStore)
 	c.core.PutStores(stores)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
