@@ -701,8 +701,8 @@ func (s *StoresInfo) GetUpdatedMaxScoreStores(flexibleScore uint64, newStores ..
 
 	if maxScore != oldMaxScore { // happen change
 		results = append(results, setAllMaxScore(oldStores, maxScore)...)
-		results = append(results, setAllMaxScore(newStores, maxScore)...)
 	}
+	results = append(results, setAllMaxScore(newStores, maxScore)...)
 	return results
 }
 
