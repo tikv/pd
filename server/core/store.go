@@ -44,7 +44,7 @@ type StoreInfo struct {
 	lastPersistTime  time.Time
 	leaderWeight     float64
 	regionWeight     float64
-	maxScore         uint64
+	maxScore         float64
 	available        func() bool
 }
 
@@ -78,6 +78,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		leaderWeight:     s.leaderWeight,
 		regionWeight:     s.regionWeight,
 		available:        s.available,
+		maxScore:         s.maxScore,
 	}
 
 	for _, opt := range opts {
@@ -290,7 +291,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	if available-float64(delta)/amplification >= highSpaceBound {
 		score = float64(s.GetRegionSize() + delta)
 	} else if available-float64(delta)/amplification <= lowSpaceBound {
-		score = float64(s.maxScore) - (available - float64(delta)/amplification)
+		score = s.maxScore - (available - float64(delta)/amplification)
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
@@ -304,10 +305,11 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 		// we can conclude that size = (capacity - irrelative - lowSpaceBound) * amp = (used + available - lowSpaceBound) * amp
 		// These are the two fixed points' x-coordinates, and y-coordinates which can be easily obtained from the above two functions.
 		x1, y1 := (used+available-highSpaceBound)*amplification, (used+available-highSpaceBound)*amplification
-		x2, y2 := (used+available-lowSpaceBound)*amplification, float64(s.maxScore)-lowSpaceBound
+		x2, y2 := (used+available-lowSpaceBound)*amplification, s.maxScore-lowSpaceBound
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1
+
 		score = k*float64(s.GetRegionSize()+delta) + b
 	}
 
@@ -403,7 +405,7 @@ func (s *StoreInfo) GetUptime() time.Duration {
 }
 
 // GetMaxScore return the maxScore
-func (s *StoreInfo) GetMaxScore() uint64 {
+func (s *StoreInfo) GetMaxScore() float64 {
 	return s.maxScore
 }
 
@@ -631,6 +633,77 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		s.stores[storeID] = store.Clone(SetRegionSize(regionSize))
 	}
+}
+
+const bytesPerMB = 1024 * 1024
+
+func calculateMaxScore(flexibleScore, capacity uint64) float64 {
+	return float64(capacity/bytesPerMB + flexibleScore)
+}
+
+func getMaxCapacity(stores []*StoreInfo) uint64 {
+	var maxCapacity uint64
+	for _, store := range stores {
+		capacity := store.GetCapacity()
+		if capacity > maxCapacity {
+			maxCapacity = capacity
+		}
+	}
+	return maxCapacity
+}
+
+func maxUint64(a, b uint64) uint64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func setAllMaxScore(stores []*StoreInfo, maxScore float64) []*StoreInfo {
+	results := make([]*StoreInfo, 0, len(stores))
+	for _, store := range stores {
+		results = append(results, store.Clone(SetMaxScore(maxScore)))
+	}
+	return results
+}
+
+// GetUpdatedMaxScoreStores update maxScore when flexible score change or add a new store
+func (s *StoresInfo) GetUpdatedMaxScoreStores(flexibleScore uint64, newStores ...*StoreInfo) []*StoreInfo {
+	results := make([]*StoreInfo, 0, len(newStores)+len(s.stores))
+	var newStore *StoreInfo
+	if len(newStores) != 0 {
+		newStore = newStores[0]
+	}
+
+	// add first store
+	if len(s.stores) == 0 {
+		if newStore != nil {
+			maxScore := calculateMaxScore(flexibleScore, newStore.GetCapacity())
+			results = append(results, newStore.Clone(SetMaxScore(maxScore)))
+		}
+		return results
+	}
+
+	// calculate max score
+	oldStores := s.GetStores()
+	oldMaxScore := oldStores[0].maxScore
+	maxScore := oldMaxScore
+
+	maxCapacity := getMaxCapacity(oldStores)
+	if calculateMaxScore(flexibleScore, maxCapacity) != oldMaxScore { //update by flexible score
+		maxCapacity = maxUint64(maxCapacity, getMaxCapacity(newStores))
+		maxScore = calculateMaxScore(flexibleScore, maxCapacity)
+	}
+
+	if newStore != nil && float64(newStore.GetCapacity()) > oldMaxScore { //update by new store when capacity of new store is greater than old maxScore
+		maxScore = calculateMaxScore(flexibleScore, newStore.GetCapacity())
+	}
+
+	if maxScore != oldMaxScore { // happen change
+		results = append(results, setAllMaxScore(oldStores, maxScore)...)
+		results = append(results, setAllMaxScore(newStores, maxScore)...)
+	}
+	return results
 }
 
 // UpdateStoreStatus updates the information of the store.

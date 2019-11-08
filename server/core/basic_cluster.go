@@ -44,6 +44,13 @@ func (bc *BasicCluster) GetStores() []*StoreInfo {
 	return bc.Stores.GetStores()
 }
 
+// GetUpdatedMaxScoreStores returns Stores with new max score.
+func (bc *BasicCluster) GetUpdatedMaxScoreStores(flexibleScore uint64, newStores ...*StoreInfo) []*StoreInfo {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Stores.GetUpdatedMaxScoreStores(flexibleScore, newStores...)
+}
+
 // GetMetaStores gets a complete set of metapb.Store.
 func (bc *BasicCluster) GetMetaStores() []*metapb.Store {
 	bc.RLock()
@@ -268,6 +275,15 @@ func (bc *BasicCluster) PutStore(store *StoreInfo) {
 	bc.Lock()
 	defer bc.Unlock()
 	bc.Stores.SetStore(store)
+}
+
+// PutStores put many stores.
+func (bc *BasicCluster) PutStores(stores []*StoreInfo) {
+	bc.Lock()
+	defer bc.Unlock()
+	for _, store := range stores {
+		bc.Stores.SetStore(store)
+	}
 }
 
 // DeleteStore deletes a store.
