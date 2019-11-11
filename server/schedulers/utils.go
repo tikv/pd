@@ -18,6 +18,7 @@ import (
 	"math"
 	"net/url"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/montanaflynn/stats"
@@ -186,19 +187,23 @@ func (s *ScoreInfo) SetScore(score float64) {
 type ScoreInfos struct {
 	scoreInfos []*ScoreInfo
 	isSorted   bool
+	mutex      sync.Mutex
 }
 
 // NewScoreInfos returns a ScoreInfos.
 func NewScoreInfos() *ScoreInfos {
 	return &ScoreInfos{
 		scoreInfos: make([]*ScoreInfo, 0),
+		mutex:      sync.Mutex{},
 	}
 }
 
 // Add adds a scoreInfo into the slice.
 func (s *ScoreInfos) Add(scoreInfo *ScoreInfo) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	infosLen := len(s.scoreInfos)
-	if infosLen != 0 && s.scoreInfos[infosLen-1].score > scoreInfo.score {
+	if s.isSorted == true && infosLen != 0 && s.scoreInfos[infosLen-1].score > scoreInfo.score {
 		s.isSorted = false
 	}
 	s.scoreInfos = append(s.scoreInfos, scoreInfo)
@@ -217,6 +222,8 @@ func (s *ScoreInfos) Swap(i, j int) {
 
 // Sort sorts the slice.
 func (s *ScoreInfos) Sort() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	if !s.isSorted {
 		sort.Sort(s)
 		s.isSorted = true
