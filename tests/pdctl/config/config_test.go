@@ -200,3 +200,54 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "config item not found"), IsTrue)
 }
+
+func (s *configTestSuite) TestConfigDefaultStoreLimit(c *C) {
+	// We renamed store-balance-rate to default-store-limit, new tests
+	// should be added for some cases like
+	// 1. set or query default-store-limit
+	// 2. set or query store-balance-rate
+	// 3. upgrade from store-balance-rate to default-store-limit
+	// and so on.
+	c.Parallel()
+
+	cluster, err := tests.NewTestCluster(1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURLs()
+	cmd := pdctl.InitCommand()
+
+	store := metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	defer cluster.Destroy()
+
+	show := func(args ...string) []string {
+		return append([]string{"-u", pdAddr, "config", "show"}, args...)
+	}
+	set := func(args ...string) []string {
+		return append([]string{"-u", pdAddr, "config", "set"}, args...)
+	}
+
+	// set default-store-limit
+	_, _, err = pdctl.ExecuteCommandC(cmd, set("default-store-limit", "128")...)
+	c.Assert(err, IsNil)
+	_, output, err := pdctl.ExecuteCommandC(cmd, show()...)
+
+	cfg := &config.Config{}
+	c.Assert(json.Unmarshal(output, cfg), IsNil)
+	c.Assert(cfg.Schedule.DefaultStoreLimit, Equals, float64(128))
+	c.Assert(cfg.Schedule.StoreBalanceRate, Equals, float64(0))
+
+	// set store-balance-rate should cause an error
+	expected := "store-balance-rate is deprecated, use default-store-limit instead"
+	_, output, err = pdctl.ExecuteCommandC(cmd, set("store-balance-rate", "256")...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), expected), IsTrue)
+}
