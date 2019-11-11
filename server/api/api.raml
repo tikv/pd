@@ -374,6 +374,32 @@ types:
         type: string
         enum: [ leader, region ]
       count: integer
+  
+  Rule:
+    type: object
+    properties:
+      group_id: string
+      id: string
+      index?: integer
+      override?: boolean
+      start_key: string
+      end_key: string
+      role:
+        type: string
+        enum: [voter, leader, follower, learner]
+      count:
+        type: integer
+        minimum: 1
+      label_constraints: LabelConstraint[]
+      location_labels: string[]
+  LabelConstraint:
+    type: object
+    properties:
+      key: string
+      op:
+        type: string
+        enum: [ in, notIn, exists, notExists ]
+      values?: string[]
 
 /cluster/status:
   description: Cluster status.
@@ -608,7 +634,113 @@ types:
           description: The config is updated.
         500:
           description: PD server failed to proceed the request.
-
+  /rules:
+    description: Placement rules.
+    get:
+      description: Get all placement rules.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Rule[]
+        412:
+          description: Placement rules feature is not enabled.
+        500:
+          description: PD server failed to proceed the request.
+  /rules/group/{group}:
+    description: Placement rules of a group.
+    uriParameters:
+      group: string
+    get:
+      description: Get placement rules of a group.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Rule[]
+        412:
+          description: Placement rules feature is not enabled.
+        500:
+          description: PD server failed to proceed the request.
+  /rules/region/{region}:
+    description: Placement rules matched by a region.
+    uriParameters:
+      region: integer
+    get:
+      description: Get placement rules matched by a region.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Rule[]
+        400:
+          description: The region ID is invalid.
+        404:
+          description: The region is not found.
+        500:
+          description: PD server failed to proceed the request.
+  /rules/key/{key}:
+    description: Placement rules matched by a key.
+    uriParameters:
+      key: string
+    get:
+      description: Get placement rules matched by a key.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Rule[]
+        400:
+          description: The key is not in hex format.
+        412:
+          description: Placement rules feature is not enabled.
+        500:
+          description: PD server failed to proceed the request.
+  /rule/{group}/{id}:
+    description: A Placement Rule.
+    uriParameters:
+      group: string
+      id: string
+    get:
+      description: Get a single Placement Rule.
+      responses:
+        200:
+          body:
+            application/json:
+              type: Rule
+        404:
+          description: The Rule is not found.
+        412:
+          description: Placement rules feature is not enabled.
+        500:
+          description: PD server failed to proceed the request.
+    delete:
+      description: Delete a Placement Rule.
+      responses:
+        200:
+          description: The Rule is delete.
+        412:
+          description: Placement rules feature is not enabled.
+        500:
+          description: PD server failed to proceed the request.
+  /rule:
+    description: A Placement Rule.
+    post:
+      description: Add or update a Placement rule.
+      body:
+        application/json:
+          description: Placement Rule.
+          type: Rule
+      responses:
+        200:
+          description: The rule is created or updated.
+        400:
+          description: The input is invalid.
+        412:
+          description: Placement rules feature is not enabled.
+        500:
+          description: PD server failed to proceed the request.
+  
 /stores:
   description: The stores in the cluster.
   get:

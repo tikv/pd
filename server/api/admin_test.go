@@ -16,7 +16,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -92,9 +91,9 @@ type testTSOSuite struct {
 	urlPrefix string
 }
 
-func makeTS(offset time.Duration) int64 {
+func makeTS(offset time.Duration) uint64 {
 	physical := time.Now().Add(offset).UnixNano() / int64(time.Millisecond)
-	return physical << 18
+	return uint64(physical << 18)
 }
 
 func (s *testTSOSuite) SetUpSuite(c *C) {
@@ -115,33 +114,47 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args := make(map[string]interface{})
 	t1 := makeTS(time.Hour)
 	url := s.urlPrefix
-	args["tso"] = t1
+	args["tso"] = fmt.Sprintf("%d", t1)
 	values, err := json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values)
+	err = postJSON(url, values,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"success\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+
 	c.Assert(err, IsNil)
 	t2 := makeTS(32 * time.Hour)
-	args["tso"] = t2
+	args["tso"] = fmt.Sprintf("%d", t2)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "too large"), IsTrue)
 
 	t3 := makeTS(-2 * time.Hour)
-	args["tso"] = t3
+	args["tso"] = fmt.Sprintf("%d", t3)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "small"), IsTrue)
 
-	t4 := math.MinInt64
-	args["tso"] = t4
+	args["tso"] = ""
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
 
+	args["tso"] = "test"
+	values, err = json.Marshal(args)
+	c.Assert(err, IsNil)
+	err = postJSON(url, values,
+		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
+	c.Assert(err, NotNil)
+	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
 }

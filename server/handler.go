@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -126,7 +127,7 @@ func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 }
 
 // GetHotWriteRegions gets all hot write regions stats.
-func (h *Handler) GetHotWriteRegions() *statistics.StoreHotRegionInfos {
+func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil
@@ -135,7 +136,7 @@ func (h *Handler) GetHotWriteRegions() *statistics.StoreHotRegionInfos {
 }
 
 // GetHotReadRegions gets all hot read regions stats.
-func (h *Handler) GetHotReadRegions() *statistics.StoreHotRegionInfos {
+func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return nil
@@ -612,13 +613,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 || len(region.GetLearners()) > 0 ||
-		len(region.GetPeers()) != c.cluster.GetMaxReplicas() {
+	if !opt.IsRegionHealthy(c.cluster, region) || !opt.IsRegionReplicated(c.cluster, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if len(target.GetDownPeers()) > 0 || len(target.GetPendingPeers()) > 0 || len(target.GetLearners()) > 0 ||
-		len(target.GetMeta().GetPeers()) != c.cluster.GetMaxReplicas() {
+	if !opt.IsRegionHealthy(c.cluster, target) || !opt.IsRegionReplicated(c.cluster, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 

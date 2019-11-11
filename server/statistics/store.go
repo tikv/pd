@@ -61,24 +61,45 @@ func (s *StoresStats) GetRollingStoreStats(storeID uint64) *RollingStoreStats {
 	return s.rollingStoresStats[storeID]
 }
 
+// GetOrCreateRollingStoreStats gets or creates RollingStoreStats with a given store ID.
+func (s *StoresStats) GetOrCreateRollingStoreStats(storeID uint64) *RollingStoreStats {
+	s.Lock()
+	defer s.Unlock()
+	ret, ok := s.rollingStoresStats[storeID]
+	if !ok {
+		ret = newRollingStoreStats()
+		s.rollingStoresStats[storeID] = ret
+	}
+	return ret
+}
+
 // Observe records the current store status with a given store.
 func (s *StoresStats) Observe(storeID uint64, stats *pdpb.StoreStats) {
-	s.RLock()
-	defer s.RUnlock()
-	s.rollingStoresStats[storeID].Observe(stats)
+	store := s.GetOrCreateRollingStoreStats(storeID)
+	store.Observe(stats)
+}
+
+// Set sets the store statistics (for test).
+func (s *StoresStats) Set(storeID uint64, stats *pdpb.StoreStats) {
+	store := s.GetOrCreateRollingStoreStats(storeID)
+	store.Set(stats)
 }
 
 // UpdateTotalBytesRate updates the total bytes write rate and read rate.
 func (s *StoresStats) UpdateTotalBytesRate(f func() []*core.StoreInfo) {
-	s.RLock()
-	defer s.RUnlock()
 	var totalBytesWriteRate float64
 	var totalBytesReadRate float64
 	var writeRate, readRate float64
 	ss := f()
+	s.RLock()
+	defer s.RUnlock()
 	for _, store := range ss {
 		if store.IsUp() {
-			writeRate, readRate = s.rollingStoresStats[store.GetID()].GetBytesRate()
+			stats, ok := s.rollingStoresStats[store.GetID()]
+			if !ok {
+				continue
+			}
+			writeRate, readRate = stats.GetBytesRate()
 			totalBytesWriteRate += writeRate
 			totalBytesReadRate += readRate
 		}
@@ -105,6 +126,26 @@ func (s *StoresStats) GetStoreBytesRate(storeID uint64) (writeRate float64, read
 		return storeStat.GetBytesRate()
 	}
 	return 0, 0
+}
+
+// GetStoreBytesWriteRate returns the bytes write stat of the specified store.
+func (s *StoresStats) GetStoreBytesWriteRate(storeID uint64) float64 {
+	s.RLock()
+	defer s.RUnlock()
+	if storeStat, ok := s.rollingStoresStats[storeID]; ok {
+		return storeStat.GetBytesWriteRate()
+	}
+	return 0
+}
+
+// GetStoreBytesReadRate returns the bytes read stat of the specified store.
+func (s *StoresStats) GetStoreBytesReadRate(storeID uint64) float64 {
+	s.RLock()
+	defer s.RUnlock()
+	if storeStat, ok := s.rollingStoresStats[storeID]; ok {
+		return storeStat.GetBytesReadRate()
+	}
+	return 0
 }
 
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
@@ -189,11 +230,40 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	r.keysReadRate.Add(float64(stats.KeysRead) / float64(interval))
 }
 
+// Set sets the statistics (for test).
+func (r *RollingStoreStats) Set(stats *pdpb.StoreStats) {
+	statInterval := stats.GetInterval()
+	interval := statInterval.GetEndTimestamp() - statInterval.GetStartTimestamp()
+	if interval == 0 {
+		return
+	}
+	r.Lock()
+	defer r.Unlock()
+	r.bytesWriteRate.Set(float64(stats.BytesWritten) / float64(interval))
+	r.bytesReadRate.Set(float64(stats.BytesRead) / float64(interval))
+	r.keysWriteRate.Set(float64(stats.KeysWritten) / float64(interval))
+	r.keysReadRate.Set(float64(stats.KeysRead) / float64(interval))
+}
+
 // GetBytesRate returns the bytes write rate and the bytes read rate.
 func (r *RollingStoreStats) GetBytesRate() (writeRate float64, readRate float64) {
 	r.RLock()
 	defer r.RUnlock()
 	return r.bytesWriteRate.Get(), r.bytesReadRate.Get()
+}
+
+// GetBytesWriteRate returns the bytes write rate.
+func (r *RollingStoreStats) GetBytesWriteRate() float64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.bytesWriteRate.Get()
+}
+
+// GetBytesReadRate returns the bytes read rate.
+func (r *RollingStoreStats) GetBytesReadRate() float64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.bytesReadRate.Get()
 }
 
 // GetKeysWriteRate returns the keys write rate.

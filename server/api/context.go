@@ -11,12 +11,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
+package api
 
-// HotPeersStat records all hot regions statistics
-type HotPeersStat struct {
-	StoreBytesRate float64       `json:"-"`
-	TotalBytesRate float64       `json:"total_flow_bytes"`
-	Count          int           `json:"regions_count"`
-	Stats          []HotPeerStat `json:"statistics"`
+import (
+	"context"
+
+	"github.com/pingcap/pd/server"
+)
+
+type contextKey int
+
+const (
+	clusterKey contextKey = iota + 1
+)
+
+func withClusterCtx(ctx context.Context, cluster *server.RaftCluster) context.Context {
+	return context.WithValue(ctx, clusterKey, cluster)
+}
+
+func getCluster(ctx context.Context) *server.RaftCluster {
+	return ctx.Value(clusterKey).(*server.RaftCluster)
 }
