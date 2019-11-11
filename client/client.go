@@ -19,8 +19,7 @@ import (
 	"sync"
 	"time"
 
-	opentracing "github.com/opentracing/opentracing-go"
-	"github.com/pingcap/failpoint"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -459,9 +458,6 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 	}
 
 	physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
-	failpoint.Inject("timestampDecrease", func() {
-		physical = c.lastPhysical - 1
-	})
 	// Server returns the highest ts.
 	logical -= int64(resp.GetCount() - 1)
 	c.finishTSORequest(requests, physical, logical, nil)
