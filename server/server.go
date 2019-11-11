@@ -103,7 +103,7 @@ type Server struct {
 	logProps *log.ZapProperties
 }
 
-// HandlerBuilder build a server HTTP handler.
+// HandlerBuilder builds a server HTTP handler.
 type HandlerBuilder func(*Server) (http.Handler, APIGroupInfo)
 
 // APIGroupInfo used to regster the api service.
@@ -120,7 +120,7 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder) http.Handler {
+func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder) (http.Handler, error) {
 	engine := negroni.New()
 	recovery := negroni.NewRecovery()
 	engine.Use(recovery)
@@ -135,18 +135,17 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 			p = path.Join(ExtensionsPath, info.Group, info.Version)
 		}
 		if _, ok := registerMap[p]; ok {
-			log.Warn("service already registered", zap.String("path", p))
-			continue
+			return nil, errors.Errorf("service with path [%s] alredy registered", p)
 		}
 		if !info.IsCore && (len(info.Group) == 0 || len(info.Version) == 0) {
-			log.Warn("invalid api group information", zap.Reflect("info", info))
-			continue
+			return nil, errors.Errorf("invalid API information, group %s version %s", info.Group, info.Version)
 		}
 		log.Info("register REST path", zap.String("path", p))
+		registerMap[p] = struct{}{}
 		router.PathPrefix(p).Handler(h)
 	}
 	engine.UseHandler(router)
-	return engine
+	return engine, nil
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
@@ -167,7 +166,10 @@ func CreateServer(cfg *config.Config, apiBulders ...HandlerBuilder) (*Server, er
 		return nil, err
 	}
 	if len(apiBulders) != 0 {
-		apiHandler := combineBuilderServerHTTPService(s, apiBulders...)
+		apiHandler, err := combineBuilderServerHTTPService(s, apiBulders...)
+		if err != nil {
+			return nil, err
+		}
 		etcdCfg.UserHandlers = map[string]http.Handler{
 			pdAPIPrefix: apiHandler,
 		}
