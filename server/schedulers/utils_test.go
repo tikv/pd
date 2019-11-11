@@ -70,7 +70,7 @@ func (s *testScoreInfosSuite) TestSortScoreInfos(c *C) {
 		c.Assert(scoreInfos.isSorted, IsTrue)
 
 		scoreInfos.Sort()
-		for i, pair := range scoreInfos.GetScoreInfo() {
+		for i, pair := range scoreInfos.GetScoreInfos() {
 			c.Assert(pair.GetScore(), Equals, expectedScores[i])
 		}
 
@@ -93,5 +93,38 @@ func (s *testScoreInfosSuite) TestSortScoreInfos(c *C) {
 
 		c.Assert(scoreInfos.Mean(), Equals, 10.0)
 		c.Assert(scoreInfos.StdDev(), Equals, 3.0)
+	}
+	{
+		// test NormalizeStoresStats
+		storeStats := map[uint64]float64{
+			1: 6.0,
+			2: 5.0,
+			3: 2.0,
+			4: 3.0,
+		}
+		expect := map[uint64]float64{
+			1: 1.0,
+			2: 0.75,
+			3: 0.0,
+			4: 0.25,
+		}
+		scoreInfos := NormalizeStoresStats(storeStats)
+		for _, info := range scoreInfos.GetScoreInfos() {
+			c.Assert(info.GetScore(), Equals, expect[info.storeID])
+		}
+		// test AggregateScores
+		expect = map[uint64]float64{
+			1: 4.0,
+			2: 3.0,
+			3: 0.0,
+			4: 1.0,
+		}
+		order := []uint64{3, 4, 2, 1}
+		weights := []float64{4.0, 2.0, 2.0, 2.0}
+		scoreInfos = AggregateScores([]*ScoreInfos{scoreInfos}, weights)
+		for i, info := range scoreInfos.GetScoreInfos() {
+			c.Assert(info.GetScore(), Equals, expect[info.storeID])
+			c.Assert(info.GetStoreID(), Equals, order[i])
+		}
 	}
 }

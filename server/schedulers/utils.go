@@ -206,8 +206,8 @@ func (s *ScoreInfos) Sort() {
 	}
 }
 
-// GetScoreInfo returns the scoreInfos.
-func (s *ScoreInfos) GetScoreInfo() []*ScoreInfo {
+// GetScoreInfos returns the scoreInfos.
+func (s *ScoreInfos) GetScoreInfos() []*ScoreInfo {
 	return s.scoreInfos
 }
 
@@ -239,7 +239,7 @@ func (s *ScoreInfos) StdDev() float64 {
 
 	var res float64
 	mean := s.Mean()
-	for _, info := range s.GetScoreInfo() {
+	for _, info := range s.GetScoreInfos() {
 		diff := info.GetScore() - mean
 		res += diff * diff
 	}
@@ -277,7 +277,7 @@ func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
 
 	minScore := scoreInfos.Min().GetScore()
 
-	for _, info := range scoreInfos.GetScoreInfo() {
+	for _, info := range scoreInfos.GetScoreInfos() {
 		info.SetScore((info.GetScore() - minScore) / mean)
 	}
 
@@ -288,7 +288,7 @@ func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
 func AggregateScores(storesStats []*ScoreInfos, weights []float64) *ScoreInfos {
 	scoreMap := make(map[uint64]float64, 0)
 	for i, scoreInfos := range storesStats {
-		for _, info := range scoreInfos.GetScoreInfo() {
+		for _, info := range scoreInfos.GetScoreInfos() {
 			scoreMap[info.GetStoreID()] += info.GetScore() * weights[i]
 		}
 	}
