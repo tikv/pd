@@ -465,7 +465,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 }
 
 func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, err error) {
-	if tsLessEqual(physical, firstLogical, c.lastPhysical, c.lastLogical) {
+	if err == nil && tsLessEqual(physical, firstLogical, c.lastPhysical, c.lastLogical) {
 		panic(errors.Errorf("timestamp fallback, newly acquired ts (%d,%d) is less or equal to last one (%d, %d)",
 			physical, firstLogical, c.lastLogical, c.lastLogical))
 	}
