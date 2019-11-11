@@ -197,6 +197,10 @@ func NewScoreInfos() *ScoreInfos {
 
 // Add adds a scoreInfo into the slice.
 func (s *ScoreInfos) Add(scoreInfo *ScoreInfo) {
+	infosLen := len(s.scoreInfos)
+	if infosLen != 0 && s.scoreInfos[infosLen-1].score > scoreInfo.score {
+		s.isSorted = false
+	}
 	s.scoreInfos = append(s.scoreInfos, scoreInfo)
 }
 
@@ -213,8 +217,10 @@ func (s *ScoreInfos) Swap(i, j int) {
 
 // Sort sorts the slice.
 func (s *ScoreInfos) Sort() {
-	sort.Sort(s)
-	s.isSorted = true
+	if !s.isSorted {
+		sort.Sort(s)
+		s.isSorted = true
+	}
 }
 
 // GetScoreInfo returns the scoreInfos.
@@ -224,9 +230,7 @@ func (s *ScoreInfos) GetScoreInfo() []*ScoreInfo {
 
 // GetMin returns the min of the slice.
 func (s *ScoreInfos) GetMin() *ScoreInfo {
-	if !s.isSorted {
-		sort.Sort(s)
-	}
+	s.Sort()
 	return s.scoreInfos[0]
 }
 
@@ -244,8 +248,8 @@ func (s *ScoreInfos) Mean() float64 {
 	return sum / float64(s.Len())
 }
 
-// StdDeviation returns the standard deviation of the slice.
-func (s *ScoreInfos) StdDeviation() float64 {
+// StdDev returns the standard deviation of the slice.
+func (s *ScoreInfos) StdDev() float64 {
 	if s.Len() == 0 {
 		return 0
 	}

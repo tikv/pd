@@ -159,34 +159,34 @@ func (s *StoresStats) GetStoreDiskWriteRate(storeID uint64) float64 {
 }
 
 // GetStoresCPUUsage returns the cpu usage stat of all StoreInfo.
-func (s *StoresStats) GetStoresCPUUsage() map[uint64]uint64 {
+func (s *StoresStats) GetStoresCPUUsage() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = uint64(stats.GetCPUUsage())
+		res[storeID] = stats.GetCPUUsage()
 	}
 	return res
 }
 
 // GetStoresDiskReadRate returns the disk read rate stat of all StoreInfo.
-func (s *StoresStats) GetStoresDiskReadRate() map[uint64]uint64 {
+func (s *StoresStats) GetStoresDiskReadRate() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = uint64(stats.GetDiskReadRate())
+		res[storeID] = stats.GetDiskReadRate()
 	}
 	return res
 }
 
 // GetStoresDiskWriteRate returns the disk write rate stat of all StoreInfo.
-func (s *StoresStats) GetStoresDiskWriteRate() map[uint64]uint64 {
+func (s *StoresStats) GetStoresDiskWriteRate() map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]uint64, len(s.rollingStoresStats))
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = uint64(stats.GetDiskWriteRate())
+		res[storeID] = stats.GetDiskWriteRate()
 	}
 	return res
 }
