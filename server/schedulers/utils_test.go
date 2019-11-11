@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -56,15 +57,41 @@ var _ = Suite(&testScoreInfosSuite{})
 type testScoreInfosSuite struct{}
 
 func (s *testScoreInfosSuite) TestSortScoreInfos(c *C) {
-	scoreInfos := NewScoreInfos()
-	scoreInfos.Add(NewScoreInfo(1, 0.5))
-	scoreInfos.Add(NewScoreInfo(2, 0.25))
-	scoreInfos.Add(NewScoreInfo(3, 0.15))
-	scoreInfos.Add(NewScoreInfo(4, 0.35))
+	{
+		scoreInfos := NewScoreInfos()
+		expectedScores := []float64{0.2, 0.4, 0.4, 0.4}
 
-	expectedScores := []float64{0.15, 0.25, 0.35, 0.5}
-	scoreInfos.Sort()
-	for i, pair := range scoreInfos.GetScoreInfo() {
-		c.Assert(pair.GetScore(), Equals, expectedScores[i])
+		for i, score := range expectedScores {
+			scoreInfos.Add(NewScoreInfo(uint64(i+1), score))
+			c.Assert(scoreInfos.isSorted, IsFalse)
+		}
+
+		c.Assert(scoreInfos.Min().score, Equals, 0.2)
+		c.Assert(scoreInfos.isSorted, IsTrue)
+
+		scoreInfos.Sort()
+		for i, pair := range scoreInfos.GetScoreInfo() {
+			c.Assert(pair.GetScore(), Equals, expectedScores[i])
+		}
+
+		scoreInfos.Add(NewScoreInfo(5, 0.6))
+		c.Assert(scoreInfos.isSorted, IsTrue)
+		scoreInfos.Add(NewScoreInfo(6, 0.4))
+		c.Assert(scoreInfos.isSorted, IsFalse)
+
+		c.Assert(math.Abs(scoreInfos.Mean()-0.4), LessEqual, 1e-7)
+	}
+	{
+		scoreInfos := NewScoreInfos()
+		c.Assert(math.Abs(scoreInfos.StdDev()), LessEqual, 1e-7)
+		expectedScores := []float64{13, 5, 11, 11}
+
+		for i, score := range expectedScores {
+			scoreInfos.Add(NewScoreInfo(uint64(i+1), score))
+			c.Assert(scoreInfos.isSorted, IsFalse)
+		}
+
+		c.Assert(scoreInfos.Mean(), Equals, 10.0)
+		c.Assert(scoreInfos.StdDev(), Equals, 3.0)
 	}
 }

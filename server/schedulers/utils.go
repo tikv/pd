@@ -14,7 +14,6 @@
 package schedulers
 
 import (
-	"context"
 	"math"
 	"net/url"
 	"sort"
@@ -22,7 +21,6 @@ import (
 
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
@@ -138,17 +136,6 @@ func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
 	return maxUint64(1, uint64(limit))
 }
 
-const (
-	taintCacheGCInterval = time.Second * 5
-	taintCacheTTL        = time.Minute * 5
-)
-
-// newTaintCache creates a TTL cache to hold stores that are not able to
-// schedule operators.
-func newTaintCache(ctx context.Context) *cache.TTLUint64 {
-	return cache.NewIDTTL(ctx, taintCacheGCInterval, taintCacheTTL)
-}
-
 // ScoreInfo stores storeID and score of a store.
 type ScoreInfo struct {
 	storeID uint64
@@ -224,8 +211,8 @@ func (s *ScoreInfos) GetScoreInfo() []*ScoreInfo {
 	return s.scoreInfos
 }
 
-// GetMin returns the min of the slice.
-func (s *ScoreInfos) GetMin() *ScoreInfo {
+// Min returns the min of the slice.
+func (s *ScoreInfos) Min() *ScoreInfo {
 	s.Sort()
 	return s.scoreInfos[0]
 }
@@ -288,7 +275,7 @@ func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
 		return scoreInfos
 	}
 
-	minScore := scoreInfos.GetMin().GetScore()
+	minScore := scoreInfos.Min().GetScore()
 
 	for _, info := range scoreInfos.GetScoreInfo() {
 		info.SetScore((info.GetScore() - minScore) / mean)
