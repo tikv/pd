@@ -22,6 +22,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockid"
@@ -172,6 +173,10 @@ func (s *testClientSuite) TestTSO(c *C) {
 		c.Assert(ts, Greater, last)
 		last = ts
 	}
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/client/timestampDecrease", "return(true)"), IsNil)
+	_, _, err := s.client.GetTS(context.Background())
+	c.Assert(err, NotNil)
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/client/timestampDecrease"), IsNil)
 }
 
 func (s *testClientSuite) TestTSORace(c *C) {

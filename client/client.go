@@ -20,6 +20,7 @@ import (
 	"time"
 
 	opentracing "github.com/opentracing/opentracing-go"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -115,6 +116,9 @@ type client struct {
 	urls        []string
 	clusterID   uint64
 	tsoRequests chan *tsoRequest
+
+	lastPhysical int64
+	lastLogical  int64
 
 	connMu struct {
 		sync.RWMutex
@@ -455,6 +459,9 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 	}
 
 	physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
+	failpoint.Inject("timestampDecrease", func() {
+		physical = c.lastPhysical - 1
+	})
 	// Server returns the highest ts.
 	logical -= int64(resp.GetCount() - 1)
 	c.finishTSORequest(requests, physical, logical, nil)
@@ -462,6 +469,13 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 }
 
 func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, err error) {
+	if tsLessEqual(physical, firstLogical, c.lastPhysical, c.lastLogical) {
+		err = errors.Errorf("timestamp fallback, newly acquired ts (%d,%d) is less or equal to last one (%d, %d)",
+			physical, firstLogical, c.lastLogical, c.lastLogical)
+	} else {
+		c.lastPhysical = physical
+		c.lastLogical = firstLogical + int64(len(requests)) - 1
+	}
 	for i := 0; i < len(requests); i++ {
 		if span := opentracing.SpanFromContext(requests[i].ctx); span != nil {
 			span.Finish()
@@ -469,6 +483,13 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 		requests[i].physical, requests[i].logical = physical, firstLogical+int64(i)
 		requests[i].done <- err
 	}
+}
+
+func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
+	if physical == thatPhysical {
+		return logical <= thatLogical
+	}
+	return physical < thatPhysical
 }
 
 func (c *client) revokeTSORequest(err error) {
