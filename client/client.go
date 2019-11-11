@@ -476,9 +476,8 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 		requests[i].physical, requests[i].logical = physical, firstLogical+int64(i)
 		requests[i].done <- err
 	}
-	lastRequest := requests[len(requests)-1]
-	c.lastPhysical = lastRequest.physical
-	c.lastLogical = lastRequest.logical
+	c.lastPhysical = physical
+	c.lastLogical = firstLogical + int64(len(requests)) - 1
 }
 
 func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
