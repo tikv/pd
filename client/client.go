@@ -470,11 +470,8 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 
 func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, err error) {
 	if tsLessEqual(physical, firstLogical, c.lastPhysical, c.lastLogical) {
-		err = errors.Errorf("timestamp fallback, newly acquired ts (%d,%d) is less or equal to last one (%d, %d)",
-			physical, firstLogical, c.lastLogical, c.lastLogical)
-	} else {
-		c.lastPhysical = physical
-		c.lastLogical = firstLogical + int64(len(requests)) - 1
+		panic(errors.Errorf("timestamp fallback, newly acquired ts (%d,%d) is less or equal to last one (%d, %d)",
+			physical, firstLogical, c.lastLogical, c.lastLogical))
 	}
 	for i := 0; i < len(requests); i++ {
 		if span := opentracing.SpanFromContext(requests[i].ctx); span != nil {
@@ -483,6 +480,9 @@ func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical
 		requests[i].physical, requests[i].logical = physical, firstLogical+int64(i)
 		requests[i].done <- err
 	}
+	lastRequest := requests[len(requests)-1]
+	c.lastPhysical = lastRequest.physical
+	c.lastLogical = lastRequest.logical
 }
 
 func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {

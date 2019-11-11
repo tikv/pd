@@ -22,7 +22,6 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockid"
@@ -173,10 +172,6 @@ func (s *testClientSuite) TestTSO(c *C) {
 		c.Assert(ts, Greater, last)
 		last = ts
 	}
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/client/timestampDecrease", "return(true)"), IsNil)
-	_, _, err := s.client.GetTS(context.Background())
-	c.Assert(err, NotNil)
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/client/timestampDecrease"), IsNil)
 }
 
 func (s *testClientSuite) TestTSORace(c *C) {
@@ -472,4 +467,12 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
 	})
 	c.Succeed()
+}
+
+func (s *testClientSuite) TestTsLessEqual(c *C) {
+	c.Assert(tsLessEqual(9, 9, 9, 9), IsTrue)
+	c.Assert(tsLessEqual(8, 9, 9, 8), IsTrue)
+	c.Assert(tsLessEqual(9, 8, 8, 9), IsFalse)
+	c.Assert(tsLessEqual(9, 8, 9, 6), IsFalse)
+	c.Assert(tsLessEqual(9, 6, 9, 8), IsTrue)
 }
