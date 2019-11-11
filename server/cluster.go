@@ -859,7 +859,6 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:di
 
 	// Bury a tombstone store should be OK, nothing to do.
 	if store.IsTombstone() {
-		c.coordinator.opController.RemoveStoreLimit(store.GetID())
 		return nil
 	}
 
@@ -1004,7 +1003,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 				return err
 			}
 			c.coordinator.opController.RemoveStoreLimit(store.GetID())
-			log.Info("delete store successed",
+			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
 	}
