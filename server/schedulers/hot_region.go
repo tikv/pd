@@ -326,12 +326,12 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster opt.Cluster, storesSt
 			continue
 		}
 
-		if isRegionUnhealthy(srcRegion) {
+		if !opt.IsHealthyAllowPending(cluster, srcRegion) {
 			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy-replica").Inc()
 			continue
 		}
 
-		if len(srcRegion.GetPeers()) != cluster.GetMaxReplicas() {
+		if !opt.IsRegionReplicated(cluster, srcRegion) {
 			log.Debug("region has abnormal replica count", zap.String("scheduler", h.GetName()), zap.Uint64("region-id", srcRegion.GetID()))
 			schedulerCounter.WithLabelValues(h.GetName(), "abnormal-replica").Inc()
 			continue
@@ -398,7 +398,7 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster opt.Cluster, stores
 			continue
 		}
 
-		if isRegionUnhealthy(srcRegion) {
+		if !opt.IsHealthyAllowPending(cluster, srcRegion) {
 			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy-replica").Inc()
 			continue
 		}

@@ -114,7 +114,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 
 func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandLeaderRegion(s.conf.StoreID, s.conf.Ranges, core.HealthRegion())
+	region := cluster.RandLeaderRegion(s.conf.StoreID, s.conf.Ranges, opt.HealthRegion(cluster))
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 		return nil

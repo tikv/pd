@@ -253,7 +253,7 @@ func (l *balanceAdjacentRegionScheduler) process(cluster opt.Cluster) []*operato
 }
 
 func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster opt.Cluster, region *core.RegionInfo) bool {
-	if len(region.GetPeers()) != cluster.GetMaxReplicas() {
+	if !opt.IsRegionReplicated(cluster, region) {
 		return true
 	}
 	storeID := region.GetLeader().GetStoreId()
