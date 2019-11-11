@@ -16,7 +16,6 @@ package filter
 import (
 	"fmt"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/pkg/slice"
 	"github.com/pingcap/pd/server/core"
@@ -532,23 +531,21 @@ type RegionFitter interface {
 }
 
 type ruleFitFilter struct {
-	scope     string
-	fitter    RegionFitter
-	region    *core.RegionInfo
-	oldFit    *placement.RegionFit
-	IsLearner bool
+	scope   string
+	fitter  RegionFitter
+	region  *core.RegionInfo
+	oldFit  *placement.RegionFit
+	oldPeer uint64
 }
 
 // NewRuleFitFilter creates a filter that ensures that the region fitness won't decrease.
-func NewRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, removePeer *metapb.Peer) *ruleFitFilter {
-	oldFit := fitter.FitRegion(region)
-	region = region.Clone(core.WithRemoveStorePeer(removePeer.GetStoreId()))
+func NewRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldPeerID uint64) Filter {
 	return &ruleFitFilter{
-		scope:     scope,
-		fitter:    fitter,
-		region:    region,
-		oldFit:    oldFit,
-		IsLearner: removePeer.IsLearner,
+		scope:   scope,
+		fitter:  fitter,
+		region:  region,
+		oldFit:  fitter.FitRegion(region),
+		oldPeer: oldPeerID,
 	}
 }
 
@@ -565,7 +562,7 @@ func (f *ruleFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	region := f.region.Clone(core.WithAddPeer(&metapb.Peer{StoreId: store.GetID(), IsLearner: f.IsLearner}))
+	region := f.region.Clone(core.WithReplacePeerStore(f.oldPeer, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) > 0
 }

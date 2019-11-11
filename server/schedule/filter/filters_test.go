@@ -71,11 +71,11 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
-		{StoreId: 3, Id: 1},
-		{StoreId: 5, Id: 1},
+		{StoreId: 3, Id: 3},
+		{StoreId: 5, Id: 5},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 
-	filter := NewRuleFitFilter("", tc, region, &metapb.Peer{StoreId: 1, Id: 1})
+	filter := NewRuleFitFilter("", tc, region, 1)
 	c.Assert(filter.Target(tc, tc.GetStore(2)), IsFalse)
 	c.Assert(filter.Target(tc, tc.GetStore(4)), IsTrue)
 	c.Assert(filter.Source(tc, tc.GetStore(4)), IsFalse)
