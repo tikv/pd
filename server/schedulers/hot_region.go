@@ -527,7 +527,7 @@ func (h *balanceHotRegionsScheduler) GetStoresScore() map[uint64]float64 {
 	h.RLock()
 	defer h.RUnlock()
 	storesScore := make(map[uint64]float64, 0)
-	for _, info := range h.scoreInfos.GetScoreInfos() {
+	for _, info := range h.scoreInfos.ToSlice() {
 		storesScore[info.GetStoreID()] = info.GetScore()
 	}
 	return storesScore

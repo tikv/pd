@@ -175,6 +175,7 @@ type ScoreInfos struct {
 func NewScoreInfos() *ScoreInfos {
 	return &ScoreInfos{
 		scoreInfos: make([]*ScoreInfo, 0),
+		isSorted:   true,
 	}
 }
 
@@ -206,8 +207,8 @@ func (s *ScoreInfos) Sort() {
 	}
 }
 
-// GetScoreInfos returns the scoreInfos.
-func (s *ScoreInfos) GetScoreInfos() []*ScoreInfo {
+// ToSlice returns the scoreInfo slice.
+func (s *ScoreInfos) ToSlice() []*ScoreInfo {
 	return s.scoreInfos
 }
 
@@ -239,7 +240,7 @@ func (s *ScoreInfos) StdDev() float64 {
 
 	var res float64
 	mean := s.Mean()
-	for _, info := range s.GetScoreInfos() {
+	for _, info := range s.ToSlice() {
 		diff := info.GetScore() - mean
 		res += diff * diff
 	}
@@ -262,7 +263,7 @@ func MeanStoresStats(storesStats map[uint64]float64) float64 {
 	return sum / float64(len(storesStats))
 }
 
-// NormalizeStoresStats returns the normalized score scoreInfos. Normolize: x_i => (x_i - x_min)/x_avg.
+// NormalizeStoresStats returns the normalized score scoreInfos. Normalize: x_i => (x_i - x_min)/x_avg.
 func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
 	scoreInfos := NewScoreInfos()
 
@@ -277,7 +278,7 @@ func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
 
 	minScore := scoreInfos.Min().GetScore()
 
-	for _, info := range scoreInfos.GetScoreInfos() {
+	for _, info := range scoreInfos.ToSlice() {
 		info.SetScore((info.GetScore() - minScore) / mean)
 	}
 
@@ -286,9 +287,15 @@ func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
 
 // AggregateScores aggregates stores' scores by using their weights.
 func AggregateScores(storesStats []*ScoreInfos, weights []float64) *ScoreInfos {
+	num := len(storesStats)
+	if num > len(weights) {
+		num = len(weights)
+	}
+
 	scoreMap := make(map[uint64]float64, 0)
-	for i, scoreInfos := range storesStats {
-		for _, info := range scoreInfos.GetScoreInfos() {
+	for i := 0; i < num; i++ {
+		scoreInfos := storesStats[i]
+		for _, info := range scoreInfos.ToSlice() {
 			scoreMap[info.GetStoreID()] += info.GetScore() * weights[i]
 		}
 	}
