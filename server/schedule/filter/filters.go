@@ -538,7 +538,9 @@ type ruleFitFilter struct {
 	oldPeer uint64
 }
 
-// NewRuleFitFilter creates a filter that ensures that the region fitness won't decrease.
+// NewRuleFitFilter creates a filter that ensures after replace a peer with new
+// one, the isolation level will not decrease. Its function is the same as
+// distinctScoreFilter but used when placement rules is enabled.
 func NewRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldPeerID uint64) Filter {
 	return &ruleFitFilter{
 		scope:   scope,
