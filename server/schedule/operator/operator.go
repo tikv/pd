@@ -739,8 +739,6 @@ func CheckOperatorValid(op *Operator) bool {
 	return true
 }
 
-type u64Set map[uint64]struct{}
-
 type u64Slice []uint64
 
 func (s u64Slice) Len() int {
@@ -754,6 +752,8 @@ func (s u64Slice) Swap(i, j int) {
 func (s u64Slice) Less(i, j int) bool {
 	return s[i] < s[j]
 }
+
+type u64Set map[uint64]struct{}
 
 func (s u64Set) String() string {
 	v := make([]uint64, 0, len(s))
