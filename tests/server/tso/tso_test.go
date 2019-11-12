@@ -15,6 +15,7 @@ package tso_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -51,6 +52,7 @@ func (s *testTsoSuite) SetUpSuite(c *C) {
 func (s *testTsoSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
+
 func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 	var err error
 	cluster, err := tests.NewTestCluster(1)
@@ -228,4 +230,55 @@ func (s *testTimeFallBackSuite) TestTimeFallBack(c *C) {
 	}
 
 	wg.Wait()
+}
+
+var _ = Suite(&testFollowerTsoSuite{})
+
+type testFollowerTsoSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testFollowerTsoSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *testFollowerTsoSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+func (s *testFollowerTsoSuite) TestRequest(c *C) {
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/skipRetryGetTS", `return(true)`), IsNil)
+	var err error
+	cluster, err := tests.NewTestCluster(2)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers(s.ctx)
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	servers := cluster.GetServers()
+	var followerServer *tests.TestServer
+	for _, s := range servers {
+		if !s.IsLeader() {
+			followerServer = s
+		}
+	}
+	c.Assert(followerServer, NotNil)
+	grpcPDClient := testutil.MustNewGrpcClient(c, followerServer.GetAddr())
+	clusterID := followerServer.GetClusterID()
+
+	req := &pdpb.TsoRequest{Header: testutil.NewRequestHeader(clusterID), Count: 1}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tsoClient, err := grpcPDClient.Tso(ctx)
+	c.Assert(err, IsNil)
+	defer tsoClient.CloseSend()
+	err = tsoClient.Send(req)
+	c.Assert(err, IsNil)
+	_, err = tsoClient.Recv()
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "can not get timestamp"), IsTrue)
+	failpoint.Disable("github.com/pingcap/pd/server/tso/skipRetryGetTS")
 }

@@ -28,17 +28,10 @@ import (
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
-func CreateAddPeerOperator(desc string, region *core.RegionInfo, peerID uint64, toStoreID uint64, kind OpKind) *Operator {
-	steps := CreateAddPeerSteps(toStoreID, peerID)
-	brief := fmt.Sprintf("add peer: store %v", toStoreID)
+func CreateAddPeerOperator(desc string, region *core.RegionInfo, peer *metapb.Peer, kind OpKind) *Operator {
+	steps := CreateAddPeerSteps(peer)
+	brief := fmt.Sprintf("add peer: store %v", peer.StoreId)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, steps...)
-}
-
-// CreateAddLearnerOperator creates an operator that adds a new learner.
-func CreateAddLearnerOperator(desc string, region *core.RegionInfo, peerID uint64, toStoreID uint64, kind OpKind) *Operator {
-	step := AddLearner{ToStore: toStoreID, PeerID: peerID}
-	brief := fmt.Sprintf("add learner: store %v", toStoreID)
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, step)
 }
 
 // CreatePromoteLearnerOperator creates an operator that promotes a learner.
@@ -62,12 +55,14 @@ func CreateRemovePeerOperator(desc string, cluster Cluster, kind OpKind, region 
 }
 
 // CreateAddPeerSteps creates an OpStep list that add a new peer.
-func CreateAddPeerSteps(newStore uint64, peerID uint64) []OpStep {
-	st := []OpStep{
-		AddLearner{ToStore: newStore, PeerID: peerID},
-		PromoteLearner{ToStore: newStore, PeerID: peerID},
+func CreateAddPeerSteps(newPeer *metapb.Peer) []OpStep {
+	if newPeer.IsLearner {
+		return []OpStep{AddLearner{ToStore: newPeer.StoreId, PeerID: newPeer.Id}}
 	}
-	return st
+	return []OpStep{
+		AddLearner{ToStore: newPeer.StoreId, PeerID: newPeer.Id},
+		PromoteLearner{ToStore: newPeer.StoreId, PeerID: newPeer.Id},
+	}
 }
 
 // CreateAddLightPeerSteps creates an OpStep list that add a new peer without considering the influence.
@@ -145,7 +140,7 @@ func orderedMoveRegionSteps(cluster Cluster, region *core.RegionInfo, storeIDs [
 			log.Debug("peer alloc failed", zap.Error(err))
 			return kind, nil, err
 		}
-		addPeerSteps = append(addPeerSteps, CreateAddPeerSteps(id, peer.Id))
+		addPeerSteps = append(addPeerSteps, CreateAddPeerSteps(peer))
 		kind |= OpRegion
 	}
 
@@ -213,41 +208,41 @@ func interleaveStepGroups(a, b [][]OpStep, sizeHint int) []OpStep {
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
-func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
-	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, append(getRegionFollowerIDs(region), newStore))
+func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
+	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, append(getRegionFollowerIDs(region), peer.StoreId))
 	if err != nil {
 		return nil, err
 	}
-	st := CreateAddPeerSteps(newStore, peerID)
+	st := CreateAddPeerSteps(peer)
 	steps = append(st, steps...)
-	brief := fmt.Sprintf("mv peer: store %v to %v", oldStore, newStore)
+	brief := fmt.Sprintf("mv peer: store %v to %v", oldStore, peer.StoreId)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpRegion, steps...), nil
 }
 
 // CreateOfflinePeerOperator creates an operator that replaces an old peer with a new peer when offline a store.
-func CreateOfflinePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
-	k, steps, err := transferLeaderStep(cluster, region, oldStore, append(getRegionFollowerIDs(region)))
+func CreateOfflinePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
+	k, steps, err := transferLeaderStep(cluster, region, oldStore, getRegionFollowerIDs(region))
 	if err != nil {
 		return nil, err
 	}
 	kind |= k
-	st := CreateAddPeerSteps(newStore, peerID)
+	st := CreateAddPeerSteps(peer)
 	steps = append(steps, st...)
 	steps = append(steps, RemovePeer{FromStore: oldStore})
-	brief := fmt.Sprintf("mv peer: store %v to %v", oldStore, newStore)
+	brief := fmt.Sprintf("mv peer: store %v to %v", oldStore, peer.StoreId)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpRegion, steps...), nil
 }
 
 // CreateMoveLeaderOperator creates an operator that replaces an old leader with a new leader.
-func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore, newStore uint64, peerID uint64) (*Operator, error) {
-	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, []uint64{newStore})
+func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
+	removeKind, steps, err := removePeerSteps(cluster, region, oldStore, []uint64{peer.StoreId})
 	if err != nil {
 		return nil, err
 	}
-	st := CreateAddPeerSteps(newStore, peerID)
-	st = append(st, TransferLeader{ToStore: newStore, FromStore: oldStore})
+	st := CreateAddPeerSteps(peer)
+	st = append(st, TransferLeader{ToStore: peer.StoreId, FromStore: oldStore})
 	steps = append(st, steps...)
-	brief := fmt.Sprintf("mv leader: store %v to %v", oldStore, newStore)
+	brief := fmt.Sprintf("mv leader: store %v to %v", oldStore, peer.StoreId)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpLeader|OpRegion, steps...), nil
 }
 
@@ -449,27 +444,6 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 	brief := fmt.Sprintf("scatter region: stores %v to %v", u64Set(origin.GetStoreIds()), targetStores)
 	op := NewOperator(desc, brief, origin.GetID(), origin.GetRegionEpoch(), kind, steps...)
 	return op
-}
-
-// CheckOperatorValid checks if the operator is valid.
-func CheckOperatorValid(op *Operator) bool {
-	removeStores := []uint64{}
-	for _, step := range op.steps {
-		if tr, ok := step.(TransferLeader); ok {
-			for _, store := range removeStores {
-				if store == tr.FromStore {
-					return false
-				}
-				if store == tr.ToStore {
-					return false
-				}
-			}
-		}
-		if rp, ok := step.(RemovePeer); ok {
-			removeStores = append(removeStores, rp.FromStore)
-		}
-	}
-	return true
 }
 
 type u64Slice []uint64
