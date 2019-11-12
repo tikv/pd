@@ -97,7 +97,7 @@ func (s LoadState) String() string {
 
 // NumberOfEntries is the max number of StatEntry that preserved,
 // it is the history of a store's hearbeats. The interval of store
-// hearbeats from TiKV is 10s, so we can preserve 300 entries per
+// hearbeats from TiKV is 10s, so we can preserve 30 entries per
 // store which is about 5 minutes.
 const NumberOfEntries = 30
 
