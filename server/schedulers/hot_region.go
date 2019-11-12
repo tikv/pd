@@ -201,8 +201,7 @@ const balanceHotRetryLimit = 10
 
 func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
 	for i := 0; i < balanceHotRetryLimit; i++ {
-		switch h.r.Int() % 2 {
-		case 0:
+		if h.allowBalanceRegion(cluster) && (!h.allowBalanceLeader(cluster) || h.r.Int()%2 == 0) {
 			// balance by peer
 			srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 			if srcRegion != nil {
@@ -215,7 +214,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster)
 				schedulerCounter.WithLabelValues(h.GetName(), "move-peer").Inc()
 				return []*operator.Operator{op}
 			}
-		case 1:
+		} else if h.allowBalanceLeader(cluster) {
 			// balance by leader
 			srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
 			if srcRegion != nil {
@@ -224,6 +223,8 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster)
 				op.SetPriorityLevel(core.HighPriority)
 				return []*operator.Operator{op}
 			}
+		} else {
+			break
 		}
 	}
 
