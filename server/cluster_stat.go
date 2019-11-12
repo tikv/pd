@@ -69,11 +69,11 @@ type LoadState int
 
 // LoadStates that supported, None means no state determined
 const (
-	LoadStateIdle LoadState = iota
+	LoadStateNone LoadState = iota
+	LoadStateIdle
 	LoadStateLow
 	LoadStateNormal
 	LoadStateHigh
-	LoadStateNone
 )
 
 // DefaultIntervalHint is a hint of the interval of the store heartbeats,
