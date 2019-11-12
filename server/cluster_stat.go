@@ -114,22 +114,22 @@ type StatEntries struct {
 func NewStatEntries(size int) *StatEntries {
 	return &StatEntries{
 		total:   0,
-		entries: make([]*StatEntry, size, size),
+		entries: make([]*StatEntry, size),
 	}
 }
 
 // Append a StatEntry
 func (s *StatEntries) Append(stat *StatEntry) {
-	idx := s.total % cap(s.entries)
+	idx := s.total % len(s.entries)
 	s.entries[idx] = stat
 	s.total++
 }
 
 // CPU returns the cpu usage
 func (s *StatEntries) CPU(steps int) float64 {
-	cap := cap(s.entries)
-	if steps > cap {
-		steps = cap
+	size := len(s.entries)
+	if steps > size {
+		steps = size
 	}
 	if steps > s.total {
 		steps = s.total
@@ -140,13 +140,13 @@ func (s *StatEntries) CPU(steps int) float64 {
 
 	log.Debug("caculate CPU", zap.Int("steps", steps))
 	usage := 0.0
-	idx := (s.total - 1) % cap
+	idx := (s.total - 1) % size
 	for i := 0; i < steps; i++ {
 		stat := s.entries[idx]
 		usage += cpuUsageAll(stat.CpuUsages)
 		idx--
 		if idx < 0 {
-			idx += cap
+			idx += size
 		}
 	}
 	return usage / float64(steps)
@@ -166,9 +166,9 @@ func cpuUsageAll(usages []*pdpb.RecordPair) float64 {
 // Keys returns the average written and read keys duration
 // an interval of heartbeats
 func (s *StatEntries) Keys(steps int) (read int64, written int64) {
-	cap := cap(s.entries)
-	if steps > cap {
-		steps = cap
+	size := len(s.entries)
+	if steps > size {
+		steps = size
 	}
 	if steps > s.total {
 		steps = s.total
@@ -177,14 +177,14 @@ func (s *StatEntries) Keys(steps int) (read int64, written int64) {
 		return 0, 0
 	}
 
-	idx := (s.total - 1) % cap
+	idx := (s.total - 1) % size
 	for i := 0; i < steps; i++ {
 		stat := s.entries[idx]
 		read += int64(stat.KeysRead)
 		written += int64(stat.KeysWritten)
 		idx--
 		if idx < 0 {
-			idx += cap
+			idx += size
 		}
 	}
 	return read / int64(steps), written / int64(steps)
@@ -193,9 +193,9 @@ func (s *StatEntries) Keys(steps int) (read int64, written int64) {
 // Bytes returns the average written and read bytes duration
 // an interval of heartbeats
 func (s *StatEntries) Bytes(steps int) (read int64, written int64) {
-	cap := cap(s.entries)
-	if steps > cap {
-		steps = cap
+	size := len(s.entries)
+	if steps > size {
+		steps = size
 	}
 	if steps > s.total {
 		steps = s.total
@@ -203,14 +203,14 @@ func (s *StatEntries) Bytes(steps int) (read int64, written int64) {
 	if steps == 0 {
 		return 0, 0
 	}
-	idx := (s.total - 1) % cap
+	idx := (s.total - 1) % size 
 	for i := 0; i < steps; i++ {
 		stat := s.entries[idx]
 		read += int64(stat.BytesRead)
 		written += int64(stat.BytesWritten)
 		idx--
 		if idx < 0 {
-			idx += cap
+			idx += size
 		}
 	}
 	return read / int64(steps), written / int64(steps)
