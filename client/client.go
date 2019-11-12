@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	opentracing "github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -115,6 +115,9 @@ type client struct {
 	urls        []string
 	clusterID   uint64
 	tsoRequests chan *tsoRequest
+
+	lastPhysical int64
+	lastLogical  int64
 
 	connMu struct {
 		sync.RWMutex
@@ -457,8 +460,21 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, requests []*tsoReq
 	physical, logical := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical()
 	// Server returns the highest ts.
 	logical -= int64(resp.GetCount() - 1)
+	if tsLessEqual(physical, logical, c.lastPhysical, c.lastLogical) {
+		panic(errors.Errorf("timestamp fallback, newly acquired ts (%d,%d) is less or equal to last one (%d, %d)",
+			physical, logical, c.lastLogical, c.lastLogical))
+	}
+	c.lastPhysical = physical
+	c.lastLogical = logical + int64(len(requests)) - 1
 	c.finishTSORequest(requests, physical, logical, nil)
 	return nil
+}
+
+func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
+	if physical == thatPhysical {
+		return logical <= thatLogical
+	}
+	return physical < thatPhysical
 }
 
 func (c *client) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, err error) {
