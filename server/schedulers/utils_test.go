@@ -144,7 +144,18 @@ func (s *testScoreInfosSuite) TestStoresStats(c *C) {
 	// test AggregateScores
 	var weights []float64
 	c.Assert(AggregateScores([]*ScoreInfos{scoreInfos}, weights).ToSlice(), HasLen, 0)
-	weights = []float64{4.0, 2.0, 2.0, 2.0}
-	c.Assert(AggregateScores([]*ScoreInfos{scoreInfos, scoreInfos}, weights).ToSlice(), HasLen, len(scoreInfos.ToSlice()))
-	//TODO add more test
+	{
+		weights = []float64{0.0, 0.0, 2.0, 2.0}
+		results := AggregateScores([]*ScoreInfos{scoreInfos}, weights).ToSlice()
+		c.Assert(results, HasLen, len(scoreInfos.ToSlice()))
+		c.Assert(results[0].score, Equals, 0.0)
+	}
+	{
+		weights = []float64{1.0, 1.0, 1.0}
+		results := AggregateScores([]*ScoreInfos{scoreInfos, scoreInfos}, weights).ToSlice()
+		minNum := 2.0 // []*ScoreInfos{scoreInfos, scoreInfos} is less than weights
+		for i, result := range results {
+			c.Assert(result.score, Equals, scoreInfos.ToSlice()[i].score*minNum)
+		}
+	}
 }
