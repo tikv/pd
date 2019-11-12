@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -192,4 +193,69 @@ func mustGetLeader(c *C, client *clientv3.Client, leaderPath string) *pdpb.Membe
 
 	c.Fatal("get leader error")
 	return nil
+}
+
+var _ = Suite(&testFollowerTsoSuite{})
+
+type testFollowerTsoSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	svrs   []*Server
+}
+
+func (s *testFollowerTsoSuite) SetUpSuite(c *C) {
+	s.svrs = make([]*Server, 0, 2)
+
+	cfgs := NewTestMultiConfig(c, 2)
+	ch := make(chan *Server, 2)
+	for i := 0; i < 2; i++ {
+		cfg := cfgs[i]
+		go func() {
+			svr, err := CreateServer(cfg, nil)
+			c.Assert(err, IsNil)
+			c.Assert(svr, NotNil)
+			err = svr.Run(context.TODO())
+			c.Assert(err, IsNil)
+			ch <- svr
+		}()
+	}
+
+	for i := 0; i < 2; i++ {
+		svr := <-ch
+		s.svrs = append(s.svrs, svr)
+	}
+	mustWaitLeader(c, s.svrs)
+}
+
+func (s *testFollowerTsoSuite) TearDownSuite(c *C) {
+	for _, svr := range s.svrs {
+		svr.Close()
+		cleanServer(svr.cfg)
+	}
+}
+
+func (s *testFollowerTsoSuite) TestRequest(c *C) {
+	var err error
+
+	var followerServer *Server
+	for _, s := range s.svrs {
+		if !s.IsLeader() {
+			followerServer = s
+		}
+	}
+	c.Assert(followerServer, NotNil)
+	grpcPDClient := mustNewGrpcClient(c, followerServer.GetAddr())
+	clusterID := followerServer.ClusterID()
+
+	req := &pdpb.TsoRequest{Header: newRequestHeader(clusterID), Count: 1}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tsoClient, err := grpcPDClient.Tso(ctx)
+	c.Assert(err, IsNil)
+	defer tsoClient.CloseSend()
+	err = tsoClient.Send(req)
+	c.Assert(err, IsNil)
+	_, err = tsoClient.Recv()
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "not leader"), IsTrue)
 }

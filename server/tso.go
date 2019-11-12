@@ -214,7 +214,7 @@ func (s *Server) updateTimestamp() error {
 	return nil
 }
 
-const maxRetryCount = 100
+var maxRetryCount = 100
 
 func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 	var resp pdpb.Timestamp
@@ -225,7 +225,7 @@ func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 
 	for i := 0; i < maxRetryCount; i++ {
 		current := (*atomicObject)(atomic.LoadPointer(&s.ts))
-		if current.physical == zeroTime {
+		if current == nil || current.physical == zeroTime {
 			log.Error("we haven't synced timestamp ok, wait and retry", zap.Int("retry-count", i))
 			time.Sleep(200 * time.Millisecond)
 			continue

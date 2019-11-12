@@ -49,45 +49,6 @@ func mustWaitLeader(c *C, svrs []*Server) *Server {
 	return leader
 }
 
-var _ = Suite(&testLeaderServerSuite{})
-
-type testLeaderServerSuite struct {
-	svrs       map[string]*Server
-	leaderPath string
-}
-
-func (s *testLeaderServerSuite) SetUpSuite(c *C) {
-	s.svrs = make(map[string]*Server)
-
-	cfgs := NewTestMultiConfig(c, 3)
-
-	ch := make(chan *Server, 3)
-	for i := 0; i < 3; i++ {
-		cfg := cfgs[i]
-
-		go func() {
-			svr, err := CreateServer(cfg, nil)
-			c.Assert(err, IsNil)
-			err = svr.Run(context.TODO())
-			c.Assert(err, IsNil)
-			ch <- svr
-		}()
-	}
-
-	for i := 0; i < 3; i++ {
-		svr := <-ch
-		s.svrs[svr.GetAddr()] = svr
-		s.leaderPath = svr.getLeaderPath()
-	}
-}
-
-func (s *testLeaderServerSuite) TearDownSuite(c *C) {
-	for _, svr := range s.svrs {
-		svr.Close()
-		cleanServer(svr.cfg)
-	}
-}
-
 var _ = Suite(&testServerSuite{})
 
 type testServerSuite struct{}
@@ -100,6 +61,7 @@ func newTestServersWithCfgs(c *C, cfgs []*Config) ([]*Server, CleanupFunc) {
 		go func(cfg *Config) {
 			svr, err := CreateServer(cfg, nil)
 			c.Assert(err, IsNil)
+			c.Assert(svr, NotNil)
 			err = svr.Run(context.TODO())
 			c.Assert(err, IsNil)
 			ch <- svr
