@@ -16,6 +16,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,8 +39,8 @@ const (
 
 	regionheartbeatSendChanCap = 1024
 	hotRegionScheduleName      = "balance-hot-region-scheduler"
-
-	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
+	evitLeaderScheduleName     = "evict-leader-scheduler"
+	patrolScanRegionLimit      = 128 // It takes about 14 minutes to iterate 1 million regions.
 )
 
 var (
@@ -398,17 +399,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	return nil
 }
 
-func (c *coordinator) removeScheduler(name string) error {
-	c.Lock()
-	defer c.Unlock()
-	if c.cluster == nil {
-		return ErrNotBootstrapped
-	}
-	s, ok := c.schedulers[name]
-	if !ok {
-		return errSchedulerNotFound
-	}
-
+func (c *coordinator) closeScheduler(s *scheduleController, name string) error {
 	s.Stop()
 	schedulerStatusGauge.WithLabelValues(name, "allow").Set(0)
 	delete(c.schedulers, name)
@@ -426,6 +417,38 @@ func (c *coordinator) removeScheduler(name string) error {
 		}
 	}
 	return err
+}
+
+func (c *coordinator) removeScheduler(name string) error {
+	c.Lock()
+	defer c.Unlock()
+	if c.cluster == nil {
+		return ErrNotBootstrapped
+	}
+
+	s, ok := c.schedulers[name]
+
+	shouldBeDeleteOneTime := func(name string) bool {
+		if strings.HasPrefix(name, evitLeaderScheduleName) {
+			return true
+		}
+		return false
+	}
+	if !ok {
+		if name != evitLeaderScheduleName {
+			return errSchedulerNotFound
+		}
+		var res error
+		for key := range c.schedulers {
+			if shouldBeDeleteOneTime(key) {
+				if err := c.closeScheduler(c.schedulers[key], key); err != nil {
+					res = err
+				}
+			}
+		}
+		return res
+	}
+	return c.closeScheduler(s, name)
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {
