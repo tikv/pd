@@ -255,7 +255,7 @@ func (t *TimestampOracle) ResetTimestamp() {
 	atomic.StorePointer(&t.ts, unsafe.Pointer(zero))
 }
 
-const maxRetryCount = 100
+var maxRetryCount = 100
 
 // GetRespTS is used to get a timestamp.
 func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
@@ -265,9 +265,13 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 		return resp, errors.New("tso count should be positive")
 	}
 
+	failpoint.Inject("skipRetryGetTS", func() {
+		maxRetryCount = 1
+	})
+
 	for i := 0; i < maxRetryCount; i++ {
 		current := (*atomicObject)(atomic.LoadPointer(&t.ts))
-		if current.physical == typeutil.ZeroTime {
+		if current == nil || current.physical == typeutil.ZeroTime {
 			log.Error("we haven't synced timestamp ok, wait and retry", zap.Int("retry-count", i))
 			time.Sleep(200 * time.Millisecond)
 			continue
