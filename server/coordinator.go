@@ -428,7 +428,7 @@ func (c *coordinator) removeScheduler(name string) error {
 
 	s, ok := c.schedulers[name]
 
-	shouldBeDeleteOneTime := func(name string) bool {
+	shouldBeClosed := func(name string) bool {
 		if strings.HasPrefix(name, evitLeaderScheduleName) {
 			return true
 		}
@@ -440,7 +440,7 @@ func (c *coordinator) removeScheduler(name string) error {
 		}
 		var res error
 		for key := range c.schedulers {
-			if shouldBeDeleteOneTime(key) {
+			if shouldBeClosed(key) {
 				if err := c.closeScheduler(c.schedulers[key], key); err != nil {
 					res = err
 				}
