@@ -54,6 +54,8 @@ const (
 	storeHotPeersDefaultLen = 100
 	hotRegionScheduleFactor = 0.9
 	balanceHotRegionName    = "balance-hot-region-scheduler"
+	minFlowBytes            = 128 * 1024
+	minScoreLimit           = 0.35
 )
 
 // BalanceType : the perspective of balance
@@ -89,6 +91,8 @@ type balanceHotRegionsScheduler struct {
 	// store id -> hot regions statistics as the role of leader
 	stats *storeStatistics
 	r     *rand.Rand
+	// ScoreInfos stores storeID and score of all stores.
+	scoreInfos *ScoreInfos
 }
 
 func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
@@ -101,6 +105,7 @@ func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *b
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
+		scoreInfos:    NewScoreInfos(),
 	}
 }
 
@@ -157,6 +162,7 @@ func (h *balanceHotRegionsScheduler) Schedule(cluster opt.Cluster) []*operator.O
 func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
+	h.analyzeStoreLoad(cluster.GetStoresStats())
 	storesStat := cluster.GetStoresStats()
 	switch typ {
 	case hotReadRegionBalance:
@@ -168,6 +174,23 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Clust
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
+}
+
+func (h *balanceHotRegionsScheduler) analyzeStoreLoad(storesStats *statistics.StoresStats) {
+	readFlowScoreInfos := NormalizeStoresStats(storesStats.GetStoresBytesReadStat())
+	writeFlowScoreInfos := NormalizeStoresStats(storesStats.GetStoresBytesWriteStat())
+	readFlowMean := MeanStoresStats(storesStats.GetStoresBytesReadStat())
+	writeFlowMean := MeanStoresStats(storesStats.GetStoresBytesWriteStat())
+
+	var weights []float64
+	means := readFlowMean + writeFlowMean
+	if means <= minFlowBytes {
+		weights = append(weights, 0, 0)
+	} else {
+		weights = append(weights, readFlowMean/means, writeFlowMean/means)
+	}
+
+	h.scoreInfos = AggregateScores([]*ScoreInfos{readFlowScoreInfos, writeFlowScoreInfos}, weights)
 }
 
 func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
@@ -498,4 +521,14 @@ func (h *balanceHotRegionsScheduler) GetHotWriteStatus() *statistics.StoreHotPee
 		AsLeader: asLeader,
 		AsPeer:   asPeer,
 	}
+}
+
+func (h *balanceHotRegionsScheduler) GetStoresScore() map[uint64]float64 {
+	h.RLock()
+	defer h.RUnlock()
+	storesScore := make(map[uint64]float64, 0)
+	for _, info := range h.scoreInfos.ToSlice() {
+		storesScore[info.GetStoreID()] = info.GetScore()
+	}
+	return storesScore
 }

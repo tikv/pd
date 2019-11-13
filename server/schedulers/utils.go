@@ -14,13 +14,13 @@
 package schedulers
 
 import (
-	"context"
+	"math"
 	"net/url"
+	"sort"
 	"time"
 
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
@@ -136,15 +136,177 @@ func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
 	return maxUint64(1, uint64(limit))
 }
 
-const (
-	taintCacheGCInterval = time.Second * 5
-	taintCacheTTL        = time.Minute * 5
-)
+// ScoreInfo stores storeID and score of a store.
+type ScoreInfo struct {
+	storeID uint64
+	score   float64
+}
 
-// newTaintCache creates a TTL cache to hold stores that are not able to
-// schedule operators.
-func newTaintCache(ctx context.Context) *cache.TTLUint64 {
-	return cache.NewIDTTL(ctx, taintCacheGCInterval, taintCacheTTL)
+// NewScoreInfo returns a ScoreInfo.
+func NewScoreInfo(storeID uint64, score float64) *ScoreInfo {
+	return &ScoreInfo{
+		storeID: storeID,
+		score:   score,
+	}
+}
+
+// GetStoreID returns the storeID.
+func (s *ScoreInfo) GetStoreID() uint64 {
+	return s.storeID
+}
+
+// GetScore returns the score.
+func (s *ScoreInfo) GetScore() float64 {
+	return s.score
+}
+
+// SetScore sets the score.
+func (s *ScoreInfo) SetScore(score float64) {
+	s.score = score
+}
+
+// ScoreInfos is used for sorting ScoreInfo.
+type ScoreInfos struct {
+	scoreInfos []*ScoreInfo
+	isSorted   bool
+}
+
+// NewScoreInfos returns a ScoreInfos.
+func NewScoreInfos() *ScoreInfos {
+	return &ScoreInfos{
+		scoreInfos: make([]*ScoreInfo, 0),
+		isSorted:   true,
+	}
+}
+
+// Add adds a scoreInfo into the slice.
+func (s *ScoreInfos) Add(scoreInfo *ScoreInfo) {
+	infosLen := len(s.scoreInfos)
+	if s.isSorted == true && infosLen != 0 && s.scoreInfos[infosLen-1].score > scoreInfo.score {
+		s.isSorted = false
+	}
+	s.scoreInfos = append(s.scoreInfos, scoreInfo)
+}
+
+// Len returns length of slice.
+func (s *ScoreInfos) Len() int { return len(s.scoreInfos) }
+
+// Less returns if one number is less than another.
+func (s *ScoreInfos) Less(i, j int) bool { return s.scoreInfos[i].score < s.scoreInfos[j].score }
+
+// Swap switches out two numbers in slice.
+func (s *ScoreInfos) Swap(i, j int) {
+	s.scoreInfos[i], s.scoreInfos[j] = s.scoreInfos[j], s.scoreInfos[i]
+}
+
+// Sort sorts the slice.
+func (s *ScoreInfos) Sort() {
+	if !s.isSorted {
+		sort.Sort(s)
+		s.isSorted = true
+	}
+}
+
+// ToSlice returns the scoreInfo slice.
+func (s *ScoreInfos) ToSlice() []*ScoreInfo {
+	return s.scoreInfos
+}
+
+// Min returns the min of the slice.
+func (s *ScoreInfos) Min() *ScoreInfo {
+	s.Sort()
+	return s.scoreInfos[0]
+}
+
+// Mean returns the mean of the slice.
+func (s *ScoreInfos) Mean() float64 {
+	if s.Len() == 0 {
+		return 0
+	}
+
+	var sum float64
+	for _, info := range s.scoreInfos {
+		sum += info.score
+	}
+
+	return sum / float64(s.Len())
+}
+
+// StdDev returns the standard deviation of the slice.
+func (s *ScoreInfos) StdDev() float64 {
+	if s.Len() == 0 {
+		return 0
+	}
+
+	var res float64
+	mean := s.Mean()
+	for _, info := range s.ToSlice() {
+		diff := info.GetScore() - mean
+		res += diff * diff
+	}
+	res /= float64(s.Len())
+	res = math.Sqrt(res)
+
+	return res
+}
+
+// MeanStoresStats returns the mean of stores' stats.
+func MeanStoresStats(storesStats map[uint64]float64) float64 {
+	if len(storesStats) == 0 {
+		return 0.0
+	}
+
+	var sum float64
+	for _, storeStat := range storesStats {
+		sum += storeStat
+	}
+	return sum / float64(len(storesStats))
+}
+
+// NormalizeStoresStats returns the normalized score scoreInfos. Normalize: x_i => (x_i - x_min)/x_avg.
+func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
+	scoreInfos := NewScoreInfos()
+
+	for storeID, score := range storesStats {
+		scoreInfos.Add(NewScoreInfo(storeID, score))
+	}
+
+	mean := scoreInfos.Mean()
+	if mean == 0 {
+		return scoreInfos
+	}
+
+	minScore := scoreInfos.Min().GetScore()
+
+	for _, info := range scoreInfos.ToSlice() {
+		info.SetScore((info.GetScore() - minScore) / mean)
+	}
+
+	return scoreInfos
+}
+
+// AggregateScores aggregates stores' scores by using their weights.
+func AggregateScores(storesStats []*ScoreInfos, weights []float64) *ScoreInfos {
+	num := len(storesStats)
+	if num > len(weights) {
+		num = len(weights)
+	}
+
+	scoreMap := make(map[uint64]float64, 0)
+	for i := 0; i < num; i++ {
+		scoreInfos := storesStats[i]
+		for _, info := range scoreInfos.ToSlice() {
+			scoreMap[info.GetStoreID()] += info.GetScore() * weights[i]
+		}
+	}
+
+	res := NewScoreInfos()
+	for storeID, score := range scoreMap {
+		res.Add(NewScoreInfo(storeID, score))
+	}
+
+	res.Sort()
+	return res
 }
 
 func getKeyRanges(args []string) ([]core.KeyRange, error) {
