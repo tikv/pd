@@ -196,7 +196,16 @@ func (s *testScatterRegionSuite) TestFiveStores(c *C) {
 }
 
 func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
-	c.Assert(operator.CheckOperatorValid(op), IsTrue)
+	for i := 0; i < op.Len(); i++ {
+		if rp, ok := op.Step(i).(operator.RemovePeer); ok {
+			for j := i + 1; j < op.Len(); j++ {
+				if tr, ok := op.Step(j).(operator.TransferLeader); ok {
+					c.Assert(rp.FromStore, Not(Equals), tr.FromStore)
+					c.Assert(rp.FromStore, Not(Equals), tr.ToStore)
+				}
+			}
+		}
+	}
 }
 
 func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {

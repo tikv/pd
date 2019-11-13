@@ -170,7 +170,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeSta
 			log.Error("failed to allocate peer", zap.Error(err))
 			return nil
 		}
-		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destStoreID, destPeer.GetId())
+		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
 		if err != nil {
 			return nil
 		}
