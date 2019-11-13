@@ -15,6 +15,7 @@ package schedulers
 
 import (
 	"context"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -57,10 +58,6 @@ func minDuration(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
-}
-
-func isRegionUnhealthy(region *core.RegionInfo) bool {
-	return len(region.GetDownPeers()) != 0 || len(region.GetLearners()) != 0
 }
 
 func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) bool {
@@ -153,4 +150,24 @@ const (
 // schedule operators.
 func newTaintCache(ctx context.Context) *cache.TTLUint64 {
 	return cache.NewIDTTL(ctx, taintCacheGCInterval, taintCacheTTL)
+}
+
+func getKeyRanges(args []string) ([]core.KeyRange, error) {
+	var ranges []core.KeyRange
+	for len(args) > 1 {
+		startKey, err := url.QueryUnescape(args[0])
+		if err != nil {
+			return nil, err
+		}
+		endKey, err := url.QueryUnescape(args[1])
+		if err != nil {
+			return nil, err
+		}
+		args = args[2:]
+		ranges = append(ranges, core.NewKeyRange(startKey, endKey))
+	}
+	if len(ranges) == 0 {
+		return []core.KeyRange{core.NewKeyRange("", "")}, nil
+	}
+	return ranges, nil
 }
