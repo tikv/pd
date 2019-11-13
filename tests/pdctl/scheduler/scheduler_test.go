@@ -16,15 +16,15 @@ package scheduler_test
 import (
 	"context"
 	"encoding/json"
-	"strings"
-	"testing"
-	"time"
-
+	"fmt"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
+	"strings"
+	"testing"
+	"time"
 )
 
 func Test(t *testing.T) {
@@ -99,6 +99,15 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	args = []string{"-u", pdAddr, "scheduler", "add", "grant-leader-scheduler", "1"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "add", "evit-leader-scheduler", "1"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "add", "evit-leader-scheduler", "2"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "add", "evit-leader-scheduler", "3"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "scheduler", "show"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
@@ -110,15 +119,63 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"balance-hot-region-scheduler": true,
 		"label-scheduler":              true,
 		"grant-leader-scheduler-1":     true,
+		"evit-leader-scheduler-1":      true,
+		"evit-leader-scheduler-2":      true,
+		"evit-leader-scheduler-3":      true,
+	}
+	for _, scheduler := range schedulers {
+		c.Assert(expected[scheduler], Equals, true)
+	}
+	fmt.Printf("[qinggniq]\n")
+	// scheduler delete command
+	args = []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "show"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	schedulers = schedulers[:0]
+	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+	expected = map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+		"grant-leader-scheduler-1":     true,
+		"evit-leader-scheduler-1":      true,
+		"evit-leader-scheduler-2":      true,
+		"evit-leader-scheduler-3":      true,
 	}
 	for _, scheduler := range schedulers {
 		c.Assert(expected[scheduler], Equals, true)
 	}
 
-	// scheduler delete command
-	args = []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
+	// evit scheduler delete single command
+	args = []string{"-u", pdAddr, "scheduler", "remove", "evit-leader-scheduler-3"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
+
+	args = []string{"-u", pdAddr, "scheduler", "show"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	schedulers = schedulers[:0]
+	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+	expected = map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+		"grant-leader-scheduler-1":     true,
+		"evit-leader-scheduler-1":      true,
+		"evit-leader-scheduler-2":      true,
+	}
+	for _, scheduler := range schedulers {
+		c.Assert(expected[scheduler], Equals, true)
+	}
+
+	// evit scheduler delete all command
+	args = []string{"-u", pdAddr, "scheduler", "remove", "evit-leader-scheduler"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+
 	args = []string{"-u", pdAddr, "scheduler", "show"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
@@ -141,4 +198,5 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"})
 	c.Assert(strings.Contains(echo, "Success!"), IsFalse)
+
 }
