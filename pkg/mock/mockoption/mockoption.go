@@ -77,6 +77,7 @@ type ScheduleOptions struct {
 	EnableRemoveExtraReplica     bool
 	EnableLocationReplacement    bool
 	EnablePlacementRules         bool
+	EnableDebugMetrics           bool
 	DisableRemoveDownReplica     bool
 	DisableReplaceOfflineReplica bool
 	DisableMakeUpReplica         bool
@@ -262,6 +263,11 @@ func (mso *ScheduleOptions) IsRemoveExtraReplicaEnabled() bool {
 // IsLocationReplacementEnabled mocks method.
 func (mso *ScheduleOptions) IsLocationReplacementEnabled() bool {
 	return mso.EnableLocationReplacement
+}
+
+// IsDebugMetricsEnabled mocks method
+func (mso *ScheduleOptions) IsDebugMetricsEnabled() bool {
+	return mso.EnableDebugMetrics
 }
 
 // GetLeaderScheduleStrategy is to get leader schedule strategy.
