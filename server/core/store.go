@@ -508,7 +508,8 @@ func NewStoreNotFoundErr(storeID uint64) errcode.ErrorCode {
 
 // StoresInfo contains information about all stores.
 type StoresInfo struct {
-	stores map[uint64]*StoreInfo
+	stores            map[uint64]*StoreInfo
+	lastFlexibleScore uint64
 }
 
 // NewStoresInfo create a StoresInfo with map of storeID to StoreInfo
@@ -680,6 +681,7 @@ func (s *StoresInfo) GetUpdatedMaxScoreStores(flexibleScore uint64, newStores ..
 		if newStore != nil {
 			maxScore := calculateMaxScore(flexibleScore, newStore.GetCapacity())
 			results = append(results, newStore.Clone(SetMaxScore(maxScore)))
+			s.lastFlexibleScore = flexibleScore
 		}
 		return results
 	}
@@ -690,12 +692,13 @@ func (s *StoresInfo) GetUpdatedMaxScoreStores(flexibleScore uint64, newStores ..
 	maxScore := oldMaxScore
 
 	maxCapacity := getMaxCapacity(oldStores)
-	if calculateMaxScore(flexibleScore, maxCapacity) != oldMaxScore { //update by flexible score
+	if s.lastFlexibleScore != 0 && s.lastFlexibleScore != flexibleScore { //update by flexible score
 		maxCapacity = maxUint64(maxCapacity, getMaxCapacity(newStores))
 		maxScore = calculateMaxScore(flexibleScore, maxCapacity)
+		s.lastFlexibleScore = flexibleScore
 	}
 
-	if newStore != nil && float64(newStore.GetCapacity()) > oldMaxScore { //update by new store when capacity of new store is greater than old maxScore
+	if newStore != nil && float64(newStore.GetCapacity()/bytesPerMB) > oldMaxScore { //update by new store when capacity of new store is greater than old maxScore
 		maxScore = calculateMaxScore(flexibleScore, newStore.GetCapacity())
 	}
 
