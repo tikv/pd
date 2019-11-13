@@ -127,7 +127,7 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 	router := mux.NewRouter()
 	registerMap := make(map[string]struct{})
 	for _, build := range apiBuilders {
-		hander, info := build(svr)
+		handler, info := build(svr)
 		var pathPrefix string
 		if info.IsCore {
 			pathPrefix = CorePath
@@ -142,7 +142,7 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 		}
 		log.Info("register REST path", zap.String("path", pathPrefix))
 		registerMap[pathPrefix] = struct{}{}
-		router.PathPrefix(pathPrefix).Handler(hander)
+		router.PathPrefix(pathPrefix).Handler(handler)
 	}
 	engine.UseHandler(router)
 	return engine, nil
