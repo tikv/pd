@@ -196,6 +196,7 @@ const (
 	defaultKeyType          = "table"
 
 	defaultStrictlyMatchLabel  = false
+	defaultEnablePrevote       = true
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 )
@@ -428,7 +429,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	adjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
 	if !configMetaData.IsDefined("enable-prevote") {
-		c.PreVote = true
+		c.PreVote = defaultEnablePrevote
 	}
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
