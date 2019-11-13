@@ -56,7 +56,7 @@ func newHeartbeatStreams(ctx context.Context, clusterID uint64, cluster *RaftClu
 		hbStreamCancel: hbStreamCancel,
 		clusterID:      clusterID,
 		streams:        make(map[uint64]heartbeatStream),
-		msgCh:          make(chan *pdpb.RegionHeartbeatResponse, regionheartbeatSendChanCap),
+		msgCh:          make(chan *pdpb.RegionHeartbeatResponse, heartbeatChanCapacity),
 		streamCh:       make(chan streamUpdate, 1),
 		cluster:        cluster,
 	}
