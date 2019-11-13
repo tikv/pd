@@ -16,15 +16,15 @@ package scheduler_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"strings"
+	"testing"
+	"time"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
-	"strings"
-	"testing"
-	"time"
 )
 
 func Test(t *testing.T) {
@@ -126,7 +126,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	for _, scheduler := range schedulers {
 		c.Assert(expected[scheduler], Equals, true)
 	}
-	fmt.Printf("[qinggniq]\n")
+
 	// scheduler delete command
 	args = []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
