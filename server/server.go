@@ -104,13 +104,13 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(*Server) (http.Handler, APIGroupInfo)
+type HandlerBuilder func(*Server) (http.Handler, APIGroup)
 
-// APIGroupInfo used to regster the api service.
-type APIGroupInfo struct {
-	IsCore  bool
-	Group   string
+// APIGroup used to register the api service.
+type APIGroup struct {
+	Name    string
 	Version string
+	IsCore  bool
 }
 
 const (
@@ -132,13 +132,13 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 		if info.IsCore {
 			p = CorePath
 		} else {
-			p = path.Join(ExtensionsPath, info.Group, info.Version)
+			p = path.Join(ExtensionsPath, info.Name, info.Version)
 		}
 		if _, ok := registerMap[p]; ok {
-			return nil, errors.Errorf("service with path [%s] alredy registered", p)
+			return nil, errors.Errorf("service with path [%s] already registered", p)
 		}
-		if !info.IsCore && (len(info.Group) == 0 || len(info.Version) == 0) {
-			return nil, errors.Errorf("invalid API information, group %s version %s", info.Group, info.Version)
+		if !info.IsCore && (len(info.Name) == 0 || len(info.Version) == 0) {
+			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
 		}
 		log.Info("register REST path", zap.String("path", p))
 		registerMap[p] = struct{}{}
@@ -149,7 +149,7 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(cfg *config.Config, apiBulders ...HandlerBuilder) (*Server, error) {
+func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 
@@ -165,8 +165,8 @@ func CreateServer(cfg *config.Config, apiBulders ...HandlerBuilder) (*Server, er
 	if err != nil {
 		return nil, err
 	}
-	if len(apiBulders) != 0 {
-		apiHandler, err := combineBuilderServerHTTPService(s, apiBulders...)
+	if len(apiBuilders) != 0 {
+		apiHandler, err := combineBuilderServerHTTPService(s, apiBuilders...)
 		if err != nil {
 			return nil, err
 		}

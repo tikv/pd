@@ -187,13 +187,13 @@ var _ = Suite(&testServerHandlerSuite{})
 type testServerHandlerSuite struct{}
 
 func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
-	mokHandler := func(s *Server) (http.Handler, APIGroupInfo) {
+	mokHandler := func(s *Server) (http.Handler, APIGroup) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
 		})
-		info := APIGroupInfo{
-			Group:   "mok",
+		info := APIGroup{
+			Name:    "mok",
 			Version: "v1",
 		}
 		return mux, info
