@@ -141,10 +141,9 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), IsNil)
-	c.Assert(op.IsFinish(), IsTrue)
-	op.startTime = time.Now()
-	op.startTime = op.startTime.Add(-RegionOperatorWaitTime - time.Second)
-	c.Assert(op.IsTimeout(), IsFalse)
+	c.Assert(op.CheckSuccess(), IsTrue)
+	op = SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-RegionOperatorWaitTime-time.Second))
+	c.Assert(op.CheckTimeout(), IsFalse)
 
 	// addPeer1, transferLeader1, removePeer2
 	steps = []OpStep{
@@ -156,12 +155,11 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
 	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
-	op.startTime = time.Now()
-	c.Assert(op.IsTimeout(), IsFalse)
-	op.startTime = op.startTime.Add(-LeaderOperatorWaitTime - time.Second)
-	c.Assert(op.IsTimeout(), IsFalse)
-	op.startTime = op.startTime.Add(-RegionOperatorWaitTime - time.Second)
-	c.Assert(op.IsTimeout(), IsTrue)
+	c.Assert(op.CheckTimeout(), IsFalse)
+	op = SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-LeaderOperatorWaitTime-time.Second))
+	c.Assert(op.CheckTimeout(), IsFalse)
+	op = SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-RegionOperatorWaitTime-time.Second))
+	c.Assert(op.CheckTimeout(), IsTrue)
 	res, err := json.Marshal(op)
 	c.Assert(err, IsNil)
 	c.Assert(len(res), Equals, len(op.String())+2)
@@ -169,10 +167,10 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	// check short timeout for transfer leader only operators.
 	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
 	op = s.newTestOperator(1, OpLeader, steps...)
-	op.startTime = time.Now()
-	c.Assert(op.IsTimeout(), IsFalse)
-	op.startTime = op.startTime.Add(-LeaderOperatorWaitTime - time.Second)
-	c.Assert(op.IsTimeout(), IsTrue)
+	op.Start()
+	c.Assert(op.CheckTimeout(), IsFalse)
+	op = SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-LeaderOperatorWaitTime-time.Second))
+	c.Assert(op.CheckTimeout(), IsTrue)
 }
 
 func (s *testOperatorSuite) TestInfluence(c *C) {

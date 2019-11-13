@@ -92,7 +92,7 @@ func ApplyOperatorStep(region *core.RegionInfo, op *operator.Operator) *core.Reg
 func ApplyOperator(mc *mockcluster.Cluster, op *operator.Operator) {
 	origin := mc.GetRegion(op.RegionID())
 	region := origin
-	for !op.IsFinish() {
+	for !op.CheckSuccess() {
 		region = ApplyOperatorStep(region, op)
 	}
 	mc.PutRegion(region)

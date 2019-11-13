@@ -103,7 +103,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		failpoint.Inject("concurrentRemoveOperator", func() {
 			time.Sleep(500 * time.Millisecond)
 		})
-		timeout := op.IsTimeout()
+		timeout := op.CheckTimeout()
 		if step := op.Check(region); step != nil && !timeout {
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
 
@@ -136,7 +136,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			oc.SendScheduleCommand(region, step, source)
 			return
 		}
-		if op.IsFinish() && oc.RemoveOperator(op) {
+		if op.CheckSuccess() && oc.RemoveOperator(op) {
 			log.Info("operator finish", zap.Uint64("region-id", region.GetID()), zap.Duration("takes", op.RunningTime()), zap.Reflect("operator", op))
 			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 			operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
@@ -339,7 +339,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	}
 
 	oc.operators[regionID] = op
-	op.SetStartTime(time.Now())
+	op.Start()
 	operatorCounter.WithLabelValues(op.Desc(), "start").Inc()
 	operatorWaitDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
@@ -605,7 +605,7 @@ func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInf
 	oc.RLock()
 	defer oc.RUnlock()
 	for _, op := range oc.operators {
-		if !op.IsTimeout() && !op.IsFinish() {
+		if !op.CheckTimeout() && !op.CheckSuccess() {
 			region := cluster.GetRegion(op.RegionID())
 			if region != nil {
 				op.UnfinishedInfluence(influence, region)
