@@ -753,7 +753,7 @@ func (c *ScheduleConfig) Validate() error {
 	return nil
 }
 
-// Deprecated is used to find if there is an option has beed deprecated.
+// Deprecated is used to find if there is an option has been deprecated.
 func (c *ScheduleConfig) Deprecated() error {
 	if c.DisableLearner {
 		return errors.New("disable-raft-learner has already been deprecated")
