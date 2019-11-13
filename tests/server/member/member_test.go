@@ -286,7 +286,7 @@ func (s *leaderTestSuite) SetUpSuite(c *C) {
 	s.cfg = server.NewTestSingleConfig(c)
 	s.wg.Add(1)
 	s.done = make(chan bool)
-	svr, err := server.CreateServer(s.cfg, nil)
+	svr, err := server.CreateServer(s.cfg)
 	c.Assert(err, IsNil)
 	err = svr.Run(s.ctx)
 	// Send requests after server has started.

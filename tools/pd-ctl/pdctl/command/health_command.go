@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	healthPrefix = "pd/health"
+	healthPrefix = "pd/api/v1/health"
 )
 
 // NewHealthCommand return a health subcommand of rootCmd
