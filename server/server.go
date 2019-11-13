@@ -28,6 +28,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
+	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -42,6 +43,7 @@ import (
 	"github.com/pingcap/pd/server/member"
 	"github.com/pingcap/pd/server/tso"
 	"github.com/pkg/errors"
+	"github.com/urfave/negroni"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
@@ -101,8 +103,53 @@ type Server struct {
 	logProps *log.ZapProperties
 }
 
+// HandlerBuilder builds a server HTTP handler.
+type HandlerBuilder func(*Server) (http.Handler, APIGroup)
+
+// APIGroup used to register the api service.
+type APIGroup struct {
+	Name    string
+	Version string
+	IsCore  bool
+}
+
+const (
+	//CorePath  the core group, is at REST path `/pd/api/v1`.
+	CorePath = "/pd/api/v1"
+	// ExtensionsPath the named groups are REST at `/pd/apis/{GROUP_NAME}/{Version}`.
+	ExtensionsPath = "/pd/apis"
+)
+
+func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder) (http.Handler, error) {
+	engine := negroni.New()
+	recovery := negroni.NewRecovery()
+	engine.Use(recovery)
+	router := mux.NewRouter()
+	registerMap := make(map[string]struct{})
+	for _, build := range apiBuilders {
+		handler, info := build(svr)
+		var pathPrefix string
+		if info.IsCore {
+			pathPrefix = CorePath
+		} else {
+			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
+		}
+		if _, ok := registerMap[pathPrefix]; ok {
+			return nil, errors.Errorf("service with path [%s] already registered", pathPrefix)
+		}
+		if !info.IsCore && (len(info.Name) == 0 || len(info.Version) == 0) {
+			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
+		}
+		log.Info("register REST path", zap.String("path", pathPrefix))
+		registerMap[pathPrefix] = struct{}{}
+		router.PathPrefix(pathPrefix).Handler(handler)
+	}
+	engine.UseHandler(router)
+	return engine, nil
+}
+
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(cfg *config.Config, apiRegister func(*Server) http.Handler) (*Server, error) {
+func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 
@@ -118,9 +165,13 @@ func CreateServer(cfg *config.Config, apiRegister func(*Server) http.Handler) (*
 	if err != nil {
 		return nil, err
 	}
-	if apiRegister != nil {
+	if len(apiBuilders) != 0 {
+		apiHandler, err := combineBuilderServerHTTPService(s, apiBuilders...)
+		if err != nil {
+			return nil, err
+		}
 		etcdCfg.UserHandlers = map[string]http.Handler{
-			pdAPIPrefix: apiRegister(s),
+			pdAPIPrefix: apiHandler,
 		}
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
@@ -705,7 +756,7 @@ func (s *Server) SetLogLevel(level string) {
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
 }
 
-var healthURL = "/pd/ping"
+var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.
 func (s *Server) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {

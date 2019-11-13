@@ -1187,7 +1187,7 @@ func waitNoResponse(c *C, stream mockhbstream.HeartbeatStream) {
 
 func getHeartBeatStreams(ctx context.Context, c *C, tc *testCluster) (*heartbeatStreams, func()) {
 	config := NewTestSingleConfig(c)
-	svr, err := CreateServer(config, nil)
+	svr, err := CreateServer(config)
 	c.Assert(err, IsNil)
 	kvBase := kv.NewEtcdKVBase(svr.client, svr.rootPath)
 	path := filepath.Join(svr.cfg.DataDir, "region-meta")

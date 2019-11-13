@@ -162,6 +162,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	//   Region 1 and 2 are the same, cannot move peer to store 5 due to the label.
 	//   Region 3 can only move peer to store 5.
 	//   Region 5 can only move peer to store 6.
+	opt.LeaderScheduleLimit = 0
 	for i := 0; i < 30; i++ {
 		op := hb.Schedule(tc)[0]
 		switch op.RegionID() {
