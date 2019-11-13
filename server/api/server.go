@@ -24,19 +24,15 @@ import (
 const apiPrefix = "/pd"
 
 // NewHandler creates a HTTP handler for API.
-func NewHandler(svr *server.Server) http.Handler {
-	engine := negroni.New()
-
-	recovery := negroni.NewRecovery()
-	engine.Use(recovery)
-
+func NewHandler(svr *server.Server) (http.Handler, server.APIGroup) {
 	router := mux.NewRouter()
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		newRedirector(svr),
 		negroni.Wrap(createRouter(apiPrefix, svr)),
 	))
 
-	engine.UseHandler(router)
-
-	return engine
+	info := server.APIGroup{
+		IsCore: true,
+	}
+	return router, info
 }

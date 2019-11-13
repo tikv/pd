@@ -30,7 +30,7 @@ import (
 
 var (
 	dialClient = &http.Client{}
-	pingPrefix = "pd/ping"
+	pingPrefix = "pd/api/v1/ping"
 )
 
 // InitHTTPSClient creates https client with ca file
