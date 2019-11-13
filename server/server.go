@@ -126,23 +126,23 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 	engine.Use(recovery)
 	router := mux.NewRouter()
 	registerMap := make(map[string]struct{})
-	for _, b := range apiBuilders {
-		h, info := b(svr)
-		var p string
+	for _, build := range apiBuilders {
+		hander, info := build(svr)
+		var pathPrefix string
 		if info.IsCore {
-			p = CorePath
+			pathPrefix = CorePath
 		} else {
-			p = path.Join(ExtensionsPath, info.Name, info.Version)
+			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
 		}
-		if _, ok := registerMap[p]; ok {
-			return nil, errors.Errorf("service with path [%s] already registered", p)
+		if _, ok := registerMap[pathPrefix]; ok {
+			return nil, errors.Errorf("service with path [%s] already registered", pathPrefix)
 		}
 		if !info.IsCore && (len(info.Name) == 0 || len(info.Version) == 0) {
 			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
 		}
-		log.Info("register REST path", zap.String("path", p))
-		registerMap[p] = struct{}{}
-		router.PathPrefix(p).Handler(h)
+		log.Info("register REST path", zap.String("path", pathPrefix))
+		registerMap[pathPrefix] = struct{}{}
+		router.PathPrefix(pathPrefix).Handler(hander)
 	}
 	engine.UseHandler(router)
 	return engine, nil
