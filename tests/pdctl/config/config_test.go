@@ -154,6 +154,9 @@ func (s *configTestSuite) TestConfig(c *C) {
 		}}, {"enable-remove-down-replica", false, func(scheduleConfig *config.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableRemoveDownReplica
 		}},
+		{"enable-debug-metrics", true, func(scheduleConfig *config.ScheduleConfig) interface{} {
+			return scheduleConfig.EnableDebugMetrics
+		}},
 	}
 	for _, item := range testItems {
 		// write
