@@ -26,10 +26,13 @@ import (
 	"go.uber.org/zap"
 )
 
-const shuffleRegionName = "shuffle-region-scheduler"
+const (
+	shuffleRegionName = "shuffle-region-scheduler"
+	shuffleRegionType = "shuffle-region"
+)
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("shuffle-region", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(shuffleRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleRegionSchedulerConfig)
 			if !ok {
@@ -44,7 +47,7 @@ func init() {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler("shuffle-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(shuffleRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleRegionSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -83,7 +86,7 @@ func (s *shuffleRegionScheduler) GetName() string {
 }
 
 func (s *shuffleRegionScheduler) GetType() string {
-	return "shuffle-region"
+	return shuffleRegionType
 }
 
 func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -109,7 +112,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return nil
 	}
 
-	op, err := operator.CreateMovePeerOperator("shuffle-region", cluster, region, operator.OpAdmin, oldPeer.GetStoreId(), newPeer)
+	op, err := operator.CreateMovePeerOperator(shuffleRegionType, cluster, region, operator.OpAdmin, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 		return nil

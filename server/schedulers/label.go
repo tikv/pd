@@ -25,10 +25,13 @@ import (
 	"go.uber.org/zap"
 )
 
-const labelSchedulerName = "label-scheduler"
+const (
+	labelSchedulerName = "label-scheduler"
+	labelSchedulerType = "label"
+)
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("label", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(labelSchedulerType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*labelSchedulerConfig)
 			if !ok {
@@ -44,7 +47,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler("label", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(labelSchedulerType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &labelSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -84,7 +87,7 @@ func (s *labelScheduler) GetName() string {
 }
 
 func (s *labelScheduler) GetType() string {
-	return "label"
+	return labelSchedulerType
 }
 
 func (s *labelScheduler) EncodeConfig() ([]byte, error) {

@@ -30,7 +30,7 @@ import (
 
 func init() {
 	// args: [start-key, end-key, range-name].
-	schedule.RegisterSliceDecoderBuilder("scatter-range", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(scatterRangeScheduleType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 3 {
 				return errors.New("should specify the range and the name")
@@ -49,7 +49,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler("scatter-range", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(scatterRangeScheduleType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &scatterRangeSchedulerConfig{
 			storage: storage,
 		}

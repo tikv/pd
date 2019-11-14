@@ -28,10 +28,13 @@ import (
 	"go.uber.org/zap"
 )
 
-const shuffleHotRegionName = "shuffle-hot-region-scheduler"
+const (
+	shuffleHotRegionName = "shuffle-hot-region-scheduler"
+	shuffleHotRegionType = "shuffle-hot-region"
+)
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("shuffle-hot-region", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(shuffleHotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleHotRegionSchedulerConfig)
 			if !ok {
@@ -50,7 +53,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(shuffleHotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleHotRegionSchedulerConfig{Limit: uint64(1)}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -93,7 +96,7 @@ func (s *shuffleHotRegionScheduler) GetName() string {
 }
 
 func (s *shuffleHotRegionScheduler) GetType() string {
-	return "shuffle-hot-region"
+	return shuffleHotRegionType
 }
 
 func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {

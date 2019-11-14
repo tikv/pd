@@ -26,8 +26,13 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	evictLeaderName = "evict-leader-scheduler"
+	evictLeaderType = "evict-leader"
+)
+
 func init() {
-	schedule.RegisterSliceDecoderBuilder("evict-leader", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(evictLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -45,16 +50,15 @@ func init() {
 			if err != nil {
 				return errors.WithStack(err)
 			}
-			name := fmt.Sprintf("evict-leader-scheduler-%d", id)
 			conf.StoreID = id
-			conf.Name = name
+			conf.Name = fmt.Sprintf("%s-%d", evictLeaderName, id)
 			conf.Ranges = ranges
 			return nil
 
 		}
 	})
 
-	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(evictLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -95,7 +99,7 @@ func (s *evictLeaderScheduler) GetName() string {
 }
 
 func (s *evictLeaderScheduler) GetType() string {
-	return "evict-leader"
+	return evictLeaderType
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -127,7 +131,7 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator("evict-leader", region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+	op := operator.CreateTransferLeaderOperator(evictLeaderType, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }

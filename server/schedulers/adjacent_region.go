@@ -36,10 +36,11 @@ const (
 	minAdjacentSchedulerInterval = time.Second
 	maxAdjacentSchedulerInterval = 30 * time.Second
 	balanceAdjacentRegionName    = "balance-adjacent-region-scheduler"
+	balanceAdjacentRegionType    = "adjacent-region"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("adjacent-region", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(balanceAdjacentRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*balanceAdjacentRegionConfig)
 			if !ok {
@@ -65,7 +66,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler("adjacent-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(balanceAdjacentRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceAdjacentRegionConfig{
 			LeaderLimit: defaultAdjacentLeaderLimit,
 			PeerLimit:   defaultAdjacentPeerLimit,
@@ -134,7 +135,7 @@ func (l *balanceAdjacentRegionScheduler) GetName() string {
 }
 
 func (l *balanceAdjacentRegionScheduler) GetType() string {
-	return "adjacent-region"
+	return balanceAdjacentRegionType
 }
 
 func (l *balanceAdjacentRegionScheduler) EncodeConfig() ([]byte, error) {

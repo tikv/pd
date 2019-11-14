@@ -25,10 +25,13 @@ import (
 	"github.com/pkg/errors"
 )
 
-const randomMergeName = "random-merge-scheduler"
+const (
+	randomMergeName = "random-merge-scheduler"
+	randomMergeType = "random-merge"
+)
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("random-merge", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(randomMergeType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*randomMergeSchedulerConfig)
 			if !ok {
@@ -43,7 +46,7 @@ func init() {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler("random-merge", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(randomMergeType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &randomMergeSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -82,7 +85,7 @@ func (s *randomMergeScheduler) GetName() string {
 }
 
 func (s *randomMergeScheduler) GetType() string {
-	return "random-merge"
+	return randomMergeType
 }
 
 func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
@@ -117,7 +120,7 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		return nil
 	}
 
-	ops, err := operator.CreateMergeRegionOperator("random-merge", cluster, region, target, operator.OpAdmin)
+	ops, err := operator.CreateMergeRegionOperator(randomMergeType, cluster, region, target, operator.OpAdmin)
 	if err != nil {
 		return nil
 	}

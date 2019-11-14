@@ -31,12 +31,12 @@ import (
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("hot-region", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(balanceHotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler("hot-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(balanceHotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 
 		return newBalanceHotRegionsScheduler(opController), nil
 	})
@@ -54,6 +54,7 @@ const (
 	storeHotPeersDefaultLen = 100
 	hotRegionScheduleFactor = 0.9
 	balanceHotRegionName    = "balance-hot-region-scheduler"
+	balanceHotRegionType    = "hot-region"
 	minFlowBytes            = 128 * 1024
 	minScoreLimit           = 0.35
 )
@@ -138,7 +139,7 @@ func (h *balanceHotRegionsScheduler) GetName() string {
 }
 
 func (h *balanceHotRegionsScheduler) GetType() string {
-	return "hot-region"
+	return balanceHotRegionType
 }
 
 func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -272,7 +273,7 @@ func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesSta
 			}
 			// HotDegree is the update times on the hot cache. If the heartbeat report
 			// the flow of the region exceeds the threshold, the scheduler will update the region in
-			// the hot cache and the hotdegree of the region will increase.
+			// the hot cache and the hot degree of the region will increase.
 			if r.HotDegree < cluster.GetHotRegionCacheHitsThreshold() {
 				continue
 			}
