@@ -24,12 +24,12 @@ import (
 )
 
 const (
-	shuffleLeaderName = "shuffle-leader-scheduler"
-	shuffleLeaderType = "shuffle-leader"
+	ShuffleLeaderName = "shuffle-leader-scheduler"
+	ShuffleLeaderType = "shuffle-leader"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(shuffleLeaderType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(ShuffleLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleLeaderSchedulerConfig)
 			if !ok {
@@ -40,12 +40,12 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.Ranges = ranges
-			conf.Name = shuffleLeaderName
+			conf.Name = ShuffleLeaderName
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler(shuffleLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(ShuffleLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleLeaderSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -84,7 +84,7 @@ func (s *shuffleLeaderScheduler) GetName() string {
 }
 
 func (s *shuffleLeaderScheduler) GetType() string {
-	return shuffleLeaderType
+	return ShuffleLeaderType
 }
 
 func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -112,7 +112,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator(shuffleLeaderType, region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
+	op := operator.CreateTransferLeaderOperator(ShuffleLeaderType, region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }

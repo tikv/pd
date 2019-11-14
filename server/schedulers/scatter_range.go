@@ -30,7 +30,7 @@ import (
 
 func init() {
 	// args: [start-key, end-key, range-name].
-	schedule.RegisterSliceDecoderBuilder(scatterRangeScheduleType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(ScatterRangeType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 3 {
 				return errors.New("should specify the range and the name")
@@ -49,7 +49,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(scatterRangeScheduleType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(ScatterRangeType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &scatterRangeSchedulerConfig{
 			storage: storage,
 		}
@@ -64,7 +64,10 @@ func init() {
 	})
 }
 
-const scatterRangeScheduleType = "scatter-range"
+const (
+	ScatterRangeType = "scatter-range"
+	ScatterRangeName = "scatter-range"
+)
 
 type scatterRangeSchedulerConfig struct {
 	mu        sync.RWMutex
@@ -178,7 +181,7 @@ func (l *scatterRangeScheduler) GetName() string {
 }
 
 func (l *scatterRangeScheduler) GetType() string {
-	return scatterRangeScheduleType
+	return ScatterRangeType
 }
 
 func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {

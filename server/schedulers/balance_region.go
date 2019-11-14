@@ -31,7 +31,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(balanceRegionType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(BalanceRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*balanceRegionSchedulerConfig)
 			if !ok {
@@ -42,11 +42,11 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.Ranges = ranges
-			conf.Name = balanceRegionName
+			conf.Name = BalanceRegionName
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(balanceRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(BalanceRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceRegionSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -58,8 +58,8 @@ func init() {
 const (
 	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
 	balanceRegionRetryLimit = 10
-	balanceRegionName       = "balance-region-scheduler"
-	balanceRegionType       = "balance-region"
+	BalanceRegionName       = "balance-region-scheduler"
+	BalanceRegionType       = "balance-region"
 )
 
 type balanceRegionSchedulerConfig struct {
@@ -114,7 +114,7 @@ func (s *balanceRegionScheduler) GetName() string {
 }
 
 func (s *balanceRegionScheduler) GetType() string {
-	return balanceRegionType
+	return BalanceRegionType
 }
 
 func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -213,7 +213,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			schedulerCounter.WithLabelValues(s.GetName(), "no-peer").Inc()
 			return nil
 		}
-		op, err := operator.CreateMovePeerOperator(balanceRegionType, cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer)
+		op, err := operator.CreateMovePeerOperator(BalanceRegionType, cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil

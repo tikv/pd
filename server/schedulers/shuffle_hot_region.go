@@ -29,12 +29,12 @@ import (
 )
 
 const (
-	shuffleHotRegionName = "shuffle-hot-region-scheduler"
-	shuffleHotRegionType = "shuffle-hot-region"
+	ShuffleHotRegionName = "shuffle-hot-region-scheduler"
+	ShuffleHotRegionType = "shuffle-hot-region"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(shuffleHotRegionType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(ShuffleHotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleHotRegionSchedulerConfig)
 			if !ok {
@@ -48,12 +48,12 @@ func init() {
 				}
 				conf.Limit = limit
 			}
-			conf.Name = shuffleHotRegionName
+			conf.Name = ShuffleHotRegionName
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler(shuffleHotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(ShuffleHotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleHotRegionSchedulerConfig{Limit: uint64(1)}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -96,7 +96,7 @@ func (s *shuffleHotRegionScheduler) GetName() string {
 }
 
 func (s *shuffleHotRegionScheduler) GetType() string {
-	return shuffleHotRegionType
+	return ShuffleHotRegionType
 }
 
 func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {

@@ -27,12 +27,12 @@ import (
 )
 
 const (
-	shuffleRegionName = "shuffle-region-scheduler"
-	shuffleRegionType = "shuffle-region"
+	ShuffleRegionName = "shuffle-region-scheduler"
+	ShuffleRegionType = "shuffle-region"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(shuffleRegionType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(ShuffleRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleRegionSchedulerConfig)
 			if !ok {
@@ -43,11 +43,11 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.Ranges = ranges
-			conf.Name = shuffleRegionName
+			conf.Name = ShuffleRegionName
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(shuffleRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(ShuffleRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleRegionSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -86,7 +86,7 @@ func (s *shuffleRegionScheduler) GetName() string {
 }
 
 func (s *shuffleRegionScheduler) GetType() string {
-	return shuffleRegionType
+	return ShuffleRegionType
 }
 
 func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -112,7 +112,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return nil
 	}
 
-	op, err := operator.CreateMovePeerOperator(shuffleRegionType, cluster, region, operator.OpAdmin, oldPeer.GetStoreId(), newPeer)
+	op, err := operator.CreateMovePeerOperator(ShuffleRegionType, cluster, region, operator.OpAdmin, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 		return nil

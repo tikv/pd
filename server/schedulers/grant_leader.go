@@ -25,12 +25,12 @@ import (
 )
 
 const (
-	grantLeaderName = "grant-leader-scheduler"
-	grantLeaderType = "grant-leader"
+	GrantLeaderName = "grant-leader-scheduler"
+	GrantLeaderType = "grant-leader"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(grantLeaderType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(GrantLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -50,13 +50,13 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.StoreID = id
-			conf.Name = fmt.Sprintf("%s-%d", grantLeaderName, id)
+			conf.Name = fmt.Sprintf("%s-%d", GrantLeaderName, id)
 			conf.Ranges = ranges
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler(grantLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(GrantLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &grandLeaderConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -92,7 +92,7 @@ func (s *grantLeaderScheduler) GetName() string {
 }
 
 func (s *grantLeaderScheduler) GetType() string {
-	return grantLeaderType
+	return GrantLeaderType
 }
 
 func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -119,7 +119,7 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator(grantLeaderType, region, region.GetLeader().GetStoreId(), s.conf.StoreID, operator.OpLeader)
+	op := operator.CreateTransferLeaderOperator(GrantLeaderType, region, region.GetLeader().GetStoreId(), s.conf.StoreID, operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }

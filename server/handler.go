@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -214,62 +215,62 @@ func (h *Handler) RemoveScheduler(name string) error {
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	return h.AddScheduler("balance-leader")
+	return h.AddScheduler(schedulers.BalanceLeaderType)
 }
 
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
 func (h *Handler) AddBalanceRegionScheduler() error {
-	return h.AddScheduler("balance-region")
+	return h.AddScheduler(schedulers.BalanceRegionType)
 }
 
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
 func (h *Handler) AddBalanceHotRegionScheduler() error {
-	return h.AddScheduler("hot-region")
+	return h.AddScheduler(schedulers.HotRegionType)
 }
 
 // AddLabelScheduler adds a label-scheduler.
 func (h *Handler) AddLabelScheduler() error {
-	return h.AddScheduler("label")
+	return h.AddScheduler(schedulers.LabelType)
 }
 
 // AddScatterRangeScheduler adds a balance-range-leader-scheduler
 func (h *Handler) AddScatterRangeScheduler(args ...string) error {
-	return h.AddScheduler("scatter-range", args...)
+	return h.AddScheduler(schedulers.ScatterRangeType, args...)
 }
 
 // AddAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
 func (h *Handler) AddAdjacentRegionScheduler(args ...string) error {
-	return h.AddScheduler("adjacent-region", args...)
+	return h.AddScheduler(schedulers.AdjacentRegionType, args...)
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler("grant-leader", strconv.FormatUint(storeID, 10))
+	return h.AddScheduler(schedulers.GrantLeaderType, strconv.FormatUint(storeID, 10))
 }
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler("evict-leader", strconv.FormatUint(storeID, 10))
+	return h.AddScheduler(schedulers.EvictLeaderType, strconv.FormatUint(storeID, 10))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	return h.AddScheduler("shuffle-leader")
+	return h.AddScheduler(schedulers.ShuffleLeaderType)
 }
 
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
-	return h.AddScheduler("shuffle-region")
+	return h.AddScheduler(schedulers.ShuffleRegionType)
 }
 
 // AddShuffleHotRegionScheduler adds a shuffle-hot-region-scheduler.
 func (h *Handler) AddShuffleHotRegionScheduler(limit uint64) error {
-	return h.AddScheduler("shuffle-hot-region", strconv.FormatUint(limit, 10))
+	return h.AddScheduler(schedulers.ShuffleHotRegionType, strconv.FormatUint(limit, 10))
 }
 
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
-	return h.AddScheduler("random-merge")
+	return h.AddScheduler(schedulers.RandomMergeType)
 }
 
 // GetOperator returns the region operator.

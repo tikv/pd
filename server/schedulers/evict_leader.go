@@ -27,12 +27,12 @@ import (
 )
 
 const (
-	evictLeaderName = "evict-leader-scheduler"
-	evictLeaderType = "evict-leader"
+	EvictLeaderName = "evict-leader-scheduler"
+	EvictLeaderType = "evict-leader"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(evictLeaderType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -51,14 +51,14 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.StoreID = id
-			conf.Name = fmt.Sprintf("%s-%d", evictLeaderName, id)
+			conf.Name = fmt.Sprintf("%s-%d", EvictLeaderName, id)
 			conf.Ranges = ranges
 			return nil
 
 		}
 	})
 
-	schedule.RegisterScheduler(evictLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(EvictLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -99,7 +99,7 @@ func (s *evictLeaderScheduler) GetName() string {
 }
 
 func (s *evictLeaderScheduler) GetType() string {
-	return evictLeaderType
+	return EvictLeaderType
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -131,7 +131,7 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator(evictLeaderType, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+	op := operator.CreateTransferLeaderOperator(EvictLeaderType, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }

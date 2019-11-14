@@ -35,12 +35,12 @@ const (
 	defaultAdjacentLeaderLimit   = 64
 	minAdjacentSchedulerInterval = time.Second
 	maxAdjacentSchedulerInterval = 30 * time.Second
-	balanceAdjacentRegionName    = "balance-adjacent-region-scheduler"
-	balanceAdjacentRegionType    = "adjacent-region"
+	AdjacentRegionName           = "balance-adjacent-region-scheduler"
+	AdjacentRegionType           = "adjacent-region"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(balanceAdjacentRegionType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(AdjacentRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*balanceAdjacentRegionConfig)
 			if !ok {
@@ -61,12 +61,12 @@ func init() {
 			}
 			conf.LeaderLimit = defaultAdjacentLeaderLimit
 			conf.PeerLimit = defaultAdjacentPeerLimit
-			conf.Name = balanceAdjacentRegionName
+			conf.Name = AdjacentRegionName
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler(balanceAdjacentRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(AdjacentRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceAdjacentRegionConfig{
 			LeaderLimit: defaultAdjacentLeaderLimit,
 			PeerLimit:   defaultAdjacentPeerLimit,
@@ -118,7 +118,7 @@ func (a *adjacentState) len() int {
 // on each store.
 func newBalanceAdjacentRegionScheduler(opController *schedule.OperatorController, conf *balanceAdjacentRegionConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: balanceAdjacentRegionName, TransferLeader: true, MoveRegion: true},
+		filter.StoreStateFilter{ActionScope: AdjacentRegionName, TransferLeader: true, MoveRegion: true},
 	}
 	base := newBaseScheduler(opController)
 	s := &balanceAdjacentRegionScheduler{
@@ -135,7 +135,7 @@ func (l *balanceAdjacentRegionScheduler) GetName() string {
 }
 
 func (l *balanceAdjacentRegionScheduler) GetType() string {
-	return balanceAdjacentRegionType
+	return AdjacentRegionType
 }
 
 func (l *balanceAdjacentRegionScheduler) EncodeConfig() ([]byte, error) {

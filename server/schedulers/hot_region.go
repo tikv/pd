@@ -31,12 +31,12 @@ import (
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(balanceHotRegionType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(HotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(balanceHotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 
 		return newBalanceHotRegionsScheduler(opController), nil
 	})
@@ -53,8 +53,8 @@ const (
 	hotRegionLimitFactor    = 0.75
 	storeHotPeersDefaultLen = 100
 	hotRegionScheduleFactor = 0.9
-	balanceHotRegionName    = "balance-hot-region-scheduler"
-	balanceHotRegionType    = "hot-region"
+	HotRegionName           = "balance-hot-region-scheduler"
+	HotRegionType           = "hot-region"
 	minFlowBytes            = 128 * 1024
 	minScoreLimit           = 0.35
 )
@@ -99,7 +99,7 @@ type balanceHotRegionsScheduler struct {
 func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
 	base := newBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
-		name:          balanceHotRegionName,
+		name:          HotRegionName,
 		baseScheduler: base,
 		leaderLimit:   1,
 		peerLimit:     1,
@@ -139,7 +139,7 @@ func (h *balanceHotRegionsScheduler) GetName() string {
 }
 
 func (h *balanceHotRegionsScheduler) GetType() string {
-	return balanceHotRegionType
+	return HotRegionType
 }
 
 func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {

@@ -40,7 +40,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	sl, err := schedule.CreateScheduler("shuffle-leader", schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("shuffle-leader", []string{"", ""}))
+	sl, err := schedule.CreateScheduler(ShuffleLeaderType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ShuffleLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(sl.Schedule(tc), IsNil)
 
@@ -350,7 +350,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("shuffle-hot-region", schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
+	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
@@ -459,7 +459,7 @@ func (s *testShuffleRegionSuite) TestShuffle(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	sl, err := schedule.CreateScheduler("shuffle-region", schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("shuffle-region", []string{"", ""}))
+	sl, err := schedule.CreateScheduler(shuffleRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(shuffleRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	c.Assert(sl.Schedule(tc), IsNil)
