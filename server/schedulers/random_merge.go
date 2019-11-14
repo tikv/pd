@@ -26,7 +26,9 @@ import (
 )
 
 const (
+	// RandomMergeName is random merge scheduler name.
 	RandomMergeName = "random-merge-scheduler"
+	// RandomMergeType is random merge scheduler type.
 	RandomMergeType = "random-merge"
 )
 

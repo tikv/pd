@@ -27,7 +27,9 @@ import (
 )
 
 const (
+	// ShuffleRegionName is shuffle region scheduler name.
 	ShuffleRegionName = "shuffle-region-scheduler"
+	// ShuffleRegionName is shuffle region scheduler type.
 	ShuffleRegionType = "shuffle-region"
 )
 

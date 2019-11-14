@@ -27,7 +27,9 @@ import (
 )
 
 const (
+	// EvictLeaderName is evict leader scheduler name.
 	EvictLeaderName = "evict-leader-scheduler"
+	// EvictLeaderType is evict leader scheduler type.
 	EvictLeaderType = "evict-leader"
 )
 

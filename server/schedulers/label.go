@@ -26,7 +26,9 @@ import (
 )
 
 const (
+	// LabelName is label scheduler name.
 	LabelName = "label-scheduler"
+	// LabelType is label scheduler type.
 	LabelType = "label"
 )
 

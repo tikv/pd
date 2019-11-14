@@ -35,8 +35,10 @@ const (
 	defaultAdjacentLeaderLimit   = 64
 	minAdjacentSchedulerInterval = time.Second
 	maxAdjacentSchedulerInterval = 30 * time.Second
-	AdjacentRegionName           = "balance-adjacent-region-scheduler"
-	AdjacentRegionType           = "adjacent-region"
+	// AdjacentRegionName is balance adjacent region scheduler name.
+	AdjacentRegionName = "balance-adjacent-region-scheduler"
+	// AdjacentRegionType is balance adjacent region scheduler type.
+	AdjacentRegionType = "adjacent-region"
 )
 
 func init() {

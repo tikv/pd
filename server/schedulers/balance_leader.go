@@ -29,7 +29,9 @@ import (
 )
 
 const (
+	// BalanceLeaderName is balance leader scheduler name.
 	BalanceLeaderName = "balance-leader-scheduler"
+	// BalanceLeaderType is balance leader scheduler type.
 	BalanceLeaderType = "balance-leader"
 	// balanceLeaderRetryLimit is the limit to retry schedule for selected source store and target store.
 	balanceLeaderRetryLimit = 10

@@ -41,10 +41,10 @@ func init() {
 		return newBalanceHotRegionsScheduler(opController), nil
 	})
 	// FIXME: remove this two schedule after the balance test move in schedulers package
-	schedule.RegisterScheduler("hot-write-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceHotWriteRegionsScheduler(opController), nil
 	})
-	schedule.RegisterScheduler("hot-read-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceHotReadRegionsScheduler(opController), nil
 	})
 }
@@ -53,10 +53,16 @@ const (
 	hotRegionLimitFactor    = 0.75
 	storeHotPeersDefaultLen = 100
 	hotRegionScheduleFactor = 0.9
-	HotRegionName           = "balance-hot-region-scheduler"
-	HotRegionType           = "hot-region"
-	minFlowBytes            = 128 * 1024
-	minScoreLimit           = 0.35
+	// HotRegionName is balance hot region scheduler name.
+	HotRegionName = "balance-hot-region-scheduler"
+	// HotRegionType is balance hot region scheduler type.
+	HotRegionType = "hot-region"
+	// HotReadRegionType is hot read region scheduler type.
+	HotReadRegionType = "hot-read-region"
+	// HotWriteRegionType is hot write region scheduler type.
+	HotWriteRegionType = "hot-write-region"
+	minFlowBytes       = 128 * 1024
+	minScoreLimit      = 0.35
 )
 
 // BalanceType : the perspective of balance

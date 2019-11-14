@@ -58,8 +58,10 @@ func init() {
 const (
 	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
 	balanceRegionRetryLimit = 10
-	BalanceRegionName       = "balance-region-scheduler"
-	BalanceRegionType       = "balance-region"
+	// BalanceRegionName is balance region scheduler name.
+	BalanceRegionName = "balance-region-scheduler"
+	// BalanceRegionType is balance region scheduler type.
+	BalanceRegionType = "balance-region"
 )
 
 type balanceRegionSchedulerConfig struct {

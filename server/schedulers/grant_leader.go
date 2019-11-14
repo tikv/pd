@@ -25,7 +25,9 @@ import (
 )
 
 const (
+	// GrantLeaderName is grant leader scheduler name.
 	GrantLeaderName = "grant-leader-scheduler"
+	// GrantLeaderType is grant leader scheduler type.
 	GrantLeaderType = "grant-leader"
 )
 
