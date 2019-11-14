@@ -37,12 +37,12 @@ import (
 
 func main() {
 	cfg := config.NewConfig()
+	err := cfg.Parse(os.Args[1:])
+
 	if cfg.Version {
 		server.PrintPDInfo()
 		exit(0)
 	}
-
-	err := cfg.Parse(os.Args[1:])
 
 	defer logutil.LogPanic()
 
