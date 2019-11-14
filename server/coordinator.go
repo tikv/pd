@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -38,8 +39,6 @@ const (
 	maxLoadConfigRetries      = 10
 
 	heartbeatChanCapacity = 1024
-	hotRegionScheduleName = "balance-hot-region-scheduler"
-
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 )
 
@@ -269,7 +268,7 @@ type hasHotStatus interface {
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
 	c.RLock()
 	defer c.RUnlock()
-	s, ok := c.schedulers[hotRegionScheduleName]
+	s, ok := c.schedulers[schedulers.HotRegionName]
 	if !ok {
 		return nil
 	}
@@ -282,7 +281,7 @@ func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
 func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
 	c.RLock()
 	defer c.RUnlock()
-	s, ok := c.schedulers[hotRegionScheduleName]
+	s, ok := c.schedulers[schedulers.HotRegionName]
 	if !ok {
 		return nil
 	}
@@ -325,7 +324,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
 	defer c.RUnlock()
 	// Collects hot write region metrics.
-	s, ok := c.schedulers[hotRegionScheduleName]
+	s, ok := c.schedulers[schedulers.HotRegionName]
 	if !ok {
 		return
 	}

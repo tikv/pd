@@ -38,7 +38,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("hot-write-region", schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	opt.HotRegionCacheHitsThreshold = 0
 
@@ -199,7 +199,7 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	defer cancel()
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	opt.HotRegionCacheHitsThreshold = 0
 

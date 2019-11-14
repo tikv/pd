@@ -223,6 +223,11 @@ func (o *ScheduleOption) IsLocationReplacementEnabled() bool {
 	return o.Load().EnableLocationReplacement
 }
 
+// IsDebugMetricsEnabled mocks method
+func (o *ScheduleOption) IsDebugMetricsEnabled() bool {
+	return o.Load().EnableDebugMetrics
+}
+
 // GetSchedulers gets the scheduler configurations.
 func (o *ScheduleOption) GetSchedulers() SchedulerConfigs {
 	return o.Load().Schedulers

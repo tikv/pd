@@ -26,10 +26,15 @@ import (
 	"go.uber.org/zap"
 )
 
-const shuffleRegionName = "shuffle-region-scheduler"
+const (
+	// ShuffleRegionName is shuffle region scheduler name.
+	ShuffleRegionName = "shuffle-region-scheduler"
+	// ShuffleRegionType is shuffle region scheduler type.
+	ShuffleRegionType = "shuffle-region"
+)
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("shuffle-region", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(ShuffleRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleRegionSchedulerConfig)
 			if !ok {
@@ -40,13 +45,15 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.Ranges = ranges
-			conf.Name = shuffleRegionName
+			conf.Name = ShuffleRegionName
 			return nil
 		}
 	})
-	schedule.RegisterScheduler("shuffle-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(ShuffleRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleRegionSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newShuffleRegionScheduler(opController, conf), nil
 	})
 }
@@ -81,7 +88,7 @@ func (s *shuffleRegionScheduler) GetName() string {
 }
 
 func (s *shuffleRegionScheduler) GetType() string {
-	return "shuffle-region"
+	return ShuffleRegionType
 }
 
 func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -107,7 +114,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return nil
 	}
 
-	op, err := operator.CreateMovePeerOperator("shuffle-region", cluster, region, operator.OpAdmin, oldPeer.GetStoreId(), newPeer)
+	op, err := operator.CreateMovePeerOperator(ShuffleRegionType, cluster, region, operator.OpAdmin, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 		return nil

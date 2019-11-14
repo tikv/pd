@@ -35,7 +35,7 @@ const (
 type intervalGrowthType int
 
 const (
-	exponentailGrowth intervalGrowthType = iota
+	exponentialGrowth intervalGrowthType = iota
 	linearGrowth
 	zeroGrowth
 )
@@ -43,7 +43,7 @@ const (
 // intervalGrow calculates the next interval of balance.
 func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowthType) time.Duration {
 	switch typ {
-	case exponentailGrowth:
+	case exponentialGrowth:
 		return minDuration(time.Duration(float64(x)*ScheduleIntervalFactor), maxInterval)
 	case linearGrowth:
 		return minDuration(x+MinSlowScheduleInterval, maxInterval)
@@ -76,7 +76,7 @@ func (s *baseScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *baseScheduler) GetNextInterval(interval time.Duration) time.Duration {
-	return intervalGrow(interval, MaxScheduleInterval, exponentailGrowth)
+	return intervalGrow(interval, MaxScheduleInterval, exponentialGrowth)
 }
 
 func (s *baseScheduler) Prepare(cluster opt.Cluster) error { return nil }
