@@ -142,7 +142,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	s.checkSteps(c, op, steps)
 	c.Assert(op.Check(region), IsNil)
 	c.Assert(op.CheckSuccess(), IsTrue)
-	op = SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-RegionOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-RegionOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsFalse)
 
 	// addPeer1, transferLeader1, removePeer2
@@ -156,9 +156,9 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
 	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
 	c.Assert(op.CheckTimeout(), IsFalse)
-	op = SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-LeaderOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-LeaderOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsFalse)
-	op = SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-RegionOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-RegionOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsTrue)
 	res, err := json.Marshal(op)
 	c.Assert(err, IsNil)
@@ -169,7 +169,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	op = s.newTestOperator(1, OpLeader, steps...)
 	op.Start()
 	c.Assert(op.CheckTimeout(), IsFalse)
-	op = SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-LeaderOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-LeaderOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsTrue)
 }
 
