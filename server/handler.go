@@ -213,6 +213,20 @@ func (h *Handler) RemoveScheduler(name string) error {
 	return err
 }
 
+// PauseOrResumeScheduler pasues a scheduler for delay seconds or resume a paused scheduler.
+// t < 0 : resume scheduler.
+// t > 0 : scheduler delays t seconds.
+func (h *Handler) PauseOrResumeScheduler(name string, t int) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return err
+	}
+	if err = c.pauseOrResumeScheduler(name, t); err != nil {
+		log.Error("can not pause or resume scheduler", zap.String("scheduler-name", name), zap.Error(err))
+	}
+	return err
+}
+
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler(schedulers.BalanceLeaderType)

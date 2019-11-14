@@ -15,6 +15,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/pkg/apiutil"
@@ -178,6 +179,22 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.r.JSON(w, http.StatusOK, nil)
+}
+
+func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	name := vars["name"]
+	t, err := strconv.Atoi(vars["time"])
+	if err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := h.PauseOrResumeScheduler(name, t); err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.r.JSON(w, http.StatusOK, nil)
 }
 
