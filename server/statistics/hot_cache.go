@@ -16,7 +16,6 @@ package statistics
 import (
 	"math/rand"
 
-	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -68,24 +67,13 @@ func (w *HotCache) Update(item *HotPeerStat) {
 
 // RegionStats returns hot items according to kind
 func (w *HotCache) RegionStats(kind FlowKind) map[uint64][]*HotPeerStat {
-	var peersOfStore map[uint64]cache.Cache
 	switch kind {
 	case WriteFlow:
-		peersOfStore = w.writeFlow.peersOfStore
+		return w.writeFlow.RegionStats()
 	case ReadFlow:
-		peersOfStore = w.readFlow.peersOfStore
+		return w.readFlow.RegionStats()
 	}
-
-	res := make(map[uint64][]*HotPeerStat)
-	for storeID, peers := range peersOfStore {
-		values := peers.Elems()
-		stat := make([]*HotPeerStat, len(values))
-		res[storeID] = stat
-		for i := range values {
-			stat[i] = values[i].Value.(*HotPeerStat)
-		}
-	}
-	return res
+	return nil
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.

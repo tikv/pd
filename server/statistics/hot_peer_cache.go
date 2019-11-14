@@ -51,6 +51,20 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 	}
 }
 
+// RegionStats returns hot items
+func (f *hotPeerCache) RegionStats() map[uint64][]*HotPeerStat {
+	res := make(map[uint64][]*HotPeerStat)
+	for storeID, peers := range f.peersOfStore {
+		values := peers.Elems()
+		stat := make([]*HotPeerStat, len(values))
+		res[storeID] = stat
+		for i := range values {
+			stat[i] = values[i].Value.(*HotPeerStat)
+		}
+	}
+	return res
+}
+
 // Update updates the items in statistics.
 func (f *hotPeerCache) Update(item *HotPeerStat) {
 	if item.IsNeedDelete() {
