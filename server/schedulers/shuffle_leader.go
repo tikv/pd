@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	// ShuffleHotRegionName is shuffle leader scheduler name.
+	// ShuffleLeaderName is shuffle leader scheduler name.
 	ShuffleLeaderName = "shuffle-leader-scheduler"
 	// ShuffleLeaderType is shuffle leader scheduler type.
 	ShuffleLeaderType = "shuffle-leader"
