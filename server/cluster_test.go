@@ -593,7 +593,7 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 			}
 		}(i == 0)
 	}
-	concurrent := 2000
+	concurrent := 400
 	for i := 0; i < concurrent; i++ {
 		region := &metapb.Region{
 			Id:       s.allocID(c),

@@ -16,6 +16,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -36,8 +37,8 @@ const (
 	maxScheduleRetries        = 10
 	maxLoadConfigRetries      = 10
 
-	regionheartbeatSendChanCap = 1024
-	hotRegionScheduleName      = "balance-hot-region-scheduler"
+	heartbeatChanCapacity = 1024
+	hotRegionScheduleName = "balance-hot-region-scheduler"
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 )
@@ -262,6 +263,7 @@ func (c *coordinator) stop() {
 type hasHotStatus interface {
 	GetHotReadStatus() *statistics.StoreHotPeersInfos
 	GetHotWriteStatus() *statistics.StoreHotPeersInfos
+	GetStoresScore() map[uint64]float64
 }
 
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
@@ -365,6 +367,17 @@ func (c *coordinator) collectHotSpotMetrics() {
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
+		}
+	}
+
+	// Collects score of stores stats metrics.
+	scores := s.Scheduler.(hasHotStatus).GetStoresScore()
+	for _, store := range stores {
+		storeAddress := store.GetAddress()
+		storeID := store.GetID()
+		score, ok := scores[storeID]
+		if ok {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, strconv.FormatUint(storeID, 10), "store_score").Set(score)
 		}
 	}
 }
