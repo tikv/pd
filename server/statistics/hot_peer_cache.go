@@ -35,7 +35,7 @@ const (
 	hotRegionAntiCount = 1
 )
 
-// hotPeerCache saves the hotspot peer's statistics.
+// hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
 	kind           FlowKind
 	peersOfStore   map[uint64]cache.Cache         // storeID -> hot peers
