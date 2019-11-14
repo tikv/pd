@@ -104,6 +104,36 @@ var _ = Suite(&testMaxScoreSuite{})
 
 type testMaxScoreSuite struct{}
 
+func putStore(stores *StoresInfo, flexibleScore, capacity uint64, storeIDs ...uint64) {
+	storeID := uint64(len(stores.GetStores()) + 1)
+	if len(storeIDs) != 0 {
+		storeID = storeIDs[0]
+	}
+	var results []*StoreInfo
+	if storeID == 0 {
+		results = stores.GetUpdatedMaxScoreStores(flexibleScore)
+	} else {
+		store := NewStoreInfo(
+			&metapb.Store{
+				Id: storeID,
+			},
+			SetStoreStats(&pdpb.StoreStats{
+				Capacity: capacity,
+			}),
+		)
+		results = stores.GetUpdatedMaxScoreStores(flexibleScore, store)
+	}
+	for _, result := range results {
+		stores.SetStore(result)
+	}
+}
+
+func checkAllStoresMaxScore(c *C, stores *StoresInfo, maxScore float64) {
+	for _, store := range stores.GetStores() {
+		c.Assert(store.GetMaxScore(), Equals, maxScore)
+	}
+}
+
 func (s *testMaxScoreSuite) TestMaxScore(c *C) {
 	stores := NewStoresInfo()
 	flexibleScore := 4 * TB / bytesPerMB
@@ -115,42 +145,18 @@ func (s *testMaxScoreSuite) TestMaxScore(c *C) {
 	oldCapacity := 1 * TB
 	oldMaxScore := float64(5 * TB / bytesPerMB)
 	for i := 1; i <= 6; i++ {
-		store := NewStoreInfo(
-			&metapb.Store{
-				Id: uint64(i),
-			},
-			SetStoreStats(&pdpb.StoreStats{
-				Capacity: oldCapacity,
-			}),
-		)
-		results = stores.GetUpdatedMaxScoreStores(flexibleScore, store)
-		for _, result := range results {
-			stores.SetStore(result)
-		}
+		putStore(stores, flexibleScore, oldCapacity)
 		c.Assert(stores.GetStores(), HasLen, i)
 		c.Assert(stores.GetStore(uint64(i)).GetMaxScore(), Equals, oldMaxScore)
 	}
-	// larger store
+	// add larger store
 	// store id         7	8	9	10	11		15
 	// add new store	2t	3t	4t	5t	6t	...	10t
 	// max score 		5t	5t	5t	5t	10t	...	10t
 	var newMaxScore float64
 	step := oldCapacity
 	for capacity := oldCapacity + step; capacity <= uint64(2*oldMaxScore*bytesPerMB); capacity += step {
-		num += 1
-		store := NewStoreInfo(
-			&metapb.Store{
-				Id: uint64(num),
-			},
-			SetStoreStats(&pdpb.StoreStats{
-				Capacity: capacity,
-			}),
-		)
-		results = stores.GetUpdatedMaxScoreStores(flexibleScore, store)
-		for _, result := range results {
-			stores.SetStore(result)
-		}
-		c.Assert(stores.GetStores(), HasLen, num)
+		putStore(stores, flexibleScore, capacity)
 		for _, store := range stores.GetStores() {
 			if float64(capacity/bytesPerMB) <= oldMaxScore {
 				c.Assert(store.maxScore, Equals, oldMaxScore)
@@ -161,50 +167,37 @@ func (s *testMaxScoreSuite) TestMaxScore(c *C) {
 			}
 		}
 	}
-	// smaller store
+	// add smaller store
 	for i := 1; i <= 6; i++ {
-		num += 1
-		store := NewStoreInfo(
-			&metapb.Store{
-				Id: uint64(num),
-			},
-			SetStoreStats(&pdpb.StoreStats{
-				Capacity: oldCapacity,
-			}),
-		)
-		results = stores.GetUpdatedMaxScoreStores(flexibleScore, store)
-		for _, result := range results {
-			stores.SetStore(result)
-		}
+		putStore(stores, flexibleScore, oldCapacity)
 		c.Assert(stores.GetStore(uint64(num)).GetMaxScore(), Equals, newMaxScore)
 	}
 
 	// update flexible score
 	flexibleScore = 0
-	results = stores.GetUpdatedMaxScoreStores(flexibleScore)
-	for _, result := range results {
-		stores.SetStore(result)
-	}
+	putStore(stores, flexibleScore, 0, 0)
 	maxCapacity := getMaxCapacity(stores.GetStores())
-	for _, store := range stores.GetStores() {
-		c.Assert(store.maxScore, Equals, float64(maxCapacity/bytesPerMB+flexibleScore))
-	}
+	checkAllStoresMaxScore(c, stores, float64(maxCapacity/bytesPerMB+flexibleScore))
 
 	// update flexible score and new store
 	flexibleScore = 4 * TB / bytesPerMB
 	capacity := 30 * TB
-	results = stores.GetUpdatedMaxScoreStores(flexibleScore, NewStoreInfo(
-		&metapb.Store{
-			Id: uint64(num + 1),
-		},
-		SetStoreStats(&pdpb.StoreStats{
-			Capacity: capacity,
-		}),
-	))
-	for _, result := range results {
-		stores.SetStore(result)
-	}
-	for _, store := range stores.GetStores() {
-		c.Assert(store.maxScore, Equals, float64(capacity/bytesPerMB+flexibleScore))
-	}
+	putStore(stores, flexibleScore, capacity)
+	checkAllStoresMaxScore(c, stores, float64(capacity/bytesPerMB+flexibleScore))
+
+	// update store with larger capacity than current store but smaller than max score
+	flexibleScore = 4 * TB / bytesPerMB
+	capacity = 32 * TB
+	putStore(stores, flexibleScore, capacity)
+	checkAllStoresMaxScore(c, stores, float64(30*TB/bytesPerMB+flexibleScore))
+
+	// update with smaller
+	capacity = 2 * TB
+	putStore(stores, flexibleScore, capacity)
+	checkAllStoresMaxScore(c, stores, float64(30*TB/bytesPerMB+flexibleScore))
+
+	// update with larger than max score
+	capacity = 64 * TB
+	putStore(stores, flexibleScore, capacity)
+	checkAllStoresMaxScore(c, stores, float64(capacity/bytesPerMB+flexibleScore))
 }
