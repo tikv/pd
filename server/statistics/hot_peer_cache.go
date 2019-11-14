@@ -96,7 +96,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 		isExpired := f.isRegionExpired(region, storeID)
 		oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
 
-		// This is used for the simulator.
+		// This is used for the simulator and test.
 		if oldItem != nil && !isExpired {
 			// ignore if report too fast or an old report
 			isOldReport := endTime.Before(oldItem.LastUpdateTime)

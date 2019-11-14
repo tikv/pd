@@ -56,7 +56,9 @@ func init() {
 
 	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newEvictLeaderScheduler(opController, conf), nil
 	})
 }

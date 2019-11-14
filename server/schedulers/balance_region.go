@@ -48,7 +48,9 @@ func init() {
 	})
 	schedule.RegisterScheduler("balance-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceRegionSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newBalanceRegionScheduler(opController, conf), nil
 	})
 }
@@ -76,17 +78,17 @@ type balanceRegionScheduler struct {
 // each store balanced.
 func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) schedule.Scheduler {
 	base := newBaseScheduler(opController)
-	s := &balanceRegionScheduler{
+	scheduler := &balanceRegionScheduler{
 		baseScheduler: base,
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceRegionCounter,
 	}
-	for _, opt := range opts {
-		opt(s)
+	for _, setOption := range opts {
+		setOption(scheduler)
 	}
-	s.filters = []filter.Filter{filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true}}
-	return s
+	scheduler.filters = []filter.Filter{filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true}}
+	return scheduler
 }
 
 // BalanceRegionCreateOption is used to create a scheduler with an option.
@@ -177,11 +179,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
 	}
 	scoreGuard := filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), stores, source)
-	checker := checker.NewReplicaChecker(cluster, s.GetName())
+	replicaChecker := checker.NewReplicaChecker(cluster, s.GetName())
 	exclude := make(map[uint64]struct{})
 	excludeFilter := filter.NewExcludedFilter(s.GetName(), nil, exclude)
 	for {
-		storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
+		storeID, _ := replicaChecker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
 		if storeID == 0 {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
 			return nil

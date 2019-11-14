@@ -52,7 +52,9 @@ func init() {
 
 	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleHotRegionSchedulerConfig{Limit: uint64(1)}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newShuffleHotRegionScheduler(opController, conf), nil
 	})
 }

@@ -458,8 +458,8 @@ func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64,
 	srcBytesRate := storesStat[srcStoreID].StoreBytesRate
 
 	var (
-		minBytesRate float64 = srcBytesRate*hotRegionScheduleFactor - regionBytesRate
-		minCount             = int(math.MaxInt32)
+		minBytesRate = srcBytesRate*hotRegionScheduleFactor - regionBytesRate
+		minCount     = math.MaxInt32
 	)
 	for _, storeID := range candidateStoreIDs {
 		if s, ok := storesStat[storeID]; ok {

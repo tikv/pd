@@ -44,7 +44,9 @@ func init() {
 
 	schedule.RegisterScheduler("shuffle-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleLeaderSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newShuffleLeaderScheduler(opController, conf), nil
 	})
 }

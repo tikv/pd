@@ -46,7 +46,9 @@ func init() {
 
 	schedule.RegisterScheduler("label", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &labelSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newLabelScheduler(opController, conf), nil
 	})
 }

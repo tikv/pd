@@ -53,7 +53,9 @@ func init() {
 
 	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceLeaderSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newBalanceLeaderScheduler(opController, conf), nil
 	})
 }

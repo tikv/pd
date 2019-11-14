@@ -46,7 +46,9 @@ func init() {
 	})
 	schedule.RegisterScheduler("shuffle-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleRegionSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newShuffleRegionScheduler(opController, conf), nil
 	})
 }

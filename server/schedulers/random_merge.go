@@ -45,7 +45,9 @@ func init() {
 	})
 	schedule.RegisterScheduler("random-merge", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &randomMergeSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newRandomMergeScheduler(opController, conf), nil
 	})
 }

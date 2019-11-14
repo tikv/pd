@@ -49,16 +49,18 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler("scatter-range", func(opController *schedule.OperatorController, storage *core.Storage, decode schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		config := &scatterRangeSchedulerConfig{
+	schedule.RegisterScheduler("scatter-range", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &scatterRangeSchedulerConfig{
 			storage: storage,
 		}
-		decode(config)
-		rangeName := config.RangeName
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		rangeName := conf.RangeName
 		if len(rangeName) == 0 {
 			return nil, errors.New("the range name is invalid")
 		}
-		return newScatterRangeScheduler(opController, storage, config), nil
+		return newScatterRangeScheduler(opController, storage, conf), nil
 	})
 }
 

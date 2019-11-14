@@ -53,7 +53,9 @@ func init() {
 
 	schedule.RegisterScheduler("grant-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &grandLeaderConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newGrantLeaderScheduler(opController, conf), nil
 	})
 }
