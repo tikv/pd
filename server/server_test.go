@@ -114,15 +114,26 @@ func newTestServersWithCfgs(ctx context.Context, c *C, cfgs []*config.Config) ([
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
 			svr, err := CreateServer(cfg)
+			// prevent blocking if Asserts fails
+			failed := true
+			defer func() {
+				if failed {
+					ch <- nil
+				} else {
+					ch <- svr
+				}
+			}()
 			c.Assert(err, IsNil)
 			err = svr.Run(ctx)
 			c.Assert(err, IsNil)
-			ch <- svr
+			failed = false
 		}(cfg)
 	}
 
 	for i := 0; i < len(cfgs); i++ {
-		svrs = append(svrs, <-ch)
+		svr := <-ch
+		c.Assert(svr, NotNil)
+		svrs = append(svrs, svr)
 	}
 	mustWaitLeader(c, svrs)
 
