@@ -45,6 +45,7 @@ type testOperatorControllerSuite struct {
 
 func (t *testOperatorControllerSuite) SetUpSuite(c *C) {
 	t.ctx, t.cancel = context.WithCancel(context.Background())
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (t *testOperatorControllerSuite) TearDownSuite(c *C) {
@@ -125,6 +126,65 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	ApplyOperator(tc, op2)
 	oc.Dispatch(region2, "test")
 	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_SUCCESS)
+}
+
+func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/schedule/unexpectedOperator"), IsNil)
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderRegion(1, 2, 1)
+	region1 := tc.GetRegion(1)
+	steps := []operator.OpStep{
+		operator.RemovePeer{FromStore: 1},
+		operator.AddPeer{ToStore: 1, PeerID: 4},
+	}
+	{
+		// finished op
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		c.Assert(oc.checkAddOperator(op), IsTrue)
+		op.Start()
+		c.Assert(oc.checkAddOperator(op), IsFalse) // started
+		c.Assert(op.Check(region1), IsNil)
+		c.Assert(op.CheckSuccess(), IsTrue)
+		c.Assert(oc.checkAddOperator(op), IsFalse) // success
+	}
+	{
+		// finished op canceled
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		c.Assert(oc.checkAddOperator(op), IsTrue)
+		c.Assert(op.Cancel(), IsTrue)
+		c.Assert(oc.checkAddOperator(op), IsFalse)
+	}
+	{
+		// finished op replaced
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		c.Assert(oc.checkAddOperator(op), IsTrue)
+    c.Assert(op.Start(), IsTrue)
+		c.Assert(op.Replace(), IsTrue)
+		c.Assert(oc.checkAddOperator(op), IsFalse)
+	}
+	{
+		// finished op expired
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		c.Assert(oc.checkAddOperator(op), IsTrue)
+		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
+		c.Assert(oc.checkAddOperator(op), IsFalse)
+    c.Assert(op.Status(), Equals, operator.EXPIRED)
+	}
+	// finished op never timeout
+
+	{
+		// unfinished op timeout
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+		c.Assert(oc.checkAddOperator(op), IsTrue)
+		op.Start()
+		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add(-operator.RegionOperatorWaitTime))
+    c.Assert(op.CheckTimeout(), IsTrue)
+		c.Assert(oc.checkAddOperator(op), IsFalse)
+	}
 }
 
 // issue #1716

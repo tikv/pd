@@ -136,6 +136,9 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 					zap.String("status", operator.OpStatusToString(op.Status())),
 					zap.Reflect("operator", op))
 				operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
+				failpoint.Inject("unexpectedOperator", func() {
+					panic(op)
+				})
 				_ = op.Cancel()
 				oc.buryOperator(op)
 				oc.PromoteWaitingOperator()
@@ -364,6 +367,10 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 				zap.Uint64("region-id", op.RegionID()),
 				zap.String("status", operator.OpStatusToString(op.Status())),
 				zap.Reflect("operator", op))
+			failpoint.Inject("unexpectedOperator", func() {
+				panic(op)
+			})
+			return false
 		}
 	}
 	return true
@@ -393,6 +400,9 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			zap.Uint64("region-id", regionID),
 			zap.String("status", operator.OpStatusToString(op.Status())),
 			zap.Reflect("operator", op))
+		failpoint.Inject("unexpectedOperator", func() {
+			panic(op)
+		})
 		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 		return false
 	}
@@ -448,6 +458,9 @@ func (oc *OperatorController) buryOperator(op *operator.Operator) {
 			zap.Uint64("region-id", op.RegionID()),
 			zap.String("status", operator.OpStatusToString(op.Status())),
 			zap.Reflect("operator", op))
+		failpoint.Inject("unexpectedOperator", func() {
+			panic(op)
+		})
 		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 		_ = op.Cancel()
 	}
