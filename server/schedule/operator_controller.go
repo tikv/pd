@@ -126,7 +126,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 				oc.PromoteWaitingOperator()
 			}
 		default:
-			if oc.removeOperator(op) {
+			if oc.removeOperatorWithoutBury(op) {
 				// CREATED, EXPIRED must not appear.
 				// CANCELED, REPLACED must remove before transition.
 				log.Error("unexpected operator status",
@@ -155,7 +155,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, region *
 	changes := latest.GetConfVer() - origin.GetConfVer()
 	if changes > uint64(op.ConfVerChanged(region)) {
 
-		if oc.removeOperator(op) {
+		if oc.removeOperatorWithoutBury(op) {
 			if op.Cancel() {
 				log.Info("stale operator",
 					zap.Uint64("region-id", op.RegionID()),
@@ -446,7 +446,7 @@ func (oc *OperatorController) RemoveOperator(op *operator.Operator) (found bool)
 	return
 }
 
-func (oc *OperatorController) removeOperator(op *operator.Operator) bool {
+func (oc *OperatorController) removeOperatorWithoutBury(op *operator.Operator) bool {
 	oc.Lock()
 	defer oc.Unlock()
 	return oc.removeOperatorLocked(op)
@@ -771,6 +771,7 @@ type OperatorWithStatus struct {
 	Status pdpb.OperatorStatus
 }
 
+// NewOperatorWithStatus creates an OperatorStatus from an operator.
 func NewOperatorWithStatus(op *operator.Operator) *OperatorWithStatus {
 	return &OperatorWithStatus{
 		Op:     op,

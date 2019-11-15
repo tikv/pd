@@ -70,13 +70,13 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	c.Assert(op2.Start(), IsTrue)
 	oc.SetOperator(op2)
 	go func(ctx context.Context) {
-		checkRemoveOperator(c, oc, op1, true)
+		checkRemoveOperatorSuccess(c, oc, op1)
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				checkRemoveOperator(c, oc, op1, false)
+				c.Assert(oc.RemoveOperator(op1), IsFalse)
 			}
 		}
 	}(t.ctx)
@@ -313,27 +313,27 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	for i := uint64(1); i <= 5; i++ {
 		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
-		checkRemoveOperator(c, oc, op, true)
+		checkRemoveOperatorSuccess(c, oc, op)
 	}
 	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
-	checkRemoveOperator(c, oc, op, false)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
 
 	oc.SetStoreLimit(2, 2)
 	for i := uint64(1); i <= 10; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
-		checkRemoveOperator(c, oc, op, true)
+		checkRemoveOperatorSuccess(c, oc, op)
 	}
 	oc.SetAllStoresLimit(1)
 	for i := uint64(1); i <= 5; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
-		checkRemoveOperator(c, oc, op, true)
+		checkRemoveOperatorSuccess(c, oc, op)
 	}
 	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
-	checkRemoveOperator(c, oc, op, false)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
 }
 
 // #1652
@@ -579,12 +579,8 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 	)
 }
 
-func checkRemoveOperator(c *C, oc *OperatorController, op *operator.Operator, success bool) {
-	if success {
-		c.Assert(oc.RemoveOperator(op), IsTrue)
-		c.Assert(op.IsEnd(), IsTrue)
-		c.Assert(oc.GetOperatorStatus(op.RegionID()).Op, DeepEquals, op)
-	} else {
-		c.Assert(oc.RemoveOperator(op), IsFalse)
-	}
+func checkRemoveOperatorSuccess(c *C, oc *OperatorController, op *operator.Operator) {
+	c.Assert(oc.RemoveOperator(op), IsTrue)
+	c.Assert(op.IsEnd(), IsTrue)
+	c.Assert(oc.GetOperatorStatus(op.RegionID()).Op, DeepEquals, op)
 }
