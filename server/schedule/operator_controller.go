@@ -129,7 +129,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			if oc.removeOperatorWithoutBury(op) {
 				// CREATED, EXPIRED must not appear.
 				// CANCELED, REPLACED must remove before transition.
-				log.Error("unexpected operator status",
+				log.Error("dispatching operator with unexpected status",
 					zap.Uint64("region-id", op.RegionID()),
 					zap.String("status", operator.OpStatusToString(op.Status())),
 					zap.Reflect("operator", op))
@@ -360,7 +360,7 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			return false
 		}
 		if op.Status() != operator.CREATED {
-			log.Warn("operator with unexpected status",
+			log.Error("trying to add operator with unexpected status",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.String("status", operator.OpStatusToString(op.Status())),
 				zap.Reflect("operator", op))
@@ -393,7 +393,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	}
 
 	if !op.Start() {
-		log.Error("add operator with unexpected status",
+		log.Error("adding operator with unexpected status",
 			zap.Uint64("region-id", regionID),
 			zap.String("status", operator.OpStatusToString(op.Status())),
 			zap.Reflect("operator", op))
@@ -467,7 +467,7 @@ func (oc *OperatorController) buryOperator(op *operator.Operator) {
 	st := op.Status()
 
 	if !operator.IsEndStatus(st) {
-		log.Warn("burying operator with non-end status",
+		log.Error("burying operator with non-end status",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.String("status", operator.OpStatusToString(op.Status())),
 			zap.Reflect("operator", op))
