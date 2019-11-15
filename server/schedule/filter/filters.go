@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/pkg/slice"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/server/schedule/placement"
 )
 
 //revive:disable:unused-parameter
@@ -491,4 +492,79 @@ func (f *BlacklistStoreFilter) Target(opt opt.Options, store *core.StoreInfo) bo
 func (f *BlacklistStoreFilter) filter(store *core.StoreInfo) bool {
 	_, ok := f.blacklist[store.GetID()]
 	return ok
+}
+
+// labelConstraintFilter is a filter that selects stores satisfy the constraints.
+type labelConstraintFilter struct {
+	scope       string
+	constraints []placement.LabelConstraint
+}
+
+// NewLabelConstaintFilter creates a filter that selects stores satisfy the constraints.
+func NewLabelConstaintFilter(scope string, constraints []placement.LabelConstraint) Filter {
+	return labelConstraintFilter{scope: scope, constraints: constraints}
+}
+
+// Scope returns the scheduler or the checker which the filter acts on.
+func (f labelConstraintFilter) Scope() string {
+	return f.scope
+}
+
+// Type returns the name of the filter.
+func (f labelConstraintFilter) Type() string {
+	return "label-constraint-filter"
+}
+
+// Source filters stores when select them as schedule source.
+func (f labelConstraintFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return !placement.MatchLabelConstraints(store, f.constraints)
+}
+
+// Target filters stores when select them as schedule target.
+func (f labelConstraintFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	return !placement.MatchLabelConstraints(store, f.constraints)
+}
+
+// RegionFitter is the interface that can fit a region against placement rules.
+type RegionFitter interface {
+	FitRegion(*core.RegionInfo) *placement.RegionFit
+}
+
+type ruleFitFilter struct {
+	scope   string
+	fitter  RegionFitter
+	region  *core.RegionInfo
+	oldFit  *placement.RegionFit
+	oldPeer uint64
+}
+
+// NewRuleFitFilter creates a filter that ensures after replace a peer with new
+// one, the isolation level will not decrease. Its function is the same as
+// distinctScoreFilter but used when placement rules is enabled.
+func NewRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldPeerID uint64) Filter {
+	return &ruleFitFilter{
+		scope:   scope,
+		fitter:  fitter,
+		region:  region,
+		oldFit:  fitter.FitRegion(region),
+		oldPeer: oldPeerID,
+	}
+}
+
+func (f *ruleFitFilter) Scope() string {
+	return f.scope
+}
+
+func (f *ruleFitFilter) Type() string {
+	return "rule-fit-filter"
+}
+
+func (f *ruleFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return false
+}
+
+func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	region := f.region.Clone(core.WithReplacePeerStore(f.oldPeer, store.GetID()))
+	newFit := f.fitter.FitRegion(region)
+	return placement.CompareRegionFit(f.oldFit, newFit) > 0
 }

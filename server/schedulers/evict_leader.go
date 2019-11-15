@@ -26,8 +26,15 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	// EvictLeaderName is evict leader scheduler name.
+	EvictLeaderName = "evict-leader-scheduler"
+	// EvictLeaderType is evict leader scheduler type.
+	EvictLeaderType = "evict-leader"
+)
+
 func init() {
-	schedule.RegisterSliceDecoderBuilder("evict-leader", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -45,18 +52,19 @@ func init() {
 			if err != nil {
 				return errors.WithStack(err)
 			}
-			name := fmt.Sprintf("evict-leader-scheduler-%d", id)
 			conf.StoreID = id
-			conf.Name = name
+			conf.Name = fmt.Sprintf("%s-%d", EvictLeaderName, id)
 			conf.Ranges = ranges
 			return nil
 
 		}
 	})
 
-	schedule.RegisterScheduler("evict-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(EvictLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newEvictLeaderScheduler(opController, conf), nil
 	})
 }
@@ -93,7 +101,7 @@ func (s *evictLeaderScheduler) GetName() string {
 }
 
 func (s *evictLeaderScheduler) GetType() string {
-	return "evict-leader"
+	return EvictLeaderType
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -125,7 +133,7 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator("evict-leader", region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+	op := operator.CreateTransferLeaderOperator(EvictLeaderType, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }

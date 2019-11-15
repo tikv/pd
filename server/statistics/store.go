@@ -128,6 +128,69 @@ func (s *StoresStats) GetStoreBytesRate(storeID uint64) (writeRate float64, read
 	return 0, 0
 }
 
+// GetStoreCPUUsage returns the total cpu usages of threads of the specified store.
+func (s *StoresStats) GetStoreCPUUsage(storeID uint64) float64 {
+	s.RLock()
+	defer s.RUnlock()
+	if storeStat, ok := s.rollingStoresStats[storeID]; ok {
+		return storeStat.GetCPUUsage()
+	}
+	return 0
+}
+
+// GetStoreDiskReadRate returns the total read disk io rate of threads of the specified store.
+func (s *StoresStats) GetStoreDiskReadRate(storeID uint64) float64 {
+	s.RLock()
+	defer s.RUnlock()
+	if storeStat, ok := s.rollingStoresStats[storeID]; ok {
+		return storeStat.GetDiskReadRate()
+	}
+	return 0
+}
+
+// GetStoreDiskWriteRate returns the total write disk io rate of threads of the specified store.
+func (s *StoresStats) GetStoreDiskWriteRate(storeID uint64) float64 {
+	s.RLock()
+	defer s.RUnlock()
+	if storeStat, ok := s.rollingStoresStats[storeID]; ok {
+		return storeStat.GetDiskWriteRate()
+	}
+	return 0
+}
+
+// GetStoresCPUUsage returns the cpu usage stat of all StoreInfo.
+func (s *StoresStats) GetStoresCPUUsage() map[uint64]float64 {
+	s.RLock()
+	defer s.RUnlock()
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
+	for storeID, stats := range s.rollingStoresStats {
+		res[storeID] = stats.GetCPUUsage()
+	}
+	return res
+}
+
+// GetStoresDiskReadRate returns the disk read rate stat of all StoreInfo.
+func (s *StoresStats) GetStoresDiskReadRate() map[uint64]float64 {
+	s.RLock()
+	defer s.RUnlock()
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
+	for storeID, stats := range s.rollingStoresStats {
+		res[storeID] = stats.GetDiskReadRate()
+	}
+	return res
+}
+
+// GetStoresDiskWriteRate returns the disk write rate stat of all StoreInfo.
+func (s *StoresStats) GetStoresDiskWriteRate() map[uint64]float64 {
+	s.RLock()
+	defer s.RUnlock()
+	res := make(map[uint64]float64, len(s.rollingStoresStats))
+	for storeID, stats := range s.rollingStoresStats {
+		res[storeID] = stats.GetDiskWriteRate()
+	}
+	return res
+}
+
 // GetStoreBytesWriteRate returns the bytes write stat of the specified store.
 func (s *StoresStats) GetStoreBytesWriteRate(storeID uint64) float64 {
 	s.RLock()
@@ -197,10 +260,13 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex
-	bytesWriteRate MovingAvg
-	bytesReadRate  MovingAvg
-	keysWriteRate  MovingAvg
-	keysReadRate   MovingAvg
+	bytesWriteRate          MovingAvg
+	bytesReadRate           MovingAvg
+	keysWriteRate           MovingAvg
+	keysReadRate            MovingAvg
+	totalCPUUsage           MovingAvg
+	totalBytesDiskReadRate  MovingAvg
+	totalBytesDiskWriteRate MovingAvg
 }
 
 const storeStatsRollingWindows = 3
@@ -208,11 +274,22 @@ const storeStatsRollingWindows = 3
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate: NewMedianFilter(storeStatsRollingWindows),
-		bytesReadRate:  NewMedianFilter(storeStatsRollingWindows),
-		keysWriteRate:  NewMedianFilter(storeStatsRollingWindows),
-		keysReadRate:   NewMedianFilter(storeStatsRollingWindows),
+		bytesWriteRate:          NewMedianFilter(storeStatsRollingWindows),
+		bytesReadRate:           NewMedianFilter(storeStatsRollingWindows),
+		keysWriteRate:           NewMedianFilter(storeStatsRollingWindows),
+		keysReadRate:            NewMedianFilter(storeStatsRollingWindows),
+		totalCPUUsage:           NewMedianFilter(storeStatsRollingWindows),
+		totalBytesDiskReadRate:  NewMedianFilter(storeStatsRollingWindows),
+		totalBytesDiskWriteRate: NewMedianFilter(storeStatsRollingWindows),
 	}
+}
+
+func collect(records []*pdpb.RecordPair) float64 {
+	var total uint64
+	for _, record := range records {
+		total += record.GetValue()
+	}
+	return float64(total)
 }
 
 // Observe records current statistics.
@@ -228,6 +305,11 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	r.bytesReadRate.Add(float64(stats.BytesRead) / float64(interval))
 	r.keysWriteRate.Add(float64(stats.KeysWritten) / float64(interval))
 	r.keysReadRate.Add(float64(stats.KeysRead) / float64(interval))
+
+	// Updates the cpu usages and disk rw rates of store.
+	r.totalCPUUsage.Add(collect(stats.GetCpuUsages()))
+	r.totalBytesDiskReadRate.Add(collect(stats.GetReadIoRates()))
+	r.totalBytesDiskWriteRate.Add(collect(stats.GetWriteIoRates()))
 }
 
 // Set sets the statistics (for test).
@@ -278,4 +360,25 @@ func (r *RollingStoreStats) GetKeysReadRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
 	return r.keysReadRate.Get()
+}
+
+// GetCPUUsage returns the total cpu usages of threads in the store.
+func (r *RollingStoreStats) GetCPUUsage() float64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.totalCPUUsage.Get()
+}
+
+// GetDiskReadRate returns the total read disk io rate of threads in the store.
+func (r *RollingStoreStats) GetDiskReadRate() float64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.totalBytesDiskReadRate.Get()
+}
+
+// GetDiskWriteRate returns the total write disk io rate of threads in the store.
+func (r *RollingStoreStats) GetDiskWriteRate() float64 {
+	r.RLock()
+	defer r.RUnlock()
+	return r.totalBytesDiskWriteRate.Get()
 }

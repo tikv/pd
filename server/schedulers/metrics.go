@@ -31,6 +31,22 @@ var schedulerStatus = prometheus.NewGaugeVec(
 		Help:      "Inner status of the scheduler.",
 	}, []string{"type", "name"})
 
+var opInfluenceStatus = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "op_influence",
+		Help:      "Store status for schedule",
+	}, []string{"scheduler", "store", "type"})
+
+var tolerantResourceStatus = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "tolerant_resource",
+		Help:      "Store status for schedule",
+	}, []string{"scheduler", "source", "target"})
+
 var balanceLeaderCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",
@@ -79,4 +95,6 @@ func init() {
 	prometheus.MustRegister(balanceDirectionCounter)
 	prometheus.MustRegister(scatterRangeLeaderCounter)
 	prometheus.MustRegister(scatterRangeRegionCounter)
+	prometheus.MustRegister(opInfluenceStatus)
+	prometheus.MustRegister(tolerantResourceStatus)
 }

@@ -25,10 +25,15 @@ import (
 	"go.uber.org/zap"
 )
 
-const labelSchedulerName = "label-scheduler"
+const (
+	// LabelName is label scheduler name.
+	LabelName = "label-scheduler"
+	// LabelType is label scheduler type.
+	LabelType = "label"
+)
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("label", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(LabelType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*labelSchedulerConfig)
 			if !ok {
@@ -39,14 +44,16 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.Ranges = ranges
-			conf.Name = labelSchedulerName
+			conf.Name = LabelName
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler("label", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(LabelType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &labelSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newLabelScheduler(opController, conf), nil
 	})
 }
@@ -67,7 +74,7 @@ type labelScheduler struct {
 // the store with the specific label.
 func newLabelScheduler(opController *schedule.OperatorController, conf *labelSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: labelSchedulerName, TransferLeader: true},
+		filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true},
 	}
 	kind := core.NewScheduleKind(core.LeaderKind, core.ByCount)
 	return &labelScheduler{
@@ -82,7 +89,7 @@ func (s *labelScheduler) GetName() string {
 }
 
 func (s *labelScheduler) GetType() string {
-	return "label"
+	return LabelType
 }
 
 func (s *labelScheduler) EncodeConfig() ([]byte, error) {
