@@ -103,53 +103,74 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		failpoint.Inject("concurrentRemoveOperator", func() {
 			time.Sleep(500 * time.Millisecond)
 		})
-		timeout := op.CheckTimeout()
-		if step := op.Check(region); step != nil && !timeout {
+
+		// Update operator status:
+		// The operator status should be STARTED.
+		step := op.Check(region)
+		_ = op.CheckSuccess()
+		_ = op.CheckTimeout()
+
+		switch op.Status() {
+		case operator.STARTED:
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
-
-			// When the "source" is heartbeat, the region may have a newer
-			// confver than the region that the operator holds. In this case,
-			// the operator is stale, and will not be executed even we would
-			// have sent it to TiKV servers. Here, we just cancel it.
-			origin := op.RegionEpoch()
-			latest := region.GetRegionEpoch()
-			changes := latest.GetConfVer() - origin.GetConfVer()
-			if source == DispatchFromHeartBeat &&
-				changes > uint64(op.ConfVerChanged(region)) {
-
-				if oc.RemoveOperator(op) {
-					log.Info("stale operator",
-						zap.Uint64("region-id", region.GetID()),
-						zap.Duration("takes", op.RunningTime()),
-						zap.Reflect("operator", op),
-						zap.Reflect("latest-epoch", region.GetRegionEpoch()),
-						zap.Uint64("diff", changes),
-					)
-					operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
-					oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
-					oc.PromoteWaitingOperator()
-				}
-
-				return
+			if source != DispatchFromHeartBeat || !oc.checkStaleOperator(op, region) {
+				oc.SendScheduleCommand(region, step, source)
 			}
-
-			oc.SendScheduleCommand(region, step, source)
 			return
-		}
-		if op.CheckSuccess() && oc.RemoveOperator(op) {
-			log.Info("operator finish", zap.Uint64("region-id", region.GetID()), zap.Duration("takes", op.RunningTime()), zap.Reflect("operator", op))
-			operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
-			operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
-			oc.pushHistory(op)
-			oc.opRecords.Put(op, pdpb.OperatorStatus_SUCCESS)
-			oc.PromoteWaitingOperator()
-		} else if timeout && oc.RemoveOperator(op) {
-			log.Info("operator timeout", zap.Uint64("region-id", region.GetID()), zap.Duration("takes", op.RunningTime()), zap.Reflect("operator", op))
-			operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
-			oc.opRecords.Put(op, pdpb.OperatorStatus_TIMEOUT)
-			oc.PromoteWaitingOperator()
+		case operator.SUCCESS:
+			if oc.RemoveOperator(op) {
+				oc.buryOperator(op)
+				oc.PromoteWaitingOperator()
+			}
+		case operator.TIMEOUT:
+			if oc.RemoveOperator(op) {
+				oc.buryOperator(op)
+				oc.PromoteWaitingOperator()
+			}
+		default:
+			if oc.RemoveOperator(op) {
+				// CREATED, EXPIRED must not appear.
+				// CANCELED, REPLACED must remove before transition.
+				log.Error("unexpected operator status",
+					zap.Uint64("region-id", op.RegionID()),
+					zap.String("status", operator.OpStatusToString(op.Status())),
+					zap.Reflect("operator", op))
+				operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
+				_ = op.Cancel()
+				oc.buryOperator(op)
+				oc.PromoteWaitingOperator()
+			}
 		}
 	}
+}
+
+func (oc *OperatorController) checkStaleOperator(op *operator.Operator, region *core.RegionInfo) bool {
+	// When the "source" is heartbeat, the region may have a newer
+	// confver than the region that the operator holds. In this case,
+	// the operator is stale, and will not be executed even we would
+	// have sent it to TiKV servers. Here, we just cancel it.
+	origin := op.RegionEpoch()
+	latest := region.GetRegionEpoch()
+	changes := latest.GetConfVer() - origin.GetConfVer()
+	if changes > uint64(op.ConfVerChanged(region)) {
+
+		if oc.RemoveOperator(op) {
+			if op.Cancel() {
+				log.Info("stale operator",
+					zap.Uint64("region-id", op.RegionID()),
+					zap.Duration("takes", op.RunningTime()),
+					zap.Reflect("operator", op),
+					zap.Reflect("latest-epoch", region.GetRegionEpoch()),
+					zap.Uint64("diff", changes),
+				)
+				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
+			}
+			oc.buryOperator(op)
+			oc.PromoteWaitingOperator()
+		}
+		return true
+	}
+	return false
 }
 
 func (oc *OperatorController) getNextPushOperatorTime(step operator.OpStep, now time.Time) time.Time {
@@ -179,11 +200,13 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 	r = oc.cluster.GetRegion(regionID)
 	if r == nil {
 		_ = oc.removeOperatorLocked(op)
-		log.Debug("remove operator because region disappeared",
-			zap.Uint64("region-id", op.RegionID()),
-			zap.Stringer("operator", op))
-		operatorCounter.WithLabelValues(op.Desc(), "disappear").Inc()
-		oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
+		if op.Cancel() {
+			log.Warn("remove operator because region disappeared",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Stringer("operator", op))
+			operatorCounter.WithLabelValues(op.Desc(), "disappear").Inc()
+		}
+		oc.buryOperator(op)
 		return nil, true
 	}
 	step := op.Check(r)
@@ -224,7 +247,8 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) bool
 	if !oc.checkAddOperator(ops...) {
 		for _, op := range ops {
 			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
-			oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
+			_ = op.Cancel()
+			oc.buryOperator(op)
 		}
 		oc.Unlock()
 		return false
@@ -234,6 +258,10 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) bool
 	desc := op.Desc()
 	if oc.wopStatus.ops[desc] >= oc.cluster.GetSchedulerMaxWaitingOperator() {
 		operatorWaitCounter.WithLabelValues(op.Desc(), "exceed_max").Inc()
+		for _, op := range ops {
+			_ = op.Cancel()
+			oc.buryOperator(op)
+		}
 		oc.Unlock()
 		return false
 	}
@@ -257,12 +285,15 @@ func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 	if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
 		for _, op := range ops {
 			operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
-			oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
+			_ = op.Cancel()
+			oc.buryOperator(op)
 		}
 		return false
 	}
 	for _, op := range ops {
-		oc.addOperatorLocked(op)
+		if !oc.addOperatorLocked(op) {
+			return false
+		}
 	}
 	return true
 }
@@ -282,7 +313,8 @@ func (oc *OperatorController) PromoteWaitingOperator() {
 		if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
 			for _, op := range ops {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote_canceled").Inc()
-				oc.opRecords.Put(op, pdpb.OperatorStatus_CANCEL)
+				_ = op.Cancel()
+				oc.buryOperator(op)
 			}
 			oc.wopStatus.ops[ops[0].Desc()]--
 			continue
@@ -301,20 +333,37 @@ func (oc *OperatorController) PromoteWaitingOperator() {
 // - There is no such region in the cluster
 // - The epoch of the operator and the epoch of the corresponding region are no longer consistent.
 // - The region already has a higher priority or same priority operator.
+// - At least one operator is expired.
 func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 	for _, op := range ops {
 		region := oc.cluster.GetRegion(op.RegionID())
 		if region == nil {
-			log.Debug("region not found, cancel add operator", zap.Uint64("region-id", op.RegionID()))
+			log.Debug("region not found, cancel add operator",
+				zap.Uint64("region-id", op.RegionID()))
 			return false
 		}
-		if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() || region.GetRegionEpoch().GetConfVer() != op.RegionEpoch().GetConfVer() {
-			log.Debug("region epoch not match, cancel add operator", zap.Uint64("region-id", op.RegionID()), zap.Reflect("old", region.GetRegionEpoch()), zap.Reflect("new", op.RegionEpoch()))
+		if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() ||
+			region.GetRegionEpoch().GetConfVer() != op.RegionEpoch().GetConfVer() {
+			log.Debug("region epoch not match, cancel add operator",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Reflect("old", region.GetRegionEpoch()),
+				zap.Reflect("new", op.RegionEpoch()))
 			return false
 		}
 		if old := oc.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
-			log.Debug("already have operator, cancel add operator", zap.Uint64("region-id", op.RegionID()), zap.Reflect("old", old))
+			log.Debug("already have operator, cancel add operator",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Reflect("old", old))
 			return false
+		}
+		if op.CheckExpired() {
+			return false
+		}
+		if op.Status() != operator.CREATED {
+			log.Warn("operator with unexpected status",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.String("status", operator.OpStatusToString(op.Status())),
+				zap.Reflect("operator", op))
 		}
 	}
 	return true
@@ -327,19 +376,27 @@ func isHigherPriorityOperator(new, old *operator.Operator) bool {
 func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	regionID := op.RegionID()
 
-	log.Info("add operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", op))
+	log.Info("add operator",
+		zap.Uint64("region-id", regionID),
+		zap.Reflect("operator", op))
 
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
 	if old, ok := oc.operators[regionID]; ok {
 		_ = oc.removeOperatorLocked(old)
-		log.Info("replace old operator", zap.Uint64("region-id", regionID), zap.Duration("takes", old.RunningTime()), zap.Reflect("operator", old))
-		operatorCounter.WithLabelValues(old.Desc(), "replace").Inc()
-		oc.opRecords.Put(old, pdpb.OperatorStatus_REPLACE)
+		_ = old.Replace()
+		oc.buryOperator(old)
 	}
 
+	if !op.Start() {
+		log.Error("add operator with unexpected status",
+			zap.Uint64("region-id", regionID),
+			zap.String("status", operator.OpStatusToString(op.Status())),
+			zap.Reflect("operator", op))
+		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
+		return false
+	}
 	oc.operators[regionID] = op
-	op.Start()
 	operatorCounter.WithLabelValues(op.Desc(), "start").Inc()
 	operatorWaitDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
@@ -372,19 +429,6 @@ func (oc *OperatorController) RemoveOperator(op *operator.Operator) (found bool)
 	return oc.removeOperatorLocked(op)
 }
 
-// GetOperatorStatus gets the operator and its status with the specify id.
-func (oc *OperatorController) GetOperatorStatus(id uint64) *OperatorWithStatus {
-	oc.Lock()
-	defer oc.Unlock()
-	if op, ok := oc.operators[id]; ok {
-		return &OperatorWithStatus{
-			Op:     op,
-			Status: pdpb.OperatorStatus_RUNNING,
-		}
-	}
-	return oc.opRecords.Get(id)
-}
-
 func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 	regionID := op.RegionID()
 	if cur := oc.operators[regionID]; cur == op {
@@ -394,6 +438,60 @@ func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 		return true
 	}
 	return false
+}
+
+func (oc *OperatorController) buryOperator(op *operator.Operator) {
+	st := op.Status()
+
+	if !operator.IsEndStatus(st) {
+		log.Warn("burying operator with non-end status",
+			zap.Uint64("region-id", op.RegionID()),
+			zap.String("status", operator.OpStatusToString(op.Status())),
+			zap.Reflect("operator", op))
+		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
+		_ = op.Cancel()
+	}
+
+	switch st {
+	case operator.SUCCESS:
+		log.Info("operator finish",
+			zap.Uint64("region-id", op.RegionID()),
+			zap.Duration("takes", op.RunningTime()),
+			zap.Reflect("operator", op))
+		operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
+		operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
+		oc.pushHistory(op)
+	case operator.REPLACED:
+		log.Info("replace old operator",
+			zap.Uint64("region-id", op.RegionID()),
+			zap.Duration("takes", op.RunningTime()),
+			zap.Reflect("operator", op))
+		operatorCounter.WithLabelValues(op.Desc(), "replace").Inc()
+	case operator.EXPIRED:
+		log.Info("operator expired",
+			zap.Uint64("region-id", op.RegionID()),
+			zap.Duration("lives", op.ElapsedTime()),
+			zap.Reflect("operator", op))
+		operatorCounter.WithLabelValues(op.Desc(), "expire").Inc()
+	case operator.TIMEOUT:
+		log.Info("operator timeout",
+			zap.Uint64("region-id", op.RegionID()),
+			zap.Duration("takes", op.RunningTime()),
+			zap.Reflect("operator", op))
+		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
+	}
+
+	oc.opRecords.Put(op)
+}
+
+// GetOperatorStatus gets the operator and its status with the specify id.
+func (oc *OperatorController) GetOperatorStatus(id uint64) *OperatorWithStatus {
+	oc.Lock()
+	defer oc.Unlock()
+	if op, ok := oc.operators[id]; ok {
+		return NewOperatorWithStatus(op)
+	}
+	return oc.opRecords.Get(id)
 }
 
 // GetOperator gets a operator from the given region.
@@ -425,7 +523,10 @@ func (oc *OperatorController) GetWaitingOperators() []*operator.Operator {
 
 // SendScheduleCommand sends a command to the region.
 func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step operator.OpStep, source string) {
-	log.Info("send schedule command", zap.Uint64("region-id", region.GetID()), zap.Stringer("step", step), zap.String("source", source))
+	log.Info("send schedule command",
+		zap.Uint64("region-id", region.GetID()),
+		zap.Stringer("step", step),
+		zap.String("source", source))
 	switch st := step.(type) {
 	case operator.TransferLeader:
 		cmd := &pdpb.RegionHeartbeatResponse{
@@ -644,6 +745,13 @@ type OperatorWithStatus struct {
 	Status pdpb.OperatorStatus
 }
 
+func NewOperatorWithStatus(op *operator.Operator) *OperatorWithStatus {
+	return &OperatorWithStatus{
+		Op:     op,
+		Status: operator.OpStatusToPDPB(op.Status()),
+	}
+}
+
 // MarshalJSON returns the status of operator as a JSON string
 func (o *OperatorWithStatus) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.Op.String()) + `"`), nil
@@ -673,12 +781,9 @@ func (o *OperatorRecords) Get(id uint64) *OperatorWithStatus {
 }
 
 // Put puts the operator and its status.
-func (o *OperatorRecords) Put(op *operator.Operator, status pdpb.OperatorStatus) {
+func (o *OperatorRecords) Put(op *operator.Operator) {
 	id := op.RegionID()
-	record := &OperatorWithStatus{
-		Op:     op,
-		Status: status,
-	}
+	record := NewOperatorWithStatus(op)
 	o.ttl.Put(id, record)
 }
 

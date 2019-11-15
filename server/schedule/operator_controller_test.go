@@ -64,7 +64,9 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	}
 	op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	op2 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	c.Assert(op1.Start(), IsTrue)
 	oc.SetOperator(op1)
+	c.Assert(op2.Start(), IsTrue)
 	oc.SetOperator(op2)
 	go func(ctx context.Context) {
 		c.Assert(oc.RemoveOperator(op1), IsTrue)
@@ -107,9 +109,9 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	op2 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
-	op1.Start()
+	c.Assert(op1.Start(), IsTrue)
 	oc.SetOperator(op1)
-	op2.Start()
+	c.Assert(op2.Start(), IsTrue)
 	oc.SetOperator(op2)
 	c.Assert(oc.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_RUNNING)
 	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_RUNNING)
@@ -143,6 +145,7 @@ func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 	// unfinished op with high priority
 	op2 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion|operator.OpAdmin, steps...)
 
+	c.Assert(op1.Start(), IsTrue)
 	oc.SetOperator(op1)
 
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/concurrentRemoveOperator", "return(true)"), IsNil)
@@ -187,9 +190,13 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	region4 := tc.GetRegion(4)
 	// Adds operator and pushes to the notifier queue.
 	{
+		c.Assert(op1.Start(), IsTrue)
 		oc.SetOperator(op1)
+		c.Assert(op3.Start(), IsTrue)
 		oc.SetOperator(op3)
+		c.Assert(op4.Start(), IsTrue)
 		oc.SetOperator(op4)
+		c.Assert(op2.Start(), IsTrue)
 		oc.SetOperator(op2)
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
 		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
@@ -464,10 +471,10 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 		core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}),
 	)
 	tc.PutRegion(regions[2])
-	ops := mc.Check(regions[2])
-	c.Assert(ops, NotNil)
 	// The size of Region is less or equal than 1MB.
 	for i := 0; i < 50; i++ {
+		ops := mc.Check(regions[2])
+		c.Assert(ops, NotNil)
 		c.Assert(oc.AddOperator(ops...), IsTrue)
 		for _, op := range ops {
 			oc.RemoveOperator(op)
@@ -478,16 +485,20 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 		core.SetApproximateKeys(2),
 	)
 	tc.PutRegion(regions[2])
-	ops = mc.Check(regions[2])
-	c.Assert(ops, NotNil)
 	// The size of Region is more than 1MB but no more than 20MB.
 	for i := 0; i < 5; i++ {
+		ops := mc.Check(regions[2])
+		c.Assert(ops, NotNil)
 		c.Assert(oc.AddOperator(ops...), IsTrue)
 		for _, op := range ops {
 			oc.RemoveOperator(op)
 		}
 	}
-	c.Assert(oc.AddOperator(ops...), IsFalse)
+	{
+		ops := mc.Check(regions[2])
+		c.Assert(ops, NotNil)
+		c.Assert(oc.AddOperator(ops...), IsFalse)
+	}
 }
 
 func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {

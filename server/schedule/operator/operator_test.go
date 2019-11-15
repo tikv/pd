@@ -140,6 +140,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
 	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	s.checkSteps(c, op, steps)
+	op.Start()
 	c.Assert(op.Check(region), IsNil)
 	c.Assert(op.CheckSuccess(), IsTrue)
 	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-RegionOperatorWaitTime-time.Second))
@@ -153,6 +154,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	}
 	op = s.newTestOperator(1, OpLeader|OpRegion, steps...)
 	s.checkSteps(c, op, steps)
+	op.Start()
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
 	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
 	c.Assert(op.CheckTimeout(), IsFalse)

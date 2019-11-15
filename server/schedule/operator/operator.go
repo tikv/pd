@@ -181,15 +181,19 @@ func (o *Operator) IsEnd() bool {
 func (o *Operator) CheckSuccess() bool {
 	success := atomic.LoadInt32(&o.currentStep) >= int32(len(o.steps))
 	if success {
-		_ = o.status.To(SUCCESS)
+		return o.status.To(SUCCESS)
 	}
 	return success
 }
 
-// Cancel cancels the operator.
-func (o *Operator) Cancel() {
-	// only the end status can prevent cancel
-	_ = o.status.To(CANCELED)
+// Cancel marks the operator canceled.
+func (o *Operator) Cancel() bool {
+	return o.status.To(CANCELED)
+}
+
+// Replace marks the operator replaced.
+func (o *Operator) Replace() bool {
+	return o.status.To(REPLACED)
 }
 
 // CheckExpired checks if the operator is expired, and update the status.
@@ -222,12 +226,10 @@ func (o *Operator) Step(i int) OpStep {
 }
 
 // Check checks if current step is finished, returns next step to take action.
-// Check also tries to set the status to STARTED.
 // If operator is at an end status, check returns nil.
 // It's safe to be called by multiple goroutine concurrently.
 // FIXME: metrics is not thread-safe
 func (o *Operator) Check(region *core.RegionInfo) OpStep {
-	_ = o.Start()
 	if o.IsEnd() {
 		return nil
 	}
@@ -241,7 +243,6 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 			return o.steps[int(step)]
 		}
 	}
-	_ = o.status.To(SUCCESS)
 	return nil
 }
 

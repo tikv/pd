@@ -67,17 +67,8 @@ func (trk *OpStatusTracker) getTime(s OpStatus) time.Time {
 	}
 }
 
-// To transfer the current status to dst if this transition is a normal transition,
+// To transfer the current status to dst if this transition is valid,
 // returns whether transferred.
-// Normal transitions:
-//
-//  From        To
-// 	CREATED    {RUNNING, CANCELED, EXPIRED}
-// 	RUNNING    {SUCCESS, CANCELED, TIMEOUT}
-// 	SUCCESS    {}
-// 	CANCELED   {}
-// 	EXPIRED    {}
-// 	TIMEOUT    {}
 func (trk *OpStatusTracker) To(dst OpStatus) bool {
 	trk.rw.Lock()
 	defer trk.rw.Unlock()
@@ -85,7 +76,7 @@ func (trk *OpStatusTracker) To(dst OpStatus) bool {
 }
 
 func (trk *OpStatusTracker) toLocked(dst OpStatus) bool {
-	if dst < statusCount && normalTrans[trk.current][dst] {
+	if dst < statusCount && validTrans[trk.current][dst] {
 		trk.current = dst
 		trk.setTime(trk.current, time.Now())
 		return true
@@ -101,36 +92,11 @@ func (trk *OpStatusTracker) setTime(st OpStatus, t time.Time) {
 	}
 }
 
-type transition [statusCount][statusCount]bool
-
-// Normal status transition
-var normalTrans transition = transition{
-	CREATED: {
-		STARTED:  true,
-		CANCELED: true,
-		EXPIRED:  true,
-	},
-	STARTED: {
-		SUCCESS:  true,
-		CANCELED: true,
-		TIMEOUT:  true,
-	},
-	SUCCESS:  {},
-	CANCELED: {},
-	EXPIRED:  {},
-	TIMEOUT:  {},
-}
-
 // IsEnd checks whether the current status is an end status.
 func (trk *OpStatusTracker) IsEnd() bool {
 	trk.rw.RLock()
 	defer trk.rw.RUnlock()
-	switch trk.current {
-	case SUCCESS, CANCELED, EXPIRED, TIMEOUT:
-		return true
-	default:
-		return false
-	}
+	return IsEndStatus(trk.current)
 }
 
 // CheckExpired checks if expired, and update the current status.
@@ -167,5 +133,5 @@ func (trk *OpStatusTracker) CheckTimeout(wait time.Duration) bool {
 func (trk *OpStatusTracker) String() string {
 	trk.rw.RLock()
 	defer trk.rw.RUnlock()
-	return StatusToString(trk.current)
+	return OpStatusToString(trk.current)
 }
