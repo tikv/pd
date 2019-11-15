@@ -29,13 +29,17 @@ import (
 )
 
 const (
-	balanceLeaderName = "balance-leader-scheduler"
+	// BalanceLeaderName is balance leader scheduler name.
+	BalanceLeaderName = "balance-leader-scheduler"
+	// BalanceLeaderType is balance leader scheduler type.
+	BalanceLeaderType = "balance-leader"
 	// balanceLeaderRetryLimit is the limit to retry schedule for selected source store and target store.
 	balanceLeaderRetryLimit = 10
+	balanceLeaderType       = "balance-leader"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("balance-leader", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(BalanceLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*balanceLeaderSchedulerConfig)
 			if !ok {
@@ -46,14 +50,16 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.Ranges = ranges
-			conf.Name = balanceLeaderName
+			conf.Name = BalanceLeaderName
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler("balance-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(BalanceLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceLeaderSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newBalanceLeaderScheduler(opController, conf), nil
 	})
 }
@@ -111,7 +117,7 @@ func (l *balanceLeaderScheduler) GetName() string {
 }
 
 func (l *balanceLeaderScheduler) GetType() string {
-	return "balance-leader"
+	return BalanceLeaderType
 }
 
 func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -251,6 +257,6 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel).Inc()
 	l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel).Inc()
 	balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel).Inc()
-	op := operator.CreateTransferLeaderOperator("balance-leader", region, region.GetLeader().GetStoreId(), targetID, operator.OpBalance)
+	op := operator.CreateTransferLeaderOperator(BalanceLeaderType, region, region.GetLeader().GetStoreId(), targetID, operator.OpBalance)
 	return []*operator.Operator{op}
 }

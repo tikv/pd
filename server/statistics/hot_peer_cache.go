@@ -35,7 +35,7 @@ const (
 	hotRegionAntiCount = 1
 )
 
-// hotPeerCache saves the hotspot peer's statistics.
+// hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
 	kind           FlowKind
 	peersOfStore   map[uint64]cache.Cache         // storeID -> hot peers
@@ -96,7 +96,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 		isExpired := f.isRegionExpired(region, storeID)
 		oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
 
-		// This is used for the simulator.
+		// This is used for the simulator and test.
 		if oldItem != nil && !isExpired {
 			// ignore if report too fast or an old report
 			isOldReport := endTime.Before(oldItem.LastUpdateTime)
