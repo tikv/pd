@@ -70,13 +70,13 @@ func (t *testOperatorControllerSuite) TestGetOpInfluence(c *C) {
 	c.Assert(op2.Start(), IsTrue)
 	oc.SetOperator(op2)
 	go func(ctx context.Context) {
-		c.Assert(oc.RemoveOperator(op1), IsTrue)
+		checkRemoveOperator(c, oc, op1, true)
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				c.Assert(oc.RemoveOperator(op1), IsFalse)
+				checkRemoveOperator(c, oc, op1, false)
 			}
 		}
 	}(t.ctx)
@@ -162,7 +162,7 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 		// finished op replaced
 		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
 		c.Assert(oc.checkAddOperator(op), IsTrue)
-    c.Assert(op.Start(), IsTrue)
+		c.Assert(op.Start(), IsTrue)
 		c.Assert(op.Replace(), IsTrue)
 		c.Assert(oc.checkAddOperator(op), IsFalse)
 	}
@@ -172,7 +172,7 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 		c.Assert(oc.checkAddOperator(op), IsTrue)
 		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
 		c.Assert(oc.checkAddOperator(op), IsFalse)
-    c.Assert(op.Status(), Equals, operator.EXPIRED)
+		c.Assert(op.Status(), Equals, operator.EXPIRED)
 	}
 	// finished op never timeout
 
@@ -182,7 +182,7 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 		c.Assert(oc.checkAddOperator(op), IsTrue)
 		op.Start()
 		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add(-operator.RegionOperatorWaitTime))
-    c.Assert(op.CheckTimeout(), IsTrue)
+		c.Assert(op.CheckTimeout(), IsTrue)
 		c.Assert(oc.checkAddOperator(op), IsFalse)
 	}
 }
@@ -313,27 +313,27 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	for i := uint64(1); i <= 5; i++ {
 		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
-		c.Assert(oc.RemoveOperator(op), IsTrue)
+		checkRemoveOperator(c, oc, op, true)
 	}
 	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
-	c.Assert(oc.RemoveOperator(op), IsFalse)
+	checkRemoveOperator(c, oc, op, false)
 
 	oc.SetStoreLimit(2, 2)
 	for i := uint64(1); i <= 10; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
-		c.Assert(oc.RemoveOperator(op), IsTrue)
+		checkRemoveOperator(c, oc, op, true)
 	}
 	oc.SetAllStoresLimit(1)
 	for i := uint64(1); i <= 5; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
-		c.Assert(oc.RemoveOperator(op), IsTrue)
+		checkRemoveOperator(c, oc, op, true)
 	}
 	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
-	c.Assert(oc.RemoveOperator(op), IsFalse)
+	checkRemoveOperator(c, oc, op, false)
 }
 
 // #1652
@@ -577,4 +577,14 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 		core.SetApproximateSize(size),
 		core.SetApproximateKeys(keys),
 	)
+}
+
+func checkRemoveOperator(c *C, oc *OperatorController, op *operator.Operator, success bool) {
+	if success {
+		c.Assert(oc.RemoveOperator(op), IsTrue)
+		c.Assert(op.IsEnd(), IsTrue)
+		c.Assert(oc.GetOperatorStatus(op.RegionID()).Op, DeepEquals, op)
+	} else {
+		c.Assert(oc.RemoveOperator(op), IsFalse)
+	}
 }

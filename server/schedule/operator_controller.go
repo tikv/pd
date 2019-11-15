@@ -119,16 +119,14 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			return
 		case operator.SUCCESS:
 			if oc.RemoveOperator(op) {
-				oc.buryOperator(op)
 				oc.PromoteWaitingOperator()
 			}
 		case operator.TIMEOUT:
 			if oc.RemoveOperator(op) {
-				oc.buryOperator(op)
 				oc.PromoteWaitingOperator()
 			}
 		default:
-			if oc.RemoveOperator(op) {
+			if oc.removeOperator(op) {
 				// CREATED, EXPIRED must not appear.
 				// CANCELED, REPLACED must remove before transition.
 				log.Error("unexpected operator status",
@@ -157,7 +155,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, region *
 	changes := latest.GetConfVer() - origin.GetConfVer()
 	if changes > uint64(op.ConfVerChanged(region)) {
 
-		if oc.RemoveOperator(op) {
+		if oc.removeOperator(op) {
 			if op.Cancel() {
 				log.Info("stale operator",
 					zap.Uint64("region-id", op.RegionID()),
@@ -168,7 +166,6 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, region *
 				)
 				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
 			}
-			oc.buryOperator(op)
 			oc.PromoteWaitingOperator()
 		}
 		return true
@@ -434,6 +431,22 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 
 // RemoveOperator removes a operator from the running operators.
 func (oc *OperatorController) RemoveOperator(op *operator.Operator) (found bool) {
+	oc.Lock()
+	found = oc.removeOperatorLocked(op)
+	oc.Unlock()
+	if found {
+		if op.Cancel() {
+			log.Info("operator removed",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Duration("takes", op.RunningTime()),
+				zap.Reflect("operator", op))
+		}
+		oc.buryOperator(op)
+	}
+	return
+}
+
+func (oc *OperatorController) removeOperator(op *operator.Operator) bool {
 	oc.Lock()
 	defer oc.Unlock()
 	return oc.removeOperatorLocked(op)
