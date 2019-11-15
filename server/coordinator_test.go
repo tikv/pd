@@ -223,10 +223,10 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)
 	testutil.CheckTransferPeer(c, co.opController.GetOperator(1), operator.OpBalance, 4, 1)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
 	waitOperator(c, co, 2)
 	testutil.CheckTransferLeader(c, co.opController.GetOperator(2), operator.OpBalance, 4, 2)
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
 
 	stream := mockhbstream.NewHeartbeatStream()
 
@@ -605,10 +605,10 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	defer cleanup()
 
 	c.Assert(co.schedulers, HasLen, 4)
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("label-scheduler"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
 	c.Assert(co.schedulers, HasLen, 0)
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -625,12 +625,12 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(tc.addLeaderRegion(3, 3, 1, 2), IsNil)
 
 	oc := co.opController
-	gls, err := schedule.CreateScheduler("grant-leader", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("grant-leader", []string{"0"}))
+	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	gls, err = schedule.CreateScheduler("grant-leader", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("grant-leader", []string{"1"}))
+	gls, err = schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), IsNil)
 
@@ -663,20 +663,20 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
-	gls1, err := schedule.CreateScheduler("grant-leader", oc, storage, schedule.ConfigSliceDecoder("grant-leader", []string{"1"}))
+	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
-	gls2, err := schedule.CreateScheduler("grant-leader", oc, storage, schedule.ConfigSliceDecoder("grant-leader", []string{"2"}))
+	gls2, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"2"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls2, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 6)
 	sches, _, err := storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(sches, HasLen, 6)
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("label-scheduler"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
 	c.Assert(co.schedulers, HasLen, 2)
 	c.Assert(co.cluster.opt.Persist(storage), IsNil)
 	co.stop()
@@ -685,10 +685,10 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	_, err = schedule.CreateScheduler("adjacent-region", oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
+	_, err = schedule.CreateScheduler(schedulers.AdjacentRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	// suppose we add a new default enable scheduler
-	newOpt.AddSchedulerCfg("adjacent-region", []string{})
+	newOpt.AddSchedulerCfg(schedulers.AdjacentRegionType, []string{})
 	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
 	c.Assert(newOpt.Reload(storage), IsNil)
 	// only remains 3 items with independent config.
@@ -715,10 +715,10 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	co.run()
 	storage = tc.RaftCluster.storage
 	c.Assert(co.schedulers, HasLen, 3)
-	bls, err := schedule.CreateScheduler("balance-leader", oc, storage, schedule.ConfigSliceDecoder("balance-leader", []string{"", ""}))
+	bls, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls), IsNil)
-	brs, err := schedule.CreateScheduler("balance-region", oc, storage, schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
+	brs, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
@@ -726,7 +726,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// the scheduler option should contain 7 items
 	// the `hot scheduler` and `label scheduler` are disabled
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 7)
-	c.Assert(co.removeScheduler("grant-leader-scheduler-1"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.GrantLeaderName+"-1"), IsNil)
 	// the scheduler that is not enable by default will be completely deleted
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 6)
 	c.Assert(co.schedulers, HasLen, 4)
@@ -741,7 +741,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 
 	co.run()
 	c.Assert(co.schedulers, HasLen, 4)
-	c.Assert(co.removeScheduler("grant-leader-scheduler-2"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.GrantLeaderName+"-2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 3)
 }
 
@@ -760,7 +760,7 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
-	gls1, err := schedule.CreateScheduler("grant-leader", oc, storage, schedule.ConfigSliceDecoder("grant-leader", []string{"1"}))
+	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
@@ -769,11 +769,11 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	c.Assert(sches, HasLen, 5)
 
 	// remove all schedulers
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("label-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("grant-leader-scheduler-1"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.GrantLeaderName+"-1"), IsNil)
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
@@ -931,7 +931,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	}, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
+	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
 	c.Assert(tc.addRegionStore(3, 100), IsNil)
@@ -971,7 +971,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	}, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, schedule.ConfigSliceDecoder("balance-region", []string{"", ""}))
+	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
@@ -1031,7 +1031,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 2), IsNil)
-	scheduler, err := schedule.CreateScheduler("balance-leader", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"", ""}))
+	scheduler, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
@@ -1101,7 +1101,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	_, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 
-	lb, err := schedule.CreateScheduler("balance-leader", co.opController, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("balance-leader", []string{"", ""}))
+	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
 

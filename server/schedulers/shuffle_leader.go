@@ -23,10 +23,15 @@ import (
 	"github.com/pkg/errors"
 )
 
-const shuffleLeaderName = "shuffle-leader-scheduler"
+const (
+	// ShuffleLeaderName is shuffle leader scheduler name.
+	ShuffleLeaderName = "shuffle-leader-scheduler"
+	// ShuffleLeaderType is shuffle leader scheduler type.
+	ShuffleLeaderType = "shuffle-leader"
+)
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("shuffle-leader", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(ShuffleLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleLeaderSchedulerConfig)
 			if !ok {
@@ -37,14 +42,16 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.Ranges = ranges
-			conf.Name = shuffleLeaderName
+			conf.Name = ShuffleLeaderName
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler("shuffle-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(ShuffleLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleLeaderSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newShuffleLeaderScheduler(opController, conf), nil
 	})
 }
@@ -79,7 +86,7 @@ func (s *shuffleLeaderScheduler) GetName() string {
 }
 
 func (s *shuffleLeaderScheduler) GetType() string {
-	return "shuffle-leader"
+	return ShuffleLeaderType
 }
 
 func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -107,7 +114,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator("shuffle-leader", region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
+	op := operator.CreateTransferLeaderOperator(ShuffleLeaderType, region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }
