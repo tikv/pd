@@ -216,7 +216,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 // PauseOrResumeScheduler pasues a scheduler for delay seconds or resume a paused scheduler.
 // t < 0 : resume scheduler.
 // t > 0 : scheduler delays t seconds.
-func (h *Handler) PauseOrResumeScheduler(name string, t int) error {
+func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return err

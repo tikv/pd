@@ -41,15 +41,12 @@ const (
 
 	heartbeatChanCapacity = 1024
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
-
-	runningState = 1
-	pauseState   = 0
 )
 
 var (
 	errSchedulerExisted   = errors.New("scheduler existed")
 	errSchedulerNotFound  = errors.New("scheduler not found")
-	errPauseSchedulerFail = errors.New("scheduler has already been paused")
+	errPauseSchedulerFail = errors.New("some schedulers have already paused")
 )
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -445,7 +442,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	return err
 }
 
-func (c *coordinator) pauseOrResumeScheduler(name string, t int) error {
+func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	c.Lock()
 	defer c.Unlock()
 	if c.cluster == nil {
@@ -465,22 +462,18 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int) error {
 	}
 	var err error
 	var wg sync.WaitGroup
+	delayUntil := time.Now().UTC().Unix() + t
 	for _, sc := range s {
 		wg.Add(1)
 		go func(sc *scheduleController) {
-			state := atomic.LoadInt32(&sc.runningState)
 			if t > 0 {
-				if state == runningState {
-					atomic.StoreInt32(&sc.runningState, pauseState)
-					sc.pauseCh <- t
-				} else {
+				if sc.isPaused() {
 					err = errPauseSchedulerFail
+				} else {
+					atomic.StoreInt64(&sc.DelayUntil, delayUntil)
 				}
 			} else {
-				select {
-				case sc.resumeCh <- struct{}{}:
-				default:
-				}
+				atomic.StoreInt64(&sc.DelayUntil, 0)
 			}
 			wg.Done()
 		}(sc)
@@ -501,19 +494,12 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		select {
 		case <-timer.C:
 			timer.Reset(s.GetInterval())
-			if !s.AllowSchedule() {
+			if !s.AllowSchedule() && !s.isPaused() {
 				continue
 			}
 			if op := s.Schedule(); op != nil {
 				c.opController.AddWaitingOperator(op...)
 			}
-
-		case p := <-s.pauseCh:
-			select {
-			case <-time.After(time.Duration(p) * time.Second):
-			case <-s.resumeCh:
-			}
-			atomic.StoreInt32(&s.runningState, runningState)
 
 		case <-s.Ctx().Done():
 			log.Info("scheduler has been stopped",
@@ -532,9 +518,7 @@ type scheduleController struct {
 	nextInterval time.Duration
 	ctx          context.Context
 	cancel       context.CancelFunc
-	pauseCh      chan int
-	resumeCh     chan struct{}
-	runningState int32
+	DelayUntil   int64
 }
 
 // newScheduleController creates a new scheduleController.
@@ -547,9 +531,6 @@ func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleContro
 		nextInterval: s.GetMinInterval(),
 		ctx:          ctx,
 		cancel:       cancel,
-		pauseCh:      make(chan int),
-		resumeCh:     make(chan struct{}),
-		runningState: runningState,
 	}
 }
 
@@ -581,4 +562,9 @@ func (s *scheduleController) GetInterval() time.Duration {
 // AllowSchedule returns if a scheduler is allowed to schedule.
 func (s *scheduleController) AllowSchedule() bool {
 	return s.Scheduler.IsScheduleAllowed(s.cluster)
+}
+
+// isPaused returns if a schedueler is paused.
+func (s *scheduleController) isPaused() bool {
+	return time.Now().UTC().Unix() < s.DelayUntil
 }

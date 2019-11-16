@@ -54,8 +54,10 @@ func pauseSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	path := schedulersPrefix + "/" + args[0] + "/" + args[1]
+	path := schedulersPrefix + "/pause"
 	input := make(map[string]interface{})
+	input["name"] = args[0]
+	input["time"] = args[1]
 	postJSON(cmd, path, input)
 }
 
@@ -84,8 +86,10 @@ func resumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	path := schedulersPrefix + "/" + args[0] + "/-1"
+	path := schedulersPrefix + "/pause"
 	input := make(map[string]interface{})
+	input["name"] = args[0]
+	input["time"] = "-1"
 	postJSON(cmd, path, input)
 }
 
