@@ -86,7 +86,7 @@ var pdpbStatus [statusCount]pdpb.OperatorStatus = [statusCount]pdpb.OperatorStat
 
 // IsEndStatus checks whether s is an end status.
 func IsEndStatus(s OpStatus) bool {
-	return s >= firstEndStatus
+	return firstEndStatus <= s && s < statusCount
 }
 
 // OpStatusToPDPB converts OpStatus to pdpb.OperatorStatus.
