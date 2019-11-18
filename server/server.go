@@ -144,6 +144,14 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 		registerMap[pathPrefix] = struct{}{}
 		router.PathPrefix(pathPrefix).Handler(handler)
 	}
+
+	// Deprecated
+	router.Path("/pd/health")
+	// Deprecated
+	router.Path("/pd/diagnose")
+	// Deprecated
+	router.Path("/pd/ping")
+
 	engine.UseHandler(router)
 	return engine, nil
 }
