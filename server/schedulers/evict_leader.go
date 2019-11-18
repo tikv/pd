@@ -14,9 +14,12 @@
 package schedulers
 
 import (
-	"fmt"
+	"net/http"
 	"strconv"
+	"sync"
 
+	"github.com/gorilla/mux"
+	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
@@ -24,6 +27,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"github.com/pkg/errors"
+	"github.com/unrolled/render"
 )
 
 const (
@@ -52,33 +56,83 @@ func init() {
 			if err != nil {
 				return errors.WithStack(err)
 			}
-			conf.StoreID = id
-			conf.Name = fmt.Sprintf("%s-%d", EvictLeaderName, id)
-			conf.Ranges = ranges
+			conf.Name = EvictLeaderName
+			conf.StoreIDWitRanges[id] = ranges
 			return nil
 
 		}
 	})
 
 	schedule.RegisterScheduler(EvictLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &evictLeaderSchedulerConfig{}
+		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
+		conf.cluster = opController.GetCluster()
 		return newEvictLeaderScheduler(opController, conf), nil
 	})
 }
 
 type evictLeaderSchedulerConfig struct {
-	Name    string          `json:"name"`
-	StoreID uint64          `json:"store-id"`
-	Ranges  []core.KeyRange `json:"ranges"`
+	mu               sync.RWMutex
+	storage          *core.Storage
+	Name             string                     `json:"name"`
+	StoreIDWitRanges map[uint64][]core.KeyRange `json:"sotre-id-ranges"`
+	cluster          *opt.Cluster
+}
+
+func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+	if len(args) != 1 {
+		return errors.New("should specify the store-id")
+	}
+	conf.mu.Lock()
+	defer conf.mu.Unlock()
+
+	id, err := strconv.ParseUint(args[0], 10, 64)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	ranges, err := getKeyRanges(args[1:])
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	conf.Name = EvictLeaderName
+	conf.StoreIDWitRanges[id] = ranges
+	return nil
+}
+
+func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	return &evictLeaderSchedulerConfig{
+		Name:             conf.Name,
+		StoreIDWitRanges: conf.StoreIDWitRanges,
+	}
+}
+
+func (conf *evictLeaderSchedulerConfig) Persist() error {
+	name := conf.getScheduleName()
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	data, err := schedule.EncodeConfig(conf)
+	if err != nil {
+		return err
+	}
+	conf.storage.SaveScheduleConfig(name, data)
+	return nil
+}
+
+func (conf *evictLeaderSchedulerConfig) getScheduleName() string {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	return EvictLeaderName
 }
 
 type evictLeaderScheduler struct {
 	*baseScheduler
 	conf     *evictLeaderSchedulerConfig
 	selector *selector.RandomSelector
+	handler  http.Handler
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
@@ -89,11 +143,17 @@ func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *ev
 	}
 
 	base := newBaseScheduler(opController)
+	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		baseScheduler: base,
 		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
+		handler:       handler,
 	}
+}
+
+func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
 }
 
 func (s *evictLeaderScheduler) GetName() string {
@@ -109,11 +169,19 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
-	return cluster.BlockStore(s.conf.StoreID)
+	var res error
+	for id := range s.conf.StoreIDWitRanges {
+		if err := cluster.BlockStore(id); err != nil {
+			res = err
+		}
+	}
+	return res
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
-	cluster.UnblockStore(s.conf.StoreID)
+	for id := range s.conf.StoreIDWitRanges {
+		cluster.UnblockStore(id)
+	}
 }
 
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -122,18 +190,76 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 
 func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandLeaderRegion(s.conf.StoreID, s.conf.Ranges, opt.HealthRegion(cluster))
-	if region == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
-		return nil
+	var ops []*operator.Operator
+	for id, ranges := range s.conf.StoreIDWitRanges {
+		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
+		if region == nil {
+			schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
+			continue
+		}
+		target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
+		if target == nil {
+			schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
+			continue
+		}
+		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
+		op := operator.CreateTransferLeaderOperator(EvictLeaderType, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		op.SetPriorityLevel(core.HighPriority)
+		ops = append(ops, op)
 	}
-	target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
-	if target == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
-		return nil
+
+	return ops
+}
+
+type evictLeaderHandler struct {
+	scheduleName string
+	storage      *core.Storage
+	rd           *render.Render
+	config       *evictLeaderSchedulerConfig
+}
+
+func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
+		return
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator(EvictLeaderType, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
-	op.SetPriorityLevel(core.HighPriority)
-	return []*operator.Operator{op}
+	var args []string
+	idFloat, ok := (input["store_id"]).(float64)
+	if ok {
+		id := (int64)(idFloat)
+		if id < 0 {
+			handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Stroe Id should be positive number type, please input number"))
+		}
+		//FIXME: maybe can update exists store
+		if _, exists := handler.config.StoreIDWitRanges[(uint64)(id)]; exists {
+			handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Stroe Id exists in sheduler, please choose a new store id"))
+		}
+		if err := (*handler.config.cluster).BlockStore((uint64)(id)); err != nil {
+			handler.rd.JSON(w, http.StatusInternalServerError, err)
+		}
+		args = append(args, strconv.FormatInt(id, 10))
+	}
+
+	handler.config.BuildWithArgs(args)
+	err := handler.config.Persist()
+	if err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err)
+	}
+	handler.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+	conf := handler.config.Clone()
+	handler.rd.JSON(w, http.StatusOK, conf)
+}
+
+func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
+	h := &evictLeaderHandler{
+		config: config,
+		rd:     render.New(render.Options{IndentJSON: true}),
+	}
+	router := mux.NewRouter()
+	router.HandleFunc("/config", h.UpdateConfig).Methods("POST")
+	router.HandleFunc("/list", h.ListConfig).Methods("GET")
+	return router
 }
