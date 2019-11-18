@@ -22,6 +22,7 @@ import (
 
 // ApplyOperatorStep applies operator step. Only for test purpose.
 func ApplyOperatorStep(region *core.RegionInfo, op *operator.Operator) *core.RegionInfo {
+	_ = op.Start()
 	if step := op.Check(region); step != nil {
 		switch s := step.(type) {
 		case operator.TransferLeader:
