@@ -40,7 +40,8 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 		{Id: 3, Address: "mock://tikv-3"},
 		{Id: 7, Address: "mock://tikv-7"},
 	}
-	var stores []*core.StoreInfo
+
+	stores := make([]*core.StoreInfo, 0, len(metaStores))
 	for _, m := range metaStores {
 		s := core.NewStoreInfo(m)
 		stores = append(stores, s)

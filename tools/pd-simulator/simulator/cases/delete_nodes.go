@@ -52,7 +52,7 @@ func newDeleteNodes() *Case {
 		})
 	}
 
-	var ids []uint64
+	ids := make([]uint64, 0, len(simCase.Stores))
 	for _, store := range simCase.Stores {
 		ids = append(ids, store.ID)
 	}

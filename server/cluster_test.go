@@ -537,7 +537,8 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	s.svr.cluster.Lock()
 	s.svr.cluster.storage = core.NewStorage(kv.NewMemoryKV())
 	s.svr.cluster.Unlock()
-	var stores []*metapb.Store
+
+	stores := make([]*metapb.Store, 0, len(storeAddrs))
 	for _, addr := range storeAddrs {
 		store := s.newStore(c, 0, addr, "2.1.0")
 		stores = append(stores, store)
