@@ -229,13 +229,16 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		id := (int64)(idFloat)
 		if id < 0 {
 			handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Stroe Id should be positive number type, please input number"))
+			return
 		}
 		//FIXME: maybe can update exists store
 		if _, exists := handler.config.StoreIDWitRanges[(uint64)(id)]; exists {
 			handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Stroe Id exists in sheduler, please choose a new store id"))
+			return
 		}
 		if err := (*handler.config.cluster).BlockStore((uint64)(id)); err != nil {
 			handler.rd.JSON(w, http.StatusInternalServerError, err)
+			return
 		}
 		args = append(args, strconv.FormatInt(id, 10))
 	}
