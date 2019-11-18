@@ -143,14 +143,14 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 		log.Info("register REST path", zap.String("path", pathPrefix))
 		registerMap[pathPrefix] = struct{}{}
 		router.PathPrefix(pathPrefix).Handler(handler)
-	}
 
-	// Deprecated
-	router.Path("/pd/health")
-	// Deprecated
-	router.Path("/pd/diagnose")
-	// Deprecated
-	router.Path("/pd/ping")
+		// Deprecated
+		router.Path("/pd/health").Handler(handler)
+		// Deprecated
+		router.Path("/pd/diagnose").Handler(handler)
+		// Deprecated
+		router.Path("/pd/ping").Handler(handler)
+	}
 
 	engine.UseHandler(router)
 	return engine, nil
