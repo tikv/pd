@@ -61,12 +61,7 @@ func GetClientConn(addr string, caPath string, certPath string, keyPath string, 
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	if len(do) != 0 {
-		do = append(do, opt)
-	} else {
-		do = []grpc.DialOption{opt}
-	}
-	cc, err := grpc.Dial(u.Host, do...)
+	cc, err := grpc.Dial(u.Host, append(do, opt)...)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
