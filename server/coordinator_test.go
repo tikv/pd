@@ -891,6 +891,7 @@ type testOperatorControllerSuite struct {
 
 func (s *testOperatorControllerSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testOperatorControllerSuite) TearDownSuite(c *C) {
@@ -1015,6 +1016,7 @@ type testScheduleControllerSuite struct {
 
 func (s *testScheduleControllerSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testScheduleControllerSuite) TearDownSuite(c *C) {
