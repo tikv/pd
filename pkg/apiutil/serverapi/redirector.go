@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package serverapi
 
 import (
 	"crypto/tls"
@@ -40,11 +40,19 @@ const (
 
 var initHTTPClientOnce sync.Once
 
+// dialClient used to dail http request.
+var dialClient = &http.Client{
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
+
 type redirector struct {
 	s *server.Server
 }
 
-func newRedirector(s *server.Server) *redirector {
+// NewRedirector redirects request to the leader if needs to be handled in the leader.
+func NewRedirector(s *server.Server) *redirector {
 	return &redirector{s: s}
 }
 

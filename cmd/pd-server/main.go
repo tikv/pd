@@ -22,6 +22,7 @@ import (
 
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/keyvisual"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
@@ -90,7 +91,15 @@ func main() {
 	if err != nil {
 		log.Fatal("join meet error", zap.Error(err))
 	}
-	svr, err := server.CreateServer(cfg, api.NewHandler)
+
+	coreAPIServiceBuilder := api.NewHandler
+	keyvisualServiceBuilder := keyvisual.NewKeyvisualService
+
+	// Creates server.
+	svr, err := server.CreateServer(
+		cfg,
+		coreAPIServiceBuilder,
+		keyvisualServiceBuilder)
 	if err != nil {
 		log.Fatal("create server failed", zap.Error(err))
 	}
