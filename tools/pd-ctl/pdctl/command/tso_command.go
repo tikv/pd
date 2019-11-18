@@ -20,11 +20,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	physicalShiftBits = 18
-	logicalBits       = 0x3FFFF
-)
-
 // NewTSOCommand return a ping subcommand of rootCmd
 func NewTSOCommand() *cobra.Command {
 	cmd := &cobra.Command{

@@ -25,7 +25,7 @@ import (
 )
 
 // GetClientConn returns a gRPC client connection.
-func GetClientConn(addr string, caPath string, certPath string, keyPath string) (*grpc.ClientConn, error) {
+func GetClientConn(addr string, caPath string, certPath string, keyPath string, do ...grpc.DialOption) (*grpc.ClientConn, error) {
 	opt := grpc.WithInsecure()
 	if len(caPath) != 0 {
 		certificates := []tls.Certificate{}
@@ -61,7 +61,12 @@ func GetClientConn(addr string, caPath string, certPath string, keyPath string) 
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	cc, err := grpc.Dial(u.Host, opt)
+	if len(do) != 0 {
+		do = append(do, opt)
+	} else {
+		do = []grpc.DialOption{opt}
+	}
+	cc, err := grpc.Dial(u.Host, do...)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

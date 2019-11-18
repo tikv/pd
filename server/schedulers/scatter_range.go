@@ -60,7 +60,7 @@ func init() {
 		if len(rangeName) == 0 {
 			return nil, errors.New("the range name is invalid")
 		}
-		return newScatterRangeScheduler(opController, storage, conf), nil
+		return newScatterRangeScheduler(opController, conf), nil
 	})
 }
 
@@ -148,7 +148,7 @@ type scatterRangeScheduler struct {
 }
 
 // newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
-func newScatterRangeScheduler(opController *schedule.OperatorController, storage *core.Storage, config *scatterRangeSchedulerConfig) schedule.Scheduler {
+func newScatterRangeScheduler(opController *schedule.OperatorController, config *scatterRangeSchedulerConfig) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 
 	name := config.getScheduleName()
@@ -199,7 +199,7 @@ func (l *scatterRangeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	// isolate a new cluster according to the key range
-	c := schedule.GenRangeCluster(cluster, []byte(l.config.GetStartKey()), []byte(l.config.GetEndKey()))
+	c := schedule.GenRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())
 	c.SetTolerantSizeRatio(2)
 	ops := l.balanceLeader.Schedule(c)
 	if len(ops) > 0 {

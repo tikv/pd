@@ -27,8 +27,6 @@ type RangeCluster struct {
 	tolerantSizeRatio float64
 }
 
-const scanLimit = 128
-
 // GenRangeCluster gets a range cluster by specifying start key and end key.
 // The cluster can only know the regions within [startKey, endKey].
 func GenRangeCluster(cluster opt.Cluster, startKey, endKey []byte) *RangeCluster {
