@@ -81,7 +81,7 @@ func (r *RangeCluster) GetStore(id uint64) *core.StoreInfo {
 // GetStores returns all Stores in the cluster.
 func (r *RangeCluster) GetStores() []*core.StoreInfo {
 	stores := r.Cluster.GetStores()
-	var newStores []*core.StoreInfo
+	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
 	}
