@@ -179,11 +179,10 @@ func (o *Operator) IsEnd() bool {
 
 // CheckSuccess checks if all steps are finished, and update the status.
 func (o *Operator) CheckSuccess() bool {
-	success := atomic.LoadInt32(&o.currentStep) >= int32(len(o.steps))
-	if success {
-		return o.status.To(SUCCESS)
+	if atomic.LoadInt32(&o.currentStep) >= int32(len(o.steps)) {
+		return o.status.To(SUCCESS) || o.Status() == SUCCESS
 	}
-	return success
+	return false
 }
 
 // Cancel marks the operator canceled.
