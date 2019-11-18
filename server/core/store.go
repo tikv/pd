@@ -668,8 +668,8 @@ func setAllMaxScore(stores []*StoreInfo, maxScore float64) []*StoreInfo {
 	return results
 }
 
-// GetUpdatedMaxScoreStores update maxScore when flexible score change or add a new store
-func (s *StoresInfo) GetUpdatedMaxScoreStores(flexibleScore uint64, newStores ...*StoreInfo) []*StoreInfo {
+// GetStoresAfterUpdateMaxScore update maxScore when flexible score change or add a new store
+func (s *StoresInfo) GetStoresAfterUpdateMaxScore(flexibleScore uint64, newStores ...*StoreInfo) []*StoreInfo {
 	results := make([]*StoreInfo, 0, len(newStores)+len(s.stores))
 	var newStore *StoreInfo
 	if len(newStores) != 0 {
