@@ -16,13 +16,15 @@ package command
 import (
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	schedulersPrefix = "pd/api/v1/schedulers"
+	schedulersPrefix       = "pd/api/v1/schedulers"
+	configSchedulersPrefix = "pd/api/v1/schedule-config"
 )
 
 // NewSchedulerCommand returns a scheduler command.
@@ -34,6 +36,7 @@ func NewSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewShowSchedulerCommand())
 	c.AddCommand(NewAddSchedulerCommand())
 	c.AddCommand(NewRemoveSchedulerCommand())
+	c.AddCommand(NewConfigSchedulerCommand())
 	return c
 }
 
@@ -316,4 +319,88 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println("Success!")
+}
+
+// NewConfigSchedulerCommand returns commands to config scheduler.
+func NewConfigSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "config",
+		Short: "config a scheduler",
+	}
+	c.AddCommand(NewConfigUpdateCommand())
+	c.AddCommand(NewConfigShowCommand())
+	return c
+}
+
+//NewConfigUpdateCommand return a command to update config
+func NewConfigUpdateCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "update <scheduler>",
+		Short: "update a scheduler",
+	}
+	c.AddCommand(NewConfigUpdateEvictLeaderSchedulerCommand())
+	return c
+}
+
+//NewConfigShowCommand return a command to show config of scheduler
+func NewConfigShowCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "show <scheduler>",
+		Short: "show a scheduler's config",
+	}
+	c.AddCommand(NewConfigShowEvictLeaderSchedulerCommand())
+	return c
+}
+
+//NewConfigUpdateEvictLeaderSchedulerCommand return a command to config evict-leader-scheduler
+func NewConfigUpdateEvictLeaderSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-leader-scheduler <store_id>",
+		Short: "make the scheduler to evict leader from a store",
+		Run:   updateConfigSchedulerForStoreCommandFunc,
+	}
+	return c
+}
+
+//NewConfigShowEvictLeaderSchedulerCommand return a command to config evict-leader-scheduler
+func NewConfigShowEvictLeaderSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-leader-scheduler",
+		Short: "show the config of evict-leader-scheduler",
+		Run:   showConfigSchedulerForStoreCommandFunc,
+	}
+	return c
+}
+
+func updateConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+
+	storeID, err := strconv.ParseUint(args[0], 10, 64)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	input["store_id"] = storeID
+
+	postJSON(cmd, path.Join(configSchedulersPrefix, cmd.Name(), "config"), input)
+}
+
+func showConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 0 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	path := path.Join(configSchedulersPrefix, cmd.Name(), "list")
+	r, err := doRequest(cmd, path, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println(r)
 }

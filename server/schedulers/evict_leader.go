@@ -77,7 +77,7 @@ type evictLeaderSchedulerConfig struct {
 	mu               sync.RWMutex
 	storage          *core.Storage
 	Name             string                     `json:"name"`
-	StoreIDWitRanges map[uint64][]core.KeyRange `json:"sotre-id-ranges"`
+	StoreIDWitRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster          *opt.Cluster
 }
 

@@ -104,7 +104,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				exceptMap := make(map[string]interface{})
 				exceptMap["1"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
-				c.Assert(resp["sotre-id-ranges"], DeepEquals, exceptMap)
+				c.Assert(resp["store-id-ranges"], DeepEquals, exceptMap)
 				c.Assert(resp["name"], Equals, "evict-leader-scheduler")
 
 				//using /pd/v1/schedule-config/evict-leader-scheduler/config to add new store to evict-leader-scheduler
@@ -118,7 +118,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				exceptMap["2"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
-				c.Assert(resp["sotre-id-ranges"], DeepEquals, exceptMap)
+				c.Assert(resp["store-id-ranges"], DeepEquals, exceptMap)
 				c.Assert(resp["name"], Equals, "evict-leader-scheduler")
 			},
 		},
