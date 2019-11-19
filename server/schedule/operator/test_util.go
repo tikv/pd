@@ -24,7 +24,7 @@ func SetOperatorStatusReachTime(op *Operator, st OpStatus, t time.Time) {
 }
 
 // SetOperatorCurrentStatus copies the operator and sets the status of copy to the given status.
-// NOTE: Shoud only use in test.
+// NOTE: Should only use in test.
 func SetOperatorCurrentStatus(op *Operator, st OpStatus) {
 	op.status.current = st
 }
