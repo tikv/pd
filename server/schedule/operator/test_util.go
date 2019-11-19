@@ -17,14 +17,8 @@ import (
 	"time"
 )
 
-// SetOperatorStatusReachTime copies the operator and sets the reach time of the copy.
-// NOTE: Shoud only use in test.
+// SetOperatorStatusReachTime sets the reach time of the operator.
+// NOTE: Should only use in test.
 func SetOperatorStatusReachTime(op *Operator, st OpStatus, t time.Time) {
 	op.status.setTime(st, t)
-}
-
-// SetOperatorCurrentStatus copies the operator and sets the status of copy to the given status.
-// NOTE: Should only use in test.
-func SetOperatorCurrentStatus(op *Operator, st OpStatus) {
-	op.status.current = st
 }
