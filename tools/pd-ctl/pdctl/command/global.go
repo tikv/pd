@@ -93,7 +93,7 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 			req.Header.Set("Content-Type", b.contentType)
 		}
 		// the resp would be returned by the outer function
-		resp, err = dail(req)
+		resp, err = dial(req)
 		if err != nil {
 			return err
 		}
@@ -102,7 +102,7 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 	return resp, err
 }
 
-func dail(req *http.Request) (string, error) {
+func dial(req *http.Request) (string, error) {
 	resp, err := dialClient.Do(req)
 	if err != nil {
 		return "", err
@@ -140,7 +140,7 @@ func tryURLs(cmd *cobra.Command, endpoints []string, f DoFunc) error {
 		}
 		// tolerate some schemes that will be used by users, the TiKV SDK
 		// use 'tikv' as the scheme, it is really confused if we do not
-		// support it by pdctl
+		// support it by pd-ctl
 		if u.Scheme == "" || u.Scheme == "pd" || u.Scheme == "tikv" {
 			u.Scheme = "http"
 		}
@@ -201,6 +201,7 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 	})
 	if err != nil {
 		cmd.Println(err)
+		return
 	}
 	cmd.Println("Success!")
 }

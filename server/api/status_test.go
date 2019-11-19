@@ -19,14 +19,13 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
 )
 
 var _ = Suite(&testStatusAPISuite{})
 
 type testStatusAPISuite struct{}
 
-func checkStatusResponse(c *C, body []byte, cfgs []*config.Config) {
+func checkStatusResponse(c *C, body []byte) {
 	got := status{}
 	c.Assert(json.Unmarshal(body, &got), IsNil)
 	c.Assert(got.BuildTS, Equals, server.PDBuildTS)
@@ -43,7 +42,7 @@ func (s *testStatusAPISuite) TestStatus(c *C) {
 		c.Assert(err, IsNil)
 		buf, err := ioutil.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
-		checkStatusResponse(c, buf, cfgs)
+		checkStatusResponse(c, buf)
 		resp.Body.Close()
 	}
 }
