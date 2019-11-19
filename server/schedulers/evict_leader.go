@@ -123,9 +123,18 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 }
 
 func (conf *evictLeaderSchedulerConfig) getScheduleName() string {
+	return EvictLeaderName
+}
+
+func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	return EvictLeaderName
+	var res []string
+	for index := range conf.StoreIDWitRanges[id] {
+		res = append(res, (string)(conf.StoreIDWitRanges[id][index].StartKey))
+		res = append(res, (string)(conf.StoreIDWitRanges[id][index].EndKey))
+	}
+	return res
 }
 
 type evictLeaderScheduler struct {
@@ -157,6 +166,8 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *evictLeaderScheduler) GetName() string {
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
 	return s.conf.Name
 }
 
@@ -165,10 +176,14 @@ func (s *evictLeaderScheduler) GetType() string {
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
 	return schedule.EncodeConfig(s.conf)
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWitRanges {
 		if err := cluster.BlockStore(id); err != nil {
@@ -179,6 +194,8 @@ func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
 }
 
 func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
 		cluster.UnblockStore(id)
 	}
@@ -191,6 +208,8 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	var ops []*operator.Operator
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
 	for id, ranges := range s.conf.StoreIDWitRanges {
 		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
 		if region == nil {
@@ -224,6 +243,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 	var args []string
+	var exists bool
 	idFloat, ok := (input["store_id"]).(float64)
 	if ok {
 		id := (int64)(idFloat)
@@ -231,16 +251,19 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 			handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Stroe Id should be positive number type, please input number"))
 			return
 		}
-		//FIXME: maybe can update exists store
-		if _, exists := handler.config.StoreIDWitRanges[(uint64)(id)]; exists {
-			handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Stroe Id exists in sheduler, please choose a new store id"))
-			return
-		}
-		if err := (*handler.config.cluster).BlockStore((uint64)(id)); err != nil {
-			handler.rd.JSON(w, http.StatusInternalServerError, err)
-			return
+		if _, exists = handler.config.StoreIDWitRanges[(uint64)(id)]; !exists {
+			if err := (*handler.config.cluster).BlockStore((uint64)(id)); err != nil {
+				handler.rd.JSON(w, http.StatusInternalServerError, err)
+				return
+			}
 		}
 		args = append(args, strconv.FormatInt(id, 10))
+	}
+	ranges, ok := (input["ranges"]).([]string)
+	if ok {
+		args = append(args, ranges...)
+	} else if exists {
+		args = append(args, handler.config.getRanges((uint64)(idFloat))...)
 	}
 
 	handler.config.BuildWithArgs(args)

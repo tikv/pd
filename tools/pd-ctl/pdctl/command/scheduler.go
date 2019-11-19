@@ -14,17 +14,21 @@
 package command
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	schedulersPrefix       = "pd/api/v1/schedulers"
-	configSchedulersPrefix = "pd/api/v1/schedule-config"
+	schedulersPrefix         = "pd/api/v1/schedulers"
+	configSchedulersPrefix   = "pd/api/v1/schedule-config"
+	evictLeaderSchedulerName = "evict-leader-scheduler"
 )
 
 // NewSchedulerCommand returns a scheduler command.
@@ -105,12 +109,43 @@ func NewEvictLeaderSchedulerCommand() *cobra.Command {
 	return c
 }
 
+func checkEvicLeaderSchedulerExist(cmd *cobra.Command) (bool, error) {
+	fmt.Printf("[qinggniq] %v\n", cmd.Name())
+	if cmd.Name() == evictLeaderSchedulerName {
+		r, err := doRequest(cmd, schedulersPrefix, http.MethodGet)
+		fmt.Printf("[qinggniq] %v\n", r)
+		if err != nil {
+			//FIXME: maybe we should give a more approprite error info
+			cmd.Println(err)
+			return false, err
+		}
+		var scheudlerList []string
+		json.Unmarshal([]byte(r), &scheudlerList)
+		for idx := range scheudlerList {
+			if scheudlerList[idx] == evictLeaderSchedulerName {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-
+	//we should ensure whether it is the first time to create evict-leader-scheduler
+	//or just update the evict-leader. But is add one ttl time.
+	exist, err := checkEvicLeaderSchedulerExist(cmd)
+	if err != nil {
+		return
+	}
+	//if there exist a evict-leader-scheduler we should only update it
+	if exist {
+		updateConfigSchedulerForStoreCommandFunc(cmd, args)
+		return
+	}
 	storeID, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
 		cmd.Println(err)
@@ -311,7 +346,10 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(cmd.Usage())
 		return
 	}
-
+	//FIXME: maybe there is a more graceful method to handler it
+	if strings.HasPrefix(args[0], evictLeaderSchedulerName) {
+		args[0] = evictLeaderSchedulerName
+	}
 	path := schedulersPrefix + "/" + args[0]
 	_, err := doRequest(cmd, path, http.MethodDelete)
 	if err != nil {

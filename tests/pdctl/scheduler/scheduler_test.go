@@ -198,6 +198,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	for _, scheduler := range schedulers {
 		c.Assert(expected[scheduler], Equals, true)
 	}
+
 	// scheduler delete command
 	args = []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
@@ -216,6 +217,95 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	for _, scheduler := range schedulers {
 		c.Assert(expected[scheduler], Equals, true)
 	}
+
+	//check the compactily
+	// scheduler add command
+	args = []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "show"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	schedulers = schedulers[:0]
+	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+	expected = map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+		"grant-leader-scheduler-1":     true,
+		"evict-leader-scheduler":       true,
+	}
+	for _, scheduler := range schedulers {
+		c.Assert(expected[scheduler], Equals, true)
+	}
+
+	// scheduler add command twice
+	args = []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "4"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "show"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	schedulers = schedulers[:0]
+	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+	expected = map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+		"grant-leader-scheduler-1":     true,
+		"evict-leader-scheduler":       true,
+	}
+	for _, scheduler := range schedulers {
+		c.Assert(expected[scheduler], Equals, true)
+	}
+
+	//check add success
+	args = []string{"-u", pdAddr, "scheduler", "config", "show", "evict-leader-scheduler"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	configInfo = make(map[string]interface{})
+	c.Assert(json.Unmarshal(output, &configInfo), IsNil)
+	expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}, "4": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
+	c.Assert(expectedConfig, DeepEquals, configInfo)
+
+	// evict-scheduler remove command
+	args = []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-2"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "show"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	schedulers = schedulers[:0]
+	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+	expected = map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+		"grant-leader-scheduler-1":     true,
+	}
+	for _, scheduler := range schedulers {
+		c.Assert(expected[scheduler], Equals, true)
+	}
+
+	// scheduler delete command
+	args = []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "show"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	schedulers = schedulers[:0]
+	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+	expected = map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+		"grant-leader-scheduler-1":     true,
+	}
+	for _, scheduler := range schedulers {
+		c.Assert(expected[scheduler], Equals, true)
+	}
+
 	// test echo
 	echo := pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"})
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
