@@ -27,10 +27,8 @@ import (
 )
 
 const (
-	kvRequestTimeout  = time.Second * 10
-	kvSlowRequestTime = time.Second * 1
-	requestTimeout    = 10 * time.Second
-	slowRequestTime   = 1 * time.Second
+	requestTimeout  = 10 * time.Second
+	slowRequestTime = 1 * time.Second
 )
 
 var (

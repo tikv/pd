@@ -46,6 +46,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 			res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 			c.Assert(e, IsNil)
 			c.Assert(res.StatusCode, Equals, http.StatusOK)
+			res.Body.Close()
 		}
 	}
 
@@ -61,6 +62,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 			testutil.WaitUntil(c, func(c *C) bool {
 				res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(e, IsNil)
+				res.Body.Close()
 				return res.StatusCode == http.StatusOK
 			})
 		}
@@ -76,6 +78,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 			testutil.WaitUntil(c, func(c *C) bool {
 				res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(err, IsNil)
+				res.Body.Close()
 				return res.StatusCode == http.StatusServiceUnavailable
 			})
 		}

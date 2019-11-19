@@ -369,7 +369,7 @@ func (c *TestCluster) RunServers(ctx context.Context, servers []*TestServer) err
 
 // RunInitialServers starts to run servers in InitialServers.
 func (c *TestCluster) RunInitialServers(ctx context.Context) error {
-	var servers []*TestServer
+	servers := make([]*TestServer, 0, len(c.config.InitialServers))
 	for _, conf := range c.config.InitialServers {
 		servers = append(servers, c.GetServer(conf.Name))
 	}
