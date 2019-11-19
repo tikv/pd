@@ -101,12 +101,20 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 
 	// Store flows.
 	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
-	storeWriteRateBytes, storeReadRateBytes := storeFlowStats.GetBytesRate()
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes").Set(storeWriteRateBytes)
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes").Set(storeReadRateBytes)
-	storeWriteRateKeys, storeReadRateKeys := storeFlowStats.GetKeysWriteRate(), storeFlowStats.GetKeysReadRate()
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys").Set(storeWriteRateKeys)
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys").Set(storeReadRateKeys)
+	storeWriteRateByte, storeReadRateByte := storeFlowStats.GetBytesRate()
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_byte").Set(storeWriteRateByte)
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_byte").Set(storeReadRateByte)
+	storeWriteRateKey, storeReadRateKey := storeFlowStats.GetKeysWriteRate(), storeFlowStats.GetKeysReadRate()
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_key").Set(storeWriteRateKey)
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_key").Set(storeReadRateKey)
+
+	// Store's threads statistics.
+	storeCPUUsage := stats.GetStoreCPUUsage(store.GetID())
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_cpu_usage").Set(storeCPUUsage)
+	storeDiskReadRate := stats.GetStoreDiskReadRate(store.GetID())
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_read_rate").Set(storeDiskReadRate)
+	storeDiskWriteRate := stats.GetStoreDiskWriteRate(store.GetID())
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_write_rate").Set(storeDiskWriteRate)
 }
 
 func (s *storeStatistics) Collect() {
@@ -134,10 +142,10 @@ func (s *storeStatistics) Collect() {
 	configs["merge-schedule-limit"] = float64(s.opt.GetMergeScheduleLimit())
 	configs["replica-schedule-limit"] = float64(s.opt.GetReplicaScheduleLimit())
 	configs["max-replicas"] = float64(s.opt.GetMaxReplicas())
-	configs["high-space-ratio"] = float64(s.opt.GetHighSpaceRatio())
-	configs["low-space-ratio"] = float64(s.opt.GetLowSpaceRatio())
-	configs["tolerant-size-ratio"] = float64(s.opt.GetTolerantSizeRatio())
-	configs["store-balance-rate"] = float64(s.opt.GetStoreBalanceRate())
+	configs["high-space-ratio"] = s.opt.GetHighSpaceRatio()
+	configs["low-space-ratio"] = s.opt.GetLowSpaceRatio()
+	configs["tolerant-size-ratio"] = s.opt.GetTolerantSizeRatio()
+	configs["store-balance-rate"] = s.opt.GetStoreBalanceRate()
 	configs["hot-region-schedule-limit"] = float64(s.opt.GetHotRegionScheduleLimit())
 	configs["hot-region-cache-hits-threshold"] = float64(s.opt.GetHotRegionCacheHitsThreshold())
 	configs["max-pending-peer-count"] = float64(s.opt.GetMaxPendingPeerCount())

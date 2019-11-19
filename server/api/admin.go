@@ -36,12 +36,7 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 }
 
 func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Request) {
-	cluster := h.svr.GetRaftCluster()
-	if cluster == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
-		return
-	}
-
+	cluster := getCluster(r.Context())
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
@@ -59,13 +54,18 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	ts, ok := input["tso"].(float64)
-	if !ok || ts < 0 {
+	tsValue, ok := input["tso"].(string)
+	if !ok || len(tsValue) == 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "invalid tso value")
+		return
+	}
+	ts, err := strconv.ParseUint(tsValue, 10, 64)
+	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, "invalid tso value")
 		return
 	}
 
-	if err := handler.ResetTS(uint64(ts)); err != nil {
+	if err = handler.ResetTS(ts); err != nil {
 		if err == server.ErrServerNotStarted {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {

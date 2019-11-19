@@ -27,8 +27,6 @@ type RangeCluster struct {
 	tolerantSizeRatio float64
 }
 
-const scanLimit = 128
-
 // GenRangeCluster gets a range cluster by specifying start key and end key.
 // The cluster can only know the regions within [startKey, endKey].
 func GenRangeCluster(cluster opt.Cluster, startKey, endKey []byte) *RangeCluster {
@@ -81,7 +79,7 @@ func (r *RangeCluster) GetStore(id uint64) *core.StoreInfo {
 // GetStores returns all Stores in the cluster.
 func (r *RangeCluster) GetStores() []*core.StoreInfo {
 	stores := r.Cluster.GetStores()
-	var newStores []*core.StoreInfo
+	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
 	}
@@ -102,13 +100,13 @@ func (r *RangeCluster) GetTolerantSizeRatio() float64 {
 }
 
 // RandFollowerRegion returns a random region that has a follower on the store.
-func (r *RangeCluster) RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
-	return r.subCluster.RandFollowerRegion(storeID, opts...)
+func (r *RangeCluster) RandFollowerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
+	return r.subCluster.RandFollowerRegion(storeID, ranges, opts...)
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
-func (r *RangeCluster) RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
-	return r.subCluster.RandLeaderRegion(storeID, opts...)
+func (r *RangeCluster) RandLeaderRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
+	return r.subCluster.RandLeaderRegion(storeID, ranges, opts...)
 }
 
 // GetAverageRegionSize returns the average region approximate size.
@@ -119,7 +117,7 @@ func (r *RangeCluster) GetAverageRegionSize() int64 {
 // GetRegionStores returns all stores that contains the region's peer.
 func (r *RangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
 	stores := r.Cluster.GetRegionStores(region)
-	var newStores []*core.StoreInfo
+	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
 	}
@@ -129,7 +127,7 @@ func (r *RangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInf
 // GetFollowerStores returns all stores that contains the region's follower peer.
 func (r *RangeCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
 	stores := r.Cluster.GetFollowerStores(region)
-	var newStores []*core.StoreInfo
+	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
 	}

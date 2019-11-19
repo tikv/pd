@@ -115,6 +115,7 @@ static:
 	  --enable misspell \
 	  --enable staticcheck \
 	  --enable ineffassign \
+	  --enable unconvert \
 	  $$($(PACKAGE_DIRECTORIES))
 
 lint:

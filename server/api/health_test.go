@@ -60,7 +60,7 @@ func (s *testHealthAPISuite) TestHealthSlice(c *C) {
 			follow = svr
 		}
 	}
-	addr := leader.GetConfig().ClientUrls + apiPrefix + "/health"
+	addr := leader.GetConfig().ClientUrls + apiPrefix + "/api/v1/health"
 	follow.Close()
 	resp, err := dialClient.Get(addr)
 	c.Assert(err, IsNil)

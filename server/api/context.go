@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2019 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,25 +14,21 @@
 package api
 
 import (
-	"net/http"
+	"context"
 
-	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
-	"github.com/urfave/negroni"
 )
 
-const apiPrefix = "/pd"
+type contextKey int
 
-// NewHandler creates a HTTP handler for API.
-func NewHandler(svr *server.Server) (http.Handler, server.APIGroup) {
-	router := mux.NewRouter()
-	router.PathPrefix(apiPrefix).Handler(negroni.New(
-		newRedirector(svr),
-		negroni.Wrap(createRouter(apiPrefix, svr)),
-	))
+const (
+	clusterKey contextKey = iota + 1
+)
 
-	info := server.APIGroup{
-		IsCore: true,
-	}
-	return router, info
+func withClusterCtx(ctx context.Context, cluster *server.RaftCluster) context.Context {
+	return context.WithValue(ctx, clusterKey, cluster)
+}
+
+func getCluster(ctx context.Context) *server.RaftCluster {
+	return ctx.Value(clusterKey).(*server.RaftCluster)
 }

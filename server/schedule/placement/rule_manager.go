@@ -198,7 +198,7 @@ func (m *RuleManager) GetSplitKeys(start, end []byte) [][]byte {
 func (m *RuleManager) GetAllRules() []*Rule {
 	m.RLock()
 	defer m.RUnlock()
-	var rules []*Rule
+	rules := make([]*Rule, 0, len(m.rules))
 	for _, r := range m.rules {
 		rules = append(rules, r)
 	}

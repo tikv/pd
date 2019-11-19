@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/schedulers"
 	"github.com/unrolled/render"
 )
 
@@ -56,27 +57,27 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch name {
-	case "balance-leader-scheduler":
+	case schedulers.BalanceLeaderName:
 		if err := h.AddBalanceLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "balance-hot-region-scheduler":
+	case schedulers.HotRegionName:
 		if err := h.AddBalanceHotRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "balance-region-scheduler":
+	case schedulers.BalanceRegionName:
 		if err := h.AddBalanceRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "label-scheduler":
+	case schedulers.LabelName:
 		if err := h.AddLabelScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "scatter-range":
+	case schedulers.ScatterRangeName:
 		var args []string
 
 		collector := func(v string) {
@@ -101,7 +102,7 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-	case "balance-adjacent-region-scheduler":
+	case schedulers.AdjacentRegionName:
 		var args []string
 		leaderLimit, ok := input["leader_limit"].(string)
 		if ok {
@@ -116,7 +117,7 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "grant-leader-scheduler":
+	case schedulers.GrantLeaderName:
 		storeID, ok := input["store_id"].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
@@ -126,7 +127,7 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "evict-leader-scheduler":
+	case schedulers.EvictLeaderName:
 		storeID, ok := input["store_id"].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
@@ -136,22 +137,22 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "shuffle-leader-scheduler":
+	case schedulers.ShuffleLeaderName:
 		if err := h.AddShuffleLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "shuffle-region-scheduler":
+	case schedulers.ShuffleRegionName:
 		if err := h.AddShuffleRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "random-merge-scheduler":
+	case schedulers.RandomMergeName:
 		if err := h.AddRandomMergeScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "shuffle-hot-region-scheduler":
+	case schedulers.ShuffleHotRegionName:
 		limit := uint64(1)
 		l, ok := input["limit"].(float64)
 		if ok {

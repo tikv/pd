@@ -112,7 +112,7 @@ func (l *LeaderLease) keepAliveWorker(ctx context.Context, interval time.Duratio
 		for {
 			go func() {
 				start := time.Now()
-				ctx1, cancel := context.WithTimeout(ctx, time.Duration(l.leaseTimeout))
+				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
 				res, err := l.lease.KeepAliveOnce(ctx1, l.ID)
 				if err != nil {

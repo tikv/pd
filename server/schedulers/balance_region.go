@@ -25,30 +25,53 @@ import (
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("balance-region", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(BalanceRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
+			conf, ok := v.(*balanceRegionSchedulerConfig)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+			ranges, err := getKeyRanges(args)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			conf.Ranges = ranges
+			conf.Name = BalanceRegionName
 			return nil
 		}
 	})
-	schedule.RegisterScheduler("balance-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newBalanceRegionScheduler(opController), nil
+	schedule.RegisterScheduler(BalanceRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &balanceRegionSchedulerConfig{}
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		return newBalanceRegionScheduler(opController, conf), nil
 	})
 }
 
 const (
 	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
 	balanceRegionRetryLimit = 10
-	balanceRegionName       = "balance-region-scheduler"
+	// BalanceRegionName is balance region scheduler name.
+	BalanceRegionName = "balance-region-scheduler"
+	// BalanceRegionType is balance region scheduler type.
+	BalanceRegionType = "balance-region"
 )
+
+type balanceRegionSchedulerConfig struct {
+	Name   string          `json:"name"`
+	Ranges []core.KeyRange `json:"ranges"`
+}
 
 type balanceRegionScheduler struct {
 	*baseScheduler
-	name         string
+	conf         *balanceRegionSchedulerConfig
 	opController *schedule.OperatorController
 	filters      []filter.Filter
 	counter      *prometheus.CounterVec
@@ -56,18 +79,19 @@ type balanceRegionScheduler struct {
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
-func newBalanceRegionScheduler(opController *schedule.OperatorController, opts ...BalanceRegionCreateOption) schedule.Scheduler {
+func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) schedule.Scheduler {
 	base := newBaseScheduler(opController)
-	s := &balanceRegionScheduler{
+	scheduler := &balanceRegionScheduler{
 		baseScheduler: base,
+		conf:          conf,
 		opController:  opController,
 		counter:       balanceRegionCounter,
 	}
-	for _, opt := range opts {
-		opt(s)
+	for _, setOption := range opts {
+		setOption(scheduler)
 	}
-	s.filters = []filter.Filter{filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true}}
-	return s
+	scheduler.filters = []filter.Filter{filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true}}
+	return scheduler
 }
 
 // BalanceRegionCreateOption is used to create a scheduler with an option.
@@ -83,19 +107,20 @@ func WithBalanceRegionCounter(counter *prometheus.CounterVec) BalanceRegionCreat
 // WithBalanceRegionName sets the name for the scheduler.
 func WithBalanceRegionName(name string) BalanceRegionCreateOption {
 	return func(s *balanceRegionScheduler) {
-		s.name = name
+		s.conf.Name = name
 	}
 }
 
 func (s *balanceRegionScheduler) GetName() string {
-	if s.name != "" {
-		return s.name
-	}
-	return balanceRegionName
+	return s.conf.Name
 }
 
 func (s *balanceRegionScheduler) GetType() string {
-	return "balance-region"
+	return BalanceRegionType
+}
+
+func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
 }
 
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -115,27 +140,20 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		for i := 0; i < balanceRegionRetryLimit; i++ {
 			// Priority picks the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
-			region := cluster.RandPendingRegion(sourceID, core.HealthRegionAllowPending())
+			region := cluster.RandPendingRegion(sourceID, s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster))
 			if region == nil {
 				// Then picks the region that has a follower in the source store.
-				region = cluster.RandFollowerRegion(sourceID, core.HealthRegion())
+				region = cluster.RandFollowerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
 			}
 			if region == nil {
 				// Last, picks the region has the leader in the source store.
-				region = cluster.RandLeaderRegion(sourceID, core.HealthRegion())
+				region = cluster.RandLeaderRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
 			}
 			if region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 				continue
 			}
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
-
-			// We don't schedule region with abnormal number of replicas.
-			if len(region.GetPeers()) != cluster.GetMaxReplicas() {
-				log.Debug("region has abnormal replica count", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "abnormal-replica").Inc()
-				continue
-			}
 
 			// Skip hot regions.
 			if cluster.IsRegionHot(region) {
@@ -164,11 +182,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
 	}
 	scoreGuard := filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), stores, source)
-	checker := checker.NewReplicaChecker(cluster, s.GetName())
+	replicaChecker := checker.NewReplicaChecker(cluster, s.GetName())
 	exclude := make(map[uint64]struct{})
-	excludeFilter := filter.NewExcludedFilter(s.name, nil, exclude)
+	excludeFilter := filter.NewExcludedFilter(s.GetName(), nil, exclude)
 	for {
-		storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
+		storeID, _ := replicaChecker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
 		if storeID == 0 {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
 			return nil
@@ -197,7 +215,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			schedulerCounter.WithLabelValues(s.GetName(), "no-peer").Inc()
 			return nil
 		}
-		op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		op, err := operator.CreateMovePeerOperator(BalanceRegionType, cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil

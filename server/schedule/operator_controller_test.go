@@ -491,7 +491,7 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 }
 
 func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
-	var prs []*metapb.Peer
+	prs := make([]*metapb.Peer, 0, len(peers))
 	for _, peer := range peers {
 		prs = append(prs, &metapb.Peer{Id: peer[0], StoreId: peer[1]})
 	}

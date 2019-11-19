@@ -46,12 +46,12 @@ func (stat *HotPeerStat) IsNeedDelete() bool {
 	return stat.needDelete
 }
 
-// IsLeader indicaes the item belong to the leader.
+// IsLeader indicates the item belong to the leader.
 func (stat *HotPeerStat) IsLeader() bool {
 	return stat.isLeader
 }
 
-// IsNew indicaes the item is first update in the cache of the region.
+// IsNew indicates the item is first update in the cache of the region.
 func (stat *HotPeerStat) IsNew() bool {
 	return stat.isNew
 }

@@ -30,6 +30,8 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -213,62 +215,62 @@ func (h *Handler) RemoveScheduler(name string) error {
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	return h.AddScheduler("balance-leader")
+	return h.AddScheduler(schedulers.BalanceLeaderType)
 }
 
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
 func (h *Handler) AddBalanceRegionScheduler() error {
-	return h.AddScheduler("balance-region")
+	return h.AddScheduler(schedulers.BalanceRegionType)
 }
 
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
 func (h *Handler) AddBalanceHotRegionScheduler() error {
-	return h.AddScheduler("hot-region")
+	return h.AddScheduler(schedulers.HotRegionType)
 }
 
 // AddLabelScheduler adds a label-scheduler.
 func (h *Handler) AddLabelScheduler() error {
-	return h.AddScheduler("label")
+	return h.AddScheduler(schedulers.LabelType)
 }
 
 // AddScatterRangeScheduler adds a balance-range-leader-scheduler
 func (h *Handler) AddScatterRangeScheduler(args ...string) error {
-	return h.AddScheduler("scatter-range", args...)
+	return h.AddScheduler(schedulers.ScatterRangeType, args...)
 }
 
 // AddAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
 func (h *Handler) AddAdjacentRegionScheduler(args ...string) error {
-	return h.AddScheduler("adjacent-region", args...)
+	return h.AddScheduler(schedulers.AdjacentRegionType, args...)
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler("grant-leader", strconv.FormatUint(storeID, 10))
+	return h.AddScheduler(schedulers.GrantLeaderType, strconv.FormatUint(storeID, 10))
 }
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler("evict-leader", strconv.FormatUint(storeID, 10))
+	return h.AddScheduler(schedulers.EvictLeaderType, strconv.FormatUint(storeID, 10))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	return h.AddScheduler("shuffle-leader")
+	return h.AddScheduler(schedulers.ShuffleLeaderType)
 }
 
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
-	return h.AddScheduler("shuffle-region")
+	return h.AddScheduler(schedulers.ShuffleRegionType)
 }
 
 // AddShuffleHotRegionScheduler adds a shuffle-hot-region-scheduler.
 func (h *Handler) AddShuffleHotRegionScheduler(limit uint64) error {
-	return h.AddScheduler("shuffle-hot-region", strconv.FormatUint(limit, 10))
+	return h.AddScheduler(schedulers.ShuffleHotRegionType, strconv.FormatUint(limit, 10))
 }
 
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
-	return h.AddScheduler("random-merge")
+	return h.AddScheduler(schedulers.RandomMergeType)
 }
 
 // GetOperator returns the region operator.
@@ -494,7 +496,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return err
 	}
 
-	op, err := operator.CreateMovePeerOperator("admin-move-peer", c.cluster, region, operator.OpAdmin, fromStoreID, toStoreID, newPeer.GetId())
+	op, err := operator.CreateMovePeerOperator("admin-move-peer", c.cluster, region, operator.OpAdmin, fromStoreID, newPeer)
 	if err != nil {
 		return err
 	}
@@ -543,7 +545,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return err
 	}
 
-	op := operator.CreateAddPeerOperator("admin-add-peer", region, newPeer.GetId(), toStoreID, operator.OpAdmin)
+	op := operator.CreateAddPeerOperator("admin-add-peer", region, newPeer, operator.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -561,8 +563,9 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 	if err != nil {
 		return err
 	}
+	newPeer.IsLearner = true
 
-	op := operator.CreateAddLearnerOperator("admin-add-learner", region, newPeer.GetId(), toStoreID, operator.OpAdmin)
+	op := operator.CreateAddPeerOperator("admin-add-learner", region, newPeer, operator.OpAdmin)
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -612,13 +615,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 || len(region.GetLearners()) > 0 ||
-		len(region.GetPeers()) != c.cluster.GetMaxReplicas() {
+	if !opt.IsRegionHealthy(c.cluster, region) || !opt.IsRegionReplicated(c.cluster, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if len(target.GetDownPeers()) > 0 || len(target.GetPendingPeers()) > 0 || len(target.GetLearners()) > 0 ||
-		len(target.GetMeta().GetPeers()) != c.cluster.GetMaxReplicas() {
+	if !opt.IsRegionHealthy(c.cluster, target) || !opt.IsRegionReplicated(c.cluster, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 

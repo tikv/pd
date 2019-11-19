@@ -60,14 +60,13 @@ type HeartbeatStreams interface {
 // OperatorController is used to limit the speed of scheduling.
 type OperatorController struct {
 	sync.RWMutex
-	ctx       context.Context
-	cluster   opt.Cluster
-	operators map[uint64]*operator.Operator
-	hbStreams HeartbeatStreams
-	histories *list.List
-	counts    map[operator.OpKind]uint64
-	opRecords *OperatorRecords
-	// TODO: Need to clean up the unused store ID.
+	ctx             context.Context
+	cluster         opt.Cluster
+	operators       map[uint64]*operator.Operator
+	hbStreams       HeartbeatStreams
+	histories       *list.List
+	counts          map[operator.OpKind]uint64
+	opRecords       *OperatorRecords
 	storesLimit     map[uint64]*ratelimit.Bucket
 	wop             WaitingOperator
 	wopStatus       *WaitingOperatorStatus
@@ -325,7 +324,7 @@ func isHigherPriorityOperator(new, old *operator.Operator) bool {
 	return new.GetPriorityLevel() > old.GetPriorityLevel()
 }
 
-func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
+func (oc *OperatorController) addOperatorLocked(op *operator.Operator) {
 	regionID := op.RegionID()
 
 	log.Info("add operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", op))
@@ -363,7 +362,6 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 
 	heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op, time: oc.getNextPushOperatorTime(step, time.Now())})
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
-	return true
 }
 
 // RemoveOperator removes a operator from the running operators.
@@ -600,19 +598,20 @@ func (oc *OperatorController) OperatorCount(mask operator.OpKind) uint64 {
 
 // GetOpInfluence gets OpInfluence.
 func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInfluence {
+	influence := operator.OpInfluence{
+		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
+	}
 	oc.RLock()
 	defer oc.RUnlock()
-
-	var res []*operator.Operator
 	for _, op := range oc.operators {
 		if !op.IsTimeout() && !op.IsFinish() {
 			region := cluster.GetRegion(op.RegionID())
 			if region != nil {
-				res = append(res, op)
+				op.UnfinishedInfluence(influence, region)
 			}
 		}
 	}
-	return NewUnfinishedOpInfluence(res, cluster)
+	return influence
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
@@ -625,24 +624,6 @@ func NewTotalOpInfluence(operators []*operator.Operator, cluster opt.Cluster) op
 		region := cluster.GetRegion(op.RegionID())
 		if region != nil {
 			op.TotalInfluence(influence, region)
-		}
-	}
-
-	return influence
-}
-
-// NewUnfinishedOpInfluence creates a OpInfluence.
-func NewUnfinishedOpInfluence(operators []*operator.Operator, cluster opt.Cluster) operator.OpInfluence {
-	influence := operator.OpInfluence{
-		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
-	}
-
-	for _, op := range operators {
-		if !op.IsTimeout() && !op.IsFinish() {
-			region := cluster.GetRegion(op.RegionID())
-			if region != nil {
-				op.UnfinishedInfluence(influence, region)
-			}
 		}
 	}
 

@@ -468,3 +468,11 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	})
 	c.Succeed()
 }
+
+func (s *testClientSuite) TestTsLessEqual(c *C) {
+	c.Assert(tsLessEqual(9, 9, 9, 9), IsTrue)
+	c.Assert(tsLessEqual(8, 9, 9, 8), IsTrue)
+	c.Assert(tsLessEqual(9, 8, 8, 9), IsFalse)
+	c.Assert(tsLessEqual(9, 8, 9, 6), IsFalse)
+	c.Assert(tsLessEqual(9, 6, 9, 8), IsTrue)
+}

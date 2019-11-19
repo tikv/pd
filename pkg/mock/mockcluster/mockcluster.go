@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
@@ -42,10 +43,12 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
+	ruleManager, _ := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()), opt.MaxReplicas, opt.GetLocationLabels())
 	return &Cluster{
 		BasicCluster:    core.NewBasicCluster(),
 		IDAllocator:     mockid.NewIDAllocator(),
 		ScheduleOptions: opt,
+		RuleManager:     ruleManager,
 		HotCache:        statistics.NewHotCache(),
 		StoresStats:     statistics.NewStoresStats(),
 	}
@@ -213,7 +216,7 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 
 // AddLabelsStore adds store with specified count of region and labels.
 func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
-	var newLabels []*metapb.StoreLabel
+	newLabels := make([]*metapb.StoreLabel, 0, len(labels))
 	for k, v := range labels {
 		newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
 	}

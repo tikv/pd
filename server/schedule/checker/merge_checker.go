@@ -83,12 +83,12 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// skip region has down peers or pending peers or learner peers
-	if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 || len(region.GetLearners()) > 0 {
+	if !opt.IsRegionHealthy(m.cluster, region) {
 		checkerCounter.WithLabelValues("merge_checker", "special-peer").Inc()
 		return nil
 	}
 
-	if len(region.GetPeers()) != m.cluster.GetMaxReplicas() {
+	if !opt.IsRegionReplicated(m.cluster, region) {
 		checkerCounter.WithLabelValues("merge_checker", "abnormal-replica").Inc()
 		return nil
 	}
@@ -132,8 +132,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 	return adjacent != nil && !m.cluster.IsRegionHot(adjacent) && m.allowMerge(region, adjacent) &&
-		len(adjacent.GetDownPeers()) == 0 && len(adjacent.GetPendingPeers()) == 0 && len(adjacent.GetLearners()) == 0 && // no special peer
-		len(adjacent.GetPeers()) == m.cluster.GetMaxReplicas() // peer count should equal
+		opt.IsRegionHealthy(m.cluster, adjacent) && opt.IsRegionReplicated(m.cluster, adjacent)
 }
 
 // allowMerge returns true if two regions can be merged according to the key type.

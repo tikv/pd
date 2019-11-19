@@ -20,48 +20,77 @@ import (
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
+	"github.com/pkg/errors"
+)
+
+const (
+	// ShuffleLeaderName is shuffle leader scheduler name.
+	ShuffleLeaderName = "shuffle-leader-scheduler"
+	// ShuffleLeaderType is shuffle leader scheduler type.
+	ShuffleLeaderType = "shuffle-leader"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("shuffle-leader", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(ShuffleLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
+			conf, ok := v.(*shuffleLeaderSchedulerConfig)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+			ranges, err := getKeyRanges(args)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			conf.Ranges = ranges
+			conf.Name = ShuffleLeaderName
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler("shuffle-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newShuffleLeaderScheduler(opController), nil
+	schedule.RegisterScheduler(ShuffleLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &shuffleLeaderSchedulerConfig{}
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		return newShuffleLeaderScheduler(opController, conf), nil
 	})
 }
 
-const shuffleLeaderName = "shuffle-leader-scheduler"
+type shuffleLeaderSchedulerConfig struct {
+	Name   string          `json:"name"`
+	Ranges []core.KeyRange `json:"ranges"`
+}
 
 type shuffleLeaderScheduler struct {
-	name string
 	*baseScheduler
+	conf     *shuffleLeaderSchedulerConfig
 	selector *selector.RandomSelector
 }
 
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
-func newShuffleLeaderScheduler(opController *schedule.OperatorController) schedule.Scheduler {
+func newShuffleLeaderScheduler(opController *schedule.OperatorController, conf *shuffleLeaderSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: shuffleLeaderName, TransferLeader: true},
+		filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true},
 	}
 	base := newBaseScheduler(opController)
 	return &shuffleLeaderScheduler{
-		name:          shuffleLeaderName,
 		baseScheduler: base,
+		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
 func (s *shuffleLeaderScheduler) GetName() string {
-	return s.name
+	return s.conf.Name
 }
 
 func (s *shuffleLeaderScheduler) GetType() string {
-	return "shuffle-leader"
+	return ShuffleLeaderType
+}
+
+func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
 }
 
 func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -79,13 +108,13 @@ func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 		return nil
 	}
-	region := cluster.RandFollowerRegion(targetStore.GetID(), core.HealthRegion())
+	region := cluster.RandFollowerRegion(targetStore.GetID(), s.conf.Ranges, opt.HealthRegion(cluster))
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator("shuffle-leader", region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
+	op := operator.CreateTransferLeaderOperator(ShuffleLeaderType, region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }

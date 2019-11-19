@@ -223,34 +223,34 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)
 	testutil.CheckTransferPeer(c, co.opController.GetOperator(1), operator.OpBalance, 4, 1)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
 	waitOperator(c, co, 2)
 	testutil.CheckTransferLeader(c, co.opController.GetOperator(2), operator.OpBalance, 4, 2)
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
 
 	stream := mockhbstream.NewHeartbeatStream()
 
 	// Transfer peer.
 	region := tc.GetRegion(1).Clone()
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitPromoteLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitRemovePeer(c, stream, region, 4)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 
 	// Transfer leader.
 	region = tc.GetRegion(2).Clone()
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitTransferLeader(c, stream, region, 2)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 }
 
-func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream mockhbstream.HeartbeatStream) error {
+func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream mockhbstream.HeartbeatStream) error {
 	co.hbStreams.bindStream(region.GetLeader().GetStoreId(), stream)
 	if err := co.cluster.putRegion(region.Clone()); err != nil {
 		return err
@@ -430,11 +430,11 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	// Add peer to store 1.
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
 	region := tc.GetRegion(1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitPromoteLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 
 	// Peer in store 3 is down, remove peer in store 3 and add peer to store 4.
@@ -446,20 +446,20 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	region = region.Clone(
 		core.WithDownPeers(append(region.GetDownPeers(), downPeer)),
 	)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 4)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitPromoteLearner(c, stream, region, 4)
 	region = region.Clone(core.WithDownPeers(nil))
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 
 	// Remove peer from store 4.
 	c.Assert(tc.addLeaderRegion(2, 1, 2, 3, 4), IsNil)
 	region = tc.GetRegion(2)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitRemovePeer(c, stream, region, 4)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 
 	// Remove offline peer directly when it's pending.
@@ -467,7 +467,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	c.Assert(tc.setStoreOffline(3), IsNil)
 	region = tc.GetRegion(3)
 	region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(3)}))
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 }
 
@@ -491,25 +491,25 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	region := tc.GetRegion(1).Clone()
 
 	// Add new peer.
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitPromoteLearner(c, stream, region, 1)
 
 	// If the new peer is pending, the operator will not finish.
 	region = region.Clone(core.WithPendingPeers(append(region.GetPendingPeers(), region.GetStorePeer(1))))
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 	c.Assert(co.opController.GetOperator(region.GetID()), NotNil)
 
 	// The new peer is not pending now, the operator will finish.
 	// And we will proceed to remove peer in store 4.
 	region = region.Clone(core.WithPendingPeers(nil))
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitRemovePeer(c, stream, region, 4)
 	c.Assert(tc.addLeaderRegion(1, 1, 2, 3), IsNil)
 	region = tc.GetRegion(1).Clone()
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 }
 
@@ -605,10 +605,10 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	defer cleanup()
 
 	c.Assert(co.schedulers, HasLen, 4)
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("label-scheduler"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
 	c.Assert(co.schedulers, HasLen, 0)
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -625,28 +625,28 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(tc.addLeaderRegion(3, 3, 1, 2), IsNil)
 
 	oc := co.opController
-	gls, err := schedule.CreateScheduler("grant-leader", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("grant-leader", []string{"0"}))
+	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	gls, err = schedule.CreateScheduler("grant-leader", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("grant-leader", []string{"1"}))
+	gls, err = schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), IsNil)
 
 	// Transfer all leaders to store 1.
 	waitOperator(c, co, 2)
 	region2 := tc.GetRegion(2)
-	c.Assert(dispatchHeartbeat(c, co, region2, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region2, stream), IsNil)
 	region2 = waitTransferLeader(c, stream, region2, 1)
-	c.Assert(dispatchHeartbeat(c, co, region2, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region2, stream), IsNil)
 	waitNoResponse(c, stream)
 
 	waitOperator(c, co, 3)
 	region3 := tc.GetRegion(3)
-	c.Assert(dispatchHeartbeat(c, co, region3, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region3, stream), IsNil)
 	region3 = waitTransferLeader(c, stream, region3, 1)
-	c.Assert(dispatchHeartbeat(c, co, region3, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region3, stream), IsNil)
 	waitNoResponse(c, stream)
 }
 
@@ -663,20 +663,20 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
-	gls1, err := schedule.CreateScheduler("grant-leader", oc, storage, schedule.ConfigSliceDecoder("grant-leader", []string{"1"}))
+	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
-	gls2, err := schedule.CreateScheduler("grant-leader", oc, storage, schedule.ConfigSliceDecoder("grant-leader", []string{"2"}))
+	gls2, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"2"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls2, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 6)
 	sches, _, err := storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(sches, HasLen, 6)
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("label-scheduler"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
 	c.Assert(co.schedulers, HasLen, 2)
 	c.Assert(co.cluster.opt.Persist(storage), IsNil)
 	co.stop()
@@ -685,10 +685,10 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	_, err = schedule.CreateScheduler("adjacent-region", oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
+	_, err = schedule.CreateScheduler(schedulers.AdjacentRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	// suppose we add a new default enable scheduler
-	newOpt.AddSchedulerCfg("adjacent-region", []string{})
+	newOpt.AddSchedulerCfg(schedulers.AdjacentRegionType, []string{})
 	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
 	c.Assert(newOpt.Reload(storage), IsNil)
 	// only remains 3 items with independent config.
@@ -715,24 +715,24 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	co.run()
 	storage = tc.RaftCluster.storage
 	c.Assert(co.schedulers, HasLen, 3)
-	bls, err := schedule.CreateScheduler("balance-leader", oc, storage, nil)
+	bls, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls), IsNil)
-	brs, err := schedule.CreateScheduler("balance-region", oc, storage, nil)
+	brs, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
+
 	// the scheduler option should contain 7 items
 	// the `hot scheduler` and `label scheduler` are disabled
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 7)
-	c.Assert(co.removeScheduler("grant-leader-scheduler-1"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.GrantLeaderName+"-1"), IsNil)
 	// the scheduler that is not enable by default will be completely deleted
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 6)
 	c.Assert(co.schedulers, HasLen, 4)
 	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
 	co.stop()
 	co.wg.Wait()
-
 	_, newOpt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
@@ -741,7 +741,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 
 	co.run()
 	c.Assert(co.schedulers, HasLen, 4)
-	c.Assert(co.removeScheduler("grant-leader-scheduler-2"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.GrantLeaderName+"-2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 3)
 }
 
@@ -760,7 +760,7 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
-	gls1, err := schedule.CreateScheduler("grant-leader", oc, storage, schedule.ConfigSliceDecoder("grant-leader", []string{"1"}))
+	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
@@ -769,11 +769,11 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	c.Assert(sches, HasLen, 5)
 
 	// remove all schedulers
-	c.Assert(co.removeScheduler("balance-leader-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("balance-hot-region-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("label-scheduler"), IsNil)
-	c.Assert(co.removeScheduler("grant-leader-scheduler-1"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
+	c.Assert(co.removeScheduler(schedulers.GrantLeaderName+"-1"), IsNil)
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
@@ -818,9 +818,9 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	stream := mockhbstream.NewHeartbeatStream()
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 2)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitPromoteLearner(c, stream, region, 2)
 	co.stop()
 	co.wg.Wait()
@@ -828,9 +828,9 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	// Recreate coodinator then add another replica on store 3.
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 3)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitPromoteLearner(c, stream, region, 3)
 }
 
@@ -931,7 +931,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	}, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, nil)
+	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
 	c.Assert(tc.addRegionStore(3, 100), IsNil)
@@ -971,7 +971,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	}, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler("balance-region", oc, tc.storage, nil)
+	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
@@ -1031,7 +1031,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 2), IsNil)
-	scheduler, err := schedule.CreateScheduler("balance-leader", oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	scheduler, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
@@ -1101,7 +1101,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	_, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 
-	lb, err := schedule.CreateScheduler("balance-leader", co.opController, core.NewStorage(kv.NewMemoryKV()), nil)
+	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
 
@@ -1187,7 +1187,7 @@ func waitNoResponse(c *C, stream mockhbstream.HeartbeatStream) {
 
 func getHeartBeatStreams(ctx context.Context, c *C, tc *testCluster) (*heartbeatStreams, func()) {
 	config := NewTestSingleConfig(c)
-	svr, err := CreateServer(config, nil)
+	svr, err := CreateServer(config)
 	c.Assert(err, IsNil)
 	kvBase := kv.NewEtcdKVBase(svr.client, svr.rootPath)
 	path := filepath.Join(svr.cfg.DataDir, "region-meta")
