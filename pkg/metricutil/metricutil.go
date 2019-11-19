@@ -32,6 +32,9 @@ type MetricConfig struct {
 	PushJob      string            `toml:"job" json:"job"`
 	PushAddress  string            `toml:"address" json:"address"`
 	PushInterval typeutil.Duration `toml:"interval" json:"interval"`
+	// Storage is the cluster metric storage address.
+	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
+	StorageAddress string `toml:"storage-address" json:"storage-address"`
 }
 
 func runesHasLowerNeighborAt(runes []rune, idx int) bool {
