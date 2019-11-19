@@ -141,8 +141,6 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	configInfo := make(map[string]interface{})
-	json.Unmarshal(output, &configInfo)
-	configInfo = make(map[string]interface{})
 	c.Assert(json.Unmarshal(output, &configInfo), IsNil)
 	expectedConfig := make(map[string]interface{})
 	expectedConfig["name"] = "evict-leader-scheduler"

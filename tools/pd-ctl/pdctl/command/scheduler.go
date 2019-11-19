@@ -109,19 +109,17 @@ func NewEvictLeaderSchedulerCommand() *cobra.Command {
 }
 
 func checkEvicLeaderSchedulerExist(cmd *cobra.Command) (bool, error) {
-	if cmd.Name() == evictLeaderSchedulerName {
-		r, err := doRequest(cmd, schedulersPrefix, http.MethodGet)
-		if err != nil {
-			//FIXME: maybe we should give a more approprite error info
-			cmd.Println(err)
-			return false, err
-		}
-		var scheudlerList []string
-		json.Unmarshal([]byte(r), &scheudlerList)
-		for idx := range scheudlerList {
-			if scheudlerList[idx] == evictLeaderSchedulerName {
-				return true, nil
-			}
+	r, err := doRequest(cmd, schedulersPrefix, http.MethodGet)
+	if err != nil {
+		//FIXME: maybe we should give a more approprite error info
+		cmd.Println(err)
+		return false, err
+	}
+	var scheudlerList []string
+	json.Unmarshal([]byte(r), &scheudlerList)
+	for idx := range scheudlerList {
+		if scheudlerList[idx] == evictLeaderSchedulerName {
+			return true, nil
 		}
 	}
 	return false, nil
@@ -134,15 +132,18 @@ func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	//we should ensure whether it is the first time to create evict-leader-scheduler
 	//or just update the evict-leader. But is add one ttl time.
-	exist, err := checkEvicLeaderSchedulerExist(cmd)
-	if err != nil {
-		return
+	if evictLeaderSchedulerName == cmd.Name() {
+		exist, err := checkEvicLeaderSchedulerExist(cmd)
+		if err != nil {
+			return
+		}
+		//if there exist a evict-leader-scheduler we should only update it
+		if exist {
+			updateConfigSchedulerForStoreCommandFunc(cmd, args)
+			return
+		}
 	}
-	//if there exist a evict-leader-scheduler we should only update it
-	if exist {
-		updateConfigSchedulerForStoreCommandFunc(cmd, args)
-		return
-	}
+
 	storeID, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
 		cmd.Println(err)

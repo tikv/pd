@@ -85,8 +85,6 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 	if len(args) != 1 {
 		return errors.New("should specify the store-id")
 	}
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
@@ -96,6 +94,8 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
+	conf.mu.Lock()
+	defer conf.mu.Unlock()
 	conf.Name = EvictLeaderName
 	conf.StoreIDWitRanges[id] = ranges
 	return nil
@@ -244,18 +244,18 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	var exists bool
 	idFloat, ok := (input["store_id"]).(float64)
 	if ok {
-		id := (int64)(idFloat)
-		if id < 0 {
+		if idFloat < 0 {
 			handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Stroe Id should be positive number type, please input number"))
 			return
 		}
-		if _, exists = handler.config.StoreIDWitRanges[(uint64)(id)]; !exists {
+		id := (uint64)(idFloat)
+		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
 			if err := (*handler.config.cluster).BlockStore((uint64)(id)); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
 				return
 			}
 		}
-		args = append(args, strconv.FormatInt(id, 10))
+		args = append(args, strconv.FormatInt(int64(id), 10))
 	}
 	ranges, ok := (input["ranges"]).([]string)
 	if ok {
