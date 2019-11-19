@@ -430,11 +430,11 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 }
 
 // RemoveOperator removes a operator from the running operators.
-func (oc *OperatorController) RemoveOperator(op *operator.Operator) (found bool) {
+func (oc *OperatorController) RemoveOperator(op *operator.Operator) bool {
 	oc.Lock()
-	found = oc.removeOperatorLocked(op)
+	removed := oc.removeOperatorLocked(op)
 	oc.Unlock()
-	if found {
+	if removed {
 		if op.Cancel() {
 			log.Info("operator removed",
 				zap.Uint64("region-id", op.RegionID()),
@@ -443,7 +443,7 @@ func (oc *OperatorController) RemoveOperator(op *operator.Operator) (found bool)
 		}
 		oc.buryOperator(op)
 	}
-	return
+	return removed
 }
 
 func (oc *OperatorController) removeOperatorWithoutBury(op *operator.Operator) bool {
