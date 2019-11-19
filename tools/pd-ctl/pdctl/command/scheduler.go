@@ -15,7 +15,6 @@ package command
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"path"
@@ -110,10 +109,8 @@ func NewEvictLeaderSchedulerCommand() *cobra.Command {
 }
 
 func checkEvicLeaderSchedulerExist(cmd *cobra.Command) (bool, error) {
-	fmt.Printf("[qinggniq] %v\n", cmd.Name())
 	if cmd.Name() == evictLeaderSchedulerName {
 		r, err := doRequest(cmd, schedulersPrefix, http.MethodGet)
-		fmt.Printf("[qinggniq] %v\n", r)
 		if err != nil {
 			//FIXME: maybe we should give a more approprite error info
 			cmd.Println(err)

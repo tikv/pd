@@ -166,9 +166,7 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *evictLeaderScheduler) GetName() string {
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
-	return s.conf.Name
+	return EvictLeaderName
 }
 
 func (s *evictLeaderScheduler) GetType() string {
