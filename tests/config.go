@@ -96,7 +96,7 @@ func (c *clusterConfig) nextServerName() string {
 }
 
 func (c *clusterConfig) GetServerAddrs() string {
-	var addrs []string
+	addrs := make([]string, 0, len(c.InitialServers))
 	for _, s := range c.InitialServers {
 		addrs = append(addrs, fmt.Sprintf("%s=%s", s.Name, s.PeerURLs))
 	}

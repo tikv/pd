@@ -181,7 +181,7 @@ func (s *RandomSelector) randStore(stores []*core.StoreInfo) *core.StoreInfo {
 
 // SelectSource randomly selects a source store from those can pass all filters.
 func (s *RandomSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo) *core.StoreInfo {
-	var candidates []*core.StoreInfo
+	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {
 		if filter.Source(opt, store, s.filters) {
 			continue
@@ -195,7 +195,7 @@ func (s *RandomSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo)
 func (s *RandomSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo, filters ...filter.Filter) *core.StoreInfo {
 	filters = append(filters, s.filters...)
 
-	var candidates []*core.StoreInfo
+	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {
 		if filter.Target(opt, store, filters) {
 			continue

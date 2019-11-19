@@ -86,6 +86,14 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(&cfg.Schedule, DeepEquals, svr.GetScheduleConfig())
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
 
+	// config show schedule
+	args = []string{"-u", pdAddr, "config", "show", "schedule"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	scheduleCfg := config.ScheduleConfig{}
+	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
+	c.Assert(&scheduleCfg, DeepEquals, svr.GetScheduleConfig())
+
 	// config show replication
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)

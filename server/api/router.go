@@ -138,8 +138,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/api/v1/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion).Methods("DELETE")
 	clusterRouter.HandleFunc("/api/v1/admin/reset-ts", adminHandler.ResetTS).Methods("POST")
 
-	logHanler := newlogHandler(svr, rd)
-	rootRouter.HandleFunc("/api/v1/admin/log", logHanler.Handle).Methods("POST")
+	logHandler := newlogHandler(svr, rd)
+	rootRouter.HandleFunc("/api/v1/admin/log", logHandler.Handle).Methods("POST")
 
 	rootRouter.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
 	rootRouter.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
