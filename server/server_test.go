@@ -16,6 +16,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -78,7 +80,7 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 		cfg := cfgs[i]
 
 		go func() {
-			svr, err := CreateServer(cfg, nil)
+			svr, err := CreateServer(cfg)
 			c.Assert(err, IsNil)
 			err = svr.Run(s.ctx)
 			c.Assert(err, IsNil)
@@ -111,16 +113,27 @@ func newTestServersWithCfgs(ctx context.Context, c *C, cfgs []*config.Config) ([
 	ch := make(chan *Server)
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
-			svr, err := CreateServer(cfg, nil)
+			svr, err := CreateServer(cfg)
+			// prevent blocking if Asserts fails
+			failed := true
+			defer func() {
+				if failed {
+					ch <- nil
+				} else {
+					ch <- svr
+				}
+			}()
 			c.Assert(err, IsNil)
 			err = svr.Run(ctx)
 			c.Assert(err, IsNil)
-			ch <- svr
+			failed = false
 		}(cfg)
 	}
 
 	for i := 0; i < len(cfgs); i++ {
-		svrs = append(svrs, <-ch)
+		svr := <-ch
+		c.Assert(svr, NotNil)
+		svrs = append(svrs, svr)
 	}
 	mustWaitLeader(c, svrs)
 
@@ -165,7 +178,7 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
-	svr, err := CreateServer(cfgA, nil)
+	svr, err := CreateServer(cfgA)
 	c.Assert(err, IsNil)
 
 	etcd, err := embed.StartEtcd(svr.etcdCfg)
@@ -178,4 +191,46 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	c.Assert(err, NotNil)
 	etcd.Close()
 	testutil.CleanServer(cfgA.DataDir)
+}
+
+var _ = Suite(&testServerHandlerSuite{})
+
+type testServerHandlerSuite struct{}
+
+func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
+	mokHandler := func(s *Server) (http.Handler, APIGroup) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintln(w, "Hello World")
+		})
+		info := APIGroup{
+			Name:    "mok",
+			Version: "v1",
+		}
+		return mux, info
+	}
+
+	cfg := NewTestSingleConfig(c)
+	svr, err := CreateServer(cfg, mokHandler)
+	c.Assert(err, IsNil)
+	_, err = CreateServer(cfg, mokHandler, mokHandler)
+	// Repeat register.
+	c.Assert(err, NotNil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+		svr.Close()
+		testutil.CleanServer(svr.cfg.DataDir)
+	}()
+	err = svr.Run(ctx)
+	c.Assert(err, IsNil)
+	addr := fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr())
+	resp, err := http.Get(addr)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+	bodyString := string(bodyBytes)
+	c.Assert(bodyString, Equals, "Hello World\n")
 }

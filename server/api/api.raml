@@ -1,6 +1,6 @@
 #%RAML 1.0
 ---
-title: Placement Driver API
+title: Placement Driver Core API
 version: v1
 baseUri: http://{pdAddr}/pd/api/{version}
 baseUriParameters:
@@ -540,6 +540,13 @@ types:
             type: MemberHealth[]
       500:
         description: PD server failed to proceed the request.
+
+/ping:
+  description: Reply an empty response to the GET reqeust.
+  get:
+    responses:
+        200:
+          description: The server is listening.
 
 /config:
   description: PD cluster configuration.

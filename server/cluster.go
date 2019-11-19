@@ -1371,6 +1371,11 @@ func (c *RaftCluster) IsLocationReplacementEnabled() bool {
 	return c.opt.IsLocationReplacementEnabled()
 }
 
+// IsDebugMetricsEnabled mocks method
+func (c *RaftCluster) IsDebugMetricsEnabled() bool {
+	return c.opt.IsDebugMetricsEnabled()
+}
+
 // CheckLabelProperty is used to check label property.
 func (c *RaftCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
 	return c.opt.CheckLabelProperty(typ, labels)

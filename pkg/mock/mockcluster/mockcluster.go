@@ -216,7 +216,7 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 
 // AddLabelsStore adds store with specified count of region and labels.
 func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
-	var newLabels []*metapb.StoreLabel
+	newLabels := make([]*metapb.StoreLabel, 0, len(labels))
 	for k, v := range labels {
 		newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
 	}

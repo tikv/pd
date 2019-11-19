@@ -24,8 +24,15 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	// GrantLeaderName is grant leader scheduler name.
+	GrantLeaderName = "grant-leader-scheduler"
+	// GrantLeaderType is grant leader scheduler type.
+	GrantLeaderType = "grant-leader"
+)
+
 func init() {
-	schedule.RegisterSliceDecoderBuilder("grant-leader", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(GrantLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -45,15 +52,17 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.StoreID = id
-			conf.Name = fmt.Sprintf("grant-leader-scheduler-%d", id)
+			conf.Name = fmt.Sprintf("%s-%d", GrantLeaderName, id)
 			conf.Ranges = ranges
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler("grant-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(GrantLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &grandLeaderConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newGrantLeaderScheduler(opController, conf), nil
 	})
 }
@@ -85,7 +94,7 @@ func (s *grantLeaderScheduler) GetName() string {
 }
 
 func (s *grantLeaderScheduler) GetType() string {
-	return "grant-leader"
+	return GrantLeaderType
 }
 
 func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -112,7 +121,7 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator("grant-leader", region, region.GetLeader().GetStoreId(), s.conf.StoreID, operator.OpLeader)
+	op := operator.CreateTransferLeaderOperator(GrantLeaderType, region, region.GetLeader().GetStoreId(), s.conf.StoreID, operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }

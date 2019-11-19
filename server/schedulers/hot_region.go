@@ -31,20 +31,20 @@ import (
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("hot-region", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(HotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler("hot-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 
 		return newBalanceHotRegionsScheduler(opController), nil
 	})
 	// FIXME: remove this two schedule after the balance test move in schedulers package
-	schedule.RegisterScheduler("hot-write-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceHotWriteRegionsScheduler(opController), nil
 	})
-	schedule.RegisterScheduler("hot-read-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newBalanceHotReadRegionsScheduler(opController), nil
 	})
 }
@@ -53,7 +53,16 @@ const (
 	hotRegionLimitFactor    = 0.75
 	storeHotPeersDefaultLen = 100
 	hotRegionScheduleFactor = 0.9
-	balanceHotRegionName    = "balance-hot-region-scheduler"
+	// HotRegionName is balance hot region scheduler name.
+	HotRegionName = "balance-hot-region-scheduler"
+	// HotRegionType is balance hot region scheduler type.
+	HotRegionType = "hot-region"
+	// HotReadRegionType is hot read region scheduler type.
+	HotReadRegionType = "hot-read-region"
+	// HotWriteRegionType is hot write region scheduler type.
+	HotWriteRegionType = "hot-write-region"
+	minFlowBytes       = 128 * 1024
+	minScoreLimit      = 0.35
 )
 
 // BalanceType : the perspective of balance
@@ -89,18 +98,21 @@ type balanceHotRegionsScheduler struct {
 	// store id -> hot regions statistics as the role of leader
 	stats *storeStatistics
 	r     *rand.Rand
+	// ScoreInfos stores storeID and score of all stores.
+	scoreInfos *ScoreInfos
 }
 
 func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
 	base := newBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
-		name:          balanceHotRegionName,
+		name:          HotRegionName,
 		baseScheduler: base,
 		leaderLimit:   1,
 		peerLimit:     1,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotWriteRegionBalance, hotReadRegionBalance},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
+		scoreInfos:    NewScoreInfos(),
 	}
 }
 
@@ -133,7 +145,7 @@ func (h *balanceHotRegionsScheduler) GetName() string {
 }
 
 func (h *balanceHotRegionsScheduler) GetType() string {
-	return "hot-region"
+	return HotRegionType
 }
 
 func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -157,6 +169,7 @@ func (h *balanceHotRegionsScheduler) Schedule(cluster opt.Cluster) []*operator.O
 func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
+	h.analyzeStoreLoad(cluster.GetStoresStats())
 	storesStat := cluster.GetStoresStats()
 	switch typ {
 	case hotReadRegionBalance:
@@ -168,6 +181,23 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Clust
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
+}
+
+func (h *balanceHotRegionsScheduler) analyzeStoreLoad(storesStats *statistics.StoresStats) {
+	readFlowScoreInfos := NormalizeStoresStats(storesStats.GetStoresBytesReadStat())
+	writeFlowScoreInfos := NormalizeStoresStats(storesStats.GetStoresBytesWriteStat())
+	readFlowMean := MeanStoresStats(storesStats.GetStoresBytesReadStat())
+	writeFlowMean := MeanStoresStats(storesStats.GetStoresBytesWriteStat())
+
+	var weights []float64
+	means := readFlowMean + writeFlowMean
+	if means <= minFlowBytes {
+		weights = append(weights, 0, 0)
+	} else {
+		weights = append(weights, readFlowMean/means, writeFlowMean/means)
+	}
+
+	h.scoreInfos = AggregateScores([]*ScoreInfos{readFlowScoreInfos, writeFlowScoreInfos}, weights)
 }
 
 func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
@@ -249,7 +279,7 @@ func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesSta
 			}
 			// HotDegree is the update times on the hot cache. If the heartbeat report
 			// the flow of the region exceeds the threshold, the scheduler will update the region in
-			// the hot cache and the hotdegree of the region will increase.
+			// the hot cache and the hot degree of the region will increase.
 			if r.HotDegree < cluster.GetHotRegionCacheHitsThreshold() {
 				continue
 			}
@@ -435,8 +465,8 @@ func (h *balanceHotRegionsScheduler) selectDestStore(candidateStoreIDs []uint64,
 	srcBytesRate := storesStat[srcStoreID].StoreBytesRate
 
 	var (
-		minBytesRate float64 = srcBytesRate*hotRegionScheduleFactor - regionBytesRate
-		minCount             = int(math.MaxInt32)
+		minBytesRate = srcBytesRate*hotRegionScheduleFactor - regionBytesRate
+		minCount     = math.MaxInt32
 	)
 	for _, storeID := range candidateStoreIDs {
 		if s, ok := storesStat[storeID]; ok {
@@ -498,4 +528,14 @@ func (h *balanceHotRegionsScheduler) GetHotWriteStatus() *statistics.StoreHotPee
 		AsLeader: asLeader,
 		AsPeer:   asPeer,
 	}
+}
+
+func (h *balanceHotRegionsScheduler) GetStoresScore() map[uint64]float64 {
+	h.RLock()
+	defer h.RUnlock()
+	storesScore := make(map[uint64]float64, 0)
+	for _, info := range h.scoreInfos.ToSlice() {
+		storesScore[info.GetStoreID()] = info.GetScore()
+	}
+	return storesScore
 }

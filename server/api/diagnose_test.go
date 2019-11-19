@@ -48,7 +48,7 @@ func (s *testDiagnoseAPISuite) TestDiagnoseSlice(c *C) {
 			follower = svr
 		}
 	}
-	addr := leader.GetConfig().ClientUrls + apiPrefix + "/diagnose"
+	addr := leader.GetConfig().ClientUrls + apiPrefix + "/api/v1/diagnose"
 	follower.Close()
 	resp, err := dialClient.Get(addr)
 	c.Assert(err, IsNil)
