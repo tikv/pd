@@ -42,7 +42,7 @@ func NewSchedulerCommand() *cobra.Command {
 // NewPauseSchedulerCommand returns a command to pause a scheduler.
 func NewPauseSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "pause <scheduler> <delay_time>",
+		Use:   "pause <scheduler> <delay>",
 		Short: "pause a scheduler",
 		Run:   pauseSchedulerCommandFunc,
 	}
@@ -51,7 +51,7 @@ func NewPauseSchedulerCommand() *cobra.Command {
 
 func pauseSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		cmd.Println(cmd.UsageString())
+		cmd.Println(cmd.Usage())
 		return
 	}
 	path := schedulersPrefix + "/pause"
@@ -89,7 +89,7 @@ func resumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	path := schedulersPrefix + "/pause"
 	input := make(map[string]interface{})
 	input["name"] = args[0]
-	input["time"] = "-1"
+	input["time"] = "0"
 	postJSON(cmd, path, input)
 }
 

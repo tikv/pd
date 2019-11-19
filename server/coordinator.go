@@ -461,24 +461,18 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 		}
 	}
 	var err error
-	var wg sync.WaitGroup
-	delayUntil := time.Now().UTC().Unix() + t
+	delayUntil := time.Now().Unix() + t
 	for _, sc := range s {
-		wg.Add(1)
-		go func(sc *scheduleController) {
-			if t > 0 {
-				if sc.isPaused() {
-					err = errPauseSchedulerFail
-				} else {
-					atomic.StoreInt64(&sc.DelayUntil, delayUntil)
-				}
+		if t > 0 {
+			if sc.isPaused() {
+				err = errPauseSchedulerFail
 			} else {
-				atomic.StoreInt64(&sc.DelayUntil, 0)
+				atomic.StoreInt64(&sc.DelayUntil, delayUntil)
 			}
-			wg.Done()
-		}(sc)
+		} else {
+			atomic.StoreInt64(&sc.DelayUntil, 0)
+		}
 	}
-	wg.Wait()
 	return err
 }
 
@@ -566,5 +560,5 @@ func (s *scheduleController) AllowSchedule() bool {
 
 // isPaused returns if a schedueler is paused.
 func (s *scheduleController) isPaused() bool {
-	return time.Now().UTC().Unix() < s.DelayUntil
+	return time.Now().Unix() < s.DelayUntil
 }
