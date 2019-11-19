@@ -250,7 +250,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		}
 		id := (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
-			if err := (*handler.config.cluster).BlockStore((uint64)(id)); err != nil {
+			if err := (*handler.config.cluster).BlockStore(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
 				return
 			}

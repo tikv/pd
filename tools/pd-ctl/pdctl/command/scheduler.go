@@ -143,7 +143,6 @@ func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 	}
-
 	storeID, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
 		cmd.Println(err)
