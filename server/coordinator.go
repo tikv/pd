@@ -482,7 +482,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		select {
 		case <-timer.C:
 			timer.Reset(s.GetInterval())
-			if !s.AllowSchedule() || s.isPaused() {
+			if !s.AllowSchedule() {
 				continue
 			}
 			if op := s.Schedule(); op != nil {
@@ -549,7 +549,7 @@ func (s *scheduleController) GetInterval() time.Duration {
 
 // AllowSchedule returns if a scheduler is allowed to schedule.
 func (s *scheduleController) AllowSchedule() bool {
-	return s.Scheduler.IsScheduleAllowed(s.cluster)
+	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.isPaused()
 }
 
 // isPaused returns if a schedueler is paused.
