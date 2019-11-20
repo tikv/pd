@@ -454,7 +454,6 @@ func updateConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string)
 		cmd.Println(err)
 		return
 	}
-
 	input := make(map[string]interface{})
 	input["name"] = cmd.Name()
 	input["store_id"] = storeID

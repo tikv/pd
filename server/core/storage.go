@@ -24,6 +24,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
@@ -102,6 +103,7 @@ func (s *Storage) storeRegionWeightPath(storeID uint64) string {
 
 // SaveScheduleConfig saves the config of scheduler.
 func (s *Storage) SaveScheduleConfig(scheduleName string, data []byte) error {
+	log.Info("[qinggniq] schedule " + scheduleName + " be created\n\n")
 	configPath := path.Join(customScheduleConfigPath, scheduleName)
 	return s.Save(configPath, string(data))
 }
