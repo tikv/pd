@@ -84,8 +84,8 @@ func (h *Handler) GetRaftCluster() *RaftCluster {
 	return h.s.GetRaftCluster()
 }
 
-// IsSchedulerPause returns whether scheduler is paused.
-func (h *Handler) IsSchedulerPause(name string) (bool, error) {
+// IsSchedulerPaused returns whether scheduler is paused.
+func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
 	c, err := h.getCoordinator()
 	if err != nil {
 		return true, err

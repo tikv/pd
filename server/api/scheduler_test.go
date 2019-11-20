@@ -128,34 +128,41 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 
 	// test pause all schedulers.
 	input := make(map[string]interface{})
-	input["delay"] = "5"
+	input["delay"] = "30"
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/all", pauseArgs)
 	c.Assert(err, IsNil)
-	time.Sleep(time.Second)
 	handler := s.svr.GetHandler()
 	for _, ca := range cases {
 		createdName := ca.createdName
 		if createdName == "" {
 			createdName = ca.name
 		}
-		isPaused, err := handler.IsSchedulerPause(createdName)
+		isPaused, err := handler.IsSchedulerPaused(createdName)
 		c.Assert(err, IsNil)
 		c.Assert(isPaused, Equals, true)
 	}
-	time.Sleep(time.Second * 4)
+	input["delay"] = "1"
+	pauseArgs, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSON(s.urlPrefix+"/all", pauseArgs)
+	c.Assert(err, IsNil)
+	time.Sleep(time.Second)
 	for _, ca := range cases {
 		createdName := ca.createdName
 		if createdName == "" {
 			createdName = ca.name
 		}
-		isPaused, err := handler.IsSchedulerPause(createdName)
+		isPaused, err := handler.IsSchedulerPaused(createdName)
 		c.Assert(err, IsNil)
 		c.Assert(isPaused, Equals, false)
 	}
 
 	// test resume all schedulers.
+	input["delay"] = "30"
+	pauseArgs, err = json.Marshal(input)
+	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/all", pauseArgs)
 	c.Assert(err, IsNil)
 	input["delay"] = "0"
@@ -168,7 +175,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		if createdName == "" {
 			createdName = ca.name
 		}
-		isPaused, err := handler.IsSchedulerPause(createdName)
+		isPaused, err := handler.IsSchedulerPaused(createdName)
 		c.Assert(err, IsNil)
 		c.Assert(isPaused, Equals, false)
 	}
@@ -215,23 +222,27 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 
 	// test pause.
 	input := make(map[string]interface{})
-	input["delay"] = "5"
+	input["delay"] = "30"
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
 	c.Assert(err, IsNil)
-	time.Sleep(time.Second)
-	isPaused, err := handler.IsSchedulerPause(createdName)
+	isPaused, err := handler.IsSchedulerPaused(createdName)
 	c.Assert(err, IsNil)
 	c.Assert(isPaused, Equals, true)
-	time.Sleep(time.Second * 4)
-	isPaused, err = handler.IsSchedulerPause(createdName)
+	input["delay"] = "1"
+	pauseArgs, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
+	c.Assert(err, IsNil)
+	time.Sleep(time.Second)
+	isPaused, err = handler.IsSchedulerPaused(createdName)
 	c.Assert(err, IsNil)
 	c.Assert(isPaused, Equals, false)
 
 	// test resume.
 	input = make(map[string]interface{})
-	input["delay"] = "5"
+	input["delay"] = "30"
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
@@ -241,7 +252,7 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
 	c.Assert(err, IsNil)
-	isPaused, err = handler.IsSchedulerPause(createdName)
+	isPaused, err = handler.IsSchedulerPaused(createdName)
 	c.Assert(err, IsNil)
 	c.Assert(isPaused, Equals, false)
 
