@@ -225,9 +225,8 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 }
 
 type evictLeaderHandler struct {
-	storage *core.Storage
-	rd      *render.Render
-	config  *evictLeaderSchedulerConfig
+	rd     *render.Render
+	config *evictLeaderSchedulerConfig
 }
 
 func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -300,7 +299,6 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	}
 
 	handler.rd.JSON(w, http.StatusInternalServerError, ErrScheduleConfigNotExist)
-	return
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {

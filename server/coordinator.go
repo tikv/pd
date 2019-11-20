@@ -389,12 +389,6 @@ func (c *coordinator) shouldRun() bool {
 	return c.cluster.isPrepared()
 }
 
-func (c *coordinator) getCluster() *RaftCluster {
-	c.RLock()
-	defer c.RUnlock()
-	return c.cluster
-}
-
 func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
