@@ -64,7 +64,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	c.Assert(err, IsNil)
 
 	l = map[string]interface{}{
-		"metric-query-address": "http://127.0.0.1:9090",
+		"metric-storage": "http://127.0.0.1:9090",
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
@@ -77,7 +77,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	cfg.Replication.MaxReplicas = 5
 	cfg.Replication.LocationLabels = []string{"zone", "rack"}
 	cfg.Schedule.RegionScheduleLimit = 10
-	cfg.PDServerCfg.MetricQueryAddress = "http://127.0.0.1:9090"
+	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:9090"
 	c.Assert(cfg, DeepEquals, newCfg)
 }
 
