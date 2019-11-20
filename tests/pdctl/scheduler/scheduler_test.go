@@ -16,6 +16,7 @@ package scheduler_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -143,7 +144,6 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	configInfo := make(map[string]interface{})
 	c.Assert(json.Unmarshal(output, &configInfo), IsNil)
 	expectedConfig := make(map[string]interface{})
-	expectedConfig["name"] = "evict-leader-scheduler"
 	expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
 	c.Assert(expectedConfig, DeepEquals, configInfo)
 
@@ -266,7 +266,37 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}, "4": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
 	c.Assert(expectedConfig, DeepEquals, configInfo)
 
-	// evict-scheduler remove command
+	// evict-scheduler remove command [old]
+	args = []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-4"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "scheduler", "show"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	schedulers = schedulers[:0]
+	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+	expected = map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+		"grant-leader-scheduler-1":     true,
+		"evict-leader-scheduler":       true,
+	}
+	for _, scheduler := range schedulers {
+		c.Assert(expected[scheduler], Equals, true)
+	}
+
+	//check remove success
+	args = []string{"-u", pdAddr, "scheduler", "config", "show", "evict-leader-scheduler"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	configInfo = make(map[string]interface{})
+	c.Assert(json.Unmarshal(output, &configInfo), IsNil)
+	fmt.Printf("[qinggniq] configInfo: %v\n", configInfo)
+	expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
+	c.Assert(expectedConfig, DeepEquals, configInfo)
+
+	// scheduler remove command [new], remove whole evict-leader-scheduler
 	args = []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-2"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
@@ -281,25 +311,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"label-scheduler":              true,
 		"grant-leader-scheduler-1":     true,
 	}
-	for _, scheduler := range schedulers {
-		c.Assert(expected[scheduler], Equals, true)
-	}
-
-	// scheduler delete command
-	args = []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	args = []string{"-u", pdAddr, "scheduler", "show"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	schedulers = schedulers[:0]
-	c.Assert(json.Unmarshal(output, &schedulers), IsNil)
-	expected = map[string]bool{
-		"balance-leader-scheduler":     true,
-		"balance-hot-region-scheduler": true,
-		"label-scheduler":              true,
-		"grant-leader-scheduler-1":     true,
-	}
+	fmt.Printf("[qinggniq] %v\n", schedulers)
 	for _, scheduler := range schedulers {
 		c.Assert(expected[scheduler], Equals, true)
 	}

@@ -25,9 +25,10 @@ import (
 )
 
 var (
-	schedulersPrefix         = "pd/api/v1/schedulers"
-	configSchedulersPrefix   = "pd/api/v1/schedule-config"
-	evictLeaderSchedulerName = "evict-leader-scheduler"
+	schedulersPrefix             = "pd/api/v1/schedulers"
+	configSchedulersPrefix       = "pd/api/v1/schedule-config"
+	evictLeaderSchedulerName     = "evict-leader-scheduler"
+	evictSchedulerHasNoStoreInfo = "No store in evict-leader-scheduler-config"
 )
 
 // NewSchedulerCommand returns a scheduler command.
@@ -338,14 +339,28 @@ func NewRemoveSchedulerCommand() *cobra.Command {
 	return c
 }
 
+func convertReomveSchedulerToRemoveConfig(cmd *cobra.Command, schedulerName string) {
+	cmd.Use = schedulerName + " "
+}
+
+func restoreCommand(cmd *cobra.Command, origion string) {
+	cmd.Use = origion
+}
+
 func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.Usage())
 		return
 	}
 	//FIXME: maybe there is a more graceful method to handler it
-	if strings.HasPrefix(args[0], evictLeaderSchedulerName) {
-		args[0] = evictLeaderSchedulerName
+	if args[0] != evictLeaderSchedulerName && strings.HasPrefix(args[0], evictLeaderSchedulerName) {
+		args = strings.Split(args[0], "-")
+		args = args[len(args)-1:]
+		cmdStore := cmd.Use
+		convertReomveSchedulerToRemoveConfig(cmd, evictLeaderSchedulerName)
+		deleteConfigSchedulerForStoreCommandFunc(cmd, args)
+		restoreCommand(cmd, cmdStore)
+		return
 	}
 	path := schedulersPrefix + "/" + args[0]
 	_, err := doRequest(cmd, path, http.MethodDelete)
@@ -353,6 +368,7 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	}
+
 	cmd.Println("Success!")
 }
 
@@ -364,6 +380,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 	}
 	c.AddCommand(NewConfigUpdateCommand())
 	c.AddCommand(NewConfigShowCommand())
+	c.AddCommand(NewConfigDeleteCommand())
 	return c
 }
 
@@ -387,6 +404,16 @@ func NewConfigShowCommand() *cobra.Command {
 	return c
 }
 
+//NewConfigDeleteCommand return a command to delete config
+func NewConfigDeleteCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "delete <scheduler>",
+		Short: "delete a scheduler's config",
+	}
+	c.AddCommand(NewConfigDeleteEvictLeaderSchedulerCommand())
+	return c
+}
+
 //NewConfigUpdateEvictLeaderSchedulerCommand return a command to config evict-leader-scheduler
 func NewConfigUpdateEvictLeaderSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
@@ -407,12 +434,21 @@ func NewConfigShowEvictLeaderSchedulerCommand() *cobra.Command {
 	return c
 }
 
+//NewConfigDeleteEvictLeaderSchedulerCommand delete a config for store_id
+func NewConfigDeleteEvictLeaderSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-leader-scheduler <store_id>",
+		Short: "delete the config of evict-leader-scheduler",
+		Run:   deleteConfigSchedulerForStoreCommandFunc,
+	}
+	return c
+}
+
 func updateConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-
 	storeID, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
 		cmd.Println(err)
@@ -438,4 +474,32 @@ func showConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
+}
+
+//convertReomveConfigToReomveScheduler make cmd can be used at removeCommandFunc
+func convertReomveConfigToReomveScheduler(cmd *cobra.Command) {
+	cmd.Use = "remove "
+}
+
+func deleteConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.Usage())
+		return
+	}
+	path := path.Join(configSchedulersPrefix, "/", cmd.Name(), "delete", args[0])
+	resp, err := doRequest(cmd, path, http.MethodDelete)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	//FIXME: remove the judege when the new command replace old command
+	if len(resp) < 100 && strings.Contains(resp, evictSchedulerHasNoStoreInfo) {
+		args = append(args[:0], evictLeaderSchedulerName)
+		cmdStore := cmd.Use
+		convertReomveConfigToReomveScheduler(cmd)
+		removeSchedulerCommandFunc(cmd, args)
+		restoreCommand(cmd, cmdStore)
+		return
+	}
+	cmd.Println("Success!")
 }

@@ -105,7 +105,6 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				exceptMap := make(map[string]interface{})
 				exceptMap["1"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
 				c.Assert(resp["store-id-ranges"], DeepEquals, exceptMap)
-				c.Assert(resp["name"], Equals, "evict-leader-scheduler")
 
 				//using /pd/v1/schedule-config/evict-leader-scheduler/config to add new store to evict-leader-scheduler
 				input := make(map[string]interface{})
@@ -119,7 +118,14 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				exceptMap["2"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
 				c.Assert(resp["store-id-ranges"], DeepEquals, exceptMap)
-				c.Assert(resp["name"], Equals, "evict-leader-scheduler")
+
+				//using /pd/v1/schedule-config/evict-leader-scheduler/config to add new store to evict-leader-scheduler
+				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name, "2")
+				c.Assert(doDelete(deleteURL), IsNil)
+				resp = make(map[string]interface{})
+				c.Assert(readJSON(listURL, &resp), IsNil)
+				delete(exceptMap, "2")
+				c.Assert(resp["store-id-ranges"], DeepEquals, exceptMap)
 			},
 		},
 	}
