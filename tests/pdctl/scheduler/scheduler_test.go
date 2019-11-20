@@ -296,7 +296,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
 	c.Assert(expectedConfig, DeepEquals, configInfo)
 
-	// scheduler remove command [new], remove whole evict-leader-scheduler
+	// scheduler remove command, when remove the last store, it should remove whole scheduler
 	args = []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-2"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
