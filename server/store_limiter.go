@@ -22,10 +22,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// StateCalcDuration is the duration being used to caculate the cluster
-// state
-const StateCalcDuration = 300 // 5 minutes
-
 // StoreLimiter adjust the store limit dynamically
 type StoreLimiter struct {
 	m     sync.RWMutex
@@ -52,7 +48,7 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 	s.state.Collect((*StatEntry)(stats))
 
 	rate := float64(0)
-	state := s.state.State(StateCalcDuration)
+	state := s.state.State()
 	switch state {
 	case LoadStateIdle:
 		rate = float64(s.scene.Idle) / schedule.StoreBalanceBaseTime

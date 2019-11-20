@@ -98,19 +98,14 @@ func (s *testClusterStatSuite) TestClusterStatCPU(c *C) {
 	cst := NewClusterStatEntries(N)
 	c.Assert(cst, NotNil)
 
-	// heartbeat per 10s
-	interval := &pdpb.TimeInterval{
-		StartTimestamp: 1,
-		EndTimestamp:   11,
-	}
 	// the average cpu usage is 20%
 	usages := cpu(20)
+	ThreadsCollected = []string{"cpu:"}
 
 	// 2 entries per store
 	for i := 0; i < 2*N; i++ {
 		entry := &StatEntry{
 			StoreId:   uint64(i % N),
-			Interval:  interval,
 			CpuUsages: usages,
 		}
 		cst.Append(entry)
@@ -125,7 +120,12 @@ func (s *testClusterStatSuite) TestClusterStatState(c *C) {
 		cst := NewClusterStatEntries(10)
 		c.Assert(cst, NotNil)
 
+<<<<<<< HEAD
+=======
+		// the average cpu usage is 20%
+>>>>>>> schedule: fix unit tests
 		usages := cpu(usage)
+		ThreadsCollected = []string{"cpu:"}
 
 		for i := 0; i < NumberOfEntries; i++ {
 			entry := &StatEntry{
@@ -137,7 +137,7 @@ func (s *testClusterStatSuite) TestClusterStatState(c *C) {
 		return &ClusterState{cst}
 	}
 	c.Assert(Load(0).State(), Equals, LoadStateIdle)
-	c.Assert(Load(20).State(), Equals, LoadStateLow)
-	c.Assert(Load(50).State(), Equals, LoadStateNormal)
-	c.Assert(Load(90).State(), Equals, LoadStateHigh)
+	c.Assert(Load(5).State(), Equals, LoadStateLow)
+	c.Assert(Load(10).State(), Equals, LoadStateNormal)
+	c.Assert(Load(30).State(), Equals, LoadStateHigh)
 }
