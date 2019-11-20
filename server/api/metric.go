@@ -14,12 +14,13 @@
 package api
 
 import (
+	"fmt"
 	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
 	"net/http"
+	"net/url"
 )
 
-const prometheusQueryAPI  = "/api/v1/query"
+const prometheusQueryAPI = "/api/v1/query"
 
 type queryMetric struct {
 	s *server.Server
@@ -32,14 +33,21 @@ func newQueryMetric(s *server.Server) *queryMetric {
 func (h *queryMetric) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	metricAddr := h.s.GetConfig().Metric.StorageAddress
 	if metricAddr == "" {
-		metricAddr = "http://127.0.0.1:9090"
+		http.Error(w, "metric storage address doesn't set", http.StatusInternalServerError)
+		return
 	}
-	urls, err := config.ParseUrls(metricAddr)
+	u, err := url.Parse(metricAddr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	r.URL.Path=prometheusQueryAPI
-	newCustomReverseProxies(urls).ServeHTTP(w, r)
-}
 
+	switch u.Scheme {
+	case "http", "https":
+		r.URL.Path = prometheusQueryAPI
+		newCustomReverseProxies([]url.URL{*u}).ServeHTTP(w, r)
+	default:
+		// TODO: Support read data by self after support store metric data in PD/TiKV.
+		http.Error(w, fmt.Sprintf("schema of metric storage address is no support, address: %v", metricAddr), http.StatusInternalServerError)
+	}
+}
