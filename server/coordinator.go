@@ -44,9 +44,8 @@ const (
 )
 
 var (
-	errSchedulerExisted   = errors.New("scheduler existed")
-	errSchedulerNotFound  = errors.New("scheduler not found")
-	errPauseSchedulerFail = errors.New("some schedulers have already paused")
+	errSchedulerExisted  = errors.New("scheduler existed")
+	errSchedulerNotFound = errors.New("scheduler not found")
 )
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.

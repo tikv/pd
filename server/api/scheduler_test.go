@@ -108,7 +108,6 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		body, err := json.Marshal(input)
 		c.Assert(err, IsNil)
 		s.testAddAndRemoveScheduler(ca.name, ca.createdName, body, ca.extraTestFunc, c)
-		input = make(map[string]interface{})
 		s.testPauseAndResumeScheduler(ca.name, ca.createdName, body, ca.extraTestFunc, c)
 	}
 
@@ -117,10 +116,6 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 	// add schedulers.
 	cases = cases[:3]
 	for _, ca := range cases {
-		createdName := ca.createdName
-		if createdName == "" {
-			createdName = ca.name
-		}
 		input := make(map[string]interface{})
 		input["name"] = ca.name
 		for _, a := range ca.args {
@@ -165,6 +160,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 	c.Assert(err, IsNil)
 	input["delay"] = "0"
 	pauseArgs, err = json.Marshal(input)
+	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/all", pauseArgs)
 	c.Assert(err, IsNil)
 	for _, ca := range cases {
@@ -230,6 +226,7 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 	c.Assert(isPaused, Equals, true)
 	time.Sleep(time.Second * 4)
 	isPaused, err = handler.IsSchedulerPause(createdName)
+	c.Assert(err, IsNil)
 	c.Assert(isPaused, Equals, false)
 
 	// test resume.
@@ -241,6 +238,7 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 	c.Assert(err, IsNil)
 	input["delay"] = "0"
 	pauseArgs, err = json.Marshal(input)
+	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
 	c.Assert(err, IsNil)
 	isPaused, err = handler.IsSchedulerPause(createdName)
