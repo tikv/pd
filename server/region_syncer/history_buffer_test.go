@@ -75,7 +75,7 @@ func (t *testHistoryBuffer) TestBufferSize(c *C) {
 	for _, r := range regions {
 		index := h2.nextIndex()
 		h2.Record(r)
-		c.Assert(h2.get(uint64(index)), Equals, r)
+		c.Assert(h2.get(index), Equals, r)
 	}
 
 	c.Assert(h2.nextIndex(), Equals, uint64(107))

@@ -232,25 +232,25 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 	// Transfer peer.
 	region := tc.GetRegion(1).Clone()
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitPromoteLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitRemovePeer(c, stream, region, 4)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 
 	// Transfer leader.
 	region = tc.GetRegion(2).Clone()
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitTransferLeader(c, stream, region, 2)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 }
 
-func dispatchHeartbeat(c *C, co *coordinator, region *core.RegionInfo, stream mockhbstream.HeartbeatStream) error {
+func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream mockhbstream.HeartbeatStream) error {
 	co.hbStreams.bindStream(region.GetLeader().GetStoreId(), stream)
 	if err := co.cluster.putRegion(region.Clone()); err != nil {
 		return err
@@ -430,11 +430,11 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	// Add peer to store 1.
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
 	region := tc.GetRegion(1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitPromoteLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 
 	// Peer in store 3 is down, remove peer in store 3 and add peer to store 4.
@@ -446,20 +446,20 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	region = region.Clone(
 		core.WithDownPeers(append(region.GetDownPeers(), downPeer)),
 	)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 4)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitPromoteLearner(c, stream, region, 4)
 	region = region.Clone(core.WithDownPeers(nil))
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 
 	// Remove peer from store 4.
 	c.Assert(tc.addLeaderRegion(2, 1, 2, 3, 4), IsNil)
 	region = tc.GetRegion(2)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitRemovePeer(c, stream, region, 4)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 
 	// Remove offline peer directly when it's pending.
@@ -467,7 +467,7 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	c.Assert(tc.setStoreOffline(3), IsNil)
 	region = tc.GetRegion(3)
 	region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(3)}))
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 }
 
@@ -491,25 +491,25 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 	region := tc.GetRegion(1).Clone()
 
 	// Add new peer.
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitPromoteLearner(c, stream, region, 1)
 
 	// If the new peer is pending, the operator will not finish.
 	region = region.Clone(core.WithPendingPeers(append(region.GetPendingPeers(), region.GetStorePeer(1))))
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 	c.Assert(co.opController.GetOperator(region.GetID()), NotNil)
 
 	// The new peer is not pending now, the operator will finish.
 	// And we will proceed to remove peer in store 4.
 	region = region.Clone(core.WithPendingPeers(nil))
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitRemovePeer(c, stream, region, 4)
 	c.Assert(tc.addLeaderRegion(1, 1, 2, 3), IsNil)
 	region = tc.GetRegion(1).Clone()
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitNoResponse(c, stream)
 }
 
@@ -637,16 +637,16 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	// Transfer all leaders to store 1.
 	waitOperator(c, co, 2)
 	region2 := tc.GetRegion(2)
-	c.Assert(dispatchHeartbeat(c, co, region2, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region2, stream), IsNil)
 	region2 = waitTransferLeader(c, stream, region2, 1)
-	c.Assert(dispatchHeartbeat(c, co, region2, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region2, stream), IsNil)
 	waitNoResponse(c, stream)
 
 	waitOperator(c, co, 3)
 	region3 := tc.GetRegion(3)
-	c.Assert(dispatchHeartbeat(c, co, region3, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region3, stream), IsNil)
 	region3 = waitTransferLeader(c, stream, region3, 1)
-	c.Assert(dispatchHeartbeat(c, co, region3, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region3, stream), IsNil)
 	waitNoResponse(c, stream)
 }
 
@@ -818,9 +818,9 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	stream := mockhbstream.NewHeartbeatStream()
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 2)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitPromoteLearner(c, stream, region, 2)
 	co.stop()
 	co.wg.Wait()
@@ -828,9 +828,9 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	// Recreate coodinator then add another replica on store 3.
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 3)
-	c.Assert(dispatchHeartbeat(c, co, region, stream), IsNil)
+	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitPromoteLearner(c, stream, region, 3)
 }
 

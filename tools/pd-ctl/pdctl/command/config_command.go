@@ -51,6 +51,7 @@ func NewShowConfigCommand() *cobra.Command {
 		Run:   showConfigCommandFunc,
 	}
 	sc.AddCommand(NewShowAllConfigCommand())
+	sc.AddCommand(NewShowScheduleConfigCommand())
 	sc.AddCommand(NewShowReplicationConfigCommand())
 	sc.AddCommand(NewShowLabelPropertyCommand())
 	sc.AddCommand(NewShowClusterVersionCommand())
@@ -63,6 +64,16 @@ func NewShowAllConfigCommand() *cobra.Command {
 		Use:   "all",
 		Short: "show all config of PD",
 		Run:   showAllConfigCommandFunc,
+	}
+	return sc
+}
+
+// NewShowScheduleConfigCommand return a show all subcommand of show subcommand
+func NewShowScheduleConfigCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "schedule",
+		Short: "show schedule config of PD",
+		Run:   showScheduleConfigCommandFunc,
 	}
 	return sc
 }
@@ -172,6 +183,15 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(string(r))
+}
+
+func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, schedulePrefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get config: %s\n", err)
+		return
+	}
+	cmd.Println(r)
 }
 
 func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {

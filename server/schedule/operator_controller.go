@@ -324,7 +324,7 @@ func isHigherPriorityOperator(new, old *operator.Operator) bool {
 	return new.GetPriorityLevel() > old.GetPriorityLevel()
 }
 
-func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
+func (oc *OperatorController) addOperatorLocked(op *operator.Operator) {
 	regionID := op.RegionID()
 
 	log.Info("add operator", zap.Uint64("region-id", regionID), zap.Reflect("operator", op))
@@ -362,7 +362,6 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 
 	heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op, time: oc.getNextPushOperatorTime(step, time.Now())})
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
-	return true
 }
 
 // RemoveOperator removes a operator from the running operators.

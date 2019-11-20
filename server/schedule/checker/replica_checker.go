@@ -26,7 +26,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const replicaCheckerName = "replica-checker"
+const (
+	replicaCheckerName = "replica-checker"
+	minReplicaCount    = 1
+)
 
 const (
 	offlineStatus = "offline"
@@ -277,7 +280,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 
 	replace := fmt.Sprintf("replace-%s-replica", status)
 	var op *operator.Operator
-	if status == offlineStatus {
+	if status == offlineStatus && r.cluster.GetMaxReplicas() > minReplicaCount {
 		op, err = operator.CreateOfflinePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer)
 	} else {
 		op, err = operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer)

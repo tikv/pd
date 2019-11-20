@@ -41,7 +41,7 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 		{Id: 8, Address: "mock://tikv-8", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h2"}}},
 	}
 	storesStats := NewStoresStats()
-	var stores []*core.StoreInfo
+	stores := make([]*core.StoreInfo, 0, len(metaStores))
 	for _, m := range metaStores {
 		s := core.NewStoreInfo(m, core.SetLastHeartbeatTS(time.Now()))
 		storesStats.CreateRollingStoreStats(m.GetId())
