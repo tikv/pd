@@ -34,7 +34,8 @@ const (
 	// EvictLeaderName is evict leader scheduler name.
 	EvictLeaderName = "evict-leader-scheduler"
 	// EvictLeaderType is evict leader scheduler type.
-	EvictLeaderType = "evict-leader"
+	EvictLeaderType        = "evict-leader"
+	noStoreInSchedulerInfo = "No store in evict-leader-scheduler-config"
 )
 
 func init() {
@@ -236,26 +237,24 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	}
 	var args []string
 	var exists bool
-	idFloat, ok := (input["store_id"]).(float64)
+	var id uint64
+	idFloat, ok := input["store_id"].(float64)
 	if ok {
-		if idFloat < 0 {
-			handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Stroe Id should be positive number type, please input number"))
-			return
-		}
-		id := (uint64)(idFloat)
+		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
 			if err := (*handler.config.cluster).BlockStore(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
 				return
 			}
 		}
-		args = append(args, strconv.FormatInt(int64(id), 10))
+		args = append(args, strconv.FormatUint(id, 10))
 	}
+
 	ranges, ok := (input["ranges"]).([]string)
 	if ok {
 		args = append(args, ranges...)
 	} else if exists {
-		args = append(args, handler.config.getRanges((uint64)(idFloat))...)
+		args = append(args, handler.config.getRanges(id)...)
 	}
 
 	handler.config.BuildWithArgs(args)
@@ -292,7 +291,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 
 		var resp interface{}
 		if len(handler.config.StoreIDWitRanges) == 0 {
-			resp = "No store in evict-leader-scheduler-config"
+			resp = noStoreInSchedulerInfo
 		}
 		handler.rd.JSON(w, http.StatusOK, resp)
 		return

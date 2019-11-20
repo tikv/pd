@@ -16,7 +16,6 @@ package scheduler_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -292,7 +291,6 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	c.Assert(err, IsNil)
 	configInfo = make(map[string]interface{})
 	c.Assert(json.Unmarshal(output, &configInfo), IsNil)
-	fmt.Printf("[qinggniq] configInfo: %v\n", configInfo)
 	expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
 	c.Assert(expectedConfig, DeepEquals, configInfo)
 
@@ -311,7 +309,6 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"label-scheduler":              true,
 		"grant-leader-scheduler-1":     true,
 	}
-	fmt.Printf("[qinggniq] %v\n", schedulers)
 	for _, scheduler := range schedulers {
 		c.Assert(expected[scheduler], Equals, true)
 	}

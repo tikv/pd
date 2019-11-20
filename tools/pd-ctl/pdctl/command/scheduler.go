@@ -119,7 +119,7 @@ func checkEvicLeaderSchedulerExist(cmd *cobra.Command) (bool, error) {
 	var scheudlerList []string
 	json.Unmarshal([]byte(r), &scheudlerList)
 	for idx := range scheudlerList {
-		if scheudlerList[idx] == evictLeaderSchedulerName {
+		if strings.Contains(scheudlerList[idx], evictLeaderSchedulerName) {
 			return true, nil
 		}
 	}
@@ -340,11 +340,15 @@ func NewRemoveSchedulerCommand() *cobra.Command {
 }
 
 func convertReomveSchedulerToRemoveConfig(cmd *cobra.Command, schedulerName string) {
-	cmd.Use = schedulerName + " "
+	setCommandUse(cmd, schedulerName)
 }
 
-func restoreCommand(cmd *cobra.Command, origion string) {
-	cmd.Use = origion
+func setCommandUse(cmd *cobra.Command, targetUse string) {
+	cmd.Use = targetUse + " "
+}
+
+func restoreCommandUse(cmd *cobra.Command, origionCommandUse string) {
+	cmd.Use = origionCommandUse
 }
 
 func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
@@ -358,8 +362,8 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		args = args[len(args)-1:]
 		cmdStore := cmd.Use
 		convertReomveSchedulerToRemoveConfig(cmd, evictLeaderSchedulerName)
+		defer restoreCommandUse(cmd, cmdStore)
 		deleteConfigSchedulerForStoreCommandFunc(cmd, args)
-		restoreCommand(cmd, cmdStore)
 		return
 	}
 	path := schedulersPrefix + "/" + args[0]
@@ -477,7 +481,7 @@ func showConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 
 //convertReomveConfigToReomveScheduler make cmd can be used at removeCommandFunc
 func convertReomveConfigToReomveScheduler(cmd *cobra.Command) {
-	cmd.Use = "remove "
+	setCommandUse(cmd, "remove")
 }
 
 func deleteConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
@@ -496,8 +500,8 @@ func deleteConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string)
 		args = append(args[:0], evictLeaderSchedulerName)
 		cmdStore := cmd.Use
 		convertReomveConfigToReomveScheduler(cmd)
+		defer restoreCommandUse(cmd, cmdStore)
 		removeSchedulerCommandFunc(cmd, args)
-		restoreCommand(cmd, cmdStore)
 		return
 	}
 	cmd.Println("Success!")
