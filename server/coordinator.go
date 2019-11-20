@@ -554,5 +554,6 @@ func (s *scheduleController) AllowSchedule() bool {
 
 // isPaused returns if a schedueler is paused.
 func (s *scheduleController) isPaused() bool {
-	return time.Now().Unix() < s.DelayUntil
+	delayUntil := atomic.LoadInt64(&s.DelayUntil)
+	return time.Now().Unix() < delayUntil
 }
