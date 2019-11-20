@@ -676,14 +676,10 @@ func (r *RegionsInfo) GetRegions() []*RegionInfo {
 func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.GetStoreLeaderCount(storeID)+r.GetStoreFollowerCount(storeID))
 	if leaders, ok := r.leaders[storeID]; ok {
-		for _, region := range leaders.scanRanges() {
-			regions = append(regions, region)
-		}
+		regions = append(regions, leaders.scanRanges()...)
 	}
 	if followers, ok := r.followers[storeID]; ok {
-		for _, region := range followers.scanRanges() {
-			regions = append(regions, region)
-		}
+		regions = append(regions, followers.scanRanges()...)
 	}
 	return regions
 }

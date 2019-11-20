@@ -423,7 +423,6 @@ type testBalanceLeaderRangeSchedulerSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
-	lb     schedule.Scheduler
 	oc     *schedule.OperatorController
 }
 

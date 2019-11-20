@@ -40,7 +40,7 @@ type Interpreter interface {
 }
 
 // CompileRegex is to provide regexp for transfer counter.
-func (TransferCounter) CompileRegex(operator string) (*regexp.Regexp, error) {
+func (c *TransferCounter) CompileRegex(operator string) (*regexp.Regexp, error) {
 	var r *regexp.Regexp
 	var err error
 
@@ -56,7 +56,7 @@ func (TransferCounter) CompileRegex(operator string) (*regexp.Regexp, error) {
 	return r, err
 }
 
-func (TransferCounter) parseLine(content string, r *regexp.Regexp) ([]uint64, error) {
+func (c *TransferCounter) parseLine(content string, r *regexp.Regexp) ([]uint64, error) {
 	results := make([]uint64, 0, 4)
 	subStrings := r.FindStringSubmatch(content)
 	if len(subStrings) == 0 {

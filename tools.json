@@ -5,10 +5,6 @@
       "Commit": "7773f47324c2bf1c8f7a5500aff2b6c01d3ed73b"
     },
     {
-      "Repository": "github.com/dnephin/govet",
-      "Commit": "4a96d43e39d340b63daa8bc5576985aa599885f6"
-    },
-    {
       "Repository": "github.com/pingcap/failpoint/failpoint-ctl",
       "Commit": "30cc7431d99c6a7f2836387d4bb255a3bd6a5e0a"
     },
