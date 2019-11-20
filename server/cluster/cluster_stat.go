@@ -249,7 +249,7 @@ func (cs *ClusterState) State(excludes ...uint64) LoadState {
 		return LoadStateIdle
 	case cpu >= 5 && cpu < 10:
 		return LoadStateLow
-	case cpu >= 10 && cpu < 20:
+	case cpu >= 10 && cpu < 30:
 		return LoadStateNormal
 	case cpu >= 30:
 		return LoadStateHigh
