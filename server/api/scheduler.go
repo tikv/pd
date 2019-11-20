@@ -188,11 +188,7 @@ func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	name, ok := input["name"].(string)
-	if !ok {
-		h.r.JSON(w, http.StatusBadRequest, "missing scheduler name")
-		return
-	}
+	name := mux.Vars(r)["name"]
 	str, ok := input["time"].(string)
 	if !ok {
 		h.r.JSON(w, http.StatusBadRequest, "missing pause time")

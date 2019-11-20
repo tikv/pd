@@ -84,6 +84,19 @@ func (h *Handler) GetRaftCluster() *RaftCluster {
 	return h.s.GetRaftCluster()
 }
 
+// GetSchedulePauseState returns whether scheduler is paused.
+func (h *Handler) GetSchedulePauseState(name string) (bool, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return true, err
+	}
+	sc, ok := c.schedulers[name]
+	if !ok {
+		return true, errors.Errorf("scheduler %v not found", name)
+	}
+	return sc.isPaused(), nil
+}
+
 // GetScheduleConfig returns ScheduleConfig.
 func (h *Handler) GetScheduleConfig() *config.ScheduleConfig {
 	return h.s.GetScheduleConfig()

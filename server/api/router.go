@@ -42,7 +42,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rootRouter.HandleFunc("/api/v1/schedulers", schedulerHandler.List).Methods("GET")
 	rootRouter.HandleFunc("/api/v1/schedulers", schedulerHandler.Post).Methods("POST")
 	rootRouter.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
-	rootRouter.HandleFunc("/api/v1/schedulers/pause", schedulerHandler.PauseOrResume).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.PauseOrResume).Methods("POST")
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
 	rootRouter.PathPrefix(server.ScheduleConfigHandlerPath).Handler(schedulerConfigHandler)
 
