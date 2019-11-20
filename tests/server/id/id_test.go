@@ -23,29 +23,41 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
+	"go.uber.org/goleak"
 )
 
 func Test(t *testing.T) {
 	TestingT(t)
 }
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 const allocStep = uint64(1000)
 
 var _ = Suite(&testAllocIDSuite{})
 
-type testAllocIDSuite struct{}
+type testAllocIDSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
 
 func (s *testAllocIDSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
 }
 
+func (s *testAllocIDSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
 func (s *testAllocIDSuite) TestID(c *C) {
 	var err error
 	cluster, err := tests.NewTestCluster(1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -89,7 +101,7 @@ func (s *testAllocIDSuite) TestCommand(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 

@@ -14,6 +14,7 @@
 package region_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -41,9 +42,11 @@ func (s *regionTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	url := cluster.GetConfig().GetClientURLs()
@@ -56,13 +59,15 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 	pdctl.MustPutStore(c, leaderServer.GetServer(), store.Id, store.State, store.Labels)
 
 	echo := pdctl.GetEcho([]string{"-u", url, "region", "key", "--format=raw", " "})
-	c.Assert(strings.Contains(string(echo), "unknown flag"), IsFalse)
+	c.Assert(strings.Contains(echo, "unknown flag"), IsFalse)
 }
 
 func (s *regionTestSuite) TestRegion(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()

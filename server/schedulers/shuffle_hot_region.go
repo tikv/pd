@@ -28,8 +28,15 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// ShuffleHotRegionName is shuffle hot region scheduler name.
+	ShuffleHotRegionName = "shuffle-hot-region-scheduler"
+	// ShuffleHotRegionType is shuffle hot region scheduler type.
+	ShuffleHotRegionType = "shuffle-hot-region"
+)
+
 func init() {
-	schedule.RegisterSliceDecoderBuilder("shuffle-hot-region", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(ShuffleHotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleHotRegionSchedulerConfig)
 			if !ok {
@@ -43,18 +50,22 @@ func init() {
 				}
 				conf.Limit = limit
 			}
+			conf.Name = ShuffleHotRegionName
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler("shuffle-hot-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(ShuffleHotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &shuffleHotRegionSchedulerConfig{Limit: uint64(1)}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newShuffleHotRegionScheduler(opController, conf), nil
 	})
 }
 
 type shuffleHotRegionSchedulerConfig struct {
+	Name  string `json:"name"`
 	Limit uint64 `json:"limit"`
 }
 
@@ -83,11 +94,11 @@ func newShuffleHotRegionScheduler(opController *schedule.OperatorController, con
 }
 
 func (s *shuffleHotRegionScheduler) GetName() string {
-	return "shuffle-hot-region-scheduler"
+	return s.conf.Name
 }
 
 func (s *shuffleHotRegionScheduler) GetType() string {
-	return "shuffle-hot-region"
+	return ShuffleHotRegionType
 }
 
 func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -107,21 +118,25 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 }
 
 func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster opt.Cluster) []*operator.Operator {
+	storesStats := cluster.GetStoresStats()
 	switch typ {
 	case hotReadRegionBalance:
-		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), cluster, core.LeaderKind)
+		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), storesStats.GetStoresBytesReadStat(), cluster, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stats.readStatAsLeader)
 	case hotWriteRegionBalance:
-		s.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), cluster, core.LeaderKind)
+		s.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), storesStats.GetStoresBytesWriteStat(), cluster, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stats.writeStatAsLeader)
 	}
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeStats statistics.StoreHotRegionsStat) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeStats statistics.StoreHotPeersStat) []*operator.Operator {
 	for _, stats := range storeStats {
-		i := s.r.Intn(len(stats.RegionsStat))
-		r := stats.RegionsStat[i]
+		if len(stats.Stats) < 1 {
+			continue
+		}
+		i := s.r.Intn(len(stats.Stats))
+		r := stats.Stats[i]
 		// select src region
 		srcRegion := cluster.GetRegion(r.RegionID)
 		if srcRegion == nil || len(srcRegion.GetDownPeers()) != 0 || len(srcRegion.GetPendingPeers()) != 0 {
@@ -162,7 +177,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeSta
 			log.Error("failed to allocate peer", zap.Error(err))
 			return nil
 		}
-		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destStoreID, destPeer.GetId())
+		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
 		if err != nil {
 			return nil
 		}

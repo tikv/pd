@@ -35,6 +35,7 @@ import (
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/checker"
+	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -83,6 +84,8 @@ type RaftCluster struct {
 	wg           sync.WaitGroup
 	quit         chan struct{}
 	regionSyncer *syncer.RegionSyncer
+
+	ruleManager *placement.RuleManager
 }
 
 // ClusterStatus saves some state information
@@ -317,6 +320,12 @@ func (c *RaftCluster) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		return core.NewStoreNotFoundErr(storeID)
 	}
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+	if newStore.IsLowSpace(c.GetLowSpaceRatio()) {
+		log.Warn("store does not have enough disk space",
+			zap.Uint64("store-id", newStore.GetID()),
+			zap.Uint64("capacity", newStore.GetCapacity()),
+			zap.Uint64("available", newStore.GetAvailable()))
+	}
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
@@ -619,18 +628,23 @@ func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
-func (c *RaftCluster) RandLeaderRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandLeaderRegion(storeID, opts...)
+func (c *RaftCluster) RandLeaderRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
+	return c.core.RandLeaderRegion(storeID, ranges, opts...)
 }
 
 // RandFollowerRegion returns a random region that has a follower on the store.
-func (c *RaftCluster) RandFollowerRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandFollowerRegion(storeID, opts...)
+func (c *RaftCluster) RandFollowerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
+	return c.core.RandFollowerRegion(storeID, ranges, opts...)
 }
 
 // RandPendingRegion returns a random region that has a pending peer on the store.
-func (c *RaftCluster) RandPendingRegion(storeID uint64, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandPendingRegion(storeID, opts...)
+func (c *RaftCluster) RandPendingRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
+	return c.core.RandPendingRegion(storeID, ranges, opts...)
+}
+
+// RandLearnerRegion returns a random region that has a learner peer on the store.
+func (c *RaftCluster) RandLearnerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
+	return c.core.RandLearnerRegion(storeID, ranges, opts...)
 }
 
 // RandHotRegionFromStore randomly picks a hot region in specified store.
@@ -862,7 +876,11 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:di
 	log.Warn("store has been Tombstone",
 		zap.Uint64("store-id", newStore.GetID()),
 		zap.String("store-address", newStore.GetAddress()))
-	return c.putStoreLocked(newStore)
+	err := c.putStoreLocked(newStore)
+	if err == nil {
+		c.coordinator.opController.RemoveStoreLimit(store.GetID())
+	}
+	return err
 }
 
 // BlockStore stops balancer from selecting the store.
@@ -988,7 +1006,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 				return err
 			}
 			c.coordinator.opController.RemoveStoreLimit(store.GetID())
-			log.Info("delete store successed",
+			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
 	}
@@ -1353,6 +1371,11 @@ func (c *RaftCluster) IsLocationReplacementEnabled() bool {
 	return c.opt.IsLocationReplacementEnabled()
 }
 
+// IsDebugMetricsEnabled mocks method
+func (c *RaftCluster) IsDebugMetricsEnabled() bool {
+	return c.opt.IsDebugMetricsEnabled()
+}
+
 // CheckLabelProperty is used to check label property.
 func (c *RaftCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
 	return c.opt.CheckLabelProperty(typ, labels)
@@ -1421,6 +1444,18 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	}
 	c.core.PutRegion(region)
 	return nil
+}
+
+// GetRuleManager returns the rule manager reference.
+func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
+	c.RLock()
+	defer c.RUnlock()
+	return c.ruleManager
+}
+
+// FitRegion tries to fit the region with placement rules.
+func (c *RaftCluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
+	return c.GetRuleManager().FitRegion(c, region)
 }
 
 type prepareChecker struct {

@@ -14,6 +14,7 @@
 package log_test
 
 import (
+	"context"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -36,9 +37,11 @@ func (s *logTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *logTestSuite) TestLog(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()

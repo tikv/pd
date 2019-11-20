@@ -21,22 +21,36 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/mock/mockid"
+	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/tests"
+	"go.uber.org/goleak"
 )
 
 func Test(t *testing.T) {
 	TestingT(t)
 }
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 var _ = Suite(&serverTestSuite{})
 
-type serverTestSuite struct{}
+type serverTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
+}
+
+func (s *serverTestSuite) TearDownSuite(c *C) {
+	s.cancel()
 }
 
 type idAllocator struct {
@@ -53,7 +67,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
@@ -97,7 +111,7 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
@@ -129,14 +143,14 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	// restart pd1
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
-	err = leaderServer.Run(context.TODO())
+	err = leaderServer.Run(s.ctx)
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd1")
 
 	// join new PD
 	pd2, err := cluster.Join()
 	c.Assert(err, IsNil)
-	err = pd2.Run(context.TODO())
+	err = pd2.Run(s.ctx)
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd1")
 	// waiting for synchronization to complete

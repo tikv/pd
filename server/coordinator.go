@@ -16,6 +16,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -36,9 +38,7 @@ const (
 	maxScheduleRetries        = 10
 	maxLoadConfigRetries      = 10
 
-	regionheartbeatSendChanCap = 1024
-	hotRegionScheduleName      = "balance-hot-region-scheduler"
-
+	heartbeatChanCapacity = 1024
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 	// PluginLoad means action for load plugin
 	PluginLoad = "load"
@@ -316,14 +316,15 @@ func (c *coordinator) stop() {
 // Hack to retrieve info from scheduler.
 // TODO: remove it.
 type hasHotStatus interface {
-	GetHotReadStatus() *statistics.StoreHotRegionInfos
-	GetHotWriteStatus() *statistics.StoreHotRegionInfos
+	GetHotReadStatus() *statistics.StoreHotPeersInfos
+	GetHotWriteStatus() *statistics.StoreHotPeersInfos
+	GetStoresScore() map[uint64]float64
 }
 
-func (c *coordinator) getHotWriteRegions() *statistics.StoreHotRegionInfos {
+func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
 	c.RLock()
 	defer c.RUnlock()
-	s, ok := c.schedulers[hotRegionScheduleName]
+	s, ok := c.schedulers[schedulers.HotRegionName]
 	if !ok {
 		return nil
 	}
@@ -333,10 +334,10 @@ func (c *coordinator) getHotWriteRegions() *statistics.StoreHotRegionInfos {
 	return nil
 }
 
-func (c *coordinator) getHotReadRegions() *statistics.StoreHotRegionInfos {
+func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
 	c.RLock()
 	defer c.RUnlock()
-	s, ok := c.schedulers[hotRegionScheduleName]
+	s, ok := c.schedulers[schedulers.HotRegionName]
 	if !ok {
 		return nil
 	}
@@ -379,7 +380,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
 	defer c.RUnlock()
 	// Collects hot write region metrics.
-	s, ok := c.schedulers[hotRegionScheduleName]
+	s, ok := c.schedulers[schedulers.HotRegionName]
 	if !ok {
 		return
 	}
@@ -392,7 +393,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		stat, ok := status.AsPeer[storeID]
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(stat.TotalBytesRate)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(float64(stat.RegionsCount))
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_peer").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_peer").Set(0)
@@ -401,7 +402,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		stat, ok = status.AsLeader[storeID]
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(stat.TotalBytesRate)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(float64(stat.RegionsCount))
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(0)
@@ -417,10 +418,21 @@ func (c *coordinator) collectHotSpotMetrics() {
 		stat, ok := status.AsLeader[storeID]
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(stat.TotalBytesRate)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(float64(stat.RegionsCount))
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
+		}
+	}
+
+	// Collects score of stores stats metrics.
+	scores := s.Scheduler.(hasHotStatus).GetStoresScore()
+	for _, store := range stores {
+		storeAddress := store.GetAddress()
+		storeID := store.GetID()
+		score, ok := scores[storeID]
+		if ok {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, strconv.FormatUint(storeID, 10), "store_score").Set(score)
 		}
 	}
 }

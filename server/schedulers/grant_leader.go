@@ -24,8 +24,15 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	// GrantLeaderName is grant leader scheduler name.
+	GrantLeaderName = "grant-leader-scheduler"
+	// GrantLeaderType is grant leader scheduler type.
+	GrantLeaderType = "grant-leader"
+)
+
 func init() {
-	schedule.RegisterSliceDecoderBuilder("grant-leader", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(GrantLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -40,15 +47,22 @@ func init() {
 			if err != nil {
 				return errors.WithStack(err)
 			}
+			ranges, err := getKeyRanges(args[1:])
+			if err != nil {
+				return errors.WithStack(err)
+			}
 			conf.StoreID = id
-			conf.Name = fmt.Sprintf("grant-leader-scheduler-%d", id)
+			conf.Name = fmt.Sprintf("%s-%d", GrantLeaderName, id)
+			conf.Ranges = ranges
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler("grant-leader", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(GrantLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &grandLeaderConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newGrantLeaderScheduler(opController, conf), nil
 	})
 }
@@ -65,8 +79,9 @@ func SchedulerArgs() []string {
 }
 
 type grandLeaderConfig struct {
-	Name    string `json:"name"`
-	StoreID uint64 `json:"store-id"`
+	Name    string          `json:"name"`
+	StoreID uint64          `json:"store-id"`
+	Ranges  []core.KeyRange `json:"ranges"`
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
@@ -90,7 +105,7 @@ func (s *grantLeaderScheduler) GetName() string {
 }
 
 func (s *grantLeaderScheduler) GetType() string {
-	return "grant-leader"
+	return GrantLeaderType
 }
 
 func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -111,13 +126,13 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 
 func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	region := cluster.RandFollowerRegion(s.conf.StoreID, core.HealthRegion())
+	region := cluster.RandFollowerRegion(s.conf.StoreID, s.conf.Ranges, opt.HealthRegion(cluster))
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 		return nil
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	op := operator.CreateTransferLeaderOperator("grant-leader", region, region.GetLeader().GetStoreId(), s.conf.StoreID, operator.OpLeader)
+	op := operator.CreateTransferLeaderOperator(GrantLeaderType, region, region.GetLeader().GetStoreId(), s.conf.StoreID, operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }

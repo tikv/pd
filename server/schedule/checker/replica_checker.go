@@ -26,7 +26,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const replicaCheckerName = "replica-checker"
+const (
+	replicaCheckerName = "replica-checker"
+	minReplicaCount    = 1
+)
 
 const (
 	offlineStatus = "offline"
@@ -86,7 +89,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 			return nil
 		}
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
-		return operator.CreateAddPeerOperator("make-up-replica", region, newPeer.GetId(), newPeer.GetStoreId(), operator.OpReplica)
+		return operator.CreateAddPeerOperator("make-up-replica", region, newPeer, operator.OpReplica)
 	}
 
 	// when add learner peer, the number of peer will exceed max replicas for a while,
@@ -241,7 +244,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *operator
 	if err != nil {
 		return nil
 	}
-	op, err := operator.CreateMovePeerOperator("move-to-better-location", r.cluster, region, operator.OpReplica, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	op, err := operator.CreateMovePeerOperator("move-to-better-location", r.cluster, region, operator.OpReplica, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		checkerCounter.WithLabelValues("replica_checker", "create-operator-fail").Inc()
 		return nil
@@ -277,10 +280,10 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 
 	replace := fmt.Sprintf("replace-%s-replica", status)
 	var op *operator.Operator
-	if status == offlineStatus {
-		op, err = operator.CreateOfflinePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	if status == offlineStatus && r.cluster.GetMaxReplicas() > minReplicaCount {
+		op, err = operator.CreateOfflinePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer)
 	} else {
-		op, err = operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+		op, err = operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer)
 	}
 	if err != nil {
 		reason := fmt.Sprintf("%s-fail", replace)

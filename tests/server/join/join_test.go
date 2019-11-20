@@ -31,12 +31,25 @@ func Test(t *testing.T) {
 	TestingT(t)
 }
 
+// TODO: enable it when we fix TestFailedAndDeletedPDJoinsPreviousCluster
+// func TestMain(m *testing.M) {
+// 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+// }
+
 var _ = Suite(&joinTestSuite{})
 
-type joinTestSuite struct{}
+type joinTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
 
 func (s *joinTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
+}
+
+func (s *joinTestSuite) TearDownSuite(c *C) {
+	s.cancel()
 }
 
 func (s *joinTestSuite) TestSimpleJoin(c *C) {
@@ -44,7 +57,7 @@ func (s *joinTestSuite) TestSimpleJoin(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -57,7 +70,7 @@ func (s *joinTestSuite) TestSimpleJoin(c *C) {
 	// Join the second PD.
 	pd2, err := cluster.Join()
 	c.Assert(err, IsNil)
-	err = pd2.Run(context.TODO())
+	err = pd2.Run(s.ctx)
 	c.Assert(err, IsNil)
 	_, err = os.Stat(path.Join(pd2.GetConfig().DataDir, "join"))
 	c.Assert(os.IsNotExist(err), IsFalse)
@@ -72,7 +85,7 @@ func (s *joinTestSuite) TestSimpleJoin(c *C) {
 	// Join another PD.
 	pd3, err := cluster.Join()
 	c.Assert(err, IsNil)
-	err = pd3.Run(context.TODO())
+	err = pd3.Run(s.ctx)
 	c.Assert(err, IsNil)
 	_, err = os.Stat(path.Join(pd3.GetConfig().DataDir, "join"))
 	c.Assert(os.IsNotExist(err), IsFalse)
@@ -89,7 +102,7 @@ func (s *joinTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	// Wait for all nodes becoming healthy.
@@ -123,7 +136,7 @@ func (s *joinTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	// Wait for all nodes becoming healthy.
@@ -156,14 +169,14 @@ func (s *joinTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	// Join the second PD.
 	pd2, err := cluster.Join()
 	c.Assert(err, IsNil)
-	err = pd2.Run(context.TODO())
+	err = pd2.Run(s.ctx)
 	c.Assert(err, IsNil)
 	err = pd2.Stop()
 	c.Assert(err, IsNil)

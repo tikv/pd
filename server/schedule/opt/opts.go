@@ -18,6 +18,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pingcap/pd/server/statistics"
 )
 
@@ -57,6 +58,7 @@ type Options interface {
 	IsMakeUpReplicaEnabled() bool
 	IsRemoveExtraReplicaEnabled() bool
 	IsLocationReplacementEnabled() bool
+	IsDebugMetricsEnabled() bool
 	GetLeaderScheduleStrategy() core.ScheduleStrategy
 	GetKeyType() core.KeyType
 
@@ -77,9 +79,12 @@ type Cluster interface {
 	core.StoreSetController
 
 	statistics.RegionStatInformer
+	statistics.StoreStatInformer
 	Options
 
 	// TODO: it should be removed. Schedulers don't need to know anything
 	// about peers.
 	AllocPeer(storeID uint64) (*metapb.Peer, error)
+
+	FitRegion(*core.RegionInfo) *placement.RegionFit
 }

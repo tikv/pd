@@ -22,48 +22,77 @@ import (
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
+const (
+	// ShuffleRegionName is shuffle region scheduler name.
+	ShuffleRegionName = "shuffle-region-scheduler"
+	// ShuffleRegionType is shuffle region scheduler type.
+	ShuffleRegionType = "shuffle-region"
+)
+
 func init() {
-	schedule.RegisterSliceDecoderBuilder("shuffle-region", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(ShuffleRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
+			conf, ok := v.(*shuffleRegionSchedulerConfig)
+			if !ok {
+				return ErrScheduleConfigNotExist
+			}
+			ranges, err := getKeyRanges(args)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			conf.Ranges = ranges
+			conf.Name = ShuffleRegionName
 			return nil
 		}
 	})
-	schedule.RegisterScheduler("shuffle-region", func(opController *schedule.OperatorController, straoge *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newShuffleRegionScheduler(opController), nil
+	schedule.RegisterScheduler(ShuffleRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &shuffleRegionSchedulerConfig{}
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		return newShuffleRegionScheduler(opController, conf), nil
 	})
 }
 
-const shuffleRegionName = "shuffle-region-scheduler"
+type shuffleRegionSchedulerConfig struct {
+	Name   string          `json:"name"`
+	Ranges []core.KeyRange `json:"ranges"`
+}
 
 type shuffleRegionScheduler struct {
-	name string
 	*baseScheduler
+	conf     *shuffleRegionSchedulerConfig
 	selector *selector.RandomSelector
 }
 
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
-func newShuffleRegionScheduler(opController *schedule.OperatorController) schedule.Scheduler {
+func newShuffleRegionScheduler(opController *schedule.OperatorController, conf *shuffleRegionSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: shuffleRegionName, MoveRegion: true},
+		filter.StoreStateFilter{ActionScope: conf.Name, MoveRegion: true},
 	}
 	base := newBaseScheduler(opController)
 	return &shuffleRegionScheduler{
-		name:          shuffleRegionName,
 		baseScheduler: base,
+		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
 func (s *shuffleRegionScheduler) GetName() string {
-	return s.name
+	return s.conf.Name
 }
 
 func (s *shuffleRegionScheduler) GetType() string {
-	return "shuffle-region"
+	return ShuffleRegionType
+}
+
+func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
+	return schedule.EncodeConfig(s.conf)
 }
 
 func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -85,7 +114,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return nil
 	}
 
-	op, err := operator.CreateMovePeerOperator("shuffle-region", cluster, region, operator.OpAdmin, oldPeer.GetStoreId(), newPeer.GetStoreId(), newPeer.GetId())
+	op, err := operator.CreateMovePeerOperator(ShuffleRegionType, cluster, region, operator.OpAdmin, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 		return nil
@@ -104,9 +133,9 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.
 		return nil, nil
 	}
 
-	region := cluster.RandFollowerRegion(source.GetID(), core.HealthRegion())
+	region := cluster.RandFollowerRegion(source.GetID(), s.conf.Ranges, opt.HealthRegion(cluster))
 	if region == nil {
-		region = cluster.RandLeaderRegion(source.GetID(), core.HealthRegion())
+		region = cluster.RandLeaderRegion(source.GetID(), s.conf.Ranges, opt.HealthRegion(cluster))
 	}
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()

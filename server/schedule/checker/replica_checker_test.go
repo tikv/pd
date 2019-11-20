@@ -128,3 +128,18 @@ func (s *testReplicaCheckerSuite) TestReplaceOfflinePeer(c *C) {
 	c.Assert(op.Step(2).(operator.PromoteLearner).ToStore, Equals, uint64(4))
 	c.Assert(op.Step(3).(operator.RemovePeer).FromStore, Equals, uint64(1))
 }
+
+func (s *testReplicaCheckerSuite) TestOfflineWithOneReplica(c *C) {
+	s.cluster.MaxReplicas = 1
+	peers := []*metapb.Peer{
+		{
+			Id:      4,
+			StoreId: 1,
+		},
+	}
+	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers}, peers[0])
+	s.cluster.PutRegion(r)
+	op := s.rc.Check(r)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "replace-offline-replica")
+}

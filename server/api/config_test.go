@@ -15,7 +15,7 @@ package api
 
 import (
 	"encoding/json"
-	"math/rand"
+	"fmt"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -26,25 +26,27 @@ import (
 var _ = Suite(&testConfigSuite{})
 
 type testConfigSuite struct {
-	cfgs    []*config.Config
-	servers []*server.Server
-	clean   func()
+	svr       *server.Server
+	cleanup   cleanUpFunc
+	urlPrefix string
 }
 
 func (s *testConfigSuite) SetUpSuite(c *C) {
-	s.cfgs, s.servers, s.clean = mustNewCluster(c, 3)
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 }
 
 func (s *testConfigSuite) TearDownSuite(c *C) {
-	s.clean()
+	s.cleanup()
 }
 
 func (s *testConfigSuite) TestConfigAll(c *C) {
-	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config"
-	resp, err := doGet(addr)
-	c.Assert(err, IsNil)
+	addr := fmt.Sprintf("%s/config", s.urlPrefix)
 	cfg := &config.Config{}
-	err = readJSON(resp.Body, cfg)
+	err := readJSON(addr, cfg)
 	c.Assert(err, IsNil)
 
 	r := map[string]int{"max-replicas": 5}
@@ -61,10 +63,8 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
-	resp, err = doGet(addr)
-	c.Assert(err, IsNil)
 	newCfg := &config.Config{}
-	err = readJSON(resp.Body, newCfg)
+	err = readJSON(addr, newCfg)
 	c.Assert(err, IsNil)
 	cfg.Replication.MaxReplicas = 5
 	cfg.Replication.LocationLabels = []string{"zone", "rack"}
@@ -73,34 +73,25 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 }
 
 func (s *testConfigSuite) TestConfigSchedule(c *C) {
-	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
-	resp, err := doGet(addr)
-	c.Assert(err, IsNil)
+	addr := fmt.Sprintf("%s/config/schedule", s.urlPrefix)
 	sc := &config.ScheduleConfig{}
-	c.Assert(readJSON(resp.Body, sc), IsNil)
+	c.Assert(readJSON(addr, sc), IsNil)
 
 	sc.MaxStoreDownTime.Duration = time.Second
 	postData, err := json.Marshal(sc)
 	c.Assert(err, IsNil)
-	postAddr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/schedule"
-	err = postJSON(postAddr, postData)
+	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
-	resp, err = doGet(addr)
-	c.Assert(err, IsNil)
 	sc1 := &config.ScheduleConfig{}
-	c.Assert(readJSON(resp.Body, sc1), IsNil)
-
+	c.Assert(readJSON(addr, sc1), IsNil)
 	c.Assert(*sc, DeepEquals, *sc1)
 }
 
 func (s *testConfigSuite) TestConfigReplication(c *C) {
-	addr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
-	resp, err := doGet(addr)
-	c.Assert(err, IsNil)
-
+	addr := fmt.Sprintf("%s/config/replicate", s.urlPrefix)
 	rc := &config.ReplicationConfig{}
-	err = readJSON(resp.Body, rc)
+	err := readJSON(addr, rc)
 	c.Assert(err, IsNil)
 
 	rc.MaxReplicas = 5
@@ -108,35 +99,29 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	rc1 := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(rc1)
 	c.Assert(err, IsNil)
-	postAddr := s.cfgs[rand.Intn(len(s.cfgs))].ClientUrls + apiPrefix + "/api/v1/config/replicate"
-	err = postJSON(postAddr, postData)
+	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 	rc.LocationLabels = []string{"zone", "rack"}
 
 	rc2 := map[string]string{"location-labels": "zone,rack"}
 	postData, err = json.Marshal(rc2)
 	c.Assert(err, IsNil)
-	err = postJSON(postAddr, postData)
+	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
-	resp, err = doGet(addr)
-	c.Assert(err, IsNil)
 	rc3 := &config.ReplicationConfig{}
-
-	err = readJSON(resp.Body, rc3)
+	err = readJSON(addr, rc3)
 	c.Assert(err, IsNil)
 
 	c.Assert(*rc, DeepEquals, *rc3)
 }
 
 func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
-	addr := s.servers[0].GetAddr() + apiPrefix + "/api/v1/config/label-property"
+	addr := s.svr.GetAddr() + apiPrefix + "/api/v1/config/label-property"
 
 	loadProperties := func() config.LabelPropertyConfig {
-		res, err := doGet(addr)
-		c.Assert(err, IsNil)
 		var cfg config.LabelPropertyConfig
-		err = readJSON(res.Body, &cfg)
+		err := readJSON(addr, &cfg)
 		c.Assert(err, IsNil)
 		return cfg
 	}

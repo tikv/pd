@@ -479,7 +479,7 @@ type ScheduleConfig struct {
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge,omitempty" json:"enable-one-way-merge,string"`
 	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
-	// This option only works when merge strategy is "table".
+	// This option only works when key type is "table".
 	EnableCrossTableMerge bool `toml:"enable-cross-table-merge,omitempty" json:"enable-cross-table-merge,string"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
 	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
@@ -554,6 +554,9 @@ type ScheduleConfig struct {
 	EnableRemoveExtraReplica bool `toml:"enable-remove-extra-replica" json:"enable-remove-extra-replica,string"`
 	// EnableLocationReplacement is the option to enable replica checker to move replica to a better location.
 	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
+	// EnableDebugMetrics is the option to enable debug metrics.
+	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
+
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
@@ -598,6 +601,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableMakeUpReplica:          c.EnableMakeUpReplica,
 		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
 		EnableLocationReplacement:    c.EnableLocationReplacement,
+		EnableDebugMetrics:           c.EnableDebugMetrics,
 		Schedulers:                   schedulers,
 	}
 }
@@ -749,7 +753,7 @@ func (c *ScheduleConfig) Validate() error {
 	return nil
 }
 
-// Deprecated is used to find if there is an option has beed deprecated.
+// Deprecated is used to find if there is an option has been deprecated.
 func (c *ScheduleConfig) Deprecated() error {
 	if c.DisableLearner {
 		return errors.New("disable-raft-learner has already been deprecated")

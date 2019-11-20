@@ -35,7 +35,7 @@ const (
 	hotRegionAntiCount = 1
 )
 
-// hotPeerCache saves the hotspot peer's statistics.
+// hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
 	kind           FlowKind
 	peersOfStore   map[uint64]cache.Cache         // storeID -> hot peers
@@ -49,6 +49,20 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 		peersOfStore:   make(map[uint64]cache.Cache),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 	}
+}
+
+// RegionStats returns hot items
+func (f *hotPeerCache) RegionStats() map[uint64][]*HotPeerStat {
+	res := make(map[uint64][]*HotPeerStat)
+	for storeID, peers := range f.peersOfStore {
+		values := peers.Elems()
+		stat := make([]*HotPeerStat, len(values))
+		res[storeID] = stat
+		for i := range values {
+			stat[i] = values[i].Value.(*HotPeerStat)
+		}
+	}
+	return res
 }
 
 // Update updates the items in statistics.
@@ -85,24 +99,19 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 	totalBytes := float64(f.getTotalBytes(region))
 	totalKeys := float64(f.getTotalKeys(region))
 
-	bytesPerSecInit := totalBytes / RegionHeartBeatReportInterval
-	keysPerSecInit := totalKeys / RegionHeartBeatReportInterval
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+
+	bytesPerSec := totalBytes / float64(interval)
+	keysPerSec := totalKeys / float64(interval)
 
 	for storeID := range storeIDs {
-		bytesPerSec := bytesPerSecInit
-		keysPerSec := keysPerSecInit
 		isExpired := f.isRegionExpired(region, storeID)
 		oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
 
-		// This is used for the simulator.
-		if oldItem != nil && Denoising {
-			interval := time.Since(oldItem.LastUpdateTime).Seconds()
-			// ignore if report too fast
-			if interval < hotRegionReportMinInterval && !isExpired {
-				continue
-			}
-			bytesPerSec = totalBytes / interval
-			keysPerSec = totalKeys / interval
+		// This is used for the simulator. Ignore if report too fast.
+		if !isExpired && Denoising && interval < hotRegionReportMinInterval {
+			continue
 		}
 
 		newItem := &HotPeerStat{

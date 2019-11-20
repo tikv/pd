@@ -40,7 +40,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	sl, err := schedule.CreateScheduler("shuffle-leader", schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	sl, err := schedule.CreateScheduler(ShuffleLeaderType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ShuffleLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(sl.Schedule(tc), IsNil)
 
@@ -81,7 +81,7 @@ func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(s.ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("adjacent-region", []string{"32", "2"}))
+	sc, err := schedule.CreateScheduler(AdjacentRegionType, schedule.NewOperatorController(s.ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(AdjacentRegionType, []string{"32", "2"}))
 	c.Assert(err, IsNil)
 
 	c.Assert(sc.(*balanceAdjacentRegionScheduler).conf.LeaderLimit, Equals, uint64(32))
@@ -149,7 +149,7 @@ func (s *testBalanceAdjacentRegionSuite) TestNoNeedToBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	sc, err := schedule.CreateScheduler("adjacent-region", schedule.NewOperatorController(s.ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("adjacent-region", nil))
+	sc, err := schedule.CreateScheduler(AdjacentRegionType, schedule.NewOperatorController(s.ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(AdjacentRegionType, nil))
 	c.Assert(err, IsNil)
 	c.Assert(sc.Schedule(tc), IsNil)
 
@@ -196,7 +196,16 @@ func (s *testScatterRegionSuite) TestFiveStores(c *C) {
 }
 
 func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
-	c.Assert(operator.CheckOperatorValid(op), IsTrue)
+	for i := 0; i < op.Len(); i++ {
+		if rp, ok := op.Step(i).(operator.RemovePeer); ok {
+			for j := i + 1; j < op.Len(); j++ {
+				if tr, ok := op.Step(j).(operator.TransferLeader); ok {
+					c.Assert(rp.FromStore, Not(Equals), tr.FromStore)
+					c.Assert(rp.FromStore, Not(Equals), tr.ToStore)
+				}
+			}
+		}
+	}
 }
 
 func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
@@ -294,7 +303,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 
 	// The label scheduler transfers leader out of store1.
 	oc := schedule.NewOperatorController(ctx, nil, nil)
-	sl, err := schedule.CreateScheduler("label", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(nil))
+	sl, err := schedule.CreateScheduler(LabelType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(LabelType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	op := sl.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 3)
@@ -306,13 +315,13 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
-	bs, err := schedule.CreateScheduler("balance-leader", oc, core.NewStorage(kv.NewMemoryKV()), nil)
+	bs, err := schedule.CreateScheduler(BalanceLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	op = bs.Schedule(tc)
 	c.Assert(op, IsNil)
 
 	// Can't evict leader from store2, neither.
-	el, err := schedule.CreateScheduler("evict-leader", oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("evict-leader", []string{"2"}))
+	el, err := schedule.CreateScheduler(EvictLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"2"}))
 	c.Assert(err, IsNil)
 	op = el.Schedule(tc)
 	c.Assert(op, IsNil)
@@ -341,7 +350,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("shuffle-hot-region", schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder(nil))
+	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
@@ -353,10 +362,10 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc.AddLabelsStore(6, 0, map[string]string{"zone": "z4", "host": "h6"})
 
 	// Report store written bytes.
-	tc.UpdateStorageWrittenBytes(1, 75*1024*1024)
-	tc.UpdateStorageWrittenBytes(2, 45*1024*1024)
-	tc.UpdateStorageWrittenBytes(3, 45*1024*1024)
-	tc.UpdateStorageWrittenBytes(4, 60*1024*1024)
+	tc.UpdateStorageWrittenBytes(1, 7.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 4.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(4, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(5, 0)
 	tc.UpdateStorageWrittenBytes(6, 0)
 
@@ -366,9 +375,9 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	//|     1     |       1      |        2       |       3        |      512KB    |
 	//|     2     |       1      |        3       |       4        |      512KB    |
 	//|     3     |       1      |        2       |       4        |      512KB    |
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 3, 4)
-	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 4)
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 3, 4)
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 4)
 	opt.HotRegionCacheHitsThreshold = 0
 
 	// try to get an operator
@@ -394,7 +403,7 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.LeaderScheduleLimit = 0
 	tc := mockcluster.NewCluster(opt)
-	hb, err := schedule.CreateScheduler("hot-read-region", schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 
 	tc.AddRegionStore(1, 3)
@@ -402,13 +411,13 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	tc.AddRegionStore(3, 2)
 
 	// Report store read bytes.
-	tc.UpdateStorageReadBytes(1, 75*1024*1024)
-	tc.UpdateStorageReadBytes(2, 45*1024*1024)
-	tc.UpdateStorageReadBytes(3, 45*1024*1024)
+	tc.UpdateStorageReadBytes(1, 7.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 4.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
 
-	tc.AddLeaderRegionWithReadInfo(1, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2)
-	tc.AddLeaderRegionWithReadInfo(2, 2, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 3)
-	tc.AddLeaderRegionWithReadInfo(3, 1, 512*1024*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2)
+	tc.AddLeaderRegionWithReadInfo(2, 2, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 3)
+	tc.AddLeaderRegionWithReadInfo(3, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
 	opt.HotRegionCacheHitsThreshold = 0
 	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
 	c.Assert(hb.Schedule(tc), IsNil)
@@ -433,7 +442,7 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	tc.AddLeaderRegion(2, 2, 1)
 	tc.AddLeaderRegion(3, 3, 1)
 
-	sl, err := schedule.CreateScheduler("evict-leader", schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("evict-leader", []string{"1"}))
+	sl, err := schedule.CreateScheduler(EvictLeaderType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	op := sl.Schedule(tc)
@@ -450,7 +459,7 @@ func (s *testShuffleRegionSuite) TestShuffle(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
-	sl, err := schedule.CreateScheduler("shuffle-region", schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	sl, err := schedule.CreateScheduler(ShuffleRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	c.Assert(sl.Schedule(tc), IsNil)

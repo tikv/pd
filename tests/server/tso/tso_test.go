@@ -15,6 +15,7 @@ package tso_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,19 +24,33 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/tests"
+	"go.uber.org/goleak"
 )
 
 func Test(t *testing.T) {
 	TestingT(t)
 }
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 var _ = Suite(&testTsoSuite{})
 
 type testTsoSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func (s *testTsoSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *testTsoSuite) TearDownSuite(c *C) {
+	s.cancel()
 }
 
 func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
@@ -44,7 +59,7 @@ func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -57,7 +72,9 @@ func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 		Count:  uint32(n),
 	}
 
-	tsoClient, err := grpcPDClient.Tso(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
 	err = tsoClient.Send(req)
@@ -105,7 +122,7 @@ func (s *testTsoSuite) TestTsoCount0(c *C) {
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -114,7 +131,9 @@ func (s *testTsoSuite) TestTsoCount0(c *C) {
 	clusterID := leaderServer.GetClusterID()
 
 	req := &pdpb.TsoRequest{Header: testutil.NewRequestHeader(clusterID)}
-	tsoClient, err := grpcPDClient.Tso(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
 	err = tsoClient.Send(req)
@@ -141,7 +160,7 @@ func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	s.cluster, err = tests.NewTestCluster(1)
 	c.Assert(err, IsNil)
 
-	err = s.cluster.RunInitialServers()
+	err = s.cluster.RunInitialServers(s.ctx)
 	c.Assert(err, IsNil)
 	s.cluster.WaitLeader()
 
@@ -168,7 +187,9 @@ func (s *testTimeFallBackSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 		Count:  uint32(n),
 	}
 
-	tsoClient, err := s.grpcPDClient.Tso(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tsoClient, err := s.grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)
 	defer tsoClient.CloseSend()
 	err = tsoClient.Send(req)
@@ -209,4 +230,55 @@ func (s *testTimeFallBackSuite) TestTimeFallBack(c *C) {
 	}
 
 	wg.Wait()
+}
+
+var _ = Suite(&testFollowerTsoSuite{})
+
+type testFollowerTsoSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testFollowerTsoSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *testFollowerTsoSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+func (s *testFollowerTsoSuite) TestRequest(c *C) {
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/skipRetryGetTS", `return(true)`), IsNil)
+	var err error
+	cluster, err := tests.NewTestCluster(2)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers(s.ctx)
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	servers := cluster.GetServers()
+	var followerServer *tests.TestServer
+	for _, s := range servers {
+		if !s.IsLeader() {
+			followerServer = s
+		}
+	}
+	c.Assert(followerServer, NotNil)
+	grpcPDClient := testutil.MustNewGrpcClient(c, followerServer.GetAddr())
+	clusterID := followerServer.GetClusterID()
+
+	req := &pdpb.TsoRequest{Header: testutil.NewRequestHeader(clusterID), Count: 1}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tsoClient, err := grpcPDClient.Tso(ctx)
+	c.Assert(err, IsNil)
+	defer tsoClient.CloseSend()
+	err = tsoClient.Send(req)
+	c.Assert(err, IsNil)
+	_, err = tsoClient.Recv()
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "can not get timestamp"), IsTrue)
+	failpoint.Disable("github.com/pingcap/pd/server/tso/skipRetryGetTS")
 }

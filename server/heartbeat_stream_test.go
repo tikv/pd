@@ -37,11 +37,11 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	var err error
 	var cleanup func()
 	s.svr, cleanup, err = NewTestServer(c)
+	defer cleanup()
 	c.Assert(err, IsNil)
 	s.svr.cfg.HeartbeatStreamBindInterval = typeutil.NewDuration(time.Second)
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
-	defer cleanup()
 
 	bootstrapReq := s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0")
 	_, err = s.svr.bootstrapCluster(bootstrapReq)
@@ -51,7 +51,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	// Add a new store and an addPeer operator.
 	storeID, err := s.svr.idAllocator.Alloc()
 	c.Assert(err, IsNil)
-	_, err = putStore(c, s.grpcPDClient, s.svr.clusterID, &metapb.Store{Id: storeID, Address: "127.0.0.1:1"})
+	_, err = putStore(s.grpcPDClient, s.svr.clusterID, &metapb.Store{Id: storeID, Address: "127.0.0.1:1"})
 	c.Assert(err, IsNil)
 	err = newHandler(s.svr).AddAddPeerOperator(s.region.GetId(), storeID)
 	c.Assert(err, IsNil)

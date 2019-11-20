@@ -34,8 +34,8 @@ var (
 	regionsPrefix          = "pd/api/v1/regions"
 	regionsStorePrefix     = "pd/api/v1/regions/store"
 	regionsCheckPrefix     = "pd/api/v1/regions/check"
-	regionsWriteflowPrefix = "pd/api/v1/regions/writeflow"
-	regionsReadflowPrefix  = "pd/api/v1/regions/readflow"
+	regionsWriteFlowPrefix = "pd/api/v1/regions/writeflow"
+	regionsReadFlowPrefix  = "pd/api/v1/regions/readflow"
 	regionsConfVerPrefix   = "pd/api/v1/regions/confver"
 	regionsVersionPrefix   = "pd/api/v1/regions/version"
 	regionsSizePrefix      = "pd/api/v1/regions/size"
@@ -180,7 +180,7 @@ func scanRegionCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showRegionTopWriteCommandFunc(cmd *cobra.Command, args []string) {
-	prefix := regionsWriteflowPrefix
+	prefix := regionsWriteFlowPrefix
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			cmd.Println("limit should be a number")
@@ -201,7 +201,7 @@ func showRegionTopWriteCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showRegionTopReadCommandFunc(cmd *cobra.Command, args []string) {
-	prefix := regionsReadflowPrefix
+	prefix := regionsReadFlowPrefix
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			cmd.Println("limit should be a number")

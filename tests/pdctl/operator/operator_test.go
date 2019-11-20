@@ -14,6 +14,7 @@
 package operator_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,8 @@ func (s *operatorTestSuite) SetUpSuite(c *C) {
 }
 
 func (s *operatorTestSuite) TestOperator(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var err error
 	var t time.Time
 	t = t.Add(time.Hour)
@@ -49,7 +52,7 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 		func(conf *config.Config) { conf.Schedule.StoreBalanceRate = 240 },
 	)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
+	err = cluster.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()
@@ -195,7 +198,9 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	c.Assert(strings.Contains(string(output), "scatter-region"), IsTrue)
 
 	// test echo
-	echo := pdctl.GetEcho([]string{"-u", pdAddr, "operator", "add", "scatter-region", "1"})
+	echo := pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
+	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "operator", "add", "scatter-region", "1"})
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 	echo = pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)

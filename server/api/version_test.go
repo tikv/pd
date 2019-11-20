@@ -33,6 +33,9 @@ var _ = Suite(&testVersionSuite{})
 type testVersionSuite struct{}
 
 func (s *testVersionSuite) TestGetVersion(c *C) {
+	// TODO: enable it.
+	c.Skip("Temporary disable. See issue: https://github.com/pingcap/pd/issues/1893")
+
 	fname := filepath.Join(os.TempDir(), "stdout")
 	old := os.Stdout
 	temp, _ := os.Create(fname)
@@ -75,7 +78,7 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 		os.Remove(fname)
 		svr.Close()
 		cancel()
-		testutil.CleanServer(cfg)
+		testutil.CleanServer(cfg.DataDir)
 	}()
 	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/memberNil"), IsNil)
 }

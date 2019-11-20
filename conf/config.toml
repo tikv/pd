@@ -76,10 +76,8 @@ hot-region-schedule-limit = 4
 ## This three parameters control the merge scheduler behavior.
 ## If it is true, it means a region can only be merged into the next region of it.
 # enable-one-way-merge = false
-## There are some strategics supported: ["table", "raw", "txn"], default: "table"
-# merge-strategy = "table"
 ## If it is true, it means two region within different tables can be merged.
-## This option only works when merge strategy is "table".
+## This option only works when key type is "table".
 # enable-cross-table-merge = false
 
 ## customized schedulers, the format is as below
