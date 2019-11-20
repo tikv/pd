@@ -106,8 +106,8 @@ func (s *testConfigSuite) TestAdjust(c *C) {
 name = ""
 lease = 0
 
-[metric]
-storage-address = "http://127.0.0.1:9090"
+[pd-server]
+metric-storage-address = "http://127.0.0.1:9090"
 
 [schedule]
 max-merge-region-size = 0
@@ -132,7 +132,7 @@ leader-schedule-limit = 0
 	// When undefined, use default values.
 	c.Assert(cfg.PreVote, IsTrue)
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
-	c.Assert(cfg.Metric.StorageAddress, Equals, "http://127.0.0.1:9090")
+	c.Assert(cfg.PDServerCfg.MetricStorageAddress, Equals, "http://127.0.0.1:9090")
 
 	// Check undefined config fields
 	cfgData = `

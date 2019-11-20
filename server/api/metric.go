@@ -44,6 +44,7 @@ func (h *queryMetric) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch u.Scheme {
 	case "http", "https":
+		// Replace the path with the prometheus http API path.
 		r.URL.Path = prometheusQueryAPI
 		newCustomReverseProxies([]url.URL{*u}).ServeHTTP(w, r)
 	default:
