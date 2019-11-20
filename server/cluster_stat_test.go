@@ -27,27 +27,32 @@ var _ = Suite(&testClusterStatSuite{})
 type testClusterStatSuite struct {
 }
 
-// randValues returns an array with values whose
-// average is "avg"
-func randValues(avg int64, n int) []int64 {
-	total := avg * int64(n)
+// medianValues returns an array with values whose
+// median is "val"
+func medianValues(val int64, n int) []int64 {
 	values := make([]int64, n)
-	for i := 0; i < n-1; i++ {
-		val := int64(0)
-		if total > 0 {
-			val = rand.Int63n(total)
-		}
-		values[i] = val
-		total -= val
+	if val == 0 {
+		return values
 	}
-	values[n-1] = total
+	idx := n / 2
+	for i := 0; i < idx-1; i++ {
+		values[i] = rand.Int63n(val)
+	}
+	if idx > 0 {
+		values[idx-1] = val
+		values[idx] = val
+	}
+	for i := idx + 1; i < n; i++ {
+		values[i] = rand.Int63n(val) + val
+	}
 	return values
 }
+
 func cpu(usage int64) []*pdpb.RecordPair {
 	n := 10
 	name := "cpu"
 	pairs := make([]*pdpb.RecordPair, n)
-	values := randValues(usage, n)
+	values := medianValues(usage, n)
 	for i := 0; i < n; i++ {
 		pairs[i] = &pdpb.RecordPair{
 			Key:   fmt.Sprintf("%s:%d", name, i),
@@ -57,93 +62,39 @@ func cpu(usage int64) []*pdpb.RecordPair {
 	return pairs
 }
 
-func (s *testClusterStatSuite) TestStatEntriesAppend(c *C) {
+func (s *testClusterStatSuite) TestCPUStatEntriesAppend(c *C) {
 	N := 10
-	entries := NewStatEntries(N)
-	c.Assert(entries, NotNil)
 
-	for i := 0; i < N; i++ {
-		entry := &StatEntry{}
-		entries.Append(entry)
-		c.Assert(entries.total, Equals, i+1)
-		c.Assert(entries.entries[i], Equals, entry)
+	checkAppend := func(appended bool, usage int64, threads ...string) {
+		entries := NewCPUStatEntries(N)
+		c.Assert(entries, NotNil)
+		for i := 0; i < N; i++ {
+			entry := &StatEntry{
+				CpuUsages: cpu(usage),
+			}
+			c.Assert(entries.Append(entry, threads...), Equals, appended)
+		}
+		c.Assert(entries.cpu.Get(), Equals, float64(usage))
 	}
 
-	// overwrite the first entry
-	entry := &StatEntry{}
-	entries.Append(entry)
-	c.Assert(entries.total, Equals, 11)
-	c.Assert(entries.entries[0], Equals, entry)
+	checkAppend(true, 20)
+	checkAppend(true, 20, "cpu")
+	checkAppend(false, 0, "cup")
 }
 
-func (s *testClusterStatSuite) TestStatEntriesCPU(c *C) {
+func (s *testClusterStatSuite) TestCPUStatEntriesCPU(c *C) {
 	N := 10
-	entries := NewStatEntries(N)
+	entries := NewCPUStatEntries(N)
 	c.Assert(entries, NotNil)
 
 	usages := cpu(20)
-	// fill the first 5 entries
-	for i := 0; i < N-5; i++ {
-		entry := &StatEntry{
-			CpuUsages: usages,
-		}
-		entries.Append(entry)
-	}
-	c.Assert(entries.CPU(N), Equals, float64(20))
-
-	// fulfill the entries
-	usages = cpu(40)
-	for i := N - 5; i < N; i++ {
-		entry := &StatEntry{
-			CpuUsages: usages,
-		}
-		entries.Append(entry)
-	}
-	c.Assert(entries.CPU(N), Equals, float64(30))
-
-	// overwrite some entries
-	usages = cpu(40)
-	for i := N; i < N+5; i++ {
-		entry := &StatEntry{
-			CpuUsages: usages,
-		}
-		entries.Append(entry)
-	}
-	c.Assert(entries.CPU(N), Equals, float64(40))
-}
-
-func (s *testClusterStatSuite) TestStatEntriesKeys(c *C) {
-	N := 10
-	entries := NewStatEntries(N)
-	c.Assert(entries, NotNil)
-
 	for i := 0; i < N; i++ {
 		entry := &StatEntry{
-			KeysWritten: 10,
-			KeysRead:    20,
+			CpuUsages: usages,
 		}
 		entries.Append(entry)
 	}
-	read, written := entries.Keys(N)
-	c.Assert(written, Equals, int64(10))
-	c.Assert(read, Equals, int64(20))
-}
-
-func (s *testClusterStatSuite) TestStatEntriesBytes(c *C) {
-	N := 10
-	entries := NewStatEntries(N)
-	c.Assert(entries, NotNil)
-
-	for i := 0; i < N; i++ {
-		entry := &StatEntry{
-			BytesWritten: 2048,
-			BytesRead:    4096,
-		}
-		entries.Append(entry)
-	}
-	read, written := entries.Bytes(N)
-	c.Assert(written, Equals, int64(2048))
-	c.Assert(read, Equals, int64(4096))
+	c.Assert(entries.CPU(), Equals, float64(20))
 }
 
 func (s *testClusterStatSuite) TestClusterStatEntriesAppend(c *C) {
@@ -154,14 +105,15 @@ func (s *testClusterStatSuite) TestClusterStatEntriesAppend(c *C) {
 	// fill 2*N entries, 2 entries for each store
 	for i := 0; i < 2*N; i++ {
 		entry := &StatEntry{
-			StoreId: uint64(i % N),
+			StoreId:   uint64(i % N),
+			CpuUsages: cpu(20),
 		}
 		cst.Append(entry)
 	}
 
 	// use i as the store ID
 	for i := 0; i < N; i++ {
-		c.Assert(cst.stats[uint64(i)].total, Equals, 2)
+		c.Assert(cst.stats[uint64(i)].CPU(), Equals, float64(20))
 	}
 }
 
@@ -193,7 +145,7 @@ func (s *testClusterStatSuite) TestClusterStatCPU(c *C) {
 }
 
 func (s *testClusterStatSuite) TestClusterStatState(c *C) {
-	Load := func(usage int64, keys uint64, bytes uint64) *ClusterState {
+	Load := func(usage int64) *ClusterState {
 		cst := NewClusterStatEntries(10)
 		c.Assert(cst, NotNil)
 
@@ -207,25 +159,17 @@ func (s *testClusterStatSuite) TestClusterStatState(c *C) {
 
 		for i := 0; i < NumberOfEntries; i++ {
 			entry := &StatEntry{
-				StoreId:      0,
-				KeysWritten:  keys,
-				KeysRead:     keys,
-				BytesWritten: bytes,
-				BytesRead:    bytes,
-				Interval:     interval,
-				CpuUsages:    usages,
+				StoreId:   0,
+				Interval:  interval,
+				CpuUsages: usages,
 			}
 			cst.Append(entry)
 		}
 		return &ClusterState{cst}
 	}
 	d := 60 * time.Second
-	c.Assert(Load(0, 1, 1).State(d), Equals, LoadStateIdle)
-	c.Assert(Load(20, 1, 1).State(d), Equals, LoadStateLow)
-	c.Assert(Load(50, 1, 1).State(d), Equals, LoadStateNormal)
-	c.Assert(Load(90, 1, 1).State(d), Equals, LoadStateHigh)
-
-	c.Assert(Load(90, 1, 0).State(d), Equals, LoadStateIdle)
-	c.Assert(Load(90, 0, 1).State(d), Equals, LoadStateIdle)
-	c.Assert(Load(90, 0, 0).State(d), Equals, LoadStateIdle)
+	c.Assert(Load(0).State(d), Equals, LoadStateIdle)
+	c.Assert(Load(20).State(d), Equals, LoadStateLow)
+	c.Assert(Load(50).State(d), Equals, LoadStateNormal)
+	c.Assert(Load(90).State(d), Equals, LoadStateHigh)
 }
