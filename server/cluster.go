@@ -74,10 +74,12 @@ type RaftCluster struct {
 	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
 
-	labelLevelStats *statistics.LabelStatistics
-	regionStats     *statistics.RegionStatistics
-	storesStats     *statistics.StoresStats
-	hotSpotCache    *statistics.HotCache
+	labelLevelStats      *statistics.LabelStatistics
+	regionStats          *statistics.RegionStatistics
+	storesStats          *statistics.StoresStats
+	hotSpotCache         *statistics.HotCache
+	enableMovingAverage  bool
+	regionSizeStatistics *statistics.TickMovingAverages
 
 	coordinator *coordinator
 
@@ -96,12 +98,14 @@ type ClusterStatus struct {
 
 func newRaftCluster(ctx context.Context, s *Server, clusterID uint64) *RaftCluster {
 	return &RaftCluster{
-		ctx:          ctx,
-		s:            s,
-		running:      false,
-		clusterID:    clusterID,
-		clusterRoot:  s.getClusterRootPath(),
-		regionSyncer: syncer.NewRegionSyncer(s),
+		ctx:                  ctx,
+		s:                    s,
+		running:              false,
+		clusterID:            clusterID,
+		clusterRoot:          s.getClusterRootPath(),
+		regionSyncer:         syncer.NewRegionSyncer(s),
+		enableMovingAverage:  true,
+		regionSizeStatistics: statistics.NewTickMovingAverages(),
 	}
 }
 
@@ -155,6 +159,8 @@ func (c *RaftCluster) initCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
+	c.regionSizeStatistics = statistics.NewTickMovingAverages()
+	c.enableMovingAverage = true
 }
 
 func (c *RaftCluster) start() error {
@@ -497,6 +503,10 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	pendingPeerCount := c.core.GetStorePendingPeerCount(id)
 	leaderRegionSize := c.core.GetStoreLeaderRegionSize(id)
 	regionSize := c.core.GetStoreRegionSize(id)
+	if c.enableMovingAverage {
+		c.regionSizeStatistics.Add(id, float64(regionSize))
+		regionSize = int64(c.regionSizeStatistics.Get(id))
+	}
 	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
