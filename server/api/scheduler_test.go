@@ -145,7 +145,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		if createdName == "" {
 			createdName = ca.name
 		}
-		isPaused, err := handler.GetSchedulePauseState(createdName)
+		isPaused, err := handler.IsSchedulerPause(createdName)
 		c.Assert(err, IsNil)
 		c.Assert(isPaused, Equals, true)
 	}
@@ -155,7 +155,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		if createdName == "" {
 			createdName = ca.name
 		}
-		isPaused, err := handler.GetSchedulePauseState(createdName)
+		isPaused, err := handler.IsSchedulerPause(createdName)
 		c.Assert(err, IsNil)
 		c.Assert(isPaused, Equals, false)
 	}
@@ -172,7 +172,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		if createdName == "" {
 			createdName = ca.name
 		}
-		isPaused, err := handler.GetSchedulePauseState(createdName)
+		isPaused, err := handler.IsSchedulerPause(createdName)
 		c.Assert(err, IsNil)
 		c.Assert(isPaused, Equals, false)
 	}
@@ -225,11 +225,11 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
 	c.Assert(err, IsNil)
 	time.Sleep(time.Second)
-	isPaused, err := handler.GetSchedulePauseState(createdName)
+	isPaused, err := handler.IsSchedulerPause(createdName)
 	c.Assert(err, IsNil)
 	c.Assert(isPaused, Equals, true)
 	time.Sleep(time.Second * 4)
-	isPaused, err = handler.GetSchedulePauseState(createdName)
+	isPaused, err = handler.IsSchedulerPause(createdName)
 	c.Assert(isPaused, Equals, false)
 
 	// test resume.
@@ -243,7 +243,7 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 	pauseArgs, err = json.Marshal(input)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
 	c.Assert(err, IsNil)
-	isPaused, err = handler.GetSchedulePauseState(createdName)
+	isPaused, err = handler.IsSchedulerPause(createdName)
 	c.Assert(err, IsNil)
 	c.Assert(isPaused, Equals, false)
 
@@ -251,9 +251,7 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 		extraTest(createdName, c)
 	}
 
-	deleteURL := fmt.Sprintf("%s/%s", s.urlPrefix, createdName)
-	err = doDelete(deleteURL)
-	c.Assert(err, IsNil)
+	s.deleteScheduler(createdName, c)
 }
 
 func (s *testScheduleSuite) testAddAndRemoveScheduler(name, createdName string, body []byte, extraTest func(string, *C), c *C) {

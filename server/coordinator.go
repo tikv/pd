@@ -461,17 +461,15 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 		}
 	}
 	var err error
-	delayUntil := time.Now().Unix() + t
+	var delayUntil int64 = 0
 	for _, sc := range s {
 		if t > 0 {
 			if sc.isPaused() {
-				err = errPauseSchedulerFail
-			} else {
-				atomic.StoreInt64(&sc.DelayUntil, delayUntil)
+				return errPauseSchedulerFail
 			}
-		} else {
-			atomic.StoreInt64(&sc.DelayUntil, 0)
+			delayUntil = time.Now().Unix() + t
 		}
+		atomic.StoreInt64(&sc.DelayUntil, delayUntil)
 	}
 	return err
 }
