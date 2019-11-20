@@ -18,8 +18,10 @@ import (
 	"sync"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/slice"
 	"github.com/pingcap/pd/server/statistics"
+	"go.uber.org/zap"
 )
 
 // Cluster State Statistics
@@ -236,15 +238,20 @@ func (cs *ClusterState) State(excludes ...uint64) LoadState {
 		return LoadStateNone
 	}
 
+	// The CPU usage in fact is collected from grpc-server, so it is not the
+	// CPU usage for the whole TiKV process. The boundaries are empirical
+	// values.
+	// TODO we may get a more accurate state with the information of the number // of the CPU cores
 	cpu := cs.cst.CPU(excludes...)
+	log.Info("calculated cpu", zap.Float64("usage", cpu))
 	switch {
-	case cpu < 10:
+	case cpu < 5:
 		return LoadStateIdle
-	case cpu >= 10 && cpu < 30:
+	case cpu >= 5 && cpu < 10:
 		return LoadStateLow
-	case cpu >= 30 && cpu < 60:
+	case cpu >= 10 && cpu < 20:
 		return LoadStateNormal
-	case cpu >= 60:
+	case cpu >= 30:
 		return LoadStateHigh
 	}
 	return LoadStateNone
