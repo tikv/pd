@@ -133,7 +133,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 
 	// test pause all schedulers.
 	input := make(map[string]interface{})
-	input["time"] = "5"
+	input["delay"] = "5"
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/all", pauseArgs)
@@ -163,7 +163,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 	// test resume all schedulers.
 	err = postJSON(s.urlPrefix+"/all", pauseArgs)
 	c.Assert(err, IsNil)
-	input["time"] = "0"
+	input["delay"] = "0"
 	pauseArgs, err = json.Marshal(input)
 	err = postJSON(s.urlPrefix+"/all", pauseArgs)
 	c.Assert(err, IsNil)
@@ -219,7 +219,7 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 
 	// test pause.
 	input := make(map[string]interface{})
-	input["time"] = "5"
+	input["delay"] = "5"
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
@@ -234,12 +234,12 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 
 	// test resume.
 	input = make(map[string]interface{})
-	input["time"] = "5"
+	input["delay"] = "5"
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
 	c.Assert(err, IsNil)
-	input["time"] = "0"
+	input["delay"] = "0"
 	pauseArgs, err = json.Marshal(input)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
 	c.Assert(err, IsNil)
