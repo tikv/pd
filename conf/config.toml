@@ -53,10 +53,12 @@ level = "info"
 interval = "15s"
 ## prometheus pushgateway address, leaves it empty will disable prometheus.
 address = ""
-## the storage address of metric data. This is use for read metric data.
+
+[pd-server]
+## the metric storage address means the metric data storage address. This is use for read metric data.
 ## Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
 ## For usability, recommended to temporarily set it to the prometheus address, eg: http://127.0.0.1:9090
-storage-address = ""
+metric-storage-address = ""
 
 [schedule]
 max-merge-region-size = 20

@@ -31,7 +31,7 @@ func newQueryMetric(s *server.Server) *queryMetric {
 }
 
 func (h *queryMetric) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	metricAddr := h.s.GetConfig().Metric.StorageAddress
+	metricAddr := h.s.GetConfig().PDServerCfg.MetricStorageAddress
 	if metricAddr == "" {
 		http.Error(w, "metric storage address doesn't set", http.StatusInternalServerError)
 		return
