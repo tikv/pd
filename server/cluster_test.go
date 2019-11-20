@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
+	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pkg/errors"
 )
@@ -344,7 +345,7 @@ func (s *baseCluster) testStateAndLimit(c *C, clusterID uint64, store *metapb.St
 	// prepare
 	storeID := store.GetId()
 	cluster := s.getRaftCluster(c)
-	cluster.coordinator.opController.SetAllStoresLimit(1.0)
+	cluster.coordinator.opController.SetAllStoresLimit(1.0, schedule.StoreLimitManual)
 	s.resetStoreState(c, store.GetId(), beforeState)
 	_, isOKBefore := cluster.coordinator.opController.GetAllStoresLimit()[storeID]
 	// run
