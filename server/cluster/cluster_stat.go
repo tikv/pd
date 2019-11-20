@@ -91,6 +91,10 @@ func (s LoadState) String() string {
 	return "none"
 }
 
+// ThreadsCollected filters the threads to take into
+// the calculation of CPU usage.
+var ThreadsCollected = []string{"grpc-server-"}
+
 // NumberOfEntries is the max number of StatEntry that preserved,
 // it is the history of a store's heartbeats. The interval of store
 // heartbeats from TiKV is 10s, so we can preserve 30 entries per
@@ -176,7 +180,7 @@ func (cst *ClusterStatEntries) Append(stat *StatEntry) {
 		cst.stats[storeID] = entries
 	}
 
-	entries.Append(stat)
+	entries.Append(stat, ThreadsCollected...)
 }
 
 func contains(slice []uint64, value uint64) bool {
