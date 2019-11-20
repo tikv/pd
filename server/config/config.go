@@ -887,9 +887,9 @@ type PDServerConfig struct {
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
-	// MetricStorageAddress is the cluster metric storage address.
-	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
-	MetricStorageAddress string `toml:"metric-storage-address" json:"metric-storage-address"`
+	// MetricQueryAddress is the cluster metric query address.
+	// Currently we use prometheus as metric query, we may use PD/TiKV as metric later.
+	MetricQueryAddress string `toml:"metric-query-address" json:"metric-query-address"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {

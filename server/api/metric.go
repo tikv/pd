@@ -15,9 +15,10 @@ package api
 
 import (
 	"fmt"
-	"github.com/pingcap/pd/server"
 	"net/http"
 	"net/url"
+
+	"github.com/pingcap/pd/server"
 )
 
 const prometheusQueryAPI = "/api/v1/query"
@@ -31,7 +32,7 @@ func newQueryMetric(s *server.Server) *queryMetric {
 }
 
 func (h *queryMetric) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	metricAddr := h.s.GetConfig().PDServerCfg.MetricStorageAddress
+	metricAddr := h.s.GetConfig().PDServerCfg.MetricQueryAddress
 	if metricAddr == "" {
 		http.Error(w, "metric storage address doesn't set", http.StatusInternalServerError)
 		return

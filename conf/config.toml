@@ -55,10 +55,10 @@ interval = "15s"
 address = ""
 
 [pd-server]
-## the metric storage address means the metric data storage address. This is use for read metric data.
-## Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
+## the metric query address means the metric query address. This is use for query metric data.
+## Currently we use prometheus as metric query, we may use PD/TiKV as metric query later.
 ## For usability, recommended to temporarily set it to the prometheus address, eg: http://127.0.0.1:9090
-metric-storage-address = ""
+metric-query-address = ""
 
 [schedule]
 max-merge-region-size = 20
