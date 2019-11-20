@@ -461,12 +461,9 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 		}
 	}
 	var err error
-	var delayUntil int64 = 0
 	for _, sc := range s {
+		var delayUntil int64 = 0
 		if t > 0 {
-			if sc.isPaused() {
-				return errPauseSchedulerFail
-			}
 			delayUntil = time.Now().Unix() + t
 		}
 		atomic.StoreInt64(&sc.DelayUntil, delayUntil)
@@ -486,7 +483,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		select {
 		case <-timer.C:
 			timer.Reset(s.GetInterval())
-			if !s.AllowSchedule() && !s.isPaused() {
+			if !s.AllowSchedule() || s.isPaused() {
 				continue
 			}
 			if op := s.Schedule(); op != nil {

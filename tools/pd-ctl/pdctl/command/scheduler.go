@@ -51,15 +51,15 @@ func NewPauseSchedulerCommand() *cobra.Command {
 
 func pauseAndResumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 && len(args) != 1 {
-		cmd.Println(cmd.Usage())
+		cmd.Usage()
 		return
 	}
 	path := schedulersPrefix + "/" + args[0]
 	input := make(map[string]interface{})
 	if len(args) == 2 {
-		input["time"] = args[1]
+		input["delay"] = args[1]
 	} else if len(args) == 1 {
-		input["time"] = "0"
+		input["delay"] = "0"
 	}
 	postJSON(cmd, path, input)
 }
