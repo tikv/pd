@@ -95,6 +95,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/api/v1/stores/limit", storesHandler.GetAllLimit).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/stores/limit", storesHandler.SetAllLimit).Methods("POST")
 	clusterRouter.HandleFunc("/api/v1/stores/limit/scene", storesHandler.SetStoreLimitScene).Methods("POST")
+	clusterRouter.HandleFunc("/api/v1/stores/limit/scene", storesHandler.GetStoreLimitScene).Methods("GET")
 
 	labelsHandler := newLabelsHandler(svr, rd)
 	clusterRouter.HandleFunc("/api/v1/labels", labelsHandler.Get).Methods("GET")
