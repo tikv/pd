@@ -76,10 +76,6 @@ const (
 	LoadStateHigh
 )
 
-// DefaultIntervalHint is a hint of the interval of the store heartbeats,
-// it is used when we can not infer the interval from heartbeats.
-const DefaultIntervalHint = 10
-
 // String representation of LoadState
 func (s LoadState) String() string {
 	switch s {
