@@ -209,7 +209,7 @@ enable-remove-extra-replica = false
 	c.Assert(cfg.Schedule.EnableRemoveDownReplica, IsFalse)
 	c.Assert(cfg.Schedule.EnableMakeUpReplica, IsFalse)
 	c.Assert(cfg.Schedule.EnableRemoveExtraReplica, IsFalse)
-	b, err := json.Marshal(cfg)
+	b, err := json.Marshal(cfg.Schedule)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(b), "disable-replace-offline-replica"), IsFalse)
 	c.Assert(strings.Contains(string(b), "disable-remove-down-replica"), IsFalse)

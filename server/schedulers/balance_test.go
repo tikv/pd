@@ -1211,11 +1211,13 @@ func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
 		for {
 			select {
 			case <-ch:
-				break
+				goto exit
 			default:
 			}
 			sche.config.BuildWithArgs(args)
 			c.Assert(sche.config.Persist(), IsNil)
+			exit:
+				break
 		}
 	}()
 	for i := 0; i < 1000; i++ {
