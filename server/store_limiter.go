@@ -24,18 +24,20 @@ import (
 
 // StoreLimiter adjust the store limit dynamically
 type StoreLimiter struct {
-	m     sync.RWMutex
-	oc    *schedule.OperatorController
-	scene *schedule.StoreLimitScene
-	state *ClusterState
+	m       sync.RWMutex
+	oc      *schedule.OperatorController
+	scene   *schedule.StoreLimitScene
+	state   *ClusterState
+	current LoadState
 }
 
 // NewStoreLimiter builds a store limiter object using the operator controller
 func NewStoreLimiter(c *schedule.OperatorController) *StoreLimiter {
 	return &StoreLimiter{
-		oc:    c,
-		state: NewClusterState(),
-		scene: schedule.DefaultStoreLimitScene(),
+		oc:      c,
+		state:   NewClusterState(),
+		scene:   schedule.DefaultStoreLimitScene(),
+		current: LoadStateNone,
 	}
 }
 
@@ -60,9 +62,10 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 		rate = float64(s.scene.High) / schedule.StoreBalanceBaseTime
 	}
 
-	if rate > 0 {
+	if rate > 0 && state != s.current {
 		s.oc.SetAllStoresLimitAuto(rate)
 		log.Info("change store limit for cluster", zap.Stringer("state", state), zap.Float64("rate", rate))
+		s.current = state
 	}
 }
 
