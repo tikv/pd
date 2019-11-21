@@ -165,6 +165,10 @@ func (s *configTestSuite) TestConfig(c *C) {
 		{"enable-debug-metrics", true, func(scheduleConfig *config.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableDebugMetrics
 		}},
+		// set again
+		{"enable-debug-metrics", true, func(scheduleConfig *config.ScheduleConfig) interface{} {
+			return scheduleConfig.EnableDebugMetrics
+		}},
 	}
 	for _, item := range testItems {
 		// write
