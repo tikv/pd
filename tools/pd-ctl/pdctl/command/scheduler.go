@@ -26,7 +26,7 @@ import (
 
 var (
 	schedulersPrefix             = "pd/api/v1/schedulers"
-	configSchedulersPrefix       = "pd/api/v1/schedule-config"
+	schedulerConfigPrefix        = "pd/api/v1/scheduler-config"
 	evictLeaderSchedulerName     = "evict-leader-scheduler"
 	evictSchedulerHasNoStoreInfo = "No store in evict-leader-scheduler-config"
 )
@@ -112,7 +112,6 @@ func NewEvictLeaderSchedulerCommand() *cobra.Command {
 func checkEvicLeaderSchedulerExist(cmd *cobra.Command) (bool, error) {
 	r, err := doRequest(cmd, schedulersPrefix, http.MethodGet)
 	if err != nil {
-		//FIXME: maybe we should give a more approprite error info
 		cmd.Println(err)
 		return false, err
 	}
@@ -357,7 +356,7 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	//FIXME: maybe there is a more graceful method to handler it
-	if args[0] != evictLeaderSchedulerName && strings.HasPrefix(args[0], evictLeaderSchedulerName) {
+	if strings.HasPrefix(args[0], evictLeaderSchedulerName) && args[0] != evictLeaderSchedulerName {
 		args = strings.Split(args[0], "-")
 		args = args[len(args)-1:]
 		cmdStore := cmd.Use
@@ -462,7 +461,7 @@ func updateConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string)
 	input["name"] = cmd.Name()
 	input["store_id"] = storeID
 
-	postJSON(cmd, path.Join(configSchedulersPrefix, cmd.Name(), "config"), input)
+	postJSON(cmd, path.Join(schedulerConfigPrefix, cmd.Name(), "config"), input)
 }
 
 func showConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
@@ -470,7 +469,7 @@ func showConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	path := path.Join(configSchedulersPrefix, cmd.Name(), "list")
+	path := path.Join(schedulerConfigPrefix, cmd.Name(), "list")
 	r, err := doRequest(cmd, path, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
@@ -489,14 +488,14 @@ func deleteConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string)
 		cmd.Println(cmd.Usage())
 		return
 	}
-	path := path.Join(configSchedulersPrefix, "/", cmd.Name(), "delete", args[0])
+	path := path.Join(schedulerConfigPrefix, "/", cmd.Name(), "delete", args[0])
 	resp, err := doRequest(cmd, path, http.MethodDelete)
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
-	//FIXME: remove the judege when the new command replace old command
-	if len(resp) < 100 && strings.Contains(resp, evictSchedulerHasNoStoreInfo) {
+	//FIXME: remove the judge when the new command replace old command
+	if strings.Contains(resp, evictSchedulerHasNoStoreInfo) {
 		args = append(args[:0], evictLeaderSchedulerName)
 		cmdStore := cmd.Use
 		convertReomveConfigToReomveScheduler(cmd)

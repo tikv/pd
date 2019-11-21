@@ -75,14 +75,14 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 			// Test the scheduler config handler.
 			extraTestFunc: func(name string, c *C) {
 				resp := make(map[string]interface{})
-				listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name)
+				listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				c.Assert(resp["start-key"], Equals, "")
 				c.Assert(resp["end-key"], Equals, "")
 				c.Assert(resp["range-name"], Equals, "test")
 				resp["start-key"] = "a_00"
 				resp["end-key"] = "a_99"
-				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name)
+				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(resp)
 				c.Assert(err, IsNil)
 				c.Assert(postJSON(updateURL, body), IsNil)
@@ -100,7 +100,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 			// Test the scheduler config handler.
 			extraTestFunc: func(name string, c *C) {
 				resp := make(map[string]interface{})
-				listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name)
+				listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				exceptMap := make(map[string]interface{})
 				exceptMap["1"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
@@ -110,7 +110,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				input := make(map[string]interface{})
 				input["name"] = "evict-leader-scheduler"
 				input["store_id"] = 2
-				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name)
+				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(input)
 				c.Assert(err, IsNil)
 				c.Assert(postJSON(updateURL, body), IsNil)
@@ -120,7 +120,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				c.Assert(resp["store-id-ranges"], DeepEquals, exceptMap)
 
 				//using /pd/v1/schedule-config/evict-leader-scheduler/config to add new store to evict-leader-scheduler
-				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", s.svr.GetAddr(), apiPrefix, server.ScheduleConfigHandlerPath, name, "2")
+				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name, "2")
 				c.Assert(doDelete(deleteURL), IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(listURL, &resp), IsNil)
