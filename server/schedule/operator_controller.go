@@ -117,6 +117,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			}
 			oc.SendScheduleCommand(region, step, source)
 		case operator.SUCCESS:
+			oc.pushHistory(op)
 			if oc.RemoveOperator(op) {
 				oc.PromoteWaitingOperator()
 			}
@@ -487,7 +488,6 @@ func (oc *OperatorController) buryOperator(op *operator.Operator) {
 			zap.Reflect("operator", op))
 		operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 		operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
-		oc.pushHistory(op)
 	case operator.REPLACED:
 		log.Info("replace old operator",
 			zap.Uint64("region-id", op.RegionID()),
