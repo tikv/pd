@@ -15,7 +15,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/pkg/apiutil"
@@ -183,23 +182,18 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]int
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}
 
 	name := mux.Vars(r)["name"]
-	str, ok := input["delay"].(string)
+	t, ok := input["delay"]
 	if !ok {
 		h.r.JSON(w, http.StatusBadRequest, "missing pause time")
 		return
 	}
-	t, err := strconv.ParseInt(str, 10, 64)
-	if err != nil {
-		h.r.JSON(w, http.StatusBadRequest, "invalid arguments")
-		return
-	}
-	if err := h.PauseOrResumeScheduler(name, t); err != nil {
+	if err := h.PauseOrResumeScheduler(name, int64(t)); err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

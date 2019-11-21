@@ -128,7 +128,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 
 	// test pause all schedulers.
 	input := make(map[string]interface{})
-	input["delay"] = "30"
+	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/all", pauseArgs)
@@ -143,7 +143,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(isPaused, Equals, true)
 	}
-	input["delay"] = "1"
+	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/all", pauseArgs)
@@ -160,12 +160,12 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 	}
 
 	// test resume all schedulers.
-	input["delay"] = "30"
+	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/all", pauseArgs)
 	c.Assert(err, IsNil)
-	input["delay"] = "0"
+	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/all", pauseArgs)
@@ -222,7 +222,7 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 
 	// test pause.
 	input := make(map[string]interface{})
-	input["delay"] = "30"
+	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
@@ -230,7 +230,7 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 	isPaused, err := handler.IsSchedulerPaused(createdName)
 	c.Assert(err, IsNil)
 	c.Assert(isPaused, Equals, true)
-	input["delay"] = "1"
+	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
@@ -242,12 +242,12 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 
 	// test resume.
 	input = make(map[string]interface{})
-	input["delay"] = "30"
+	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
 	c.Assert(err, IsNil)
-	input["delay"] = "0"
+	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = postJSON(s.urlPrefix+"/"+createdName, pauseArgs)
