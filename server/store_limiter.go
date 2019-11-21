@@ -66,7 +66,18 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 		s.oc.SetAllStoresLimitAuto(rate)
 		log.Info("change store limit for cluster", zap.Stringer("state", state), zap.Float64("rate", rate))
 		s.current = state
+		collectClusterStateCurrent(state)
 	}
+}
+
+func collectClusterStateCurrent(state LoadState) {
+	for i := LoadStateIdle; i < state; i++ {
+		clusterStateCurrent.WithLabelValues(i.String()).Set(0)
+	}
+	for i := state + 1; i <= LoadStateNone; i++ {
+		clusterStateCurrent.WithLabelValues(i.String()).Set(0)
+	}
+	clusterStateCurrent.WithLabelValues(state.String()).Set(1)
 }
 
 // ReplaceStoreLimitScene replaces the store limit values for different scenes
