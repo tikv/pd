@@ -136,6 +136,7 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 2, 1)
+	tc.AddLeaderRegion(2, 2, 1)
 	region1 := tc.GetRegion(1)
 	steps := []operator.OpStep{
 		operator.RemovePeer{FromStore: 1},
@@ -168,11 +169,14 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 	}
 	{
 		// finished op expired
-		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
-		c.Assert(oc.checkAddOperator(op), IsTrue)
-		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
-		c.Assert(oc.checkAddOperator(op), IsFalse)
-		c.Assert(op.Status(), Equals, operator.EXPIRED)
+		op1 := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		op2 := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 1})
+		c.Assert(oc.checkAddOperator(op1, op2), IsTrue)
+		operator.SetOperatorStatusReachTime(op1, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
+		operator.SetOperatorStatusReachTime(op2, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
+		c.Assert(oc.checkAddOperator(op1, op2), IsFalse)
+		c.Assert(op1.Status(), Equals, operator.EXPIRED)
+		c.Assert(op2.Status(), Equals, operator.EXPIRED)
 	}
 	// finished op never timeout
 

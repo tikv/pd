@@ -358,9 +358,6 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 				zap.Reflect("old", old))
 			return false
 		}
-		if op.CheckExpired() {
-			return false
-		}
 		if op.Status() != operator.CREATED {
 			log.Error("trying to add operator with unexpected status",
 				zap.Uint64("region-id", op.RegionID()),
@@ -372,7 +369,13 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			return false
 		}
 	}
-	return true
+	expired := false
+	for _, op := range ops {
+		if op.CheckExpired() {
+			expired = true
+		}
+	}
+	return !expired
 }
 
 func isHigherPriorityOperator(new, old *operator.Operator) bool {
