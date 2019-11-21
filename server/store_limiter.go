@@ -71,10 +71,10 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 }
 
 func collectClusterStateCurrent(state LoadState) {
-	for i := LoadStateIdle; i < state; i++ {
+	for i := LoadStateNone; i < state; i++ {
 		clusterStateCurrent.WithLabelValues(i.String()).Set(0)
 	}
-	for i := state + 1; i <= LoadStateNone; i++ {
+	for i := state + 1; i <= LoadStateHigh; i++ {
 		clusterStateCurrent.WithLabelValues(i.String()).Set(0)
 	}
 	clusterStateCurrent.WithLabelValues(state.String()).Set(1)
