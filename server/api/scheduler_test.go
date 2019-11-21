@@ -107,7 +107,6 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		}
 		body, err := json.Marshal(input)
 		c.Assert(err, IsNil)
-		s.testAddAndRemoveScheduler(ca.name, ca.createdName, body, ca.extraTestFunc, c)
 		s.testPauseAndResumeScheduler(ca.name, ca.createdName, body, ca.extraTestFunc, c)
 	}
 
@@ -261,24 +260,4 @@ func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string
 	}
 
 	s.deleteScheduler(createdName, c)
-}
-
-func (s *testScheduleSuite) testAddAndRemoveScheduler(name, createdName string, body []byte, extraTest func(string, *C), c *C) {
-	if createdName == "" {
-		createdName = name
-	}
-	err := postJSON(s.urlPrefix, body)
-	c.Assert(err, IsNil)
-	handler := s.svr.GetHandler()
-	sches, err := handler.GetSchedulers()
-	c.Assert(err, IsNil)
-	c.Assert(sches[0], Equals, createdName)
-
-	if extraTest != nil {
-		extraTest(createdName, c)
-	}
-
-	deleteURL := fmt.Sprintf("%s/%s", s.urlPrefix, createdName)
-	err = doDelete(deleteURL)
-	c.Assert(err, IsNil)
 }
