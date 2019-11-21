@@ -400,6 +400,13 @@ types:
         type: string
         enum: [ in, notIn, exists, notExists ]
       values?: string[]
+  StoreLimitScene:
+    type: object
+    properties:
+      idle: integer
+      low: integer
+      normal: integer
+      high: integer
 
 /cluster/status:
   description: Cluster status.
@@ -764,6 +771,27 @@ types:
             type: Stores
       500:
         description: PD server failed to proceed the request.
+  /limit/scene:
+    description: Get or update the store limit for scenes
+    get:
+      description: Get the store limit for scenes
+      responses:
+        200:
+          body:
+            application/json:
+              type: StoreLimitScene
+        500:
+          description: PD server failed to proceed the request.
+    post:
+      description: Update the store limit for scenes
+      body:
+        application/json:
+        type: StoreLimitScene
+      responses:
+        200:
+          description: Store limit for specific scenes are updated
+        500:
+          description: PD server failed to proceed the request.
 
   /limit:
     description: The balance rate limit for all stores.
