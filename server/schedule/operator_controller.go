@@ -112,10 +112,10 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		switch op.Status() {
 		case operator.STARTED:
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
-			if source != DispatchFromHeartBeat || !oc.checkStaleOperator(op, region) {
-				oc.SendScheduleCommand(region, step, source)
+			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, region) {
+				return
 			}
-			return
+			oc.SendScheduleCommand(region, step, source)
 		case operator.SUCCESS:
 			if oc.RemoveOperator(op) {
 				oc.PromoteWaitingOperator()
