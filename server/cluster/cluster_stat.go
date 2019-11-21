@@ -106,7 +106,7 @@ const NumberOfEntries = 30
 
 // StaleEntriesTimeout is the time before an entry is deleted as stale.
 // It is about 30 entries * 10s
-const StaleEntriesTimeout = 300
+const StaleEntriesTimeout = 300 * time.Second
 
 // StatEntry is an entry of store statistics
 type StatEntry pdpb.StoreStats
