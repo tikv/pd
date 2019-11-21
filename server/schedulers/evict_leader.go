@@ -77,7 +77,7 @@ type evictLeaderSchedulerConfig struct {
 	mu               sync.RWMutex
 	storage          *core.Storage
 	StoreIDWitRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster          *opt.Cluster
+	cluster          opt.Cluster
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -242,7 +242,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
-			if err := (*handler.config.cluster).BlockStore(id); err != nil {
+			if err := handler.config.cluster.BlockStore(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
 				return
 			}
@@ -283,7 +283,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	_, exists := handler.config.StoreIDWitRanges[id]
 	if exists {
 		delete(handler.config.StoreIDWitRanges, id)
-		(*handler.config.cluster).UnblockStore(id)
+		handler.config.cluster.UnblockStore(id)
 
 		handler.config.mu.Unlock()
 		handler.config.Persist()
