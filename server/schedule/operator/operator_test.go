@@ -142,7 +142,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	s.checkSteps(c, op, steps)
 	op.Start()
 	c.Assert(op.Check(region), IsNil)
-	c.Assert(op.CheckSuccess(), IsTrue)
+	c.Assert(op.Status(), Equals, SUCCESS)
 	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-RegionOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsFalse)
 
@@ -356,4 +356,53 @@ func (s *testOperatorSuite) TestCheckExpired(c *C) {
 	SetOperatorStatusReachTime(op, CREATED, time.Now().Add(-OperatorExpireTime))
 	c.Assert(op.CheckExpired(), IsTrue)
 	c.Assert(op.Status(), Equals, EXPIRED)
+}
+
+func (s *testOperatorSuite) TestCheck(c *C) {
+	{
+		region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+		steps := []OpStep{
+			AddPeer{ToStore: 1, PeerID: 1},
+			TransferLeader{FromStore: 2, ToStore: 1},
+			RemovePeer{FromStore: 2},
+		}
+		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		c.Assert(op.Start(), IsTrue)
+		c.Assert(op.Check(region), NotNil)
+		c.Assert(op.Status(), Equals, STARTED)
+		region = s.newTestRegion(1, 1, [2]uint64{1, 1})
+		c.Assert(op.Check(region), IsNil)
+		c.Assert(op.Status(), Equals, SUCCESS)
+	}
+	{
+		region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+		steps := []OpStep{
+			AddPeer{ToStore: 1, PeerID: 1},
+			TransferLeader{FromStore: 2, ToStore: 1},
+			RemovePeer{FromStore: 2},
+		}
+		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		c.Assert(op.Start(), IsTrue)
+		c.Assert(op.Check(region), NotNil)
+		c.Assert(op.Status(), Equals, STARTED)
+		op.status.setTime(STARTED, time.Now().Add(-RegionOperatorWaitTime))
+		c.Assert(op.Check(region), NotNil)
+		c.Assert(op.Status(), Equals, TIMEOUT)
+	}
+	{
+		region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+		steps := []OpStep{
+			AddPeer{ToStore: 1, PeerID: 1},
+			TransferLeader{FromStore: 2, ToStore: 1},
+			RemovePeer{FromStore: 2},
+		}
+		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		c.Assert(op.Start(), IsTrue)
+		c.Assert(op.Check(region), NotNil)
+		c.Assert(op.Status(), Equals, STARTED)
+		op.status.setTime(STARTED, time.Now().Add(-RegionOperatorWaitTime))
+		region = s.newTestRegion(1, 1, [2]uint64{1, 1})
+		c.Assert(op.Check(region), IsNil)
+		c.Assert(op.Status(), Equals, SUCCESS)
+	}
 }

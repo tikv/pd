@@ -232,6 +232,8 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	if o.IsEnd() {
 		return nil
 	}
+	// CheckTimeout will call CheckSuccess first
+	defer func() { _ = o.CheckTimeout() }()
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
 			operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).

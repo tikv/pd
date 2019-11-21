@@ -148,7 +148,7 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 		op.Start()
 		c.Assert(oc.checkAddOperator(op), IsFalse) // started
 		c.Assert(op.Check(region1), IsNil)
-		c.Assert(op.CheckSuccess(), IsTrue)
+		c.Assert(op.Status(), Equals, operator.SUCCESS)
 		c.Assert(oc.checkAddOperator(op), IsFalse) // success
 	}
 	{

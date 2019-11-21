@@ -106,9 +106,8 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 
 		// Update operator status:
 		// The operator status should be STARTED.
+		// Check will call CheckSuccess and CheckTimeout.
 		step := op.Check(region)
-		_ = op.CheckSuccess()
-		_ = op.CheckTimeout()
 
 		switch op.Status() {
 		case operator.STARTED:
