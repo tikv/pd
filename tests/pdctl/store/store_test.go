@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
 )
