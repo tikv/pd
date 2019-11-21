@@ -16,6 +16,7 @@ package cluster
 import (
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -103,12 +104,17 @@ var ThreadsCollected = []string{"grpc-server-"}
 // store which is about 5 minutes.
 const NumberOfEntries = 30
 
+// StaleEntriesTimeout is the time before an entry is deleted as stale.
+// It is about 30 entries * 10s
+const StaleEntriesTimeout = 300
+
 // StatEntry is an entry of store statistics
 type StatEntry pdpb.StoreStats
 
 // CPUStatEntries saves a history of store statistics
 type CPUStatEntries struct {
-	cpu statistics.MovingAvg
+	cpu     statistics.MovingAvg
+	updated time.Time
 }
 
 // NewCPUStatEntries returns the StateEntries with a fixed size
@@ -157,6 +163,7 @@ type ClusterStatEntries struct {
 	stats map[uint64]*CPUStatEntries
 	size  int   // size of entries to keep for each store
 	total int64 // total of StatEntry appended
+	ttl   time.Duration
 }
 
 // NewClusterStatEntries returns a statistics object for the cluster
@@ -164,6 +171,7 @@ func NewClusterStatEntries(size int) *ClusterStatEntries {
 	return &ClusterStatEntries{
 		stats: make(map[uint64]*CPUStatEntries),
 		size:  size,
+		ttl:   StaleEntriesTimeout,
 	}
 }
 
@@ -196,8 +204,8 @@ func contains(slice []uint64, value uint64) bool {
 
 // CPU returns the cpu usage of the cluster
 func (cst *ClusterStatEntries) CPU(excludes ...uint64) float64 {
-	cst.m.RLock()
-	defer cst.m.RUnlock()
+	cst.m.Lock()
+	defer cst.m.Unlock()
 
 	// no entries have been collected
 	if cst.total == 0 {
@@ -209,7 +217,14 @@ func (cst *ClusterStatEntries) CPU(excludes ...uint64) float64 {
 		if contains(excludes, sid) {
 			continue
 		}
+		if time.Since(stat.updated) > cst.ttl {
+			delete(cst.stats, sid)
+			continue
+		}
 		sum += stat.CPU()
+	}
+	if len(cst.stats) == 0 {
+		return 0.0
 	}
 	return sum / float64(len(cst.stats))
 }

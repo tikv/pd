@@ -114,6 +114,23 @@ func (s *testClusterStatSuite) TestClusterStatCPU(c *C) {
 	// the cpu usage of the whole cluster is 20%
 	c.Assert(cst.CPU(), Equals, float64(20))
 }
+func (s *testClusterStatSuite) TestClusterStatCPUStale(c *C) {
+	N := 10
+	cst := NewClusterStatEntries(N)
+	// make all entries stale immediately
+	cst.ttl = 0
+
+	usages := cpu(20)
+	ThreadsCollected = []string{"cpu:"}
+	for i := 0; i < 2*N; i++ {
+		entry := &StatEntry{
+			StoreId:   uint64(i % N),
+			CpuUsages: usages,
+		}
+		cst.Append(entry)
+	}
+	c.Assert(cst.CPU(), Equals, float64(0))
+}
 
 func (s *testClusterStatSuite) TestClusterStatState(c *C) {
 	Load := func(usage int64) *ClusterState {
