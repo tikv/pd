@@ -110,6 +110,14 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
+	// StoreLimitMode can be auto or manual, when set to auto,
+	// PD tries to change the store limit values according to
+	// the load state of the cluster dynamically. User can
+	// overwrite the auto-tuned value by pd-ctl, when the value
+	// is overwritten, the value is fixed until it is deleted.
+	// Default: auto
+	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
+
 	Security SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
@@ -432,6 +440,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
+	}
+	if !configMetaData.IsDefined("store-limit-mode") {
+		c.StoreLimitMode = "auto"
 	}
 	return nil
 }

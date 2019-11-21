@@ -391,8 +391,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 
+	enabled := c.s.GetConfig().StoreLimitMode == "auto"
 	// c.limiter is nil before "start" is called
-	if c.limiter != nil {
+	if enabled && c.limiter != nil {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
