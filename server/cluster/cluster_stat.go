@@ -243,7 +243,7 @@ func (cs *ClusterState) State(excludes ...uint64) LoadState {
 	// values.
 	// TODO we may get a more accurate state with the information of the number // of the CPU cores
 	cpu := cs.cst.CPU(excludes...)
-	log.Info("calculated cpu", zap.Float64("usage", cpu))
+	log.Debug("calculated cpu", zap.Float64("usage", cpu))
 	switch {
 	case cpu < 5:
 		return LoadStateIdle
