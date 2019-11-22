@@ -115,7 +115,7 @@ type Config struct {
 	// the load state of the cluster dynamically. User can
 	// overwrite the auto-tuned value by pd-ctl, when the value
 	// is overwritten, the value is fixed until it is deleted.
-	// Default: auto
+	// Default: manual
 	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
 
 	Security SecurityConfig `toml:"security" json:"security"`
@@ -442,7 +442,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
 	}
 	if !configMetaData.IsDefined("store-limit-mode") {
-		c.StoreLimitMode = "auto"
+		c.StoreLimitMode = "manual"
 	}
 	return nil
 }
