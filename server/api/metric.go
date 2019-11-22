@@ -49,6 +49,6 @@ func (h *queryMetric) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		newCustomReverseProxies([]url.URL{*u}).ServeHTTP(w, r)
 	default:
 		// TODO: Support read data by self after support store metric data in PD/TiKV.
-		http.Error(w, fmt.Sprintf("schema of metric storage address is no support, address: %v", metricAddr), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("schema of metric storage address is no supported, address: %v", metricAddr), http.StatusInternalServerError)
 	}
 }
