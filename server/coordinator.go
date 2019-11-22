@@ -465,7 +465,7 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 		if t > 0 {
 			delayUntil = time.Now().Unix() + t
 		}
-		atomic.StoreInt64(&sc.DelayUntil, delayUntil)
+		atomic.StoreInt64(&sc.delayUntil, delayUntil)
 	}
 	return err
 }
@@ -506,7 +506,7 @@ type scheduleController struct {
 	nextInterval time.Duration
 	ctx          context.Context
 	cancel       context.CancelFunc
-	DelayUntil   int64
+	delayUntil   int64
 }
 
 // newScheduleController creates a new scheduleController.
@@ -554,6 +554,6 @@ func (s *scheduleController) AllowSchedule() bool {
 
 // isPaused returns if a schedueler is paused.
 func (s *scheduleController) isPaused() bool {
-	delayUntil := atomic.LoadInt64(&s.DelayUntil)
+	delayUntil := atomic.LoadInt64(&s.delayUntil)
 	return time.Now().Unix() < delayUntil
 }
