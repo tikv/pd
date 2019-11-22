@@ -179,6 +179,7 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 		cmd.Println(err)
 		return
 	}
+
 	endpoints := getEndpoints(cmd)
 	err = tryURLs(cmd, endpoints, func(endpoint string) error {
 		var msg []byte
