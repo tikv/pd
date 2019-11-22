@@ -220,10 +220,8 @@ func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operat
 }
 
 type scatterRangeHandler struct {
-	scheduleName string
-	storage      *core.Storage
-	rd           *render.Render
-	config       *scatterRangeSchedulerConfig
+	rd     *render.Render
+	config *scatterRangeSchedulerConfig
 }
 
 func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {

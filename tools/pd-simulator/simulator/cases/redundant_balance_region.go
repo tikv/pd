@@ -66,8 +66,8 @@ func newRedundantBalanceRegion() *Case {
 		})
 	}
 
-	storesLastUpdateTime := make([]int64, storeNum+1, storeNum+1)
-	storeLastAvailable := make([]uint64, storeNum+1, storeNum+1)
+	storesLastUpdateTime := make([]int64, storeNum+1)
+	storeLastAvailable := make([]uint64, storeNum+1)
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		curTime := time.Now().Unix()
