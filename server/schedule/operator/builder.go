@@ -290,9 +290,8 @@ func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
 }
 
 func (b *Builder) execTransferLeader(id uint64) {
-	p := b.currentPeers.Get(id)
-	b.steps = append(b.steps, TransferLeader{FromStore: b.currentLeader, ToStore: p.GetStoreId()})
-	b.currentLeader = p.GetStoreId()
+	b.steps = append(b.steps, TransferLeader{FromStore: b.currentLeader, ToStore: id})
+	b.currentLeader = id
 }
 
 func (b *Builder) execPromoteLearner(p *metapb.Peer) {
@@ -313,8 +312,8 @@ func (b *Builder) execAddPeer(p *metapb.Peer) {
 	b.currentPeers.Set(p)
 	if b.peerAddStep == nil {
 		b.peerAddStep = make(map[uint64]int)
-		b.peerAddStep[p.GetStoreId()] = len(b.steps)
 	}
+	b.peerAddStep[p.GetStoreId()] = len(b.steps)
 	b.toAdd.Delete(p.GetStoreId())
 }
 
