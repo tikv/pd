@@ -67,17 +67,6 @@ func init() {
 	})
 }
 
-// SchedulerType return type of the scheduler
-func SchedulerType() string {
-	return "user-grant-leader"
-}
-
-// SchedulerArgs provides parameters for the scheduler
-func SchedulerArgs() []string {
-	args := []string{"7"}
-	return args
-}
-
 type grandLeaderConfig struct {
 	Name    string          `json:"name"`
 	StoreID uint64          `json:"store-id"`

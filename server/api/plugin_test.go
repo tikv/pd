@@ -35,19 +35,6 @@ type testPluginSuite struct {
 	stores    []*metapb.Store
 }
 
-func doRequest(c *C, client *http.Client, url, method string, data io.Reader) (int, []byte) {
-	req, err := http.NewRequest(method, url, data)
-	c.Assert(err, IsNil)
-	resp, err := client.Do(req)
-	c.Assert(err, IsNil)
-	body, err := ioutil.ReadAll(resp.Body)
-	c.Assert(err, IsNil)
-	err = resp.Body.Close()
-	c.Assert(err, IsNil)
-
-	return resp.StatusCode, body
-}
-
 func (s *testPluginSuite) SetUpSuite(c *C) {
 	s.stores = []*metapb.Store{
 		{
@@ -93,6 +80,10 @@ func (s *testPluginSuite) SetUpSuite(c *C) {
 	}
 }
 
+func (s *testPluginSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
 func (s *testPluginSuite) TestPlugin(c *C) {
 	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r2 := newTestRegionInfo(3, 4, []byte("b"), []byte("c"))
@@ -111,8 +102,21 @@ func (s *testPluginSuite) TestPlugin(c *C) {
 	}
 	reqData, err := json.Marshal(data)
 	c.Assert(err, IsNil)
-	client := newHTTPClient()
-	url := s.urlPrefix + "/plugin"
+	client := &http.Client{}
+	url := s.urlPrefix + "plugin"
 	status, _ := doRequest(c, client, url, http.MethodPost, bytes.NewBuffer(reqData))
 	c.Assert(status, Equals, http.StatusOK)
+}
+
+func doRequest(c *C, client *http.Client, url, method string, data io.Reader) (int, []byte) {
+	req, err := http.NewRequest(method, url, data)
+	c.Assert(err, IsNil)
+	resp, err := client.Do(req)
+	c.Assert(err, IsNil)
+	body, err := ioutil.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+	err = resp.Body.Close()
+	c.Assert(err, IsNil)
+
+	return resp.StatusCode, body
 }

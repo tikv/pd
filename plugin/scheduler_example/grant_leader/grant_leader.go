@@ -15,6 +15,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 
 	"github.com/pingcap/pd/server/core"
@@ -40,8 +41,13 @@ func init() {
 			if err != nil {
 				return errors.WithStack(err)
 			}
+			ranges, err := getKeyRanges(args[1:])
+			if err != nil {
+				return errors.WithStack(err)
+			}
 			conf.StoreID = id
 			conf.Name = fmt.Sprintf("user-grant-leader-scheduler-%d", id)
+			conf.Ranges = ranges
 			return nil
 		}
 	})
@@ -65,8 +71,9 @@ func SchedulerArgs() []string {
 }
 
 type grandLeaderConfig struct {
-	Name    string `json:"name"`
-	StoreID uint64 `json:"store-id"`
+	Name    string          `json:"name"`
+	StoreID uint64          `json:"store-id"`
+	Ranges  []core.KeyRange `json:"ranges"`
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
@@ -110,11 +117,31 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
-	region := cluster.RandFollowerRegion(s.conf.StoreID, core.HealthRegion())
+	region := cluster.RandFollowerRegion(s.conf.StoreID, s.conf.Ranges, opt.HealthRegion(cluster))
 	if region == nil {
 		return nil
 	}
 	op := operator.CreateTransferLeaderOperator("user-grant-leader", region, region.GetLeader().GetStoreId(), s.conf.StoreID, operator.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
+}
+
+func getKeyRanges(args []string) ([]core.KeyRange, error) {
+	var ranges []core.KeyRange
+	for len(args) > 1 {
+		startKey, err := url.QueryUnescape(args[0])
+		if err != nil {
+			return nil, err
+		}
+		endKey, err := url.QueryUnescape(args[1])
+		if err != nil {
+			return nil, err
+		}
+		args = args[2:]
+		ranges = append(ranges, core.NewKeyRange(startKey, endKey))
+	}
+	if len(ranges) == 0 {
+		return []core.KeyRange{core.NewKeyRange("", "")}, nil
+	}
+	return ranges, nil
 }

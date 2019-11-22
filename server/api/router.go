@@ -142,12 +142,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rootRouter.HandleFunc("/api/v1/admin/log", logHandler.Handle).Methods("POST")
 
 	pluginHandler := newPluginHandler(handler, rd)
-	router.HandleFunc("/api/v1/plugin", pluginHandler.LoadPlugin).Methods("POST")
-	router.HandleFunc("/api/v1/plugin", pluginHandler.UpdatePlugin).Methods("PUT")
-	router.HandleFunc("/api/v1/plugin", pluginHandler.UnloadPlugin).Methods("DELETE")
+	rootRouter.HandleFunc("/api/v1/plugin", pluginHandler.LoadPlugin).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/plugin", pluginHandler.UpdatePlugin).Methods("PUT")
+	rootRouter.HandleFunc("/api/v1/plugin", pluginHandler.UnloadPlugin).Methods("DELETE")
 
-	router.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
-	router.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	rootRouter.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
 	rootRouter.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	rootRouter.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
