@@ -362,7 +362,8 @@ func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 func NewScatterRegionCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "scatter-region <region_id>",
-		Short: "scatter a region",
+		Short: "usually used for a batch of adjacent regions",
+		Long:  "usually used for a batch of adjacent regions, for example, scatter the regions for 1 to 100, need to use the following commands in order: \"scatter-region 1; scatter-region 2; ...; scatter-region 100;\"",
 		Run:   scatterRegionCommandFunc,
 	}
 	return c
