@@ -200,7 +200,7 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 		return nil
 	})
 	if err != nil {
-		cmd.Println(err)
+		cmd.Printf("Failed! %s", err)
 		return
 	}
 	cmd.Println("Success!")
