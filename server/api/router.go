@@ -144,6 +144,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rootRouter.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
 	rootRouter.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	rootRouter.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	// metric query use to query metric data, the protocol is compatible with prometheus.
+	rootRouter.Handle("/api/v1/metric/query", newQueryMetric(svr)).Methods("GET", "POST")
+	rootRouter.Handle("/api/v1/metric/query_range", newQueryMetric(svr)).Methods("GET", "POST")
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
