@@ -107,7 +107,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		}
 		body, err := json.Marshal(input)
 		c.Assert(err, IsNil)
-		s.testPauseAndResumeScheduler(ca.name, ca.createdName, body, ca.extraTestFunc, c)
+		s.testPauseOrResume(ca.name, ca.createdName, body, ca.extraTestFunc, c)
 	}
 
 	// test pause and resume all schedulers.
@@ -208,7 +208,7 @@ func (s *testScheduleSuite) deleteScheduler(createdName string, c *C) {
 	c.Assert(err, IsNil)
 }
 
-func (s *testScheduleSuite) testPauseAndResumeScheduler(name, createdName string, body []byte, extraTest func(string, *C), c *C) {
+func (s *testScheduleSuite) testPauseOrResume(name, createdName string, body []byte, extraTest func(string, *C), c *C) {
 	if createdName == "" {
 		createdName = name
 	}

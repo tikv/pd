@@ -14,7 +14,6 @@
 package command
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -56,7 +55,7 @@ func pauseOrResumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	path := schedulersPrefix + "/" + args[0]
-	input := make(map[string]int)
+	input := make(map[string]interface{})
 	input["delay"] = 0
 	if len(args) == 2 {
 		dealy, err := strconv.Atoi(args[1])
@@ -66,12 +65,7 @@ func pauseOrResumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		input["delay"] = dealy
 	}
-	data, err := json.Marshal(input)
-	if err != nil {
-		cmd.Usage()
-		return
-	}
-	postData(cmd, path, data)
+	postJSON(cmd, path, input)
 }
 
 // NewShowSchedulerCommand returns a command to show schedulers.
