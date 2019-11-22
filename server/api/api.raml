@@ -1142,16 +1142,29 @@ types:
       500:
         description: PD server failed to proceed the request.
   /{name}:
-    description: A specific scheduler.
+    description: A specific scheduler or all schedulers.
     uriParameters:
       name:
         type: string
-        description: The name of the scheduler.
+        description: The name of a specific scheduler or "all" means all shcedulers.
     delete:
       description: Delete a scheduler.
       responses:
         200:
           description: The scheduler is removed.
+        500:
+          description: PD server failed to proceed the request.
+    post:
+      description: Pause or resume a specific scheduler or all schedulers.
+      body:
+        application/json:
+          properties:
+            delay:
+              description: how long does the specified shcedulers pause.
+              type: integer
+      responses:
+        200:
+          description: pause specified schedulers for some time or resume specified schedulers.
         500:
           description: PD server failed to proceed the request.
 
