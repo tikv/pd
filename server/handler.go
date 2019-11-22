@@ -38,8 +38,8 @@ import (
 )
 
 var (
-	// ScheduleConfigHandlerPath is the api router path of the schedule config handler.
-	ScheduleConfigHandlerPath = "/api/v1/schedule-config"
+	// SchedulerConfigHandlerPath is the api router path of the schedule config handler.
+	SchedulerConfigHandlerPath = "/api/v1/scheduler-config"
 
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
 	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
@@ -748,7 +748,7 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.schedulers {
-		prefix := path.Join(pdRootPath, ScheduleConfigHandlerPath, name)
+		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name)
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
