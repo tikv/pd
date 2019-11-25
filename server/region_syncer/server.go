@@ -75,6 +75,7 @@ type RegionSyncer struct {
 	history            *historyBuffer
 	limit              *ratelimit.Bucket
 	securityConfig     *config.SecurityConfig
+	regionsCache       []*metapb.Region
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -90,6 +91,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		history:        newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
 		limit:          ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
 		securityConfig: s.GetSecurityConfig(),
+		regionsCache:   make([]*metapb.Region, 0),
 	}
 }
 
@@ -240,4 +242,21 @@ func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
 		}
 		s.Unlock()
 	}
+}
+
+func (s *RegionSyncer) LoadRegionsCache(f func(region *core.RegionInfo) []*core.RegionInfo) error {
+	for _, region := range s.regionsCache {
+		overlaps := f(core.NewRegionInfo(region, nil))
+		for _, item := range overlaps {
+			if err := s.server.GetStorage().DeleteRegion(item.GetMeta()); err != nil {
+				log.Error("failed to delete region from storage",
+					zap.Uint64("region-id", item.GetID()),
+					zap.Stringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
+					zap.Error(err))
+				return err
+			}
+		}
+	}
+	s.regionsCache = make([]*metapb.Region, 0)
+	return nil
 }

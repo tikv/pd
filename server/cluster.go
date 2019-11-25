@@ -213,7 +213,7 @@ func (c *RaftCluster) loadClusterInfo() (*RaftCluster, error) {
 
 	start = time.Now()
 
-	if err := c.storage.LoadRegions(c.core.PutRegion); err != nil {
+	if err := c.regionSyncer.LoadRegionsCache(c.core.PutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",

@@ -128,6 +128,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					err = s.server.GetStorage().SaveRegion(r)
 					if err == nil {
 						s.history.Record(core.NewRegionInfo(r, nil))
+						s.regionsCache = append(s.regionsCache, r)
 					}
 				}
 			}
