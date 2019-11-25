@@ -244,6 +244,7 @@ func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
 	}
 }
 
+// LoadRegionsCache loads all regions from cache to RegionsInfo.
 func (s *RegionSyncer) LoadRegionsCache(f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	for _, region := range s.regionsCache {
 		overlaps := f(core.NewRegionInfo(region, nil))
