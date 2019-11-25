@@ -21,10 +21,14 @@ import (
 	"github.com/unrolled/render"
 )
 
-func createRouter(prefix string, svr *server.Server) *mux.Router {
-	rd := render.New(render.Options{
-		IndentJSON: true,
+func createRender() *render.Render {
+	return render.New(render.Options{
+		StreamingJSON: true,
 	})
+}
+
+func createRouter(prefix string, svr *server.Server) *mux.Router {
+	rd := createRender()
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
