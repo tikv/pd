@@ -15,6 +15,7 @@ package api
 
 import (
 	"net/http"
+	"net/http/pprof"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
@@ -148,6 +149,14 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// metric query use to query metric data, the protocol is compatible with prometheus.
 	rootRouter.Handle("/api/v1/metric/query", newQueryMetric(svr)).Methods("GET", "POST")
 	rootRouter.Handle("/api/v1/metric/query_range", newQueryMetric(svr)).Methods("GET", "POST")
+
+	// profile API
+	rootRouter.HandleFunc("/api/v1/debug/pprof/profile", pprof.Profile)
+	rootRouter.Handle("/api/v1/debug/pprof/heap", pprof.Handler("heap"))
+	rootRouter.Handle("/api/v1/debug/pprof/mutex", pprof.Handler("mutex"))
+	rootRouter.Handle("/api/v1/debug/pprof/allocs", pprof.Handler("allocs"))
+	rootRouter.Handle("/api/v1/debug/pprof/block", pprof.Handler("block"))
+	rootRouter.Handle("/api/v1/debug/pprof/goroutine", pprof.Handler("goroutine"))
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
