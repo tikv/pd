@@ -35,7 +35,7 @@ const (
 	EvictLeaderName = "evict-leader-scheduler"
 	// EvictLeaderType is evict leader scheduler type.
 	EvictLeaderType        = "evict-leader"
-	noStoreInSchedulerInfo = "No store in evict-leader-scheduler-config"
+	noStoreInSchedulerInfo = "No store in scheduler"
 )
 
 func init() {
@@ -108,7 +108,7 @@ func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 }
 
 func (conf *evictLeaderSchedulerConfig) Persist() error {
-	name := conf.getScheduleName()
+	name := conf.getSchedulerName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedule.EncodeConfig(conf)
@@ -119,7 +119,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	return nil
 }
 
-func (conf *evictLeaderSchedulerConfig) getScheduleName() string {
+func (conf *evictLeaderSchedulerConfig) getSchedulerName() string {
 	return EvictLeaderName
 }
 
