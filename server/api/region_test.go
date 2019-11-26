@@ -361,7 +361,7 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 }
 
 func BenchmarkRenderJSON(b *testing.B) {
-	regionsCount := uint64(10_000)
+	regionsCount := uint64(10000)
 	storeCount := uint64(100)
 	regionInfos := newTestRegions(regionsCount, storeCount)
 
@@ -376,7 +376,7 @@ func BenchmarkRenderJSON(b *testing.B) {
 }
 
 func BenchmarkConvertToAPIRegions(b *testing.B) {
-	regionsCount := uint64(10_000)
+	regionsCount := uint64(10000)
 	storeCount := uint64(100)
 	regionInfos := newTestRegions(regionsCount, storeCount)
 
