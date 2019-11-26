@@ -134,6 +134,13 @@ func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 	return res
 }
 
+func (conf *evictLeaderSchedulerConfig) removeStoreFromConfig(id uint64) {
+	conf.mu.Lock()
+	defer conf.mu.Unlock()
+	delete(conf.StoreIDWitRanges, id)
+	conf.cluster.UnblockStore(id)
+}
+
 type evictLeaderScheduler struct {
 	*baseScheduler
 	conf     *evictLeaderSchedulerConfig
@@ -278,17 +285,12 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	handler.config.mu.Lock()
-	defer handler.config.mu.Unlock()
+	handler.config.mu.RLock()
 	_, exists := handler.config.StoreIDWitRanges[id]
+	handler.config.mu.RUnlock()
 	if exists {
-		delete(handler.config.StoreIDWitRanges, id)
-		handler.config.cluster.UnblockStore(id)
-
-		handler.config.mu.Unlock()
+		handler.config.removeStoreFromConfig(id)
 		handler.config.Persist()
-		handler.config.mu.Lock()
-
 		var resp interface{}
 		if len(handler.config.StoreIDWitRanges) == 0 {
 			resp = noStoreInSchedulerInfo

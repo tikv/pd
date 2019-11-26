@@ -134,6 +134,13 @@ func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
 	return res
 }
 
+func (conf *grantLeaderSchedulerConfig) removeStoreFromConfig(id uint64) {
+	conf.mu.Lock()
+	defer conf.mu.Unlock()
+	delete(conf.StoreIDWitRanges, id)
+	conf.cluster.UnblockStore(id)
+}
+
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
 	*baseScheduler
@@ -194,17 +201,6 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
-	// schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	// region := cluster.RandFollowerRegion(s.conf.StoreID, s.conf.Ranges, opt.HealthRegion(cluster))
-	// if region == nil {
-	// 	schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
-	// 	return nil
-	// }
-	// schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	// op := operator.CreateTransferLeaderOperator(GrantLeaderType, region, region.GetLeader().GetStoreId(), s.conf.StoreID, operator.OpLeader)
-	// op.SetPriorityLevel(core.HighPriority)
-	// return []*operator.Operator{op}
-
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	var ops []*operator.Operator
 	s.conf.mu.RLock()
@@ -278,17 +274,12 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	handler.config.mu.Lock()
-	defer handler.config.mu.Unlock()
+	handler.config.mu.RLock()
 	_, exists := handler.config.StoreIDWitRanges[id]
+	handler.config.mu.RUnlock()
 	if exists {
-		delete(handler.config.StoreIDWitRanges, id)
-		handler.config.cluster.UnblockStore(id)
-
-		handler.config.mu.Unlock()
+		handler.config.removeStoreFromConfig(id)
 		handler.config.Persist()
-		handler.config.mu.Lock()
-
 		var resp interface{}
 		if len(handler.config.StoreIDWitRanges) == 0 {
 			resp = noStoreInSchedulerInfo

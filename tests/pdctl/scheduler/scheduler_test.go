@@ -145,12 +145,12 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		}
 		checkSchedulerCommand(args, expected)
 
-		//scheduler config show command
+		// scheduler config show command
 		expectedConfig := make(map[string]interface{})
 		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
 		checkSchedulerConfigCommand(nil, expectedConfig, schedulers[idx])
 
-		//scheduler config update command
+		// scheduler config update command
 		args = []string{"-u", pdAddr, "scheduler", "config", "update", schedulers[idx], "3"}
 		expected = map[string]bool{
 			"balance-leader-scheduler":     true,
@@ -160,7 +160,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		}
 		checkSchedulerCommand(args, expected)
 
-		//check update success
+		// check update success
 		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}, "3": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
 		checkSchedulerConfigCommand(nil, expectedConfig, schedulers[idx])
 
@@ -173,8 +173,8 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		}
 		checkSchedulerCommand(args, expected)
 
-		//check the compactily
-		// evict scheduler add command
+		// check the compactily
+		// scheduler add command
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "2"}
 		expected = map[string]bool{
 			"balance-leader-scheduler":     true,
@@ -184,7 +184,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		}
 		checkSchedulerCommand(args, expected)
 
-		// evict scheduler add command twice
+		// scheduler add command twice
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "4"}
 		expected = map[string]bool{
 			"balance-leader-scheduler":     true,
@@ -194,11 +194,11 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		}
 		checkSchedulerCommand(args, expected)
 
-		//check add success
+		// check add success
 		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}, "4": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
 		checkSchedulerConfigCommand(nil, expectedConfig, schedulers[idx])
 
-		// evict-scheduler remove command [old]
+		// scheduler remove command [old]
 		args = []string{"-u", pdAddr, "scheduler", "remove", schedulers[idx] + "-4"}
 		expected = map[string]bool{
 			"balance-leader-scheduler":     true,
