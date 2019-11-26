@@ -140,11 +140,11 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
 	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	s.checkSteps(c, op, steps)
+	op.Start()
 	c.Assert(op.Check(region), IsNil)
-	c.Assert(op.IsFinish(), IsTrue)
-	op.startTime = time.Now()
-	op.startTime = op.startTime.Add(-RegionOperatorWaitTime - time.Second)
-	c.Assert(op.IsTimeout(), IsFalse)
+	c.Assert(op.Status(), Equals, SUCCESS)
+	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-RegionOperatorWaitTime-time.Second))
+	c.Assert(op.CheckTimeout(), IsFalse)
 
 	// addPeer1, transferLeader1, removePeer2
 	steps = []OpStep{
@@ -154,14 +154,14 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	}
 	op = s.newTestOperator(1, OpLeader|OpRegion, steps...)
 	s.checkSteps(c, op, steps)
+	op.Start()
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
 	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
-	op.startTime = time.Now()
-	c.Assert(op.IsTimeout(), IsFalse)
-	op.startTime = op.startTime.Add(-LeaderOperatorWaitTime - time.Second)
-	c.Assert(op.IsTimeout(), IsFalse)
-	op.startTime = op.startTime.Add(-RegionOperatorWaitTime - time.Second)
-	c.Assert(op.IsTimeout(), IsTrue)
+	c.Assert(op.CheckTimeout(), IsFalse)
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-LeaderOperatorWaitTime-time.Second))
+	c.Assert(op.CheckTimeout(), IsFalse)
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-RegionOperatorWaitTime-time.Second))
+	c.Assert(op.CheckTimeout(), IsTrue)
 	res, err := json.Marshal(op)
 	c.Assert(err, IsNil)
 	c.Assert(len(res), Equals, len(op.String())+2)
@@ -169,10 +169,10 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	// check short timeout for transfer leader only operators.
 	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
 	op = s.newTestOperator(1, OpLeader, steps...)
-	op.startTime = time.Now()
-	c.Assert(op.IsTimeout(), IsFalse)
-	op.startTime = op.startTime.Add(-LeaderOperatorWaitTime - time.Second)
-	c.Assert(op.IsTimeout(), IsTrue)
+	op.Start()
+	c.Assert(op.CheckTimeout(), IsFalse)
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-LeaderOperatorWaitTime-time.Second))
+	c.Assert(op.CheckTimeout(), IsTrue)
 }
 
 func (s *testOperatorSuite) TestInfluence(c *C) {
@@ -266,4 +266,143 @@ func (s *testOperatorSuite) TestOperatorKind(c *C) {
 	c.Assert(err, IsNil)
 	_, err = ParseOperatorKind("foobar")
 	c.Assert(err, NotNil)
+}
+
+func (s *testOperatorSuite) TestCheckSuccess(c *C) {
+	{
+		steps := []OpStep{
+			AddPeer{ToStore: 1, PeerID: 1},
+			TransferLeader{FromStore: 2, ToStore: 1},
+			RemovePeer{FromStore: 2},
+		}
+		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		c.Assert(op.Status(), Equals, CREATED)
+		c.Assert(op.CheckSuccess(), IsFalse)
+		c.Assert(op.Start(), IsTrue)
+		c.Assert(op.CheckSuccess(), IsFalse)
+		op.currentStep = int32(len(op.steps))
+		c.Assert(op.CheckSuccess(), IsTrue)
+		c.Assert(op.CheckSuccess(), IsTrue)
+	}
+	{
+		steps := []OpStep{
+			AddPeer{ToStore: 1, PeerID: 1},
+			TransferLeader{FromStore: 2, ToStore: 1},
+			RemovePeer{FromStore: 2},
+		}
+		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		op.currentStep = int32(len(op.steps))
+		c.Assert(op.Status(), Equals, CREATED)
+		c.Assert(op.CheckSuccess(), IsFalse)
+		c.Assert(op.Start(), IsTrue)
+		c.Assert(op.CheckSuccess(), IsTrue)
+		c.Assert(op.CheckSuccess(), IsTrue)
+	}
+}
+
+func (s *testOperatorSuite) TestCheckTimeout(c *C) {
+	{
+		steps := []OpStep{
+			AddPeer{ToStore: 1, PeerID: 1},
+			TransferLeader{FromStore: 2, ToStore: 1},
+			RemovePeer{FromStore: 2},
+		}
+		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		c.Assert(op.Status(), Equals, CREATED)
+		c.Assert(op.Start(), IsTrue)
+		op.currentStep = int32(len(op.steps))
+		c.Assert(op.CheckTimeout(), IsFalse)
+		c.Assert(op.Status(), Equals, SUCCESS)
+	}
+	{
+		steps := []OpStep{
+			AddPeer{ToStore: 1, PeerID: 1},
+			TransferLeader{FromStore: 2, ToStore: 1},
+			RemovePeer{FromStore: 2},
+		}
+		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		c.Assert(op.Status(), Equals, CREATED)
+		c.Assert(op.Start(), IsTrue)
+		op.currentStep = int32(len(op.steps))
+		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-RegionOperatorWaitTime))
+		c.Assert(op.CheckTimeout(), IsFalse)
+		c.Assert(op.Status(), Equals, SUCCESS)
+	}
+}
+
+func (s *testOperatorSuite) TestStart(c *C) {
+	steps := []OpStep{
+		AddPeer{ToStore: 1, PeerID: 1},
+		TransferLeader{FromStore: 2, ToStore: 1},
+		RemovePeer{FromStore: 2},
+	}
+	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+	c.Assert(op.stepTime, Equals, int64(0))
+	c.Assert(op.Status(), Equals, CREATED)
+	c.Assert(op.Start(), IsTrue)
+	c.Assert(op.stepTime, Not(Equals), 0)
+	c.Assert(op.Status(), Equals, STARTED)
+}
+
+func (s *testOperatorSuite) TestCheckExpired(c *C) {
+	steps := []OpStep{
+		AddPeer{ToStore: 1, PeerID: 1},
+		TransferLeader{FromStore: 2, ToStore: 1},
+		RemovePeer{FromStore: 2},
+	}
+	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+	c.Assert(op.CheckExpired(), IsFalse)
+	c.Assert(op.Status(), Equals, CREATED)
+	SetOperatorStatusReachTime(op, CREATED, time.Now().Add(-OperatorExpireTime))
+	c.Assert(op.CheckExpired(), IsTrue)
+	c.Assert(op.Status(), Equals, EXPIRED)
+}
+
+func (s *testOperatorSuite) TestCheck(c *C) {
+	{
+		region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+		steps := []OpStep{
+			AddPeer{ToStore: 1, PeerID: 1},
+			TransferLeader{FromStore: 2, ToStore: 1},
+			RemovePeer{FromStore: 2},
+		}
+		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		c.Assert(op.Start(), IsTrue)
+		c.Assert(op.Check(region), NotNil)
+		c.Assert(op.Status(), Equals, STARTED)
+		region = s.newTestRegion(1, 1, [2]uint64{1, 1})
+		c.Assert(op.Check(region), IsNil)
+		c.Assert(op.Status(), Equals, SUCCESS)
+	}
+	{
+		region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+		steps := []OpStep{
+			AddPeer{ToStore: 1, PeerID: 1},
+			TransferLeader{FromStore: 2, ToStore: 1},
+			RemovePeer{FromStore: 2},
+		}
+		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		c.Assert(op.Start(), IsTrue)
+		c.Assert(op.Check(region), NotNil)
+		c.Assert(op.Status(), Equals, STARTED)
+		op.status.setTime(STARTED, time.Now().Add(-RegionOperatorWaitTime))
+		c.Assert(op.Check(region), NotNil)
+		c.Assert(op.Status(), Equals, TIMEOUT)
+	}
+	{
+		region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+		steps := []OpStep{
+			AddPeer{ToStore: 1, PeerID: 1},
+			TransferLeader{FromStore: 2, ToStore: 1},
+			RemovePeer{FromStore: 2},
+		}
+		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		c.Assert(op.Start(), IsTrue)
+		c.Assert(op.Check(region), NotNil)
+		c.Assert(op.Status(), Equals, STARTED)
+		op.status.setTime(STARTED, time.Now().Add(-RegionOperatorWaitTime))
+		region = s.newTestRegion(1, 1, [2]uint64{1, 1})
+		c.Assert(op.Check(region), IsNil)
+		c.Assert(op.Status(), Equals, SUCCESS)
+	}
 }

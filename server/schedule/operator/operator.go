@@ -25,10 +25,13 @@ import (
 )
 
 const (
-	// LeaderOperatorWaitTime is the duration that when a leader operator lives
+	// OperatorExpireTime is the duration that when an operator is not started
+	// after it, the operator will be considered expired.
+	OperatorExpireTime = 3 * time.Second
+	// LeaderOperatorWaitTime is the duration that when a leader operator runs
 	// longer than it, the operator will be considered timeout.
 	LeaderOperatorWaitTime = 10 * time.Second
-	// RegionOperatorWaitTime is the duration that when a region operator lives
+	// RegionOperatorWaitTime is the duration that when a region operator runs
 	// longer than it, the operator will be considered timeout.
 	RegionOperatorWaitTime = 10 * time.Minute
 )
@@ -49,11 +52,9 @@ type Operator struct {
 	kind        OpKind
 	steps       []OpStep
 	currentStep int32
-	createTime  time.Time
-	// startTime is used to record the start time of an operator which is added into running operators.
-	startTime time.Time
-	stepTime  int64
-	level     core.PriorityLevel
+	status      OpStatusTracker
+	stepTime    int64
+	level       core.PriorityLevel
 }
 
 // NewOperator creates a new operator.
@@ -69,8 +70,7 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		regionEpoch: regionEpoch,
 		kind:        kind,
 		steps:       steps,
-		createTime:  time.Now(),
-		stepTime:    time.Now().UnixNano(),
+		status:      NewOpStatusTracker(),
 		level:       level,
 	}
 }
@@ -80,12 +80,12 @@ func (o *Operator) String() string {
 	for i := range o.steps {
 		stepStrs[i] = o.steps[i].String()
 	}
-	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, steps:[%s])", o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.createTime, o.startTime, atomic.LoadInt32(&o.currentStep), strings.Join(stepStrs, ", "))
-	if o.IsTimeout() {
-		s = s + " timeout"
-	}
-	if o.IsFinish() {
+	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, steps:[%s])", o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(), o.GetStartTime(), atomic.LoadInt32(&o.currentStep), strings.Join(stepStrs, ", "))
+	if o.CheckSuccess() {
 		s = s + " finished"
+	}
+	if o.CheckTimeout() {
+		s = s + " timeout"
 	}
 	return s
 }
@@ -125,24 +125,90 @@ func (o *Operator) Kind() OpKind {
 	return o.kind
 }
 
+// Status returns operator status.
+func (o *Operator) Status() OpStatus {
+	return o.status.Status()
+}
+
+// GetReachTimeOf returns the time when operator reaches the given status.
+func (o *Operator) GetReachTimeOf(st OpStatus) time.Time {
+	return o.status.ReachTimeOf(st)
+}
+
+// GetCreateTime gets the create time of operator.
+func (o *Operator) GetCreateTime() time.Time {
+	return o.status.ReachTimeOf(CREATED)
+}
+
 // ElapsedTime returns duration since it was created.
 func (o *Operator) ElapsedTime() time.Duration {
-	return time.Since(o.createTime)
+	return time.Since(o.GetCreateTime())
 }
 
-// RunningTime returns duration since it was promoted.
-func (o *Operator) RunningTime() time.Duration {
-	return time.Since(o.startTime)
+// Start sets the operator to STARTED status, returns whether succeeded.
+func (o *Operator) Start() bool {
+	if o.status.To(STARTED) {
+		atomic.StoreInt64(&o.stepTime, time.Now().UnixNano())
+		return true
+	}
+	return false
 }
 
-// SetStartTime sets the start time for operator.
-func (o *Operator) SetStartTime(t time.Time) {
-	o.startTime = t
+// HasStarted returns whether operator has started.
+func (o *Operator) HasStarted() bool {
+	return !o.GetStartTime().IsZero()
 }
 
-// GetStartTime ges the start time for operator.
+// GetStartTime gets the start time of operator.
 func (o *Operator) GetStartTime() time.Time {
-	return o.startTime
+	return o.status.ReachTimeOf(STARTED)
+}
+
+// RunningTime returns duration since it started.
+func (o *Operator) RunningTime() time.Duration {
+	if o.HasStarted() {
+		return time.Since(o.GetStartTime())
+	}
+	return 0
+}
+
+// IsEnd checks if the operator is at and end status.
+func (o *Operator) IsEnd() bool {
+	return o.status.IsEnd()
+}
+
+// CheckSuccess checks if all steps are finished, and update the status.
+func (o *Operator) CheckSuccess() bool {
+	if atomic.LoadInt32(&o.currentStep) >= int32(len(o.steps)) {
+		return o.status.To(SUCCESS) || o.Status() == SUCCESS
+	}
+	return false
+}
+
+// Cancel marks the operator canceled.
+func (o *Operator) Cancel() bool {
+	return o.status.To(CANCELED)
+}
+
+// Replace marks the operator replaced.
+func (o *Operator) Replace() bool {
+	return o.status.To(REPLACED)
+}
+
+// CheckExpired checks if the operator is expired, and update the status.
+func (o *Operator) CheckExpired() bool {
+	return o.status.CheckExpired(OperatorExpireTime)
+}
+
+// CheckTimeout checks if the operator is timeout, and update the status.
+func (o *Operator) CheckTimeout() bool {
+	if o.CheckSuccess() {
+		return false
+	}
+	if o.kind&OpRegion != 0 {
+		return o.status.CheckTimeout(RegionOperatorWaitTime)
+	}
+	return o.status.CheckTimeout(LeaderOperatorWaitTime)
 }
 
 // Len returns the operator's steps count.
@@ -159,8 +225,15 @@ func (o *Operator) Step(i int) OpStep {
 }
 
 // Check checks if current step is finished, returns next step to take action.
+// If operator is at an end status, check returns nil.
 // It's safe to be called by multiple goroutine concurrently.
+// FIXME: metrics is not thread-safe
 func (o *Operator) Check(region *core.RegionInfo) OpStep {
+	if o.IsEnd() {
+		return nil
+	}
+	// CheckTimeout will call CheckSuccess first
+	defer func() { _ = o.CheckTimeout() }()
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
 			operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
@@ -198,31 +271,6 @@ func (o *Operator) SetPriorityLevel(level core.PriorityLevel) {
 // GetPriorityLevel gets the priority level.
 func (o *Operator) GetPriorityLevel() core.PriorityLevel {
 	return o.level
-}
-
-// IsFinish checks if all steps are finished.
-func (o *Operator) IsFinish() bool {
-	return atomic.LoadInt32(&o.currentStep) >= int32(len(o.steps))
-}
-
-// IsTimeout checks the operator's create time and determines if it is timeout.
-func (o *Operator) IsTimeout() bool {
-	var timeout bool
-	if o.IsFinish() {
-		return false
-	}
-	if o.startTime.IsZero() {
-		return false
-	}
-	if o.kind&OpRegion != 0 {
-		timeout = time.Since(o.startTime) > RegionOperatorWaitTime
-	} else {
-		timeout = time.Since(o.startTime) > LeaderOperatorWaitTime
-	}
-	if timeout {
-		return true
-	}
-	return false
 }
 
 // UnfinishedInfluence calculates the store difference which unfinished operator steps make.
