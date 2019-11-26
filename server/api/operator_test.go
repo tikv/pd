@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
@@ -36,6 +37,7 @@ type testOperatorSuite struct {
 }
 
 func (s *testOperatorSuite) SetUpSuite(c *C) {
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 1 })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
