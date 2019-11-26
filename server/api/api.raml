@@ -1142,16 +1142,29 @@ types:
       500:
         description: PD server failed to proceed the request.
   /{name}:
-    description: A specific scheduler.
+    description: A specific scheduler or all schedulers.
     uriParameters:
       name:
         type: string
-        description: The name of the scheduler.
+        description: The name of a specific scheduler or "all" means all shcedulers.
     delete:
       description: Delete a scheduler.
       responses:
         200:
           description: The scheduler is removed.
+        500:
+          description: PD server failed to proceed the request.
+    post:
+      description: Pause or resume a specific scheduler or all schedulers.
+      body:
+        application/json:
+          properties:
+            delay:
+              description: how long does the specified shcedulers pause.
+              type: integer
+      responses:
+        200:
+          description: pause specified schedulers for some time or resume specified schedulers.
         500:
           description: PD server failed to proceed the request.
 
@@ -1297,5 +1310,100 @@ types:
           description: The log level is updated.
         400:
           description: The input is invalid.
+        500:
+          description: PD server failed to proceed the request.
+
+/metric:
+  description: Query metric.
+  /query:
+    get:
+      description: Query instant metric api.
+      queryParameters:
+        query:
+          description: promQL query statement.
+          type: string
+        time?:
+          description: Evaluation timestamp, such as 2019-11-22T20:10:51.781Z.
+          type: string
+        timeout?:
+          description: Evaluation timeout, such as 15s.
+          type: string
+      responses:
+        200:
+          body:
+            application/json:
+              properties:
+                data: Metric data
+        500:
+          description: PD server failed to proceed the request.
+    post:
+      description: Query instant metric api.
+      body:
+        application/json:
+          properties:
+            query:
+              description: promQL query statement.
+              type: string
+            time?:
+              description: Evaluation timestamp, such as 2019-11-22T20:10:51.781Z.
+              type: string
+            timeout?:
+              description: Evaluation timeout, such as 15s.
+              type: string
+      responses:
+        200:
+          body:
+            application/json:
+              properties:
+                data: Metric data
+        500:
+          description: PD server failed to proceed the request.
+  /query_range:
+    get:
+      description: Query range metric api.
+      queryParameters:
+        query:
+          description: promQL query statement.
+          type: string
+        start:
+          description: Evaluation start timestamp, such as 2019-11-22T20:10:51.781Z.
+          type: string
+        end:
+          description: Evaluation end timestamp, such as 2019-11-22T20:10:51.781Z.
+          type: string
+        timeout?:
+          description: Evaluation timeout, such as 15s.
+          type: string
+      responses:
+        200:
+          body:
+            application/json:
+              properties:
+                data: Metric data
+        500:
+          description: PD server failed to proceed the request.
+    post:
+      description: Query range metric api.
+      body:
+        application/json:
+          properties:
+            query:
+              description: promQL query statement.
+              type: string
+            start:
+              description: Evaluation start timestamp, such as 2019-11-22T20:10:51.781Z.
+              type: string
+            end:
+              description: Evaluation end timestamp, such as 2019-11-22T20:10:51.781Z.
+              type: string
+            timeout?:
+              description: Evaluation timeout, such as 15s.
+              type: string
+      responses:
+        200:
+          body:
+            application/json:
+              properties:
+                data: Metric data
         500:
           description: PD server failed to proceed the request.

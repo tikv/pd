@@ -1211,7 +1211,7 @@ func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
 		for {
 			select {
 			case <-ch:
-				break
+				return
 			default:
 			}
 			sche.config.BuildWithArgs(args)

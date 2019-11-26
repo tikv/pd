@@ -96,6 +96,13 @@ func (oc *OperatorController) Ctx() context.Context {
 	return oc.ctx
 }
 
+//GetCluster export cluster to evict-scheduler for check sctore status
+func (oc *OperatorController) GetCluster() opt.Cluster {
+	oc.RLock()
+	defer oc.RUnlock()
+	return oc.cluster
+}
+
 // Dispatch is used to dispatch the operator of a region.
 func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 	// Check existed operator.
