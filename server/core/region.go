@@ -891,7 +891,13 @@ func isInvolved(region *RegionInfo, startKey, endKey []byte) bool {
 // HexRegionKey converts region key to hex format. Used for formating region in
 // logs.
 func HexRegionKey(key []byte) []byte {
-	return []byte(strings.ToUpper(hex.EncodeToString(key)))
+	return []byte(HexRegionKeyStr(key))
+}
+
+// HexRegionKeyStr converts region key to hex format. Used for formating region in
+// logs.
+func HexRegionKeyStr(key []byte) string {
+	return strings.ToUpper(hex.EncodeToString(key))
 }
 
 // RegionToHexMeta converts a region meta's keys to hex format. Used for formating

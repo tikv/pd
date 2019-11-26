@@ -374,3 +374,31 @@ func BenchmarkRenderJSON(b *testing.B) {
 		rd.JSON(&buffer, 200, regions)
 	}
 }
+
+func BenchmarkConvertToAPIRegions(b *testing.B) {
+	regionsCount := uint64(10_000)
+	storeCount := uint64(100)
+	regionInfos := newTestRegions(regionsCount, storeCount)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		regions := convertToAPIRegions(regionInfos)
+		_ = regions.Count
+	}
+}
+
+func BenchmarkHexRegionKey(b *testing.B) {
+	key := []byte("region_number_infinity")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = string(core.HexRegionKey(key))
+	}
+}
+
+func BenchmarkHexRegionKeyStr(b *testing.B) {
+	key := []byte("region_number_infinity")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = core.HexRegionKeyStr(key)
+	}
+}
