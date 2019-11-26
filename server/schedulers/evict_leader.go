@@ -275,6 +275,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	err := handler.config.Persist()
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err)
+		return
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
