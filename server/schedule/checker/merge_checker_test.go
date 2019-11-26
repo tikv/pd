@@ -145,13 +145,6 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops, IsNil)
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
-	for _, op := range ops {
-		op.SetStartTime(time.Now())
-		op.SetStartTime(op.GetStartTime().Add(-operator.LeaderOperatorWaitTime - time.Second))
-		c.Assert(op.IsTimeout(), IsFalse)
-		op.SetStartTime(op.GetStartTime().Add(-operator.RegionOperatorWaitTime - time.Second))
-		c.Assert(op.IsTimeout(), IsTrue)
-	}
 	// Check merge with previous region.
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
