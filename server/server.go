@@ -80,10 +80,11 @@ type Server struct {
 	isServing int64
 
 	// Configs and initial fields.
-	cfg         *config.Config
-	etcdCfg     *embed.Config
-	scheduleOpt *config.ScheduleOption
-	handler     *Handler
+	cfg           *config.Config
+	componentsCfg *config.ComponentsConfig
+	etcdCfg       *embed.Config
+	scheduleOpt   *config.ScheduleOption
+	handler       *Handler
 
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
@@ -174,6 +175,7 @@ func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, e
 
 	s := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		componentsCfg: 		config.NewComponentsConfig(),
 		cfg:               cfg,
 		scheduleOpt:       config.NewScheduleOption(cfg),
 		member:            &member.Member{},
@@ -539,6 +541,11 @@ func (s *Server) GetEndpoints() []string {
 // GetClient returns builtin etcd client.
 func (s *Server) GetClient() *clientv3.Client {
 	return s.client
+}
+
+// GetComponentsConfig returns the components config of server.
+func (s *Server) GetComponentsConfig() *config.ComponentsConfig {
+	return s.componentsCfg
 }
 
 // GetLeader returns leader of etcd.
@@ -944,6 +951,10 @@ func (s *Server) reloadConfigFromKV() error {
 	} else {
 		s.storage.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
+	}
+
+	if err := s.componentsCfg.Reload(s.storage); err != nil {
+		return err
 	}
 	return nil
 }

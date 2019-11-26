@@ -47,8 +47,9 @@ require (
 	go.uber.org/goleak v0.10.0
 	go.uber.org/zap v1.12.0
 	golang.org/x/crypto v0.0.0-20190909091759-094676da4a83 // indirect
-	golang.org/x/net v0.0.0-20190909003024-a7b16738d86b // indirect
 	golang.org/x/sys v0.0.0-20190909082730-f460065e899a // indirect
 	google.golang.org/grpc v1.25.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+replace github.com/pingcap/kvproto => /home/ryan/kvproto

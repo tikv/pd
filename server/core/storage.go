@@ -32,11 +32,12 @@ import (
 )
 
 const (
-	clusterPath  = "raft"
-	configPath   = "config"
-	schedulePath = "schedule"
-	gcPath       = "gc"
-	rulesPath    = "rules"
+	clusterPath       = "raft"
+	clusterConfigPath = "cluster_config"
+	configPath        = "config"
+	schedulePath      = "schedule"
+	gcPath            = "gc"
+	rulesPath         = "rules"
 
 	customScheduleConfigPath = "scheduler_config"
 	componentsConfigPath     = "components_config"
@@ -190,6 +191,31 @@ func (s *Storage) SaveConfig(cfg interface{}) error {
 // LoadConfig loads config from configPath then unmarshal it to cfg.
 func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 	value, err := s.Load(configPath)
+	if err != nil {
+		return false, err
+	}
+	if value == "" {
+		return false, nil
+	}
+	err = json.Unmarshal([]byte(value), cfg)
+	if err != nil {
+		return false, errors.WithStack(err)
+	}
+	return true, nil
+}
+
+// SaveClusterConfig stores marshalable cfg to the clusterConfigPath.
+func (s *Storage) SaveClusterConfig(cfg interface{}) error {
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	return s.Save(clusterConfigPath, string(value))
+}
+
+// LoadClusterConfig loads config from clusterConfigPath then unmarshal it to cfg.
+func (s *Storage) LoadClusterConfig(cfg interface{}) (bool, error) {
+	value, err := s.Load(clusterConfigPath)
 	if err != nil {
 		return false, err
 	}
