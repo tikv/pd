@@ -247,6 +247,7 @@ func (s *testFollowerTsoSuite) SetUpSuite(c *C) {
 func (s *testFollowerTsoSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
+
 func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/skipRetryGetTS", `return(true)`), IsNil)
 	var err error
@@ -281,4 +282,39 @@ func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "can not get timestamp"), IsTrue)
 	failpoint.Disable("github.com/pingcap/pd/server/tso/skipRetryGetTS")
+}
+
+func (s *testFollowerTsoSuite) TestConcurrcyRequest(c *C) {
+	cluster, err := tests.NewTestCluster(1)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers(s.ctx)
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	leader := cluster.GetServer(cluster.GetLeader())
+
+	c.Assert(leader, NotNil)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	now := time.Now()
+	go func() {
+		defer wg.Done()
+		for i := 0; i <= 100; i++ {
+			physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
+			ts := uint64(physical << 18)
+			leader.GetServer().GetHandler().ResetTS(ts)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i <= 100; i++ {
+			physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
+			ts := uint64(physical << 18)
+			leader.GetServer().GetHandler().ResetTS(ts)
+		}
+	}()
+	wg.Wait()
 }
