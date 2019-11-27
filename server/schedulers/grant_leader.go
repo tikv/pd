@@ -55,16 +55,13 @@ func init() {
 			if err != nil {
 				return errors.WithStack(err)
 			}
-			conf.StoreIDWitRanges[id] = ranges
+			conf.StoreIDWithRanges[id] = ranges
 			return nil
 		}
 	})
 
 	schedule.RegisterScheduler(GrantLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &grantLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
+		conf := &grantLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		conf.cluster = opController.GetCluster()
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -74,10 +71,10 @@ func init() {
 }
 
 type grantLeaderSchedulerConfig struct {
-	mu               sync.RWMutex
-	storage          *core.Storage
-	StoreIDWitRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster          opt.Cluster
+	mu                sync.RWMutex
+	storage           *core.Storage
+	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
+	cluster           opt.Cluster
 }
 
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -95,7 +92,7 @@ func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 	}
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
-	conf.StoreIDWitRanges[id] = ranges
+	conf.StoreIDWithRanges[id] = ranges
 	return nil
 }
 
@@ -103,7 +100,7 @@ func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	return &grantLeaderSchedulerConfig{
-		StoreIDWitRanges: conf.StoreIDWitRanges,
+		StoreIDWithRanges: conf.StoreIDWithRanges,
 	}
 }
 
@@ -127,9 +124,10 @@ func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	var res []string
-	for index := range conf.StoreIDWitRanges[id] {
-		res = append(res, (string)(conf.StoreIDWitRanges[id][index].StartKey))
-		res = append(res, (string)(conf.StoreIDWitRanges[id][index].EndKey))
+	ranges := conf.StoreIDWithRanges[id]
+	for index := range ranges {
+		res = append(res, (string)(ranges[index].StartKey))
+		res = append(res, (string)(ranges[index].EndKey))
 	}
 	return res
 }
@@ -137,13 +135,13 @@ func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
 func (conf *grantLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (succ bool, last bool) {
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
-	_, exists := conf.StoreIDWitRanges[id]
+	_, exists := conf.StoreIDWithRanges[id]
 	succ, last = false, false
 	if exists {
-		delete(conf.StoreIDWitRanges, id)
+		delete(conf.StoreIDWithRanges, id)
 		conf.cluster.UnblockStore(id)
 		succ = true
-		last = len(conf.StoreIDWitRanges) == 0
+		last = len(conf.StoreIDWithRanges) == 0
 	}
 	return succ, last
 }
@@ -187,7 +185,7 @@ func (s *grantLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
-	for id := range s.conf.StoreIDWitRanges {
+	for id := range s.conf.StoreIDWithRanges {
 		if err := cluster.BlockStore(id); err != nil {
 			res = err
 		}
@@ -198,7 +196,7 @@ func (s *grantLeaderScheduler) Prepare(cluster opt.Cluster) error {
 func (s *grantLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
-	for id := range s.conf.StoreIDWitRanges {
+	for id := range s.conf.StoreIDWithRanges {
 		cluster.UnblockStore(id)
 	}
 }
@@ -212,7 +210,7 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 	var ops []*operator.Operator
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
-	for id, ranges := range s.conf.StoreIDWitRanges {
+	for id, ranges := range s.conf.StoreIDWithRanges {
 		region := cluster.RandFollowerRegion(id, ranges, opt.HealthRegion(cluster))
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
@@ -244,7 +242,7 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	idFloat, ok := input["store_id"].(float64)
 	if ok {
 		id = (uint64)(idFloat)
-		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
+		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
 			if err := handler.config.cluster.BlockStore(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
 				return
@@ -291,7 +289,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			resp = noStoreInSchedulerInfo
+			resp = lastStoreDeleteInfo
 		}
 		handler.rd.JSON(w, http.StatusOK, resp)
 		return

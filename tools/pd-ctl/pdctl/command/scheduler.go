@@ -29,7 +29,7 @@ var (
 	schedulerConfigPrefix    = "pd/api/v1/scheduler-config"
 	evictLeaderSchedulerName = "evict-leader-scheduler"
 	grantLeaderSchedulerName = "grant-leader-scheduler"
-	noStoreInSchedulerInfo   = "No store in scheduler"
+	lastStoreDeleteInfo      = "The last store has been delete"
 )
 
 // NewSchedulerCommand returns a scheduler command.
@@ -395,7 +395,7 @@ func restoreCommandUse(cmd *cobra.Command, origionCommandUse string) {
 	cmd.Use = origionCommandUse
 }
 
-func redirectReomveSchedulerToDelteConfig(cmd *cobra.Command, schedulerName string, args []string) {
+func redirectReomveSchedulerToDeleteConfig(cmd *cobra.Command, schedulerName string, args []string) {
 	args = strings.Split(args[0], "-")
 	args = args[len(args)-1:]
 	cmdStore := cmd.Use
@@ -412,9 +412,9 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	//FIXME: maybe there is a more graceful method to handler it
 	switch {
 	case strings.HasPrefix(args[0], evictLeaderSchedulerName) && args[0] != evictLeaderSchedulerName:
-		redirectReomveSchedulerToDelteConfig(cmd, evictLeaderSchedulerName, args)
+		redirectReomveSchedulerToDeleteConfig(cmd, evictLeaderSchedulerName, args)
 	case strings.HasPrefix(args[0], grantLeaderSchedulerName) && args[0] != grantLeaderSchedulerName:
-		redirectReomveSchedulerToDelteConfig(cmd, grantLeaderSchedulerName, args)
+		redirectReomveSchedulerToDeleteConfig(cmd, grantLeaderSchedulerName, args)
 	default:
 		path := schedulersPrefix + "/" + args[0]
 		_, err := doRequest(cmd, path, http.MethodDelete)
@@ -588,7 +588,7 @@ func deleteConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string)
 		return
 	}
 	//FIXME: remove the judge when the new command replace old command
-	if strings.Contains(resp, noStoreInSchedulerInfo) {
+	if strings.Contains(resp, lastStoreDeleteInfo) {
 		redirectDeleteConfigToRemoveScheduler(cmd, cmd.Name(), args)
 		return
 	}
