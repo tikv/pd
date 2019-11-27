@@ -333,3 +333,37 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 	}
 	return ranges, nil
 }
+
+type influence struct {
+	byteRate float64
+}
+
+func (infl influence) add(rhs *influence, w float64) influence {
+	infl.byteRate += rhs.byteRate * w
+	return infl
+}
+
+type pendingInfluence struct {
+	op       *operator.Operator
+	from, to uint64
+	origin   influence
+}
+
+func newPendingInfluence(op *operator.Operator, from, to uint64, infl influence) *pendingInfluence {
+	return &pendingInfluence{
+		op, from, to, infl,
+	}
+}
+
+func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) (float64, bool)) map[uint64]influence {
+	ret := map[uint64]influence{}
+	for p := range pendings {
+		w, remove := f(p.op)
+		if remove {
+			delete(pendings, p)
+		}
+		ret[p.to] = ret[p.to].add(&p.origin, w)
+		ret[p.from] = ret[p.from].add(&p.origin, -w)
+	}
+	return ret
+}
