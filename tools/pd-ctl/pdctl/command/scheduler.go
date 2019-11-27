@@ -29,7 +29,7 @@ var (
 	schedulerConfigPrefix    = "pd/api/v1/scheduler-config"
 	evictLeaderSchedulerName = "evict-leader-scheduler"
 	grantLeaderSchedulerName = "grant-leader-scheduler"
-	lastStoreDeleteInfo      = "The last store has been delete"
+	lastStoreDeleteInfo      = "The last store has been deleted"
 )
 
 // NewSchedulerCommand returns a scheduler command.

@@ -35,7 +35,7 @@ const (
 	EvictLeaderName = "evict-leader-scheduler"
 	// EvictLeaderType is evict leader scheduler type.
 	EvictLeaderType     = "evict-leader"
-	lastStoreDeleteInfo = "The last store has been delete"
+	lastStoreDeleteInfo = "The last store has been deleted"
 )
 
 func init() {
