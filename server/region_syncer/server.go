@@ -75,7 +75,7 @@ type RegionSyncer struct {
 	history            *historyBuffer
 	limit              *ratelimit.Bucket
 	securityConfig     *config.SecurityConfig
-	regionsCache       []*metapb.Region
+	regionsCache       map[uint64]*metapb.Region
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -91,7 +91,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		history:        newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
 		limit:          ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
 		securityConfig: s.GetSecurityConfig(),
-		regionsCache:   make([]*metapb.Region, 0),
+		regionsCache:   make(map[uint64]*metapb.Region),
 	}
 }
 
@@ -246,7 +246,7 @@ func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
 
 // LoadRegionsCache loads all regions from cache to RegionsInfo.
 func (s *RegionSyncer) LoadRegionsCache(f func(region *core.RegionInfo) []*core.RegionInfo) error {
-	for _, region := range s.regionsCache {
+	for key, region := range s.regionsCache {
 		overlaps := f(core.NewRegionInfo(region, nil))
 		for _, item := range overlaps {
 			if err := s.server.GetStorage().DeleteRegion(item.GetMeta()); err != nil {
@@ -257,7 +257,12 @@ func (s *RegionSyncer) LoadRegionsCache(f func(region *core.RegionInfo) []*core.
 				return err
 			}
 		}
+		delete(s.regionsCache, key)
 	}
-	s.regionsCache = make([]*metapb.Region, 0)
 	return nil
+}
+
+// AddRegionCache adds region into cache.
+func (s *RegionSyncer) AddRegionCache(region *metapb.Region) {
+	s.regionsCache[region.GetId()] = region
 }

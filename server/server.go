@@ -477,6 +477,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		log.Warn("save the bootstrap region failed", zap.Error(err))
 	}
+	s.cluster.regionSyncer.AddRegionCache(req.GetRegion())
 	err = s.storage.Flush()
 	if err != nil {
 		log.Warn("flush the bootstrap region failed", zap.Error(err))
