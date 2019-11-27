@@ -889,16 +889,6 @@ func isInvolved(region *RegionInfo, startKey, endKey []byte) bool {
 	return bytes.Compare(region.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), endKey) <= 0))
 }
 
-// Slice converts string to slice without copy.
-func Slice(s string) (b []byte) {
-	pbytes := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	pstring := *(*reflect.StringHeader)(unsafe.Pointer(&s))
-	pbytes.Data = pstring.Data
-	pbytes.Len = pstring.Len
-	pbytes.Cap = pstring.Len
-	return
-}
-
 // String converts slice of bytes to string without copy.
 func String(b []byte) (s string) {
 	if len(b) == 0 {
@@ -933,17 +923,17 @@ func ToUpperASCIIInplace(s []byte) []byte {
 	return s
 }
 
-// HexRegionKey converts region key to hex format. Used for formating region in
-// logs.
-func HexRegionKey(key []byte) []byte {
-	return ToUpperASCIIInplace(EncodeToString(key))
-}
-
 // EncodeToString overrides hex.EncodeToString implementation. Difference: returns []byte, not string
 func EncodeToString(src []byte) []byte {
 	dst := make([]byte, hex.EncodedLen(len(src)))
 	hex.Encode(dst, src)
 	return dst
+}
+
+// HexRegionKey converts region key to hex format. Used for formating region in
+// logs.
+func HexRegionKey(key []byte) []byte {
+	return ToUpperASCIIInplace(EncodeToString(key))
 }
 
 // HexRegionKeyStr converts region key to hex format. Used for formating region in
