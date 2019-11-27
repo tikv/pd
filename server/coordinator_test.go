@@ -669,9 +669,9 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
-	gls2, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"2"}))
+	evict, err := schedule.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
 	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(gls2, "2"), IsNil)
+	c.Assert(co.addScheduler(evict, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 6)
 	sches, _, err := storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
@@ -729,7 +729,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// the scheduler option should contain 7 items
 	// the `hot scheduler` and `label scheduler` are disabled
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 7)
-	c.Assert(co.removeScheduler(schedulers.GrantLeaderName+"-1"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.GrantLeaderName), IsNil)
 	// the scheduler that is not enable by default will be completely deleted
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 6)
 	c.Assert(co.schedulers, HasLen, 4)
@@ -744,7 +744,7 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 
 	co.run()
 	c.Assert(co.schedulers, HasLen, 4)
-	c.Assert(co.removeScheduler(schedulers.GrantLeaderName+"-2"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.EvictLeaderName), IsNil)
 	c.Assert(co.schedulers, HasLen, 3)
 }
 
@@ -776,7 +776,7 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.GrantLeaderName+"-1"), IsNil)
+	c.Assert(co.removeScheduler(schedulers.GrantLeaderName), IsNil)
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
