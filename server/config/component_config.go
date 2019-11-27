@@ -15,6 +15,8 @@ package config
 
 import (
 	"bytes"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -230,7 +232,7 @@ type GlobalConfig struct {
 
 // NewGlobalConfig ...
 func NewGlobalConfig(entries []*configpb.ConfigEntry) (*GlobalConfig, error) {
-	var configs map[string]string
+	configs := make(map[string]string)
 	for _, entry := range entries {
 		configs[entry.GetName()] = entry.GetValue()
 	}
@@ -263,7 +265,7 @@ type LocalConfig struct {
 
 // NewLocalConfig ...
 func NewLocalConfig(cfg string) (*LocalConfig, error) {
-	var configs map[string]interface{}
+	configs := make(map[string]interface{})
 	if err := decodeConfigs(cfg, configs); err != nil {
 		return nil, err
 	}
@@ -292,7 +294,7 @@ func (lc *LocalConfig) updateConfig(entry *configpb.ConfigEntry) {
 // TODO: need to consider the redundant label.
 func update(config map[string]interface{}, configName []string, value string) {
 	res := config
-	for len(configName) >= 1 {
+	for len(configName) >= 2 {
 		if _, ok := config[configName[0]]; !ok {
 			config[configName[0]] = make(map[string]interface{})
 		}
@@ -300,8 +302,28 @@ func update(config map[string]interface{}, configName []string, value string) {
 		configName = configName[1:]
 		res = config
 	}
-	res[configName[0]] = value
 
+	t := reflect.TypeOf(res[configName[0]])
+	// TODO: support more types
+	// TODO: error handle
+	switch t.Kind() {
+	case reflect.Bool:
+		v, _ := strconv.ParseBool(value)
+		res[configName[0]] = v
+	case reflect.Int:
+		v, _ := strconv.Atoi(value)
+		res[configName[0]] = v
+	case reflect.Int64:
+		v, _ := strconv.ParseInt(value, 10, 64)
+		res[configName[0]] = v
+	case reflect.Float64:
+		v, _ := strconv.ParseFloat(value, 64)
+		res[configName[0]] = v
+	case reflect.String:
+		res[configName[0]] = value
+	default:
+		res[configName[0]] = value
+	}
 }
 
 func encodeConfigs(configs map[string]interface{}) (string, error) {
