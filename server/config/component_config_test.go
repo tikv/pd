@@ -17,6 +17,9 @@ import (
 	"strings"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/kv"
 )
 
 var _ = Suite(&testComponentsConfigSuite{})
@@ -155,7 +158,7 @@ panic-when-unexpected-key-or-data = true
 	c.Assert(str, Equals, encodedStr)
 }
 
-func (s *testComponentsConfigSuite) TestUpdate(c *C) {
+func (s *testComponentsConfigSuite) TestUpdateConfig(c *C) {
 	cfg := make(map[string]interface{})
 	defaultcfTitanMap := map[string]interface{}{
 		"discardable-ratio": 0.00156,
@@ -172,4 +175,219 @@ func (s *testComponentsConfigSuite) TestUpdate(c *C) {
 	cfg["rocksdb"] = rocksdbMap
 	update(cfg, strings.Split("rocksdb.defaultcf.titan.discardable-ratio", "."), "0.002")
 	c.Assert(defaultcfTitanMap["discardable-ratio"], Equals, 0.002)
+}
+
+func (s *testComponentsConfigSuite) TestReloadConfig(c *C) {
+	cfgData := `
+[rocksdb]
+wal-recovery-mode = 1
+
+[rocksdb.defaultcf]
+block-size = "12KB"
+disable-block-cache = false
+compression-per-level = [
+    "no",
+    "lz4",
+]
+
+[rocksdb.defaultcf.titan]
+discardable-ratio = 0.00156
+`
+	cfg := NewComponentsConfig()
+	lc, err := NewLocalConfig(cfgData)
+	c.Assert(err, IsNil)
+	gc := NewGlobalConfig([]*configpb.ConfigEntry{{
+		Name: "rocksdb.defaultcf.disable-block-cache", Value: "true"},
+	})
+	cfg.GlobalCfgs["tikv"] = gc
+	cfg.LocalCfgs["tikv1"] = lc
+
+	storage := core.NewStorage(kv.NewMemoryKV())
+	err = cfg.Persist(storage)
+	c.Assert(err, IsNil)
+
+	cfg1 := NewComponentsConfig()
+	err = cfg1.Reload(storage)
+	c.Assert(err, IsNil)
+	c.Assert(cfg1.LocalCfgs["tikv1"], DeepEquals, lc)
+	c.Assert(cfg1.GlobalCfgs["tikv"], DeepEquals, gc)
+
+	// test cover config
+	cfgData1 := `
+[rocksdb]
+wal-recovery-mode = 1
+
+[rocksdb.defaultcf]
+block-size = "20KB"
+disable-block-cache = true
+compression-per-level = [
+    "zstd",
+    "zstd",
+]
+`
+	lc1, err := NewLocalConfig(cfgData1)
+	c.Assert(err, IsNil)
+	gc1 := NewGlobalConfig([]*configpb.ConfigEntry{{
+		Name: "rocksdb.defaultcf.disable-block-cache", Value: "true"},
+	})
+	cfg.GlobalCfgs["tikv"] = gc1
+	cfg.LocalCfgs["tikv1"] = lc1
+	err = cfg.Persist(storage)
+	c.Assert(err, IsNil)
+	err = cfg1.Reload(storage)
+	c.Assert(err, IsNil)
+	c.Assert(cfg1.LocalCfgs["tikv1"], DeepEquals, lc1)
+	c.Assert(cfg1.GlobalCfgs["tikv"], DeepEquals, gc1)
+}
+
+func (s *testComponentsConfigSuite) TestGetConfig(c *C) {
+	cfgData := `
+[rocksdb]
+wal-recovery-mode = 1
+
+[rocksdb.defaultcf]
+block-size = "12KB"
+disable-block-cache = false
+compression-per-level = [
+    "no",
+    "lz4",
+]
+
+[rocksdb.defaultcf.titan]
+discardable-ratio = 0.00156
+`
+	cfg := NewComponentsConfig()
+	lc, err := NewLocalConfig(cfgData)
+	c.Assert(err, IsNil)
+	gc := NewGlobalConfig([]*configpb.ConfigEntry{{
+		Name: "rocksdb.defaultcf.disable-block-cache", Value: "true"},
+	})
+	cfg.GlobalCfgs["tikv"] = gc
+	cfg.LocalCfgs["tikv1"] = lc
+	str, err := cfg.getComponentCfg("tikv", "tikv1")
+	c.Assert(err, IsNil)
+	expect := `[rocksdb]
+  wal-recovery-mode = 1
+  [rocksdb.defaultcf]
+    block-size = "12KB"
+    compression-per-level = ["no", "lz4"]
+    disable-block-cache = true
+    [rocksdb.defaultcf.titan]
+      discardable-ratio = 0.00156
+`
+	c.Assert(str, Equals, expect)
+}
+
+func (s *testComponentsConfigSuite) TestCreate(c *C) {
+	cfgData := `
+log-level = "debug"
+`
+	cfg := NewComponentsConfig()
+	v, config, status := cfg.Create(&configpb.Version{Global: 0, Local: 0}, "tikv", "tikv1", cfgData)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	expect := `log-level = "debug"
+`
+	c.Assert(config, Equals, expect)
+	v, config, status = cfg.Create(&configpb.Version{Global: 0, Local: 0}, "tikv", "tikv1", cfgData)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.Status_NOT_CHANGE)
+	c.Assert(config, Equals, "")
+	v, status = cfg.Update(
+		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Local{Local: &configpb.Local{ComponentId: "tikv1"}}},
+		&configpb.Version{Global: 0, Local: 0},
+		[]*configpb.ConfigEntry{{Name: "log-level", Value: "info"}},
+	)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
+	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	v, config, status = cfg.Create(&configpb.Version{Global: 0, Local: 0}, "tikv", "tikv1", cfgData)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
+	c.Assert(status.GetCode(), Equals, configpb.Status_STALE_VERSION)
+	expect1 := `log-level = "info"
+`
+	c.Assert(config, Equals, expect1)
+	v, config, status = cfg.Create(&configpb.Version{Global: 10, Local: 10}, "tikv", "tikv1", cfgData)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
+	c.Assert(status.GetCode(), Equals, configpb.Status_FAILED)
+	c.Assert(config, Equals, expect1)
+}
+
+func (s *testComponentsConfigSuite) TestUpdate(c *C) {
+	cfgData := `
+log-level = "debug"
+`
+	cfg := NewComponentsConfig()
+	v, config, status := cfg.Create(&configpb.Version{Global: 0, Local: 0}, "tikv", "tikv1", cfgData)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	expect := `log-level = "debug"
+`
+	c.Assert(config, Equals, expect)
+	v, status = cfg.Update(
+		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Local{Local: &configpb.Local{ComponentId: "tikv1"}}},
+		&configpb.Version{Global: 0, Local: 0},
+		[]*configpb.ConfigEntry{{Name: "log-level", Value: "info"}},
+	)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
+	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	v, status = cfg.Update(
+		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Local{Local: &configpb.Local{ComponentId: "tikv1"}}},
+		&configpb.Version{Global: 0, Local: 0},
+		[]*configpb.ConfigEntry{{Name: "log-level", Value: "info"}},
+	)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
+	c.Assert(status.GetCode(), Equals, configpb.Status_STALE_VERSION)
+	v, status = cfg.Update(
+		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: "tikv"}}},
+		&configpb.Version{Global: 10, Local: 0},
+		[]*configpb.ConfigEntry{{Name: "log-level", Value: "info"}},
+	)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 11, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	v, status = cfg.Update(
+		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: "tikv"}}},
+		&configpb.Version{Global: 0, Local: 0},
+		[]*configpb.ConfigEntry{{Name: "log-level", Value: "info"}},
+	)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 11, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.Status_STALE_VERSION)
+
+	// nil case
+	v, status = cfg.Update(nil, nil, nil)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.Status_FAILED)
+}
+
+func (s *testComponentsConfigSuite) TestGet(c *C) {
+	cfgData := `
+log-level = "debug"
+`
+	cfg := NewComponentsConfig()
+	v, config, status := cfg.Create(&configpb.Version{Global: 0, Local: 0}, "tikv", "tikv1", cfgData)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	expect := `log-level = "debug"
+`
+	c.Assert(config, Equals, expect)
+	v, status = cfg.Update(
+		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Local{Local: &configpb.Local{ComponentId: "tikv1"}}},
+		&configpb.Version{Global: 0, Local: 0},
+		[]*configpb.ConfigEntry{{Name: "log-level", Value: "info"}},
+	)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
+	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	v, config, status = cfg.Get(&configpb.Version{Global: 0, Local: 0}, "tikv", "tikv1")
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
+	c.Assert(status.GetCode(), Equals, configpb.Status_STALE_VERSION)
+	expect1 := `log-level = "info"
+`
+	c.Assert(config, Equals, expect1)
+	v, config, status = cfg.Get(&configpb.Version{Global: 10, Local: 0}, "tikv", "tikv1")
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
+	c.Assert(status.GetCode(), Equals, configpb.Status_STALE_VERSION)
+	c.Assert(config, Equals, expect1)
+	v, config, status = cfg.Get(&configpb.Version{Global: 10, Local: 1}, "tikv", "tikv1")
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
+	c.Assert(status.GetCode(), Equals, configpb.Status_FAILED)
+	c.Assert(config, Equals, expect1)
 }

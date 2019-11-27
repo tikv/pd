@@ -32,12 +32,12 @@ import (
 )
 
 const (
-	clusterPath       = "raft"
-	clusterConfigPath = "cluster_config"
-	configPath        = "config"
-	schedulePath      = "schedule"
-	gcPath            = "gc"
-	rulesPath         = "rules"
+	clusterPath          = "raft"
+	componentsConfigPath = "components_config"
+	configPath           = "config"
+	schedulePath         = "schedule"
+	gcPath               = "gc"
+	rulesPath            = "rules"
 
 	customScheduleConfigPath = "scheduler_config"
 	componentsConfigPath     = "components_config"
@@ -204,25 +204,25 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 	return true, nil
 }
 
-// SaveClusterConfig stores marshalable cfg to the clusterConfigPath.
-func (s *Storage) SaveClusterConfig(cfg interface{}) error {
-	value, err := json.Marshal(cfg)
-	if err != nil {
+// SaveComponentsConfig stores marshalable cfg to the componentsConfigPath.
+func (s *Storage) SaveComponentsConfig(cfg interface{}) error {
+	value := new(bytes.Buffer)
+	if err := toml.NewEncoder(value).Encode(cfg); err != nil {
 		return errors.WithStack(err)
 	}
-	return s.Save(clusterConfigPath, string(value))
+	return s.Save(componentsConfigPath, value.String())
 }
 
-// LoadClusterConfig loads config from clusterConfigPath then unmarshal it to cfg.
-func (s *Storage) LoadClusterConfig(cfg interface{}) (bool, error) {
-	value, err := s.Load(clusterConfigPath)
+// LoadComponentsConfig loads config from componentsConfigPath then unmarshal it to cfg.
+func (s *Storage) LoadComponentsConfig(cfg interface{}) (bool, error) {
+	value, err := s.Load(componentsConfigPath)
 	if err != nil {
 		return false, err
 	}
 	if value == "" {
 		return false, nil
 	}
-	err = json.Unmarshal([]byte(value), cfg)
+	_, err = toml.Decode(value, cfg)
 	if err != nil {
 		return false, errors.WithStack(err)
 	}

@@ -42,13 +42,13 @@ func NewComponentsConfig() *ComponentsConfig {
 
 // Persist saves the configuration to the storage.
 func (c *ComponentsConfig) Persist(storage *core.Storage) error {
-	err := storage.SaveClusterConfig(c)
+	err := storage.SaveComponentsConfig(c)
 	return err
 }
 
 // Reload reloads the configuration from the storage.
 func (c *ComponentsConfig) Reload(storage *core.Storage) error {
-	_, err := storage.LoadClusterConfig(c)
+	_, err := storage.LoadComponentsConfig(c)
 	if err != nil {
 		return err
 	}
@@ -142,7 +142,6 @@ func (c *ComponentsConfig) getComponentCfg(component, componentID string) (strin
 	config := c.LocalCfgs[componentID].GetConfigs()
 	if _, ok := c.GlobalCfgs[component]; ok {
 		globalCfgs := c.GlobalCfgs[component].GetConfigs()
-		// TODO: need to loop over
 		for k, v := range globalCfgs {
 			configName := strings.Split(k, ".")
 			update(config, configName, v)
@@ -153,25 +152,28 @@ func (c *ComponentsConfig) getComponentCfg(component, componentID string) (strin
 }
 
 // Update ...
+// We denote rv for the request version, pv for the version stored in PD.
+// 1. rv >= pv -> pv = rv + 1, update config, return pv
+// 2. rv < pv -> return pv
 func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
 	c.Lock()
 	defer c.Unlock()
 	global := kind.GetGlobal()
 	if global != nil {
 		component := global.GetComponent()
+		rgv := version.GetGlobal()
 		// if the global config of the component is existed.
 		if gc, ok := c.GlobalCfgs[component]; ok {
 			// if the global version of the request is larger than PD, we need to update it.
-			rgv := version.GetGlobal()
 			globalVersion := gc.GetVersion()
-			if rgv > globalVersion {
+			if rgv >= globalVersion {
 				for _, entry := range entries {
 					c.GlobalCfgs[component].updateConfig(entry)
 				}
+				c.GlobalCfgs[component].Version = rgv + 1
 			} else {
 				v := &configpb.Version{
 					Global: globalVersion,
-					Local:  version.GetLocal(),
 				}
 				return v, &configpb.Status{
 					Code:    configpb.Status_STALE_VERSION,
@@ -179,15 +181,12 @@ func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.V
 				}
 			}
 		} else {
-			gc, err := NewGlobalConfig(entries)
-			if err != nil {
-				return version, &configpb.Status{Code: configpb.Status_FAILED, Message: "parse error"}
-			}
+			gc := NewGlobalConfig(entries)
 			c.GlobalCfgs[component] = gc
+			c.GlobalCfgs[component].Version = rgv + 1
 		}
 		v := &configpb.Version{
 			Global: c.GlobalCfgs[component].GetVersion(),
-			Local:  version.GetLocal(),
 		}
 		return v, &configpb.Status{Code: configpb.Status_OK}
 	}
@@ -200,14 +199,14 @@ func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.V
 			isExisted = true
 			rlv := version.GetLocal()
 			localVersion := lc.GetVersion()
-			if rlv > localVersion {
+			if rlv >= localVersion {
 				for _, entry := range entries {
 					c.LocalCfgs[componentID].updateConfig(entry)
 				}
+				c.LocalCfgs[componentID].Version = rlv + 1
 			} else {
 				v := &configpb.Version{
-					Global: version.GetGlobal(),
-					Local:  localVersion,
+					Local: localVersion,
 				}
 				return v, &configpb.Status{
 					Code:    configpb.Status_STALE_VERSION,
@@ -219,30 +218,29 @@ func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.V
 			return version, &configpb.Status{Code: configpb.Status_FAILED, Message: "component ID is not existed"}
 		}
 		v := &configpb.Version{
-			Global: version.GetLocal(),
-			Local:  c.LocalCfgs[componentID].GetVersion(),
+			Local: c.LocalCfgs[componentID].GetVersion(),
 		}
 		return v, &configpb.Status{Code: configpb.Status_OK}
 	}
-	return version, &configpb.Status{Code: configpb.Status_FAILED, Message: "no component is specified"}
+	return &configpb.Version{}, &configpb.Status{Code: configpb.Status_FAILED, Message: "no component is specified"}
 }
 
 // GlobalConfig ...
 type GlobalConfig struct {
-	version uint64
-	configs map[string]string
+	Version uint64
+	Configs map[string]string
 }
 
 // NewGlobalConfig ...
-func NewGlobalConfig(entries []*configpb.ConfigEntry) (*GlobalConfig, error) {
+func NewGlobalConfig(entries []*configpb.ConfigEntry) *GlobalConfig {
 	configs := make(map[string]string)
 	for _, entry := range entries {
 		configs[entry.GetName()] = entry.GetValue()
 	}
 	return &GlobalConfig{
-		version: 0,
-		configs: configs,
-	}, nil
+		Version: 0,
+		Configs: configs,
+	}
 }
 
 func (gc *GlobalConfig) updateConfig(entry *configpb.ConfigEntry) {
@@ -252,18 +250,21 @@ func (gc *GlobalConfig) updateConfig(entry *configpb.ConfigEntry) {
 
 // GetVersion ...
 func (gc *GlobalConfig) GetVersion() uint64 {
-	return gc.version
+	if gc == nil {
+		return 0
+	}
+	return gc.Version
 }
 
 // GetConfigs ...
 func (gc *GlobalConfig) GetConfigs() map[string]string {
-	return gc.configs
+	return gc.Configs
 }
 
 // LocalConfig ...
 type LocalConfig struct {
-	version uint64
-	configs map[string]interface{}
+	Version uint64
+	Configs map[string]interface{}
 }
 
 // NewLocalConfig ...
@@ -273,25 +274,29 @@ func NewLocalConfig(cfg string) (*LocalConfig, error) {
 		return nil, err
 	}
 	return &LocalConfig{
-		version: 0,
-		configs: configs,
+		Version: 0,
+		Configs: configs,
 	}, nil
 }
 
 // GetVersion ...
 func (lc *LocalConfig) GetVersion() uint64 {
-	return lc.version
+	if lc == nil {
+		return 0
+	}
+	return lc.Version
 }
 
 // GetConfigs ...
 func (lc *LocalConfig) GetConfigs() map[string]interface{} {
-	return lc.configs
+	return lc.Configs
 }
 
 func (lc *LocalConfig) updateConfig(entry *configpb.ConfigEntry) {
 	config := lc.GetConfigs()
 	configName := strings.Split(entry.GetName(), ".")
 	update(config, configName, entry.GetValue())
+	lc.Version++
 }
 
 // TODO: need to consider the redundant label.
