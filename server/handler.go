@@ -38,8 +38,8 @@ import (
 )
 
 var (
-	// ScheduleConfigHandlerPath is the api router path of the schedule config handler.
-	ScheduleConfigHandlerPath = "/api/v1/schedule-config"
+	// SchedulerConfigHandlerPath is the api router path of the schedule config handler.
+	SchedulerConfigHandlerPath = "/api/v1/scheduler-config"
 
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
 	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
@@ -87,6 +87,19 @@ func newHandler(s *Server) *Handler {
 // GetRaftCluster returns RaftCluster.
 func (h *Handler) GetRaftCluster() *RaftCluster {
 	return h.s.GetRaftCluster()
+}
+
+// IsSchedulerPaused returns whether scheduler is paused.
+func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return true, err
+	}
+	sc, ok := c.schedulers[name]
+	if !ok {
+		return true, errors.Errorf("scheduler %v not found", name)
+	}
+	return sc.isPaused(), nil
 }
 
 // GetScheduleConfig returns ScheduleConfig.
@@ -214,6 +227,24 @@ func (h *Handler) RemoveScheduler(name string) error {
 	}
 	if err = c.removeScheduler(name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
+	}
+	return err
+}
+
+// PauseOrResumeScheduler pasues a scheduler for delay seconds or resume a paused scheduler.
+// t == 0 : resume scheduler.
+// t > 0 : scheduler delays t seconds.
+func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return err
+	}
+	if err = c.pauseOrResumeScheduler(name, t); err != nil {
+		if t == 0 {
+			log.Error("can not resume scheduler", zap.String("scheduler-name", name), zap.Error(err))
+		} else {
+			log.Error("can not pause scheduler", zap.String("scheduler-name", name), zap.Error(err))
+		}
 	}
 	return err
 }
@@ -753,7 +784,7 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.schedulers {
-		prefix := path.Join(pdRootPath, ScheduleConfigHandlerPath, name)
+		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name)
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}

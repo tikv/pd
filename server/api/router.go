@@ -15,6 +15,7 @@ package api
 
 import (
 	"net/http"
+	"net/http/pprof"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
@@ -42,8 +43,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rootRouter.HandleFunc("/api/v1/schedulers", schedulerHandler.List).Methods("GET")
 	rootRouter.HandleFunc("/api/v1/schedulers", schedulerHandler.Post).Methods("POST")
 	rootRouter.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
+	rootRouter.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.PauseOrResume).Methods("POST")
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	rootRouter.PathPrefix(server.ScheduleConfigHandlerPath).Handler(schedulerConfigHandler)
+	rootRouter.PathPrefix(server.SchedulerConfigHandlerPath).Handler(schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
 	rootRouter.Handle("/api/v1/cluster", clusterHandler).Methods("GET")
@@ -149,6 +151,17 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rootRouter.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
 	rootRouter.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	rootRouter.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	// metric query use to query metric data, the protocol is compatible with prometheus.
+	rootRouter.Handle("/api/v1/metric/query", newQueryMetric(svr)).Methods("GET", "POST")
+	rootRouter.Handle("/api/v1/metric/query_range", newQueryMetric(svr)).Methods("GET", "POST")
+
+	// profile API
+	rootRouter.HandleFunc("/api/v1/debug/pprof/profile", pprof.Profile)
+	rootRouter.Handle("/api/v1/debug/pprof/heap", pprof.Handler("heap"))
+	rootRouter.Handle("/api/v1/debug/pprof/mutex", pprof.Handler("mutex"))
+	rootRouter.Handle("/api/v1/debug/pprof/allocs", pprof.Handler("allocs"))
+	rootRouter.Handle("/api/v1/debug/pprof/block", pprof.Handler("block"))
+	rootRouter.Handle("/api/v1/debug/pprof/goroutine", pprof.Handler("goroutine"))
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
