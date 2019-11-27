@@ -103,7 +103,7 @@ func (conf *scatterRangeSchedulerConfig) Clone() *scatterRangeSchedulerConfig {
 }
 
 func (conf *scatterRangeSchedulerConfig) Persist() error {
-	name := conf.getScheduleName()
+	name := conf.getSchedulerName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedule.EncodeConfig(conf)
@@ -132,7 +132,7 @@ func (conf *scatterRangeSchedulerConfig) GetEndKey() []byte {
 	return []byte(conf.EndKey)
 }
 
-func (conf *scatterRangeSchedulerConfig) getScheduleName() string {
+func (conf *scatterRangeSchedulerConfig) getSchedulerName() string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	return fmt.Sprintf("scatter-range-%s", conf.RangeName)
@@ -151,7 +151,7 @@ type scatterRangeScheduler struct {
 func newScatterRangeScheduler(opController *schedule.OperatorController, config *scatterRangeSchedulerConfig) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 
-	name := config.getScheduleName()
+	name := config.getSchedulerName()
 	handler := newScatterRangeHandler(config)
 	scheduler := &scatterRangeScheduler{
 		baseScheduler: base,
