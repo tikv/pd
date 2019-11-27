@@ -15,10 +15,12 @@ type testLoadRegionsCacheSuite struct{}
 func (s *testLoadRegionsCacheSuite) TestLoadRegionsCache(c *C) {
 	cache := core.NewRegionsInfo()
 	n := 10
-	regions := make([]*metapb.Region, 0, n)
+	regions := make(map[uint64]*metapb.Region)
+	copyCache := make(map[uint64]*metapb.Region)
 	for i := 0; i < n; i++ {
 		region := newTestRegionMeta(uint64(i))
-		regions = append(regions, region)
+		regions[region.GetId()] = region
+		copyCache[region.GetId()] = region
 	}
 	regionSyner := &RegionSyncer{
 		regionsCache: regions,
@@ -26,7 +28,7 @@ func (s *testLoadRegionsCacheSuite) TestLoadRegionsCache(c *C) {
 	c.Assert(regionSyner.LoadRegionsCache(cache.SetRegion), IsNil)
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
-		c.Assert(region, DeepEquals, regions[region.GetId()])
+		c.Assert(region, DeepEquals, copyCache[region.GetId()])
 	}
 }
 func newTestRegionMeta(regionID uint64) *metapb.Region {
