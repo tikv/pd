@@ -34,7 +34,10 @@ type ComponentsConfig struct {
 
 // NewComponentsConfig ...
 func NewComponentsConfig() *ComponentsConfig {
-	return &ComponentsConfig{}
+	return &ComponentsConfig{
+		GlobalCfgs: make(map[string]*GlobalConfig),
+		LocalCfgs:  make(map[string]*LocalConfig),
+	}
 }
 
 // Persist saves the configuration to the storage.

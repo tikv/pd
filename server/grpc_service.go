@@ -766,6 +766,9 @@ func (s *Server) CreateComponentConfig(ctx context.Context, request *configpb.Cr
 
 	componentsCfg := s.GetComponentsConfig()
 	version, config, status := componentsCfg.Create(request.GetVersion(), request.GetComponent(), request.GetComponentId(), request.GetConfig())
+	if status.GetCode() == configpb.Status_OK {
+		componentsCfg.Persist(s.storage)
+	}
 
 	return &configpb.CreateResponse{
 		Header:  s.componentHeader(),
@@ -815,6 +818,9 @@ func (s *Server) UpdateComponentConfig(ctx context.Context, request *configpb.Up
 	}
 	componentsCfg := s.GetComponentsConfig()
 	version, status := componentsCfg.Update(request.GetKind(), request.GetVersion(), request.GetEntries())
+	if status.GetCode() == configpb.Status_OK {
+		componentsCfg.Persist(s.storage)
+	}
 
 	return &configpb.UpdateResponse{
 		Header:  s.componentHeader(),

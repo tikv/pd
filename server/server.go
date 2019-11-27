@@ -953,8 +953,6 @@ func (s *Server) reloadConfigFromKV() error {
 		log.Info("server disable region storage")
 	}
 
-	if err := s.componentsCfg.Reload(s.storage); err != nil {
-		return err
-	}
-	return nil
+	err = s.componentsCfg.Reload(s.storage)
+	return err
 }
