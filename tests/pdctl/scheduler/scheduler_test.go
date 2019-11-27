@@ -16,7 +16,6 @@ package scheduler_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -91,14 +90,11 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 			c.Assert(err, IsNil)
 		}
 		args = []string{"-u", pdAddr, "scheduler", "config", "show", schedulerName}
-		fmt.Printf("[qinggniq] %v\n", schedulerName)
 		_, output, err := pdctl.ExecuteCommandC(cmd, args...)
-		fmt.Printf("[qinggniq] output %v\n", output)
 		c.Assert(err, IsNil)
 		configInfo := make(map[string]interface{})
 		c.Assert(json.Unmarshal(output, &configInfo), IsNil)
 		c.Assert(expectedConfig, DeepEquals, configInfo)
-		fmt.Printf("[qinggniq]%v\n", configInfo)
 	}
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
