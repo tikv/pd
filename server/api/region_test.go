@@ -339,7 +339,7 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 // (copied from server/cluster_test.go)
 func newTestRegions() []*core.RegionInfo {
 	n := uint64(10000)
-	np := uint64(100)
+	np := uint64(3)
 
 	regions := make([]*core.RegionInfo, 0, n)
 	for i := uint64(0); i < n; i++ {
