@@ -47,11 +47,7 @@ type RegionInfo struct {
 
 // NewRegionInfo create a new api RegionInfo.
 func NewRegionInfo(r *core.RegionInfo) *RegionInfo {
-	if r == nil {
-		return nil
-	}
-	ri := &RegionInfo{}
-	return InitRegion(r, ri)
+	return InitRegion(r, &RegionInfo{})
 }
 
 // InitRegion init a new api RegionInfo from the core.RegionInfo.

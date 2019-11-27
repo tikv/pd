@@ -337,7 +337,10 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 // Create n regions (0..n) of n stores (0..n).
 // Each region contains np peers, the first peer is the leader.
 // (copied from server/cluster_test.go)
-func newTestRegions(n, np uint64) []*core.RegionInfo {
+func newTestRegions() []*core.RegionInfo {
+	n := uint64(10000)
+	np := uint64(100)
+
 	regions := make([]*core.RegionInfo, 0, n)
 	for i := uint64(0); i < n; i++ {
 		peers := make([]*metapb.Peer, 0, np)
@@ -351,8 +354,8 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 		region := &metapb.Region{
 			Id:          i,
 			Peers:       peers,
-			StartKey:    []byte{byte(i)},
-			EndKey:      []byte{byte(i + 1)},
+			StartKey:    []byte(fmt.Sprintf("%d", i)),
+			EndKey:      []byte(fmt.Sprintf("%d", i+1)),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 		}
 		regions = append(regions, core.NewRegionInfo(region, peers[0]))
@@ -361,10 +364,7 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 }
 
 func BenchmarkRenderJSON(b *testing.B) {
-	regionsCount := uint64(10000)
-	storeCount := uint64(100)
-	regionInfos := newTestRegions(regionsCount, storeCount)
-
+	regionInfos := newTestRegions()
 	rd := createRender()
 	regions := convertToAPIRegions(regionInfos)
 
@@ -376,9 +376,7 @@ func BenchmarkRenderJSON(b *testing.B) {
 }
 
 func BenchmarkConvertToAPIRegions(b *testing.B) {
-	regionsCount := uint64(10000)
-	storeCount := uint64(100)
-	regionInfos := newTestRegions(regionsCount, storeCount)
+	regionInfos := newTestRegions()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -391,7 +389,7 @@ func BenchmarkHexRegionKey(b *testing.B) {
 	key := []byte("region_number_infinity")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = string(core.HexRegionKey(key))
+		_ = core.HexRegionKey(key)
 	}
 }
 
