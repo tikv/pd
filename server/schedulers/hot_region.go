@@ -193,8 +193,8 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Clust
 		regionWriteStats := cluster.RegionWriteStats()
 		storeWriteStats := storesStat.GetStoresBytesWriteStat()
 		asLeader := calcScore(regionWriteStats, storeWriteStats, cluster, core.LeaderKind)
-		asPeer := calcScore(regionWriteStats, storeWriteStats, cluster, core.RegionKind)
 		h.stats.writeStatAsLeader = h.calcPendingInfluence(asLeader, h.writePendingSum)
+		asPeer := calcScore(regionWriteStats, storeWriteStats, cluster, core.RegionKind)
 		h.stats.writeStatAsPeer = h.calcPendingInfluence(asPeer, h.writePendingSum)
 		return h.balanceHotWriteRegions(cluster)
 	}
@@ -203,9 +203,7 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Clust
 
 func (h *balanceHotRegionsScheduler) calcPendingInfluence(storeStat statistics.StoreHotPeersStat, pending map[uint64]influence) statistics.StoreHotPeersStat {
 	for id, stat := range storeStat {
-		if infl, ok := pending[id]; ok {
-			stat.FutureBytesRate = stat.StoreBytesRate + infl.byteRate
-		}
+		stat.FutureBytesRate = stat.StoreBytesRate + pending[id].byteRate
 	}
 	return storeStat
 }
@@ -591,7 +589,7 @@ func calcPendingWeight(op *operator.Operator) (weight float64, remove bool) {
 			if zombieDur >= maxZombieDur {
 				return 0, true
 			}
-      // TODO: use store statistics update time to make a more accurate estimation
+			// TODO: use store statistics update time to make a more accurate estimation
 			return float64(maxZombieDur-zombieDur) / float64(maxZombieDur), false
 		default:
 			return 0, true
@@ -602,4 +600,11 @@ func calcPendingWeight(op *operator.Operator) (weight float64, remove bool) {
 func (h *balanceHotRegionsScheduler) summaryPendingInfluence() {
 	h.readPendingSum = summaryPendingInfluence(h.readPendings, calcPendingWeight)
 	h.writePendingSum = summaryPendingInfluence(h.writePendings, calcPendingWeight)
+}
+
+func (h *balanceHotRegionsScheduler) clearPendingInfluence() {
+	h.readPendings = map[*pendingInfluence]struct{}{}
+	h.writePendings = map[*pendingInfluence]struct{}{}
+	h.readPendingSum = nil
+	h.writePendingSum = nil
 }

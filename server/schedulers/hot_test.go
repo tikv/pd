@@ -81,6 +81,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	// Will transfer a hot region from store 1, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
 	op := hb.Schedule(tc)[0]
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 	switch op.Len() {
 	case 1:
 		// balance by leader selected
@@ -101,12 +102,14 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	// hot region scheduler is restricted by `hot-region-schedule-limit`.
 	opt.HotRegionScheduleLimit = 0
 	c.Assert(hb.Schedule(tc), HasLen, 0)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 	opt.HotRegionScheduleLimit = mockoption.NewScheduleOptions().HotRegionScheduleLimit
 
 	// hot region scheduler is restricted by schedule limit.
 	opt.LeaderScheduleLimit = 0
 	for i := 0; i < 20; i++ {
 		op := hb.Schedule(tc)[0]
+		hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 		c.Assert(op.Len(), Equals, 4)
 		if op.RegionID() == 2 {
 			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
@@ -121,9 +124,12 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	// hot region scheduler is not affect by `balance-region-schedule-limit`.
 	opt.RegionScheduleLimit = 0
 	c.Assert(hb.Schedule(tc), HasLen, 1)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 	// Always produce operator
 	c.Assert(hb.Schedule(tc), HasLen, 1)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 	c.Assert(hb.Schedule(tc), HasLen, 1)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 
 	//| store_id | write_bytes_rate |
 	//|----------|------------------|
@@ -165,6 +171,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	opt.LeaderScheduleLimit = 0
 	for i := 0; i < 30; i++ {
 		op := hb.Schedule(tc)[0]
+		hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 		switch op.RegionID() {
 		case 1, 2:
 			if op.Len() == 3 {
@@ -188,6 +195,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 		tc.Regions.RemoveRegion(tc.GetRegion(i))
 	}
 	hb.Schedule(tc)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 }
 
 var _ = Suite(&testHotReadRegionSchedulerSuite{})
@@ -255,6 +263,7 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	// bytes_rate[store 1] * 0.9 > bytes_rate[store 3] + region_bytes_rate
 	// hot_region_count[store 3] < hot_regin_count[store 2]
 	testutil.CheckTransferLeader(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 3)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 	// assume handle the operator
 	tc.AddLeaderRegionWithReadInfo(3, 3, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 2)
 	// After transfer a hot region leader from store 1 to store 3
@@ -291,12 +300,14 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	// Trying to move leader peer:
 	//   Store 5 is selected as destination because of less hot region count.
 	testutil.CheckTransferPeerWithLeaderTransfer(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 5)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
 		tc.Regions.RemoveRegion(tc.GetRegion(i))
 	}
 	hb.Schedule(tc)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 }
 
 var _ = Suite(&testHotCacheSuite{})
