@@ -308,7 +308,7 @@ log-level = "debug"
 	c.Assert(config, Equals, expect1)
 	v, config, status = cfg.Create(&configpb.Version{Global: 10, Local: 10}, "tikv", "tikv1", cfgData)
 	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
-	c.Assert(status.GetCode(), Equals, configpb.Status_FAILED)
+	c.Assert(status.GetCode(), Equals, configpb.Status_UNKNOWN)
 	c.Assert(config, Equals, expect1)
 }
 
@@ -355,7 +355,7 @@ log-level = "debug"
 	// nil case
 	v, status = cfg.Update(nil, nil, nil)
 	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
-	c.Assert(status.GetCode(), Equals, configpb.Status_FAILED)
+	c.Assert(status.GetCode(), Equals, configpb.Status_UNKNOWN)
 }
 
 func (s *testComponentsConfigSuite) TestGet(c *C) {
@@ -388,6 +388,6 @@ log-level = "debug"
 	c.Assert(config, Equals, expect1)
 	v, config, status = cfg.Get(&configpb.Version{Global: 10, Local: 1}, "tikv", "tikv1")
 	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
-	c.Assert(status.GetCode(), Equals, configpb.Status_FAILED)
+	c.Assert(status.GetCode(), Equals, configpb.Status_UNKNOWN)
 	c.Assert(config, Equals, expect1)
 }

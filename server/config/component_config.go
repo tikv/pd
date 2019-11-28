@@ -70,7 +70,7 @@ func (c *ComponentsConfig) Get(version *configpb.Version, component, componentID
 		config, err = c.getComponentCfg(component, componentID)
 		if err != nil {
 			return version, "", &configpb.Status{
-				Code:    configpb.Status_FAILED,
+				Code:    configpb.Status_UNKNOWN,
 				Message: "encode failed",
 			}
 		}
@@ -82,13 +82,13 @@ func (c *ComponentsConfig) Get(version *configpb.Version, component, componentID
 		} else {
 			// TODO: need more specified error message
 			status = &configpb.Status{
-				Code:    configpb.Status_FAILED,
+				Code:    configpb.Status_UNKNOWN,
 				Message: "version is illegal",
 			}
 		}
 	} else {
 		status = &configpb.Status{
-			Code:    configpb.Status_FAILED,
+			Code:    configpb.Status_UNKNOWN,
 			Message: "component ID is not existed",
 		}
 	}
@@ -109,12 +109,12 @@ func (c *ComponentsConfig) Create(version *configpb.Version, component, componen
 		} else if rlv < lcv {
 			status = &configpb.Status{Code: configpb.Status_STALE_VERSION}
 		} else {
-			status = &configpb.Status{Code: configpb.Status_FAILED, Message: "version is illegal"}
+			status = &configpb.Status{Code: configpb.Status_UNKNOWN, Message: "version is illegal"}
 		}
 	} else {
 		lc, err := NewLocalConfig(cfg)
 		if err != nil {
-			status = &configpb.Status{Code: configpb.Status_FAILED, Message: "parse error"}
+			status = &configpb.Status{Code: configpb.Status_UNKNOWN, Message: "parse error"}
 			return version, "", status
 		}
 		c.LocalCfgs[componentID] = lc
@@ -123,7 +123,7 @@ func (c *ComponentsConfig) Create(version *configpb.Version, component, componen
 
 	config, err := c.getComponentCfg(component, componentID)
 	if err != nil {
-		status = &configpb.Status{Code: configpb.Status_FAILED, Message: "encode error"}
+		status = &configpb.Status{Code: configpb.Status_UNKNOWN, Message: "encode error"}
 		return version, "", status
 	}
 
@@ -215,14 +215,14 @@ func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.V
 			}
 		}
 		if !isExisted {
-			return version, &configpb.Status{Code: configpb.Status_FAILED, Message: "component ID is not existed"}
+			return version, &configpb.Status{Code: configpb.Status_UNKNOWN, Message: "component ID is not existed"}
 		}
 		v := &configpb.Version{
 			Local: c.LocalCfgs[componentID].GetVersion(),
 		}
 		return v, &configpb.Status{Code: configpb.Status_OK}
 	}
-	return &configpb.Version{}, &configpb.Status{Code: configpb.Status_FAILED, Message: "no component is specified"}
+	return &configpb.Version{}, &configpb.Status{Code: configpb.Status_UNKNOWN, Message: "no component is specified"}
 }
 
 // GlobalConfig ...

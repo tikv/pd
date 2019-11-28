@@ -759,7 +759,7 @@ func (s *Server) CreateComponentConfig(ctx context.Context, request *configpb.Cr
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		return &configpb.CreateResponse{Header: s.componentHeader(), Status: &configpb.Status{
-			Code:    configpb.Status_FAILED,
+			Code:    configpb.Status_UNKNOWN,
 			Message: "cluster is not bootstrapped",
 		}}, nil
 	}
@@ -787,7 +787,7 @@ func (s *Server) GetComponentConfig(ctx context.Context, request *configpb.GetRe
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		return &configpb.GetResponse{Header: s.componentHeader(), Status: &configpb.Status{
-			Code:    configpb.Status_FAILED,
+			Code:    configpb.Status_UNKNOWN,
 			Message: "cluster is not bootstrapped",
 		}}, nil
 	}
@@ -812,7 +812,7 @@ func (s *Server) UpdateComponentConfig(ctx context.Context, request *configpb.Up
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		return &configpb.UpdateResponse{Header: &configpb.Header{ClusterId: s.clusterID}, Status: &configpb.Status{
-			Code:    configpb.Status_FAILED,
+			Code:    configpb.Status_UNKNOWN,
 			Message: "cluster is not bootstrapped",
 		}}, nil
 	}
