@@ -43,7 +43,7 @@ const (
 type TimestampOracle struct {
 	// For tso, set after pd becomes leader.
 	ts            unsafe.Pointer
-	lastSavedTime time.Time
+	lastSavedTime atomic.Value
 	lease         *member.LeaderLease
 
 	rootPath      string
@@ -101,7 +101,7 @@ func (t *TimestampOracle) saveTimestamp(ts time.Time) error {
 		return errors.New("save timestamp failed, maybe we lost leader")
 	}
 
-	t.lastSavedTime = ts
+	t.lastSavedTime.Store(ts)
 
 	return nil
 }
@@ -228,7 +228,7 @@ func (t *TimestampOracle) UpdateTimestamp() error {
 
 	// It is not safe to increase the physical time to `next`.
 	// The time window needs to be updated and saved to etcd.
-	if typeutil.SubTimeByWallClock(t.lastSavedTime, next) <= updateTimestampGuard {
+	if typeutil.SubTimeByWallClock(t.lastSavedTime.Load().(time.Time), next) <= updateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		if err := t.saveTimestamp(save); err != nil {
 			tsoCounter.WithLabelValues("err_save_update_ts").Inc()

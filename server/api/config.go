@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
+	"reflect"
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/pd/pkg/apiutil"
@@ -51,22 +52,22 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	up1, err := h.updateSchedule(data, config)
+	found1, err := h.updateSchedule(data, config)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	up2, err := h.updateReplication(data, config)
+	found2, err := h.updateReplication(data, config)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	up3, err := h.updatePDServerConfig(data, config)
+	found3, err := h.updatePDServerConfig(data, config)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if !up1 && !up2 && !up3 {
+	if !found1 && !found2 && !found3 {
 		h.rd.JSON(w, http.StatusBadRequest, "config item not found")
 		return
 	}
@@ -74,39 +75,58 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) updateSchedule(data []byte, config *config.Config) (bool, error) {
-	old, _ := json.Marshal(config.Schedule)
-	if err := json.Unmarshal(data, &config.Schedule); err != nil {
+	updated, found, err := h.mergeConfig(&config.Schedule, data)
+	if err != nil {
 		return false, err
 	}
-	new, _ := json.Marshal(config.Schedule)
-	if bytes.Equal(old, new) {
-		return false, nil
+	if updated {
+		err = h.svr.SetScheduleConfig(config.Schedule)
 	}
-	return true, h.svr.SetScheduleConfig(config.Schedule)
+	return found, err
 }
 
 func (h *confHandler) updateReplication(data []byte, config *config.Config) (bool, error) {
-	old, _ := json.Marshal(config.Replication)
-	if err := json.Unmarshal(data, &config.Replication); err != nil {
+	updated, found, err := h.mergeConfig(&config.Replication, data)
+	if err != nil {
 		return false, err
 	}
-	new, _ := json.Marshal(config.Replication)
-	if bytes.Equal(old, new) {
-		return false, nil
+	if updated {
+		err = h.svr.SetReplicationConfig(config.Replication)
 	}
-	return true, h.svr.SetReplicationConfig(config.Replication)
+	return found, err
 }
 
 func (h *confHandler) updatePDServerConfig(data []byte, config *config.Config) (bool, error) {
-	old, _ := json.Marshal(config.PDServerCfg)
-	if err := json.Unmarshal(data, &config.PDServerCfg); err != nil {
+	updated, found, err := h.mergeConfig(&config.PDServerCfg, data)
+	if err != nil {
 		return false, err
 	}
-	new, _ := json.Marshal(config.PDServerCfg)
-	if bytes.Equal(old, new) {
-		return false, nil
+	if updated {
+		err = h.svr.SetPDServerConfig(config.PDServerCfg)
 	}
-	return true, h.svr.SetPDServerConfig(config.PDServerCfg)
+	return found, err
+}
+
+func (h *confHandler) mergeConfig(v interface{}, data []byte) (updated bool, found bool, err error) {
+	old, _ := json.Marshal(v)
+	if err := json.Unmarshal(data, v); err != nil {
+		return false, false, err
+	}
+	new, _ := json.Marshal(v)
+	if !bytes.Equal(old, new) {
+		return true, true, nil
+	}
+	m := make(map[string]interface{})
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false, false, err
+	}
+	t := reflect.TypeOf(v).Elem()
+	for i := 0; i < t.NumField(); i++ {
+		if _, ok := m[t.Field(i).Tag.Get("json")]; ok {
+			return false, true, nil
+		}
+	}
+	return false, false, nil
 }
 
 func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
