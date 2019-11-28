@@ -73,7 +73,7 @@ func (s *Server) saveTimestamp(ts time.Time) error {
 		return errors.New("save timestamp failed, maybe we lost leader")
 	}
 
-	s.lastSavedTime = ts
+	s.lastSavedTime.Store(ts)
 
 	return nil
 }
@@ -195,7 +195,7 @@ func (s *Server) updateTimestamp() error {
 
 	// It is not safe to increase the physical time to `next`.
 	// The time window needs to be updated and saved to etcd.
-	if subTimeByWallClock(s.lastSavedTime, next) <= updateTimestampGuard {
+	if subTimeByWallClock(s.lastSavedTime.Load().(time.Time), next) <= updateTimestampGuard {
 		save := next.Add(s.cfg.TsoSaveInterval.Duration)
 		if err := s.saveTimestamp(save); err != nil {
 			tsoCounter.WithLabelValues("err_save_update_ts").Inc()

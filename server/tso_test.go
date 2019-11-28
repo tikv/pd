@@ -93,6 +93,34 @@ func (s *testTsoSuite) TestTso(c *C) {
 	wg.Wait()
 }
 
+func (s *testTsoSuite) TestConcurrcyRequest(c *C) {
+	cluster, err := tests.NewTestCluster(1)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers(s.ctx)
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	leader := cluster.GetServer(cluster.GetLeader())
+
+	c.Assert(leader, NotNil)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	now := time.Now()
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i <= 100; i++ {
+				physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
+				ts := uint64(physical << 18)
+				leader.GetServer().GetHandler().ResetTS(ts)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 func (s *testTsoSuite) TestTsoCount0(c *C) {
 	req := &pdpb.TsoRequest{Header: newRequestHeader(s.svr.clusterID)}
 	tsoClient, err := s.grpcPDClient.Tso(context.Background())
