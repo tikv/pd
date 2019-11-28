@@ -62,7 +62,7 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 		rate = float64(s.scene.High) / schedule.StoreBalanceBaseTime
 	}
 
-	if rate > 0 && state != s.current {
+	if rate > 0 {
 		s.oc.SetAllStoresLimitAuto(rate)
 		log.Info("change store limit for cluster", zap.Stringer("state", state), zap.Float64("rate", rate))
 		s.current = state
