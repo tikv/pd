@@ -177,8 +177,10 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				// 1->10
 				AddLearner{ToStore: 10},
 				PromoteLearner{ToStore: 10},
-				TransferLeader{FromStore: 1, ToStore: 9}, // transfer to target before remove 1
+				TransferLeader{FromStore: 1, ToStore: 7}, // transfer oldest voter
 				RemovePeer{FromStore: 1},
+				// transfer leader
+				TransferLeader{FromStore: 7, ToStore: 9},
 			},
 		},
 	}
