@@ -63,12 +63,21 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
+	l = map[string]interface{}{
+		"metric-storage": "http://127.0.0.1:9090",
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(err, IsNil)
+
 	newCfg := &config.Config{}
 	err = readJSON(addr, newCfg)
 	c.Assert(err, IsNil)
 	cfg.Replication.MaxReplicas = 5
 	cfg.Replication.LocationLabels = []string{"zone", "rack"}
 	cfg.Schedule.RegionScheduleLimit = 10
+	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:9090"
 	c.Assert(cfg, DeepEquals, newCfg)
 }
 

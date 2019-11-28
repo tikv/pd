@@ -264,12 +264,12 @@ func (s *testRegionSuite) TestRegionTreeSplitAndMerge(c *C) {
 
 func (s *testRegionSuite) TestRandomRegion(c *C) {
 	tree := newRegionTree()
-	r := tree.RandomRegion([]byte(""), []byte(""))
+	r := tree.RandomRegion(nil)
 	c.Assert(r, IsNil)
 
 	regionA := NewTestRegionInfo([]byte(""), []byte("g"))
 	tree.update(regionA)
-	ra := tree.RandomRegion([]byte(""), []byte(""))
+	ra := tree.RandomRegion([]KeyRange{NewKeyRange("", "")})
 	c.Assert(ra, DeepEquals, regionA)
 
 	regionB := NewTestRegionInfo([]byte("g"), []byte("n"))
@@ -279,78 +279,80 @@ func (s *testRegionSuite) TestRandomRegion(c *C) {
 	tree.update(regionC)
 	tree.update(regionD)
 
-	rb := tree.RandomRegion([]byte("g"), []byte("n"))
+	rb := tree.RandomRegion([]KeyRange{NewKeyRange("g", "n")})
 	c.Assert(rb, DeepEquals, regionB)
-	rc := tree.RandomRegion([]byte("n"), []byte("t"))
+	rc := tree.RandomRegion([]KeyRange{NewKeyRange("n", "t")})
 	c.Assert(rc, DeepEquals, regionC)
-	rd := tree.RandomRegion([]byte("t"), []byte(""))
+	rd := tree.RandomRegion([]KeyRange{NewKeyRange("t", "")})
 	c.Assert(rd, DeepEquals, regionD)
 
-	re := tree.RandomRegion([]byte("a"), []byte("a"))
-	c.Assert(re, DeepEquals, regionA)
-	re = tree.RandomRegion([]byte("o"), []byte("s"))
-	c.Assert(re, DeepEquals, regionC)
-	re = tree.RandomRegion([]byte(""), []byte("a"))
-	c.Assert(re, DeepEquals, regionA)
-	re = tree.RandomRegion([]byte("z"), []byte(""))
-	c.Assert(re, DeepEquals, regionD)
+	re := tree.RandomRegion([]KeyRange{NewKeyRange("", "a")})
+	c.Assert(re, IsNil)
+	re = tree.RandomRegion([]KeyRange{NewKeyRange("o", "s")})
+	c.Assert(re, IsNil)
+	re = tree.RandomRegion([]KeyRange{NewKeyRange("", "a")})
+	c.Assert(re, IsNil)
+	re = tree.RandomRegion([]KeyRange{NewKeyRange("z", "")})
+	c.Assert(re, IsNil)
 
-	checkRandomRegion(c, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []byte(""), []byte(""))
-	checkRandomRegion(c, tree, []*RegionInfo{regionA, regionB}, []byte(""), []byte("n"))
-	checkRandomRegion(c, tree, []*RegionInfo{regionC, regionD}, []byte("n"), []byte(""))
-	checkRandomRegion(c, tree, []*RegionInfo{regionB, regionC}, []byte("h"), []byte("s"))
-	checkRandomRegion(c, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []byte("a"), []byte("z"))
+	checkRandomRegion(c, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []KeyRange{NewKeyRange("", "")})
+	checkRandomRegion(c, tree, []*RegionInfo{regionA, regionB}, []KeyRange{NewKeyRange("", "n")})
+	checkRandomRegion(c, tree, []*RegionInfo{regionC, regionD}, []KeyRange{NewKeyRange("n", "")})
+	checkRandomRegion(c, tree, []*RegionInfo{}, []KeyRange{NewKeyRange("h", "s")})
+	checkRandomRegion(c, tree, []*RegionInfo{regionB, regionC}, []KeyRange{NewKeyRange("a", "z")})
 }
 
 func (s *testRegionSuite) TestRandomRegionDiscontinuous(c *C) {
 	tree := newRegionTree()
-	r := tree.RandomRegion([]byte("c"), []byte("f"))
+	r := tree.RandomRegion([]KeyRange{NewKeyRange("c", "f")})
 	c.Assert(r, IsNil)
 
 	// test for single region
 	regionA := NewTestRegionInfo([]byte("c"), []byte("f"))
 	tree.update(regionA)
-	ra := tree.RandomRegion([]byte("c"), []byte("e"))
+	ra := tree.RandomRegion([]KeyRange{NewKeyRange("c", "e")})
+	c.Assert(ra, IsNil)
+	ra = tree.RandomRegion([]KeyRange{NewKeyRange("c", "f")})
 	c.Assert(ra, DeepEquals, regionA)
-	ra = tree.RandomRegion([]byte("c"), []byte("f"))
+	ra = tree.RandomRegion([]KeyRange{NewKeyRange("c", "g")})
 	c.Assert(ra, DeepEquals, regionA)
-	ra = tree.RandomRegion([]byte("c"), []byte("g"))
+	ra = tree.RandomRegion([]KeyRange{NewKeyRange("a", "e")})
+	c.Assert(ra, IsNil)
+	ra = tree.RandomRegion([]KeyRange{NewKeyRange("a", "f")})
 	c.Assert(ra, DeepEquals, regionA)
-	ra = tree.RandomRegion([]byte("a"), []byte("e"))
-	c.Assert(ra, DeepEquals, regionA)
-	ra = tree.RandomRegion([]byte("a"), []byte("f"))
-	c.Assert(ra, DeepEquals, regionA)
-	ra = tree.RandomRegion([]byte("a"), []byte("g"))
+	ra = tree.RandomRegion([]KeyRange{NewKeyRange("a", "g")})
 	c.Assert(ra, DeepEquals, regionA)
 
 	regionB := NewTestRegionInfo([]byte("n"), []byte("x"))
 	tree.update(regionB)
-	rb := tree.RandomRegion([]byte("g"), []byte("x"))
+	rb := tree.RandomRegion([]KeyRange{NewKeyRange("g", "x")})
 	c.Assert(rb, DeepEquals, regionB)
-	rb = tree.RandomRegion([]byte("g"), []byte("y"))
+	rb = tree.RandomRegion([]KeyRange{NewKeyRange("g", "y")})
 	c.Assert(rb, DeepEquals, regionB)
-	rb = tree.RandomRegion([]byte("n"), []byte("y"))
+	rb = tree.RandomRegion([]KeyRange{NewKeyRange("n", "y")})
 	c.Assert(rb, DeepEquals, regionB)
-	rb = tree.RandomRegion([]byte("o"), []byte("y"))
-	c.Assert(rb, DeepEquals, regionB)
+	rb = tree.RandomRegion([]KeyRange{NewKeyRange("o", "y")})
+	c.Assert(rb, IsNil)
 
 	regionC := NewTestRegionInfo([]byte("z"), []byte(""))
 	tree.update(regionC)
-	rc := tree.RandomRegion([]byte("y"), []byte(""))
+	rc := tree.RandomRegion([]KeyRange{NewKeyRange("y", "")})
 	c.Assert(rc, DeepEquals, regionC)
 	regionD := NewTestRegionInfo([]byte(""), []byte("a"))
 	tree.update(regionD)
-	rd := tree.RandomRegion([]byte(""), []byte("b"))
+	rd := tree.RandomRegion([]KeyRange{NewKeyRange("", "b")})
 	c.Assert(rd, DeepEquals, regionD)
 
-	checkRandomRegion(c, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []byte(""), []byte(""))
+	checkRandomRegion(c, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []KeyRange{NewKeyRange("", "")})
 }
 
-func checkRandomRegion(c *C, tree *regionTree, regions []*RegionInfo, startKey, endKey []byte) {
+func checkRandomRegion(c *C, tree *regionTree, regions []*RegionInfo, ranges []KeyRange) {
 	keys := make(map[string]struct{})
 	for i := 0; i < 10000 && len(keys) < len(regions); i++ {
-		re := tree.RandomRegion(startKey, endKey)
-		c.Assert(re, NotNil)
+		re := tree.RandomRegion(ranges)
+		if re == nil {
+			continue
+		}
 		k := string(re.GetStartKey())
 		if _, ok := keys[k]; !ok {
 			keys[k] = struct{}{}

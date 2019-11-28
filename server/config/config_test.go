@@ -106,6 +106,9 @@ func (s *testConfigSuite) TestAdjust(c *C) {
 name = ""
 lease = 0
 
+[pd-server]
+metric-storage = "http://127.0.0.1:9090"
+
 [schedule]
 max-merge-region-size = 0
 enable-one-way-merge = true
@@ -129,6 +132,7 @@ leader-schedule-limit = 0
 	// When undefined, use default values.
 	c.Assert(cfg.PreVote, IsTrue)
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
+	c.Assert(cfg.PDServerCfg.MetricStorage, Equals, "http://127.0.0.1:9090")
 
 	// Check undefined config fields
 	cfgData = `
