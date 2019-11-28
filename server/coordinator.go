@@ -45,8 +45,6 @@ const (
 	PluginLoad = "load"
 	// PluginUnload means action for unload plugin
 	PluginUnload = "unload"
-	// PluginUpdate means action for update plugin
-	PluginUpdate = "update"
 )
 
 var (
@@ -294,17 +292,14 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	// Get signal from channel which means user unload the plugin
 	for {
 		action := <-ch
-		switch action {
-		case PluginUnload:
-			if err := c.removeScheduler(s.GetName()); err != nil {
+		if action == PluginUnload {
+			err := c.removeScheduler(s.GetName())
+			if err != nil {
 				log.Error("can not remove scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 			} else {
-				log.Info("unload plugin")
 				return
 			}
-		case PluginUpdate:
-			log.Info("update plugin")
-		default:
+		} else {
 			log.Error("unknown action", zap.String("action", action))
 		}
 	}

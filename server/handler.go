@@ -831,15 +831,6 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 	return nil
 }
 
-// PluginUpdate update the plugin referenced by the pluginPath
-func (h *Handler) PluginUpdate(pluginPath string) error {
-	if ch, ok := h.pluginChMap[pluginPath]; ok {
-		ch <- "update"
-		return nil
-	}
-	return ErrPluginNotFound(pluginPath)
-}
-
 // PluginUnload unloads the plugin referenced by the pluginPath
 func (h *Handler) PluginUnload(pluginPath string) error {
 	if ch, ok := h.pluginChMap[pluginPath]; ok {

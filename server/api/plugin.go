@@ -37,10 +37,6 @@ func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
 	h.processPluginCommand(w, r, server.PluginLoad)
 }
 
-func (h *pluginHandler) UpdatePlugin(w http.ResponseWriter, r *http.Request) {
-	h.processPluginCommand(w, r, server.PluginUpdate)
-}
-
 func (h *pluginHandler) UnloadPlugin(w http.ResponseWriter, r *http.Request) {
 	h.processPluginCommand(w, r, server.PluginUnload)
 }
@@ -54,8 +50,6 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 	switch action {
 	case "load":
 		err = h.PluginLoad(data["plugin-path"])
-	case "update":
-		err = h.PluginUpdate(data["plugin-path"])
 	case "unload":
 		err = h.PluginUnload(data["plugin-path"])
 	default:

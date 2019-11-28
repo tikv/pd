@@ -145,7 +145,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	pluginHandler := newPluginHandler(handler, rd)
 	rootRouter.HandleFunc("/api/v1/plugin", pluginHandler.LoadPlugin).Methods("POST")
-	rootRouter.HandleFunc("/api/v1/plugin", pluginHandler.UpdatePlugin).Methods("PUT")
 	rootRouter.HandleFunc("/api/v1/plugin", pluginHandler.UnloadPlugin).Methods("DELETE")
 
 	rootRouter.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")

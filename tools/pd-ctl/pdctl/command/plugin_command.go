@@ -33,7 +33,6 @@ func NewPluginCommand() *cobra.Command {
 		Short: "plugin commands",
 	}
 	r.AddCommand(NewLoadPluginCommand())
-	r.AddCommand(NewUpdatePluginCommand())
 	r.AddCommand(NewUnloadPluginCommand())
 	return r
 }
@@ -44,16 +43,6 @@ func NewLoadPluginCommand() *cobra.Command {
 		Use:   "load <plugin_path>",
 		Short: "load a plugin",
 		Run:   loadPluginCommandFunc,
-	}
-	return r
-}
-
-// NewUpdatePluginCommand return a update subcommand of plugin command
-func NewUpdatePluginCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   "update <plugin_path>",
-		Short: "update plugin",
-		Run:   updatePluginCommandFunc,
 	}
 	return r
 }
@@ -70,10 +59,6 @@ func NewUnloadPluginCommand() *cobra.Command {
 
 func loadPluginCommandFunc(cmd *cobra.Command, args []string) {
 	sendPluginCommand(cmd, server.PluginLoad, args)
-}
-
-func updatePluginCommandFunc(cmd *cobra.Command, args []string) {
-	sendPluginCommand(cmd, server.PluginUpdate, args)
 }
 
 func unloadPluginCommandFunc(cmd *cobra.Command, args []string) {
@@ -96,8 +81,6 @@ func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
 	switch action {
 	case server.PluginLoad:
 		_, err = doRequest(cmd, pluginPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(reqData)))
-	case server.PluginUpdate:
-		_, err = doRequest(cmd, pluginPrefix, http.MethodPut, WithBody("application/json", bytes.NewBuffer(reqData)))
 	case server.PluginUnload:
 		_, err = doRequest(cmd, pluginPrefix, http.MethodDelete, WithBody("application/json", bytes.NewBuffer(reqData)))
 	default:
