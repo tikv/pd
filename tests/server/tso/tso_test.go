@@ -131,23 +131,16 @@ func (s *testTsoSuite) TestConcurrcyRequest(c *C) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	now := time.Now()
-	go func() {
-		defer wg.Done()
-		for i := 0; i <= 100; i++ {
-			physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
-			ts := uint64(physical << 18)
-			leader.GetServer().GetHandler().ResetTS(ts)
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		for i := 0; i <= 100; i++ {
-			physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
-			ts := uint64(physical << 18)
-			leader.GetServer().GetHandler().ResetTS(ts)
-		}
-	}()
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i <= 100; i++ {
+				physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
+				ts := uint64(physical << 18)
+				leader.GetServer().GetHandler().ResetTS(ts)
+			}
+		}()
+	}
 	wg.Wait()
 }
 
