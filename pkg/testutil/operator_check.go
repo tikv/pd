@@ -60,18 +60,18 @@ func CheckTransferLeaderFrom(c *check.C, op *operator.Operator, kind operator.Op
 // CheckTransferPeer checks if the operator is to transfer peer between the specified source and target stores.
 func CheckTransferPeer(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	c.Assert(op, check.NotNil)
-	if op.Len() == 3 {
-		c.Assert(op.Step(0).(operator.AddLearner).ToStore, check.Equals, targetID)
-		c.Assert(op.Step(1), check.FitsTypeOf, operator.PromoteLearner{})
-		c.Assert(op.Step(2).(operator.RemovePeer).FromStore, check.Equals, sourceID)
-	} else {
-		c.Assert(op.Len(), check.Equals, 4)
-		c.Assert(op.Step(0).(operator.AddLearner).ToStore, check.Equals, targetID)
-		c.Assert(op.Step(1), check.FitsTypeOf, operator.PromoteLearner{})
-		c.Assert(op.Step(2).(operator.TransferLeader).FromStore, check.Equals, sourceID)
-		c.Assert(op.Step(3).(operator.RemovePeer).FromStore, check.Equals, sourceID)
-		kind |= operator.OpLeader
+
+	var steps []operator.OpStep
+	for i := 0; i < op.Len(); i++ {
+		step := op.Step(i)
+		if _, ok := step.(operator.TransferLeader); !ok {
+			steps = append(steps, step)
+		}
 	}
+	c.Assert(steps, check.HasLen, 3)
+	c.Assert(steps[0].(operator.AddLearner).ToStore, check.Equals, targetID)
+	c.Assert(steps[1], check.FitsTypeOf, operator.PromoteLearner{})
+	c.Assert(steps[2].(operator.RemovePeer).FromStore, check.Equals, sourceID)
 	kind |= operator.OpRegion
 	c.Assert(op.Kind()&kind, check.Equals, kind)
 }

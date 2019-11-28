@@ -453,7 +453,10 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
-	op := operator.CreateTransferLeaderOperator("admin-transfer-leader", region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpAdmin)
+	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", h.GetRaftCluster(), region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpAdmin)
+	if err != nil {
+		return err
+	}
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -487,7 +490,12 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		}
 	}
 
-	op, err := operator.CreateMoveRegionOperator("admin-move-region", c.cluster, region, operator.OpAdmin, storeIDs)
+	peers := make(map[uint64]*metapb.Peer)
+	for id := range storeIDs {
+		peers[id] = &metapb.Peer{StoreId: id}
+	}
+
+	op, err := operator.CreateMoveRegionOperator("admin-move-region", c.cluster, region, operator.OpAdmin, peers)
 	if err != nil {
 		return err
 	}
@@ -576,7 +584,10 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return err
 	}
 
-	op := operator.CreateAddPeerOperator("admin-add-peer", region, newPeer, operator.OpAdmin)
+	op, err := operator.CreateAddPeerOperator("admin-add-peer", h.GetRaftCluster(), region, newPeer, operator.OpAdmin)
+	if err != nil {
+		return err
+	}
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
@@ -596,7 +607,10 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 	}
 	newPeer.IsLearner = true
 
-	op := operator.CreateAddPeerOperator("admin-add-learner", region, newPeer, operator.OpAdmin)
+	op, err := operator.CreateAddPeerOperator("admin-add-learner", h.GetRaftCluster(), region, newPeer, operator.OpAdmin)
+	if err != nil {
+		return err
+	}
 	if ok := c.opController.AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
