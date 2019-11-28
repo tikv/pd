@@ -14,8 +14,8 @@ package core
 
 import (
 	"bytes"
-	"fmt"
 	"math/rand"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -198,34 +198,49 @@ func (t *regionTree) getAdjacentRegions(region *RegionInfo) (*regionItem, *regio
 	return prev, next
 }
 
-// RandomRegion is used to get a random region intersecting with the range [startKey, endKey).
-func (t *regionTree) RandomRegion(startKey, endKey []byte) *RegionInfo {
+// RandomRegion is used to get a random region within ranges.
+func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 	if t.length() == 0 {
 		return nil
 	}
 
-	var endIndex int
-
-	startRegion, startIndex := t.tree.GetWithIndex(&regionItem{region: &RegionInfo{meta: &metapb.Region{StartKey: startKey}}})
-
-	if len(endKey) != 0 {
-		_, endIndex = t.tree.GetWithIndex(&regionItem{region: &RegionInfo{meta: &metapb.Region{StartKey: endKey}}})
-	} else {
-		endIndex = t.tree.Len()
+	if len(ranges) == 0 {
+		ranges = []KeyRange{NewKeyRange("", "")}
 	}
 
-	// Consider that the item in the tree may not be continuous,
-	// we need to check if the previous item contains the key.
-	if startIndex != 0 && startRegion == nil && t.tree.GetAt(startIndex-1).(*regionItem).Contains(startKey) {
-		startIndex--
+	for _, i := range rand.Perm(len(ranges)) {
+		var endIndex int
+		startKey, endKey := ranges[i].StartKey, ranges[i].EndKey
+		startRegion, startIndex := t.tree.GetWithIndex(&regionItem{region: &RegionInfo{meta: &metapb.Region{StartKey: startKey}}})
+
+		if len(endKey) != 0 {
+			_, endIndex = t.tree.GetWithIndex(&regionItem{region: &RegionInfo{meta: &metapb.Region{StartKey: endKey}}})
+		} else {
+			endIndex = t.tree.Len()
+		}
+
+		// Consider that the item in the tree may not be continuous,
+		// we need to check if the previous item contains the key.
+		if startIndex != 0 && startRegion == nil && t.tree.GetAt(startIndex-1).(*regionItem).Contains(startKey) {
+			startIndex--
+		}
+
+		if endIndex <= startIndex {
+			log.Error("wrong keys",
+				zap.String("start-key", string(HexRegionKey(startKey))),
+				zap.String("end-key", string(HexRegionKey(endKey))))
+			continue
+		}
+		index := rand.Intn(endIndex-startIndex) + startIndex
+		region := t.tree.GetAt(index).(*regionItem).region
+		if isInvolved(region, startKey, endKey) {
+			return region
+		}
 	}
 
-	if endIndex <= startIndex {
-		log.Error("wrong keys",
-			zap.String("start-key", fmt.Sprintf("%s", HexRegionKey(startKey))),
-			zap.String("end-key", fmt.Sprintf("%s", HexRegionKey(startKey))))
-		return nil
-	}
-	index := rand.Intn(endIndex-startIndex) + startIndex
-	return t.tree.GetAt(index).(*regionItem).region
+	return nil
+}
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }

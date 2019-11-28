@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/log"
@@ -440,6 +441,35 @@ func (c *coordinator) removeScheduler(name string) error {
 	return err
 }
 
+func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
+	c.Lock()
+	defer c.Unlock()
+	if c.cluster == nil {
+		return ErrNotBootstrapped
+	}
+	s := make([]*scheduleController, 0)
+	if name != "all" {
+		sc, ok := c.schedulers[name]
+		if !ok {
+			return errSchedulerNotFound
+		}
+		s = append(s, sc)
+	} else {
+		for _, sc := range c.schedulers {
+			s = append(s, sc)
+		}
+	}
+	var err error
+	for _, sc := range s {
+		var delayUntil int64 = 0
+		if t > 0 {
+			delayUntil = time.Now().Unix() + t
+		}
+		atomic.StoreInt64(&sc.delayUntil, delayUntil)
+	}
+	return err
+}
+
 func (c *coordinator) runScheduler(s *scheduleController) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
@@ -476,6 +506,7 @@ type scheduleController struct {
 	nextInterval time.Duration
 	ctx          context.Context
 	cancel       context.CancelFunc
+	delayUntil   int64
 }
 
 // newScheduleController creates a new scheduleController.
@@ -518,5 +549,11 @@ func (s *scheduleController) GetInterval() time.Duration {
 
 // AllowSchedule returns if a scheduler is allowed to schedule.
 func (s *scheduleController) AllowSchedule() bool {
-	return s.Scheduler.IsScheduleAllowed(s.cluster)
+	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.isPaused()
+}
+
+// isPaused returns if a schedueler is paused.
+func (s *scheduleController) isPaused() bool {
+	delayUntil := atomic.LoadInt64(&s.delayUntil)
+	return time.Now().Unix() < delayUntil
 }

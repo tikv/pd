@@ -145,7 +145,7 @@ func BenchmarkRandomRegion(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		regions.RandLeaderRegion(1, []KeyRange{NewKeyRange("", "")})
+		regions.RandLeaderRegion(1, nil)
 	}
 }
 

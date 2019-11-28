@@ -181,6 +181,25 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, nil)
 }
 
+func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
+	var input map[string]int
+	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
+		return
+	}
+
+	name := mux.Vars(r)["name"]
+	t, ok := input["delay"]
+	if !ok {
+		h.r.JSON(w, http.StatusBadRequest, "missing pause time")
+		return
+	}
+	if err := h.PauseOrResumeScheduler(name, int64(t)); err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.r.JSON(w, http.StatusOK, nil)
+}
+
 type schedulerConfigHandler struct {
 	svr *server.Server
 	rd  *render.Render

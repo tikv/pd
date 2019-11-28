@@ -20,7 +20,7 @@ Tests <!-- At least one of them must be included. -->
 Code changes
 
  - Has configuration change
- - Has HTTP API interfaces change
+ - Has HTTP API interfaces change (Don't forget to [update API document](https://github.com/pingcap/pd/blob/master/docs/development.md#updating-api-documentation))
  - Has persistent data change
 
 Side effects

@@ -51,7 +51,7 @@ func (c *TransferCounter) CompileRegex(operator string) (*regexp.Regexp, error) 
 	}
 
 	if r == nil {
-		err = errors.New("Unsupported operator. ")
+		err = errors.New("unsupported operator. ")
 	}
 	return r, err
 }
