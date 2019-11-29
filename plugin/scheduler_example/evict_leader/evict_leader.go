@@ -74,6 +74,17 @@ func init() {
 	})
 }
 
+// SchedulerType return type of the scheduler
+func SchedulerType() string {
+	return EvictLeaderType
+}
+
+// SchedulerArgs provides parameters for the scheduler
+func SchedulerArgs() []string {
+	args := []string{"1"}
+	return args
+}
+
 type evictLeaderSchedulerConfig struct {
 	mu               sync.RWMutex
 	storage          *core.Storage
@@ -140,17 +151,6 @@ type evictLeaderScheduler struct {
 	conf     *evictLeaderSchedulerConfig
 	selector *selector.RandomSelector
 	handler  http.Handler
-}
-
-// SchedulerType return type of the scheduler
-func SchedulerType() string {
-	return EvictLeaderType
-}
-
-// SchedulerArgs provides parameters for the scheduler
-func SchedulerArgs() []string {
-	args := []string{"1"}
-	return args
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
