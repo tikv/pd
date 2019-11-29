@@ -125,18 +125,11 @@ func (s *testClusterStatSuite) TestClusterStatState(c *C) {
 		cst := NewClusterStatEntries(10)
 		c.Assert(cst, NotNil)
 
-		// heartbeat per 10s
-		interval := &pdpb.TimeInterval{
-			StartTimestamp: 1,
-			EndTimestamp:   11,
-		}
-		// the average cpu usage is 20%
 		usages := cpu(usage)
 
 		for i := 0; i < NumberOfEntries; i++ {
 			entry := &StatEntry{
 				StoreId:   0,
-				Interval:  interval,
 				CpuUsages: usages,
 			}
 			cst.Append(entry)
