@@ -15,7 +15,6 @@ package server
 
 import (
 	"fmt"
-	"math/rand"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -27,36 +26,14 @@ var _ = Suite(&testClusterStatSuite{})
 type testClusterStatSuite struct {
 }
 
-// medianValues returns an array with values whose
-// median is "val"
-func medianValues(val int64, n int) []int64 {
-	values := make([]int64, n)
-	if val == 0 {
-		return values
-	}
-	idx := n / 2
-	for i := 0; i < idx-1; i++ {
-		values[i] = rand.Int63n(val)
-	}
-	if idx > 0 {
-		values[idx-1] = val
-		values[idx] = val
-	}
-	for i := idx + 1; i < n; i++ {
-		values[i] = rand.Int63n(val) + val
-	}
-	return values
-}
-
 func cpu(usage int64) []*pdpb.RecordPair {
 	n := 10
 	name := "cpu"
 	pairs := make([]*pdpb.RecordPair, n)
-	values := medianValues(usage, n)
 	for i := 0; i < n; i++ {
 		pairs[i] = &pdpb.RecordPair{
 			Key:   fmt.Sprintf("%s:%d", name, i),
-			Value: uint64(values[i]),
+			Value: uint64(usage),
 		}
 	}
 	return pairs

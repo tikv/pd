@@ -121,7 +121,8 @@ func (s *CPUStatEntries) Append(stat *StatEntry, threads ...string) bool {
 		return false
 	}
 
-	appended := false
+	cpu := float64(0)
+	appended := 0
 	for _, usage := range usages {
 		name := usage.GetKey()
 		value := usage.GetValue()
@@ -130,10 +131,14 @@ func (s *CPUStatEntries) Append(stat *StatEntry, threads ...string) bool {
 		}) {
 			continue
 		}
-		s.cpu.Add(float64(value))
-		appended = true
+		cpu += float64(value)
+		appended++
 	}
-	return appended
+	if appended > 0 {
+		s.cpu.Add(cpu / float64(appended))
+		return true
+	}
+	return false
 }
 
 // CPU returns the cpu usage
