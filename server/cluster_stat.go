@@ -30,9 +30,9 @@ import (
 // the load for the whole cluster.
 //
 // Now we just support CPU as the measurement of the load. The CPU information
-// is reported by each store with a hearbeat message which sending to PD every
+// is reported by each store with a heartbeat message which sending to PD every
 // interval(10s). There is no synchronization between each store, so the stores
-// could not send hearbeat messages at the same time, and the collected
+// could not send heartbeat messages at the same time, and the collected
 // information has time shift.
 //
 // The diagram below demonstrates the time shift. "|" indicates the latest
@@ -92,8 +92,8 @@ func (s LoadState) String() string {
 }
 
 // NumberOfEntries is the max number of StatEntry that preserved,
-// it is the history of a store's hearbeats. The interval of store
-// hearbeats from TiKV is 10s, so we can preserve 30 entries per
+// it is the history of a store's heartbeats. The interval of store
+// heartbeats from TiKV is 10s, so we can preserve 30 entries per
 // store which is about 5 minutes.
 const NumberOfEntries = 30
 
@@ -226,7 +226,7 @@ func NewClusterState() *ClusterState {
 // State returns the state of the cluster, excludes is the list of store ID
 // to be excluded
 func (cs *ClusterState) State(excludes ...uint64) LoadState {
-	// Return LoadStateNone if there is not enough hearbeats
+	// Return LoadStateNone if there is not enough heartbeats
 	// collected.
 	if cs.cst.total < NumberOfEntries {
 		return LoadStateNone
