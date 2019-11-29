@@ -88,7 +88,7 @@ func newStoreStaticstics() *storeStatistics {
 
 type balanceHotRegionsScheduler struct {
 	name string
-	*baseScheduler
+	*BaseScheduler
 	sync.RWMutex
 	leaderLimit uint64
 	peerLimit   uint64
@@ -102,10 +102,10 @@ type balanceHotRegionsScheduler struct {
 }
 
 func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
 		name:          HotRegionName,
-		baseScheduler: base,
+		BaseScheduler: base,
 		leaderLimit:   1,
 		peerLimit:     1,
 		stats:         newStoreStaticstics(),
@@ -116,9 +116,9 @@ func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *b
 }
 
 func newBalanceHotReadRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		leaderLimit:   1,
 		peerLimit:     1,
 		stats:         newStoreStaticstics(),
@@ -128,9 +128,9 @@ func newBalanceHotReadRegionsScheduler(opController *schedule.OperatorController
 }
 
 func newBalanceHotWriteRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	return &balanceHotRegionsScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		leaderLimit:   1,
 		peerLimit:     1,
 		stats:         newStoreStaticstics(),
@@ -152,12 +152,12 @@ func (h *balanceHotRegionsScheduler) IsScheduleAllowed(cluster opt.Cluster) bool
 }
 
 func (h *balanceHotRegionsScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
-	return h.opController.OperatorCount(operator.OpHotRegion) < minUint64(h.leaderLimit, cluster.GetHotRegionScheduleLimit()) &&
-		h.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return h.OpController.OperatorCount(operator.OpHotRegion) < minUint64(h.leaderLimit, cluster.GetHotRegionScheduleLimit()) &&
+		h.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (h *balanceHotRegionsScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
-	return h.opController.OperatorCount(operator.OpHotRegion) < minUint64(h.peerLimit, cluster.GetHotRegionScheduleLimit())
+	return h.OpController.OperatorCount(operator.OpHotRegion) < minUint64(h.peerLimit, cluster.GetHotRegionScheduleLimit())
 }
 
 func (h *balanceHotRegionsScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

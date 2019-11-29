@@ -74,7 +74,7 @@ type shuffleHotRegionSchedulerConfig struct {
 // to a random store, and then transfer the leader to
 // the hot peer.
 type shuffleHotRegionScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	stats *storeStatistics
 	r     *rand.Rand
 	conf  *shuffleHotRegionSchedulerConfig
@@ -83,9 +83,9 @@ type shuffleHotRegionScheduler struct {
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
 func newShuffleHotRegionScheduler(opController *schedule.OperatorController, conf *shuffleHotRegionSchedulerConfig) schedule.Scheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	return &shuffleHotRegionScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotReadRegionBalance, hotWriteRegionBalance},
@@ -106,9 +106,9 @@ func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpHotRegion) < s.conf.Limit &&
-		s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit() &&
-		s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit &&
+		s.OpController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit() &&
+		s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

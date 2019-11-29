@@ -92,7 +92,7 @@ type balanceAdjacentRegionConfig struct {
 // 1. any two adjacent regions' leader will not in the same store
 // 2. the two regions' leader will not in the public store of this two regions
 type balanceAdjacentRegionScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	selector             *selector.RandomSelector
 	lastKey              []byte
 	cacheRegions         *adjacentState
@@ -122,9 +122,9 @@ func newBalanceAdjacentRegionScheduler(opController *schedule.OperatorController
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: AdjacentRegionName, TransferLeader: true, MoveRegion: true},
 	}
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	s := &balanceAdjacentRegionScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		selector:      selector.NewRandomSelector(filters),
 		conf:          conf,
 		lastKey:       []byte(""),
@@ -157,11 +157,11 @@ func (l *balanceAdjacentRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) 
 }
 
 func (l *balanceAdjacentRegionScheduler) allowBalanceLeader() bool {
-	return l.opController.OperatorCount(operator.OpAdjacent|operator.OpLeader) < l.conf.LeaderLimit
+	return l.OpController.OperatorCount(operator.OpAdjacent|operator.OpLeader) < l.conf.LeaderLimit
 }
 
 func (l *balanceAdjacentRegionScheduler) allowBalancePeer() bool {
-	return l.opController.OperatorCount(operator.OpAdjacent|operator.OpRegion) < l.conf.PeerLimit
+	return l.OpController.OperatorCount(operator.OpAdjacent|operator.OpRegion) < l.conf.PeerLimit
 }
 
 func (l *balanceAdjacentRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

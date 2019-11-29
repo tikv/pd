@@ -305,7 +305,7 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 				log.Error("unknown action", zap.String("action", action))
 			}
 		case <-c.ctx.Done():
-			log.Info("patrol regions has been stopped")
+			log.Info("load plugin has been stopped")
 			return
 		}
 	}

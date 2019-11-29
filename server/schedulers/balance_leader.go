@@ -69,7 +69,7 @@ type balanceLeaderSchedulerConfig struct {
 }
 
 type balanceLeaderScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf         *balanceLeaderSchedulerConfig
 	opController *schedule.OperatorController
 	filters      []filter.Filter
@@ -79,10 +79,10 @@ type balanceLeaderScheduler struct {
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
 func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *balanceLeaderSchedulerConfig, opts ...BalanceLeaderCreateOption) schedule.Scheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 
 	s := &balanceLeaderScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceLeaderCounter,

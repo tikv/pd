@@ -139,7 +139,7 @@ func (conf *scatterRangeSchedulerConfig) getSchedulerName() string {
 }
 
 type scatterRangeScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	name          string
 	config        *scatterRangeSchedulerConfig
 	balanceLeader schedule.Scheduler
@@ -149,12 +149,12 @@ type scatterRangeScheduler struct {
 
 // newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
 func newScatterRangeScheduler(opController *schedule.OperatorController, config *scatterRangeSchedulerConfig) schedule.Scheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 
 	name := config.getSchedulerName()
 	handler := newScatterRangeHandler(config)
 	scheduler := &scatterRangeScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		config:        config,
 		handler:       handler,
 		name:          name,
@@ -193,7 +193,7 @@ func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return l.opController.OperatorCount(operator.OpRange) < cluster.GetRegionScheduleLimit()
+	return l.OpController.OperatorCount(operator.OpRange) < cluster.GetRegionScheduleLimit()
 }
 
 func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

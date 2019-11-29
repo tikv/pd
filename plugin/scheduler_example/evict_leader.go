@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
+	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -147,7 +148,7 @@ func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 }
 
 type evictLeaderScheduler struct {
-	*userBaseScheduler
+	*schedulers.BaseScheduler
 	conf     *evictLeaderSchedulerConfig
 	selector *selector.RandomSelector
 	handler  http.Handler
@@ -160,13 +161,13 @@ func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *ev
 		filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true},
 	}
 
-	base := newUserBaseScheduler(opController)
+	base := schedulers.NewBaseScheduler(opController)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
-		userBaseScheduler: base,
-		conf:              conf,
-		selector:          selector.NewRandomSelector(filters),
-		handler:           handler,
+		BaseScheduler: base,
+		conf:          conf,
+		selector:      selector.NewRandomSelector(filters),
+		handler:       handler,
 	}
 }
 
@@ -209,7 +210,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 }
 
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
