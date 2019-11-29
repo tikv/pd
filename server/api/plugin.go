@@ -48,9 +48,9 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 	}
 	var err error
 	switch action {
-	case "load":
+	case "PluginLoad":
 		err = h.PluginLoad(data["plugin-path"])
-	case "unload":
+	case "PluginUnload":
 		err = h.PluginUnload(data["plugin-path"])
 	default:
 		h.rd.JSON(w, http.StatusBadRequest, "unknown action")

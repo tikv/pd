@@ -42,9 +42,9 @@ const (
 	heartbeatChanCapacity = 1024
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 	// PluginLoad means action for load plugin
-	PluginLoad = "load"
+	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
-	PluginUnload = "unload"
+	PluginUnload = "PluginUnload"
 )
 
 var (
@@ -291,16 +291,22 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 
 	// Get signal from channel which means user unload the plugin
 	for {
-		action := <-ch
-		if action == PluginUnload {
-			err := c.removeScheduler(s.GetName())
-			if err != nil {
-				log.Error("can not remove scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		select {
+		case action := <-ch:
+			if action == PluginUnload {
+				err := c.removeScheduler(s.GetName())
+				if err != nil {
+					log.Error("can not remove scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+				} else {
+					log.Info("unload plugin", zap.String("plugin", pluginPath))
+					return
+				}
 			} else {
-				return
+				log.Error("unknown action", zap.String("action", action))
 			}
-		} else {
-			log.Error("unknown action", zap.String("action", action))
+		case <-c.ctx.Done():
+			log.Info("patrol regions has been stopped")
+			return
 		}
 	}
 }
