@@ -16,7 +16,6 @@ package server
 import (
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/slice"
@@ -190,7 +189,7 @@ func contains(slice []uint64, value uint64) bool {
 }
 
 // CPU returns the cpu usage of the cluster
-func (cst *ClusterStatEntries) CPU(d time.Duration, excludes ...uint64) float64 {
+func (cst *ClusterStatEntries) CPU(excludes ...uint64) float64 {
 	cst.m.RLock()
 	defer cst.m.RUnlock()
 
@@ -226,14 +225,14 @@ func NewClusterState() *ClusterState {
 
 // State returns the state of the cluster, excludes is the list of store ID
 // to be excluded
-func (cs *ClusterState) State(d time.Duration, excludes ...uint64) LoadState {
+func (cs *ClusterState) State(excludes ...uint64) LoadState {
 	// Return LoadStateNone if there is not enough hearbeats
 	// collected.
 	if cs.cst.total < NumberOfEntries {
 		return LoadStateNone
 	}
 
-	cpu := cs.cst.CPU(d, excludes...)
+	cpu := cs.cst.CPU(excludes...)
 	switch {
 	case cpu == 0:
 		return LoadStateIdle

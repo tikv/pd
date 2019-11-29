@@ -15,7 +15,6 @@ package server
 
 import (
 	"fmt"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -118,7 +117,7 @@ func (s *testClusterStatSuite) TestClusterStatCPU(c *C) {
 	}
 
 	// the cpu usage of the whole cluster is 20%
-	c.Assert(cst.CPU(100*time.Second), Equals, float64(20))
+	c.Assert(cst.CPU(), Equals, float64(20))
 }
 
 func (s *testClusterStatSuite) TestClusterStatState(c *C) {
@@ -144,9 +143,8 @@ func (s *testClusterStatSuite) TestClusterStatState(c *C) {
 		}
 		return &ClusterState{cst}
 	}
-	d := 60 * time.Second
-	c.Assert(Load(0).State(d), Equals, LoadStateIdle)
-	c.Assert(Load(20).State(d), Equals, LoadStateLow)
-	c.Assert(Load(50).State(d), Equals, LoadStateNormal)
-	c.Assert(Load(90).State(d), Equals, LoadStateHigh)
+	c.Assert(Load(0).State(), Equals, LoadStateIdle)
+	c.Assert(Load(20).State(), Equals, LoadStateLow)
+	c.Assert(Load(50).State(), Equals, LoadStateNormal)
+	c.Assert(Load(90).State(), Equals, LoadStateHigh)
 }
