@@ -365,7 +365,7 @@ func newTestRegions() []*core.RegionInfo {
 
 func BenchmarkRenderJSON(b *testing.B) {
 	regionInfos := newTestRegions()
-	rd := createRender()
+	rd := createStreamingRender()
 	regions := convertToAPIRegions(regionInfos)
 
 	b.ResetTimer()

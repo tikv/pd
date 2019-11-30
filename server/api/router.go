@@ -22,14 +22,20 @@ import (
 	"github.com/unrolled/render"
 )
 
-func createRender() *render.Render {
+func createStreamingRender() *render.Render {
 	return render.New(render.Options{
 		StreamingJSON: true,
 	})
 }
 
+func createIndentRender() *render.Render {
+	return render.New(render.Options{
+		IndentJSON: true,
+	})
+}
+
 func createRouter(prefix string, svr *server.Server) *mux.Router {
-	rd := createRender()
+	rd := createIndentRender()
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -102,7 +108,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/api/v1/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/region/key/{key}", regionHandler.GetRegionByKey).Methods("GET")
 
-	regionsHandler := newRegionsHandler(svr, rd)
+	srd := createStreamingRender()
+	regionsHandler := newRegionsHandler(svr, srd)
 	clusterRouter.HandleFunc("/api/v1/regions", regionsHandler.GetAll).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/key", regionsHandler.ScanRegions).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/count", regionsHandler.GetRegionCount).Methods("GET")
