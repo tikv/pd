@@ -108,9 +108,10 @@ func (s *testClusterStatSuite) TestClusterStatCPU(c *C) {
 			StoreId:   uint64(i % N),
 			CpuUsages: usages,
 		}
-		cst.Append(entry)
+		c.Assert(cst.Append(entry), IsTrue)
 	}
 
+	c.Assert(cst.total, Equals, int64(2*N))
 	// the cpu usage of the whole cluster is 20%
 	c.Assert(cst.CPU(), Equals, float64(20))
 }
@@ -137,10 +138,6 @@ func (s *testClusterStatSuite) TestClusterStatState(c *C) {
 		cst := NewClusterStatEntries(10)
 		c.Assert(cst, NotNil)
 
-<<<<<<< HEAD
-=======
-		// the average cpu usage is 20%
->>>>>>> schedule: fix unit tests
 		usages := cpu(usage)
 		ThreadsCollected = []string{"cpu:"}
 

@@ -147,6 +147,7 @@ func (s *CPUStatEntries) Append(stat *StatEntry, threads ...string) bool {
 	}
 	if appended > 0 {
 		s.cpu.Add(cpu / float64(appended))
+		s.updated = time.Now()
 		return true
 	}
 	return false
@@ -176,7 +177,7 @@ func NewClusterStatEntries(size int) *ClusterStatEntries {
 }
 
 // Append an store StatEntry
-func (cst *ClusterStatEntries) Append(stat *StatEntry) {
+func (cst *ClusterStatEntries) Append(stat *StatEntry) bool {
 	cst.m.Lock()
 	defer cst.m.Unlock()
 
@@ -190,7 +191,7 @@ func (cst *ClusterStatEntries) Append(stat *StatEntry) {
 		cst.stats[storeID] = entries
 	}
 
-	entries.Append(stat, ThreadsCollected...)
+	return entries.Append(stat, ThreadsCollected...)
 }
 
 func contains(slice []uint64, value uint64) bool {
