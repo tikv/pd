@@ -47,10 +47,7 @@ func TestMain(m *testing.M) {
 
 var _ = Suite(&serverTestSuite{})
 
-type serverTestSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
+type serverTestSuite struct{}
 
 func (s *serverTestSuite) TestReconnect(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())

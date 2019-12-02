@@ -107,8 +107,9 @@ func (s *keyvisualService) Heatmap(w http.ResponseWriter, r *http.Request) {
 	s.rd.JSON(w, http.StatusNotImplemented, "not implemented")
 }
 
+// FIXME: works well with leader changed.
 func (s *keyvisualService) run() {
-	// TODO: coanfig the ticker
+	// TODO: make the ticker consistent with heartbeat interval
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -121,7 +122,7 @@ func (s *keyvisualService) run() {
 				continue
 			}
 			s.scanRegions(cluster)
-			// TODO: implement the stats
+			// TODO: implements the stats
 		}
 	}
 }

@@ -27,7 +27,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// somes HTTP filed.
+// HTTP headers.
 const (
 	RedirectorHeader    = "PD-Redirector"
 	AllowFollowerHandle = "PD-Allow-follower-handle"

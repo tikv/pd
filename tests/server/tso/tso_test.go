@@ -117,11 +117,11 @@ func (s *testTsoSuite) TestTso(c *C) {
 }
 
 func (s *testTsoSuite) TestConcurrcyRequest(c *C) {
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
