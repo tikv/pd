@@ -52,7 +52,7 @@ func init() {
 const (
 	hotRegionLimitFactor    = 0.75
 	storeHotPeersDefaultLen = 100
-	hotRegionScheduleFactor = 0.9
+	hotRegionScheduleFactor = 0.95
 	// HotRegionName is balance hot region scheduler name.
 	HotRegionName = "balance-hot-region-scheduler"
 	// HotRegionType is balance hot region scheduler type.
@@ -203,7 +203,7 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Clust
 
 func (h *balanceHotRegionsScheduler) calcPendingInfluence(storeStat statistics.StoreHotPeersStat, pending map[uint64]Influence) statistics.StoreHotPeersStat {
 	for id, stat := range storeStat {
-		stat.FutureBytesRate = stat.StoreBytesRate + pending[id].ByteRate
+		stat.FutureBytesRate += pending[id].ByteRate
 	}
 	return storeStat
 }
@@ -259,8 +259,10 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) 
 const balanceHotRetryLimit = 10
 
 func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
+	balancePeer := h.r.Int()%2 == 0
 	for i := 0; i < balanceHotRetryLimit; i++ {
-		if h.allowBalanceRegion(cluster) && (!h.allowBalanceLeader(cluster) || h.r.Int()%2 == 0) {
+		balancePeer = !balancePeer
+		if h.allowBalanceRegion(cluster) && (!h.allowBalanceLeader(cluster) || balancePeer) {
 			// balance by peer
 			srcRegion, srcPeer, dstPeer, infl := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
 			if srcRegion != nil {
@@ -337,10 +339,17 @@ func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesSta
 			hotPeers.Count++
 			hotPeers.Stats = append(hotPeers.Stats, s)
 		}
-
-		if rate, ok := storeBytesStat[storeID]; ok {
-			hotPeers.StoreBytesRate = rate
+	}
+	for id, rate := range storeBytesStat {
+		hotPeers, ok := stats[id]
+		if !ok {
+			hotPeers = &statistics.HotPeersStat{
+				Stats: make([]statistics.HotPeerStat, 0, storeHotPeersDefaultLen),
+			}
+			stats[id] = hotPeers
 		}
+		hotPeers.StoreBytesRate = rate
+		hotPeers.FutureBytesRate = rate
 	}
 	return stats
 }
