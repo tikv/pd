@@ -92,9 +92,9 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 		peers := make([]*metapb.Peer, 0, np)
 		for j := uint64(0); j < np; j++ {
 			peer := &metapb.Peer{
-				Id: i*np + j,
+				Id: i*np + j + 1,
 			}
-			peer.StoreId = (i + j) % n
+			peer.StoreId = (i+j)%n + 1
 			peers = append(peers, peer)
 		}
 		region := &metapb.Region{
@@ -424,6 +424,12 @@ func (s *testClusterInfoSuite) testRegionHeartbeat(c *C, cache *clusterInfo) {
 		region.PendingPeers = nil
 		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
 		checkRegions(c, cache.Regions, regions[:i+1])
+
+		// Different peer count.
+		region.Peers = region.Peers[:2]
+		c.Assert(cache.handleRegionHeartbeat(region), IsNil)
+		checkRegions(c, cache.Regions, regions[:i+1])
+		checkRegionsKV(c, cache.kv, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)

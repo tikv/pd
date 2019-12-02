@@ -431,6 +431,9 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if region.ApproximateSize != origin.ApproximateSize {
 			saveCache = true
 		}
+		if len(region.Peers) != len(origin.Peers) {
+			saveKV, saveCache = true, true
+		}
 	}
 
 	if saveKV && c.kv != nil {
