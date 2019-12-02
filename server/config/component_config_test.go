@@ -194,11 +194,13 @@ compression-per-level = [
 discardable-ratio = 0.00156
 `
 	cfg := NewComponentsConfig()
-	lc, err := NewLocalConfig(cfgData)
+	lc, err := NewLocalConfig(cfgData, &configpb.Version{Global: 0, Local: 1})
 	c.Assert(err, IsNil)
-	gc := NewGlobalConfig([]*configpb.ConfigEntry{{
-		Name: "rocksdb.defaultcf.disable-block-cache", Value: "true"},
-	})
+	gc := NewGlobalConfig(
+		[]*configpb.ConfigEntry{{
+			Name:  "rocksdb.defaultcf.disable-block-cache",
+			Value: "true"}},
+		&configpb.Version{Global: 1, Local: 0})
 	cfg.GlobalCfgs["tikv"] = gc
 	cfg.LocalCfgs["tikv1"] = lc
 
@@ -225,11 +227,13 @@ compression-per-level = [
     "zstd",
 ]
 `
-	lc1, err := NewLocalConfig(cfgData1)
+	lc1, err := NewLocalConfig(cfgData1, &configpb.Version{Global: 0, Local: 1})
 	c.Assert(err, IsNil)
-	gc1 := NewGlobalConfig([]*configpb.ConfigEntry{{
-		Name: "rocksdb.defaultcf.disable-block-cache", Value: "true"},
-	})
+	gc1 := NewGlobalConfig(
+		[]*configpb.ConfigEntry{{
+			Name:  "rocksdb.defaultcf.disable-block-cache",
+			Value: "true"}},
+		&configpb.Version{Global: 1, Local: 0})
 	cfg.GlobalCfgs["tikv"] = gc1
 	cfg.LocalCfgs["tikv1"] = lc1
 	err = cfg.Persist(storage)
@@ -257,11 +261,13 @@ compression-per-level = [
 discardable-ratio = 0.00156
 `
 	cfg := NewComponentsConfig()
-	lc, err := NewLocalConfig(cfgData)
+	lc, err := NewLocalConfig(cfgData, &configpb.Version{Global: 0, Local: 0})
 	c.Assert(err, IsNil)
-	gc := NewGlobalConfig([]*configpb.ConfigEntry{{
-		Name: "rocksdb.defaultcf.disable-block-cache", Value: "true"},
-	})
+	gc := NewGlobalConfig(
+		[]*configpb.ConfigEntry{{
+			Name:  "rocksdb.defaultcf.disable-block-cache",
+			Value: "true"}},
+		&configpb.Version{Global: 1, Local: 0})
 	cfg.GlobalCfgs["tikv"] = gc
 	cfg.LocalCfgs["tikv1"] = lc
 	str, err := cfg.getComponentCfg("tikv", "tikv1")
@@ -272,6 +278,22 @@ discardable-ratio = 0.00156
     block-size = "12KB"
     compression-per-level = ["no", "lz4"]
     disable-block-cache = true
+    [rocksdb.defaultcf.titan]
+      discardable-ratio = 0.00156
+`
+	c.Assert(str, Equals, expect)
+	lc.updateEntry(&configpb.ConfigEntry{
+		Name:  "rocksdb.defaultcf.disable-block-cache",
+		Value: "false"},
+		&configpb.Version{Global: 1, Local: 1})
+	str, err = cfg.getComponentCfg("tikv", "tikv1")
+	c.Assert(err, IsNil)
+	expect = `[rocksdb]
+  wal-recovery-mode = 1
+  [rocksdb.defaultcf]
+    block-size = "12KB"
+    compression-per-level = ["no", "lz4"]
+    disable-block-cache = false
     [rocksdb.defaultcf.titan]
       discardable-ratio = 0.00156
 `
@@ -322,6 +344,8 @@ log-level = "debug"
 	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
 	expect := `log-level = "debug"
 `
+	expect1 := `log-level = "info"
+`
 	c.Assert(config, Equals, expect)
 	v, status = cfg.Update(
 		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Local{Local: &configpb.Local{ComponentId: "tikv1"}}},
@@ -330,6 +354,11 @@ log-level = "debug"
 	)
 	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
 	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	result, err := cfg.getComponentCfg("tikv", "tikv1")
+	c.Assert(err, IsNil)
+	c.Assert(result, Equals, expect1)
+
+	// stale update request
 	v, status = cfg.Update(
 		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Local{Local: &configpb.Local{ComponentId: "tikv1"}}},
 		&configpb.Version{Global: 0, Local: 0},
@@ -340,16 +369,41 @@ log-level = "debug"
 	v, status = cfg.Update(
 		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: "tikv"}}},
 		&configpb.Version{Global: 10, Local: 0},
+		[]*configpb.ConfigEntry{{Name: "log-level", Value: "debug"}},
+	)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 1, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	result, err = cfg.getComponentCfg("tikv", "tikv1")
+	c.Assert(err, IsNil)
+	c.Assert(result, Equals, expect)
+	v, status = cfg.Update(
+		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: "tikv"}}},
+		&configpb.Version{Global: 1, Local: 0},
 		[]*configpb.ConfigEntry{{Name: "log-level", Value: "info"}},
 	)
-	c.Assert(v, DeepEquals, &configpb.Version{Global: 11, Local: 0})
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 2, Local: 0})
 	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	result, err = cfg.getComponentCfg("tikv", "tikv1")
+	c.Assert(err, IsNil)
+	c.Assert(result, Equals, expect1)
+	v, status = cfg.Update(
+		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Local{Local: &configpb.Local{ComponentId: "tikv1"}}},
+		&configpb.Version{Global: 2, Local: 0},
+		[]*configpb.ConfigEntry{{Name: "log-level", Value: "debug"}},
+	)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 2, Local: 1})
+	c.Assert(status.GetCode(), Equals, configpb.Status_OK)
+	result, err = cfg.getComponentCfg("tikv", "tikv1")
+	c.Assert(err, IsNil)
+	c.Assert(result, Equals, expect)
+
+	// stale update request
 	v, status = cfg.Update(
 		&configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: "tikv"}}},
 		&configpb.Version{Global: 0, Local: 0},
 		[]*configpb.ConfigEntry{{Name: "log-level", Value: "info"}},
 	)
-	c.Assert(v, DeepEquals, &configpb.Version{Global: 11, Local: 0})
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 2, Local: 0})
 	c.Assert(status.GetCode(), Equals, configpb.Status_STALE_VERSION)
 
 	// nil case
@@ -384,7 +438,7 @@ log-level = "debug"
 	c.Assert(config, Equals, expect1)
 	v, config, status = cfg.Get(&configpb.Version{Global: 10, Local: 0}, "tikv", "tikv1")
 	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
-	c.Assert(status.GetCode(), Equals, configpb.Status_STALE_VERSION)
+	c.Assert(status.GetCode(), Equals, configpb.Status_UNKNOWN)
 	c.Assert(config, Equals, expect1)
 	v, config, status = cfg.Get(&configpb.Version{Global: 10, Local: 1}, "tikv", "tikv1")
 	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 1})
