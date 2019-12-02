@@ -240,12 +240,12 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	tc.AddLeaderRegionWithWriteInfo(5, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
 	tc.AddLeaderRegionWithWriteInfo(6, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 20; i++ {
 		hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 		cnt := 0
 	testLoop:
 		for j := 0; j < 1000; j++ {
-			c.Assert(cnt, LessEqual, 4)
+			c.Assert(cnt, LessEqual, 5)
 			emptyCnt := 0
 			ops := hb.Schedule(tc)
 			for len(ops) == 0 {
@@ -264,11 +264,14 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 				// balance by peer selected
 				testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 4)
 				cnt++
+				if cnt == 3 {
+					c.Assert(op.Cancel(), IsTrue)
+				}
 			default:
 				c.Fatalf("wrong op: %v", op)
 			}
 		}
-		c.Assert(cnt, Equals, 4)
+		c.Assert(cnt, Equals, 5)
 	}
 }
 
@@ -428,14 +431,29 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	tc.AddLeaderRegionWithReadInfo(7, 3, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 2)
 	tc.AddLeaderRegionWithReadInfo(8, 3, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 2)
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 20; i++ {
 		hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
-		op := hb.Schedule(tc)[0]
-		testutil.CheckTransferLeader(c, op, operator.OpLeader, 1, 3)
-		op = hb.Schedule(tc)[0]
-		testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 4)
-		op = hb.Schedule(tc)[0]
-		testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 3, 4)
+		op1 := hb.Schedule(tc)[0]
+		testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
+		op2 := hb.Schedule(tc)[0]
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+		op3 := hb.Schedule(tc)[0]
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op3, operator.OpHotRegion, 3, 4)
+		ops := hb.Schedule(tc)
+		c.Assert(ops, HasLen, 0)
+	}
+	for i := 0; i < 20; i++ {
+		hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
+		op1 := hb.Schedule(tc)[0]
+		testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
+		op2 := hb.Schedule(tc)[0]
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+		c.Assert(op2.Cancel(), IsTrue)
+		op2 = hb.Schedule(tc)[0]
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+		c.Assert(op1.Cancel(), IsTrue)
+		op3 := hb.Schedule(tc)[0]
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op3, operator.OpHotRegion, 1, 4)
 		ops := hb.Schedule(tc)
 		c.Assert(ops, HasLen, 0)
 	}
