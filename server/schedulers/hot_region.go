@@ -241,7 +241,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) 
 	// balance by peer
 	srcRegion, srcPeer, destPeer, infl := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
-		op, err := operator.CreateMovePeerOperator("move-hot-read-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer)
+		op, err := operator.CreateMoveLeaderOperator("move-hot-read-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(h.GetName(), "create-operator-fail").Inc()
 			return nil

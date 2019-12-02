@@ -240,7 +240,6 @@ func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionI
 		return nil, err
 	}
 	st := CreateAddPeerSteps(peer)
-	st = append(st, TransferLeader{ToStore: peer.StoreId, FromStore: oldStore})
 	steps = append(st, steps...)
 	brief := fmt.Sprintf("mv leader: store %v to %v", oldStore, peer.StoreId)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), removeKind|kind|OpLeader|OpRegion, steps...), nil
