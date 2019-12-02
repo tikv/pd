@@ -349,12 +349,12 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	//| store_id | read_bytes_rate |
 	//|----------|-----------------|
 	//|    1     |       6MB       |
-	//|    2     |       5MB       |
+	//|    2     |       5.5MB     |
 	//|    3     |       6MB       |
 	//|    4     |       3MB       |
 	//|    5     |       3MB       |
 	tc.UpdateStorageReadBytes(1, 6*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(2, 5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 5.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(4, 3*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(5, 3*MB*statistics.StoreHeartBeatReportInterval)
@@ -371,7 +371,7 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	tc.AddLeaderRegionWithReadInfo(5, 4, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 5)
 
 	// We will move leader peer of region 1 from 1 to 5
-	// Store 1 will be selected as source store (max rate, count > store 4 count).
+	// Store 1 will be selected as source store (max rate, count > store 3 count).
 	// When trying to transfer leader:
 	//   Store 2 and store 3 are also hot, failed.
 	// Trying to move leader peer:
