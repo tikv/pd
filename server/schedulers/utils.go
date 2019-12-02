@@ -187,7 +187,7 @@ func NewScoreInfos() *ScoreInfos {
 // Add adds a scoreInfo into the slice.
 func (s *ScoreInfos) Add(scoreInfo *ScoreInfo) {
 	infosLen := len(s.scoreInfos)
-	if s.isSorted == true && infosLen != 0 && s.scoreInfos[infosLen-1].score > scoreInfo.score {
+	if s.isSorted && infosLen != 0 && s.scoreInfos[infosLen-1].score > scoreInfo.score {
 		s.isSorted = false
 	}
 	s.scoreInfos = append(s.scoreInfos, scoreInfo)
@@ -297,7 +297,7 @@ func AggregateScores(storesStats []*ScoreInfos, weights []float64) *ScoreInfos {
 		num = len(weights)
 	}
 
-	scoreMap := make(map[uint64]float64, 0)
+	scoreMap := make(map[uint64]float64)
 	for i := 0; i < num; i++ {
 		scoreInfos := storesStats[i]
 		for _, info := range scoreInfos.ToSlice() {

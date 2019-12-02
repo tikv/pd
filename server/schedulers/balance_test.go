@@ -423,7 +423,6 @@ type testBalanceLeaderRangeSchedulerSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
-	lb     schedule.Scheduler
 	oc     *schedule.OperatorController
 }
 
@@ -1212,7 +1211,7 @@ func (s *testScatterRangeLeaderSuite) TestConcurrencyUpdateConfig(c *C) {
 		for {
 			select {
 			case <-ch:
-				break
+				return
 			default:
 			}
 			sche.config.BuildWithArgs(args)

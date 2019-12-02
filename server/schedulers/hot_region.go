@@ -62,7 +62,6 @@ const (
 	// HotWriteRegionType is hot write region scheduler type.
 	HotWriteRegionType = "hot-write-region"
 	minFlowBytes       = 128 * 1024
-	minScoreLimit      = 0.35
 )
 
 // BalanceType : the perspective of balance
@@ -533,7 +532,7 @@ func (h *balanceHotRegionsScheduler) GetHotWriteStatus() *statistics.StoreHotPee
 func (h *balanceHotRegionsScheduler) GetStoresScore() map[uint64]float64 {
 	h.RLock()
 	defer h.RUnlock()
-	storesScore := make(map[uint64]float64, 0)
+	storesScore := make(map[uint64]float64)
 	for _, info := range h.scoreInfos.ToSlice() {
 		storesScore[info.GetStoreID()] = info.GetScore()
 	}

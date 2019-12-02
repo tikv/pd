@@ -17,9 +17,9 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
 	"reflect"
 	"strings"
+	"unsafe"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -497,25 +497,25 @@ func (rst *regionSubTree) length() int {
 	return rst.regionTree.length()
 }
 
-func (rst *regionSubTree) RandomRegion(startKey, endKey []byte) *RegionInfo {
+func (rst *regionSubTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 	if rst.length() == 0 {
 		return nil
 	}
-	return rst.regionTree.RandomRegion(startKey, endKey)
+
+	return rst.regionTree.RandomRegion(ranges)
 }
 
-func (rst *regionSubTree) RandomRegions(n int, startKey, endKey []byte) []*RegionInfo {
+func (rst *regionSubTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 	if rst.length() == 0 {
 		return nil
 	}
 
 	regions := make([]*RegionInfo, 0, n)
+
 	for i := 0; i < n; i++ {
-		region := rst.regionTree.RandomRegion(startKey, endKey)
-		if region == nil || !isInvolved(region, startKey, endKey) {
-			continue
+		if region := rst.regionTree.RandomRegion(ranges); region != nil {
+			regions = append(regions, region)
 		}
-		regions = append(regions, region)
 	}
 	return regions
 }
@@ -676,14 +676,10 @@ func (r *RegionsInfo) GetRegions() []*RegionInfo {
 func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.GetStoreLeaderCount(storeID)+r.GetStoreFollowerCount(storeID))
 	if leaders, ok := r.leaders[storeID]; ok {
-		for _, region := range leaders.scanRanges() {
-			regions = append(regions, region)
-		}
+		regions = append(regions, leaders.scanRanges()...)
 	}
 	if followers, ok := r.followers[storeID]; ok {
-		for _, region := range followers.scanRanges() {
-			regions = append(regions, region)
-		}
+		regions = append(regions, followers.scanRanges()...)
 	}
 	return regions
 }
@@ -749,56 +745,42 @@ func (r *RegionsInfo) GetStoreLearnerCount(storeID uint64) int {
 
 // RandPendingRegion randomly gets a store's region with a pending peer.
 func (r *RegionsInfo) RandPendingRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	startKey, endKey := r.GetKeys(ranges)
-	return r.pendingPeers[storeID].RandomRegion(startKey, endKey)
+	return r.pendingPeers[storeID].RandomRegion(ranges)
 }
 
 // RandPendingRegions randomly gets a store's n regions with a pending peer.
 func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
-	startKey, endKey := r.GetKeys(ranges)
-	return r.pendingPeers[storeID].RandomRegions(n, startKey, endKey)
+	return r.pendingPeers[storeID].RandomRegions(n, ranges)
 }
 
 // RandLeaderRegion randomly gets a store's leader region.
 func (r *RegionsInfo) RandLeaderRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	startKey, endKey := r.GetKeys(ranges)
-	return r.leaders[storeID].RandomRegion(startKey, endKey)
+	return r.leaders[storeID].RandomRegion(ranges)
 }
 
 // RandLeaderRegions randomly gets a store's n leader regions.
 func (r *RegionsInfo) RandLeaderRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
-	startKey, endKey := r.GetKeys(ranges)
-	return r.leaders[storeID].RandomRegions(n, startKey, endKey)
+	return r.leaders[storeID].RandomRegions(n, ranges)
 }
 
 // RandFollowerRegion randomly gets a store's follower region.
 func (r *RegionsInfo) RandFollowerRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	startKey, endKey := r.GetKeys(ranges)
-	return r.followers[storeID].RandomRegion(startKey, endKey)
+	return r.followers[storeID].RandomRegion(ranges)
 }
 
 // RandFollowerRegions randomly gets a store's n follower regions.
 func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
-	startKey, endKey := r.GetKeys(ranges)
-	return r.followers[storeID].RandomRegions(n, startKey, endKey)
+	return r.followers[storeID].RandomRegions(n, ranges)
 }
 
 // RandLearnerRegion randomly gets a store's learner region.
 func (r *RegionsInfo) RandLearnerRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	startKey, endKey := r.GetKeys(ranges)
-	return r.learners[storeID].RandomRegion(startKey, endKey)
+	return r.learners[storeID].RandomRegion(ranges)
 }
 
 // RandLearnerRegions randomly gets a store's n learner regions.
 func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
-	startKey, endKey := r.GetKeys(ranges)
-	return r.learners[storeID].RandomRegions(n, startKey, endKey)
-}
-
-// GetKeys gets the start key and end key from random key range.
-func (r *RegionsInfo) GetKeys(ranges []KeyRange) ([]byte, []byte) {
-	idx := rand.Intn(len(ranges))
-	return ranges[idx].StartKey, ranges[idx].EndKey
+	return r.learners[storeID].RandomRegions(n, ranges)
 }
 
 // GetLeader return leader RegionInfo by storeID and regionID(now only used in test)
@@ -907,10 +889,57 @@ func isInvolved(region *RegionInfo, startKey, endKey []byte) bool {
 	return bytes.Compare(region.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), endKey) <= 0))
 }
 
+// String converts slice of bytes to string without copy.
+func String(b []byte) (s string) {
+	if len(b) == 0 {
+		return ""
+	}
+	pbytes := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	pstring := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	pstring.Data = pbytes.Data
+	pstring.Len = pbytes.Len
+	return
+}
+
+// ToUpperASCIIInplace bytes.ToUpper but zero-cost
+func ToUpperASCIIInplace(s []byte) []byte {
+	hasLower := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		hasLower = hasLower || ('a' <= c && c <= 'z')
+	}
+
+	if !hasLower {
+		return s
+	}
+	var c byte
+	for i := 0; i < len(s); i++ {
+		c = s[i]
+		if 'a' <= c && c <= 'z' {
+			c -= 'a' - 'A'
+		}
+		s[i] = c
+	}
+	return s
+}
+
+// EncodeToString overrides hex.EncodeToString implementation. Difference: returns []byte, not string
+func EncodeToString(src []byte) []byte {
+	dst := make([]byte, hex.EncodedLen(len(src)))
+	hex.Encode(dst, src)
+	return dst
+}
+
 // HexRegionKey converts region key to hex format. Used for formating region in
 // logs.
 func HexRegionKey(key []byte) []byte {
-	return []byte(strings.ToUpper(hex.EncodeToString(key)))
+	return ToUpperASCIIInplace(EncodeToString(key))
+}
+
+// HexRegionKeyStr converts region key to hex format. Used for formating region in
+// logs.
+func HexRegionKeyStr(key []byte) string {
+	return String(HexRegionKey(key))
 }
 
 // RegionToHexMeta converts a region meta's keys to hex format. Used for formating
