@@ -200,6 +200,8 @@ const (
 	defaultDisableErrorVerbose = true
 )
 
+var defaultRuntimeServices = []string{""}
+
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {
 		*v = defValue
@@ -883,6 +885,8 @@ type PDServerConfig struct {
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
+	// RuntimeSercives is the running the running extensions services.
+	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -894,6 +898,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("key-type") {
 		c.KeyType = defaultKeyType
+	}
+	if !meta.IsDefined("runtime-services") {
+		c.RuntimeServices = defaultRuntimeServices
 	}
 	return nil
 }

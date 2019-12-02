@@ -40,9 +40,9 @@ func (s *healthTestSuite) SetUpSuite(c *C) {
 func (s *healthTestSuite) TestHealth(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers(ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()

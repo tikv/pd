@@ -27,10 +27,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// somes HTTP filed.
 const (
-	redirectorHeader    = "PD-Redirector"
-	allowFollowerHandle = "PD-Allow-follower-handle"
-	followerHandle      = "PD-Follwer-handle"
+	RedirectorHeader    = "PD-Redirector"
+	AllowFollowerHandle = "PD-Allow-follower-handle"
+	FollowerHandle      = "PD-Follwer-handle"
 )
 
 const (
@@ -47,6 +48,42 @@ var dialClient = &http.Client{
 	},
 }
 
+type runtimeServiceAuth struct {
+	s *server.Server
+}
+
+// NewRuntimeServiceAuth checks if the path is invalid.
+func NewRuntimeServiceAuth(s *server.Server) *runtimeServiceAuth {
+	return &runtimeServiceAuth{s: s}
+}
+
+func (h *runtimeServiceAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if IsServiceAllowed(h.s, r.RequestURI) {
+		next(w, r)
+		return
+	}
+
+	http.Error(w, "no service", http.StatusServiceUnavailable)
+}
+
+// IsServiceAllowed checks the service through the path.
+func IsServiceAllowed(s *server.Server, path string) bool {
+	opt := s.GetServerOption()
+	cfg := opt.LoadPDServerConfig()
+	if cfg != nil {
+		for _, allow := range cfg.RuntimeServices {
+			if len(allow) != 0 && strings.Contains(path, allow) {
+				return true
+			}
+		}
+	}
+	// for core path
+	if strings.Contains(path, "api/v1") {
+		return true
+	}
+	return false
+}
+
 type redirector struct {
 	s *server.Server
 }
@@ -57,23 +94,23 @@ func NewRedirector(s *server.Server) *redirector {
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	allowFollowerHandle := len(r.Header.Get(allowFollowerHandle)) > 0
+	allowFollowerHandle := len(r.Header.Get(AllowFollowerHandle)) > 0
 	if !h.s.IsClosed() && (h.s.GetMember().IsLeader() || allowFollowerHandle) {
 		if allowFollowerHandle {
-			w.Header().Add(followerHandle, "true")
+			w.Header().Add(FollowerHandle, "true")
 		}
 		next(w, r)
 		return
 	}
 
 	// Prevent more than one redirection.
-	if name := r.Header.Get(redirectorHeader); len(name) != 0 {
+	if name := r.Header.Get(RedirectorHeader); len(name) != 0 {
 		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()))
 		http.Error(w, errRedirectToNotLeader, http.StatusInternalServerError)
 		return
 	}
 
-	r.Header.Set(redirectorHeader, h.s.Name())
+	r.Header.Set(RedirectorHeader, h.s.Name())
 
 	leader := h.s.GetMember().GetLeader()
 	if leader == nil {

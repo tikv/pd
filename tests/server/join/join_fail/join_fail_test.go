@@ -45,17 +45,17 @@ func (s *joinTestSuite) SetUpSuite(c *C) {
 func (s *joinTestSuite) TestFailedPDJoinInStep1(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	// Join the second PD.
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/join/add-member-failed", `return`), IsNil)
-	_, err = cluster.Join()
+	_, err = cluster.Join(ctx)
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "join failed"), IsTrue)
 	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/join/add-member-failed"), IsNil)

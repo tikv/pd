@@ -57,11 +57,11 @@ type client interface {
 }
 
 func (s *serverTestSuite) TestClientLeaderChange(c *C) {
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -111,11 +111,11 @@ func (s *serverTestSuite) TestClientLeaderChange(c *C) {
 }
 
 func (s *serverTestSuite) TestLeaderTransfer(c *C) {
-	cluster, err := tests.NewTestCluster(2)
+	cluster, err := tests.NewTestCluster(s.ctx, 2)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 

@@ -53,7 +53,6 @@ import (
 
 const (
 	etcdTimeout           = time.Second * 3
-	etcdStartTimeout      = time.Minute * 5
 	serverMetricsInterval = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
@@ -62,8 +61,12 @@ const (
 	pdClusterIDPath = "/pd/cluster_id"
 )
 
-// EnableZap enable the zap logger in embed etcd.
-var EnableZap = false
+var (
+	// EnableZap enable the zap logger in embed etcd.
+	EnableZap = false
+	// EtcdStartTimeout the timeout of the startup etcd.
+	EtcdStartTimeout = time.Minute * 5
+)
 
 // Server is the pd server.
 type Server struct {
@@ -76,6 +79,7 @@ type Server struct {
 	scheduleOpt *config.ScheduleOption
 	handler     *Handler
 
+	ctx              context.Context
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
@@ -104,7 +108,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(*Server) (http.Handler, APIGroup)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, APIGroup)
 
 // APIGroup used to register the api service.
 type APIGroup struct {
@@ -127,7 +131,7 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 	router := mux.NewRouter()
 	registerMap := make(map[string]struct{})
 	for _, build := range apiBuilders {
-		handler, info := build(svr)
+		handler, info := build(svr.ctx, svr)
 		var pathPrefix string
 		if info.IsCore {
 			pathPrefix = CorePath
@@ -149,7 +153,7 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, error) {
+func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 
@@ -157,6 +161,7 @@ func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, e
 		cfg:         cfg,
 		scheduleOpt: config.NewScheduleOption(cfg),
 		member:      &member.Member{},
+		ctx:         ctx,
 	}
 	s.handler = newHandler(s)
 
@@ -190,8 +195,7 @@ func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, e
 }
 
 func (s *Server) startEtcd(ctx context.Context) error {
-	log.Info("start embed etcd")
-	ctx, cancel := context.WithTimeout(ctx, etcdStartTimeout)
+	newCtx, cancel := context.WithTimeout(ctx, EtcdStartTimeout)
 	defer cancel()
 
 	etcd, err := embed.StartEtcd(s.etcdCfg)
@@ -208,6 +212,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap, tlsConfig); err != nil {
 		return err
 	}
@@ -215,7 +220,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	select {
 	// Wait etcd until it is ready to use
 	case <-etcd.Server.ReadyNotify():
-	case <-ctx.Done():
+	case <-newCtx.Done():
 		return errors.Errorf("canceled when waiting embed etcd to be ready")
 	}
 
@@ -340,27 +345,31 @@ func (s *Server) IsClosed() bool {
 }
 
 // Run runs the pd server.
-func (s *Server) Run(ctx context.Context) error {
-	go StartMonitor(ctx, time.Now, func() {
+func (s *Server) Run() error {
+	go StartMonitor(s.ctx, time.Now, func() {
 		log.Error("system time jumps backward")
 		timeJumpBackCounter.Inc()
 	})
-
-	if err := s.startEtcd(ctx); err != nil {
+	if err := s.startEtcd(s.ctx); err != nil {
 		return err
 	}
 
-	if err := s.startServer(ctx); err != nil {
+	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}
 
-	s.startServerLoop(ctx)
+	s.startServerLoop(s.ctx)
 
 	return nil
 }
 
-// Context returns the loop context of server.
+// Context returns the context of server.
 func (s *Server) Context() context.Context {
+	return s.ctx
+}
+
+// LoopContext returns the loop context of server.
+func (s *Server) LoopContext() context.Context {
 	return s.serverLoopCtx
 }
 
@@ -370,6 +379,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
+
 }
 
 func (s *Server) stopServerLoop() {
@@ -731,6 +741,11 @@ func (s *Server) GetCluster() *metapb.Cluster {
 		Id:           s.clusterID,
 		MaxPeerCount: uint32(s.scheduleOpt.GetReplication().GetMaxReplicas()),
 	}
+}
+
+// GetServerOption gets the option of the server.
+func (s *Server) GetServerOption() *config.ScheduleOption {
+	return s.scheduleOpt
 }
 
 // GetMetaRegions gets meta regions from cluster.

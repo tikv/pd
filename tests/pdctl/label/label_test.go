@@ -43,9 +43,9 @@ func (s *labelTestSuite) SetUpSuite(c *C) {
 func (s *labelTestSuite) TestLabel(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(1, func(cfg *config.Config) { cfg.Replication.StrictlyMatchLabel = false })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config) { cfg.Replication.StrictlyMatchLabel = false })
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers(ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()

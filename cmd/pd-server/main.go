@@ -96,7 +96,9 @@ func main() {
 	keyvisualServiceBuilder := keyvisual.NewKeyvisualService
 
 	// Creates server.
+	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := server.CreateServer(
+		ctx,
 		cfg,
 		coreAPIServiceBuilder,
 		keyvisualServiceBuilder)
@@ -115,14 +117,13 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
-	ctx, cancel := context.WithCancel(context.Background())
 	var sig os.Signal
 	go func() {
 		sig = <-sc
 		cancel()
 	}()
 
-	if err := svr.Run(ctx); err != nil {
+	if err := svr.Run(); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
 

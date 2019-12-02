@@ -15,6 +15,7 @@ package keyvisual
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/pingcap/pd/pkg/apiutil/serverapi"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
+	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
 	"go.uber.org/zap"
 )
@@ -35,35 +37,36 @@ var (
 	}
 )
 
-// KeyvisualService provides the service of heatmap statistics of the key.
-type KeyvisualService struct {
+// keyvisualService provides the service of heatmap statistics of the key.
+type keyvisualService struct {
 	*http.ServeMux
-	ctx    context.Context
-	cancel context.CancelFunc
-	svr    *server.Server
+	svr *server.Server
+	ctx context.Context
+	rd  *render.Render
 }
 
 // NewKeyvisualService creates a HTTP handler for heatmap service.
-func NewKeyvisualService(svr *server.Server) (http.Handler, server.APIGroup) {
-	ctx := svr.Context()
-
+func NewKeyvisualService(ctx context.Context, svr *server.Server) (http.Handler, server.APIGroup) {
 	mux := http.NewServeMux()
-	k := &KeyvisualService{
+	k := &keyvisualService{
 		ServeMux: mux,
-		ctx:      ctx,
 		svr:      svr,
+		ctx:      ctx,
+		rd:       render.New(render.Options{StreamingJSON: true}),
 	}
-	k.HandleFunc("/pd/apis/keyvisual/v1/heatmaps", k.Heatmap)
-	negroni.New(
+
+	k.HandleFunc("/pd/apis/keyvisual/v1/heatmap", k.Heatmap)
+	handler := negroni.New(
+		serverapi.NewRuntimeServiceAuth(svr),
 		serverapi.NewRedirector(svr),
 		negroni.Wrap(k),
 	)
-	go k.updateStat()
-	return k, defaultRegisterAPIGroupInfo
+	go k.run()
+	return handler, defaultRegisterAPIGroupInfo
 }
 
 // Heatmap returns the heatmap data.
-func (s *KeyvisualService) Heatmap(w http.ResponseWriter, r *http.Request) {
+func (s *keyvisualService) Heatmap(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-type", "application/json")
 	form := r.URL.Query()
 	startKey := form.Get("startkey")
@@ -72,7 +75,7 @@ func (s *KeyvisualService) Heatmap(w http.ResponseWriter, r *http.Request) {
 	endTimeString := form.Get("endtime")
 	typ := form.Get("type")
 	endTime := time.Now()
-	startTime := endTime.Add(-60 * time.Minute)
+	startTime := endTime.Add(-1200 * time.Minute)
 
 	if startTimeString != "" {
 		tsSec, err := strconv.ParseInt(startTimeString, 10, 64)
@@ -101,15 +104,11 @@ func (s *KeyvisualService) Heatmap(w http.ResponseWriter, r *http.Request) {
 		zap.String("type", typ),
 	)
 	// TODO: get the heatmap
-	// matrix := s.stats.RangeMatrix(startTime, endTime, startKey, endKey, typ)
-	// data, _ := json.Marshal(matrix)
-	_, err := w.Write([]byte("Not implemented"))
-	if err != nil {
-		log.Error("heatmap reponse meet error", zap.Error(err))
-	}
+	s.rd.JSON(w, http.StatusNotImplemented, "not implemented")
 }
 
-func (s *KeyvisualService) updateStat() {
+func (s *keyvisualService) run() {
+	// TODO: coanfig the ticker
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -118,18 +117,16 @@ func (s *KeyvisualService) updateStat() {
 			return
 		case <-ticker.C:
 			cluster := s.svr.GetRaftCluster()
-			if cluster == nil {
+			if cluster == nil || !serverapi.IsServiceAllowed(s.svr, fmt.Sprintf("pd/apis/%s", defaultRegisterAPIGroupInfo.Name)) {
 				continue
-
 			}
 			s.scanRegions(cluster)
 			// TODO: implement the stats
-			// s.stats.Append(regions)
 		}
 	}
 }
 
-func (s *KeyvisualService) scanRegions(cluster *server.RaftCluster) []*core.RegionInfo {
+func (s *keyvisualService) scanRegions(cluster *server.RaftCluster) []*core.RegionInfo {
 	var key []byte
 	limit := 1024
 	regions := make([]*core.RegionInfo, 0, limit)

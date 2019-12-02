@@ -80,9 +80,9 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 		cfg := cfgs[i]
 
 		go func() {
-			svr, err := CreateServer(cfg)
+			svr, err := CreateServer(s.ctx, cfg)
 			c.Assert(err, IsNil)
-			err = svr.Run(s.ctx)
+			err = svr.Run()
 			c.Assert(err, IsNil)
 			ch <- svr
 		}()
@@ -113,9 +113,9 @@ func newTestServersWithCfgs(ctx context.Context, c *C, cfgs []*config.Config) ([
 	ch := make(chan *Server)
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
-			svr, err := CreateServer(cfg)
+			svr, err := CreateServer(ctx, cfg)
 			c.Assert(err, IsNil)
-			err = svr.Run(ctx)
+			err = svr.Run()
 			c.Assert(err, IsNil)
 			ch <- svr
 		}(cfg)
@@ -167,7 +167,7 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
-	svr, err := CreateServer(cfgA)
+	svr, err := CreateServer(ctx, cfgA)
 	c.Assert(err, IsNil)
 
 	etcd, err := embed.StartEtcd(svr.etcdCfg)
@@ -187,7 +187,7 @@ var _ = Suite(&testServerHandlerSuite{})
 type testServerHandlerSuite struct{}
 
 func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
-	mokHandler := func(s *Server) (http.Handler, APIGroup) {
+	mokHandler := func(ctx context.Context, s *Server) (http.Handler, APIGroup) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
@@ -200,18 +200,18 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	}
 
 	cfg := NewTestSingleConfig(c)
-	svr, err := CreateServer(cfg, mokHandler)
+	ctx, cancel := context.WithCancel(context.Background())
+	svr, err := CreateServer(ctx, cfg, mokHandler)
 	c.Assert(err, IsNil)
-	_, err = CreateServer(cfg, mokHandler, mokHandler)
+	_, err = CreateServer(ctx, cfg, mokHandler, mokHandler)
 	// Repeat register.
 	c.Assert(err, NotNil)
-	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}()
-	err = svr.Run(ctx)
+	err = svr.Run()
 	c.Assert(err, IsNil)
 	addr := fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr())
 	resp, err := http.Get(addr)
