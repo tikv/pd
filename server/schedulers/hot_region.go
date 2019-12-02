@@ -102,8 +102,8 @@ type balanceHotRegionsScheduler struct {
 	scoreInfos      *ScoreInfos
 	readPendings    map[*pendingInfluence]struct{}
 	writePendings   map[*pendingInfluence]struct{}
-	readPendingSum  map[uint64]influence
-	writePendingSum map[uint64]influence
+	readPendingSum  map[uint64]Influence
+	writePendingSum map[uint64]Influence
 }
 
 func newBalanceHotRegionsScheduler(opController *schedule.OperatorController) *balanceHotRegionsScheduler {
@@ -201,9 +201,9 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster opt.Clust
 	return nil
 }
 
-func (h *balanceHotRegionsScheduler) calcPendingInfluence(storeStat statistics.StoreHotPeersStat, pending map[uint64]influence) statistics.StoreHotPeersStat {
+func (h *balanceHotRegionsScheduler) calcPendingInfluence(storeStat statistics.StoreHotPeersStat, pending map[uint64]Influence) statistics.StoreHotPeersStat {
 	for id, stat := range storeStat {
-		stat.FutureBytesRate = stat.StoreBytesRate + pending[id].byteRate
+		stat.FutureBytesRate = stat.StoreBytesRate + pending[id].ByteRate
 	}
 	return storeStat
 }
@@ -284,7 +284,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster)
 				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcStore, dstStore, operator.OpHotRegion)
 				op.SetPriorityLevel(core.HighPriority)
 				// transfer leader do not influence the byte rate
-				infl.byteRate = 0
+				infl.ByteRate = 0
 				h.writePendings[newPendingInfluence(op, srcStore, dstStore, infl)] = struct{}{}
 				return []*operator.Operator{op}
 			}
@@ -346,14 +346,14 @@ func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesSta
 }
 
 // balanceByPeer balances the peer distribution of hot regions.
-func (h *balanceHotRegionsScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.StoreHotPeersStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer, influence) {
+func (h *balanceHotRegionsScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.StoreHotPeersStat) (*core.RegionInfo, *metapb.Peer, *metapb.Peer, Influence) {
 	if !h.allowBalanceRegion(cluster) {
-		return nil, nil, nil, influence{}
+		return nil, nil, nil, Influence{}
 	}
 
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
-		return nil, nil, nil, influence{}
+		return nil, nil, nil, Influence{}
 	}
 
 	// get one source region and a target store.
@@ -403,7 +403,7 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster opt.Cluster, storesSt
 
 			srcPeer := srcRegion.GetStorePeer(srcStoreID)
 			if srcPeer == nil {
-				return nil, nil, nil, influence{}
+				return nil, nil, nil, Influence{}
 			}
 
 			// When the target store is decided, we allocate a peer ID to hold the source region,
@@ -411,25 +411,25 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster opt.Cluster, storesSt
 			destPeer, err := cluster.AllocPeer(destStoreID)
 			if err != nil {
 				log.Error("failed to allocate peer", zap.Error(err))
-				return nil, nil, nil, influence{}
+				return nil, nil, nil, Influence{}
 			}
 
-			return srcRegion, srcPeer, destPeer, influence{byteRate: rs.GetBytesRate()}
+			return srcRegion, srcPeer, destPeer, Influence{ByteRate: rs.GetBytesRate()}
 		}
 	}
 
-	return nil, nil, nil, influence{}
+	return nil, nil, nil, Influence{}
 }
 
 // balanceByLeader balances the leader distribution of hot regions.
-func (h *balanceHotRegionsScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistics.StoreHotPeersStat) (*core.RegionInfo, *metapb.Peer, influence) {
+func (h *balanceHotRegionsScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistics.StoreHotPeersStat) (*core.RegionInfo, *metapb.Peer, Influence) {
 	if !h.allowBalanceLeader(cluster) {
-		return nil, nil, influence{}
+		return nil, nil, Influence{}
 	}
 
 	srcStoreID := h.selectSrcStore(storesStat)
 	if srcStoreID == 0 {
-		return nil, nil, influence{}
+		return nil, nil, Influence{}
 	}
 
 	// select destPeer
@@ -465,10 +465,10 @@ func (h *balanceHotRegionsScheduler) balanceByLeader(cluster opt.Cluster, stores
 		if destPeer != nil {
 			h.leaderLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
 
-			return srcRegion, destPeer, influence{byteRate: rs.GetBytesRate()}
+			return srcRegion, destPeer, Influence{ByteRate: rs.GetBytesRate()}
 		}
 	}
-	return nil, nil, influence{}
+	return nil, nil, Influence{}
 }
 
 // Select the store to move hot regions from.
@@ -565,6 +565,26 @@ func (h *balanceHotRegionsScheduler) GetHotWriteStatus() *statistics.StoreHotPee
 	}
 }
 
+func (h *balanceHotRegionsScheduler) GetWritePendingInfluence() map[uint64]Influence {
+	h.RLock()
+	defer h.RUnlock()
+	ret := make(map[uint64]Influence, len(h.writePendingSum))
+	for id, infl := range h.writePendingSum {
+		ret[id] = infl
+	}
+	return ret
+}
+
+func (h *balanceHotRegionsScheduler) GetReadPendingInfluence() map[uint64]Influence {
+	h.RLock()
+	defer h.RUnlock()
+	ret := make(map[uint64]Influence, len(h.readPendingSum))
+	for id, infl := range h.readPendingSum {
+		ret[id] = infl
+	}
+	return ret
+}
+
 func (h *balanceHotRegionsScheduler) GetStoresScore() map[uint64]float64 {
 	h.RLock()
 	defer h.RUnlock()
@@ -578,22 +598,21 @@ func (h *balanceHotRegionsScheduler) GetStoresScore() map[uint64]float64 {
 func calcPendingWeight(op *operator.Operator) (weight float64, remove bool) {
 	if op.CheckExpired() || op.CheckTimeout() {
 		return 0, true
-	} else {
-		status := op.Status()
-		if !operator.IsEndStatus(status) {
-			return 1, false
-		}
-		switch status {
-		case operator.SUCCESS:
-			zombieDur := time.Since(op.GetReachTimeOf(status))
-			if zombieDur >= maxZombieDur {
-				return 0, true
-			}
-			// TODO: use store statistics update time to make a more accurate estimation
-			return float64(maxZombieDur-zombieDur) / float64(maxZombieDur), false
-		default:
+	}
+	status := op.Status()
+	if !operator.IsEndStatus(status) {
+		return 1, false
+	}
+	switch status {
+	case operator.SUCCESS:
+		zombieDur := time.Since(op.GetReachTimeOf(status))
+		if zombieDur >= maxZombieDur {
 			return 0, true
 		}
+		// TODO: use store statistics update time to make a more accurate estimation
+		return float64(maxZombieDur-zombieDur) / float64(maxZombieDur), false
+	default:
+		return 0, true
 	}
 }
 

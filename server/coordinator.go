@@ -263,6 +263,8 @@ func (c *coordinator) stop() {
 type hasHotStatus interface {
 	GetHotReadStatus() *statistics.StoreHotPeersInfos
 	GetHotWriteStatus() *statistics.StoreHotPeersInfos
+	GetWritePendingInfluence() map[uint64]schedulers.Influence
+	GetReadPendingInfluence() map[uint64]schedulers.Influence
 	GetStoresScore() map[uint64]float64
 }
 
@@ -331,6 +333,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	}
 	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
+	pendings := s.Scheduler.(hasHotStatus).GetWritePendingInfluence()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
@@ -352,10 +355,14 @@ func (c *coordinator) collectHotSpotMetrics() {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(0)
 		}
+
+		infl := pendings[storeID]
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.ByteRate)
 	}
 
 	// Collects hot read region metrics.
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
+	pendings = s.Scheduler.(hasHotStatus).GetReadPendingInfluence()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
@@ -368,6 +375,9 @@ func (c *coordinator) collectHotSpotMetrics() {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
 		}
+
+		infl := pendings[storeID]
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.ByteRate)
 	}
 
 	// Collects score of stores stats metrics.
