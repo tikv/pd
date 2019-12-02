@@ -137,7 +137,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	newCustomReverseProxies(urls).ServeHTTP(w, r)
+	NewCustomReverseProxies(urls).ServeHTTP(w, r)
 }
 
 type customReverseProxies struct {
@@ -145,7 +145,8 @@ type customReverseProxies struct {
 	client *http.Client
 }
 
-func newCustomReverseProxies(urls []url.URL) *customReverseProxies {
+// NewCustomReverseProxies returns the custome rerverse proxies.
+func NewCustomReverseProxies(urls []url.URL) *customReverseProxies {
 	p := &customReverseProxies{
 		client: dialClient,
 	}

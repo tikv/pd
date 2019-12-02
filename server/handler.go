@@ -31,14 +31,15 @@ import (
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
 var (
-	// ScheduleConfigHandlerPath is the api router path of the schedule config handler.
-	ScheduleConfigHandlerPath = "/api/v1/schedule-config"
+	// SchedulerConfigHandlerPath is the api router path of the schedule config handler.
+	SchedulerConfigHandlerPath = "/api/v1/scheduler-config"
 
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
 	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
@@ -81,6 +82,19 @@ func newHandler(s *Server) *Handler {
 // GetRaftCluster returns RaftCluster.
 func (h *Handler) GetRaftCluster() *RaftCluster {
 	return h.s.GetRaftCluster()
+}
+
+// IsSchedulerPaused returns whether scheduler is paused.
+func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return true, err
+	}
+	sc, ok := c.schedulers[name]
+	if !ok {
+		return true, errors.Errorf("scheduler %v not found", name)
+	}
+	return sc.isPaused(), nil
 }
 
 // GetScheduleConfig returns ScheduleConfig.
@@ -212,64 +226,82 @@ func (h *Handler) RemoveScheduler(name string) error {
 	return err
 }
 
+// PauseOrResumeScheduler pasues a scheduler for delay seconds or resume a paused scheduler.
+// t == 0 : resume scheduler.
+// t > 0 : scheduler delays t seconds.
+func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
+	c, err := h.getCoordinator()
+	if err != nil {
+		return err
+	}
+	if err = c.pauseOrResumeScheduler(name, t); err != nil {
+		if t == 0 {
+			log.Error("can not resume scheduler", zap.String("scheduler-name", name), zap.Error(err))
+		} else {
+			log.Error("can not pause scheduler", zap.String("scheduler-name", name), zap.Error(err))
+		}
+	}
+	return err
+}
+
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	return h.AddScheduler("balance-leader")
+	return h.AddScheduler(schedulers.BalanceLeaderType)
 }
 
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
 func (h *Handler) AddBalanceRegionScheduler() error {
-	return h.AddScheduler("balance-region")
+	return h.AddScheduler(schedulers.BalanceRegionType)
 }
 
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
 func (h *Handler) AddBalanceHotRegionScheduler() error {
-	return h.AddScheduler("hot-region")
+	return h.AddScheduler(schedulers.HotRegionType)
 }
 
 // AddLabelScheduler adds a label-scheduler.
 func (h *Handler) AddLabelScheduler() error {
-	return h.AddScheduler("label")
+	return h.AddScheduler(schedulers.LabelType)
 }
 
 // AddScatterRangeScheduler adds a balance-range-leader-scheduler
 func (h *Handler) AddScatterRangeScheduler(args ...string) error {
-	return h.AddScheduler("scatter-range", args...)
+	return h.AddScheduler(schedulers.ScatterRangeType, args...)
 }
 
 // AddAdjacentRegionScheduler adds a balance-adjacent-region-scheduler.
 func (h *Handler) AddAdjacentRegionScheduler(args ...string) error {
-	return h.AddScheduler("adjacent-region", args...)
+	return h.AddScheduler(schedulers.AdjacentRegionType, args...)
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler("grant-leader", strconv.FormatUint(storeID, 10))
+	return h.AddScheduler(schedulers.GrantLeaderType, strconv.FormatUint(storeID, 10))
 }
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler("evict-leader", strconv.FormatUint(storeID, 10))
+	return h.AddScheduler(schedulers.EvictLeaderType, strconv.FormatUint(storeID, 10))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	return h.AddScheduler("shuffle-leader")
+	return h.AddScheduler(schedulers.ShuffleLeaderType)
 }
 
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
-	return h.AddScheduler("shuffle-region")
+	return h.AddScheduler(schedulers.ShuffleRegionType)
 }
 
 // AddShuffleHotRegionScheduler adds a shuffle-hot-region-scheduler.
 func (h *Handler) AddShuffleHotRegionScheduler(limit uint64) error {
-	return h.AddScheduler("shuffle-hot-region", strconv.FormatUint(limit, 10))
+	return h.AddScheduler(schedulers.ShuffleHotRegionType, strconv.FormatUint(limit, 10))
 }
 
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
-	return h.AddScheduler("random-merge")
+	return h.AddScheduler(schedulers.RandomMergeType)
 }
 
 // GetOperator returns the region operator.
@@ -747,7 +779,7 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.schedulers {
-		prefix := path.Join(pdRootPath, ScheduleConfigHandlerPath, name)
+		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name)
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}

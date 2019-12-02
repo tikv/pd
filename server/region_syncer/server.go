@@ -94,7 +94,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 }
 
 // RunServer runs the server of the region syncer.
-// regionNitifier is used to get the changed regions.
+// regionNotifier is used to get the changed regions.
 func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit chan struct{}) {
 	var requests []*metapb.Region
 	ticker := time.NewTicker(syncerKeepAliveInterval)

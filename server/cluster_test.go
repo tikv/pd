@@ -284,7 +284,7 @@ func (s *testClusterSuite) TestGetPutConfig(c *C) {
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 }
 
-func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.Store) (*pdpb.PutStoreResponse, error) {
+func putStore(grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.Store) (*pdpb.PutStoreResponse, error) {
 	req := &pdpb.PutStoreRequest{
 		Header: testutil.NewRequestHeader(clusterID),
 		Store:  store,
@@ -295,36 +295,36 @@ func putStore(c *C, grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.
 
 func (s *baseCluster) testPutStore(c *C, clusterID uint64, store *metapb.Store) {
 	// Update store.
-	_, err := putStore(c, s.grpcPDClient, clusterID, store)
+	_, err := putStore(s.grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
 	updatedStore := s.getStore(c, clusterID, store.GetId())
 	c.Assert(updatedStore, DeepEquals, store)
 
 	// Update store again.
-	_, err = putStore(c, s.grpcPDClient, clusterID, store)
+	_, err = putStore(s.grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
 
 	// Put new store with a duplicated address when old store is up will fail.
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
+	_, err = putStore(s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
 	c.Assert(err, NotNil)
 
 	// Put new store with a duplicated address when old store is offline will fail.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Offline)
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
+	_, err = putStore(s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
 	c.Assert(err, NotNil)
 
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Tombstone)
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
+	_, err = putStore(s.grpcPDClient, clusterID, s.newStore(c, 0, store.GetAddress(), "2.1.0"))
 	c.Assert(err, IsNil)
 
 	// Put a new store.
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, 0, "127.0.0.1:12345", "2.1.0"))
+	_, err = putStore(s.grpcPDClient, clusterID, s.newStore(c, 0, "127.0.0.1:12345", "2.1.0"))
 	c.Assert(err, IsNil)
 
 	// Put an existed store with duplicated address with other old stores.
 	s.resetStoreState(c, store.GetId(), metapb.StoreState_Up)
-	_, err = putStore(c, s.grpcPDClient, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345", "2.1.0"))
+	_, err = putStore(s.grpcPDClient, clusterID, s.newStore(c, store.GetId(), "127.0.0.1:12345", "2.1.0"))
 	c.Assert(err, NotNil)
 }
 
@@ -406,7 +406,7 @@ func (s *baseCluster) testRemoveStore(c *C, clusterID uint64, store *metapb.Stor
 	}
 	{
 		// Put after removed should return tombstone error.
-		resp, err := putStore(c, s.grpcPDClient, clusterID, store)
+		resp, err := putStore(s.grpcPDClient, clusterID, store)
 		c.Assert(err, IsNil)
 		c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_STORE_TOMBSTONE)
 	}
@@ -511,7 +511,7 @@ func (s *testClusterSuite) TestStoreVersionChange(c *C) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, err = putStore(c, s.grpcPDClient, s.svr.clusterID, store)
+		_, err = putStore(s.grpcPDClient, s.svr.clusterID, store)
 		c.Assert(err, IsNil)
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -537,11 +537,12 @@ func (s *testClusterSuite) TestConcurrentHandleRegion(c *C) {
 	s.svr.cluster.Lock()
 	s.svr.cluster.storage = core.NewStorage(kv.NewMemoryKV())
 	s.svr.cluster.Unlock()
-	var stores []*metapb.Store
+
+	stores := make([]*metapb.Store, 0, len(storeAddrs))
 	for _, addr := range storeAddrs {
 		store := s.newStore(c, 0, addr, "2.1.0")
 		stores = append(stores, store)
-		_, err := putStore(c, s.grpcPDClient, s.svr.clusterID, store)
+		_, err := putStore(s.grpcPDClient, s.svr.clusterID, store)
 		c.Assert(err, IsNil)
 	}
 
@@ -852,10 +853,10 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := cluster.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")})
+		region := cluster.RandLeaderRegion(i, nil)
 		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
 
-		region = cluster.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")})
+		region = cluster.RandFollowerRegion(i, nil)
 		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -871,14 +872,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := cluster.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(cluster))
+			region := cluster.RandLeaderRegion(i, nil, opt.HealthRegion(cluster))
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		c.Assert(cluster.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(cluster)), IsNil)
+		c.Assert(cluster.RandLeaderRegion(i, nil, opt.HealthRegion(cluster)), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(cluster.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.HealthRegion(cluster)), IsNil)
+		c.Assert(cluster.RandFollowerRegion(i, nil, opt.HealthRegion(cluster)), IsNil)
 	}
 }
 

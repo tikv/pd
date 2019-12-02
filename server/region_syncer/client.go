@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -51,7 +52,7 @@ func (s *RegionSyncer) reset() {
 func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
 	s.reset()
 
-	cc, err := grpcutil.GetClientConn(addr, s.securityConfig.CAPath, s.securityConfig.CertPath, s.securityConfig.KeyPath)
+	cc, err := grpcutil.GetClientConn(addr, s.securityConfig.CAPath, s.securityConfig.CertPath, s.securityConfig.KeyPath, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)))
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

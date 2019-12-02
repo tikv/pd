@@ -31,7 +31,7 @@ import (
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder("balance-region", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(BalanceRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			conf, ok := v.(*balanceRegionSchedulerConfig)
 			if !ok {
@@ -42,13 +42,15 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.Ranges = ranges
-			conf.Name = balanceRegionName
+			conf.Name = BalanceRegionName
 			return nil
 		}
 	})
-	schedule.RegisterScheduler("balance-region", func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(BalanceRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceRegionSchedulerConfig{}
-		decoder(conf)
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
 		return newBalanceRegionScheduler(opController, conf), nil
 	})
 }
@@ -56,7 +58,10 @@ func init() {
 const (
 	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
 	balanceRegionRetryLimit = 10
-	balanceRegionName       = "balance-region-scheduler"
+	// BalanceRegionName is balance region scheduler name.
+	BalanceRegionName = "balance-region-scheduler"
+	// BalanceRegionType is balance region scheduler type.
+	BalanceRegionType = "balance-region"
 )
 
 type balanceRegionSchedulerConfig struct {
@@ -76,17 +81,17 @@ type balanceRegionScheduler struct {
 // each store balanced.
 func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) schedule.Scheduler {
 	base := newBaseScheduler(opController)
-	s := &balanceRegionScheduler{
+	scheduler := &balanceRegionScheduler{
 		baseScheduler: base,
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceRegionCounter,
 	}
-	for _, opt := range opts {
-		opt(s)
+	for _, setOption := range opts {
+		setOption(scheduler)
 	}
-	s.filters = []filter.Filter{filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true}}
-	return s
+	scheduler.filters = []filter.Filter{filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true}}
+	return scheduler
 }
 
 // BalanceRegionCreateOption is used to create a scheduler with an option.
@@ -111,7 +116,7 @@ func (s *balanceRegionScheduler) GetName() string {
 }
 
 func (s *balanceRegionScheduler) GetType() string {
-	return "balance-region"
+	return BalanceRegionType
 }
 
 func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -177,11 +182,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
 	}
 	scoreGuard := filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), stores, source)
-	checker := checker.NewReplicaChecker(cluster, s.GetName())
+	replicaChecker := checker.NewReplicaChecker(cluster, s.GetName())
 	exclude := make(map[uint64]struct{})
 	excludeFilter := filter.NewExcludedFilter(s.GetName(), nil, exclude)
 	for {
-		storeID, _ := checker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
+		storeID, _ := replicaChecker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
 		if storeID == 0 {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
 			return nil
@@ -210,7 +215,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			schedulerCounter.WithLabelValues(s.GetName(), "no-peer").Inc()
 			return nil
 		}
-		op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer)
+		op, err := operator.CreateMovePeerOperator(BalanceRegionType, cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil

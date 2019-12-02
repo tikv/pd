@@ -15,16 +15,27 @@ package api
 
 import (
 	"net/http"
+	"net/http/pprof"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
 )
 
-func createRouter(prefix string, svr *server.Server) *mux.Router {
-	rd := render.New(render.Options{
+func createStreamingRender() *render.Render {
+	return render.New(render.Options{
+		StreamingJSON: true,
+	})
+}
+
+func createIndentRender() *render.Render {
+	return render.New(render.Options{
 		IndentJSON: true,
 	})
+}
+
+func createRouter(prefix string, svr *server.Server) *mux.Router {
+	rd := createIndentRender()
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -42,8 +53,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rootRouter.HandleFunc("/api/v1/schedulers", schedulerHandler.List).Methods("GET")
 	rootRouter.HandleFunc("/api/v1/schedulers", schedulerHandler.Post).Methods("POST")
 	rootRouter.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
+	rootRouter.HandleFunc("/api/v1/schedulers/{name}", schedulerHandler.PauseOrResume).Methods("POST")
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	rootRouter.PathPrefix(server.ScheduleConfigHandlerPath).Handler(schedulerConfigHandler)
+	rootRouter.PathPrefix(server.SchedulerConfigHandlerPath).Handler(schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
 	rootRouter.Handle("/api/v1/cluster", clusterHandler).Methods("GET")
@@ -96,8 +108,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/api/v1/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/region/key/{key}", regionHandler.GetRegionByKey).Methods("GET")
 
+	srd := createStreamingRender()
+	regionsAllHandler := newRegionsHandler(svr, srd)
+	clusterRouter.HandleFunc("/api/v1/regions", regionsAllHandler.GetAll).Methods("GET")
+
 	regionsHandler := newRegionsHandler(svr, rd)
-	clusterRouter.HandleFunc("/api/v1/regions", regionsHandler.GetAll).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/key", regionsHandler.ScanRegions).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/count", regionsHandler.GetRegionCount).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/store/{id}", regionsHandler.GetStoreRegions).Methods("GET")
@@ -138,12 +153,23 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/api/v1/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion).Methods("DELETE")
 	clusterRouter.HandleFunc("/api/v1/admin/reset-ts", adminHandler.ResetTS).Methods("POST")
 
-	logHanler := newlogHandler(svr, rd)
-	rootRouter.HandleFunc("/api/v1/admin/log", logHanler.Handle).Methods("POST")
+	logHandler := newlogHandler(svr, rd)
+	rootRouter.HandleFunc("/api/v1/admin/log", logHandler.Handle).Methods("POST")
 
 	rootRouter.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
 	rootRouter.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	rootRouter.HandleFunc("/api/v1/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+	// metric query use to query metric data, the protocol is compatible with prometheus.
+	rootRouter.Handle("/api/v1/metric/query", newQueryMetric(svr)).Methods("GET", "POST")
+	rootRouter.Handle("/api/v1/metric/query_range", newQueryMetric(svr)).Methods("GET", "POST")
+
+	// profile API
+	rootRouter.HandleFunc("/api/v1/debug/pprof/profile", pprof.Profile)
+	rootRouter.Handle("/api/v1/debug/pprof/heap", pprof.Handler("heap"))
+	rootRouter.Handle("/api/v1/debug/pprof/mutex", pprof.Handler("mutex"))
+	rootRouter.Handle("/api/v1/debug/pprof/allocs", pprof.Handler("allocs"))
+	rootRouter.Handle("/api/v1/debug/pprof/block", pprof.Handler("block"))
+	rootRouter.Handle("/api/v1/debug/pprof/goroutine", pprof.Handler("goroutine"))
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")

@@ -31,11 +31,9 @@ var (
 )
 
 const (
-	requestTimeout = 10 * time.Second
-	etcdTimeout    = 1200 * time.Second
+	etcdTimeout = 1200 * time.Second
 
 	pdRootPath      = "/pd"
-	pdClusterIDPath = "/pd/cluster_id"
 	maxKVRangeLimit = 10000
 	minKVRangeLimit = 100
 )
@@ -88,7 +86,7 @@ func regionPath(regionID uint64) string {
 }
 
 func loadRegions(client *clientv3.Client, f *os.File) error {
-	nextID := uint64(*startID)
+	nextID := *startID
 	endKey := regionPath(math.MaxUint64)
 	if *endID != 0 {
 		endKey = regionPath(*endID)
@@ -98,7 +96,7 @@ func loadRegions(client *clientv3.Client, f *os.File) error {
 	// Since the region key may be very long, using a larger rangeLimit will cause
 	// the message packet to exceed the grpc message size limit (4MB). Here we use
 	// a variable rangeLimit to work around.
-	rangeLimit := 10000
+	rangeLimit := maxKVRangeLimit
 	for {
 		startKey := regionPath(nextID)
 		_, res, err := loadRange(client, startKey, endKey, rangeLimit)

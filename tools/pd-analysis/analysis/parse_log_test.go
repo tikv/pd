@@ -83,37 +83,32 @@ func (t *testParseLog) TestTransferCounterParseLog(c *C) {
 
 func (t *testParseLog) TestIsExpectTime(c *C) {
 	{
-		layout := "2006/01/02 15:04:05"
-		testFunction := isExpectTime("2019/09/05 14:19:15", layout, true)
-		current, _ := time.Parse(layout, "2019/09/05 14:19:14")
+		testFunction := isExpectTime("2019/09/05 14:19:15", DefaultLayout, true)
+		current, _ := time.Parse(DefaultLayout, "2019/09/05 14:19:14")
 		c.Assert(testFunction(current), Equals, true)
 	}
 	{
-		layout := "2006/01/02 15:04:05"
-		testFunction := isExpectTime("2019/09/05 14:19:15", layout, false)
-		current, _ := time.Parse(layout, "2019/09/05 14:19:16")
+		testFunction := isExpectTime("2019/09/05 14:19:15", DefaultLayout, false)
+		current, _ := time.Parse(DefaultLayout, "2019/09/05 14:19:16")
 		c.Assert(testFunction(current), Equals, true)
 	}
 	{
-		layout := "2006/01/02 15:04:05"
-		testFunction := isExpectTime("", layout, true)
-		current, _ := time.Parse(layout, "2019/09/05 14:19:14")
+		testFunction := isExpectTime("", DefaultLayout, true)
+		current, _ := time.Parse(DefaultLayout, "2019/09/05 14:19:14")
 		c.Assert(testFunction(current), Equals, true)
 	}
 	{
-		layout := "2006/01/02 15:04:05"
-		testFunction := isExpectTime("", layout, false)
-		current, _ := time.Parse(layout, "2019/09/05 14:19:16")
+		testFunction := isExpectTime("", DefaultLayout, false)
+		current, _ := time.Parse(DefaultLayout, "2019/09/05 14:19:16")
 		c.Assert(testFunction(current), Equals, true)
 	}
 }
 
 func (t *testParseLog) TestCurrentTime(c *C) {
-	layout := "2006/01/02 15:04:05"
-	getCurrentTime := currentTime(layout)
+	getCurrentTime := currentTime(DefaultLayout)
 	content := "[2019/09/05 14:19:15.066 +08:00] [INFO] [operator_controller.go:119] [\"operator finish\"] [region-id=389] [operator=\"\"move-hot-read-region {mv peer: store 5 to 4} (kind:leader,region,hot-region, region:389(1,1), createAt:2019-09-05 14:19:13.576359364 +0800 CST m=+25.855737101, startAt:2019-09-05 14:19:13.576556556 +0800 CST m=+25.855934288, currentStep:4, steps:[add learner peer 2014 on store 4, promote learner peer 2014 on store 4 to voter, transfer leader from store 5 to store 3, remove peer on store 5]) finished\"\"]"
 	current, err := getCurrentTime(content)
 	c.Assert(err, Equals, nil)
-	expect, _ := time.Parse(layout, "2019/09/05 14:19:15")
+	expect, _ := time.Parse(DefaultLayout, "2019/09/05 14:19:15")
 	c.Assert(current, Equals, expect)
 }

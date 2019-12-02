@@ -30,7 +30,7 @@ import (
 
 func init() {
 	// args: [start-key, end-key, range-name].
-	schedule.RegisterSliceDecoderBuilder("scatter-range", func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(ScatterRangeType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 3 {
 				return errors.New("should specify the range and the name")
@@ -49,20 +49,27 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler("scatter-range", func(opController *schedule.OperatorController, storage *core.Storage, decode schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		config := &scatterRangeSchedulerConfig{
+	schedule.RegisterScheduler(ScatterRangeType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &scatterRangeSchedulerConfig{
 			storage: storage,
 		}
-		decode(config)
-		rangeName := config.RangeName
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		rangeName := conf.RangeName
 		if len(rangeName) == 0 {
 			return nil, errors.New("the range name is invalid")
 		}
-		return newScatterRangeScheduler(opController, storage, config), nil
+		return newScatterRangeScheduler(opController, conf), nil
 	})
 }
 
-const scatterRangeScheduleType = "scatter-range"
+const (
+	//ScatterRangeType is scatter range scheduler type
+	ScatterRangeType = "scatter-range"
+	//ScatterRangeName is scatter range scheduler name
+	ScatterRangeName = "scatter-range"
+)
 
 type scatterRangeSchedulerConfig struct {
 	mu        sync.RWMutex
@@ -96,7 +103,7 @@ func (conf *scatterRangeSchedulerConfig) Clone() *scatterRangeSchedulerConfig {
 }
 
 func (conf *scatterRangeSchedulerConfig) Persist() error {
-	name := conf.getScheduleName()
+	name := conf.getSchedulerName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedule.EncodeConfig(conf)
@@ -125,7 +132,7 @@ func (conf *scatterRangeSchedulerConfig) GetEndKey() []byte {
 	return []byte(conf.EndKey)
 }
 
-func (conf *scatterRangeSchedulerConfig) getScheduleName() string {
+func (conf *scatterRangeSchedulerConfig) getSchedulerName() string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	return fmt.Sprintf("scatter-range-%s", conf.RangeName)
@@ -141,10 +148,10 @@ type scatterRangeScheduler struct {
 }
 
 // newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
-func newScatterRangeScheduler(opController *schedule.OperatorController, storage *core.Storage, config *scatterRangeSchedulerConfig) schedule.Scheduler {
+func newScatterRangeScheduler(opController *schedule.OperatorController, config *scatterRangeSchedulerConfig) schedule.Scheduler {
 	base := newBaseScheduler(opController)
 
-	name := config.getScheduleName()
+	name := config.getSchedulerName()
 	handler := newScatterRangeHandler(config)
 	scheduler := &scatterRangeScheduler{
 		baseScheduler: base,
@@ -176,7 +183,7 @@ func (l *scatterRangeScheduler) GetName() string {
 }
 
 func (l *scatterRangeScheduler) GetType() string {
-	return scatterRangeScheduleType
+	return ScatterRangeType
 }
 
 func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
@@ -192,7 +199,7 @@ func (l *scatterRangeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	// isolate a new cluster according to the key range
-	c := schedule.GenRangeCluster(cluster, []byte(l.config.GetStartKey()), []byte(l.config.GetEndKey()))
+	c := schedule.GenRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())
 	c.SetTolerantSizeRatio(2)
 	ops := l.balanceLeader.Schedule(c)
 	if len(ops) > 0 {
@@ -213,10 +220,8 @@ func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operat
 }
 
 type scatterRangeHandler struct {
-	scheduleName string
-	storage      *core.Storage
-	rd           *render.Render
-	config       *scatterRangeSchedulerConfig
+	rd     *render.Render
+	config *scatterRangeSchedulerConfig
 }
 
 func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {

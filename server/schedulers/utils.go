@@ -17,6 +17,7 @@ import (
 	"math"
 	"net/url"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/montanaflynn/stats"
@@ -70,7 +71,11 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 	targetInfluence := opInfluence.GetStoreInfluence(targetID).ResourceProperty(kind)
 	sourceScore := source.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), sourceInfluence-tolerantResource)
 	targetScore := target.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), targetInfluence+tolerantResource)
-
+	if cluster.IsDebugMetricsEnabled() {
+		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
+		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(targetInfluence))
+		tolerantResourceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), strconv.FormatUint(targetID, 10)).Set(float64(tolerantResource))
+	}
 	// Make sure after move, source score is still greater than target score.
 	shouldBalance := sourceScore > targetScore
 
@@ -182,7 +187,7 @@ func NewScoreInfos() *ScoreInfos {
 // Add adds a scoreInfo into the slice.
 func (s *ScoreInfos) Add(scoreInfo *ScoreInfo) {
 	infosLen := len(s.scoreInfos)
-	if s.isSorted == true && infosLen != 0 && s.scoreInfos[infosLen-1].score > scoreInfo.score {
+	if s.isSorted && infosLen != 0 && s.scoreInfos[infosLen-1].score > scoreInfo.score {
 		s.isSorted = false
 	}
 	s.scoreInfos = append(s.scoreInfos, scoreInfo)
@@ -292,7 +297,7 @@ func AggregateScores(storesStats []*ScoreInfos, weights []float64) *ScoreInfos {
 		num = len(weights)
 	}
 
-	scoreMap := make(map[uint64]float64, 0)
+	scoreMap := make(map[uint64]float64)
 	for i := 0; i < num; i++ {
 		scoreInfos := storesStats[i]
 		for _, info := range scoreInfos.ToSlice() {
