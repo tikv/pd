@@ -254,7 +254,7 @@ func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
 	for b.toAdd.Len() > 0 || b.toRemove.Len() > 0 || b.toPromote.Len() > 0 {
 		plan := b.peerPlan()
 		if plan.empty() {
-			return kind, errors.New("fail to build operator: plan is empty")
+			return kind, errors.New("fail to build operator: plan is empty, maybe no valid leader")
 		}
 		if plan.leaderAdd != 0 && plan.leaderAdd != b.currentLeader {
 			b.execTransferLeader(plan.leaderAdd)
