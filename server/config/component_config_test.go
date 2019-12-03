@@ -202,7 +202,8 @@ discardable-ratio = 0.00156
 			Value: "true"}},
 		&configpb.Version{Global: 1, Local: 0})
 	cfg.GlobalCfgs["tikv"] = gc
-	cfg.LocalCfgs["tikv1"] = lc
+	cfg.LocalCfgs["tikv"] = make(map[string]*LocalConfig)
+	cfg.LocalCfgs["tikv"]["tikv1"] = lc
 
 	storage := core.NewStorage(kv.NewMemoryKV())
 	err = cfg.Persist(storage)
@@ -211,7 +212,7 @@ discardable-ratio = 0.00156
 	cfg1 := NewComponentsConfig()
 	err = cfg1.Reload(storage)
 	c.Assert(err, IsNil)
-	c.Assert(cfg1.LocalCfgs["tikv1"], DeepEquals, lc)
+	c.Assert(cfg1.LocalCfgs["tikv"]["tikv1"], DeepEquals, lc)
 	c.Assert(cfg1.GlobalCfgs["tikv"], DeepEquals, gc)
 
 	// test cover config
@@ -235,12 +236,12 @@ compression-per-level = [
 			Value: "true"}},
 		&configpb.Version{Global: 1, Local: 0})
 	cfg.GlobalCfgs["tikv"] = gc1
-	cfg.LocalCfgs["tikv1"] = lc1
+	cfg.LocalCfgs["tikv"]["tikv1"] = lc1
 	err = cfg.Persist(storage)
 	c.Assert(err, IsNil)
 	err = cfg1.Reload(storage)
 	c.Assert(err, IsNil)
-	c.Assert(cfg1.LocalCfgs["tikv1"], DeepEquals, lc1)
+	c.Assert(cfg1.LocalCfgs["tikv"]["tikv1"], DeepEquals, lc1)
 	c.Assert(cfg1.GlobalCfgs["tikv"], DeepEquals, gc1)
 }
 
@@ -269,7 +270,8 @@ discardable-ratio = 0.00156
 			Value: "true"}},
 		&configpb.Version{Global: 1, Local: 0})
 	cfg.GlobalCfgs["tikv"] = gc
-	cfg.LocalCfgs["tikv1"] = lc
+	cfg.LocalCfgs["tikv"] = make(map[string]*LocalConfig)
+	cfg.LocalCfgs["tikv"]["tikv1"] = lc
 	str, err := cfg.getComponentCfg("tikv", "tikv1")
 	c.Assert(err, IsNil)
 	expect := `[rocksdb]
