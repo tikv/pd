@@ -383,25 +383,13 @@ func (b *Builder) peerPlan() stepPlan {
 
 func (b *Builder) planReplace() stepPlan {
 	var best stepPlan
-	// add voter + remove voter.
+	// add voter + remove voter OR add learner + remove learner.
 	for _, i := range b.toAdd.IDs() {
-		if add := b.toAdd.Get(i); !add.GetIsLearner() {
-			for _, j := range b.toRemove.IDs() {
-				remove := b.toRemove.Get(j)
-				if !remove.GetIsLearner() {
-					best = b.planReplaceLeaders(best, stepPlan{add: add, remove: remove})
-				}
-			}
-		}
-	}
-	// add learner + remove learner.
-	for _, i := range b.toAdd.IDs() {
-		if add := b.toAdd.Get(i); add.GetIsLearner() {
-			for _, j := range b.toRemove.IDs() {
-				remove := b.toRemove.Get(j)
-				if remove.GetIsLearner() {
-					best = b.planReplaceLeaders(best, stepPlan{add: add, remove: remove})
-				}
+		add := b.toAdd.Get(i)
+		for _, j := range b.toRemove.IDs() {
+			remove := b.toRemove.Get(j)
+			if remove.GetIsLearner() == add.GetIsLearner() {
+				best = b.planReplaceLeaders(best, stepPlan{add: add, remove: remove})
 			}
 		}
 	}
@@ -429,16 +417,16 @@ func (b *Builder) planReplaceLeaders(best, next stepPlan) stepPlan {
 		}
 		next.leaderAdd = leaderAdd
 		for _, leaderRemove := range b.currentPeers.IDs() {
-			if b.allowLeader(b.currentPeers.Get(leaderRemove)) {
+			if b.allowLeader(b.currentPeers.Get(leaderRemove)) && leaderRemove != next.remove.GetStoreId() {
 				next.leaderRemove = leaderRemove
 				best = b.comparePlan(best, next)
 			}
 		}
-		if next.promote != nil {
+		if next.promote != nil && b.allowLeader(next.promote) && next.promote.GetStoreId() != next.remove.GetStoreId() {
 			next.leaderRemove = next.promote.GetStoreId()
 			best = b.comparePlan(best, next)
 		}
-		if next.add != nil && !next.add.GetIsLearner() {
+		if next.add != nil && b.allowLeader(next.add) && next.add.GetStoreId() != next.remove.GetStoreId() {
 			next.leaderRemove = next.add.GetStoreId()
 			best = b.comparePlan(best, next)
 		}
@@ -459,7 +447,7 @@ func (b *Builder) planRemovePeer() stepPlan {
 	for _, i := range b.toRemove.IDs() {
 		r := b.toRemove.Get(i)
 		for _, leader := range b.currentPeers.IDs() {
-			if b.allowLeader(b.currentPeers.Get(leader)) {
+			if b.allowLeader(b.currentPeers.Get(leader)) && leader != r.GetStoreId() {
 				best = b.comparePlan(best, stepPlan{remove: r, leaderRemove: leader})
 			}
 		}
@@ -486,13 +474,15 @@ func (b *Builder) comparePlan(best, next stepPlan) stepPlan {
 		return next
 	}
 	fs := []func(stepPlan) int{
-		b.preferReplaceByNearest,
-		b.avoidRemoveLeader,
-		b.preferUpStoreAsLeader,
-		b.preferOldPeerAsLeader,
-		b.preferLessLeaderTransfer,
-		b.preferTargetLeader,
-		b.preferAddOrPromoteTargetLeader,
+		b.preferReplaceByNearest, // 1. violate it affects replica safety.
+		// 2-3 affects operator execution speed.
+		b.preferUpStoreAsLeader, // 2. compare to 3, it is more likely to affect execution speed.
+		b.preferOldPeerAsLeader, // 3. violate it may or may not affect execution speed.
+		// 4-6 are less important as they are only trying to build the
+		// operator with less leader transfer steps.
+		b.preferAddOrPromoteTargetLeader, // 4. it is precondition of 5 so goes first.
+		b.preferTargetLeader,             // 5. it may help 6 in later steps.
+		b.preferLessLeaderTransfer,       // 6. trival optimization to make the operator more tidy.
 	}
 	for _, t := range fs {
 		if tb, tc := t(best), t(next); tb > tc {
@@ -539,14 +529,9 @@ func (b *Builder) preferReplaceByNearest(p stepPlan) int {
 	return m
 }
 
-// TiKV rejects removing leader directly.
-func (b *Builder) avoidRemoveLeader(p stepPlan) int {
-	return b2i(p.remove == nil || p.leaderRemove != p.remove.GetStoreId())
-}
-
 // Avoid generating snapshots from offline stores.
 func (b *Builder) preferUpStoreAsLeader(p stepPlan) int {
-	if p.add != nil && b.currentPeers.Get(p.add.GetStoreId()) == nil {
+	if p.add != nil {
 		store := b.cluster.GetStore(p.leaderAdd)
 		return b2i(store != nil && store.IsUp())
 	}

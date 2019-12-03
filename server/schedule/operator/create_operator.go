@@ -15,7 +15,6 @@ package operator
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -160,15 +159,4 @@ func (s u64Slice) Swap(i, j int) {
 
 func (s u64Slice) Less(i, j int) bool {
 	return s[i] < s[j]
-}
-
-type u64Set map[uint64]struct{}
-
-func (s u64Set) String() string {
-	v := make([]uint64, 0, len(s))
-	for x := range s {
-		v = append(v, x)
-	}
-	sort.Sort(u64Slice(v))
-	return fmt.Sprintf("%v", v)
 }

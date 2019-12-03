@@ -75,18 +75,6 @@ func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, pe
 	return regionInfo
 }
 
-func genAddPeers(store uint64, groups [][]uint64) [][]OpStep {
-	ret := make([][]OpStep, len(groups))
-	for i, grp := range groups {
-		steps := make([]OpStep, len(grp))
-		for j, id := range grp {
-			steps[j] = AddPeer{ToStore: store, PeerID: id}
-		}
-		ret[i] = steps
-	}
-	return ret
-}
-
 func (s *testOperatorSuite) TestOperatorStep(c *C) {
 	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	c.Assert(TransferLeader{FromStore: 1, ToStore: 2}.IsFinish(region), IsFalse)

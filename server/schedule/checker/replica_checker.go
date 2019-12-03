@@ -28,7 +28,6 @@ import (
 
 const (
 	replicaCheckerName = "replica-checker"
-	minReplicaCount    = 1
 )
 
 const (
