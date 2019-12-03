@@ -84,16 +84,17 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 	c.Assert(s.newBuilder().SetLeader(2).RemovePeer(2).err, NotNil)
 	c.Assert(s.newBuilder().PromoteLearner(4).err, NotNil)
 	c.Assert(s.newBuilder().SetLeader(4).err, NotNil)
+	c.Assert(s.newBuilder().SetPeers(map[uint64]*metapb.Peer{2: {Id: 2}}).err, NotNil)
 
 	m := map[uint64]*metapb.Peer{
-		2:  {StoreId: 2},
-		30: {StoreId: 3, IsLearner: true}, // Use ID in metapb.Peer (3) instead of map key (30).
-		4:  {StoreId: 4},
+		2: {StoreId: 2},
+		3: {StoreId: 3, IsLearner: true},
+		4: {StoreId: 4},
 	}
 	builder := s.newBuilder().SetPeers(m).SetLightWeight()
 	c.Assert(builder.targetPeers.Len(), Equals, 3)
 	c.Assert(builder.targetPeers.Get(2), DeepEquals, m[2])
-	c.Assert(builder.targetPeers.Get(3), DeepEquals, m[30])
+	c.Assert(builder.targetPeers.Get(3), DeepEquals, m[3])
 	c.Assert(builder.targetPeers.Get(4), DeepEquals, m[4])
 	c.Assert(builder.targetLeader, Equals, uint64(0))
 	c.Assert(builder.isLigthWeight, IsTrue)

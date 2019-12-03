@@ -142,15 +142,18 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 
 // SetPeers resets the target peer list.
 //
-// If the storeID of metapb.Peer is different from the map key, subject to the
-// one in metapb.Peer. If peer's ID is 0, the builder will allocate a new ID
-// later. If current target leader does not exist in peers, it will be reset.
+// If peer's ID is 0, the builder will allocate a new ID later. If current
+// target leader does not exist in peers, it will be reset.
 func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 	if b.err != nil {
 		return b
 	}
 	b.targetPeers = peersMap{}
-	for _, p := range peers {
+	for k, p := range peers {
+		if p.GetStoreId() != k {
+			b.err = errors.Errorf("setPeers with mismatch storeID: %v", peers)
+			return b
+		}
 		b.targetPeers.Set(p)
 	}
 	if _, ok := peers[b.targetLeader]; !ok {
