@@ -829,6 +829,31 @@ func (s *Server) UpdateComponentConfig(ctx context.Context, request *configpb.Up
 	}, nil
 }
 
+// DeleteComponentConfig ...
+func (s *Server) DeleteComponentConfig(ctx context.Context, request *configpb.DeleteRequest) (*configpb.DeleteResponse, error) {
+	if err := s.validateComponentRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	cluster := s.GetRaftCluster()
+	if cluster == nil {
+		return &configpb.DeleteResponse{Header: &configpb.Header{ClusterId: s.clusterID}, Status: &configpb.Status{
+			Code:    configpb.Status_UNKNOWN,
+			Message: "cluster is not bootstrapped",
+		}}, nil
+	}
+	componentsCfg := s.GetComponentsConfig()
+	status := componentsCfg.Delete(request.GetKind(), request.GetVersion())
+	if status.GetCode() == configpb.Status_OK {
+		componentsCfg.Persist(s.storage)
+	}
+
+	return &configpb.DeleteResponse{
+		Header: s.componentHeader(),
+		Status: status,
+	}, nil
+}
+
 // validateRequest checks if Server is leader and clusterID is matched.
 // TODO: Call it in gRPC intercepter.
 func (s *Server) validateRequest(header *pdpb.RequestHeader) error {

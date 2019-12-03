@@ -74,7 +74,6 @@ func (c *ComponentsConfig) Get(version *configpb.Version, component, componentID
 		if res == 0 {
 			status = &configpb.Status{Code: configpb.Status_NOT_CHANGE}
 			return version, "", status
-
 		} else if res == -1 {
 			// TODO: need more specified error message
 			status = &configpb.Status{
@@ -160,7 +159,6 @@ func (c *ComponentsConfig) getComponentCfg(component, componentID string) (strin
 			updateEntries[k] = v
 		}
 	}
-
 	// apply the local change to updateEntries
 	for k1, v1 := range c.LocalCfgs[componentID].GetUpdateEntries() {
 		if v, ok := updateEntries[k1]; ok {
@@ -182,9 +180,6 @@ func (c *ComponentsConfig) getComponentCfg(component, componentID string) (strin
 }
 
 // Update ...
-// We denote rv for the request version, pv for the version stored in PD.
-// 1. rv >= pv -> pv = rv + 1, update config, return pv
-// 2. rv < pv -> return pv
 func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
 	c.Lock()
 	defer c.Unlock()
@@ -214,12 +209,26 @@ func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.V
 				globalCfg.updateEntry(entry, &configpb.Version{Global: newGlobalVersion, Local: 0})
 			}
 			globalCfg.Version = newGlobalVersion
-			for _, lc := range c.LocalCfgs {
-				lc.Version = &configpb.Version{Global: newGlobalVersion, Local: 0}
+			// update all local config version
+			for _, LocalCfg := range c.LocalCfgs {
+				LocalCfg.Version = &configpb.Version{Global: newGlobalVersion, Local: 0}
 			}
 		} else {
-			globalCfg := NewGlobalConfig(entries, &configpb.Version{Global: 1, Local: 0})
+			// The global version of first global update should be 0.
+			if version.GetGlobal() != 0 {
+				return &configpb.Version{Global: 0, Local: 0},
+					&configpb.Status{
+						Code:    configpb.Status_UNKNOWN,
+						Message: "version is wrong",
+					}
+			}
+			newGlobalVersion := uint64(1)
+			globalCfg := NewGlobalConfig(entries, &configpb.Version{Global: newGlobalVersion, Local: 0})
 			c.GlobalCfgs[component] = globalCfg
+			// update all local config version
+			for _, LocalCfg := range c.LocalCfgs {
+				LocalCfg.Version = &configpb.Version{Global: newGlobalVersion, Local: 0}
+			}
 		}
 		return &configpb.Version{Global: c.GlobalCfgs[component].GetVersion(), Local: 0}, &configpb.Status{Code: configpb.Status_OK}
 	}
@@ -235,7 +244,7 @@ func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.V
 					Code:    configpb.Status_STALE_VERSION,
 					Message: "version is wrong",
 				}
-			} else if res < 0 {
+			} else if res == -1 {
 				return localLatestVersion, &configpb.Status{
 					Code:    configpb.Status_UNKNOWN,
 					Message: "version is wrong",
@@ -251,6 +260,54 @@ func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.V
 		return c.LocalCfgs[componentID].GetVersion(), &configpb.Status{Code: configpb.Status_OK}
 	}
 	return &configpb.Version{Global: 0, Local: 0}, &configpb.Status{Code: configpb.Status_UNKNOWN, Message: "no component is specified"}
+}
+
+// Delete ...
+func (c *ComponentsConfig) Delete(kind *configpb.ConfigKind, version *configpb.Version) *configpb.Status {
+	c.Lock()
+	defer c.Unlock()
+
+	global := kind.GetGlobal()
+	if global != nil {
+		component := global.GetComponent()
+		// if the global config of the component is existed.
+		if globalCfg, ok := c.GlobalCfgs[component]; ok {
+			globalLatestVersion := globalCfg.GetVersion()
+			if globalLatestVersion != version.GetGlobal() {
+				return &configpb.Status{
+					Code:    configpb.Status_STALE_VERSION,
+					Message: "version is wrong",
+				}
+			}
+			delete(c.GlobalCfgs, component)
+			for _, LocalCfg := range c.LocalCfgs {
+				LocalCfg.Version = &configpb.Version{Global: 0, Local: 0}
+			}
+		} else {
+			return &configpb.Status{Code: configpb.Status_UNKNOWN, Message: "no component is specified"}
+		}
+		return &configpb.Status{Code: configpb.Status_OK}
+	}
+
+	local := kind.GetLocal()
+	if local != nil {
+		componentID := local.GetComponentId()
+		if localCfg, ok := c.LocalCfgs[componentID]; ok {
+			localLatestVersion := localCfg.GetVersion()
+			res := compareVersion(localLatestVersion, version)
+			if res != 0 {
+				return &configpb.Status{
+					Code:    configpb.Status_STALE_VERSION,
+					Message: "version is wrong",
+				}
+			}
+			delete(c.LocalCfgs, componentID)
+		} else {
+			return &configpb.Status{Code: configpb.Status_UNKNOWN, Message: "no component id is specified"}
+		}
+		return &configpb.Status{Code: configpb.Status_OK}
+	}
+	return &configpb.Status{Code: configpb.Status_UNKNOWN, Message: "kind is specified"}
 }
 
 // EntryValue ...
