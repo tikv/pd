@@ -357,6 +357,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 		}
 
 		infl := pendings[storeID]
+		// TODO: add to tidb-ansible after merging pending influence into operator influence.
 		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.ByteRate)
 	}
 
