@@ -18,12 +18,14 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"path"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
@@ -42,14 +44,6 @@ var (
 	PDGitHash        = "None"
 	PDGitBranch      = "None"
 )
-
-// dialClient used to dail http request.
-var dialClient = &http.Client{
-	Timeout: clientTimeout,
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
 
 // LogPDInfo prints the PD version information.
 func LogPDInfo() {
@@ -82,9 +76,9 @@ func PrintConfigCheckMsg(cfg *config.Config) {
 
 // CheckPDVersion checks if PD needs to be upgraded.
 func CheckPDVersion(opt *config.ScheduleOption) {
-	pdVersion := *MinSupportedVersion(Base)
+	pdVersion := *cluster.MinSupportedVersion(cluster.Base)
 	if PDReleaseVersion != "None" {
-		pdVersion = *MustParseVersion(PDReleaseVersion)
+		pdVersion = *cluster.MustParseVersion(PDReleaseVersion)
 	}
 	clusterVersion := *opt.LoadClusterVersion()
 	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))
@@ -135,27 +129,6 @@ func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 	return typeutil.BytesToUint64(response.Kvs[0].Value)
 }
 
-// GetMembers return a slice of Members.
-func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
-	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
-	if err != nil {
-		return nil, err
-	}
-
-	members := make([]*pdpb.Member, 0, len(listResp.Members))
-	for _, m := range listResp.Members {
-		info := &pdpb.Member{
-			Name:       m.Name,
-			MemberId:   m.ID,
-			ClientUrls: m.ClientURLs,
-			PeerUrls:   m.PeerURLs,
-		}
-		members = append(members, info)
-	}
-
-	return members, nil
-}
-
 // InitHTTPClient initials a http client.
 func InitHTTPClient(svr *Server) error {
 	tlsConfig, err := svr.GetSecurityConfig().ToTLSConfig()
@@ -163,12 +136,64 @@ func InitHTTPClient(svr *Server) error {
 		return err
 	}
 
-	dialClient = &http.Client{
+	cluster.DialClient = &http.Client{
 		Timeout: clientTimeout,
 		Transport: &http.Transport{
 			TLSClientConfig:   tlsConfig,
 			DisableKeepAlives: true,
 		},
 	}
+	return nil
+}
+
+func makeStoreKey(clusterRootPath string, storeID uint64) string {
+	return path.Join(clusterRootPath, "s", fmt.Sprintf("%020d", storeID))
+}
+
+func makeRegionKey(clusterRootPath string, regionID uint64) string {
+	return path.Join(clusterRootPath, "r", fmt.Sprintf("%020d", regionID))
+}
+
+func makeRaftClusterStatusPrefix(clusterRootPath string) string {
+	return path.Join(clusterRootPath, "status")
+}
+
+func makeBootstrapTimeKey(clusterRootPath string) string {
+	return path.Join(makeRaftClusterStatusPrefix(clusterRootPath), "raft_bootstrap_time")
+}
+
+func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
+	// TODO: do more check for request fields validation.
+
+	storeMeta := req.GetStore()
+	if storeMeta == nil {
+		return errors.Errorf("missing store meta for bootstrap %d", clusterID)
+	} else if storeMeta.GetId() == 0 {
+		return errors.New("invalid zero store id")
+	}
+
+	regionMeta := req.GetRegion()
+	if regionMeta == nil {
+		return errors.Errorf("missing region meta for bootstrap %d", clusterID)
+	} else if len(regionMeta.GetStartKey()) > 0 || len(regionMeta.GetEndKey()) > 0 {
+		// first region start/end key must be empty
+		return errors.Errorf("invalid first region key range, must all be empty for bootstrap %d", clusterID)
+	} else if regionMeta.GetId() == 0 {
+		return errors.New("invalid zero region id")
+	}
+
+	peers := regionMeta.GetPeers()
+	if len(peers) != 1 {
+		return errors.Errorf("invalid first region peer count %d, must be 1 for bootstrap %d", len(peers), clusterID)
+	}
+
+	peer := peers[0]
+	if peer.GetStoreId() != storeMeta.GetId() {
+		return errors.Errorf("invalid peer store id %d != %d for bootstrap %d", peer.GetStoreId(), storeMeta.GetId(), clusterID)
+	}
+	if peer.GetId() == 0 {
+		return errors.New("invalid zero peer id")
+	}
+
 	return nil
 }

@@ -9,7 +9,7 @@ baseUriParameters:
 protocols: [ HTTP, HTTPS ]
 
 types:
-  ClusterStatus:
+  Status:
     type: object
     properties:
       raft_bootstrap_time?: string
@@ -409,7 +409,7 @@ types:
       200:
         body:
           application/json:
-            type: ClusterStatus
+            type: Status
       500:
         description: PD server failed to proceed the request.
 

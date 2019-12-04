@@ -35,7 +35,7 @@ type Recommendation struct {
 	Instruction string `json:"instruction"`
 }
 
-//lint:file-ignore U1000 document available levels and modules
+// lint:file-ignore U1000 document available levels and modules
 const (
 	// analyze levels
 	levelWarning  = "Warning"
@@ -153,10 +153,6 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 	if float64(lenMembers)/2 < float64(lenLostMembers) {
 		*rdd = append(*rdd, diagnosePD(memberLostPeersMoreThanHalf, "", ""))
 	}
-	return nil
-}
-
-func (d *diagnoseHandler) tikvDiagnose(rdd *[]*Recommendation) error {
 	return nil
 }
 

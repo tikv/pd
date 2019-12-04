@@ -23,7 +23,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// dialClient used to dail http request.
+// dialClient used to dial http request.
 var dialClient = &http.Client{
 	Transport: &http.Transport{
 		DisableKeepAlives: true,

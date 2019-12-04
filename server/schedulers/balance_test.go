@@ -1090,7 +1090,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.MergeScheduleLimit = 1
 	tc := mockcluster.NewCluster(opt)
-	hb := mockhbstream.NewHeartbeatStreams(tc.ID)
+	hb := mockhbstream.NewHeartbeatStreams(tc.ID, false /* need to run */)
 	oc := schedule.NewOperatorController(ctx, tc, hb)
 
 	mb, err := schedule.CreateScheduler(RandomMergeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(RandomMergeType, []string{"", ""}))

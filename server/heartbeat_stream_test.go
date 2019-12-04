@@ -29,8 +29,9 @@ import (
 var _ = Suite(&testHeartbeatStreamSuite{})
 
 type testHeartbeatStreamSuite struct {
-	baseCluster
-	region *metapb.Region
+	svr          *Server
+	grpcPDClient pdpb.PDClient
+	region       *metapb.Region
 }
 
 func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
@@ -43,17 +44,23 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.svr.GetAddr())
 
-	bootstrapReq := s.newBootstrapRequest(c, s.svr.clusterID, "127.0.0.1:0")
+	bootstrapReq := &pdpb.BootstrapRequest{
+		Header: testutil.NewRequestHeader(s.svr.clusterID),
+		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, IsLearner: false}}},
+	}
 	_, err = s.svr.bootstrapCluster(bootstrapReq)
 	c.Assert(err, IsNil)
 	s.region = bootstrapReq.Region
 
 	// Add a new store and an addPeer operator.
-	storeID, err := s.svr.idAllocator.Alloc()
+	req := &pdpb.PutStoreRequest{
+		Header: testutil.NewRequestHeader(s.svr.clusterID),
+		Store:  &metapb.Store{Id: 2, Address: "127.0.0.1:1"},
+	}
+	_, err = s.grpcPDClient.PutStore(context.Background(), req)
 	c.Assert(err, IsNil)
-	_, err = putStore(s.grpcPDClient, s.svr.clusterID, &metapb.Store{Id: storeID, Address: "127.0.0.1:1"})
-	c.Assert(err, IsNil)
-	err = newHandler(s.svr).AddAddPeerOperator(s.region.GetId(), storeID)
+	err = newHandler(s.svr).AddAddPeerOperator(s.region.GetId(), 2)
 	c.Assert(err, IsNil)
 
 	stream1, stream2 := newRegionheartbeatClient(c, s.grpcPDClient), newRegionheartbeatClient(c, s.grpcPDClient)
@@ -78,7 +85,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 			return 0
 		}
 	}
-	req := &pdpb.RegionHeartbeatRequest{
+	hbReq := &pdpb.RegionHeartbeatRequest{
 		Header: testutil.NewRequestHeader(s.svr.clusterID),
 		Leader: s.region.Peers[0],
 		Region: s.region,
@@ -90,17 +97,17 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 		Region: invalidRegion,
 	}
 	// Active stream is stream1.
-	c.Assert(stream1.stream.Send(req), IsNil)
+	c.Assert(stream1.stream.Send(hbReq), IsNil)
 	c.Assert(checkActiveStream(), Equals, 1)
 	// Rebind to stream2.
-	c.Assert(stream2.stream.Send(req), IsNil)
+	c.Assert(stream2.stream.Send(hbReq), IsNil)
 	c.Assert(checkActiveStream(), Equals, 2)
 	// SendErr to stream2.
 	c.Assert(stream2.stream.Send(invalidReq), IsNil)
 	c.Assert(checkActiveStream(), Equals, 3)
 	// Rebind to stream1 if no more heartbeats sent through stream2.
 	testutil.WaitUntil(c, func(c *C) bool {
-		c.Assert(stream1.stream.Send(req), IsNil)
+		c.Assert(stream1.stream.Send(hbReq), IsNil)
 		return checkActiveStream() == 1
 	})
 }

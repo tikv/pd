@@ -22,10 +22,20 @@ import (
 	"github.com/unrolled/render"
 )
 
-func createRouter(prefix string, svr *server.Server) *mux.Router {
-	rd := render.New(render.Options{
+func createStreamingRender() *render.Render {
+	return render.New(render.Options{
+		StreamingJSON: true,
+	})
+}
+
+func createIndentRender() *render.Render {
+	return render.New(render.Options{
 		IndentJSON: true,
 	})
+}
+
+func createRouter(prefix string, svr *server.Server) *mux.Router {
+	rd := createIndentRender()
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -98,8 +108,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/api/v1/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/region/key/{key}", regionHandler.GetRegionByKey).Methods("GET")
 
+	srd := createStreamingRender()
+	regionsAllHandler := newRegionsHandler(svr, srd)
+	clusterRouter.HandleFunc("/api/v1/regions", regionsAllHandler.GetAll).Methods("GET")
+
 	regionsHandler := newRegionsHandler(svr, rd)
-	clusterRouter.HandleFunc("/api/v1/regions", regionsHandler.GetAll).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/key", regionsHandler.ScanRegions).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/count", regionsHandler.GetRegionCount).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/store/{id}", regionsHandler.GetStoreRegions).Methods("GET")

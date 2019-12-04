@@ -21,6 +21,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
 )
@@ -40,19 +41,21 @@ func (s *healthTestSuite) SetUpSuite(c *C) {
 func (s *healthTestSuite) TestHealth(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(3)
+	tc, err := tests.NewTestCluster(3)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers(ctx)
+	err = tc.RunInitialServers(ctx)
 	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURLs()
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	pdAddr := tc.GetConfig().GetClientURLs()
 	cmd := pdctl.InitCommand()
-	defer cluster.Destroy()
+	defer tc.Destroy()
 
-	client := cluster.GetEtcdClient()
-	members, err := server.GetMembers(client)
+	client := tc.GetEtcdClient()
+	members, err := cluster.GetMembers(client)
 	c.Assert(err, IsNil)
-	unhealthMembers := cluster.CheckHealth(members)
+	unhealthMembers := tc.CheckHealth(members)
 	healths := []api.Health{}
 	for _, member := range members {
 		h := api.Health{
