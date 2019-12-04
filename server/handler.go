@@ -835,7 +835,7 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 // PluginUnload unloads the plugin referenced by the pluginPath
 func (h *Handler) PluginUnload(pluginPath string) error {
 	if ch, ok := h.pluginChMap[pluginPath]; ok {
-		ch <- "PluginUnload"
+		ch <- server.PluginUnload
 		return nil
 	}
 	return ErrPluginNotFound(pluginPath)
