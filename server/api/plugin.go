@@ -48,7 +48,7 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 	}
 	var err error
 	switch action {
-	case "PluginLoad":
+	case server.PluginLoad:
 		err = h.PluginLoad(data["plugin-path"])
 	case "PluginUnload":
 		err = h.PluginUnload(data["plugin-path"])
