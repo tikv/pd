@@ -75,12 +75,12 @@ func init() {
 	})
 }
 
-// SchedulerType return type of the scheduler
+// nolint
 func SchedulerType() string {
 	return EvictLeaderType
 }
 
-// SchedulerArgs provides parameters for the scheduler
+// nolint
 func SchedulerArgs() []string {
 	args := []string{"1"}
 	return args
