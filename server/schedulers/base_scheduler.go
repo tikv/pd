@@ -55,10 +55,12 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 	return 0
 }
 
+// BaseScheduler is a basic scheduler for all other complex scheduler
 type BaseScheduler struct {
 	OpController *schedule.OperatorController
 }
 
+// NewBaseScheduler returns a basic scheduler
 func NewBaseScheduler(opController *schedule.OperatorController) *BaseScheduler {
 	return &BaseScheduler{OpController: opController}
 }
@@ -67,18 +69,23 @@ func (s *BaseScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "not implements")
 }
 
+// GetMinInterval returns the minimal interval for the scheduler
 func (s *BaseScheduler) GetMinInterval() time.Duration {
 	return MinScheduleInterval
 }
 
+// EncodeConfig encode config for the scheduler
 func (s *BaseScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(nil)
 }
 
+// GetNextInterval return the next interval for the scheduler
 func (s *BaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(interval, MaxScheduleInterval, exponentialGrowth)
 }
 
+// Prepare does some prepare work
 func (s *BaseScheduler) Prepare(cluster opt.Cluster) error { return nil }
 
+// Cleanup does some cleanup work
 func (s *BaseScheduler) Cleanup(cluster opt.Cluster) {}
