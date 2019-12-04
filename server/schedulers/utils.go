@@ -335,7 +335,6 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 }
 
 // Influence records operator influence.
-// TODO: merge it into OperatorInfluence.
 type Influence struct {
 	ByteRate float64
 }
@@ -345,6 +344,7 @@ func (infl Influence) add(rhs *Influence, w float64) Influence {
 	return infl
 }
 
+// TODO: merge it into OperatorInfluence.
 type pendingInfluence struct {
 	op       *operator.Operator
 	from, to uint64
