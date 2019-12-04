@@ -61,6 +61,7 @@ func CheckTransferLeaderFrom(c *check.C, op *operator.Operator, kind operator.Op
 func CheckTransferPeer(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	c.Assert(op, check.NotNil)
 
+	// cleanup transfer leaders.
 	var steps []operator.OpStep
 	for i := 0; i < op.Len(); i++ {
 		step := op.Step(i)
@@ -68,6 +69,10 @@ func CheckTransferPeer(c *check.C, op *operator.Operator, kind operator.OpKind, 
 			steps = append(steps, step)
 		}
 	}
+	if len(steps) < op.Len() {
+		kind |= operator.OpLeader
+	}
+
 	c.Assert(steps, check.HasLen, 3)
 	c.Assert(steps[0].(operator.AddLearner).ToStore, check.Equals, targetID)
 	c.Assert(steps[1], check.FitsTypeOf, operator.PromoteLearner{})

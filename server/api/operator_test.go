@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 )
@@ -142,7 +143,7 @@ func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, 
 			Address: fmt.Sprintf("tikv%d", id),
 			State:   state,
 			Labels:  labels,
-			Version: (*server.MinSupportedVersion(server.Version2_0)).String(),
+			Version: (*cluster.MinSupportedVersion(cluster.Version2_0)).String(),
 		},
 	})
 	c.Assert(err, IsNil)

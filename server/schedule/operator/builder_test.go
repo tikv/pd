@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2019 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule/opt"
 )
 
 var _ = Suite(&testBuilderSuite{})
@@ -28,9 +29,10 @@ type testBuilderSuite struct {
 }
 
 func (s *testBuilderSuite) SetUpTest(c *C) {
-	opt := mockoption.NewScheduleOptions()
-	opt.LocationLabels = []string{"zone", "host"}
-	s.cluster = mockcluster.NewCluster(opt)
+	opts := mockoption.NewScheduleOptions()
+	opts.LocationLabels = []string{"zone", "host"}
+	opts.LabelProperties = map[string][]*metapb.StoreLabel{opt.RejectLeader: {{Key: "noleader", Value: "true"}}}
+	s.cluster = mockcluster.NewCluster(opts)
 	s.cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
 	s.cluster.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h1"})
 	s.cluster.AddLabelsStore(3, 0, map[string]string{"zone": "z1", "host": "h1"})
@@ -40,7 +42,7 @@ func (s *testBuilderSuite) SetUpTest(c *C) {
 	s.cluster.AddLabelsStore(7, 0, map[string]string{"zone": "z1", "host": "h2"})
 	s.cluster.AddLabelsStore(8, 0, map[string]string{"zone": "z2", "host": "h1"})
 	s.cluster.AddLabelsStore(9, 0, map[string]string{"zone": "z2", "host": "h2"})
-	s.cluster.AddLabelsStore(10, 0, map[string]string{"zone": "z3", "host": "h1"})
+	s.cluster.AddLabelsStore(10, 0, map[string]string{"zone": "z3", "host": "h1", "noleader": "true"})
 }
 
 func (s *testBuilderSuite) TestNewBuilder(c *C) {
@@ -79,6 +81,10 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 	c.Assert(s.newBuilder().SetLeader(3).err, NotNil)
 	c.Assert(s.newBuilder().RemovePeer(4).err, NotNil)
 	c.Assert(s.newBuilder().AddPeer(&metapb.Peer{StoreId: 4, IsLearner: true}).RemovePeer(4).err, IsNil)
+	c.Assert(s.newBuilder().SetLeader(2).RemovePeer(2).err, NotNil)
+	c.Assert(s.newBuilder().PromoteLearner(4).err, NotNil)
+	c.Assert(s.newBuilder().SetLeader(4).err, NotNil)
+	c.Assert(s.newBuilder().SetPeers(map[uint64]*metapb.Peer{2: {Id: 2}}).err, NotNil)
 
 	m := map[uint64]*metapb.Peer{
 		2: {StoreId: 2},
@@ -112,7 +118,7 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	c.Assert(builder.toAdd.Get(1).IsLearner, IsTrue)
 	c.Assert(builder.toAdd.Get(1).Id, Not(Equals), uint64(0))
 	c.Assert(builder.toAdd.Get(4).IsLearner, IsFalse)
-	c.Assert(builder.toAdd.Get(4).Id, Not(Equals), uint64(0))
+	c.Assert(builder.toAdd.Get(4).Id, Equals, uint64(14))
 	c.Assert(builder.toAdd.Get(5).IsLearner, IsTrue)
 	c.Assert(builder.toAdd.Get(5).Id, Not(Equals), uint64(0))
 	c.Assert(builder.toRemove.Len(), Equals, 1)
@@ -181,6 +187,34 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 1},
 				// transfer leader
 				TransferLeader{FromStore: 7, ToStore: 9},
+			},
+		},
+		{ // promote learner
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, IsLearner: true}},
+			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
+			[]OpStep{
+				PromoteLearner{ToStore: 2},
+				TransferLeader{FromStore: 1, ToStore: 2},
+			},
+		},
+		{ // empty step
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]OpStep{},
+		},
+		{ // no valid leader
+			[]*metapb.Peer{{Id: 1, StoreId: 1}},
+			[]*metapb.Peer{{Id: 10, StoreId: 10}},
+			[]OpStep{},
+		},
+		{ // add learner + promote learner + remove voter
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, IsLearner: true}},
+			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsLearner: true}},
+			[]OpStep{
+				AddLearner{ToStore: 3},
+				PromoteLearner{ToStore: 2},
+				TransferLeader{FromStore: 1, ToStore: 2},
+				RemovePeer{FromStore: 1},
 			},
 		},
 	}

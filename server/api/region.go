@@ -47,25 +47,31 @@ type RegionInfo struct {
 
 // NewRegionInfo create a new api RegionInfo.
 func NewRegionInfo(r *core.RegionInfo) *RegionInfo {
+	return InitRegion(r, &RegionInfo{})
+}
+
+// InitRegion init a new api RegionInfo from the core.RegionInfo.
+func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	if r == nil {
 		return nil
 	}
-	return &RegionInfo{
-		ID:              r.GetID(),
-		StartKey:        string(core.HexRegionKey(r.GetStartKey())),
-		EndKey:          string(core.HexRegionKey(r.GetEndKey())),
-		RegionEpoch:     r.GetRegionEpoch(),
-		Peers:           r.GetPeers(),
-		Leader:          r.GetLeader(),
-		DownPeers:       r.GetDownPeers(),
-		PendingPeers:    r.GetPendingPeers(),
-		WrittenBytes:    r.GetBytesWritten(),
-		WrittenKeys:     r.GetKeysWritten(),
-		ReadBytes:       r.GetBytesRead(),
-		ReadKeys:        r.GetKeysRead(),
-		ApproximateSize: r.GetApproximateSize(),
-		ApproximateKeys: r.GetApproximateKeys(),
-	}
+
+	s.ID = r.GetID()
+	s.StartKey = core.HexRegionKeyStr(r.GetStartKey())
+	s.EndKey = core.HexRegionKeyStr(r.GetEndKey())
+	s.RegionEpoch = r.GetRegionEpoch()
+	s.Peers = r.GetPeers()
+	s.Leader = r.GetLeader()
+	s.DownPeers = r.GetDownPeers()
+	s.PendingPeers = r.GetPendingPeers()
+	s.WrittenBytes = r.GetBytesWritten()
+	s.WrittenKeys = r.GetKeysWritten()
+	s.ReadBytes = r.GetBytesRead()
+	s.ReadKeys = r.GetKeysRead()
+	s.ApproximateSize = r.GetApproximateSize()
+	s.ApproximateKeys = r.GetApproximateKeys()
+
+	return s
 }
 
 // RegionsInfo contains some regions with the detailed region info.
@@ -87,7 +93,7 @@ func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
 }
 
 func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
@@ -97,15 +103,15 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	regionInfo := cluster.GetRegion(regionID)
+	regionInfo := rc.GetRegion(regionID)
 	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
 }
 
 func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	key := vars["key"]
-	regionInfo := cluster.GetRegionInfoByKey([]byte(key))
+	regionInfo := rc.GetRegionInfoByKey([]byte(key))
 	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
 }
 
@@ -122,25 +128,30 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 }
 
 func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
-	regionInfos := make([]*RegionInfo, len(regions))
+	regionInfos := make([]RegionInfo, len(regions))
+	regionInfosRefs := make([]*RegionInfo, len(regions))
+
+	for i := 0; i < len(regions); i++ {
+		regionInfosRefs[i] = &regionInfos[i]
+	}
 	for i, r := range regions {
-		regionInfos[i] = NewRegionInfo(r)
+		regionInfosRefs[i] = InitRegion(r, regionInfosRefs[i])
 	}
 	return &RegionsInfo{
 		Count:   len(regions),
-		Regions: regionInfos,
+		Regions: regionInfosRefs,
 	}
 }
 
 func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
-	regions := cluster.GetRegions()
+	rc := getCluster(r.Context())
+	regions := rc.GetRegions()
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
 func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	startKey := r.URL.Query().Get("key")
 
 	limit := defaultRegionLimit
@@ -155,19 +166,19 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	if limit > maxRegionLimit {
 		limit = maxRegionLimit
 	}
-	regions := cluster.ScanRegions([]byte(startKey), nil, limit)
+	regions := rc.ScanRegions([]byte(startKey), nil, limit)
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
 func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
-	count := cluster.GetRegionCount()
+	rc := getCluster(r.Context())
+	count := rc.GetRegionCount()
 	h.rd.JSON(w, http.StatusOK, &RegionsInfo{Count: count})
 }
 
 func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
@@ -175,7 +186,7 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	regions := cluster.GetStoreRegions(uint64(id))
+	regions := rc.GetStoreRegions(uint64(id))
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
@@ -247,7 +258,7 @@ func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 
 	vars := mux.Vars(r)
 	id, err := strconv.Atoi(vars["id"])
@@ -255,13 +266,13 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	region := cluster.GetRegion(uint64(id))
+	region := rc.GetRegion(uint64(id))
 	if region == nil {
 		h.rd.JSON(w, http.StatusNotFound, server.ErrRegionNotFound(uint64(id)).Error())
 		return
 	}
 
-	left, right := cluster.GetAdjacentRegions(region)
+	left, right := rc.GetAdjacentRegions(region)
 	regionsInfo := convertToAPIRegions([]*core.RegionInfo{left, right})
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
@@ -298,7 +309,7 @@ func (h *regionsHandler) GetTopSize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	limit := defaultRegionLimit
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		var err error
@@ -311,7 +322,7 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 	if limit > maxRegionLimit {
 		limit = maxRegionLimit
 	}
-	regions := TopNRegions(cluster.GetRegions(), less, limit)
+	regions := TopNRegions(rc.GetRegions(), less, limit)
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }

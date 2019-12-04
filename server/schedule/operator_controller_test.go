@@ -343,7 +343,7 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 // #1652
 func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
-	stream := mockhbstream.NewHeartbeatStreams(cluster.ID)
+	stream := mockhbstream.NewHeartbeatStreams(cluster.ID, true /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 
 	cluster.AddLeaderStore(1, 2)
@@ -395,7 +395,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 
 func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
-	stream := mockhbstream.NewHeartbeatStreams(cluster.ID)
+	stream := mockhbstream.NewHeartbeatStreams(cluster.ID, true /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 
 	// Create a new region with epoch(0, 0)

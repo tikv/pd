@@ -58,7 +58,7 @@ type ConfigDecoder func(v interface{}) error
 // ConfigSliceDecoderBuilder used to build slice decoder of the config.
 type ConfigSliceDecoderBuilder func([]string) ConfigDecoder
 
-//ConfigJSONDecoder used to build a json decoder of the config.
+// ConfigJSONDecoder used to build a json decoder of the config.
 func ConfigJSONDecoder(data []byte) ConfigDecoder {
 	return func(v interface{}) error {
 		return DecodeConfig(data, v)

@@ -150,7 +150,7 @@ func (c *TransferCounter) dfs(cur int, curFlow uint64, path []int) {
 		if flow == 0 {
 			continue
 		}
-		if path[0] == target { //is a loop
+		if path[0] == target { // is a loop
 			// get curMinFlow
 			curMinFlow := flow
 			for i := 0; i < len(path)-1; i++ {

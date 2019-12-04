@@ -389,15 +389,8 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 		}
 	}
 	c.Assert(op, NotNil)
-	toStore := op[0].Step(1).(operator.PromoteLearner).ToStore
-	c.Assert(toStore, Not(Equals), 6)
-	leader := uint64(1)
-	for i := 0; i < op[0].Len(); i++ {
-		if tl, ok := op[0].Step(i).(operator.TransferLeader); ok {
-			leader = tl.ToStore
-		}
-	}
-	c.Assert(leader, Equals, toStore)
+	c.Assert(op[0].Step(1).(operator.PromoteLearner).ToStore, Equals, op[0].Step(op[0].Len()-1).(operator.TransferLeader).ToStore)
+	c.Assert(op[0].Step(1).(operator.PromoteLearner).ToStore, Not(Equals), 6)
 }
 
 var _ = Suite(&testHotRegionSchedulerSuite{})

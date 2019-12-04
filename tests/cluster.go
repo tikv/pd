@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
@@ -260,7 +261,7 @@ func (s *TestServer) GetStore(storeID uint64) *core.StoreInfo {
 
 // GetRaftCluster returns Raft cluster.
 // If cluster has not been bootstrapped, return nil.
-func (s *TestServer) GetRaftCluster() *server.RaftCluster {
+func (s *TestServer) GetRaftCluster() *cluster.RaftCluster {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetRaftCluster()
@@ -299,7 +300,8 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 func (s *TestServer) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.CheckHealth(members)
+	rc := s.server.GetRaftCluster()
+	return rc.CheckHealth(members)
 }
 
 // BootstrapCluster is used to bootstrap the cluster.

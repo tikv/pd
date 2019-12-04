@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 
@@ -42,12 +43,18 @@ func newHealthHandler(svr *server.Server, rd *render.Render) *healthHandler {
 
 func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
-	members, err := server.GetMembers(client)
+	members, err := cluster.GetMembers(client)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	unhealthMembers := h.svr.CheckHealth(members)
+
+	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, cluster.ErrNotBootstrapped.Error())
+		return
+	}
+	unhealthMembers := rc.CheckHealth(members)
 	healths := []Health{}
 	for _, member := range members {
 		h := Health{

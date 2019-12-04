@@ -11,12 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package cluster
 
 import (
 	"context"
 	"fmt"
-	"path"
+	"net/http"
 	"sync"
 	"time"
 
@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/config"
@@ -35,16 +36,34 @@ import (
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/checker"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
-var (
-	backgroundJobInterval      = time.Minute
+var backgroundJobInterval = time.Minute
+
+const (
+	clientTimeout              = 3 * time.Second
 	defaultChangedRegionsLimit = 10000
 )
+
+// ErrRegionIsStale is error info for region is stale.
+var ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
+	return errors.Errorf("region is stale: region %v origin %v", region, origin)
+}
+
+// Server is the interface for cluster.
+type Server interface {
+	GetAllocator() *id.AllocatorImpl
+	GetScheduleOption() *config.ScheduleOption
+	GetStorage() *core.Storage
+	GetHBStreams() opt.HeartbeatStreams
+	GetRaftCluster() *RaftCluster
+}
 
 // RaftCluster is used for cluster config management.
 // Raft cluster key format:
@@ -56,8 +75,6 @@ var (
 type RaftCluster struct {
 	sync.RWMutex
 	ctx context.Context
-
-	s *Server
 
 	running bool
 
@@ -86,26 +103,29 @@ type RaftCluster struct {
 	regionSyncer *syncer.RegionSyncer
 
 	ruleManager *placement.RuleManager
+	client      *clientv3.Client
 }
 
-// ClusterStatus saves some state information
-type ClusterStatus struct {
+// Status saves some state information.
+type Status struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`
 }
 
-func newRaftCluster(ctx context.Context, s *Server, clusterID uint64) *RaftCluster {
+// NewRaftCluster create a new cluster.
+func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, client *clientv3.Client) *RaftCluster {
 	return &RaftCluster{
 		ctx:          ctx,
-		s:            s,
 		running:      false,
 		clusterID:    clusterID,
-		clusterRoot:  s.getClusterRootPath(),
-		regionSyncer: syncer.NewRegionSyncer(s),
+		clusterRoot:  root,
+		regionSyncer: regionSyncer,
+		client:       client,
 	}
 }
 
-func (c *RaftCluster) loadClusterStatus() (*ClusterStatus, error) {
+// LoadClusterStatus loads the cluster status.
+func (c *RaftCluster) LoadClusterStatus() (*Status, error) {
 	bootstrapTime, err := c.loadBootstrapTime()
 	if err != nil {
 		return nil, err
@@ -114,7 +134,7 @@ func (c *RaftCluster) loadClusterStatus() (*ClusterStatus, error) {
 	if bootstrapTime != typeutil.ZeroTime {
 		isInitialized = c.isInitialized()
 	}
-	return &ClusterStatus{
+	return &Status{
 		RaftBootstrapTime: bootstrapTime,
 		IsInitialized:     isInitialized,
 	}, nil
@@ -126,8 +146,15 @@ func (c *RaftCluster) isInitialized() bool {
 	}
 	region := c.core.SearchRegion(nil)
 	return region != nil &&
-		len(region.GetVoters()) >= int(c.s.GetReplicationConfig().MaxReplicas) &&
+		len(region.GetVoters()) >= int(c.GetReplicationConfig().MaxReplicas) &&
 		len(region.GetPendingPeers()) == 0
+}
+
+// GetReplicationConfig get the replication config.
+func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
+	cfg := &config.ReplicationConfig{}
+	*cfg = *c.opt.GetReplication().Load()
+	return cfg
 }
 
 // loadBootstrapTime loads the saved bootstrap time from etcd. It returns zero
@@ -135,7 +162,7 @@ func (c *RaftCluster) isInitialized() bool {
 // yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.s.storage.Load(c.s.storage.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.storage.Load(c.storage.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return t, err
 	}
@@ -145,7 +172,8 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	return typeutil.ParseTimestamp([]byte(data))
 }
 
-func (c *RaftCluster) initCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage) {
+// InitCluster initializes the raft cluster.
+func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage) {
 	c.core = core.NewBasicCluster()
 	c.opt = opt
 	c.storage = storage
@@ -157,7 +185,8 @@ func (c *RaftCluster) initCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.hotSpotCache = statistics.NewHotCache()
 }
 
-func (c *RaftCluster) start() error {
+// Start starts a cluster.
+func (c *RaftCluster) Start(s Server) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -166,8 +195,8 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 
-	c.initCluster(c.s.idAllocator, c.s.scheduleOpt, c.s.storage)
-	cluster, err := c.loadClusterInfo()
+	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage())
+	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
 	}
@@ -175,8 +204,8 @@ func (c *RaftCluster) start() error {
 		return nil
 	}
 
-	c.coordinator = newCoordinator(c.ctx, cluster, c.s.hbStreams)
-	c.regionStats = statistics.NewRegionStatistics(c.s.scheduleOpt)
+	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
+	c.regionStats = statistics.NewRegionStatistics(c.opt)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(3)
@@ -191,8 +220,8 @@ func (c *RaftCluster) start() error {
 	return nil
 }
 
-// Return nil if cluster is not bootstrapped.
-func (c *RaftCluster) loadClusterInfo() (*RaftCluster, error) {
+// LoadClusterInfo loads cluster related info.
+func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	c.meta = &metapb.Cluster{}
 	ok, err := c.storage.LoadMeta(c.meta)
 	if err != nil {
@@ -207,7 +236,7 @@ func (c *RaftCluster) loadClusterInfo() (*RaftCluster, error) {
 		return nil, err
 	}
 	log.Info("load stores",
-		zap.Int("count", c.getStoreCount()),
+		zap.Int("count", c.GetStoreCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
 
@@ -266,7 +295,8 @@ func (c *RaftCluster) syncRegions() {
 	c.regionSyncer.RunServer(c.changedRegionNotifier(), c.quit)
 }
 
-func (c *RaftCluster) stop() {
+// Stop stops the cluster.
+func (c *RaftCluster) Stop() {
 	c.Lock()
 
 	if !c.running {
@@ -282,7 +312,8 @@ func (c *RaftCluster) stop() {
 	c.wg.Wait()
 }
 
-func (c *RaftCluster) isRunning() bool {
+// IsRunning return if the cluster is running.
+func (c *RaftCluster) IsRunning() bool {
 	c.RLock()
 	defer c.RUnlock()
 	return c.running
@@ -295,8 +326,15 @@ func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	return c.coordinator.opController
 }
 
+// GetRegionScatter returns the region scatter.
+func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.regionScatterer
+}
+
 // GetHeartbeatStreams returns the heartbeat streams.
-func (c *RaftCluster) GetHeartbeatStreams() *heartbeatStreams {
+func (c *RaftCluster) GetHeartbeatStreams() opt.HeartbeatStreams {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.hbStreams
@@ -309,8 +347,29 @@ func (c *RaftCluster) GetCoordinator() *coordinator {
 	return c.coordinator
 }
 
-// handleStoreHeartbeat updates the store status.
-func (c *RaftCluster) handleStoreHeartbeat(stats *pdpb.StoreStats) error {
+// GetRegionSyncer returns the region syncer.
+func (c *RaftCluster) GetRegionSyncer() *syncer.RegionSyncer {
+	c.RLock()
+	defer c.RUnlock()
+	return c.regionSyncer
+}
+
+// GetStorage returns the storage.
+func (c *RaftCluster) GetStorage() *core.Storage {
+	c.RLock()
+	defer c.RUnlock()
+	return c.storage
+}
+
+// SetStorage set the storage for test purpose.
+func (c *RaftCluster) SetStorage(s *core.Storage) {
+	c.Lock()
+	defer c.Unlock()
+	c.storage = s
+}
+
+// HandleStoreHeartbeat updates the store status.
+func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -496,58 +555,6 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
-func makeStoreKey(clusterRootPath string, storeID uint64) string {
-	return path.Join(clusterRootPath, "s", fmt.Sprintf("%020d", storeID))
-}
-
-func makeRegionKey(clusterRootPath string, regionID uint64) string {
-	return path.Join(clusterRootPath, "r", fmt.Sprintf("%020d", regionID))
-}
-
-func makeRaftClusterStatusPrefix(clusterRootPath string) string {
-	return path.Join(clusterRootPath, "status")
-}
-
-func makeBootstrapTimeKey(clusterRootPath string) string {
-	return path.Join(makeRaftClusterStatusPrefix(clusterRootPath), "raft_bootstrap_time")
-}
-
-func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
-	// TODO: do more check for request fields validation.
-
-	storeMeta := req.GetStore()
-	if storeMeta == nil {
-		return errors.Errorf("missing store meta for bootstrap %d", clusterID)
-	} else if storeMeta.GetId() == 0 {
-		return errors.New("invalid zero store id")
-	}
-
-	regionMeta := req.GetRegion()
-	if regionMeta == nil {
-		return errors.Errorf("missing region meta for bootstrap %d", clusterID)
-	} else if len(regionMeta.GetStartKey()) > 0 || len(regionMeta.GetEndKey()) > 0 {
-		// first region start/end key must be empty
-		return errors.Errorf("invalid first region key range, must all be empty for bootstrap %d", clusterID)
-	} else if regionMeta.GetId() == 0 {
-		return errors.New("invalid zero region id")
-	}
-
-	peers := regionMeta.GetPeers()
-	if len(peers) != 1 {
-		return errors.Errorf("invalid first region peer count %d, must be 1 for bootstrap %d", len(peers), clusterID)
-	}
-
-	peer := peers[0]
-	if peer.GetStoreId() != storeMeta.GetId() {
-		return errors.Errorf("invalid peer store id %d != %d for bootstrap %d", peer.GetStoreId(), storeMeta.GetId(), clusterID)
-	}
-	if peer.GetId() == 0 {
-		return errors.New("invalid zero peer id")
-	}
-
-	return nil
-}
-
 func (c *RaftCluster) getClusterID() uint64 {
 	c.RLock()
 	defer c.RUnlock()
@@ -673,7 +680,8 @@ func (c *RaftCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
 	return c.core.GetRegionStores(region)
 }
 
-func (c *RaftCluster) getStoreCount() int {
+// GetStoreCount returns the count of stores.
+func (c *RaftCluster) GetStoreCount() int {
 	return c.core.GetStoreCount()
 }
 
@@ -708,6 +716,13 @@ func (c *RaftCluster) DropCacheRegion(id uint64) {
 	if region := c.GetRegion(id); region != nil {
 		c.core.RemoveRegion(region)
 	}
+}
+
+// GetCacheCluster gets the cached cluster.
+func (c *RaftCluster) GetCacheCluster() *core.BasicCluster {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core
 }
 
 // GetMetaStores gets stores from cluster.
@@ -745,12 +760,13 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	}
 	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
 	newStore.Labels = labels
-	// putStore will perform label merge.
-	err := c.putStore(newStore)
+	// PutStore will perform label merge.
+	err := c.PutStore(newStore)
 	return err
 }
 
-func (c *RaftCluster) putStore(store *metapb.Store) error {
+// PutStore puts a store.
+func (c *RaftCluster) PutStore(store *metapb.Store) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -925,7 +941,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 		return core.NewStoreNotFoundErr(storeID)
 	}
 
-	if err := c.s.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
+	if err := c.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
 		return err
 	}
 
@@ -1072,12 +1088,11 @@ func (c *RaftCluster) resetClusterMetrics() {
 }
 
 func (c *RaftCluster) collectHealthStatus() {
-	client := c.s.GetClient()
-	members, err := GetMembers(client)
+	members, err := GetMembers(c.client)
 	if err != nil {
 		log.Error("get members error", zap.Error(err))
 	}
-	unhealth := c.s.CheckHealth(members)
+	unhealth := c.CheckHealth(members)
 	for _, member := range members {
 		if _, ok := unhealth[member.GetMemberId()]; ok {
 			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
@@ -1115,13 +1130,14 @@ func (c *RaftCluster) takeRegionStoresLocked(region *core.RegionInfo) []*core.St
 	return stores
 }
 
-func (c *RaftCluster) allocID() (uint64, error) {
+// AllocID allocs ID.
+func (c *RaftCluster) AllocID() (uint64, error) {
 	return c.id.Alloc()
 }
 
 // AllocPeer allocs a new peer on a store.
 func (c *RaftCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := c.allocID()
+	peerID, err := c.AllocID()
 	if err != nil {
 		log.Error("failed to alloc peer", zap.Error(err))
 		return nil, err
@@ -1171,7 +1187,6 @@ func (c *RaftCluster) OnStoreVersionChange() {
 		log.Info("cluster version changed",
 			zap.Stringer("old-cluster-version", clusterVersion),
 			zap.Stringer("new-cluster-version", minVersion))
-		CheckPDVersion(c.opt)
 	}
 }
 
@@ -1195,7 +1210,8 @@ func (c *RaftCluster) GetConfig() *metapb.Cluster {
 	return proto.Clone(c.meta).(*metapb.Cluster)
 }
 
-func (c *RaftCluster) putConfig(meta *metapb.Cluster) error {
+// PutConfig puts config into cluster.
+func (c *RaftCluster) PutConfig(meta *metapb.Cluster) error {
 	c.Lock()
 	defer c.Unlock()
 	if meta.GetId() != c.clusterID {
@@ -1388,25 +1404,29 @@ func (c *RaftCluster) isPrepared() bool {
 	return c.prepareChecker.check(c)
 }
 
-func (c *RaftCluster) getStoresBytesWriteStat() map[uint64]float64 {
+// GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
+func (c *RaftCluster) GetStoresBytesWriteStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresBytesWriteStat()
 }
 
-func (c *RaftCluster) getStoresBytesReadStat() map[uint64]float64 {
+// GetStoresBytesReadStat returns the bytes read stat of all StoreInfo.
+func (c *RaftCluster) GetStoresBytesReadStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresBytesReadStat()
 }
 
-func (c *RaftCluster) getStoresKeysWriteStat() map[uint64]float64 {
+// GetStoresKeysWriteStat returns the bytes write stat of all StoreInfo.
+func (c *RaftCluster) GetStoresKeysWriteStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresKeysWriteStat()
 }
 
-func (c *RaftCluster) getStoresKeysReadStat() map[uint64]float64 {
+// GetStoresKeysReadStat returns the bytes read stat of all StoreInfo.
+func (c *RaftCluster) GetStoresKeysReadStat() map[uint64]float64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats.GetStoresKeysReadStat()
@@ -1500,4 +1520,97 @@ func (checker *prepareChecker) collect(region *core.RegionInfo) {
 		checker.reactiveRegions[p.GetStoreId()]++
 	}
 	checker.sum++
+}
+
+// GetHotWriteRegions gets hot write regions' info.
+func (c *RaftCluster) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
+	c.RLock()
+	co := c.coordinator
+	c.RUnlock()
+	return co.getHotWriteRegions()
+}
+
+// GetHotReadRegions gets hot read regions' info.
+func (c *RaftCluster) GetHotReadRegions() *statistics.StoreHotPeersInfos {
+	c.RLock()
+	co := c.coordinator
+	c.RUnlock()
+	return co.getHotReadRegions()
+}
+
+// GetSchedulers gets all schedulers.
+func (c *RaftCluster) GetSchedulers() map[string]*scheduleController {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.getSchedulers()
+}
+
+// AddScheduler adds a scheduler.
+func (c *RaftCluster) AddScheduler(scheduler schedule.Scheduler, args ...string) error {
+	c.Lock()
+	defer c.Unlock()
+	return c.coordinator.addScheduler(scheduler, args...)
+}
+
+// RemoveScheduler removes a scheduler.
+func (c *RaftCluster) RemoveScheduler(name string) error {
+	c.Lock()
+	defer c.Unlock()
+	return c.coordinator.removeScheduler(name)
+}
+
+// PauseOrResumeScheduler pauses or resumes a scheduler.
+func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.pauseOrResumeScheduler(name, t)
+}
+
+// DialClient used to dial http request.
+var DialClient = &http.Client{
+	Timeout: clientTimeout,
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
+
+var healthURL = "/pd/api/v1/ping"
+
+// CheckHealth checks if members are healthy.
+func (c *RaftCluster) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
+	unhealthMembers := make(map[uint64]*pdpb.Member)
+	for _, member := range members {
+		for _, cURL := range member.ClientUrls {
+			resp, err := DialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
+			if resp != nil {
+				resp.Body.Close()
+			}
+			if err != nil || resp.StatusCode != http.StatusOK {
+				unhealthMembers[member.GetMemberId()] = member
+				break
+			}
+		}
+	}
+	return unhealthMembers
+}
+
+// GetMembers return a slice of Members.
+func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
+	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
+	if err != nil {
+		return nil, err
+	}
+
+	members := make([]*pdpb.Member, 0, len(listResp.Members))
+	for _, m := range listResp.Members {
+		info := &pdpb.Member{
+			Name:       m.Name,
+			MemberId:   m.ID,
+			ClientUrls: m.ClientURLs,
+			PeerUrls:   m.PeerURLs,
+		}
+		members = append(members, info)
+	}
+
+	return members, nil
 }

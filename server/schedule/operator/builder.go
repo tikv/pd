@@ -141,14 +141,19 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 }
 
 // SetPeers resets the target peer list.
-// If peer's ID is 0, the builder will allocate a new ID later.
-// If current target leader does not exist in peers, it will be reset.
+//
+// If peer's ID is 0, the builder will allocate a new ID later. If current
+// target leader does not exist in peers, it will be reset.
 func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 	if b.err != nil {
 		return b
 	}
 	b.targetPeers = peersMap{}
-	for _, p := range peers {
+	for k, p := range peers {
+		if p.GetStoreId() != k {
+			b.err = errors.Errorf("setPeers with mismatch storeID: %v", peers)
+			return b
+		}
 		b.targetPeers.Set(p)
 	}
 	if _, ok := peers[b.targetLeader]; !ok {
@@ -240,11 +245,9 @@ func (b *Builder) brief() string {
 		return fmt.Sprintf("add peer: store %s", b.toAdd)
 	case b.toRemove.Len() > 0:
 		return fmt.Sprintf("rm peer: store %s", b.toRemove)
-	}
-	if b.toPromote.Len() > 0 {
+	case b.toPromote.Len() > 0:
 		return fmt.Sprintf("promote peer: store %s", b.toPromote)
-	}
-	if b.targetLeader != b.originLeader {
+	case b.targetLeader != b.originLeader:
 		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeader, b.targetLeader)
 	}
 	return ""
@@ -254,7 +257,7 @@ func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
 	for b.toAdd.Len() > 0 || b.toRemove.Len() > 0 || b.toPromote.Len() > 0 {
 		plan := b.peerPlan()
 		if plan.empty() {
-			return kind, errors.New("fail to build operator: plan is empty")
+			return kind, errors.New("fail to build operator: plan is empty, maybe no valid leader")
 		}
 		if plan.leaderAdd != 0 && plan.leaderAdd != b.currentLeader {
 			b.execTransferLeader(plan.leaderAdd)
@@ -341,7 +344,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 // stepPlan is exec step. It can be:
 // 1. add voter + remove voter.
 // 2. add learner + remove learner.
-// 3. promote learner + add learner + remove voter.
+// 3. add learner + promote learner + remove voter.
 // 4. promote learner.
 // 5. remove voter/learner.
 // 6. add voter/learner.
@@ -393,7 +396,7 @@ func (b *Builder) planReplace() stepPlan {
 			}
 		}
 	}
-	// promote learner + add learner + remove voter
+	// add learner + promote learner + remove voter
 	for _, i := range b.toPromote.IDs() {
 		promote := b.toPromote.Get(i)
 		for _, j := range b.toAdd.IDs() {
@@ -520,7 +523,7 @@ func (b *Builder) preferReplaceByNearest(p stepPlan) int {
 	var m int
 	if p.add != nil && p.remove != nil {
 		m = b.labelMatch(p.add.GetStoreId(), p.remove.GetStoreId())
-		if p.promote != nil { // promote learner + add learner + remove voter
+		if p.promote != nil { // add learner + promote learner + remove voter
 			if m2 := b.labelMatch(p.promote.GetStoreId(), p.add.GetStoreId()); m2 < m {
 				return m2
 			}
