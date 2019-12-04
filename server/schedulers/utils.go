@@ -356,11 +356,11 @@ func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence)
 	}
 }
 
-func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) (float64, bool)) map[uint64]Influence {
+func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]Influence {
 	ret := map[uint64]Influence{}
 	for p := range pendings {
-		w, remove := f(p.op)
-		if remove {
+		w := f(p.op)
+		if w == 0 {
 			delete(pendings, p)
 		}
 		ret[p.to] = ret[p.to].add(&p.origin, w)

@@ -604,24 +604,24 @@ func (h *balanceHotRegionsScheduler) GetStoresScore() map[uint64]float64 {
 	return storesScore
 }
 
-func calcPendingWeight(op *operator.Operator) (weight float64, remove bool) {
+func calcPendingWeight(op *operator.Operator) float64 {
 	if op.CheckExpired() || op.CheckTimeout() {
-		return 0, true
+		return 0
 	}
 	status := op.Status()
 	if !operator.IsEndStatus(status) {
-		return 1, false
+		return 1
 	}
 	switch status {
 	case operator.SUCCESS:
 		zombieDur := time.Since(op.GetReachTimeOf(status))
 		if zombieDur >= maxZombieDur {
-			return 0, true
+			return 0
 		}
 		// TODO: use store statistics update time to make a more accurate estimation
-		return float64(maxZombieDur-zombieDur) / float64(maxZombieDur), false
+		return float64(maxZombieDur-zombieDur) / float64(maxZombieDur)
 	default:
-		return 0, true
+		return 0
 	}
 }
 
