@@ -262,8 +262,6 @@ func (c *coordinator) run() {
 
 // LoadPlugin load user plugin
 func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
-	defer logutil.LogPanic()
-	defer c.wg.Done()
 	log.Info("load plugin", zap.String("plugin-path", pluginPath))
 	// get func: SchedulerType from plugin
 	SchedulerType, err := schedule.GetFunction(pluginPath, "SchedulerType")
@@ -291,14 +289,21 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 		return
 	}
 
+	c.wg.Add(1)
+	go c.waitPluginUnload(pluginPath, s.GetName(), ch)
+}
+
+func (c *coordinator) waitPluginUnload(pluginPath, schedulerName string, ch chan string) {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
 	// Get signal from channel which means user unload the plugin
 	for {
 		select {
 		case action := <-ch:
 			if action == PluginUnload {
-				err := c.removeScheduler(s.GetName())
+				err := c.removeScheduler(schedulerName)
 				if err != nil {
-					log.Error("can not remove scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+					log.Error("can not remove scheduler", zap.String("scheduler-name", schedulerName), zap.Error(err))
 				} else {
 					log.Info("unload plugin", zap.String("plugin", pluginPath))
 					return
@@ -307,7 +312,7 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 				log.Error("unknown action", zap.String("action", action))
 			}
 		case <-c.ctx.Done():
-			log.Info("load plugin has been stopped")
+			log.Info("unload plugin has been stopped")
 			return
 		}
 	}

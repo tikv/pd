@@ -821,21 +821,21 @@ func (h *Handler) ResetTS(ts uint64) error {
 
 // PluginLoad loads the plugin referenced by the pluginPath
 func (h *Handler) PluginLoad(pluginPath string) error {
-	c, err := h.getCoordinator()
+	cluster, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
+	c := cluster.GetCoordinator()
 	ch := make(chan string)
 	h.pluginChMap[pluginPath] = ch
-	c.wg.Add(1)
-	go c.LoadPlugin(pluginPath, ch)
+	c.LoadPlugin(pluginPath, ch)
 	return nil
 }
 
 // PluginUnload unloads the plugin referenced by the pluginPath
 func (h *Handler) PluginUnload(pluginPath string) error {
 	if ch, ok := h.pluginChMap[pluginPath]; ok {
-		ch <- server.PluginUnload
+		ch <- cluster.PluginUnload
 		return nil
 	}
 	return ErrPluginNotFound(pluginPath)

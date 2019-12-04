@@ -18,7 +18,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/spf13/cobra"
 )
 
@@ -58,11 +58,11 @@ func NewUnloadPluginCommand() *cobra.Command {
 }
 
 func loadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	sendPluginCommand(cmd, server.PluginLoad, args)
+	sendPluginCommand(cmd, cluster.PluginLoad, args)
 }
 
 func unloadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	sendPluginCommand(cmd, server.PluginUnload, args)
+	sendPluginCommand(cmd, cluster.PluginUnload, args)
 }
 
 func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
@@ -79,9 +79,9 @@ func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
 		return
 	}
 	switch action {
-	case server.PluginLoad:
+	case cluster.PluginLoad:
 		_, err = doRequest(cmd, pluginPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(reqData)))
-	case server.PluginUnload:
+	case cluster.PluginUnload:
 		_, err = doRequest(cmd, pluginPrefix, http.MethodDelete, WithBody("application/json", bytes.NewBuffer(reqData)))
 	default:
 		cmd.Printf("Unknown action %s\n", action)

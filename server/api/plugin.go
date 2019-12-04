@@ -18,6 +18,7 @@ import (
 
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 
@@ -34,11 +35,11 @@ func newPluginHandler(handler *server.Handler, rd *render.Render) *pluginHandler
 }
 
 func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
-	h.processPluginCommand(w, r, server.PluginLoad)
+	h.processPluginCommand(w, r, cluster.PluginLoad)
 }
 
 func (h *pluginHandler) UnloadPlugin(w http.ResponseWriter, r *http.Request) {
-	h.processPluginCommand(w, r, server.PluginUnload)
+	h.processPluginCommand(w, r, cluster.PluginUnload)
 }
 
 func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Request, action string) {
@@ -48,9 +49,9 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 	}
 	var err error
 	switch action {
-	case server.PluginLoad:
+	case cluster.PluginLoad:
 		err = h.PluginLoad(data["plugin-path"])
-	case server.PluginUnload:
+	case cluster.PluginUnload:
 		err = h.PluginUnload(data["plugin-path"])
 	default:
 		h.rd.JSON(w, http.StatusBadRequest, "unknown action")
