@@ -344,7 +344,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 // stepPlan is exec step. It can be:
 // 1. add voter + remove voter.
 // 2. add learner + remove learner.
-// 3. promote learner + add learner + remove voter.
+// 3. add learner + promote learner + remove voter.
 // 4. promote learner.
 // 5. remove voter/learner.
 // 6. add voter/learner.
@@ -523,7 +523,7 @@ func (b *Builder) preferReplaceByNearest(p stepPlan) int {
 	var m int
 	if p.add != nil && p.remove != nil {
 		m = b.labelMatch(p.add.GetStoreId(), p.remove.GetStoreId())
-		if p.promote != nil { // promote learner + add learner + remove voter
+		if p.promote != nil { // add learner + promote learner + remove voter
 			if m2 := b.labelMatch(p.promote.GetStoreId(), p.add.GetStoreId()); m2 < m {
 				return m2
 			}
