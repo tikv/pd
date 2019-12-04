@@ -42,6 +42,11 @@ type RegionInfo struct {
 	approximateSize int64
 	approximateKeys int64
 	interval        *pdpb.TimeInterval
+
+	// accumulated hot degree
+	accumHotDegree uint64
+	// accumulated interval
+	accumInterval uint64
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -77,6 +82,9 @@ func classifyVoterAndLearner(region *RegionInfo) {
 // (heartbeat size <= 1MB).
 const EmptyRegionApproximateSize = 1
 
+// CountPeriod is the period of interval count
+const CountPeriod = 24 * 60 * 60
+
 // RegionFromHeartbeat constructs a Region from region heartbeat.
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 	// Convert unit to MB.
@@ -99,6 +107,13 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		approximateKeys: int64(heartbeat.GetApproximateKeys()),
 		interval:        heartbeat.GetInterval(),
 	}
+
+	// compute the accumulated interval and accumulated hot degree
+	region.accumInterval = region.accumInterval + region.interval.GetEndTimestamp() - region.interval.GetStartTimestamp()
+	if region.accumInterval > CountPeriod {
+		region.accumHotDegree = (region.writtenBytes+region.readBytes)/(uint64)(region.approximateSize) + region.accumHotDegree/2
+	}
+	region.accumHotDegree = (region.writtenBytes+region.readBytes)/(uint64)(region.approximateSize) + region.accumHotDegree
 
 	classifyVoterAndLearner(region)
 	return region
@@ -127,6 +142,9 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		approximateSize: r.approximateSize,
 		approximateKeys: r.approximateKeys,
 		interval:        proto.Clone(r.interval).(*pdpb.TimeInterval),
+
+		accumHotDegree: r.accumHotDegree,
+		accumInterval:  r.accumInterval,
 	}
 
 	for _, opt := range opts {
@@ -375,6 +393,16 @@ func (r *RegionInfo) GetPeers() []*metapb.Peer {
 // GetRegionEpoch returns the region epoch of the region.
 func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 	return r.meta.RegionEpoch
+}
+
+// GetRegionHotDegree returns the hot degree of the region
+func (r *RegionInfo) GetRegionHotDegree() uint64 {
+	return r.accumHotDegree
+}
+
+// SetRegionHotDegree set the hot degree of the region
+func (r *RegionInfo) SetRegionHotDegree(hotDegree uint64) {
+	r.accumHotDegree = hotDegree
 }
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.

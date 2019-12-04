@@ -1,45 +1,48 @@
 package main
 
 import (
+	"encoding/hex"
 	"time"
 
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"go.uber.org/zap"
 )
 
 type moveRegionUserScheduler struct {
 	*userBaseScheduler
-	name         string
 	opController *schedule.OperatorController
+	name         string
+	startKey     string
+	endKey       string
 	storeIDs     []uint64
-	keyStart     string
-	keyEnd       string
-	timeInterval *schedule.TimeInterval
+	startTime    time.Time
+	endTime      time.Time
 }
 
 // Only use for register scheduler
 // newMoveRegionUserScheduler() will be called manually
 func init() {
 	schedule.RegisterScheduler("move-region-user", func(opController *schedule.OperatorController, args []string) (schedule.Scheduler, error) {
-		return newMoveRegionUserScheduler(opController, "", "", "", []uint64{}, nil), nil
+		return newMoveRegionUserScheduler(opController, "", "", "", []uint64{}, time.Time{}, time.Time{}), nil
 	})
 }
 
-func newMoveRegionUserScheduler(opController *schedule.OperatorController, name, keyStart, keyEnd string, storeIDs []uint64, interval *schedule.TimeInterval) schedule.Scheduler {
+func newMoveRegionUserScheduler(opController *schedule.OperatorController, name, startKey, endKey string, storeIDs []uint64, startTime, endTime time.Time) schedule.Scheduler {
 	base := newUserBaseScheduler(opController)
-	log.Info("", zap.String("New", name), zap.Strings("key range", []string{keyStart, keyEnd}))
+	log.Info("", zap.String("New", name), zap.Strings("key range", []string{startKey, endKey}))
 	return &moveRegionUserScheduler{
 		userBaseScheduler: base,
-		name:              name,
-		storeIDs:          storeIDs,
-		keyStart:          keyStart,
-		keyEnd:            keyEnd,
-		timeInterval:      interval,
 		opController:      opController,
+		name:              name,
+		startKey:          startKey,
+		endKey:            endKey,
+		storeIDs:          storeIDs,
+		startTime:         startTime,
+		endTime:           endTime,
 	}
 }
 
@@ -52,29 +55,24 @@ func (r *moveRegionUserScheduler) GetType() string {
 }
 
 func (r *moveRegionUserScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+	currentTime := time.Now()
+	if currentTime.Before(r.startTime) || currentTime.After(r.endTime) {
+		return false
+	}
 	return r.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
 func (r *moveRegionUserScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
-	schedule.PluginsInfoMapLock.RLock()
-	defer schedule.PluginsInfoMapLock.RUnlock()
-	// Determine if there is a time limit
-	if r.timeInterval != nil {
-		currentTime := time.Now()
-		if currentTime.After(r.timeInterval.GetEnd()) || r.timeInterval.GetBegin().After(currentTime) {
-			return nil
-		}
-	}
 	// When region ids change, re-output scheduler's regions and stores
-	regionIDs := schedule.GetRegionIDs(cluster, r.keyStart, r.keyEnd)
-//	log.Info("", zap.String("Schedule()", r.GetName()), zap.Uint64s("Regions", regionIDs))
-//	log.Info("", zap.String("Schedule()", r.GetName()), zap.Uint64s("Stores", r.storeIDs))
+	regionIDs := getRegionIDs(cluster, r.startKey, r.endKey)
+	// log.Info("", zap.String("Schedule()", r.GetName()), zap.Uint64s("Regions", regionIDs))
+	// log.Info("", zap.String("Schedule()", r.GetName()), zap.Uint64s("Stores", r.storeIDs))
 
 	if len(r.storeIDs) == 0 {
 		return nil
 	}
 
-	filters := []filter.Filter {
+	filters := []filter.Filter{
 		filter.StoreStateFilter{MoveRegion: true},
 	}
 
@@ -104,7 +102,7 @@ func (r *moveRegionUserScheduler) Schedule(cluster schedule.Cluster) []*operator
 		// If filtered target stores all contain a region peer,
 		// it means user's rules has been met,
 		// then do nothing
-		if !r.allExist(storeIDs, region) {
+		if !allExist(storeIDs, region) {
 			// if region max-replicas > target stores length,
 			// add the store where the original peer is located sequentially,
 			// until target stores length = max-replicas
@@ -126,7 +124,7 @@ func (r *moveRegionUserScheduler) Schedule(cluster schedule.Cluster) []*operator
 				log.Info("replicas > len(storeMap)", zap.String("scheduler", r.GetName()))
 				continue
 			}
-			op, err := operator.CreateMoveRegionOperator("move-region-user", cluster, region, operator.OpAdmin, storeMap)
+			op, err := operator.CreateMoveRegionOperator(r.name, cluster, region, operator.OpAdmin, storeMap)
 			if err != nil {
 				log.Error("CreateMoveRegionOperator Err", zap.String("scheduler", r.GetName()), zap.Error(err))
 				continue
@@ -138,7 +136,7 @@ func (r *moveRegionUserScheduler) Schedule(cluster schedule.Cluster) []*operator
 }
 
 // allExist(storeIDs, region) determine if all storeIDs contain a region peer
-func (r *moveRegionUserScheduler) allExist(storeIDs []uint64, region *core.RegionInfo) bool {
+func allExist(storeIDs []uint64, region *core.RegionInfo) bool {
 	for _, storeID := range storeIDs {
 		if _, ok := region.GetStoreIds()[storeID]; ok {
 			continue
@@ -147,4 +145,68 @@ func (r *moveRegionUserScheduler) allExist(storeIDs []uint64, region *core.Regio
 		}
 	}
 	return true
+}
+
+func getRegionIDs(cluster schedule.Cluster, keyStart, keyEnd string) []uint64 {
+	regionIDs := []uint64{}
+	//decode key form string to []byte
+	startKey, err := hex.DecodeString(keyStart)
+	if err != nil {
+		log.Error("can not decode", zap.String("key:", keyStart))
+		return regionIDs
+	}
+	endKey, err := hex.DecodeString(keyEnd)
+	if err != nil {
+		log.Info("can not decode", zap.String("key:", keyEnd))
+		return regionIDs
+	}
+
+	lastKey := []byte{}
+	regions := cluster.ScanRegions(startKey, endKey, 0)
+	for _, region := range regions {
+		regionIDs = append(regionIDs, region.GetID())
+		lastKey = region.GetEndKey()
+	}
+
+	if len(regions) == 0 {
+		lastRegion := cluster.ScanRegions(startKey, []byte{}, 1)
+		if len(lastRegion) == 0 {
+			return regionIDs
+		} else {
+			//if get the only one region, exclude it
+			if len(lastRegion[0].GetStartKey()) == 0 && len(lastRegion[0].GetEndKey()) == 0 {
+				return regionIDs
+			} else {
+				//      startKey         endKey
+				//         |			   |
+				//     -----------------------------
+				// ...|	  region0  |    region1  | ...
+				//    -----------------------------
+				// key range span two regions
+				// choose region1
+				regionIDs = append(regionIDs, lastRegion[0].GetID())
+				return regionIDs
+			}
+		}
+	} else {
+		if len(lastKey) == 0 {
+			// if regions last one is the last region
+			return regionIDs
+		} else {
+			//            startKey		                            endKey
+			//         	   |                                         |
+			//      -----------------------------------------------------------
+			// ... |	  region_i   |   ...   |     region_j   |    region_j+1   | ...
+			//     -----------------------------------------------------------
+			// ScanRangeWithEndKey(startKey, endKey) will get region i+1 to j
+			// lastKey = region_j's EndKey
+			// ScanRegions(lastKey, 1) then get region_j+1
+			// so finally get region i+1 to j+1
+			lastRegion := cluster.ScanRegions(lastKey, []byte{}, 1)
+			if len(lastRegion) != 0 {
+				regionIDs = append(regionIDs, lastRegion[0].GetID())
+			}
+			return regionIDs
+		}
+	}
 }

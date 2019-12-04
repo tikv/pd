@@ -26,7 +26,7 @@ func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var err error
-	err = h.PluginLoad(input["plugin-path"].(string), input["config-path"].(string))
+	err = h.PluginLoad(input["plugin-path"].(string))
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -41,7 +41,7 @@ func (h *pluginHandler) UpdatePlugin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var err error
-	err = h.PluginUpdate(input["plugin-path"].(string), input["config-path"].(string))
+	err = h.PluginUpdate(input["plugin-path"].(string))
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
