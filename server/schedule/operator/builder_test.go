@@ -207,7 +207,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			[]*metapb.Peer{{Id: 10, StoreId: 10}},
 			[]OpStep{},
 		},
-		{ // promote learner + add learner + remove voter
+		{ // add learner + promote learner + remove voter
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, IsLearner: true}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsLearner: true}},
 			[]OpStep{
