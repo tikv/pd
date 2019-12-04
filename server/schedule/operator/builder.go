@@ -245,11 +245,9 @@ func (b *Builder) brief() string {
 		return fmt.Sprintf("add peer: store %s", b.toAdd)
 	case b.toRemove.Len() > 0:
 		return fmt.Sprintf("rm peer: store %s", b.toRemove)
-	}
-	if b.toPromote.Len() > 0 {
+	case b.toPromote.Len() > 0:
 		return fmt.Sprintf("promote peer: store %s", b.toPromote)
-	}
-	if b.targetLeader != b.originLeader {
+	case b.targetLeader != b.originLeader:
 		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeader, b.targetLeader)
 	}
 	return ""
@@ -398,7 +396,7 @@ func (b *Builder) planReplace() stepPlan {
 			}
 		}
 	}
-	// promote learner + add learner + remove voter
+	// add learner + promote learner + remove voter
 	for _, i := range b.toPromote.IDs() {
 		promote := b.toPromote.Get(i)
 		for _, j := range b.toAdd.IDs() {
