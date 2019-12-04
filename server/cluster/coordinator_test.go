@@ -11,13 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package cluster
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -28,13 +26,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/pkg/mock/mockid"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
-	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
@@ -42,38 +37,8 @@ import (
 	"github.com/pingcap/pd/server/statistics"
 )
 
-func newTestScheduleConfig() (*config.ScheduleConfig, *config.ScheduleOption, error) {
-	cfg := config.NewConfig()
-	cfg.Schedule.TolerantSizeRatio = 5
-	cfg.Schedule.StoreBalanceRate = 60
-	if err := cfg.Adjust(nil); err != nil {
-		return nil, nil, err
-	}
-	opt := config.NewScheduleOption(cfg)
-	opt.SetClusterVersion(MinSupportedVersion(Version2_0))
-	return &cfg.Schedule, opt, nil
-}
-
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
 	return operator.NewOperator("test", "test", regionID, regionEpoch, kind, steps...)
-}
-
-type testCluster struct {
-	*RaftCluster
-}
-
-func newTestCluster(opt *config.ScheduleOption) *testCluster {
-	cluster := createTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()))
-	return &testCluster{RaftCluster: cluster}
-}
-
-func newTestRegionMeta(regionID uint64) *metapb.Region {
-	return &metapb.Region{
-		Id:          regionID,
-		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
-		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
-	}
 }
 
 func (c *testCluster) addRegionStore(storeID uint64, regionCount int, regionSizes ...uint64) error {
@@ -253,8 +218,8 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	waitNoResponse(c, stream)
 }
 
-func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream mockhbstream.HeartbeatStream) error {
-	co.hbStreams.bindStream(region.GetLeader().GetStoreId(), stream)
+func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream opt.HeartbeatStream) error {
+	co.hbStreams.BindStream(region.GetLeader().GetStoreId(), stream)
 	if err := co.cluster.putRegion(region.Clone()); err != nil {
 		return err
 	}
@@ -264,7 +229,7 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream mockhbst
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.s.scheduleOpt)
+		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpt())
 	}, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
@@ -309,7 +274,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 		setCfg(cfg)
 	}
 	tc := newTestCluster(opt)
-	hbStreams, cleanup := getHeartBeatStreams(ctx, c, tc)
+	hbStreams := mockhbstream.NewHeartbeatStreams(tc.getClusterID(), false /* need to run */)
 	if setTc != nil {
 		setTc(tc)
 	}
@@ -320,7 +285,6 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	return tc, co, func() {
 		co.stop()
 		co.wg.Wait()
-		cleanup()
 		hbStreams.Close()
 		cancel()
 	}
@@ -1208,29 +1172,4 @@ func waitNoResponse(c *C, stream mockhbstream.HeartbeatStream) {
 		res := stream.Recv()
 		return res == nil
 	})
-}
-
-func getHeartBeatStreams(ctx context.Context, c *C, tc *testCluster) (*heartbeatStreams, func()) {
-	config := NewTestSingleConfig(c)
-	svr, err := CreateServer(config)
-	c.Assert(err, IsNil)
-	kvBase := kv.NewEtcdKVBase(svr.client, svr.rootPath)
-	path := filepath.Join(svr.cfg.DataDir, "region-meta")
-	regionStorage, err := core.NewRegionStorage(ctx, path)
-	c.Assert(err, IsNil)
-	svr.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
-	cluster := tc.RaftCluster
-	cluster.s = svr
-	cluster.running = false
-	cluster.clusterID = tc.getClusterID()
-	cluster.clusterRoot = svr.getClusterRootPath()
-	cluster.regionSyncer = syncer.NewRegionSyncer(svr)
-	hbStreams := newHeartbeatStreams(ctx, tc.getClusterID(), cluster)
-	return hbStreams, func() { testutil.CleanServer(config.DataDir) }
-}
-
-func createTestRaftCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage) *RaftCluster {
-	cluster := &RaftCluster{}
-	cluster.initCluster(id, opt, storage)
-	return cluster
 }

@@ -23,19 +23,20 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/logutil"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
-const heartbeatStreamKeepAliveInterval = time.Minute
-
-type heartbeatStream interface {
-	Send(*pdpb.RegionHeartbeatResponse) error
-}
+const (
+	heartbeatStreamKeepAliveInterval = time.Minute
+	heartbeatChanCapacity            = 1024
+)
 
 type streamUpdate struct {
 	storeID uint64
-	stream  heartbeatStream
+	stream  opt.HeartbeatStream
 }
 
 type heartbeatStreams struct {
@@ -43,19 +44,19 @@ type heartbeatStreams struct {
 	hbStreamCtx    context.Context
 	hbStreamCancel context.CancelFunc
 	clusterID      uint64
-	streams        map[uint64]heartbeatStream
+	streams        map[uint64]opt.HeartbeatStream
 	msgCh          chan *pdpb.RegionHeartbeatResponse
 	streamCh       chan streamUpdate
-	cluster        *RaftCluster
+	cluster        *cluster.RaftCluster
 }
 
-func newHeartbeatStreams(ctx context.Context, clusterID uint64, cluster *RaftCluster) *heartbeatStreams {
+func newHeartbeatStreams(ctx context.Context, clusterID uint64, cluster *cluster.RaftCluster) *heartbeatStreams {
 	hbStreamCtx, hbStreamCancel := context.WithCancel(ctx)
 	hs := &heartbeatStreams{
 		hbStreamCtx:    hbStreamCtx,
 		hbStreamCancel: hbStreamCancel,
 		clusterID:      clusterID,
-		streams:        make(map[uint64]heartbeatStream),
+		streams:        make(map[uint64]opt.HeartbeatStream),
 		msgCh:          make(chan *pdpb.RegionHeartbeatResponse, heartbeatChanCapacity),
 		streamCh:       make(chan streamUpdate, 1),
 		cluster:        cluster,
@@ -137,7 +138,7 @@ func (s *heartbeatStreams) Close() {
 	s.wg.Wait()
 }
 
-func (s *heartbeatStreams) bindStream(storeID uint64, stream heartbeatStream) {
+func (s *heartbeatStreams) BindStream(storeID uint64, stream opt.HeartbeatStream) {
 	update := streamUpdate{
 		storeID: storeID,
 		stream:  stream,

@@ -20,6 +20,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
 )
 
@@ -61,7 +62,7 @@ func (s *testClusterSuite) TestCluster(c *C) {
 
 func (s *testClusterSuite) TestGetClusterStatus(c *C) {
 	url := fmt.Sprintf("%s/cluster/status", s.urlPrefix)
-	status := server.ClusterStatus{}
+	status := cluster.Status{}
 	err := readJSON(url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.IsZero(), IsTrue)

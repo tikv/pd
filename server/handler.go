@@ -23,9 +23,9 @@ import (
 	"time"
 
 	"github.com/pingcap/errcode"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -41,8 +41,6 @@ var (
 	// SchedulerConfigHandlerPath is the api router path of the schedule config handler.
 	SchedulerConfigHandlerPath = "/api/v1/scheduler-config"
 
-	// ErrNotBootstrapped is error info for cluster not bootstrapped.
-	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
 	// ErrServerNotStarted is error info for server not started.
 	ErrServerNotStarted = errors.New("The server has not been started")
 	// ErrOperatorNotFound is error info for operator not found.
@@ -58,10 +56,6 @@ var (
 	// ErrRegionAbnormalPeer is error info for region has abonormal peer.
 	ErrRegionAbnormalPeer = func(regionID uint64) error {
 		return errors.Errorf("region %v has abnormal peer", regionID)
-	}
-	// ErrRegionIsStale is error info for region is stale.
-	ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
-		return errors.Errorf("region is stale: region %v origin %v", region, origin)
 	}
 	// ErrStoreNotFound is error info for store not found.
 	ErrStoreNotFound = func(storeID uint64) error {
@@ -80,21 +74,34 @@ func newHandler(s *Server) *Handler {
 }
 
 // GetRaftCluster returns RaftCluster.
-func (h *Handler) GetRaftCluster() *RaftCluster {
-	return h.s.GetRaftCluster()
+func (h *Handler) GetRaftCluster() (*cluster.RaftCluster, error) {
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return nil, errors.WithStack(cluster.ErrNotBootstrapped)
+	}
+	return rc, nil
+}
+
+// GetOperatorController returns OperatorController.
+func (h *Handler) GetOperatorController() (*schedule.OperatorController, error) {
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return nil, errors.WithStack(cluster.ErrNotBootstrapped)
+	}
+	return rc.GetOperatorController(), nil
 }
 
 // IsSchedulerPaused returns whether scheduler is paused.
 func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return true, err
 	}
-	sc, ok := c.schedulers[name]
+	sc, ok := c.GetSchedulers()[name]
 	if !ok {
 		return true, errors.Errorf("scheduler %v not found", name)
 	}
-	return sc.isPaused(), nil
+	return sc.IsPaused(), nil
 }
 
 // GetScheduleConfig returns ScheduleConfig.
@@ -102,36 +109,30 @@ func (h *Handler) GetScheduleConfig() *config.ScheduleConfig {
 	return h.s.GetScheduleConfig()
 }
 
-func (h *Handler) getCoordinator() (*coordinator, error) {
-	cluster := h.s.GetRaftCluster()
-	if cluster == nil {
-		return nil, errors.WithStack(ErrNotBootstrapped)
-	}
-	cluster.RLock()
-	defer cluster.RUnlock()
-	return cluster.coordinator, nil
-}
-
 // GetSchedulers returns all names of schedulers.
 func (h *Handler) GetSchedulers() ([]string, error) {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil, err
 	}
-	return c.getSchedulers(), nil
+	names := make([]string, 0, len(c.GetSchedulers()))
+	for name := range c.GetSchedulers() {
+		names = append(names, name)
+	}
+	return names, nil
 }
 
 // GetStores returns all stores in the cluster.
 func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
-	cluster := h.s.GetRaftCluster()
-	if cluster == nil {
-		return nil, errors.WithStack(ErrNotBootstrapped)
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return nil, errors.WithStack(cluster.ErrNotBootstrapped)
 	}
-	storeMetas := cluster.GetMetaStores()
+	storeMetas := rc.GetMetaStores()
 	stores := make([]*core.StoreInfo, 0, len(storeMetas))
 	for _, s := range storeMetas {
 		storeID := s.GetId()
-		store := cluster.GetStore(storeID)
+		store := rc.GetStore(storeID)
 		if store == nil {
 			return nil, ErrStoreNotFound(storeID)
 		}
@@ -142,73 +143,73 @@ func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 
 // GetHotWriteRegions gets all hot write regions stats.
 func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil
 	}
-	return c.getHotWriteRegions()
+	return c.GetHotWriteRegions()
 }
 
 // GetHotReadRegions gets all hot read regions stats.
 func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil
 	}
-	return c.getHotReadRegions()
+	return c.GetHotReadRegions()
 }
 
 // GetHotBytesWriteStores gets all hot write stores stats.
 func (h *Handler) GetHotBytesWriteStores() map[uint64]float64 {
-	cluster := h.s.GetRaftCluster()
-	if cluster == nil {
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
 		return nil
 	}
-	return cluster.getStoresBytesWriteStat()
+	return rc.GetStoresBytesWriteStat()
 }
 
 // GetHotBytesReadStores gets all hot write stores stats.
 func (h *Handler) GetHotBytesReadStores() map[uint64]float64 {
-	cluster := h.s.GetRaftCluster()
-	if cluster == nil {
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
 		return nil
 	}
-	return cluster.getStoresBytesReadStat()
+	return rc.GetStoresBytesReadStat()
 }
 
 // GetHotKeysWriteStores gets all hot write stores stats.
 func (h *Handler) GetHotKeysWriteStores() map[uint64]float64 {
-	cluster := h.s.GetRaftCluster()
-	if cluster == nil {
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
 		return nil
 	}
-	return cluster.getStoresKeysWriteStat()
+	return rc.GetStoresKeysWriteStat()
 }
 
 // GetHotKeysReadStores gets all hot write stores stats.
 func (h *Handler) GetHotKeysReadStores() map[uint64]float64 {
-	cluster := h.s.GetRaftCluster()
-	if cluster == nil {
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
 		return nil
 	}
-	return cluster.getStoresKeysReadStat()
+	return rc.GetStoresKeysReadStat()
 }
 
 // AddScheduler adds a scheduler.
 func (h *Handler) AddScheduler(name string, args ...string) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 
-	s, err := schedule.CreateScheduler(name, c.opController, h.s.storage, schedule.ConfigSliceDecoder(name, args))
+	s, err := schedule.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedule.ConfigSliceDecoder(name, args))
 	if err != nil {
 		return err
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-	if err = c.addScheduler(s, args...); err != nil {
+	if err = c.AddScheduler(s, args...); err != nil {
 		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
-	} else if err = h.opt.Persist(c.cluster.storage); err != nil {
+	} else if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", zap.Error(err))
 	}
 	return err
@@ -216,11 +217,11 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 
 // RemoveScheduler removes a scheduler by name.
 func (h *Handler) RemoveScheduler(name string) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
-	if err = c.removeScheduler(name); err != nil {
+	if err = c.RemoveScheduler(name); err != nil {
 		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
 	}
 	return err
@@ -230,11 +231,11 @@ func (h *Handler) RemoveScheduler(name string) error {
 // t == 0 : resume scheduler.
 // t > 0 : scheduler delays t seconds.
 func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
-	if err = c.pauseOrResumeScheduler(name, t); err != nil {
+	if err = c.PauseOrResumeScheduler(name, t); err != nil {
 		if t == 0 {
 			log.Error("can not resume scheduler", zap.String("scheduler-name", name), zap.Error(err))
 		} else {
@@ -306,12 +307,12 @@ func (h *Handler) AddRandomMergeScheduler() error {
 
 // GetOperator returns the region operator.
 func (h *Handler) GetOperator(regionID uint64) (*operator.Operator, error) {
-	c, err := h.getCoordinator()
+	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
 
-	op := c.opController.GetOperator(regionID)
+	op := c.GetOperator(regionID)
 	if op == nil {
 		return nil, ErrOperatorNotFound
 	}
@@ -321,12 +322,12 @@ func (h *Handler) GetOperator(regionID uint64) (*operator.Operator, error) {
 
 // GetOperatorStatus returns the status of the region operator.
 func (h *Handler) GetOperatorStatus(regionID uint64) (*schedule.OperatorWithStatus, error) {
-	c, err := h.getCoordinator()
+	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
 
-	op := c.opController.GetOperatorStatus(regionID)
+	op := c.GetOperatorStatus(regionID)
 	if op == nil {
 		return nil, ErrOperatorNotFound
 	}
@@ -336,36 +337,36 @@ func (h *Handler) GetOperatorStatus(regionID uint64) (*schedule.OperatorWithStat
 
 // RemoveOperator removes the region operator.
 func (h *Handler) RemoveOperator(regionID uint64) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetOperatorController()
 	if err != nil {
 		return err
 	}
 
-	op := c.opController.GetOperator(regionID)
+	op := c.GetOperator(regionID)
 	if op == nil {
 		return ErrOperatorNotFound
 	}
 
-	_ = c.opController.RemoveOperator(op)
+	_ = c.RemoveOperator(op)
 	return nil
 }
 
 // GetOperators returns the running operators.
 func (h *Handler) GetOperators() ([]*operator.Operator, error) {
-	c, err := h.getCoordinator()
+	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
-	return c.opController.GetOperators(), nil
+	return c.GetOperators(), nil
 }
 
 // GetWaitingOperators returns the waiting operators.
 func (h *Handler) GetWaitingOperators() ([]*operator.Operator, error) {
-	c, err := h.getCoordinator()
+	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
-	return c.opController.GetWaitingOperators(), nil
+	return c.GetWaitingOperators(), nil
 }
 
 // GetAdminOperators returns the running admin operators.
@@ -400,50 +401,50 @@ func (h *Handler) GetOperatorsOfKind(mask operator.OpKind) ([]*operator.Operator
 
 // GetHistory returns finished operators' history since start.
 func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
-	c, err := h.getCoordinator()
+	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
-	return c.opController.GetHistory(start), nil
+	return c.GetHistory(start), nil
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
 func (h *Handler) SetAllStoresLimit(rate float64) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetOperatorController()
 	if err != nil {
 		return err
 	}
-	c.opController.SetAllStoresLimit(rate)
+	c.SetAllStoresLimit(rate)
 	return nil
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
 func (h *Handler) GetAllStoresLimit() (map[uint64]float64, error) {
-	c, err := h.getCoordinator()
+	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
-	return c.opController.GetAllStoresLimit(), nil
+	return c.GetAllStoresLimit(), nil
 }
 
 // SetStoreLimit is used to set the limit of a store.
 func (h *Handler) SetStoreLimit(storeID uint64, rate float64) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetOperatorController()
 	if err != nil {
 		return err
 	}
-	c.opController.SetStoreLimit(storeID, rate)
+	c.SetStoreLimit(storeID, rate)
 	return nil
 }
 
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.
 func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 
-	region := c.cluster.GetRegion(regionID)
+	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
 	}
@@ -454,7 +455,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 	}
 
 	op := operator.CreateTransferLeaderOperator("admin-transfer-leader", region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpAdmin)
-	if ok := c.opController.AddOperator(op); !ok {
+	if ok := c.GetOperatorController().AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
@@ -462,23 +463,23 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 
 // AddTransferRegionOperator adds an operator to transfer region to the stores.
 func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]struct{}) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 
-	region := c.cluster.GetRegion(regionID)
+	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
 	}
 
-	if len(storeIDs) > c.cluster.GetMaxReplicas() {
+	if len(storeIDs) > c.GetMaxReplicas() {
 		return errors.Errorf("the number of stores is %v, beyond the max replicas", len(storeIDs))
 	}
 
 	var store *core.StoreInfo
 	for id := range storeIDs {
-		store = c.cluster.GetStore(id)
+		store = c.GetStore(id)
 		if store == nil {
 			return core.NewStoreNotFoundErr(id)
 		}
@@ -487,11 +488,11 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		}
 	}
 
-	op, err := operator.CreateMoveRegionOperator("admin-move-region", c.cluster, region, operator.OpAdmin, storeIDs)
+	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, storeIDs)
 	if err != nil {
 		return err
 	}
-	if ok := c.opController.AddOperator(op); !ok {
+	if ok := c.GetOperatorController().AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
@@ -499,12 +500,12 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 
 // AddTransferPeerOperator adds an operator to transfer peer.
 func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreID uint64) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 
-	region := c.cluster.GetRegion(regionID)
+	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
 	}
@@ -514,7 +515,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errors.Errorf("region has no peer in store %v", fromStoreID)
 	}
 
-	toStore := c.cluster.GetStore(toStoreID)
+	toStore := c.GetStore(toStoreID)
 	if toStore == nil {
 		return core.NewStoreNotFoundErr(toStoreID)
 	}
@@ -522,29 +523,29 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
 	}
 
-	newPeer, err := c.cluster.AllocPeer(toStoreID)
+	newPeer, err := c.AllocPeer(toStoreID)
 	if err != nil {
 		return err
 	}
 
-	op, err := operator.CreateMovePeerOperator("admin-move-peer", c.cluster, region, operator.OpAdmin, fromStoreID, newPeer)
+	op, err := operator.CreateMovePeerOperator("admin-move-peer", c, region, operator.OpAdmin, fromStoreID, newPeer)
 	if err != nil {
 		return err
 	}
-	if ok := c.opController.AddOperator(op); !ok {
+	if ok := c.GetOperatorController().AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
 }
 
 // checkAdminAddPeerOperator checks adminAddPeer operator with given region ID and store ID.
-func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (*coordinator, *core.RegionInfo, error) {
-	c, err := h.getCoordinator()
+func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (*cluster.RaftCluster, *core.RegionInfo, error) {
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	region := c.cluster.GetRegion(regionID)
+	region := c.GetRegion(regionID)
 	if region == nil {
 		return nil, nil, ErrRegionNotFound(regionID)
 	}
@@ -553,7 +554,7 @@ func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (
 		return nil, nil, errors.Errorf("region already has peer in store %v", toStoreID)
 	}
 
-	toStore := c.cluster.GetStore(toStoreID)
+	toStore := c.GetStore(toStoreID)
 	if toStore == nil {
 		return nil, nil, core.NewStoreNotFoundErr(toStoreID)
 	}
@@ -571,13 +572,13 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return err
 	}
 
-	newPeer, err := c.cluster.AllocPeer(toStoreID)
+	newPeer, err := c.AllocPeer(toStoreID)
 	if err != nil {
 		return err
 	}
 
 	op := operator.CreateAddPeerOperator("admin-add-peer", region, newPeer, operator.OpAdmin)
-	if ok := c.opController.AddOperator(op); !ok {
+	if ok := c.GetOperatorController().AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
@@ -590,14 +591,14 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 		return err
 	}
 
-	newPeer, err := c.cluster.AllocPeer(toStoreID)
+	newPeer, err := c.AllocPeer(toStoreID)
 	if err != nil {
 		return err
 	}
 	newPeer.IsLearner = true
 
 	op := operator.CreateAddPeerOperator("admin-add-learner", region, newPeer, operator.OpAdmin)
-	if ok := c.opController.AddOperator(op); !ok {
+	if ok := c.GetOperatorController().AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
@@ -605,12 +606,12 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 
 // AddRemovePeerOperator adds an operator to remove peer.
 func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 
-	region := c.cluster.GetRegion(regionID)
+	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
 	}
@@ -619,11 +620,11 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 		return errors.Errorf("region has no peer in store %v", fromStoreID)
 	}
 
-	op, err := operator.CreateRemovePeerOperator("admin-remove-peer", c.cluster, operator.OpAdmin, region, fromStoreID)
+	op, err := operator.CreateRemovePeerOperator("admin-remove-peer", c, operator.OpAdmin, region, fromStoreID)
 	if err != nil {
 		return err
 	}
-	if ok := c.opController.AddOperator(op); !ok {
+	if ok := c.GetOperatorController().AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
@@ -631,26 +632,26 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 
 // AddMergeRegionOperator adds an operator to merge region.
 func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 
-	region := c.cluster.GetRegion(regionID)
+	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
 	}
 
-	target := c.cluster.GetRegion(targetID)
+	target := c.GetRegion(targetID)
 	if target == nil {
 		return ErrRegionNotFound(targetID)
 	}
 
-	if !opt.IsRegionHealthy(c.cluster, region) || !opt.IsRegionReplicated(c.cluster, region) {
+	if !opt.IsRegionHealthy(c, region) || !opt.IsRegionReplicated(c, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if !opt.IsRegionHealthy(c.cluster, target) || !opt.IsRegionReplicated(c.cluster, target) {
+	if !opt.IsRegionHealthy(c, target) || !opt.IsRegionReplicated(c, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 
@@ -660,11 +661,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotAdjacent
 	}
 
-	ops, err := operator.CreateMergeRegionOperator("admin-merge-region", c.cluster, region, target, operator.OpAdmin)
+	ops, err := operator.CreateMergeRegionOperator("admin-merge-region", c, region, target, operator.OpAdmin)
 	if err != nil {
 		return err
 	}
-	if ok := c.opController.AddOperator(ops...); !ok {
+	if ok := c.GetOperatorController().AddOperator(ops...); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
@@ -672,12 +673,12 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 
 // AddSplitRegionOperator adds an operator to split a region.
 func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys []string) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 
-	region := c.cluster.GetRegion(regionID)
+	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
 	}
@@ -699,7 +700,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 	}
 
 	op := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, pdpb.CheckPolicy(policy), splitKeys)
-	if ok := c.opController.AddOperator(op); !ok {
+	if ok := c.GetOperatorController().AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
@@ -707,21 +708,21 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 
 // AddScatterRegionOperator adds an operator to scatter a region.
 func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 
-	region := c.cluster.GetRegion(regionID)
+	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
 	}
 
-	if c.cluster.IsRegionHot(region) {
+	if c.IsRegionHot(region) {
 		return errors.Errorf("region %d is a hot region", regionID)
 	}
 
-	op, err := c.regionScatterer.Scatter(region)
+	op, err := c.GetRegionScatter().Scatter(region)
 	if err != nil {
 		return err
 	}
@@ -729,7 +730,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
 	if op == nil {
 		return nil
 	}
-	if ok := c.opController.AddOperator(op); !ok {
+	if ok := c.GetOperatorController().AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
 	return nil
@@ -739,7 +740,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
 func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, ErrNotBootstrapped
+		return nil, cluster.ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.DownPeer), nil
 }
@@ -748,7 +749,7 @@ func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, ErrNotBootstrapped
+		return nil, cluster.ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.ExtraPeer), nil
 }
@@ -757,7 +758,7 @@ func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, ErrNotBootstrapped
+		return nil, cluster.ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.MissPeer), nil
 }
@@ -766,19 +767,19 @@ func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetPendingPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, ErrNotBootstrapped
+		return nil, cluster.ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.PendingPeer), nil
 }
 
 // GetSchedulerConfigHandler gets the handler of schedulers.
 func (h *Handler) GetSchedulerConfigHandler() http.Handler {
-	c, err := h.getCoordinator()
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil
 	}
 	mux := http.NewServeMux()
-	for name, handler := range c.schedulers {
+	for name, handler := range c.GetSchedulers() {
 		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name)
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
@@ -790,7 +791,7 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 func (h *Handler) GetOfflinePeer() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, ErrNotBootstrapped
+		return nil, cluster.ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.OfflinePeer), nil
 }
@@ -799,7 +800,7 @@ func (h *Handler) GetOfflinePeer() ([]*core.RegionInfo, error) {
 func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, ErrNotBootstrapped
+		return nil, cluster.ErrNotBootstrapped
 	}
 	return c.GetRegionStatsByType(statistics.EmptyRegion), nil
 }

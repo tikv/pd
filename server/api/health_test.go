@@ -30,7 +30,6 @@ type testHealthAPISuite struct{}
 func checkSliceResponse(c *C, body []byte, cfgs []*config.Config, unhealth string) {
 	got := []Health{}
 	c.Assert(json.Unmarshal(body, &got), IsNil)
-
 	c.Assert(len(got), Equals, len(cfgs))
 
 	for _, h := range got {
@@ -60,6 +59,7 @@ func (s *testHealthAPISuite) TestHealthSlice(c *C) {
 			follow = svr
 		}
 	}
+	mustBootstrapCluster(c, leader)
 	addr := leader.GetConfig().ClientUrls + apiPrefix + "/api/v1/health"
 	follow.Close()
 	resp, err := dialClient.Get(addr)
