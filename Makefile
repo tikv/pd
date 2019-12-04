@@ -109,14 +109,8 @@ static: export GO111MODULE=on
 static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
-	./scripts/retool do govet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
-	CGO_ENABLED=0 ./scripts/retool do golangci-lint run --disable-all --deadline 120s \
-	  --enable misspell \
-	  --enable staticcheck \
-	  --enable ineffassign \
-	  --enable unconvert \
-	  $$($(PACKAGE_DIRECTORIES))
+	CGO_ENABLED=0 ./scripts/retool do golangci-lint run --enable misspell --disable errcheck --deadline 120s $$($(PACKAGE_DIRECTORIES))
 
 lint:
 	@echo "linting"
