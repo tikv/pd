@@ -284,7 +284,12 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 		return
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-	if err = c.addUserScheduler(s); err != nil {
+	if _, ok := c.schedulers[s.GetName()]; ok {
+		if err := c.removeScheduler(s.GetName()); err != nil {
+			log.Error("can not remove scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		}
+	}
+	if err = c.addScheduler(s); err != nil {
 		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		return
 	}
@@ -456,29 +461,6 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	if _, ok := c.schedulers[scheduler.GetName()]; ok {
 		return errSchedulerExisted
 	}
-
-	s := newScheduleController(c, scheduler)
-	if err := s.Prepare(c.cluster); err != nil {
-		return err
-	}
-
-	c.wg.Add(1)
-	go c.runScheduler(s)
-	c.schedulers[s.GetName()] = s
-	c.cluster.opt.AddSchedulerCfg(s.GetType(), args)
-
-	return nil
-}
-
-func (c *coordinator) addUserScheduler(scheduler schedule.Scheduler, args ...string) error {
-	if _, ok := c.schedulers[scheduler.GetName()]; ok {
-		if err := c.removeScheduler(scheduler.GetName()); err != nil {
-			log.Error("can not remove scheduler", zap.String("scheduler-name", scheduler.GetName()), zap.Error(err))
-		}
-	}
-
-	c.Lock()
-	defer c.Unlock()
 
 	s := newScheduleController(c, scheduler)
 	if err := s.Prepare(c.cluster); err != nil {
