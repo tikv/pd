@@ -232,7 +232,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	//|     4     |       1      |        2       |       3        |      512KB    |
 	//|     5     |       1      |        2       |       3        |      512KB    |
 	//|     6     |       1      |        2       |       3        |      512KB    |
-	// Region 1, 2 and 3 are hot regions.
+	// All regions are hot.
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
 	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
