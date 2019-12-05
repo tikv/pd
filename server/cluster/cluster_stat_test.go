@@ -77,6 +77,7 @@ func (s *testClusterStatSuite) TestStatEntriesAppend(c *C) {
 	N := 10
 	cst := NewStatEntries(N)
 	c.Assert(cst, NotNil)
+	ThreadsCollected = []string{"cpu:"}
 
 	// fill 2*N entries, 2 entries for each store
 	for i := 0; i < 2*N; i++ {
@@ -84,7 +85,7 @@ func (s *testClusterStatSuite) TestStatEntriesAppend(c *C) {
 			StoreId:   uint64(i % N),
 			CpuUsages: cpu(20),
 		}
-		cst.Append(entry)
+		c.Assert(cst.Append(entry), IsTrue)
 	}
 
 	// use i as the store ID
