@@ -65,21 +65,6 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
-
-	clusterStateCPUGuage = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "cluster_state_cpu_usage",
-			Help:      "CPU usage to determine the cluster state",
-		})
-	clusterStateCurrent = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "cluster_state_current",
-			Help:      "CPU usage to determine the cluster state",
-		}, []string{"state"})
 )
 
 func init() {
@@ -89,6 +74,4 @@ func init() {
 	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(tsoHandleDuration)
-	prometheus.MustRegister(clusterStateCPUGuage)
-	prometheus.MustRegister(clusterStateCurrent)
 }

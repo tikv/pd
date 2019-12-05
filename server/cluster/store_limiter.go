@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License
 
-package cluster 
+package cluster
 
 import (
 	"sync"
@@ -22,24 +22,22 @@ import (
 	"go.uber.org/zap"
 )
 
-// StateCalcDuration is the duration being used to caculate the cluster
-// state
-const StateCalcDuration = 300 // 5 minutes
-
 // StoreLimiter adjust the store limit dynamically
 type StoreLimiter struct {
-	m     sync.RWMutex
-	oc    *schedule.OperatorController
-	scene *schedule.StoreLimitScene
-	state *ClusterState
+	m       sync.RWMutex
+	oc      *schedule.OperatorController
+	scene   *schedule.StoreLimitScene
+	state   *ClusterState
+	current LoadState
 }
 
 // NewStoreLimiter builds a store limiter object using the operator controller
 func NewStoreLimiter(c *schedule.OperatorController) *StoreLimiter {
 	return &StoreLimiter{
-		oc:    c,
-		state: NewClusterState(),
-		scene: schedule.DefaultStoreLimitScene(),
+		oc:      c,
+		state:   NewClusterState(),
+		scene:   schedule.DefaultStoreLimitScene(),
+		current: LoadStateNone,
 	}
 }
 
@@ -48,17 +46,11 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 	s.m.Lock()
 	defer s.m.Unlock()
 
+	log.Debug("collected statistics", zap.Reflect("stats", stats))
 	s.state.Collect((*StatEntry)(stats))
 
 	rate := float64(0)
-	read, written := s.state.cst.Keys(StateCalcDuration)
-	if read == 0 && written == 0 {
-		log.Info("no keys read or written, the cluster is idle")
-		rate = float64(s.scene.Idle) / schedule.StoreBalanceBaseTime
-		s.oc.SetAllStoresLimit(rate, schedule.StoreLimitAuto)
-		return
-	}
-	state := s.state.State(StateCalcDuration)
+	state := s.state.State()
 	switch state {
 	case LoadStateIdle:
 		rate = float64(s.scene.Idle) / schedule.StoreBalanceBaseTime
@@ -71,7 +63,33 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 	}
 
 	if rate > 0 {
-		s.oc.SetAllStoresLimit(rate, schedule.StoreLimitAuto)
+		s.oc.SetAllStoresLimitAuto(rate)
 		log.Info("change store limit for cluster", zap.Stringer("state", state), zap.Float64("rate", rate))
+		s.current = state
+		collectClusterStateCurrent(state)
 	}
+}
+
+func collectClusterStateCurrent(state LoadState) {
+	for i := LoadStateNone; i < state; i++ {
+		clusterStateCurrent.WithLabelValues(i.String()).Set(0)
+	}
+	for i := state + 1; i <= LoadStateHigh; i++ {
+		clusterStateCurrent.WithLabelValues(i.String()).Set(0)
+	}
+	clusterStateCurrent.WithLabelValues(state.String()).Set(1)
+}
+
+// ReplaceStoreLimitScene replaces the store limit values for different scenes
+func (s *StoreLimiter) ReplaceStoreLimitScene(scene *schedule.StoreLimitScene) {
+	s.m.Lock()
+	defer s.m.Unlock()
+	s.scene = scene
+}
+
+// StoreLimitScene returns the current limit for different scenes
+func (s *StoreLimiter) StoreLimitScene() *schedule.StoreLimitScene {
+	s.m.RLock()
+	defer s.m.RUnlock()
+	return s.scene
 }

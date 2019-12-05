@@ -391,9 +391,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 
-	enabled := c.s.GetConfig().StoreLimitMode == "auto"
 	// c.limiter is nil before "start" is called
-	if enabled && c.limiter != nil {
+	if c.limiter != nil {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
@@ -1579,6 +1578,11 @@ func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.pauseOrResumeScheduler(name, t)
+}
+
+// GetStoreLimiter returns the dynamic adjusting limiter
+func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
+	return c.limiter
 }
 
 // DialClient used to dial http request.
