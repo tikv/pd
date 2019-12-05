@@ -14,9 +14,11 @@
 package checker
 
 import (
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"go.uber.org/zap"
 )
 
 // LearnerChecker ensures region has a learner will be promoted.
@@ -37,7 +39,11 @@ func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
 		if region.GetPendingLearner(p.GetId()) != nil {
 			continue
 		}
-		op, _ := operator.CreatePromoteLearnerOperator("promote-learner", l.cluster, region, p)
+		op, err := operator.CreatePromoteLearnerOperator("promote-learner", l.cluster, region, p)
+		if err != nil {
+			log.Debug("fail to create promote learner operator", zap.Error(err))
+			return nil
+		}
 		return op
 	}
 	return nil
