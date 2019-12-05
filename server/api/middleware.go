@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 
@@ -34,12 +35,12 @@ func newClusterMiddleware(s *server.Server) clusterMiddleware {
 
 func (m clusterMiddleware) Middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cluster := m.s.GetRaftCluster()
-		if cluster == nil {
-			m.rd.JSON(w, http.StatusInternalServerError, server.ErrNotBootstrapped.Error())
+		rc := m.s.GetRaftCluster()
+		if rc == nil {
+			m.rd.JSON(w, http.StatusInternalServerError, cluster.ErrNotBootstrapped.Error())
 			return
 		}
-		ctx := withClusterCtx(r.Context(), cluster)
+		ctx := withClusterCtx(r.Context(), rc)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

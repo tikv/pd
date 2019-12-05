@@ -36,7 +36,7 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 }
 
 func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
@@ -44,7 +44,7 @@ func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Requ
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	cluster.DropCacheRegion(regionID)
+	rc.DropCacheRegion(regionID)
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 

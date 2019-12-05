@@ -65,9 +65,9 @@ func init() {
 }
 
 const (
-	//ScatterRangeType is scatter range scheduler type
+	// ScatterRangeType is scatter range scheduler type
 	ScatterRangeType = "scatter-range"
-	//ScatterRangeName is scatter range scheduler name
+	// ScatterRangeName is scatter range scheduler name
 	ScatterRangeName = "scatter-range"
 )
 

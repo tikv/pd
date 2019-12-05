@@ -38,14 +38,6 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func mustRunTestServer(c *C) (*Server, CleanupFunc) {
-	var err error
-	server, cleanup, err := NewTestServer(c)
-	c.Assert(err, IsNil)
-	mustWaitLeader(c, []*Server{server})
-	return server, cleanup
-}
-
 func mustWaitLeader(c *C, svrs []*Server) *Server {
 	var leader *Server
 	testutil.WaitUntil(c, func(c *C) bool {

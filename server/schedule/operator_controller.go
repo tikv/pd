@@ -51,22 +51,16 @@ var (
 	StoreBalanceBaseTime float64 = 60
 )
 
-// HeartbeatStreams is an interface of async region heartbeat.
-type HeartbeatStreams interface {
-	SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse)
-}
-
 // OperatorController is used to limit the speed of scheduling.
 type OperatorController struct {
 	sync.RWMutex
-	ctx       context.Context
-	cluster   opt.Cluster
-	operators map[uint64]*operator.Operator
-	hbStreams HeartbeatStreams
-	histories *list.List
-	counts    map[operator.OpKind]uint64
-	opRecords *OperatorRecords
-	// TODO: Need to clean up the unused store ID.
+	ctx             context.Context
+	cluster         opt.Cluster
+	operators       map[uint64]*operator.Operator
+	hbStreams       opt.HeartbeatStreams
+	histories       *list.List
+	counts          map[operator.OpKind]uint64
+	opRecords       *OperatorRecords
 	storesLimit     map[uint64]*StoreLimit
 	wop             WaitingOperator
 	wopStatus       *WaitingOperatorStatus
@@ -74,7 +68,7 @@ type OperatorController struct {
 }
 
 // NewOperatorController creates a OperatorController.
-func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams HeartbeatStreams) *OperatorController {
+func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams opt.HeartbeatStreams) *OperatorController {
 	return &OperatorController{
 		ctx:             ctx,
 		cluster:         cluster,
@@ -96,7 +90,7 @@ func (oc *OperatorController) Ctx() context.Context {
 	return oc.ctx
 }
 
-//GetCluster export cluster to evict-scheduler for check sctore status
+// GetCluster exports cluster to evict-scheduler for check sctore status.
 func (oc *OperatorController) GetCluster() opt.Cluster {
 	oc.RLock()
 	defer oc.RUnlock()
