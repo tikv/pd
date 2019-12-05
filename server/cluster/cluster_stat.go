@@ -111,21 +111,21 @@ const StaleEntriesTimeout = 300 * time.Second
 // StatEntry is an entry of store statistics
 type StatEntry pdpb.StoreStats
 
-// CPUStatEntries saves a history of store statistics
-type CPUStatEntries struct {
+// CPUEntries saves a history of store statistics
+type CPUEntries struct {
 	cpu     statistics.MovingAvg
 	updated time.Time
 }
 
-// NewCPUStatEntries returns the StateEntries with a fixed size
-func NewCPUStatEntries(size int) *CPUStatEntries {
-	return &CPUStatEntries{
+// NewCPUEntries returns the StateEntries with a fixed size
+func NewCPUEntries(size int) *CPUEntries {
+	return &CPUEntries{
 		cpu: statistics.NewMedianFilter(size),
 	}
 }
 
 // Append a StatEntry, it accepts an optional threads as a filter of CPU usage
-func (s *CPUStatEntries) Append(stat *StatEntry, threads ...string) bool {
+func (s *CPUEntries) Append(stat *StatEntry, threads ...string) bool {
 	usages := stat.CpuUsages
 	// all gRPC fields are optional, so we must check the empty value
 	if usages == nil {
@@ -154,30 +154,30 @@ func (s *CPUStatEntries) Append(stat *StatEntry, threads ...string) bool {
 }
 
 // CPU returns the cpu usage
-func (s *CPUStatEntries) CPU() float64 {
+func (s *CPUEntries) CPU() float64 {
 	return s.cpu.Get()
 }
 
-// ClusterStatEntries saves the StatEntries for each store in the cluster
-type ClusterStatEntries struct {
+// StatEntries saves the StatEntries for each store in the cluster
+type StatEntries struct {
 	m     sync.RWMutex
-	stats map[uint64]*CPUStatEntries
+	stats map[uint64]*CPUEntries
 	size  int   // size of entries to keep for each store
 	total int64 // total of StatEntry appended
 	ttl   time.Duration
 }
 
-// NewClusterStatEntries returns a statistics object for the cluster
-func NewClusterStatEntries(size int) *ClusterStatEntries {
-	return &ClusterStatEntries{
-		stats: make(map[uint64]*CPUStatEntries),
+// NewStatEntries returns a statistics object for the cluster
+func NewStatEntries(size int) *StatEntries {
+	return &StatEntries{
+		stats: make(map[uint64]*CPUEntries),
 		size:  size,
 		ttl:   StaleEntriesTimeout,
 	}
 }
 
 // Append an store StatEntry
-func (cst *ClusterStatEntries) Append(stat *StatEntry) bool {
+func (cst *StatEntries) Append(stat *StatEntry) bool {
 	cst.m.Lock()
 	defer cst.m.Unlock()
 
@@ -187,7 +187,7 @@ func (cst *ClusterStatEntries) Append(stat *StatEntry) bool {
 	storeID := stat.StoreId
 	entries, ok := cst.stats[storeID]
 	if !ok {
-		entries = NewCPUStatEntries(cst.size)
+		entries = NewCPUEntries(cst.size)
 		cst.stats[storeID] = entries
 	}
 
@@ -204,7 +204,7 @@ func contains(slice []uint64, value uint64) bool {
 }
 
 // CPU returns the cpu usage of the cluster
-func (cst *ClusterStatEntries) CPU(excludes ...uint64) float64 {
+func (cst *StatEntries) CPU(excludes ...uint64) float64 {
 	cst.m.Lock()
 	defer cst.m.Unlock()
 
@@ -230,24 +230,24 @@ func (cst *ClusterStatEntries) CPU(excludes ...uint64) float64 {
 	return sum / float64(len(cst.stats))
 }
 
-// ClusterState collects information from store heartbeat
+// State collects information from store heartbeat
 // and caculates the load state of the cluster
-type ClusterState struct {
-	cst *ClusterStatEntries
+type State struct {
+	cst *StatEntries
 }
 
-// NewClusterState return the ClusterState object which collects
+// NewState return the LoadState object which collects
 // information from store heartbeats and gives the current state of
 // the cluster
-func NewClusterState() *ClusterState {
-	return &ClusterState{
-		cst: NewClusterStatEntries(NumberOfEntries),
+func NewState() *State {
+	return &State{
+		cst: NewStatEntries(NumberOfEntries),
 	}
 }
 
 // State returns the state of the cluster, excludes is the list of store ID
 // to be excluded
-func (cs *ClusterState) State(excludes ...uint64) LoadState {
+func (cs *State) State(excludes ...uint64) LoadState {
 	// Return LoadStateNone if there is not enough heartbeats
 	// collected.
 	if cs.cst.total < NumberOfEntries {
@@ -275,6 +275,6 @@ func (cs *ClusterState) State(excludes ...uint64) LoadState {
 }
 
 // Collect statistics from store heartbeat
-func (cs *ClusterState) Collect(stat *StatEntry) {
+func (cs *State) Collect(stat *StatEntry) {
 	cs.cst.Append(stat)
 }

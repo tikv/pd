@@ -27,7 +27,7 @@ type StoreLimiter struct {
 	m       sync.RWMutex
 	oc      *schedule.OperatorController
 	scene   *schedule.StoreLimitScene
-	state   *ClusterState
+	state   *State
 	current LoadState
 }
 
@@ -35,7 +35,7 @@ type StoreLimiter struct {
 func NewStoreLimiter(c *schedule.OperatorController) *StoreLimiter {
 	return &StoreLimiter{
 		oc:      c,
-		state:   NewClusterState(),
+		state:   NewState(),
 		scene:   schedule.DefaultStoreLimitScene(),
 		current: LoadStateNone,
 	}

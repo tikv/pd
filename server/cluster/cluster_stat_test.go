@@ -38,11 +38,11 @@ func cpu(usage int64) []*pdpb.RecordPair {
 	return pairs
 }
 
-func (s *testClusterStatSuite) TestCPUStatEntriesAppend(c *C) {
+func (s *testClusterStatSuite) TestCPUEntriesAppend(c *C) {
 	N := 10
 
 	checkAppend := func(appended bool, usage int64, threads ...string) {
-		entries := NewCPUStatEntries(N)
+		entries := NewCPUEntries(N)
 		c.Assert(entries, NotNil)
 		for i := 0; i < N; i++ {
 			entry := &StatEntry{
@@ -58,9 +58,9 @@ func (s *testClusterStatSuite) TestCPUStatEntriesAppend(c *C) {
 	checkAppend(false, 0, "cup")
 }
 
-func (s *testClusterStatSuite) TestCPUStatEntriesCPU(c *C) {
+func (s *testClusterStatSuite) TestCPUEntriesCPU(c *C) {
 	N := 10
-	entries := NewCPUStatEntries(N)
+	entries := NewCPUEntries(N)
 	c.Assert(entries, NotNil)
 
 	usages := cpu(20)
@@ -73,9 +73,9 @@ func (s *testClusterStatSuite) TestCPUStatEntriesCPU(c *C) {
 	c.Assert(entries.CPU(), Equals, float64(20))
 }
 
-func (s *testClusterStatSuite) TestClusterStatEntriesAppend(c *C) {
+func (s *testClusterStatSuite) TestStatEntriesAppend(c *C) {
 	N := 10
-	cst := NewClusterStatEntries(N)
+	cst := NewStatEntries(N)
 	c.Assert(cst, NotNil)
 
 	// fill 2*N entries, 2 entries for each store
@@ -93,9 +93,9 @@ func (s *testClusterStatSuite) TestClusterStatEntriesAppend(c *C) {
 	}
 }
 
-func (s *testClusterStatSuite) TestClusterStatCPU(c *C) {
+func (s *testClusterStatSuite) TestStatEntriesCPU(c *C) {
 	N := 10
-	cst := NewClusterStatEntries(N)
+	cst := NewStatEntries(N)
 	c.Assert(cst, NotNil)
 
 	// the average cpu usage is 20%
@@ -115,9 +115,9 @@ func (s *testClusterStatSuite) TestClusterStatCPU(c *C) {
 	// the cpu usage of the whole cluster is 20%
 	c.Assert(cst.CPU(), Equals, float64(20))
 }
-func (s *testClusterStatSuite) TestClusterStatCPUStale(c *C) {
+func (s *testClusterStatSuite) TestStatEntriesCPUStale(c *C) {
 	N := 10
-	cst := NewClusterStatEntries(N)
+	cst := NewStatEntries(N)
 	// make all entries stale immediately
 	cst.ttl = 0
 
@@ -133,9 +133,9 @@ func (s *testClusterStatSuite) TestClusterStatCPUStale(c *C) {
 	c.Assert(cst.CPU(), Equals, float64(0))
 }
 
-func (s *testClusterStatSuite) TestClusterStatState(c *C) {
-	Load := func(usage int64) *ClusterState {
-		cst := NewClusterStatEntries(10)
+func (s *testClusterStatSuite) TestStatEntriesState(c *C) {
+	Load := func(usage int64) *State {
+		cst := NewStatEntries(10)
 		c.Assert(cst, NotNil)
 
 		usages := cpu(usage)
@@ -148,7 +148,7 @@ func (s *testClusterStatSuite) TestClusterStatState(c *C) {
 			}
 			cst.Append(entry)
 		}
-		return &ClusterState{cst}
+		return &State{cst}
 	}
 	c.Assert(Load(0).State(), Equals, LoadStateIdle)
 	c.Assert(Load(5).State(), Equals, LoadStateLow)
