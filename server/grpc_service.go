@@ -750,8 +750,8 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 	}, nil
 }
 
-// CreateComponentConfig ...
-func (s *Server) CreateComponentConfig(ctx context.Context, request *configpb.CreateRequest) (*configpb.CreateResponse, error) {
+// Create ...
+func (s *Server) Create(ctx context.Context, request *configpb.CreateRequest) (*configpb.CreateResponse, error) {
 	if err := s.validateComponentRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -778,8 +778,8 @@ func (s *Server) CreateComponentConfig(ctx context.Context, request *configpb.Cr
 	}, nil
 }
 
-// GetComponentConfig ...
-func (s *Server) GetComponentConfig(ctx context.Context, request *configpb.GetRequest) (*configpb.GetResponse, error) {
+// Get ...
+func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*configpb.GetResponse, error) {
 	if err := s.validateComponentRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -803,8 +803,8 @@ func (s *Server) GetComponentConfig(ctx context.Context, request *configpb.GetRe
 	}, nil
 }
 
-// UpdateComponentConfig ...
-func (s *Server) UpdateComponentConfig(ctx context.Context, request *configpb.UpdateRequest) (*configpb.UpdateResponse, error) {
+// Update ...
+func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*configpb.UpdateResponse, error) {
 	if err := s.validateComponentRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -829,8 +829,8 @@ func (s *Server) UpdateComponentConfig(ctx context.Context, request *configpb.Up
 	}, nil
 }
 
-// DeleteComponentConfig ...
-func (s *Server) DeleteComponentConfig(ctx context.Context, request *configpb.DeleteRequest) (*configpb.DeleteResponse, error) {
+// Delete ...
+func (s *Server) Delete(ctx context.Context, request *configpb.DeleteRequest) (*configpb.DeleteResponse, error) {
 	if err := s.validateComponentRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
