@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/schedule/opt"
 )
 
 const (
@@ -38,8 +39,8 @@ const (
 
 // Cluster provides an overview of a cluster's regions distribution.
 type Cluster interface {
+	opt.Options
 	GetStore(id uint64) *core.StoreInfo
-	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 	AllocPeer(storeID uint64) (*metapb.Peer, error)
 }
 

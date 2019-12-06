@@ -36,11 +36,14 @@ import (
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
 	"github.com/pingcap/pd/server/member"
+	syncer "github.com/pingcap/pd/server/region_syncer"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/tso"
 	"github.com/pkg/errors"
 	"github.com/urfave/negroni"
@@ -95,7 +98,7 @@ type Server struct {
 	// for tso.
 	tso *tso.TimestampOracle
 	// for raft cluster
-	cluster *RaftCluster
+	cluster *cluster.RaftCluster
 	// For async region heartbeat.
 	hbStreams *heartbeatStreams
 	// Zap logger
@@ -114,7 +117,7 @@ type APIGroup struct {
 }
 
 const (
-	//CorePath  the core group, is at REST path `/pd/api/v1`.
+	// CorePath the core group, is at REST path `/pd/api/v1`.
 	CorePath = "/pd/api/v1"
 	// ExtensionsPath the named groups are REST at `/pd/apis/{GROUP_NAME}/{Version}`.
 	ExtensionsPath = "/pd/apis"
@@ -292,7 +295,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
-	s.cluster = newRaftCluster(ctx, s, s.clusterID)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
@@ -431,7 +434,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	clusterRootPath := s.getClusterRootPath()
+	clusterRootPath := s.GetClusterRootPath()
 
 	var ops []clientv3.Op
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
@@ -481,7 +484,8 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		log.Warn("flush the bootstrap region failed", zap.Error(err))
 	}
-	if err := s.cluster.start(); err != nil {
+
+	if err := s.cluster.Start(s); err != nil {
 		return nil, err
 	}
 
@@ -489,15 +493,15 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 }
 
 func (s *Server) createRaftCluster() error {
-	if s.cluster.isRunning() {
+	if s.cluster.IsRunning() {
 		return nil
 	}
 
-	return s.cluster.start()
+	return s.cluster.Start(s)
 }
 
 func (s *Server) stopRaftCluster() {
-	s.cluster.stop()
+	s.cluster.Stop()
 }
 
 // GetAddr returns the server urls for clients.
@@ -538,6 +542,21 @@ func (s *Server) GetMember() *member.Member {
 // GetStorage returns the backend storage of server.
 func (s *Server) GetStorage() *core.Storage {
 	return s.storage
+}
+
+// SetStorage changes the storage for test purpose.
+func (s *Server) SetStorage(storage *core.Storage) {
+	s.storage = storage
+}
+
+// GetScheduleOption returns the schedule option.
+func (s *Server) GetScheduleOption() *config.ScheduleOption {
+	return s.scheduleOpt
+}
+
+// GetHBStreams returns the heartbeat streams.
+func (s *Server) GetHBStreams() opt.HeartbeatStreams {
+	return s.hbStreams
 }
 
 // GetAllocator returns the ID allocator of server.
@@ -693,7 +712,7 @@ func (s *Server) GetLabelProperty() config.LabelPropertyConfig {
 
 // SetClusterVersion sets the version of cluster.
 func (s *Server) SetClusterVersion(v string) error {
-	version, err := ParseVersion(v)
+	version, err := cluster.ParseVersion(v)
 	if err != nil {
 		return err
 	}
@@ -722,14 +741,15 @@ func (s *Server) GetSecurityConfig() *config.SecurityConfig {
 	return &s.cfg.Security
 }
 
-func (s *Server) getClusterRootPath() string {
+// GetClusterRootPath returns the cluster root path.
+func (s *Server) GetClusterRootPath() string {
 	return path.Join(s.rootPath, "raft")
 }
 
 // GetRaftCluster gets Raft cluster.
 // If cluster has not been bootstrapped, return nil.
-func (s *Server) GetRaftCluster() *RaftCluster {
-	if s.IsClosed() || !s.cluster.isRunning() {
+func (s *Server) GetRaftCluster() *cluster.RaftCluster {
+	if s.IsClosed() || !s.cluster.IsRunning() {
 		return nil
 	}
 	return s.cluster
@@ -753,10 +773,10 @@ func (s *Server) GetMetaRegions() []*metapb.Region {
 }
 
 // GetClusterStatus gets cluster status.
-func (s *Server) GetClusterStatus() (*ClusterStatus, error) {
+func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 	s.cluster.Lock()
 	defer s.cluster.Unlock()
-	return s.cluster.loadClusterStatus()
+	return s.cluster.LoadClusterStatus()
 }
 
 // SetLogLevel sets log level.
@@ -764,26 +784,6 @@ func (s *Server) SetLogLevel(level string) {
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
-}
-
-var healthURL = "/pd/api/v1/ping"
-
-// CheckHealth checks if members are healthy.
-func (s *Server) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
-	unhealthMembers := make(map[uint64]*pdpb.Member)
-	for _, member := range members {
-		for _, cURL := range member.ClientUrls {
-			resp, err := dialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
-			if resp != nil {
-				resp.Body.Close()
-			}
-			if err != nil || resp.StatusCode != http.StatusOK {
-				unhealthMembers[member.GetMemberId()] = member
-				break
-			}
-		}
-	}
-	return unhealthMembers
 }
 
 func (s *Server) leaderLoop() {
@@ -806,12 +806,13 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", zap.Error(err))
 				continue
 			}
+			syncer := s.cluster.GetRegionSyncer()
 			if s.scheduleOpt.LoadPDServerConfig().UseRegionStorage {
-				s.cluster.regionSyncer.StartSyncWithLeader(leader.GetClientUrls()[0])
+				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
 			log.Info("start watch leader", zap.Stringer("leader", leader))
 			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
-			s.cluster.regionSyncer.StopSyncWithLeader()
+			syncer.StopSyncWithLeader()
 			log.Info("leader changed, try to campaign leader")
 		}
 

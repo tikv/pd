@@ -476,3 +476,16 @@ func (s *testClientSuite) TestTsLessEqual(c *C) {
 	c.Assert(tsLessEqual(9, 8, 9, 6), IsFalse)
 	c.Assert(tsLessEqual(9, 6, 9, 8), IsTrue)
 }
+
+var _ = Suite(&testClientCtxSuite{})
+
+type testClientCtxSuite struct{}
+
+func (s *testClientCtxSuite) TestClientCtx(c *C) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*3)
+	defer cancel()
+	_, err := NewClientWithContext(ctx, []string{"localhost:8080"}, SecurityOption{})
+	c.Assert(err, NotNil)
+	c.Assert(time.Since(start), Less, time.Second*4)
+}

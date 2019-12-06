@@ -42,9 +42,9 @@ type RegionStorage struct {
 }
 
 const (
-	//DefaultFlushRegionRate is the ttl to sync the regions to region storage.
+	// DefaultFlushRegionRate is the ttl to sync the regions to region storage.
 	defaultFlushRegionRate = 3 * time.Second
-	//DefaultBatchSize is the batch size to save the regions to region storage.
+	// DefaultBatchSize is the batch size to save the regions to region storage.
 	defaultBatchSize = 100
 )
 

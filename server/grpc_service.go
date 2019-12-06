@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -42,7 +43,7 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 	if s.IsClosed() {
 		return nil, status.Errorf(codes.Unknown, "server not started")
 	}
-	members, err := GetMembers(s.GetClient())
+	members, err := cluster.GetMembers(s.GetClient())
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
@@ -110,8 +111,8 @@ func (s *Server) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) 
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster != nil {
+	rc := s.GetRaftCluster()
+	if rc != nil {
 		err := &pdpb.Error{
 			Type:    pdpb.ErrorType_ALREADY_BOOTSTRAPPED,
 			Message: "cluster is already bootstrapped",
@@ -135,10 +136,10 @@ func (s *Server) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstrappe
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
+	rc := s.GetRaftCluster()
 	return &pdpb.IsBootstrappedResponse{
 		Header:       s.header(),
-		Bootstrapped: cluster != nil,
+		Bootstrapped: rc != nil,
 	}, nil
 }
 
@@ -166,13 +167,13 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.GetStoreResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	storeID := request.GetStoreId()
-	store := cluster.GetStore(storeID)
+	store := rc.GetStore(storeID)
 	if store == nil {
 		return nil, status.Errorf(codes.Unknown, "invalid store ID %d, not found", storeID)
 	}
@@ -186,8 +187,8 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 // checkStore2 returns an error response if the store exists and is in tombstone state.
 // It returns nil if it can't get the store.
 // Copied from server/command.go
-func checkStore2(cluster *RaftCluster, storeID uint64) *pdpb.Error {
-	store := cluster.GetStore(storeID)
+func checkStore2(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
+	store := rc.GetStore(storeID)
 	if store != nil {
 		if store.GetState() == metapb.StoreState_Tombstone {
 			return &pdpb.Error{
@@ -205,24 +206,25 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.PutStoreResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	store := request.GetStore()
-	if pberr := checkStore2(cluster, store.GetId()); pberr != nil {
+	if pberr := checkStore2(rc, store.GetId()); pberr != nil {
 		return &pdpb.PutStoreResponse{
 			Header: s.errorHeader(pberr),
 		}, nil
 	}
 
-	if err := cluster.putStore(store); err != nil {
+	if err := rc.PutStore(store); err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	cluster.OnStoreVersionChange()
+	rc.OnStoreVersionChange()
+	CheckPDVersion(s.scheduleOpt)
 
 	return &pdpb.PutStoreResponse{
 		Header: s.header(),
@@ -235,21 +237,21 @@ func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresReq
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.GetAllStoresResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	// Don't return tombstone stores.
 	var stores []*metapb.Store
 	if request.GetExcludeTombstoneStores() {
-		for _, store := range cluster.GetMetaStores() {
+		for _, store := range rc.GetMetaStores() {
 			if store.GetState() != metapb.StoreState_Tombstone {
 				stores = append(stores, store)
 			}
 		}
 	} else {
-		stores = cluster.GetMetaStores()
+		stores = rc.GetMetaStores()
 	}
 
 	return &pdpb.GetAllStoresResponse{
@@ -267,18 +269,18 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	if request.GetStats() == nil {
 		return nil, errors.Errorf("invalid store heartbeat command, but %v", request)
 	}
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if pberr := checkStore2(cluster, request.GetStats().GetStoreId()); pberr != nil {
+	if pberr := checkStore2(rc, request.GetStats().GetStoreId()); pberr != nil {
 		return &pdpb.StoreHeartbeatResponse{
 			Header: s.errorHeader(pberr),
 		}, nil
 	}
 
-	err := cluster.handleStoreHeartbeat(request.Stats)
+	err := rc.HandleStoreHeartbeat(request.Stats)
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
@@ -332,8 +334,8 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 // RegionHeartbeat implements gRPC PDServer.
 func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 	server := &heartbeatServer{stream: stream}
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		resp := &pdpb.RegionHeartbeatResponse{
 			Header: s.notBootstrappedHeader(),
 		}
@@ -357,7 +359,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		storeID := request.GetLeader().GetStoreId()
 		storeLabel := strconv.FormatUint(storeID, 10)
-		store := cluster.GetStore(storeID)
+		store := rc.GetStore(storeID)
 		if store == nil {
 			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
@@ -366,11 +368,9 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
 		regionHeartbeatLatency.WithLabelValues(storeAddress, storeLabel).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
 
-		hbStreams := cluster.GetHeartbeatStreams()
-
 		if time.Since(lastBind) > s.cfg.HeartbeatStreamBindInterval.Duration {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
-			hbStreams.bindStream(storeID, server)
+			s.hbStreams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
 
@@ -381,14 +381,14 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 		}
 		if region.GetID() == 0 {
 			msg := fmt.Sprintf("invalid request region, %v", request)
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
+			s.hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
 			continue
 		}
 
-		err = cluster.HandleRegionHeartbeat(region)
+		err = rc.HandleRegionHeartbeat(region)
 		if err != nil {
 			msg := err.Error()
-			hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
+			s.hbStreams.sendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader(), storeAddress, storeLabel)
 		}
 
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
@@ -401,11 +401,11 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) 
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	region, leader := cluster.GetRegionByKey(request.GetRegionKey())
+	region, leader := rc.GetRegionByKey(request.GetRegionKey())
 	return &pdpb.GetRegionResponse{
 		Header: s.header(),
 		Region: region,
@@ -419,12 +419,12 @@ func (s *Server) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionReque
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	region, leader := cluster.GetPrevRegionByKey(request.GetRegionKey())
+	region, leader := rc.GetPrevRegionByKey(request.GetRegionKey())
 	return &pdpb.GetRegionResponse{
 		Header: s.header(),
 		Region: region,
@@ -438,12 +438,12 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	id := request.GetRegionId()
-	region, leader := cluster.GetRegionByID(id)
+	region, leader := rc.GetRegionByID(id)
 	return &pdpb.GetRegionResponse{
 		Header: s.header(),
 		Region: region,
@@ -457,11 +457,11 @@ func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsReque
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	regions := cluster.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
+	regions := rc.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
 	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
 	for _, r := range regions {
 		leader := r.GetLeader()
@@ -480,8 +480,8 @@ func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.AskSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	if request.GetRegion() == nil {
@@ -490,7 +490,7 @@ func (s *Server) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest) (*
 	req := &pdpb.AskSplitRequest{
 		Region: request.Region,
 	}
-	split, err := cluster.handleAskSplit(req)
+	split, err := rc.HandleAskSplit(req)
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
@@ -508,12 +508,12 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if !cluster.IsFeatureSupported(BatchSplit) {
+	if !rc.IsFeatureSupported(cluster.BatchSplit) {
 		return &pdpb.AskBatchSplitResponse{Header: s.incompatibleVersion("batch_split")}, nil
 	}
 	if request.GetRegion() == nil {
@@ -523,7 +523,7 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 		Region:     request.Region,
 		SplitCount: request.SplitCount,
 	}
-	split, err := cluster.handleAskBatchSplit(req)
+	split, err := rc.HandleAskBatchSplit(req)
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
@@ -540,11 +540,11 @@ func (s *Server) ReportSplit(ctx context.Context, request *pdpb.ReportSplitReque
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.ReportSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	_, err := cluster.handleReportSplit(request)
+	_, err := rc.HandleReportSplit(request)
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
@@ -560,12 +560,12 @@ func (s *Server) ReportBatchSplit(ctx context.Context, request *pdpb.ReportBatch
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.ReportBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	_, err := cluster.handleBatchReportSplit(request)
+	_, err := rc.HandleBatchReportSplit(request)
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
@@ -581,13 +581,13 @@ func (s *Server) GetClusterConfig(ctx context.Context, request *pdpb.GetClusterC
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.GetClusterConfigResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	return &pdpb.GetClusterConfigResponse{
 		Header:  s.header(),
-		Cluster: cluster.GetConfig(),
+		Cluster: rc.GetConfig(),
 	}, nil
 }
 
@@ -597,12 +597,12 @@ func (s *Server) PutClusterConfig(ctx context.Context, request *pdpb.PutClusterC
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.PutClusterConfigResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 	conf := request.GetCluster()
-	if err := cluster.putConfig(conf); err != nil {
+	if err := rc.PutConfig(conf); err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
@@ -619,12 +619,12 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	region := cluster.GetRegion(request.GetRegionId())
+	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
 			return nil, errors.Errorf("region %d not found", request.GetRegionId())
@@ -632,17 +632,16 @@ func (s *Server) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionR
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
 
-	if cluster.IsRegionHot(region) {
+	if rc.IsRegionHot(region) {
 		return nil, errors.Errorf("region %d is a hot region", region.GetID())
 	}
 
-	co := cluster.GetCoordinator()
-	op, err := co.regionScatterer.Scatter(region)
+	op, err := rc.GetRegionScatter().Scatter(region)
 	if err != nil {
 		return nil, err
 	}
 	if op != nil {
-		co.opController.AddOperator(op)
+		rc.GetOperatorController().AddOperator(op)
 	}
 
 	return &pdpb.ScatterRegionResponse{
@@ -656,8 +655,8 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
@@ -674,11 +673,11 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 
 // SyncRegions syncs the regions.
 func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
-		return ErrNotBootstrapped
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return cluster.ErrNotBootstrapped
 	}
-	return s.cluster.regionSyncer.Sync(stream)
+	return rc.GetRegionSyncer().Sync(stream)
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.
@@ -687,8 +686,8 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
@@ -725,12 +724,12 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 		return nil, err
 	}
 
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
+	rc := s.GetRaftCluster()
+	if rc == nil {
 		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	opController := cluster.coordinator.opController
+	opController := rc.GetOperatorController()
 	requestID := request.GetRegionId()
 	r := opController.GetOperatorStatus(requestID)
 	if r == nil {

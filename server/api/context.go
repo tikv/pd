@@ -16,7 +16,7 @@ package api
 import (
 	"context"
 
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/cluster"
 )
 
 type contextKey int
@@ -25,10 +25,10 @@ const (
 	clusterKey contextKey = iota + 1
 )
 
-func withClusterCtx(ctx context.Context, cluster *server.RaftCluster) context.Context {
+func withClusterCtx(ctx context.Context, cluster *cluster.RaftCluster) context.Context {
 	return context.WithValue(ctx, clusterKey, cluster)
 }
 
-func getCluster(ctx context.Context) *server.RaftCluster {
-	return ctx.Value(clusterKey).(*server.RaftCluster)
+func getCluster(ctx context.Context) *cluster.RaftCluster {
+	return ctx.Value(clusterKey).(*cluster.RaftCluster)
 }

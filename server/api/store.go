@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -137,7 +138,7 @@ func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 }
 
 func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -145,7 +146,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	store := cluster.GetStore(storeID)
+	store := rc.GetStore(storeID)
 	if store == nil {
 		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
 		return
@@ -156,7 +157,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -164,12 +165,12 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, force := r.URL.Query()["force"]
 	var err error
+	_, force := r.URL.Query()["force"]
 	if force {
-		err = cluster.BuryStore(storeID, force)
+		err = rc.BuryStore(storeID, force)
 	} else {
-		err = cluster.RemoveStore(storeID)
+		err = rc.RemoveStore(storeID)
 	}
 
 	if err != nil {
@@ -181,7 +182,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -196,7 +197,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := cluster.SetStoreState(storeID, metapb.StoreState(state))
+	err := rc.SetStoreState(storeID, metapb.StoreState(state))
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -206,7 +207,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -232,7 +233,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := cluster.UpdateStoreLabels(storeID, labels); err != nil {
+	if err := rc.UpdateStoreLabels(storeID, labels); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -241,7 +242,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -275,7 +276,7 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := cluster.SetStoreWeight(storeID, leader, region); err != nil {
+	if err := rc.SetStoreWeight(storeID, leader, region); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -328,8 +329,8 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 }
 
 func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
-	err := cluster.RemoveTombStoneRecords()
+	rc := getCluster(r.Context())
+	err := rc.RemoveTombStoneRecords()
 	if err != nil {
 		apiutil.ErrorResp(h.rd, w, err)
 		return
@@ -364,24 +365,29 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
-	limit, err := h.GetAllStoresLimit()
+	limits, err := h.GetAllStoresLimit()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ret := make(map[uint64]interface{})
-	for s, l := range limit {
-		ret[s] = struct {
-			Rate float64 `json:"rate"`
-		}{Rate: l * schedule.StoreBalanceBaseTime}
+	type LimitResp struct {
+		Rate float64 `json:"rate"`
+		Mode string  `json:"mode"`
+	}
+	resp := make(map[uint64]*LimitResp)
+	for s, l := range limits {
+		resp[s] = &LimitResp{
+			Rate: l.Rate() / float64(operator.RegionInfluence) * schedule.StoreBalanceBaseTime,
+			Mode: l.Mode().String(),
+		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, ret)
+	h.rd.JSON(w, http.StatusOK, resp)
 }
 
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
-	stores := cluster.GetMetaStores()
+	rc := getCluster(r.Context())
+	stores := rc.GetMetaStores()
 	StoresInfo := &StoresInfo{
 		Stores: make([]*StoreInfo, 0, len(stores)),
 	}
@@ -392,10 +398,10 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stores = urlFilter.filter(cluster.GetMetaStores())
+	stores = urlFilter.filter(rc.GetMetaStores())
 	for _, s := range stores {
 		storeID := s.GetId()
-		store := cluster.GetStore(storeID)
+		store := rc.GetStore(storeID)
 		if store == nil {
 			h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
 			return

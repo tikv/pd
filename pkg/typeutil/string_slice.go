@@ -20,7 +20,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-//StringSlice is more friendly to json encode/decode
+// StringSlice is more friendly to json encode/decode
 type StringSlice []string
 
 // MarshalJSON returns the size as a JSON string.

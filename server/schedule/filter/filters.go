@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/placement"
 )
 
-//revive:disable:unused-parameter
+// revive:disable:unused-parameter
 
 // SelectSourceStores selects stores that be selected as source store from the list.
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt opt.Options) []*core.StoreInfo {

@@ -37,10 +37,10 @@ func newLabelsHandler(svr *server.Server, rd *render.Render) *labelsHandler {
 }
 
 func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	var labels []*metapb.StoreLabel
 	m := make(map[string]struct{})
-	stores := cluster.GetStores()
+	stores := rc.GetStores()
 	for _, s := range stores {
 		ls := s.GetLabels()
 		for _, l := range ls {
@@ -54,7 +54,7 @@ func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
-	cluster := getCluster(r.Context())
+	rc := getCluster(r.Context())
 	name := r.URL.Query().Get("name")
 	value := r.URL.Query().Get("value")
 	filter, err := newStoresLabelFilter(name, value)
@@ -63,7 +63,7 @@ func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stores := cluster.GetMetaStores()
+	stores := rc.GetMetaStores()
 	storesInfo := &StoresInfo{
 		Stores: make([]*StoreInfo, 0, len(stores)),
 	}
@@ -71,7 +71,7 @@ func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 	stores = filter.filter(stores)
 	for _, s := range stores {
 		storeID := s.GetId()
-		store := cluster.GetStore(storeID)
+		store := rc.GetStore(storeID)
 		if store == nil {
 			h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
 			return
