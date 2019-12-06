@@ -36,18 +36,15 @@ func GetFunction(path string, funcName string) (plugin.Symbol, error) {
 		//open plugin
 		filePath, err := filepath.Abs(path)
 		if err != nil {
-			PluginMapLock.Unlock()
 			return nil, err
 		}
 		log.Info("open plugin file", zap.String("file-path", filePath))
 		p, err := plugin.Open(filePath)
 		if err != nil {
-			PluginMapLock.Unlock()
 			return nil, err
 		}
 		PluginMap[path] = p
 	}
-	PluginMapLock.Unlock()
 	//get func from plugin
 	f, err := PluginMap[path].Lookup(funcName)
 	if err != nil {

@@ -284,11 +284,6 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 		return
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-	if _, ok := c.schedulers[s.GetName()]; ok {
-		if err := c.removeScheduler(s.GetName()); err != nil {
-			log.Error("can not remove scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
-		}
-	}
 	if err = c.addScheduler(s); err != nil {
 		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		return
