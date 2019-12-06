@@ -45,23 +45,29 @@ type RegionInfo struct {
 
 // NewRegionInfo create a new api RegionInfo.
 func NewRegionInfo(r *core.RegionInfo) *RegionInfo {
+	return InitRegion(r, &RegionInfo{})
+}
+
+// InitRegion init a new api RegionInfo from the core.RegionInfo.
+func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	if r == nil {
 		return nil
 	}
-	return &RegionInfo{
-		ID:              r.GetID(),
-		StartKey:        string(core.HexRegionKey(r.GetStartKey())),
-		EndKey:          string(core.HexRegionKey(r.GetEndKey())),
-		RegionEpoch:     r.GetRegionEpoch(),
-		Peers:           r.GetPeers(),
-		Leader:          r.GetLeader(),
-		DownPeers:       r.GetDownPeers(),
-		PendingPeers:    r.GetPendingPeers(),
-		WrittenBytes:    r.GetBytesWritten(),
-		ReadBytes:       r.GetBytesRead(),
-		ApproximateSize: r.GetApproximateSize(),
-		ApproximateKeys: r.GetApproximateKeys(),
-	}
+
+	s.ID = r.GetID()
+	s.StartKey = core.HexRegionKeyStr(r.GetStartKey())
+	s.EndKey = core.HexRegionKeyStr(r.GetEndKey())
+	s.RegionEpoch = r.GetRegionEpoch()
+	s.Peers = r.GetPeers()
+	s.Leader = r.GetLeader()
+	s.DownPeers = r.GetDownPeers()
+	s.PendingPeers = r.GetPendingPeers()
+	s.WrittenBytes = r.GetBytesWritten()
+	s.ReadBytes = r.GetBytesRead()
+	s.ApproximateSize = r.GetApproximateSize()
+	s.ApproximateKeys = r.GetApproximateKeys()
+
+	return s
 }
 
 // RegionsInfo contains some regions with the detailed region info.
@@ -126,13 +132,18 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 }
 
 func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
-	regionInfos := make([]*RegionInfo, len(regions))
+	regionInfos := make([]RegionInfo, len(regions))
+	regionInfosRefs := make([]*RegionInfo, len(regions))
+
+	for i := 0; i < len(regions); i++ {
+		regionInfosRefs[i] = &regionInfos[i]
+	}
 	for i, r := range regions {
-		regionInfos[i] = NewRegionInfo(r)
+		regionInfosRefs[i] = InitRegion(r, regionInfosRefs[i])
 	}
 	return &RegionsInfo{
 		Count:   len(regions),
-		Regions: regionInfos,
+		Regions: regionInfosRefs,
 	}
 }
 

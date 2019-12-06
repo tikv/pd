@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"reflect"
 	"strings"
+	"unsafe"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -807,10 +808,57 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	return strings.Join(ret, ", ")
 }
 
+// String converts slice of bytes to string without copy.
+func String(b []byte) (s string) {
+	if len(b) == 0 {
+		return ""
+	}
+	pbytes := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	pstring := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	pstring.Data = pbytes.Data
+	pstring.Len = pbytes.Len
+	return
+}
+
+// ToUpperASCIIInplace bytes.ToUpper but zero-cost
+func ToUpperASCIIInplace(s []byte) []byte {
+	hasLower := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		hasLower = hasLower || ('a' <= c && c <= 'z')
+	}
+
+	if !hasLower {
+		return s
+	}
+	var c byte
+	for i := 0; i < len(s); i++ {
+		c = s[i]
+		if 'a' <= c && c <= 'z' {
+			c -= 'a' - 'A'
+		}
+		s[i] = c
+	}
+	return s
+}
+
+// EncodeToString overrides hex.EncodeToString implementation. Difference: returns []byte, not string
+func EncodeToString(src []byte) []byte {
+	dst := make([]byte, hex.EncodedLen(len(src)))
+	hex.Encode(dst, src)
+	return dst
+}
+
 // HexRegionKey converts region key to hex format. Used for formating region in
 // logs.
 func HexRegionKey(key []byte) []byte {
-	return []byte(strings.ToUpper(hex.EncodeToString(key)))
+	return ToUpperASCIIInplace(EncodeToString(key))
+}
+
+// HexRegionKeyStr converts region key to hex format. Used for formating region in
+// logs.
+func HexRegionKeyStr(key []byte) string {
+	return String(HexRegionKey(key))
 }
 
 // RegionToHexMeta converts a region meta's keys to hex format. Used for formating

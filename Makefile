@@ -99,7 +99,7 @@ travis_coverage: export GO111MODULE=on
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
+	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -concurrency=8 -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 else
 	@echo "coverage only runs in travis."

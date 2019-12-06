@@ -14,10 +14,12 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"net/url"
 	"sort"
+	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -318,5 +320,72 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 	c.Assert(len(regionIds), Equals, regions.Count)
 	for i, v := range regionIds {
 		c.Assert(v, Equals, regions.Regions[i].ID)
+	}
+}
+
+// Create n regions (0..n) of n stores (0..n).
+// Each region contains np peers, the first peer is the leader.
+// (copied from server/cluster_test.go)
+func newTestRegions() []*core.RegionInfo {
+	n := uint64(10000)
+	np := uint64(3)
+
+	regions := make([]*core.RegionInfo, 0, n)
+	for i := uint64(0); i < n; i++ {
+		peers := make([]*metapb.Peer, 0, np)
+		for j := uint64(0); j < np; j++ {
+			peer := &metapb.Peer{
+				Id: i*np + j,
+			}
+			peer.StoreId = (i + j) % n
+			peers = append(peers, peer)
+		}
+		region := &metapb.Region{
+			Id:          i,
+			Peers:       peers,
+			StartKey:    []byte(fmt.Sprintf("%d", i)),
+			EndKey:      []byte(fmt.Sprintf("%d", i+1)),
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+		}
+		regions = append(regions, core.NewRegionInfo(region, peers[0]))
+	}
+	return regions
+}
+
+func BenchmarkRenderJSON(b *testing.B) {
+	regionInfos := newTestRegions()
+	rd := createStreamingRender()
+	regions := convertToAPIRegions(regionInfos)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var buffer bytes.Buffer
+		rd.JSON(&buffer, 200, regions)
+	}
+}
+
+func BenchmarkConvertToAPIRegions(b *testing.B) {
+	regionInfos := newTestRegions()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		regions := convertToAPIRegions(regionInfos)
+		_ = regions.Count
+	}
+}
+
+func BenchmarkHexRegionKey(b *testing.B) {
+	key := []byte("region_number_infinity")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = core.HexRegionKey(key)
+	}
+}
+
+func BenchmarkHexRegionKeyStr(b *testing.B) {
+	key := []byte("region_number_infinity")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = core.HexRegionKeyStr(key)
 	}
 }

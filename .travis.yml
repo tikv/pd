@@ -21,3 +21,7 @@ matrix:
       - TRAVIS_COVERAGE=1
     script:
       - make ci
+    after_success:
+      - travis_wait make travis_coverage
+      - mv overalls.coverprofile coverage.txt
+      - bash <(curl -s https://codecov.io/bash)
