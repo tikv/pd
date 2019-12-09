@@ -1092,7 +1092,7 @@ func (c *RaftCluster) collectHealthStatus() {
 	if err != nil {
 		log.Error("get members error", zap.Error(err))
 	}
-	unhealth := c.CheckHealth(members)
+	unhealth := CheckHealth(members)
 	for _, member := range members {
 		if _, ok := unhealth[member.GetMemberId()]; ok {
 			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
@@ -1577,7 +1577,7 @@ var DialClient = &http.Client{
 var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.
-func (c *RaftCluster) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
+func CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 	unhealthMembers := make(map[uint64]*pdpb.Member)
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {

@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -364,19 +365,24 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
-	limit, err := h.GetAllStoresLimit()
+	limits, err := h.GetAllStoresLimit()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ret := make(map[uint64]interface{})
-	for s, l := range limit {
-		ret[s] = struct {
-			Rate float64 `json:"rate"`
-		}{Rate: l * schedule.StoreBalanceBaseTime}
+	type LimitResp struct {
+		Rate float64 `json:"rate"`
+		Mode string  `json:"mode"`
+	}
+	resp := make(map[uint64]*LimitResp)
+	for s, l := range limits {
+		resp[s] = &LimitResp{
+			Rate: l.Rate() / float64(operator.RegionInfluence) * schedule.StoreBalanceBaseTime,
+			Mode: l.Mode().String(),
+		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, ret)
+	h.rd.JSON(w, http.StatusOK, resp)
 }
 
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

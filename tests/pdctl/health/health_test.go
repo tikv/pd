@@ -55,7 +55,7 @@ func (s *healthTestSuite) TestHealth(c *C) {
 	client := tc.GetEtcdClient()
 	members, err := cluster.GetMembers(client)
 	c.Assert(err, IsNil)
-	unhealthMembers := tc.CheckHealth(members)
+	unhealthMembers := cluster.CheckHealth(members)
 	healths := []api.Health{}
 	for _, member := range members {
 		h := api.Health{
