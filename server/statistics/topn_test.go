@@ -122,11 +122,11 @@ func (s *testTopNSuite) TestTTL(c *C) {
 	for _, x := range rand.Perm(TOTAL) {
 		c.Assert(tn.Put(&item{id: uint64(x), value: float64(-x)}), IsFalse)
 	}
-	time.Sleep(300 * time.Millisecond)
-	for i := 0; i < TOTAL; i += 3 {
-		c.Assert(tn.Put(&item{id: uint64(i), value: float64(-i) + 100}), IsTrue)
+	time.Sleep(900 * time.Millisecond)
+	c.Assert(tn.Put(&item{id: 0, value: 100}), IsTrue)
+	for i := 3; i < TOTAL; i += 3 {
+		c.Assert(tn.Put(&item{id: uint64(i), value: float64(-i) + 100}), IsFalse)
 	}
-	time.Sleep(600 * time.Millisecond)
 	tn.RemoveExpired()
 	c.Assert(tn.Len(), Equals, TOTAL/3+1)
 	items := tn.GetAllTopN()
