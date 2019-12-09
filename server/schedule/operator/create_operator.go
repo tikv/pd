@@ -15,6 +15,7 @@ package operator
 
 import (
 	"fmt"
+	"math/rand"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -141,8 +142,18 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
 func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer) (*Operator, error) {
+	// randomly pick a leader.
+	var ids []uint64
+	for id := range targetPeers {
+		ids = append(ids, id)
+	}
+	var leader uint64
+	if len(ids) > 0 {
+		leader = ids[rand.Intn(len(ids))]
+	}
 	return NewBuilder(desc, cluster, origin).
 		SetPeers(targetPeers).
+		SetLeader(leader).
 		SetLightWeight().
 		Build(0)
 }
