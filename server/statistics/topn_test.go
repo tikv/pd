@@ -118,15 +118,15 @@ func (s *testTopNSuite) TestRemove(c *C) {
 func (s *testTopNSuite) TestTTL(c *C) {
 	const TOTAL = 10000
 	const N = 50
-	tn := NewTopN(50, 300*time.Millisecond)
+	tn := NewTopN(50, 900*time.Millisecond)
 	for _, x := range rand.Perm(TOTAL) {
 		c.Assert(tn.Put(&item{id: uint64(x), value: float64(-x)}), IsFalse)
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	for i := 0; i < TOTAL; i += 3 {
 		c.Assert(tn.Put(&item{id: uint64(i), value: float64(-i) + 100}), IsTrue)
 	}
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(600 * time.Millisecond)
 	tn.RemoveExpired()
 	c.Assert(tn.Len(), Equals, TOTAL/3+1)
 	items := tn.GetAllTopN()
