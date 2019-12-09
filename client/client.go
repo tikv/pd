@@ -34,6 +34,9 @@ import (
 type Client interface {
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
+	// GetLeaderAddr returns current leader's address. It returns "" before
+	// syncing leader from server.
+	GetLeaderAddr() string
 	// GetTS gets a timestamp from PD.
 	GetTS(ctx context.Context) (int64, int64, error)
 	// GetTSAsync gets a timestamp from PD, without block the caller.
@@ -522,7 +525,6 @@ func (c *client) GetClusterID(context.Context) uint64 {
 	return c.clusterID
 }
 
-// For testing use.
 func (c *client) GetLeaderAddr() string {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
