@@ -90,7 +90,7 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
 		op, err := operator.CreateAddPeerOperator("make-up-replica", r.cluster, region, newPeer, operator.OpReplica)
 		if err != nil {
-			log.Debug("create operator fail", zap.Error(err))
+			log.Debug("create make-up-replica operator fail", zap.Error(err))
 			return nil
 		}
 		return op

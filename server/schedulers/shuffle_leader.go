@@ -118,7 +118,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 	op, err := operator.CreateTransferLeaderOperator(ShuffleLeaderType, cluster, region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
 	if err != nil {
-		log.Debug("fail to create operator", zap.Error(err))
+		log.Debug("fail to create shuffle leader operator", zap.Error(err))
 		return nil
 	}
 	op.SetPriorityLevel(core.HighPriority)

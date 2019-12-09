@@ -234,7 +234,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) 
 		dstStore := newLeader.GetStoreId()
 		op, err := operator.CreateTransferLeaderOperator("transfer-hot-read-leader", cluster, srcRegion, srcStore, dstStore, operator.OpHotRegion)
 		if err != nil {
-			log.Debug("fail to create operator", zap.Error(err))
+			log.Debug("fail to create transfer hot read leader operator", zap.Error(err))
 			return nil
 		}
 		op.SetPriorityLevel(core.HighPriority)
@@ -289,7 +289,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster)
 				dstStore := newLeader.GetStoreId()
 				op, err := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", cluster, srcRegion, srcStore, dstStore, operator.OpHotRegion)
 				if err != nil {
-					log.Debug("fail to create operator", zap.Error(err))
+					log.Debug("fail to create transfer hot write leader operator", zap.Error(err))
 					return nil
 				}
 				op.SetPriorityLevel(core.HighPriority)
