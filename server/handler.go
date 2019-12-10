@@ -20,6 +20,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pingcap/errcode"
@@ -69,13 +70,14 @@ var (
 
 // Handler is a helper to export methods to handle API/RPC requests.
 type Handler struct {
-	s           *Server
-	opt         *config.ScheduleOption
-	pluginChMap map[string]chan string
+	s               *Server
+	opt             *config.ScheduleOption
+	pluginChMap     map[string]chan string
+	pluginChMapLock sync.RWMutex
 }
 
 func newHandler(s *Server) *Handler {
-	return &Handler{s: s, opt: s.scheduleOpt, pluginChMap: make(map[string]chan string)}
+	return &Handler{s: s, opt: s.scheduleOpt, pluginChMap: make(map[string]chan string), pluginChMapLock: sync.RWMutex{}}
 }
 
 // GetRaftCluster returns RaftCluster.
@@ -821,6 +823,8 @@ func (h *Handler) ResetTS(ts uint64) error {
 
 // PluginLoad loads the plugin referenced by the pluginPath
 func (h *Handler) PluginLoad(pluginPath string) error {
+	h.pluginChMapLock.Lock()
+	defer h.pluginChMapLock.Unlock()
 	cluster, err := h.GetRaftCluster()
 	if err != nil {
 		return err
@@ -834,6 +838,8 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 
 // PluginUnload unloads the plugin referenced by the pluginPath
 func (h *Handler) PluginUnload(pluginPath string) error {
+	h.pluginChMapLock.Lock()
+	defer h.pluginChMapLock.Unlock()
 	if ch, ok := h.pluginChMap[pluginPath]; ok {
 		ch <- cluster.PluginUnload
 		return nil
