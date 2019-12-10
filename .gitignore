@@ -11,3 +11,5 @@ vendor
 default*
 *.bak
 .vscode/
+bindata.go
+/pkg/ui/pd-web/*
