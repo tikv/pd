@@ -414,7 +414,7 @@ func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithCheckCommand returns a region with check subcommand of regionCmd
 func NewRegionWithCheckCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "check [miss-peer|extra-peer|down-peer|pending-peer|incorrect-ns]",
+		Use:   "check [miss-peer|extra-peer|down-peer|pending-peer|offline-peer|empty-region]",
 		Short: "show the region with check specific status",
 		Run:   showRegionWithCheckCommandFunc,
 	}

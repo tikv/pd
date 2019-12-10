@@ -333,3 +333,39 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 	}
 	return ranges, nil
 }
+
+// Influence records operator influence.
+type Influence struct {
+	ByteRate float64
+}
+
+func (infl Influence) add(rhs *Influence, w float64) Influence {
+	infl.ByteRate += rhs.ByteRate * w
+	return infl
+}
+
+// TODO: merge it into OperatorInfluence.
+type pendingInfluence struct {
+	op       *operator.Operator
+	from, to uint64
+	origin   Influence
+}
+
+func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence) *pendingInfluence {
+	return &pendingInfluence{
+		op, from, to, infl,
+	}
+}
+
+func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]Influence {
+	ret := map[uint64]Influence{}
+	for p := range pendings {
+		w := f(p.op)
+		if w == 0 {
+			delete(pendings, p)
+		}
+		ret[p.to] = ret[p.to].add(&p.origin, w)
+		ret[p.from] = ret[p.from].add(&p.origin, -w)
+	}
+	return ret
+}

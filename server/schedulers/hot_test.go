@@ -81,6 +81,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	// Will transfer a hot region from store 1, because the total count of peers
 	// which is hot for store 1 is more larger than other stores.
 	op := hb.Schedule(tc)[0]
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 	switch op.Len() {
 	case 1:
 		// balance by leader selected
@@ -101,12 +102,14 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	// hot region scheduler is restricted by `hot-region-schedule-limit`.
 	opt.HotRegionScheduleLimit = 0
 	c.Assert(hb.Schedule(tc), HasLen, 0)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 	opt.HotRegionScheduleLimit = mockoption.NewScheduleOptions().HotRegionScheduleLimit
 
 	// hot region scheduler is restricted by schedule limit.
 	opt.LeaderScheduleLimit = 0
 	for i := 0; i < 20; i++ {
 		op := hb.Schedule(tc)[0]
+		hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 		c.Assert(op.Len(), Equals, 4)
 		if op.RegionID() == 2 {
 			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
@@ -121,9 +124,12 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	// hot region scheduler is not affect by `balance-region-schedule-limit`.
 	opt.RegionScheduleLimit = 0
 	c.Assert(hb.Schedule(tc), HasLen, 1)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 	// Always produce operator
 	c.Assert(hb.Schedule(tc), HasLen, 1)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 	c.Assert(hb.Schedule(tc), HasLen, 1)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 
 	//| store_id | write_bytes_rate |
 	//|----------|------------------|
@@ -165,6 +171,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	opt.LeaderScheduleLimit = 0
 	for i := 0; i < 30; i++ {
 		op := hb.Schedule(tc)[0]
+		hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 		switch op.RegionID() {
 		case 1, 2:
 			if op.Len() == 3 {
@@ -188,6 +195,84 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 		tc.Regions.RemoveRegion(tc.GetRegion(i))
 	}
 	hb.Schedule(tc)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
+}
+
+func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	opt.HotRegionCacheHitsThreshold = 0
+
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.AddRegionStore(4, 20)
+
+	//| store_id | write_bytes_rate |
+	//|----------|------------------|
+	//|    1     |        8MB       |
+	//|    2     |        6MB       |
+	//|    3     |        6MB       |
+	//|    4     |        4MB       |
+	tc.UpdateStorageWrittenBytes(1, 8*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(4, 4*MB*statistics.StoreHeartBeatReportInterval)
+
+	//| region_id | leader_store | follower_store | follower_store | written_bytes |
+	//|-----------|--------------|----------------|----------------|---------------|
+	//|     1     |       1      |        2       |       3        |      512KB    |
+	//|     2     |       1      |        2       |       3        |      512KB    |
+	//|     3     |       1      |        2       |       3        |      512KB    |
+	//|     4     |       1      |        2       |       3        |      512KB    |
+	//|     5     |       1      |        2       |       3        |      512KB    |
+	//|     6     |       1      |        2       |       3        |      512KB    |
+	// All regions are hot.
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(4, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(5, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithWriteInfo(6, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+
+	for i := 0; i < 20; i++ {
+		hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
+		cnt := 0
+	testLoop:
+		for j := 0; j < 1000; j++ {
+			c.Assert(cnt, LessEqual, 5)
+			emptyCnt := 0
+			ops := hb.Schedule(tc)
+			for len(ops) == 0 {
+				emptyCnt++
+				if emptyCnt >= 10 {
+					break testLoop
+				}
+				ops = hb.Schedule(tc)
+			}
+			op := ops[0]
+			switch op.Len() {
+			case 1:
+				// balance by leader selected
+				testutil.CheckTransferLeaderFrom(c, op, operator.OpHotRegion, 1)
+			case 4:
+				// balance by peer selected
+				testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 4)
+				cnt++
+				if cnt == 3 {
+					c.Assert(op.Cancel(), IsTrue)
+				}
+			default:
+				c.Fatalf("wrong op: %v", op)
+			}
+		}
+		c.Assert(cnt, Equals, 5)
+	}
 }
 
 var _ = Suite(&testHotReadRegionSchedulerSuite{})
@@ -255,6 +340,7 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	// bytes_rate[store 1] * 0.9 > bytes_rate[store 3] + region_bytes_rate
 	// hot_region_count[store 3] < hot_regin_count[store 2]
 	testutil.CheckTransferLeader(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 3)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 	// assume handle the operator
 	tc.AddLeaderRegionWithReadInfo(3, 3, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 2)
 	// After transfer a hot region leader from store 1 to store 3
@@ -263,12 +349,12 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	//| store_id | read_bytes_rate |
 	//|----------|-----------------|
 	//|    1     |       6MB       |
-	//|    2     |       5MB       |
+	//|    2     |       5.5MB     |
 	//|    3     |       6MB       |
 	//|    4     |       3MB       |
 	//|    5     |       3MB       |
 	tc.UpdateStorageReadBytes(1, 6*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(2, 5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 5.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(4, 3*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(5, 3*MB*statistics.StoreHeartBeatReportInterval)
@@ -285,18 +371,92 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	tc.AddLeaderRegionWithReadInfo(5, 4, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 5)
 
 	// We will move leader peer of region 1 from 1 to 5
-	// Store 1 will be selected as source store (max rate, count > store 4 count).
+	// Store 1 will be selected as source store (max rate, count > store 3 count).
 	// When trying to transfer leader:
 	//   Store 2 and store 3 are also hot, failed.
 	// Trying to move leader peer:
 	//   Store 5 is selected as destination because of less hot region count.
 	testutil.CheckTransferPeerWithLeaderTransfer(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 5)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
 
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
 		tc.Regions.RemoveRegion(tc.GetRegion(i))
 	}
 	hb.Schedule(tc)
+	hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
+}
+
+func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	opt.HotRegionCacheHitsThreshold = 0
+
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.AddRegionStore(4, 20)
+
+	//| store_id | write_bytes_rate |
+	//|----------|------------------|
+	//|    1     |       7.1MB      |
+	//|    2     |       6.1MB      |
+	//|    3     |        6MB       |
+	//|    4     |        5MB       |
+	tc.UpdateStorageReadBytes(1, 7.1*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 6.1*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(4, 5*MB*statistics.StoreHeartBeatReportInterval)
+
+	//| region_id | leader_store | follower_store | follower_store |   read_bytes_rate  |
+	//|-----------|--------------|----------------|----------------|--------------------|
+	//|     1     |       1      |        2       |       3        |        512KB       |
+	//|     2     |       1      |        2       |       3        |        512KB       |
+	//|     3     |       1      |        2       |       3        |        512KB       |
+	//|     4     |       1      |        2       |       3        |        512KB       |
+	//|     5     |       2      |        1       |       3        |        512KB       |
+	//|     6     |       2      |        1       |       3        |        512KB       |
+	//|     7     |       3      |        1       |       2        |        512KB       |
+	//|     8     |       3      |        1       |       2        |        512KB       |
+	tc.AddLeaderRegionWithReadInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(2, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(3, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(4, 1, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 2, 3)
+	tc.AddLeaderRegionWithReadInfo(5, 2, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 3)
+	tc.AddLeaderRegionWithReadInfo(6, 2, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 3)
+	tc.AddLeaderRegionWithReadInfo(7, 3, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 2)
+	tc.AddLeaderRegionWithReadInfo(8, 3, 512*KB*statistics.RegionHeartBeatReportInterval, statistics.RegionHeartBeatReportInterval, 1, 2)
+
+	for i := 0; i < 20; i++ {
+		hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
+		op1 := hb.Schedule(tc)[0]
+		testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
+		op2 := hb.Schedule(tc)[0]
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+		op3 := hb.Schedule(tc)[0]
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op3, operator.OpHotRegion, 3, 4)
+		ops := hb.Schedule(tc)
+		c.Assert(ops, HasLen, 0)
+	}
+	for i := 0; i < 20; i++ {
+		hb.(*balanceHotRegionsScheduler).clearPendingInfluence()
+		op1 := hb.Schedule(tc)[0]
+		testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
+		op2 := hb.Schedule(tc)[0]
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+		c.Assert(op2.Cancel(), IsTrue)
+		op2 = hb.Schedule(tc)[0]
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+		c.Assert(op1.Cancel(), IsTrue)
+		op3 := hb.Schedule(tc)[0]
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op3, operator.OpHotRegion, 1, 4)
+		ops := hb.Schedule(tc)
+		c.Assert(ops, HasLen, 0)
+	}
 }
 
 var _ = Suite(&testHotCacheSuite{})
