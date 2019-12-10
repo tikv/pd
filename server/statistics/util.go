@@ -160,7 +160,7 @@ func (e *EMA) Set(n float64) {
 	e.count = 1
 }
 
-const defaultSize = 144
+const defaultSize = 10
 const defaultInterval = time.Minute
 
 // HMA works as hull moving average
