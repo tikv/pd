@@ -99,19 +99,20 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 		}
 		matchOp, err := NewBuilder("", cluster, source).
 			SetPeers(peers).
-			SetLeader(target.GetLeader().GetStoreId()).
 			Build(kind)
 		if err != nil {
 			return nil, err
 		}
 
-		steps = append(matchOp.steps, MergeRegion{
-			FromRegion: source.GetMeta(),
-			ToRegion:   target.GetMeta(),
-			IsPassive:  false,
-		})
+		steps = append(steps, matchOp.steps...)
 		kind = matchOp.Kind()
 	}
+
+	steps = append(steps, MergeRegion{
+		FromRegion: source.GetMeta(),
+		ToRegion:   target.GetMeta(),
+		IsPassive:  false,
+	})
 
 	brief := fmt.Sprintf("merge: region %v to %v", source.GetID(), target.GetID())
 	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind|OpMerge, steps...)
@@ -125,9 +126,6 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 }
 
 func isRegionMatch(a, b *core.RegionInfo) bool {
-	if a.GetLeader().GetStoreId() != b.GetLeader().GetStoreId() {
-		return false
-	}
 	if len(a.GetPeers()) != len(b.GetPeers()) {
 		return false
 	}

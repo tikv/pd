@@ -190,6 +190,8 @@ func (s *testMergeCheckerSuite) checkSteps(c *C, op *operator.Operator, steps []
 			c.Assert(op.Step(i).(operator.RemovePeer).FromStore, Equals, steps[i].(operator.RemovePeer).FromStore)
 		case operator.MergeRegion:
 			c.Assert(op.Step(i).(operator.MergeRegion).IsPassive, Equals, steps[i].(operator.MergeRegion).IsPassive)
+		default:
+			c.Fatal("unknown operator step type")
 		}
 	}
 }
@@ -199,14 +201,13 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	ops := s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	s.checkSteps(c, ops[0], []operator.OpStep{
-		operator.AddLearner{ToStore: 4},
-		operator.PromoteLearner{ToStore: 4},
-		operator.RemovePeer{FromStore: 2},
 		operator.AddLearner{ToStore: 1},
 		operator.PromoteLearner{ToStore: 1},
+		operator.RemovePeer{FromStore: 2},
+		operator.AddLearner{ToStore: 4},
+		operator.PromoteLearner{ToStore: 4},
 		operator.TransferLeader{FromStore: 6, ToStore: 5},
 		operator.RemovePeer{FromStore: 6},
-		operator.TransferLeader{FromStore: 5, ToStore: 4},
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
@@ -237,7 +238,6 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 		operator.AddLearner{ToStore: 4},
 		operator.PromoteLearner{ToStore: 4},
 		operator.RemovePeer{FromStore: 6},
-		operator.TransferLeader{FromStore: 1, ToStore: 4},
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
@@ -261,7 +261,6 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []operator.OpStep{
-		operator.TransferLeader{FromStore: 1, ToStore: 4},
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
@@ -285,15 +284,15 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []operator.OpStep{
-		operator.AddLearner{ToStore: 4},
-		operator.PromoteLearner{ToStore: 4},
-		operator.RemovePeer{FromStore: 3},
 		operator.AddLearner{ToStore: 1},
 		operator.PromoteLearner{ToStore: 1},
+		operator.RemovePeer{FromStore: 3},
+		operator.AddLearner{ToStore: 4},
+		operator.PromoteLearner{ToStore: 4},
 		operator.RemovePeer{FromStore: 6},
 		operator.AddLearner{ToStore: 5},
 		operator.PromoteLearner{ToStore: 5},
-		operator.TransferLeader{FromStore: 2, ToStore: 4},
+		operator.TransferLeader{FromStore: 2, ToStore: 1},
 		operator.RemovePeer{FromStore: 2},
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
