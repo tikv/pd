@@ -76,6 +76,8 @@ type RaftCluster struct {
 	sync.RWMutex
 	ctx context.Context
 
+	server Server
+
 	running bool
 
 	clusterID   uint64
@@ -113,13 +115,14 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, client *clientv3.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, s Server, client *clientv3.Client) *RaftCluster {
 	return &RaftCluster{
 		ctx:          ctx,
 		running:      false,
 		clusterID:    clusterID,
 		clusterRoot:  root,
 		regionSyncer: regionSyncer,
+		server:       s,
 		client:       client,
 	}
 }
@@ -186,7 +189,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, s
 }
 
 // Start starts a cluster.
-func (c *RaftCluster) Start(s Server) error {
+func (c *RaftCluster) Start() error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -195,7 +198,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage())
+	c.InitCluster(c.server.GetAllocator(), c.server.GetScheduleOption(), c.server.GetStorage())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -204,8 +207,9 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
+	c.coordinator = newCoordinator(c.ctx, cluster, c.server.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt)
+
 	c.quit = make(chan struct{})
 
 	c.wg.Add(3)

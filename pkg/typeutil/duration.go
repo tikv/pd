@@ -56,3 +56,8 @@ func (d *Duration) UnmarshalText(text []byte) error {
 	d.Duration, err = time.ParseDuration(string(text))
 	return errors.WithStack(err)
 }
+
+// MarshalText parses the duration string into the TOML.
+func (d Duration) MarshalText() (text []byte, err error) {
+	return []byte(fmt.Sprintf("%v", d.Duration)), nil
+}

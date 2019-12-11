@@ -759,14 +759,14 @@ func (s *Server) Create(ctx context.Context, request *configpb.CreateRequest) (*
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		return &configpb.CreateResponse{Header: s.componentHeader(), Status: &configpb.Status{
-			Code:    configpb.Status_UNKNOWN,
+			Code:    configpb.StatusCode_UNKNOWN,
 			Message: "cluster is not bootstrapped",
 		}}, nil
 	}
 
 	componentsCfg := s.GetComponentsConfig()
 	version, config, status := componentsCfg.Create(request.GetVersion(), request.GetComponent(), request.GetComponentId(), request.GetConfig())
-	if status.GetCode() == configpb.Status_OK {
+	if status.GetCode() == configpb.StatusCode_OK {
 		componentsCfg.Persist(s.storage)
 	}
 
@@ -787,7 +787,7 @@ func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*config
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		return &configpb.GetResponse{Header: s.componentHeader(), Status: &configpb.Status{
-			Code:    configpb.Status_UNKNOWN,
+			Code:    configpb.StatusCode_UNKNOWN,
 			Message: "cluster is not bootstrapped",
 		}}, nil
 	}
@@ -812,13 +812,13 @@ func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		return &configpb.UpdateResponse{Header: &configpb.Header{ClusterId: s.clusterID}, Status: &configpb.Status{
-			Code:    configpb.Status_UNKNOWN,
+			Code:    configpb.StatusCode_UNKNOWN,
 			Message: "cluster is not bootstrapped",
 		}}, nil
 	}
 	componentsCfg := s.GetComponentsConfig()
 	version, status := componentsCfg.Update(request.GetKind(), request.GetVersion(), request.GetEntries())
-	if status.GetCode() == configpb.Status_OK {
+	if status.GetCode() == configpb.StatusCode_OK {
 		componentsCfg.Persist(s.storage)
 	}
 
@@ -838,13 +838,13 @@ func (s *Server) Delete(ctx context.Context, request *configpb.DeleteRequest) (*
 	cluster := s.GetRaftCluster()
 	if cluster == nil {
 		return &configpb.DeleteResponse{Header: &configpb.Header{ClusterId: s.clusterID}, Status: &configpb.Status{
-			Code:    configpb.Status_UNKNOWN,
+			Code:    configpb.StatusCode_UNKNOWN,
 			Message: "cluster is not bootstrapped",
 		}}, nil
 	}
 	componentsCfg := s.GetComponentsConfig()
 	status := componentsCfg.Delete(request.GetKind(), request.GetVersion())
-	if status.GetCode() == configpb.Status_OK {
+	if status.GetCode() == configpb.StatusCode_OK {
 		componentsCfg.Persist(s.storage)
 	}
 

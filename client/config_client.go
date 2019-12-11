@@ -59,12 +59,17 @@ type configClient struct {
 
 // NewConfigClient creates a PD configuration client.
 func NewConfigClient(pdAddrs []string, security SecurityOption) (ConfigClient, error) {
+	return NewConfigClientWithContext(context.Background(), pdAddrs, security)
+}
+
+// NewConfigClientWithContext creates a PD configuration client with the context.
+func NewConfigClientWithContext(ctx context.Context, pdAddrs []string, security SecurityOption) (ConfigClient, error) {
 	log.Info("[pd] create pd configuration client with endpoints", zap.Strings("pd-address", pdAddrs))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx1, cancel := context.WithCancel(ctx)
 	c := &configClient{
 		urls:          addrsToUrls(pdAddrs),
 		checkLeaderCh: make(chan struct{}, 1),
-		ctx:           ctx,
+		ctx:           ctx1,
 		cancel:        cancel,
 		security:      security,
 	}
@@ -276,6 +281,7 @@ func (c *configClient) Create(ctx context.Context, v *configpb.Version, componen
 		Version:     v,
 		Component:   component,
 		ComponentId: componentID,
+		Config:      config,
 	})
 	cancel()
 

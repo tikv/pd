@@ -95,20 +95,20 @@ func (c *ComponentsConfig) Get(version *configpb.Version, component, componentID
 			config, err = c.getComponentCfg(component, componentID)
 			if err != nil {
 				return version, "", &configpb.Status{
-					Code:    configpb.Status_UNKNOWN,
+					Code:    configpb.StatusCode_UNKNOWN,
 					Message: ErrEncode(err),
 				}
 			}
 			res := compareVersion(cfg.GetVersion(), version)
 			if res == 0 {
-				return version, "", &configpb.Status{Code: configpb.Status_NOT_CHANGE}
+				return version, "", &configpb.Status{Code: configpb.StatusCode_NOT_CHANGE}
 			}
-			status = &configpb.Status{Code: configpb.Status_WRONG_VERSION}
+			status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		} else {
-			status = &configpb.Status{Code: configpb.Status_COMPONENT_ID_NOT_FOUND}
+			status = &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
 		}
 	} else {
-		status = &configpb.Status{Code: configpb.Status_COMPONENT_NOT_FOUND}
+		status = &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
 	}
 	return c.getLatestVersion(component, componentID), config, status
 }
@@ -136,18 +136,18 @@ func (c *ComponentsConfig) Create(version *configpb.Version, component, componen
 			// restart a component
 			res := compareVersion(latestVersion, version)
 			if res == 0 {
-				status = &configpb.Status{Code: configpb.Status_NOT_CHANGE}
+				status = &configpb.Status{Code: configpb.StatusCode_NOT_CHANGE}
 				return latestVersion, "", status
 			}
-			status = &configpb.Status{Code: configpb.Status_WRONG_VERSION}
+			status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		} else {
 			// add a new component
 			lc, err := NewLocalConfig(cfg, latestVersion)
 			if err != nil {
-				status = &configpb.Status{Code: configpb.Status_UNKNOWN, Message: ErrDecode(err)}
+				status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrDecode(err)}
 			} else {
 				componentsCfg[componentID] = lc
-				status = &configpb.Status{Code: configpb.Status_OK}
+				status = &configpb.Status{Code: configpb.StatusCode_OK}
 			}
 		}
 	} else {
@@ -155,16 +155,16 @@ func (c *ComponentsConfig) Create(version *configpb.Version, component, componen
 		// start the first component
 		lc, err := NewLocalConfig(cfg, latestVersion)
 		if err != nil {
-			status = &configpb.Status{Code: configpb.Status_UNKNOWN, Message: ErrDecode(err)}
+			status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrDecode(err)}
 		} else {
 			c.LocalCfgs[component][componentID] = lc
-			status = &configpb.Status{Code: configpb.Status_OK}
+			status = &configpb.Status{Code: configpb.StatusCode_OK}
 		}
 	}
 
 	config, err := c.getComponentCfg(component, componentID)
 	if err != nil {
-		status = &configpb.Status{Code: configpb.Status_UNKNOWN, Message: ErrEncode(err)}
+		status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrEncode(err)}
 		return latestVersion, "", status
 	}
 
@@ -225,7 +225,7 @@ func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.V
 	if local != nil {
 		return c.updateLocal(local.GetComponentId(), version, entries)
 	}
-	return &configpb.Version{Global: 0, Local: 0}, &configpb.Status{Code: configpb.Status_UNKNOWN, Message: ErrUnknownKind(kind)}
+	return &configpb.Version{Global: 0, Local: 0}, &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrUnknownKind(kind)}
 }
 
 func (c *ComponentsConfig) updateGlobal(component string, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
@@ -234,7 +234,7 @@ func (c *ComponentsConfig) updateGlobal(component string, version *configpb.Vers
 		globalLatestVersion := globalCfg.GetVersion()
 		if globalLatestVersion != version.GetGlobal() {
 			return &configpb.Version{Global: globalLatestVersion, Local: version.GetLocal()},
-				&configpb.Status{Code: configpb.Status_WRONG_VERSION}
+				&configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
 		newGlobalVersion := version.GetGlobal() + 1
 		for _, entry := range entries {
@@ -249,7 +249,7 @@ func (c *ComponentsConfig) updateGlobal(component string, version *configpb.Vers
 		// The global version of first global update should be 0.
 		if version.GetGlobal() != 0 {
 			return &configpb.Version{Global: 0, Local: 0},
-				&configpb.Status{Code: configpb.Status_WRONG_VERSION}
+				&configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
 		newGlobalVersion := uint64(1)
 		globalCfg := NewGlobalConfig(entries, &configpb.Version{Global: newGlobalVersion, Local: 0})
@@ -259,28 +259,28 @@ func (c *ComponentsConfig) updateGlobal(component string, version *configpb.Vers
 			LocalCfg.Version = &configpb.Version{Global: newGlobalVersion, Local: 0}
 		}
 	}
-	return &configpb.Version{Global: c.GlobalCfgs[component].GetVersion(), Local: 0}, &configpb.Status{Code: configpb.Status_OK}
+	return &configpb.Version{Global: c.GlobalCfgs[component].GetVersion(), Local: 0}, &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
 func (c *ComponentsConfig) updateLocal(componentID string, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
 	component := c.GetComponent(componentID)
 	if component == "" {
-		return &configpb.Version{Global: 0, Local: 0}, &configpb.Status{Code: configpb.Status_COMPONENT_NOT_FOUND}
+		return &configpb.Version{Global: 0, Local: 0}, &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
 	}
 	if localCfg, ok := c.LocalCfgs[component][componentID]; ok {
 		localLatestVersion := localCfg.GetVersion()
 		res := compareVersion(localLatestVersion, version)
 		if res != 0 {
-			return localLatestVersion, &configpb.Status{Code: configpb.Status_WRONG_VERSION}
+			return localLatestVersion, &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
 		for _, entry := range entries {
 			localCfg.updateEntry(entry, version)
 		}
 		localCfg.Version = &configpb.Version{Global: version.GetGlobal(), Local: version.GetLocal() + 1}
 	} else {
-		return version, &configpb.Status{Code: configpb.Status_COMPONENT_ID_NOT_FOUND}
+		return version, &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
 	}
-	return c.LocalCfgs[component][componentID].GetVersion(), &configpb.Status{Code: configpb.Status_OK}
+	return c.LocalCfgs[component][componentID].GetVersion(), &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
 // Delete ...
@@ -298,7 +298,7 @@ func (c *ComponentsConfig) Delete(kind *configpb.ConfigKind, version *configpb.V
 		return c.deleteLocal(local.GetComponentId(), version)
 	}
 
-	return &configpb.Status{Code: configpb.Status_UNKNOWN, Message: ErrUnknownKind(kind)}
+	return &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrUnknownKind(kind)}
 }
 
 func (c *ComponentsConfig) deleteGlobal(component string, version *configpb.Version) *configpb.Status {
@@ -306,34 +306,34 @@ func (c *ComponentsConfig) deleteGlobal(component string, version *configpb.Vers
 	if globalCfg, ok := c.GlobalCfgs[component]; ok {
 		globalLatestVersion := globalCfg.GetVersion()
 		if globalLatestVersion != version.GetGlobal() {
-			return &configpb.Status{Code: configpb.Status_WRONG_VERSION}
+			return &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
 		delete(c.GlobalCfgs, component)
 		for _, LocalCfg := range c.LocalCfgs[component] {
 			LocalCfg.Version = &configpb.Version{Global: 0, Local: 0}
 		}
 	} else {
-		return &configpb.Status{Code: configpb.Status_COMPONENT_NOT_FOUND}
+		return &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
 	}
-	return &configpb.Status{Code: configpb.Status_OK}
+	return &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
 func (c *ComponentsConfig) deleteLocal(componentID string, version *configpb.Version) *configpb.Status {
 	component := c.GetComponent(componentID)
 	if component == "" {
-		return &configpb.Status{Code: configpb.Status_COMPONENT_NOT_FOUND}
+		return &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
 	}
 	if localCfg, ok := c.LocalCfgs[component][componentID]; ok {
 		localLatestVersion := localCfg.GetVersion()
 		res := compareVersion(localLatestVersion, version)
 		if res != 0 {
-			return &configpb.Status{Code: configpb.Status_WRONG_VERSION}
+			return &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
 		delete(c.LocalCfgs[component], componentID)
 	} else {
-		return &configpb.Status{Code: configpb.Status_COMPONENT_ID_NOT_FOUND}
+		return &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
 	}
-	return &configpb.Status{Code: configpb.Status_OK}
+	return &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
 // EntryValue ...

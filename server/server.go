@@ -14,18 +14,21 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
@@ -35,6 +38,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	pd "github.com/pingcap/pd/client"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/typeutil"
@@ -68,6 +72,9 @@ const (
 	pdAPIPrefix     = "/pd/"
 	webPath         = "/web/"
 	pdClusterIDPath = "/pd/cluster_id"
+
+	component            = "pd"
+	configChangeInterval = 10 * time.Second
 )
 
 // EnableZap enable the zap logger in embed etcd.
@@ -112,6 +119,10 @@ type Server struct {
 	// Zap logger
 	lg       *zap.Logger
 	logProps *log.ZapProperties
+
+	// component config
+	configVersion *configpb.Version
+	configClient  pd.ConfigClient
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -311,7 +322,17 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
+	configPath := filepath.Join(s.cfg.DataDir, "config_version")
+	configVersion, err := s.storage.Load(configPath)
+	if err != nil {
+		return err
+	}
+	version := &configpb.Version{}
+	if _, err := toml.Decode(configVersion, &version); err != nil {
+		return err
+	}
+	s.configVersion = version
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s, s.client)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
@@ -395,10 +416,11 @@ func (s *Server) Context() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(3)
+	s.serverLoopWg.Add(4)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
+	go s.configChangeLoop(configChangeInterval)
 }
 
 func (s *Server) stopServerLoop() {
@@ -501,7 +523,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		log.Warn("flush the bootstrap region failed", zap.Error(err))
 	}
 
-	if err := s.cluster.Start(s); err != nil {
+	if err := s.cluster.Start(); err != nil {
 		return nil, err
 	}
 
@@ -513,7 +535,7 @@ func (s *Server) createRaftCluster() error {
 		return nil
 	}
 
-	return s.cluster.Start(s)
+	return s.cluster.Start()
 }
 
 func (s *Server) stopRaftCluster() {
@@ -807,6 +829,19 @@ func (s *Server) SetLogLevel(level string) {
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
 }
 
+// GetConfigVersion ...
+func (s *Server) GetConfigVersion() *configpb.Version {
+	if s.configVersion == nil {
+		return &configpb.Version{Local: 0, Global: 0}
+	}
+	return s.configVersion
+}
+
+// SetConfigVersion ...
+func (s *Server) SetConfigVersion(version *configpb.Version) {
+	s.configVersion = version
+}
+
 func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
@@ -940,6 +975,135 @@ func (s *Server) etcdLeaderLoop() {
 			return
 		}
 	}
+}
+
+func (s *Server) configChangeLoop(interval time.Duration) {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		leader := s.GetLeader()
+		if leader != nil {
+			var err error
+			securityConfig := s.GetSecurityConfig()
+			s.configClient, err = pd.NewConfigClientWithContext(ctx, s.GetEndpoints(), pd.SecurityOption{
+				CAPath:   securityConfig.CAPath,
+				CertPath: securityConfig.CertPath,
+				KeyPath:  securityConfig.KeyPath,
+			})
+			if err != nil {
+				log.Error("failed to create config client", zap.Error(err))
+				return
+			}
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			log.Info("config change stop running")
+			return
+		}
+	}
+
+	name := s.GetMemberInfo().GetName()
+	retry := true
+	var err error
+	for retry {
+		version := s.GetConfigVersion()
+		config := new(bytes.Buffer)
+		if err := toml.NewEncoder(config).Encode(*s.GetConfig()); err != nil {
+			log.Error("failed to encode config", zap.Error(err))
+			cancel()
+			return
+		}
+		retry, err = s.createComponentConfig(ctx, version, name, config.String())
+		if err != nil {
+			log.Error("failed to create config", zap.Error(err))
+			cancel()
+			return
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("capture config change has been stopped")
+			return
+		case <-ticker.C:
+			version := s.GetConfigVersion()
+			config, err := s.getComponentConfig(ctx, version, name)
+			if err != nil {
+				log.Error("failed to get config", zap.Error(err))
+			}
+			if config != "" {
+				s.updateComponentConfig(config)
+			}
+		}
+	}
+}
+
+func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Version, componentID, config string) (bool, error) {
+	status, v, config, err := s.configClient.Create(ctx, version, component, componentID, config)
+	if err != nil {
+		return false, err
+	}
+	var retry bool
+	switch status.GetCode() {
+	case configpb.StatusCode_OK:
+		s.SetConfigVersion(v)
+		s.updateComponentConfig(config)
+		retry = false
+	case configpb.StatusCode_NOT_CHANGE:
+		retry = false
+	case configpb.StatusCode_WRONG_VERSION:
+		s.SetConfigVersion(v)
+		retry = true
+	case configpb.StatusCode_UNKNOWN:
+		return false, errors.Errorf("unknown error: %v", status.GetMessage())
+	}
+	return retry, nil
+}
+
+func (s *Server) getComponentConfig(ctx context.Context, version *configpb.Version, componentID string) (string, error) {
+	status, v, cfg, err := s.configClient.Get(ctx, version, component, componentID)
+	if err != nil {
+		return "", err
+	}
+	var config string
+	switch status.GetCode() {
+	case configpb.StatusCode_OK:
+		config = cfg
+	case configpb.StatusCode_WRONG_VERSION:
+		s.SetConfigVersion(v)
+	case configpb.StatusCode_UNKNOWN:
+		return "", err
+	}
+	return config, nil
+}
+
+func (s *Server) updateComponentConfig(cfg string) error {
+	old := s.GetConfig()
+	new := &config.Config{}
+	if _, err := toml.Decode(cfg, &new); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(old.Schedule, new.Schedule) {
+		s.SetScheduleConfig(new.Schedule)
+	}
+
+	if !reflect.DeepEqual(old.Replication, new.Replication) {
+		s.SetReplicationConfig(new.Replication)
+	}
+
+	if !reflect.DeepEqual(old.PDServerCfg, new.PDServerCfg) {
+		s.SetPDServerConfig(new.PDServerCfg)
+	}
+	return nil
 }
 
 func (s *Server) reloadConfigFromKV() error {

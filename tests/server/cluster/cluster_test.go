@@ -314,7 +314,7 @@ func (s *clusterTestSuite) TestRaftClusterRestart(c *C) {
 	c.Assert(rc, NotNil)
 	rc.Stop()
 
-	err = rc.Start(leaderServer.GetServer())
+	err = rc.Start()
 	c.Assert(err, IsNil)
 
 	rc = leaderServer.GetRaftCluster()
@@ -349,7 +349,7 @@ func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
 	// let the job run at small interval
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
 	for i := 0; i < 100; i++ {
-		err = rc.Start(leaderServer.GetServer())
+		err = rc.Start()
 		c.Assert(err, IsNil)
 		time.Sleep(time.Millisecond)
 		rc = leaderServer.GetRaftCluster()
@@ -621,7 +621,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient())
+	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr, svr.GetClient())
 
 	// Cluster is not bootstrapped.
 	rc.InitCluster(svr.GetAllocator(), svr.GetScheduleOption(), svr.GetStorage())

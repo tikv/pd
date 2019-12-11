@@ -30,10 +30,9 @@ require (
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
-	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
-	github.com/pingcap/kvproto v0.0.0-20191213111810-93cb7c623c8b
-	github.com/pingcap/log v0.0.0-20191012051959-b742a5d432e9
-	github.com/pingcap/sysutil v0.0.0-20191216090214-5f9620d22b3b
+	github.com/pingcap/failpoint v0.0.0-20190512135322-30cc7431d99c
+	github.com/pingcap/kvproto v0.0.0-20191211032946-5dbce7e7b868
+	github.com/pingcap/log v0.0.0-20190715063458-479153f07ebd
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v0.8.0
 	github.com/sirupsen/logrus v1.0.5
@@ -51,5 +50,3 @@ require (
 	google.golang.org/grpc v1.25.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
-
-replace github.com/pingcap/kvproto => github.com/rleungx/kvproto v0.0.0-20191209064212-97062f464176
