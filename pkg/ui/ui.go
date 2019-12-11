@@ -62,10 +62,10 @@ func Handler() http.Handler {
 		AssetInfo: AssetInfo,
 	})
 
-	haveWebUI := Asset != nil && AssetDir != nil && AssetInfo != nil
+	enableWebUI := Asset != nil && AssetDir != nil && AssetInfo != nil
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !haveWebUI {
+		if !enableWebUI {
 			http.ServeContent(w, r, "index.html", time.Now(), bytes.NewReader(indexHTML))
 			return
 		}
