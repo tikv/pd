@@ -110,14 +110,6 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
-	// StoreLimitMode can be auto or manual, when set to auto,
-	// PD tries to change the store limit values according to
-	// the load state of the cluster dynamically. User can
-	// overwrite the auto-tuned value by pd-ctl, when the value
-	// is overwritten, the value is fixed until it is deleted.
-	// Default: manual
-	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
-
 	Security SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
@@ -441,9 +433,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
 	}
-	if !configMetaData.IsDefined("store-limit-mode") {
-		c.StoreLimitMode = "manual"
-	}
 	return nil
 }
 
@@ -573,6 +562,14 @@ type ScheduleConfig struct {
 
 	// Only used to display
 	SchedulersPayload map[string]string `json:"schedulers,omitempty"`
+
+	// StoreLimitMode can be auto or manual, when set to auto,
+	// PD tries to change the store limit values according to
+	// the load state of the cluster dynamically. User can
+	// overwrite the auto-tuned value by pd-ctl, when the value
+	// is overwritten, the value is fixed until it is deleted.
+	// Default: manual
+	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -613,6 +610,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
 		EnableLocationReplacement:    c.EnableLocationReplacement,
 		EnableDebugMetrics:           c.EnableDebugMetrics,
+		StoreLimitMode:               c.StoreLimitMode,
 		Schedulers:                   schedulers,
 	}
 }
@@ -640,6 +638,7 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultLeaderScheduleStrategy      = "count"
+	defaultStoreLimitMode              = "manual"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -684,6 +683,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("leader-schedule-strategy") {
 		adjustString(&c.LeaderScheduleStrategy, defaultLeaderScheduleStrategy)
+	}
+	if !meta.IsDefined("store-limit-mode") {
+		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
