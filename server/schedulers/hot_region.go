@@ -232,7 +232,11 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) 
 		schedulerCounter.WithLabelValues(h.GetName(), "move-leader").Inc()
 		srcStore := srcRegion.GetLeader().GetStoreId()
 		dstStore := newLeader.GetStoreId()
-		op := operator.CreateTransferLeaderOperator("transfer-hot-read-leader", srcRegion, srcStore, dstStore, operator.OpHotRegion)
+		op, err := operator.CreateTransferLeaderOperator("transfer-hot-read-leader", cluster, srcRegion, srcStore, dstStore, operator.OpHotRegion)
+		if err != nil {
+			log.Debug("fail to create transfer hot read leader operator", zap.Error(err))
+			return nil
+		}
 		op.SetPriorityLevel(core.HighPriority)
 		h.readPendings[newPendingInfluence(op, srcStore, dstStore, infl)] = struct{}{}
 		return []*operator.Operator{op}
@@ -283,7 +287,11 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster)
 				schedulerCounter.WithLabelValues(h.GetName(), "move-leader").Inc()
 				srcStore := srcRegion.GetLeader().GetStoreId()
 				dstStore := newLeader.GetStoreId()
-				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcStore, dstStore, operator.OpHotRegion)
+				op, err := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", cluster, srcRegion, srcStore, dstStore, operator.OpHotRegion)
+				if err != nil {
+					log.Debug("fail to create transfer hot write leader operator", zap.Error(err))
+					return nil
+				}
 				op.SetPriorityLevel(core.HighPriority)
 				// transfer leader do not influence the byte rate
 				infl.ByteRate = 0
