@@ -146,7 +146,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		checkRegion(c, cache.SearchRegion(regionKey), region)
 	}
 
-	for i := uint64(0); i < n; i++ {
+	for i := uint64(1); i <= n; i++ {
 		region := cache.RandLeaderRegion(i, core.HealthRegion())
 		c.Assert(region.Leader.GetStoreId(), Equals, i)
 
@@ -164,7 +164,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	c.Assert(cache.GetRegion(n-1), NotNil)
 
 	// All regions will be filtered out if they have pending peers.
-	for i := uint64(0); i < n; i++ {
+	for i := uint64(1); i <= n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
 			region := cache.RandLeaderRegion(i, core.HealthRegion())
 			region.PendingPeers = region.Peers
@@ -172,7 +172,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		}
 		c.Assert(cache.RandLeaderRegion(i, core.HealthRegion()), IsNil)
 	}
-	for i := uint64(0); i < n; i++ {
+	for i := uint64(1); i <= n; i++ {
 		c.Assert(cache.RandFollowerRegion(i, core.HealthRegion()), IsNil)
 	}
 }
