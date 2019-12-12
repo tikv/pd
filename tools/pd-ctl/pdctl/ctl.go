@@ -26,6 +26,7 @@ type CommandFlags struct {
 	CAPath   string
 	CertPath string
 	KeyPath  string
+	Help     bool
 }
 
 var (
@@ -46,6 +47,7 @@ func Start(args []string) {
 	rootCmd.Flags().StringVar(&commandFlags.CAPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
 	rootCmd.Flags().StringVar(&commandFlags.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format.")
 	rootCmd.Flags().StringVar(&commandFlags.KeyPath, "key", "", "path of file that contains X509 key in PEM format.")
+	rootCmd.PersistentFlags().BoolVarP(&commandFlags.Help, "help", "h", false, "Help message.")
 	rootCmd.AddCommand(
 		command.NewConfigCommand(),
 		command.NewRegionCommand(),
