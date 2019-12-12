@@ -15,6 +15,7 @@ package api
 
 import (
 	"container/heap"
+	"github.com/beorn7/perks/histogram"
 	"net/http"
 	"strconv"
 
@@ -255,6 +256,61 @@ func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) 
 	}
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+type regionSize struct {
+	Size  int64 `json:"size"`
+	Count int   `json:"count"`
+}
+
+type regionKeys struct {
+	Keys  int64 `json:"keys"`
+	Count int   `json:"count"`
+}
+
+type regionHist struct {
+	SizeHist []*regionSize `json:"region size histogram:"`
+	KeysHist []*regionKeys `json:"region keys histogram:"`
+}
+
+func (h *regionsHandler) GetHistogram(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
+	regions := rc.GetRegions()
+	sizeHistgoram := histogram.New(10)
+	keysHistgoram := histogram.New(10)
+	for _, region := range regions {
+		sizeHistgoram.Insert(float64(region.GetApproximateSize()))
+		keysHistgoram.Insert(float64(region.GetApproximateKeys()))
+	}
+	sizeBins := sizeHistgoram.Bins()
+	keysBins := keysHistgoram.Bins()
+	var sizeHist [10]*regionSize
+	var keysHist [10]*regionKeys
+
+	for i, bin := range sizeBins {
+		if bin == nil {
+			continue
+		}
+		reginSize := &regionSize{}
+		reginSize.Count = bin.Count
+		reginSize.Size = int64(bin.Mean())
+		sizeHist[i] = reginSize
+	}
+	for i, bin := range keysBins {
+		if bin == nil {
+			continue
+		}
+		reginKeys := &regionKeys{}
+		reginKeys.Count = bin.Count
+		reginKeys.Keys = int64(bin.Mean())
+		keysHist[i] = reginKeys
+	}
+
+	regionHist := &regionHist{
+		SizeHist: sizeHist[:],
+		KeysHist: keysHist[:],
+	}
+	h.rd.JSON(w, http.StatusOK, regionHist)
 }
 
 func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Request) {

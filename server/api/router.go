@@ -127,6 +127,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/api/v1/regions/check/down-peer", regionsHandler.GetDownPeerRegions).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/check/offline-peer", regionsHandler.GetOfflinePeer).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/check/empty-region", regionsHandler.GetEmptyRegion).Methods("GET")
+	clusterRouter.HandleFunc("/api/v1/regions/check/histogram", regionsHandler.GetHistogram).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/sibling/{id}", regionsHandler.GetRegionSiblings).Methods("GET")
 
 	rootRouter.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
