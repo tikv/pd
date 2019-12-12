@@ -457,6 +457,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 
 	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpAdmin)
 	if err != nil {
+		log.Debug("fail to create transfer leader operator", zap.Error(err))
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
@@ -499,6 +500,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 
 	op, err := operator.CreateMoveRegionOperator("admin-move-region", c, region, operator.OpAdmin, peers)
 	if err != nil {
+		log.Debug("fail to create move region operator", zap.Error(err))
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
@@ -539,6 +541,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 
 	op, err := operator.CreateMovePeerOperator("admin-move-peer", c, region, operator.OpAdmin, fromStoreID, newPeer)
 	if err != nil {
+		log.Debug("fail to create move peer operator", zap.Error(err))
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
@@ -588,6 +591,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 
 	op, err := operator.CreateAddPeerOperator("admin-add-peer", c, region, newPeer, operator.OpAdmin)
 	if err != nil {
+		log.Debug("fail to create add peer operator", zap.Error(err))
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
@@ -611,6 +615,7 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 
 	op, err := operator.CreateAddPeerOperator("admin-add-learner", c, region, newPeer, operator.OpAdmin)
 	if err != nil {
+		log.Debug("fail to create add learner operator", zap.Error(err))
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
@@ -637,6 +642,7 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 
 	op, err := operator.CreateRemovePeerOperator("admin-remove-peer", c, operator.OpAdmin, region, fromStoreID)
 	if err != nil {
+		log.Debug("fail to create move peer operator", zap.Error(err))
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
@@ -678,6 +684,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 
 	ops, err := operator.CreateMergeRegionOperator("admin-merge-region", c, region, target, operator.OpAdmin)
 	if err != nil {
+		log.Debug("fail to create merge region operator", zap.Error(err))
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(ops...); !ok {

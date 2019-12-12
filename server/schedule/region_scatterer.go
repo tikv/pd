@@ -127,6 +127,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 	}
 	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers)
 	if err != nil {
+		log.Debug("fail to create scatter region operator", zap.Error(err))
 		return nil
 	}
 	op.SetPriorityLevel(core.HighPriority)
