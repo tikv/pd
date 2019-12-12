@@ -173,7 +173,16 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 
 func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
-	count := rc.GetRegionCount()
+
+	var count int
+	startKey := r.URL.Query().Get("start_key")
+	endKey := r.URL.Query().Get("end_key")
+	if len(startKey) == 0 && len(endKey) == 0 {
+		count = rc.GetRegionCount()
+	} else {
+		regions := rc.ScanRegions([]byte(startKey), []byte(endKey), 0)
+		count = len(regions)
+	}
 	h.rd.JSON(w, http.StatusOK, &RegionsInfo{Count: count})
 }
 

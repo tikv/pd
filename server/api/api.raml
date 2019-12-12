@@ -374,7 +374,7 @@ types:
         type: string
         enum: [ leader, region ]
       count: integer
-  
+
   Rule:
     type: object
     properties:
@@ -747,7 +747,7 @@ types:
           description: Placement rules feature is not enabled.
         500:
           description: PD server failed to proceed the request.
-  
+
 /stores:
   description: The stores in the cluster.
   get:
@@ -967,7 +967,10 @@ types:
         description: PD server failed to proceed the request.
   /count:
     get:
-      description: Get region count in the cluster.
+      description: Get region count of a specified range.
+      queryParameters:
+        start_key?: string
+        end_key?: string
       responses:
         200:
           body:
