@@ -67,6 +67,7 @@ type coordinator struct {
 	schedulers      map[string]*scheduleController
 	opController    *schedule.OperatorController
 	hbStreams       opt.HeartbeatStreams
+	pluginInterface *schedule.PluginInterface
 }
 
 // newCoordinator creates a new coordinator.
@@ -82,6 +83,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams opt.Hea
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
 		hbStreams:       hbStreams,
+		pluginInterface: schedule.NewPluginInterface(),
 	}
 }
 
@@ -264,14 +266,14 @@ func (c *coordinator) run() {
 func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	log.Info("load plugin", zap.String("plugin-path", pluginPath))
 	// get func: SchedulerType from plugin
-	SchedulerType, err := schedule.GetFunction(pluginPath, "SchedulerType")
+	SchedulerType, err := c.pluginInterface.GetFunction(pluginPath, "SchedulerType")
 	if err != nil {
 		log.Error("GetFunction SchedulerType error", zap.Error(err))
 		return
 	}
 	schedulerType := SchedulerType.(func() string)
 	// get func: SchedulerArgs from plugin
-	SchedulerArgs, err := schedule.GetFunction(pluginPath, "SchedulerArgs")
+	SchedulerArgs, err := c.pluginInterface.GetFunction(pluginPath, "SchedulerArgs")
 	if err != nil {
 		log.Error("GetFunction SchedulerArgs error", zap.Error(err))
 		return

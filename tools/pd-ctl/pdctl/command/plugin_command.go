@@ -41,7 +41,7 @@ func NewPluginCommand() *cobra.Command {
 func NewLoadPluginCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "load <plugin_path>",
-		Short: "load a plugin",
+		Short: "load a plugin, path must begin with ./pd/plugin/",
 		Run:   loadPluginCommandFunc,
 	}
 	return r
@@ -51,7 +51,7 @@ func NewLoadPluginCommand() *cobra.Command {
 func NewUnloadPluginCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "unload <plugin_path>",
-		Short: "unload a plugin",
+		Short: "unload a plugin, path must begin with ./pd/plugin/",
 		Run:   unloadPluginCommandFunc,
 	}
 	return r
@@ -67,7 +67,7 @@ func unloadPluginCommandFunc(cmd *cobra.Command, args []string) {
 
 func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
 	if len(args) != 1 {
-		cmd.Println(cmd.UsageString())
+		cmd.Println(cmd.Usage())
 		return
 	}
 	data := map[string]interface{}{

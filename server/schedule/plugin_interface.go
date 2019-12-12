@@ -22,31 +22,39 @@ import (
 	"go.uber.org/zap"
 )
 
-// PluginMapLock is a read/write mutex for pluginMap
-var PluginMapLock = sync.RWMutex{}
+// PluginInterface is used to manage all plugin.
+type PluginInterface struct {
+	pluginMap     map[string]*plugin.Plugin
+	pluginMapLock sync.RWMutex
+}
 
-// PluginMap is a map for storing plugin(plugin-path -> plugin)
-var PluginMap = make(map[string]*plugin.Plugin)
+// NewPluginInterface create a plugin interface
+func NewPluginInterface() *PluginInterface {
+	return &PluginInterface{
+		pluginMap:     make(map[string]*plugin.Plugin),
+		pluginMapLock: sync.RWMutex{},
+	}
+}
 
 // GetFunction gets func by funcName from plugin(.so)
-func GetFunction(path string, funcName string) (plugin.Symbol, error) {
-	PluginMapLock.Lock()
-	defer PluginMapLock.Unlock()
-	if _, ok := PluginMap[path]; !ok {
+func (p *PluginInterface) GetFunction(path string, funcName string) (plugin.Symbol, error) {
+	p.pluginMapLock.Lock()
+	defer p.pluginMapLock.Unlock()
+	if _, ok := p.pluginMap[path]; !ok {
 		//open plugin
 		filePath, err := filepath.Abs(path)
 		if err != nil {
 			return nil, err
 		}
 		log.Info("open plugin file", zap.String("file-path", filePath))
-		p, err := plugin.Open(filePath)
+		plugin, err := plugin.Open(filePath)
 		if err != nil {
 			return nil, err
 		}
-		PluginMap[path] = p
+		p.pluginMap[path] = plugin
 	}
 	//get func from plugin
-	f, err := PluginMap[path].Lookup(funcName)
+	f, err := p.pluginMap[path].Lookup(funcName)
 	if err != nil {
 		log.Error("Lookup func error!")
 		return nil, err

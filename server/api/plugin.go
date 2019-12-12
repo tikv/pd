@@ -14,7 +14,10 @@
 package api
 
 import (
+	"errors"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
@@ -47,12 +50,22 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &data); err != nil {
 		return
 	}
+	path := data["plugin-path"]
+	if !strings.HasPrefix(path, "./pd/plugin/") {
+		err := errors.New("plugin path must begin with ./pd/plugin/")
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if exist, err := pathExists(path); !exist {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	var err error
 	switch action {
 	case cluster.PluginLoad:
-		err = h.PluginLoad(data["plugin-path"])
+		err = h.PluginLoad(path)
 	case cluster.PluginUnload:
-		err = h.PluginUnload(data["plugin-path"])
+		err = h.PluginUnload(path)
 	default:
 		h.rd.JSON(w, http.StatusBadRequest, "unknown action")
 		return
@@ -62,4 +75,16 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		err = errors.New("file is not exists")
+		return false, err
+	}
+	return false, err
 }
