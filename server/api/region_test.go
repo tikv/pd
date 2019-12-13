@@ -334,26 +334,32 @@ func (s *testGetRegionSuite) TestScanRegionByKey(c *C) {
 }
 
 func (s *testGetRegionSuite) TestRegionCount(c *C) {
-	url := fmt.Sprintf("%s/regions/count", s.urlPrefix)
+	u := fmt.Sprintf("%s/regions/count", s.urlPrefix)
 	regions := &RegionsInfo{}
-	err := readJSON(url, regions)
+	err := readJSON(u, regions)
 	c.Assert(err, IsNil)
 	c.Assert(5, Equals, regions.Count)
 
-	url = fmt.Sprintf("%s/regions/count?start_key=%s", s.urlPrefix, "b")
-	err = readJSON(url, regions)
+	u = fmt.Sprintf("%s/regions/count?start_key=%s", s.urlPrefix, "b")
+	err = readJSON(u, regions)
 	c.Assert(err, IsNil)
 	c.Assert(4, Equals, regions.Count)
 
-	url = fmt.Sprintf("%s/regions/count?end_key=%s", s.urlPrefix, "c")
-	err = readJSON(url, regions)
+	u = fmt.Sprintf("%s/regions/count?end_key=%s", s.urlPrefix, "c")
+	err = readJSON(u, regions)
 	c.Assert(err, IsNil)
 	c.Assert(2, Equals, regions.Count)
 
-	url = fmt.Sprintf("%s/regions/count?start_key=%s&end_key=%s", s.urlPrefix, "b", "y")
-	err = readJSON(url, regions)
+	u = fmt.Sprintf("%s/regions/count?start_key=%s&end_key=%s", s.urlPrefix, "b", "y")
+	err = readJSON(u, regions)
 	c.Assert(err, IsNil)
 	c.Assert(3, Equals, regions.Count)
+
+	u = fmt.Sprintf("%s/regions/count?start_key=%s&end_key=%s",
+		s.urlPrefix, url.QueryEscape(string([]byte{0xFF, 0xFF, 0xAA})), url.QueryEscape(string([]byte{0xFF, 0xFF, 0xAC})))
+	err = readJSON(u, regions)
+	c.Assert(err, IsNil)
+	c.Assert(1, Equals, regions.Count)
 }
 
 // Create n regions (0..n) of n stores (0..n).
