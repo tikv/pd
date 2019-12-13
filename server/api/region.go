@@ -269,7 +269,7 @@ type regionKeys struct {
 }
 
 type regionHist struct {
-	SizeHist []*regionSize `json:"region size histogram:"`
+	SizeHist []*regionSize `json:"region size histogram"`
 	KeysHist []*regionKeys `json:"region keys histogram:"`
 }
 
