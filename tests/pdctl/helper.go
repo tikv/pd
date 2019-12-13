@@ -116,6 +116,11 @@ func MustPutStore(c *check.C, svr *server.Server, id uint64, state metapb.StoreS
 		},
 	})
 	c.Assert(err, check.IsNil)
+	_, err = svr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Stats:  &pdpb.StoreStats{StoreId: id},
+	})
+	c.Assert(err, check.IsNil)
 }
 
 // MustPutRegion is used for test purpose.
