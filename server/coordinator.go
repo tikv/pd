@@ -254,17 +254,17 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan int) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 	//get func from plugin
-	//func : CreateScheduler()
-	f, err := schedule.GetFunction(pluginPath, "CreateScheduler")
+	//func : CreateUserScheduler()
+	f, err := schedule.GetFunction(pluginPath, "CreateUserScheduler")
 	if err != nil {
 		log.Error("GetFunction err", zap.Error(err))
 		return
 	}
 
-	CreateScheduler := f.(func(*schedule.OperatorController, schedule.Cluster) []schedule.Scheduler)
-	schedulers := CreateScheduler(c.opController, c.cluster)
+	CreateUserScheduler := f.(func(*schedule.OperatorController, schedule.Cluster) []schedule.Scheduler)
+	schedulers := CreateUserScheduler(c.opController, c.cluster)
 	for _, s := range schedulers {
-		if err = c.addUserScheduler(s); err != nil {
+		if err := c.addUserScheduler(s); err != nil {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		}
 	}
@@ -273,9 +273,9 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan int) {
 		select {
 		case <-ch:
 			log.Info("scheduleInfo changed")
-			schedulers := CreateScheduler(c.opController, c.cluster)
+			schedulers := CreateUserScheduler(c.opController, c.cluster)
 			for _, s := range schedulers {
-				if err = c.addUserScheduler(s); err != nil {
+				if err := c.addUserScheduler(s); err != nil {
 					log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 				}
 			}

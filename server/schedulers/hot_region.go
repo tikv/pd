@@ -165,7 +165,7 @@ func (h *balanceHotRegionsScheduler) dispatch(typ BalanceType, cluster schedule.
 func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operator.Operator {
 	// balance by leader
 	srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.readStatAsLeader)
-	if srcRegion != nil {
+	if srcRegion != nil && !schedule.IsPredictedHotRegion(cluster, srcRegion.GetID()) {
 		schedulerCounter.WithLabelValues(h.GetName(), "move-leader").Inc()
 		op := operator.CreateTransferLeaderOperator("transfer-hot-read-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 		op.SetPriorityLevel(core.HighPriority)
@@ -174,7 +174,7 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster schedule.Clus
 
 	// balance by peer
 	srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.readStatAsLeader)
-	if srcRegion != nil {
+	if srcRegion != nil && !schedule.IsPredictedHotRegion(cluster, srcRegion.GetID()) {
 		op, err := operator.CreateMovePeerOperator("move-hot-read-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 		if err != nil {
 			schedulerCounter.WithLabelValues(h.GetName(), "create-operator-fail").Inc()
@@ -197,7 +197,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 		case 0:
 			// balance by peer
 			srcRegion, srcPeer, destPeer := h.balanceByPeer(cluster, h.stats.writeStatAsPeer)
-			if srcRegion != nil {
+			if srcRegion != nil && !schedule.IsPredictedHotRegion(cluster, srcRegion.GetID()) {
 				op, err := operator.CreateMovePeerOperator("move-hot-write-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), destPeer.GetStoreId(), destPeer.GetId())
 				if err != nil {
 					schedulerCounter.WithLabelValues(h.GetName(), "create-operator-fail").Inc()
@@ -210,7 +210,7 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster schedule.Clu
 		case 1:
 			// balance by leader
 			srcRegion, newLeader := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
-			if srcRegion != nil {
+			if srcRegion != nil && !schedule.IsPredictedHotRegion(cluster, srcRegion.GetID()) {
 				schedulerCounter.WithLabelValues(h.GetName(), "move-leader").Inc()
 				op := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", srcRegion, srcRegion.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpHotRegion)
 				op.SetPriorityLevel(core.HighPriority)

@@ -166,6 +166,11 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster schedule.Cluster, sou
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
 		return nil
 	}
+	// Skip predicted hot regions.
+	if schedule.IsPredictedHotRegion(cluster, region.GetID()) {
+		log.Debug("region is predicted hot", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
+		return nil
+	}
 	target := l.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
 	if target == nil {
 		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
@@ -184,6 +189,11 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster schedule.Cluster, targ
 	if region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", targetID))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()
+		return nil
+	}
+	// Skip predicted hot regions.
+	if schedule.IsPredictedHotRegion(cluster, region.GetID()) {
+		log.Debug("region is predicted hot", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
 		return nil
 	}
 	leaderStoreID := region.GetLeader().GetStoreId()
