@@ -103,6 +103,7 @@ func run(simCase string) {
 
 // NewSingleServer creates a pd server for simulator.
 func NewSingleServer(simConfig *simulator.SimConfig) (*server.Server, server.CleanupFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
 	err := simConfig.ServerConfig.SetupLogger()
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.GetZapLogger(), simConfig.ServerConfig.GetZapLogProperties())
@@ -115,13 +116,14 @@ func NewSingleServer(simConfig *simulator.SimConfig) (*server.Server, server.Cle
 		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
-	s, err := server.CreateServer(simConfig.ServerConfig, api.NewHandler)
+	s, err := server.CreateServer(ctx, simConfig.ServerConfig, api.NewHandler)
 	if err != nil {
 		panic("create server failed")
 	}
 
 	cleanup := func() {
 		s.Close()
+		cancel()
 		cleanServer(simConfig.ServerConfig)
 	}
 	return s, cleanup

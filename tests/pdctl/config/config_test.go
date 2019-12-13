@@ -17,7 +17,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/coreos/go-semver/semver"
@@ -184,14 +183,4 @@ func (s *configTestSuite) TestConfig(c *C) {
 		// judge
 		item.judge(c, &cfg.Schedule, svr.GetScheduleConfig())
 	}
-
-	// test error or deprecated config name
-	args1 = []string{"-u", pdAddr, "config", "set", "foo-bar", "1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "config item not found"), IsTrue)
-	args1 = []string{"-u", pdAddr, "config", "set", "disable-remove-down-replica", "true"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "already been deprecated"), IsTrue)
 }

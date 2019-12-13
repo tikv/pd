@@ -73,8 +73,9 @@ const (
 	webPath         = "/web/"
 	pdClusterIDPath = "/pd/cluster_id"
 
-	component            = "pd"
-	configChangeInterval = 10 * time.Second
+	// Component ...
+	Component            = "pd"
+	configChangeInterval = 1 * time.Second
 )
 
 // EnableZap enable the zap logger in embed etcd.
@@ -126,7 +127,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(*Server) (http.Handler, APIGroup)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, APIGroup)
 
 // APIGroup used to register the api service.
 type APIGroup struct {
@@ -142,14 +143,14 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder) (http.Handler, error) {
+func combineBuilderServerHTTPService(ctx context.Context, svr *Server, apiBuilders ...HandlerBuilder) (http.Handler, error) {
 	engine := negroni.New()
 	recovery := negroni.NewRecovery()
 	engine.Use(recovery)
 	router := mux.NewRouter()
 	registerMap := make(map[string]struct{})
 	for _, build := range apiBuilders {
-		handler, info := build(svr)
+		handler, info := build(ctx, svr)
 		var pathPrefix string
 		if info.IsCore {
 			pathPrefix = CorePath
@@ -181,7 +182,7 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, error) {
+func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 
@@ -200,7 +201,7 @@ func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, e
 		return nil, err
 	}
 	if len(apiBuilders) != 0 {
-		apiHandler, err := combineBuilderServerHTTPService(s, apiBuilders...)
+		apiHandler, err := combineBuilderServerHTTPService(ctx, s, apiBuilders...)
 		if err != nil {
 			return nil, err
 		}
@@ -327,11 +328,14 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	version := &configpb.Version{}
+	version := configpb.Version{}
 	if _, err := toml.Decode(configVersion, &version); err != nil {
 		return err
 	}
-	s.configVersion = version
+	if reflect.DeepEqual(version, configpb.Version{}) {
+		version = configpb.Version{Global: 0, Local: 0}
+	}
+	s.configVersion = &version
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s, s.client)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// Server has started.
@@ -1048,7 +1052,7 @@ func (s *Server) configChangeLoop(interval time.Duration) {
 }
 
 func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Version, componentID, config string) (bool, error) {
-	status, v, config, err := s.configClient.Create(ctx, version, component, componentID, config)
+	status, v, config, err := s.configClient.Create(ctx, version, Component, componentID, config)
 	if err != nil {
 		return false, err
 	}
@@ -1057,8 +1061,6 @@ func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Ve
 	case configpb.StatusCode_OK:
 		s.SetConfigVersion(v)
 		s.updateComponentConfig(config)
-		retry = false
-	case configpb.StatusCode_NOT_CHANGE:
 		retry = false
 	case configpb.StatusCode_WRONG_VERSION:
 		s.SetConfigVersion(v)
@@ -1070,7 +1072,7 @@ func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Ve
 }
 
 func (s *Server) getComponentConfig(ctx context.Context, version *configpb.Version, componentID string) (string, error) {
-	status, v, cfg, err := s.configClient.Get(ctx, version, component, componentID)
+	status, v, cfg, err := s.configClient.Get(ctx, version, Component, componentID)
 	if err != nil {
 		return "", err
 	}

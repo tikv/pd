@@ -25,7 +25,7 @@ type testStringSliceSuite struct {
 }
 
 func (s *testStringSliceSuite) TestJSON(c *C) {
-	b := StringSlice([]string{"zone", "rack"})
+	b := NewStringSlice([]string{"zone", "rack"})
 	o, err := json.Marshal(b)
 	c.Assert(err, IsNil)
 	c.Assert(string(o), Equals, "\"zone,rack\"")

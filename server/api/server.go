@@ -14,6 +14,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -24,11 +25,11 @@ import (
 const apiPrefix = "/pd"
 
 // NewHandler creates a HTTP handler for API.
-func NewHandler(svr *server.Server) (http.Handler, server.APIGroup) {
+func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, server.APIGroup) {
 	router := mux.NewRouter()
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		newRedirector(svr),
-		negroni.Wrap(createRouter(apiPrefix, svr)),
+		negroni.Wrap(createRouter(ctx, apiPrefix, svr)),
 	))
 
 	info := server.APIGroup{

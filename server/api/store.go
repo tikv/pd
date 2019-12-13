@@ -237,7 +237,6 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 

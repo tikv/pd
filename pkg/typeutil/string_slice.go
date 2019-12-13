@@ -21,11 +21,28 @@ import (
 )
 
 // StringSlice is more friendly to json encode/decode
-type StringSlice []string
+type StringSlice struct {
+	slice []string
+}
+
+// NewStringSlice creates a StringSlice from slice.
+func NewStringSlice(slice []string) StringSlice {
+	return StringSlice{slice: slice}
+}
+
+// Len returns the len of string slice.
+func (s StringSlice) Len() int {
+	return len(s.slice)
+}
+
+// GetSlice returns the string slice.
+func (s StringSlice) GetSlice() []string {
+	return s.slice
+}
 
 // MarshalJSON returns the size as a JSON string.
 func (s StringSlice) MarshalJSON() ([]byte, error) {
-	return []byte(strconv.Quote(strings.Join(s, ","))), nil
+	return []byte(strconv.Quote(strings.Join(s.slice, ","))), nil
 }
 
 // UnmarshalJSON parses a JSON string into the bytesize.
@@ -35,9 +52,28 @@ func (s *StringSlice) UnmarshalJSON(text []byte) error {
 		return errors.WithStack(err)
 	}
 	if len(data) == 0 {
-		*s = nil
+		s.slice = nil
 		return nil
 	}
-	*s = strings.Split(data, ",")
+	s.slice = strings.Split(data, ",")
+	return nil
+}
+
+// MarshalText returns the size as a TOML string.
+func (s StringSlice) MarshalText() ([]byte, error) {
+	return []byte(strconv.Quote(strings.Join(s.slice, ","))), nil
+}
+
+// UnmarshalText parses a TOML string into the bytesize.
+func (s *StringSlice) UnmarshalText(text []byte) error {
+	data, err := strconv.Unquote(string(text))
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if len(data) == 0 {
+		s.slice = nil
+		return nil
+	}
+	s.slice = strings.Split(data, ",")
 	return nil
 }

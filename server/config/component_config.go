@@ -39,6 +39,7 @@ var (
 	ErrDecode = func(e error) string {
 		return fmt.Sprintf("decode error: %v", e)
 	}
+	errNotSupported = "not supported"
 )
 
 // ComponentsConfig ...
@@ -99,11 +100,11 @@ func (c *ComponentsConfig) Get(version *configpb.Version, component, componentID
 					Message: ErrEncode(err),
 				}
 			}
-			res := compareVersion(cfg.GetVersion(), version)
-			if res == 0 {
-				return version, "", &configpb.Status{Code: configpb.StatusCode_NOT_CHANGE}
+			if reflect.DeepEqual(cfg.GetVersion(), version) {
+				status = &configpb.Status{Code: configpb.StatusCode_OK}
+			} else {
+				status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 			}
-			status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		} else {
 			status = &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
 		}
@@ -131,18 +132,18 @@ func (c *ComponentsConfig) Create(version *configpb.Version, component, componen
 	defer c.Unlock()
 	var status *configpb.Status
 	latestVersion := c.getLatestVersion(component, componentID)
+	initVersion := &configpb.Version{Local: 0, Global: 0}
 	if componentsCfg, ok := c.LocalCfgs[component]; ok {
 		if _, ok := componentsCfg[componentID]; ok {
 			// restart a component
-			res := compareVersion(latestVersion, version)
-			if res == 0 {
-				status = &configpb.Status{Code: configpb.StatusCode_NOT_CHANGE}
-				return latestVersion, "", status
+			if reflect.DeepEqual(initVersion, version) {
+				status = &configpb.Status{Code: configpb.StatusCode_OK}
+			} else {
+				status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 			}
-			status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		} else {
 			// add a new component
-			lc, err := NewLocalConfig(cfg, latestVersion)
+			lc, err := NewLocalConfig(cfg, initVersion)
 			if err != nil {
 				status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrDecode(err)}
 			} else {
@@ -153,12 +154,21 @@ func (c *ComponentsConfig) Create(version *configpb.Version, component, componen
 	} else {
 		c.LocalCfgs[component] = make(map[string]*LocalConfig)
 		// start the first component
-		lc, err := NewLocalConfig(cfg, latestVersion)
+		lc, err := NewLocalConfig(cfg, initVersion)
 		if err != nil {
 			status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrDecode(err)}
 		} else {
 			c.LocalCfgs[component][componentID] = lc
 			status = &configpb.Status{Code: configpb.StatusCode_OK}
+		}
+	}
+
+	// Apply global config to new component
+	globalCfg := c.GlobalCfgs[component]
+	if globalCfg != nil {
+		entries := globalCfg.GetConfigEntries()
+		if err := c.ApplyGlobalConifg(globalCfg, component, globalCfg.GetVersion(), entries); err != nil {
+			return latestVersion, "", &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: err.Error()}
 		}
 	}
 
@@ -181,33 +191,6 @@ func (c *ComponentsConfig) getLatestVersion(component, componentID string) *conf
 
 func (c *ComponentsConfig) getComponentCfg(component, componentID string) (string, error) {
 	config := c.LocalCfgs[component][componentID].GetConfigs()
-	updateEntries := make(map[string]*EntryValue)
-	// apply the global change to updateEntries
-	if _, ok := c.GlobalCfgs[component]; ok {
-		globalUpdateEntries := c.GlobalCfgs[component].GetUpdateEntries()
-		for k, v := range globalUpdateEntries {
-			updateEntries[k] = v
-		}
-	}
-	// apply the local change to updateEntries
-	for k1, v1 := range c.LocalCfgs[component][componentID].GetUpdateEntries() {
-		if v, ok := updateEntries[k1]; ok {
-			// apply conflict
-			if v1.Version.GetGlobal() == v.Version.GetGlobal() {
-				updateEntries[k1] = v1
-			}
-		} else {
-			updateEntries[k1] = v1
-		}
-	}
-
-	for k, v := range updateEntries {
-		configName := strings.Split(k, ".")
-		if err := update(config, configName, v.Value); err != nil {
-			return "", nil
-		}
-	}
-
 	return encodeConfigs(config)
 }
 
@@ -228,6 +211,32 @@ func (c *ComponentsConfig) Update(kind *configpb.ConfigKind, version *configpb.V
 	return &configpb.Version{Global: 0, Local: 0}, &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrUnknownKind(kind)}
 }
 
+// ApplyGlobalConifg ...
+func (c *ComponentsConfig) ApplyGlobalConifg(globalCfg *GlobalConfig, component string, newGlobalVersion uint64, entries []*configpb.ConfigEntry) error {
+	// get the global config
+	updateEntries := make(map[string]*EntryValue)
+	for _, entry := range entries {
+		globalCfg.updateEntry(entry, &configpb.Version{Global: newGlobalVersion, Local: 0})
+		globalUpdateEntries := c.GlobalCfgs[component].GetUpdateEntries()
+		for k, v := range globalUpdateEntries {
+			updateEntries[k] = v
+		}
+	}
+
+	// update all local config
+	// merge the global config with each local config and update it
+	for _, LocalCfg := range c.LocalCfgs[component] {
+		if err := mergeAndUpdateConfig(LocalCfg, updateEntries); err != nil {
+			return err
+		}
+		LocalCfg.Version = &configpb.Version{Global: newGlobalVersion, Local: 0}
+	}
+
+	// update the global version
+	globalCfg.Version = newGlobalVersion
+	return nil
+}
+
 func (c *ComponentsConfig) updateGlobal(component string, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
 	// if the global config of the component is existed.
 	if globalCfg, ok := c.GlobalCfgs[component]; ok {
@@ -236,14 +245,9 @@ func (c *ComponentsConfig) updateGlobal(component string, version *configpb.Vers
 			return &configpb.Version{Global: globalLatestVersion, Local: version.GetLocal()},
 				&configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
-		newGlobalVersion := version.GetGlobal() + 1
-		for _, entry := range entries {
-			globalCfg.updateEntry(entry, &configpb.Version{Global: newGlobalVersion, Local: 0})
-		}
-		globalCfg.Version = newGlobalVersion
-		// update all local config version
-		for _, LocalCfg := range c.LocalCfgs[component] {
-			LocalCfg.Version = &configpb.Version{Global: newGlobalVersion, Local: 0}
+		if err := c.ApplyGlobalConifg(globalCfg, component, version.GetGlobal()+1, entries); err != nil {
+			return &configpb.Version{Global: globalLatestVersion, Local: version.GetLocal()},
+				&configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: err.Error()}
 		}
 	} else {
 		// The global version of first global update should be 0.
@@ -251,21 +255,57 @@ func (c *ComponentsConfig) updateGlobal(component string, version *configpb.Vers
 			return &configpb.Version{Global: 0, Local: 0},
 				&configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
-		newGlobalVersion := uint64(1)
-		globalCfg := NewGlobalConfig(entries, &configpb.Version{Global: newGlobalVersion, Local: 0})
+
+		globalCfg := NewGlobalConfig(entries, &configpb.Version{Global: 0, Local: 0})
 		c.GlobalCfgs[component] = globalCfg
-		// update all local config version
-		for _, LocalCfg := range c.LocalCfgs[component] {
-			LocalCfg.Version = &configpb.Version{Global: newGlobalVersion, Local: 0}
+
+		if err := c.ApplyGlobalConifg(globalCfg, component, 1, entries); err != nil {
+			return &configpb.Version{Global: 0, Local: version.GetLocal()},
+				&configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: err.Error()}
 		}
 	}
 	return &configpb.Version{Global: c.GlobalCfgs[component].GetVersion(), Local: 0}, &configpb.Status{Code: configpb.StatusCode_OK}
+}
+
+func mergeAndUpdateConfig(localCfg *LocalConfig, updateEntries map[string]*EntryValue) error {
+	config := localCfg.GetConfigs()
+	newUpdateEntries := make(map[string]*EntryValue)
+	for k, v := range updateEntries {
+		newUpdateEntries[k] = v
+	}
+
+	// apply the local change to updateEntries
+	for k1, v1 := range localCfg.GetUpdateEntries() {
+		if v, ok := newUpdateEntries[k1]; ok {
+			// apply conflict
+			if v1.Version.GetGlobal() == v.Version.GetGlobal() {
+				newUpdateEntries[k1] = v1
+			}
+		} else {
+			newUpdateEntries[k1] = v1
+		}
+	}
+
+	for k, v := range newUpdateEntries {
+		configName := strings.Split(k, ".")
+		if err := update(config, configName, v.Value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *ComponentsConfig) updateLocal(componentID string, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
 	component := c.GetComponent(componentID)
 	if component == "" {
 		return &configpb.Version{Global: 0, Local: 0}, &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
+	}
+	updateEntries := make(map[string]*EntryValue)
+	if _, ok := c.GlobalCfgs[component]; ok {
+		globalUpdateEntries := c.GlobalCfgs[component].GetUpdateEntries()
+		for k, v := range globalUpdateEntries {
+			updateEntries[k] = v
+		}
 	}
 	if localCfg, ok := c.LocalCfgs[component][componentID]; ok {
 		localLatestVersion := localCfg.GetVersion()
@@ -276,6 +316,7 @@ func (c *ComponentsConfig) updateLocal(componentID string, version *configpb.Ver
 		for _, entry := range entries {
 			localCfg.updateEntry(entry, version)
 		}
+		mergeAndUpdateConfig(localCfg, updateEntries)
 		localCfg.Version = &configpb.Version{Global: version.GetGlobal(), Local: version.GetLocal() + 1}
 	} else {
 		return version, &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
@@ -302,20 +343,8 @@ func (c *ComponentsConfig) Delete(kind *configpb.ConfigKind, version *configpb.V
 }
 
 func (c *ComponentsConfig) deleteGlobal(component string, version *configpb.Version) *configpb.Status {
-	// if the global config of the component is existed.
-	if globalCfg, ok := c.GlobalCfgs[component]; ok {
-		globalLatestVersion := globalCfg.GetVersion()
-		if globalLatestVersion != version.GetGlobal() {
-			return &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
-		}
-		delete(c.GlobalCfgs, component)
-		for _, LocalCfg := range c.LocalCfgs[component] {
-			LocalCfg.Version = &configpb.Version{Global: 0, Local: 0}
-		}
-	} else {
-		return &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
-	}
-	return &configpb.Status{Code: configpb.StatusCode_OK}
+	// TODO: Add delete global
+	return &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: errNotSupported}
 }
 
 func (c *ComponentsConfig) deleteLocal(componentID string, version *configpb.Version) *configpb.Status {
@@ -384,6 +413,15 @@ func (gc *GlobalConfig) GetVersion() uint64 {
 // GetUpdateEntries ...
 func (gc *GlobalConfig) GetUpdateEntries() map[string]*EntryValue {
 	return gc.UpdateEntries
+}
+
+// GetConfigEntries ...
+func (gc *GlobalConfig) GetConfigEntries() []*configpb.ConfigEntry {
+	var entries []*configpb.ConfigEntry
+	for k, v := range gc.UpdateEntries {
+		entries = append(entries, &configpb.ConfigEntry{Name: k, Value: v.Value})
+	}
+	return entries
 }
 
 // LocalConfig ...
@@ -457,6 +495,8 @@ func update(config map[string]interface{}, configName []string, value string) er
 		v, err = strconv.ParseFloat(value, 64)
 	case reflect.String:
 		v = value
+	case reflect.Slice:
+		v = strings.Split(value, ",")
 	default:
 		v = value
 	}
@@ -465,6 +505,7 @@ func update(config map[string]interface{}, configName []string, value string) er
 		return err
 	}
 	res[configName[0]] = v
+
 	return nil
 }
 

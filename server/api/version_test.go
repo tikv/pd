@@ -57,7 +57,7 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan *server.Server)
 	go func(cfg *config.Config) {
-		s, err := server.CreateServer(cfg, NewHandler)
+		s, err := server.CreateServer(ctx, cfg, NewHandler)
 		c.Assert(err, IsNil)
 		c.Assert(failpoint.Enable("github.com/pingcap/pd/server/memberNil", `return(true)`), IsNil)
 		reqCh <- struct{}{}

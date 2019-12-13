@@ -83,7 +83,7 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 			for _, opt := range opts {
 				opt(cfg)
 			}
-			s, err := server.CreateServer(cfg, NewHandler)
+			s, err := server.CreateServer(ctx, cfg, NewHandler)
 			c.Assert(err, IsNil)
 			err = s.Run(ctx)
 			c.Assert(err, IsNil)
@@ -101,10 +101,11 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 
 	// clean up
 	clean := func() {
-		cancel()
 		for _, s := range svrs {
 			s.Close()
 		}
+		cancel()
+
 		for _, cfg := range cfgs {
 			testutil.CleanServer(cfg.DataDir)
 		}

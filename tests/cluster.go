@@ -46,8 +46,9 @@ const (
 // TestServer is only for test.
 type TestServer struct {
 	sync.RWMutex
-	server *server.Server
-	state  int32
+	server  *server.Server
+	cleanup func()
+	state   int32
 }
 
 var initHTTPClientOnce sync.Once
@@ -67,19 +68,23 @@ func NewTestServer(cfg *config.Config) (*TestServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	svr, err := server.CreateServer(cfg, api.NewHandler)
+	ctx, cleanup := context.WithCancel(context.Background())
+	svr, err := server.CreateServer(ctx, cfg, api.NewHandler)
 	if err != nil {
+		cleanup()
 		return nil, err
 	}
 	initHTTPClientOnce.Do(func() {
 		err = server.InitHTTPClient(svr)
 	})
 	if err != nil {
+		cleanup()
 		return nil, err
 	}
 	return &TestServer{
-		server: svr,
-		state:  Initial,
+		server:  svr,
+		state:   Initial,
+		cleanup: cleanup,
 	}, nil
 }
 
@@ -475,6 +480,7 @@ func (c *TestCluster) Join() (*TestServer, error) {
 // Destroy is used to destroy a TestCluster.
 func (c *TestCluster) Destroy() {
 	for _, s := range c.servers {
+		s.cleanup()
 		err := s.Destroy()
 		if err != nil {
 			log.Error("failed to destroy the cluster:", zap.Error(err))

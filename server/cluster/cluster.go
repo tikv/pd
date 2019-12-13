@@ -815,6 +815,9 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 	// Check location labels.
 	keysSet := make(map[string]struct{})
 	for _, k := range c.GetLocationLabels() {
+		if k == "" {
+			continue
+		}
 		keysSet[k] = struct{}{}
 		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warn("label configuration is incorrect",
@@ -824,6 +827,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 				return errors.Errorf("label configuration is incorrect, need to specify the key: %s ", k)
 			}
 		}
+
 	}
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()

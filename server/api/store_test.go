@@ -171,16 +171,18 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	lc, _ := json.Marshal(labelCheck)
 	err = postJSON(s.urlPrefix+"/config", lc)
 	c.Assert(err, IsNil)
+	time.Sleep(3 * time.Second)
 	// Test set.
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
 	err = postJSON(url+"/label", b)
 	c.Assert(strings.Contains(err.Error(), "key matching the label was not found"), IsTrue)
-	locationLabels := map[string]string{"location-labels": "zone,host"}
+	locationLabels := map[string]interface{}{"location-labels": "zone,host"}
 	ll, _ := json.Marshal(locationLabels)
 	err = postJSON(s.urlPrefix+"/config", ll)
 	c.Assert(err, IsNil)
+	time.Sleep(3 * time.Second)
 	err = postJSON(url+"/label", b)
 	c.Assert(err, IsNil)
 
@@ -197,6 +199,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	lc, _ = json.Marshal(labelCheck)
 	err = postJSON(s.urlPrefix+"/config", lc)
 	c.Assert(err, IsNil)
+	time.Sleep(3 * time.Second)
 
 	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)

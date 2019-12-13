@@ -23,6 +23,7 @@ require (
 	github.com/gorilla/mux v1.6.1
 	github.com/gorilla/websocket v1.2.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
+	github.com/grpc-ecosystem/grpc-gateway v1.12.1
 	github.com/juju/ratelimit v1.0.1
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
@@ -50,3 +51,5 @@ require (
 	google.golang.org/grpc v1.25.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+replace github.com/pingcap/kvproto => /home/ryan/kvproto
