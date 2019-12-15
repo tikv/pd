@@ -94,6 +94,13 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 		err = rc.HandleRegionHeartbeat(region)
 		c.Assert(err, IsNil)
 	}
+	// merge case
+	// region2-> region 1 -> region 0
+	regions[2] = regions[0].Clone(core.WithEndKey(regions[2].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
+	err = rc.HandleRegionHeartbeat(regions[2])
+	c.Assert(err, IsNil)
+	regionLen -= 2
+
 	// ensure flush to region storage, we use a duration larger than the
 	// region storage flush rate limit (3s).
 	time.Sleep(4 * time.Second)
