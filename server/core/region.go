@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -39,14 +40,19 @@ type RegionInfo struct {
 	writtenKeys     uint64
 	readBytes       uint64
 	readKeys        uint64
+	rwBytesTotal    uint64
 	approximateSize int64
 	approximateKeys int64
 	interval        *pdpb.TimeInterval
+}
 
-	// accumulated hot degree
-	accumHotDegree uint64
-	// accumulated interval
-	accumInterval uint64
+var SplitRegionRwByte map[uint64]uint64
+
+func GetSplitRegionRwByte() map[uint64]uint64 {
+	if SplitRegionRwByte == nil {
+		SplitRegionRwByte = make(map[uint64]uint64)
+	}
+	return SplitRegionRwByte
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -82,9 +88,6 @@ func classifyVoterAndLearner(region *RegionInfo) {
 // (heartbeat size <= 1MB).
 const EmptyRegionApproximateSize = 1
 
-// CountPeriod is the period of interval count
-const CountPeriod = 24 * 60 * 60
-
 // RegionFromHeartbeat constructs a Region from region heartbeat.
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 	// Convert unit to MB.
@@ -107,13 +110,6 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		approximateKeys: int64(heartbeat.GetApproximateKeys()),
 		interval:        heartbeat.GetInterval(),
 	}
-
-	// compute the accumulated interval and accumulated hot degree
-	region.accumInterval = region.accumInterval + region.interval.GetEndTimestamp() - region.interval.GetStartTimestamp()
-	if region.accumInterval > CountPeriod {
-		region.accumHotDegree = (region.writtenBytes+region.readBytes)/(uint64)(region.approximateSize) + region.accumHotDegree/2
-	}
-	region.accumHotDegree = (region.writtenBytes+region.readBytes)/(uint64)(region.approximateSize) + region.accumHotDegree
 
 	classifyVoterAndLearner(region)
 	return region
@@ -142,9 +138,6 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		approximateSize: r.approximateSize,
 		approximateKeys: r.approximateKeys,
 		interval:        proto.Clone(r.interval).(*pdpb.TimeInterval),
-
-		accumHotDegree: r.accumHotDegree,
-		accumInterval:  r.accumInterval,
 	}
 
 	for _, opt := range opts {
@@ -360,6 +353,11 @@ func (r *RegionInfo) GetBytesWritten() uint64 {
 	return r.writtenBytes
 }
 
+// GetRwBytesTotal returns the total RW bytes of the region.
+func (r *RegionInfo) GetRwBytesTotal() uint64 {
+	return r.rwBytesTotal
+}
+
 // GetKeysWritten returns the written keys of the region.
 func (r *RegionInfo) GetKeysWritten() uint64 {
 	return r.writtenKeys
@@ -393,16 +391,6 @@ func (r *RegionInfo) GetPeers() []*metapb.Peer {
 // GetRegionEpoch returns the region epoch of the region.
 func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 	return r.meta.RegionEpoch
-}
-
-// GetRegionHotDegree returns the hot degree of the region
-func (r *RegionInfo) GetRegionHotDegree() uint64 {
-	return r.accumHotDegree
-}
-
-// SetRegionHotDegree set the hot degree of the region
-func (r *RegionInfo) SetRegionHotDegree(hotDegree uint64) {
-	r.accumHotDegree = hotDegree
 }
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
@@ -521,6 +509,36 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 
 // SetRegion sets the RegionInfo with regionID
 func (r *RegionsInfo) SetRegion(region *RegionInfo) []*metapb.Region {
+	rwBytesTotalarr := GetSplitRegionRwByte()
+	overlaps := r.tree.getOverlaps(region.meta)
+	if rwb, ok := rwBytesTotalarr[region.GetID()]; ok {
+		region.rwBytesTotal = rwb
+		delete(rwBytesTotalarr, region.GetID())
+	} else {
+		var sum uint64
+		sum = 0
+		for _, reg := range overlaps {
+			rInfo := r.regions.Get(reg.GetId())
+			sum = sum + rInfo.rwBytesTotal
+		}
+		region.rwBytesTotal = sum
+	}
+	ok := false
+	for _, reg := range overlaps {
+		regInfo := r.regions.Get(reg.GetId())
+		if regInfo != nil && regInfo.interval != nil && (time.Unix(int64(regInfo.interval.StartTimestamp), 0).Hour() < time.Unix(int64(region.interval.StartTimestamp), 0).Hour()) {
+			ok = true
+		}
+	}
+	if ok {
+		region.rwBytesTotal = region.rwBytesTotal / 2
+	}
+	if region.approximateSize > 0 {
+		region.rwBytesTotal = region.rwBytesTotal + (region.readBytes+region.writtenBytes)/uint64(region.approximateSize)
+	} else {
+		region.rwBytesTotal = 0
+	}
+
 	if origin := r.regions.Get(region.GetID()); origin != nil {
 		r.RemoveRegion(origin)
 	}

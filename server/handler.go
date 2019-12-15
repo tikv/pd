@@ -770,8 +770,7 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 	}
 	ch := make(chan int)
 	h.chMap[pluginPath] = ch
-	c.wg.Add(1)
-	go c.LoadPlugin(pluginPath, ch)
+	c.LoadPlugin(pluginPath)
 	return nil
 }
 

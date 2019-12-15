@@ -1,6 +1,8 @@
 package command
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 )
 
@@ -61,6 +63,7 @@ func loadPluginCommandFunc(cmd *cobra.Command, args []string) {
 	input := map[string]interface{}{
 		"plugin-path": args[0],
 	}
+	fmt.Println(input["plugin-path"].(string))
 	postJSON(cmd, loadPrefix, input)
 }
 

@@ -250,25 +250,38 @@ func (c *coordinator) run() {
 }
 
 //read user_config.toml and load plugin
-func (c *coordinator) LoadPlugin(pluginPath string, ch chan int) {
-	defer logutil.LogPanic()
-	defer c.wg.Done()
+func (c *coordinator) LoadPlugin(pluginPath string) {
 	//get func from plugin
-	//func : CreateUserScheduler()
-	f, err := schedule.GetFunction(pluginPath, "CreateUserScheduler")
+	//func : ProcessPredictInfo()
+	f1, err := schedule.GetFunction(pluginPath, "ProcessPredictInfo")
 	if err != nil {
 		log.Error("GetFunction err", zap.Error(err))
 		return
 	}
-
-	CreateUserScheduler := f.(func(*schedule.OperatorController, schedule.Cluster) []schedule.Scheduler)
+	ProcessPredictInfo := f1.(func(*RaftCluster, chan int))
+	//func : CreateUserScheduler()
+	f2, err := schedule.GetFunction(pluginPath, "CreateUserScheduler")
+	if err != nil {
+		log.Error("GetFunction err", zap.Error(err))
+		return
+	}
+	CreateUserScheduler := f2.(func(*schedule.OperatorController, schedule.Cluster) []schedule.Scheduler)
 	schedulers := CreateUserScheduler(c.opController, c.cluster)
 	for _, s := range schedulers {
 		if err := c.addUserScheduler(s); err != nil {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		}
 	}
-	//Get signal from channel which means user config changed
+
+	ch := make(chan int)
+	c.wg.Add(2)
+	go ProcessPredictInfo(c.cluster, ch)
+	go c.updateUserScheduler(CreateUserScheduler, ch)
+}
+
+func (c *coordinator) updateUserScheduler(CreateUserScheduler func(*schedule.OperatorController, schedule.Cluster) []schedule.Scheduler, ch chan int) {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
 	for {
 		select {
 		case <-ch:

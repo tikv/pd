@@ -1,7 +1,6 @@
 package schedule
 
 import (
-	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"plugin"
@@ -20,8 +19,8 @@ var ScheduleInfoLock = sync.RWMutex{}
 
 // MoveRegion is a schedule information structure
 type MoveRegion struct {
-	StartKey  string
-	EndKey    string
+	StartKey  []byte
+	EndKey    []byte
 	StoreIDs  []uint64
 	StartTime time.Time
 	EndTime   time.Time
@@ -46,29 +45,17 @@ func IsPredictedHotRegion(cluster Cluster, regionID uint64) bool {
 }
 
 // GetRegionIDs get all regions within the specified key range
-func GetRegionIDs(cluster Cluster, keyStart, keyEnd string) []uint64 {
+func GetRegionIDs(cluster Cluster, keyStart, keyEnd []byte) []uint64 {
 	regionIDs := []uint64{}
-	//decode key form string to []byte
-	startKey, err := hex.DecodeString(keyStart)
-	if err != nil {
-		log.Error("can not decode", zap.String("key:", keyStart))
-		return regionIDs
-	}
-	endKey, err := hex.DecodeString(keyEnd)
-	if err != nil {
-		log.Info("can not decode", zap.String("key:", keyEnd))
-		return regionIDs
-	}
-
 	lastKey := []byte{}
-	regions := cluster.ScanRegions(startKey, endKey, 0)
+	regions := cluster.ScanRegions(keyStart, keyEnd, 0)
 	for _, region := range regions {
 		regionIDs = append(regionIDs, region.GetID())
 		lastKey = region.GetEndKey()
 	}
 
 	if len(regions) == 0 {
-		lastRegion := cluster.ScanRegions(startKey, []byte{}, 1)
+		lastRegion := cluster.ScanRegions(keyStart, []byte{}, 1)
 		if len(lastRegion) == 0 {
 			return regionIDs
 		} else {
