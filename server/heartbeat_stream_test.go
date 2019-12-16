@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/testutil"
 	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -59,6 +60,8 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 		Store:  &metapb.Store{Id: 2, Address: "127.0.0.1:1"},
 	}
 	_, err = s.grpcPDClient.PutStore(context.Background(), req)
+	c.Assert(err, IsNil)
+	err = s.svr.GetRaftCluster().HandleRegionHeartbeat(core.NewRegionInfo(s.region, s.region.GetPeers()[0]))
 	c.Assert(err, IsNil)
 	err = newHandler(s.svr).AddAddPeerOperator(s.region.GetId(), 2)
 	c.Assert(err, IsNil)

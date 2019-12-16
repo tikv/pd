@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
 	syncer "github.com/pingcap/pd/server/region_syncer"
+	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/tests"
 	"github.com/pkg/errors"
 )
@@ -216,7 +217,7 @@ func testStateAndLimit(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDCl
 	// prepare
 	storeID := store.GetId()
 	oc := rc.GetOperatorController()
-	oc.SetAllStoresLimit(1.0)
+	oc.SetAllStoresLimit(1.0, schedule.StoreLimitManual)
 	resetStoreState(c, rc, store.GetId(), beforeState)
 	_, isOKBefore := oc.GetAllStoresLimit()[storeID]
 	// run

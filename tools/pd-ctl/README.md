@@ -518,7 +518,7 @@ Usage:
 }
 ```
 
-### `region check [miss-peer | extra-peer | down-peer | pending-peer | incorrect-ns]`
+### `region check [miss-peer | extra-peer | down-peer | pending-peer | offline-peer | empty-region]`
 
 Use this command to check the Regions in abnormal conditions.
 

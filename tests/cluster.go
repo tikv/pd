@@ -296,14 +296,6 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	return s.server.GetRaftCluster().GetStoreRegions(storeID)
 }
 
-// CheckHealth checks if members are healthy.
-func (s *TestServer) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
-	s.RLock()
-	defer s.RUnlock()
-	rc := s.server.GetRaftCluster()
-	return rc.CheckHealth(members)
-}
-
 // BootstrapCluster is used to bootstrap the cluster.
 func (s *TestServer) BootstrapCluster() error {
 	bootstrapReq := &pdpb.BootstrapRequest{
@@ -457,12 +449,6 @@ func (c *TestCluster) GetEtcdClient() *clientv3.Client {
 // GetConfig returns the current TestCluster's configuration.
 func (c *TestCluster) GetConfig() *clusterConfig {
 	return c.config
-}
-
-// CheckHealth checks if members are healthy.
-func (c *TestCluster) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
-	leader := c.GetLeader()
-	return c.servers[leader].CheckHealth(members)
 }
 
 // HandleRegionHeartbeat processes RegionInfo reports from the client.

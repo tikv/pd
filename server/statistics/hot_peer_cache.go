@@ -14,16 +14,17 @@
 package statistics
 
 import (
+	"math"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/cache"
 	"github.com/pingcap/pd/server/core"
 )
 
 const (
-	cacheMaxLen     = 1000
-	hotPeerMaxCount = 400
+	topNN             = 60
+	topNTTL           = 3 * RegionHeartBeatReportInterval * time.Second
+	hotThresholdRatio = 0.8
 
 	rollingWindowsSize = 5
 
@@ -38,7 +39,7 @@ const (
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
 	kind           FlowKind
-	peersOfStore   map[uint64]cache.Cache         // storeID -> hot peers
+	peersOfStore   map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion map[uint64]map[uint64]struct{} // regionID -> storeIDs
 }
 
@@ -46,7 +47,7 @@ type hotPeerCache struct {
 func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 	return &hotPeerCache{
 		kind:           kind,
-		peersOfStore:   make(map[uint64]cache.Cache),
+		peersOfStore:   make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 	}
 }
@@ -55,11 +56,11 @@ func NewHotStoresStats(kind FlowKind) *hotPeerCache {
 func (f *hotPeerCache) RegionStats() map[uint64][]*HotPeerStat {
 	res := make(map[uint64][]*HotPeerStat)
 	for storeID, peers := range f.peersOfStore {
-		values := peers.Elems()
+		values := peers.GetAll()
 		stat := make([]*HotPeerStat, len(values))
 		res[storeID] = stat
 		for i := range values {
-			stat[i] = values[i].Value.(*HotPeerStat)
+			stat[i] = values[i].(*HotPeerStat)
 		}
 	}
 	return res
@@ -78,10 +79,10 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	} else {
 		peers, ok := f.peersOfStore[item.StoreID]
 		if !ok {
-			peers = cache.NewCache(cacheMaxLen, cache.TwoQueueCache)
+			peers = NewTopN(topNN, topNTTL)
 			f.peersOfStore[item.StoreID] = peers
 		}
-		peers.Put(item.RegionID, item)
+		peers.Put(item)
 
 		stores, ok := f.storesOfRegion[item.RegionID]
 		if !ok {
@@ -177,7 +178,7 @@ func (f *hotPeerCache) getTotalKeys(region *core.RegionInfo) uint64 {
 
 func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat {
 	if hotPeers, ok := f.peersOfStore[storeID]; ok {
-		if v, ok := hotPeers.Peek(regionID); ok {
+		if v := hotPeers.Get(regionID); v != nil {
 			return v.(*HotPeerStat)
 		}
 	}
@@ -195,13 +196,20 @@ func (f *hotPeerCache) isRegionExpired(region *core.RegionInfo, storeID uint64) 
 }
 
 func (f *hotPeerCache) calcHotThreshold(stats *StoresStats, storeID uint64) float64 {
+	var minHotThreshold float64
 	switch f.kind {
 	case WriteFlow:
-		return calculateWriteHotThresholdWithStore(stats, storeID)
+		minHotThreshold = hotWriteRegionMinBytesRate
 	case ReadFlow:
-		return calculateReadHotThresholdWithStore(stats, storeID)
+		minHotThreshold = hotReadRegionMinBytesRate
 	}
-	return 0
+
+	tn, ok := f.peersOfStore[storeID]
+	if !ok || tn.Len() < topNN {
+		return minHotThreshold
+	}
+	tnMin := tn.GetTopNMin().(*HotPeerStat).BytesRate
+	return math.Max(tnMin*hotThresholdRatio, minHotThreshold)
 }
 
 // gets the storeIDs, including old region and new region
@@ -244,7 +252,7 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 	}
 	storeID := peer.GetStoreId()
 	if peers, ok := f.peersOfStore[storeID]; ok {
-		if stat, ok := peers.Peek(region.GetID()); ok {
+		if stat := peers.Get(region.GetID()); stat != nil {
 			return stat.(*HotPeerStat).HotDegree >= hotDegree
 		}
 	}
@@ -279,25 +287,4 @@ func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytesRate float64, hotThre
 	newItem.RollingBytesRate.Add(bytesRate)
 
 	return newItem
-}
-
-// Utils
-func calculateWriteHotThresholdWithStore(stats *StoresStats, storeID uint64) float64 {
-	writeBytes, _ := stats.GetStoreBytesRate(storeID)
-	hotRegionThreshold := writeBytes / hotPeerMaxCount
-
-	if hotRegionThreshold < hotWriteRegionMinBytesRate {
-		hotRegionThreshold = hotWriteRegionMinBytesRate
-	}
-	return hotRegionThreshold
-}
-
-func calculateReadHotThresholdWithStore(stats *StoresStats, storeID uint64) float64 {
-	_, readBytes := stats.GetStoreBytesRate(storeID)
-	hotRegionThreshold := readBytes / hotPeerMaxCount
-
-	if hotRegionThreshold < hotReadRegionMinBytesRate {
-		hotRegionThreshold = hotReadRegionMinBytesRate
-	}
-	return hotRegionThreshold
 }

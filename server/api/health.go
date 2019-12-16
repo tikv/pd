@@ -49,12 +49,7 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rc := h.svr.GetRaftCluster()
-	if rc == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, cluster.ErrNotBootstrapped.Error())
-		return
-	}
-	unhealthMembers := rc.CheckHealth(members)
+	unhealthMembers := cluster.CheckHealth(members)
 	healths := []Health{}
 	for _, member := range members {
 		h := Health{

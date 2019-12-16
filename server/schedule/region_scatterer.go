@@ -102,10 +102,7 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*operator.Operator, 
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Operator {
 	stores := r.collectAvailableStores(region)
-	var (
-		targetPeers   []*metapb.Peer
-		replacedPeers []*metapb.Peer
-	)
+	targetPeers := make(map[uint64]*metapb.Peer)
 	for _, peer := range region.GetPeers() {
 		if len(stores) == 0 {
 			// Reset selected stores if we have no available stores.
@@ -115,26 +112,25 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 
 		if r.selected.put(peer.GetStoreId()) {
 			delete(stores, peer.GetStoreId())
-			targetPeers = append(targetPeers, peer)
-			replacedPeers = append(replacedPeers, peer)
+			targetPeers[peer.GetStoreId()] = peer
 			continue
 		}
 		newPeer := r.selectPeerToReplace(stores, region, peer)
 		if newPeer == nil {
-			targetPeers = append(targetPeers, peer)
-			replacedPeers = append(replacedPeers, peer)
+			targetPeers[peer.GetStoreId()] = peer
 			continue
 		}
 		// Remove it from stores and mark it as selected.
 		delete(stores, newPeer.GetStoreId())
 		r.selected.put(newPeer.GetStoreId())
-		targetPeers = append(targetPeers, newPeer)
-		replacedPeers = append(replacedPeers, peer)
+		targetPeers[newPeer.GetStoreId()] = newPeer
 	}
-	op := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, replacedPeers, targetPeers)
-	if op != nil {
-		op.SetPriorityLevel(core.HighPriority)
+	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers)
+	if err != nil {
+		log.Debug("fail to create scatter region operator", zap.Error(err))
+		return nil
 	}
+	op.SetPriorityLevel(core.HighPriority)
 	return op
 }
 
@@ -165,6 +161,7 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 	if err != nil {
 		return nil
 	}
+	newPeer.IsLearner = oldPeer.GetIsLearner()
 	return newPeer
 }
 

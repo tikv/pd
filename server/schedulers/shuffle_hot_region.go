@@ -179,6 +179,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeSta
 		}
 		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
 		if err != nil {
+			log.Debug("fail to create move leader operator", zap.Error(err))
 			return nil
 		}
 		schedulerCounter.WithLabelValues(s.GetName(), "create-operator").Inc()

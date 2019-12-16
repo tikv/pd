@@ -256,6 +256,10 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel).Inc()
 	l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel).Inc()
 	balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel).Inc()
-	op := operator.CreateTransferLeaderOperator(BalanceLeaderType, region, region.GetLeader().GetStoreId(), targetID, operator.OpBalance)
+	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, cluster, region, region.GetLeader().GetStoreId(), targetID, operator.OpBalance)
+	if err != nil {
+		log.Debug("fail to create balance leader operator", zap.Error(err))
+		return nil
+	}
 	return []*operator.Operator{op}
 }

@@ -11,13 +11,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
-
-// HotPeersStat records all hot regions statistics
-type HotPeersStat struct {
-	StoreBytesRate  float64       `json:"-"`
-	FutureBytesRate float64       `json:"-"`
-	TotalBytesRate  float64       `json:"total_flow_bytes"`
-	Count           int           `json:"regions_count"`
-	Stats           []HotPeerStat `json:"statistics"`
-}
+package dist
