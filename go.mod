@@ -16,7 +16,7 @@ require (
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32
 	github.com/gogo/protobuf v1.0.0
 	github.com/golang/groupcache v0.0.0-20181024230925-c65c006176ff // indirect
-	github.com/golang/protobuf v1.2.0
+	github.com/golang/protobuf v1.3.2
 	github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db // indirect
 	github.com/google/btree v0.0.0-20180813153112-4030bb1f1f0c
 	github.com/gorilla/context v0.0.0-20160226214623-1ea25387ff6f // indirect
@@ -24,19 +24,18 @@ require (
 	github.com/gorilla/websocket v1.2.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/juju/ratelimit v1.0.1
-	github.com/kr/pretty v0.1.0 // indirect
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/montanaflynn/stats v0.0.0-20151014174947-eeaced052adb
 	github.com/opentracing/opentracing-go v1.0.2
-	github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8
+	github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
-	github.com/pingcap/failpoint v0.0.0-20190512135322-30cc7431d99c
-	github.com/pingcap/kvproto v0.0.0-20191030021250-51b332bcb20b
-	github.com/pingcap/log v0.0.0-20190715063458-479153f07ebd
+	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
+	github.com/pingcap/kvproto v0.0.0-20191213111810-93cb7c623c8b
+	github.com/pingcap/log v0.0.0-20191012051959-b742a5d432e9
+	github.com/pingcap/sysutil v0.0.0-20191216090214-5f9620d22b3b
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v0.8.0
-	github.com/prometheus/client_model v0.0.0-20171117100541-99fa1f4be8e5 // indirect
 	github.com/sirupsen/logrus v1.0.5
 	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.1
@@ -46,12 +45,10 @@ require (
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.0.0-20190320044326-77d4b742cdbf
 	go.uber.org/goleak v0.10.0
-	go.uber.org/zap v1.9.1
+	go.uber.org/zap v1.12.0
 	golang.org/x/crypto v0.0.0-20190909091759-094676da4a83 // indirect
 	golang.org/x/net v0.0.0-20190909003024-a7b16738d86b // indirect
-	golang.org/x/sync v0.0.0-20190423024810-112230192c58 // indirect
 	golang.org/x/sys v0.0.0-20190909082730-f460065e899a // indirect
-	google.golang.org/grpc v1.14.0
-	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
+	google.golang.org/grpc v1.25.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )

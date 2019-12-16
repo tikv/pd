@@ -37,12 +37,12 @@ type RegionInfo struct {
 	Leader          *metapb.Peer      `json:"leader,omitempty"`
 	DownPeers       []*pdpb.PeerStats `json:"down_peers,omitempty"`
 	PendingPeers    []*metapb.Peer    `json:"pending_peers,omitempty"`
-	WrittenBytes    uint64            `json:"written_bytes,omitempty"`
-	ReadBytes       uint64            `json:"read_bytes,omitempty"`
-	WrittenKeys     uint64            `json:"written_keys,omitempty"`
-	ReadKeys        uint64            `json:"read_keys,omitempty"`
-	ApproximateSize int64             `json:"approximate_size,omitempty"`
-	ApproximateKeys int64             `json:"approximate_keys,omitempty"`
+	WrittenBytes    uint64            `json:"written_bytes"`
+	ReadBytes       uint64            `json:"read_bytes"`
+	WrittenKeys     uint64            `json:"written_keys"`
+	ReadKeys        uint64            `json:"read_keys"`
+	ApproximateSize int64             `json:"approximate_size"`
+	ApproximateKeys int64             `json:"approximate_keys"`
 }
 
 // NewRegionInfo create a new api RegionInfo.
