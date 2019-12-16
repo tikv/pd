@@ -293,12 +293,12 @@ func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request
 
 func calBound(bound int, r *http.Request) (int, error) {
 	if boundStr := r.URL.Query().Get("bound"); boundStr != "" {
-		bountInput, err := strconv.Atoi(boundStr)
+		boundInput, err := strconv.Atoi(boundStr)
 		if err != nil {
 			return -1, err
 		}
-		if bound < bountInput {
-			bound = bountInput
+		if bound < boundInput {
+			bound = boundInput
 		}
 	}
 	return bound, nil
