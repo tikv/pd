@@ -116,7 +116,7 @@ func (s *testTopNSuite) TestRemove(c *C) {
 }
 
 func (s *testTopNSuite) TestTTL(c *C) {
-	const Total = 10000
+	const Total = 1000
 	const N = 50
 	tn := NewTopN(50, 900*time.Millisecond)
 	for _, x := range rand.Perm(Total) {
