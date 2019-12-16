@@ -228,7 +228,7 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		if target == nil {
 			continue
 		}
-		op := operator.CreateTransferLeaderOperator(EvictLeaderType, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		op := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)
 	}
