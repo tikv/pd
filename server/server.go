@@ -30,6 +30,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -46,6 +47,7 @@ import (
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/tso"
+	"github.com/pingcap/sysutil"
 	"github.com/pkg/errors"
 	"github.com/urfave/negroni"
 	"go.etcd.io/etcd/clientv3"
@@ -72,6 +74,8 @@ var EnableZap = false
 
 // Server is the pd server.
 type Server struct {
+	diagnosticspb.DiagnosticsServer
+
 	// Server state.
 	isServing int64
 
@@ -169,9 +173,10 @@ func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, e
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
-		cfg:         cfg,
-		scheduleOpt: config.NewScheduleOption(cfg),
-		member:      &member.Member{},
+		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		cfg:               cfg,
+		scheduleOpt:       config.NewScheduleOption(cfg),
+		member:            &member.Member{},
 	}
 	s.handler = newHandler(s)
 
@@ -191,7 +196,10 @@ func CreateServer(cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, e
 			webPath:     http.StripPrefix(webPath, ui.Handler()),
 		}
 	}
-	etcdCfg.ServiceRegister = func(gs *grpc.Server) { pdpb.RegisterPDServer(gs, s) }
+	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
+		pdpb.RegisterPDServer(gs, s)
+		diagnosticspb.RegisterDiagnosticsServer(gs, s)
+	}
 	s.etcdCfg = etcdCfg
 	if EnableZap {
 		// The etcd master version has removed embed.Config.SetupLogging.
