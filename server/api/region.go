@@ -39,8 +39,8 @@ type RegionInfo struct {
 	PendingPeers    []*metapb.Peer    `json:"pending_peers,omitempty"`
 	WrittenBytes    uint64            `json:"written_bytes"`
 	ReadBytes       uint64            `json:"read_bytes"`
-	WrittenKeys     uint64            `json:"written_keys,omitempty"`
-	ReadKeys        uint64            `json:"read_keys,omitempty"`
+	WrittenKeys     uint64            `json:"written_keys"`
+	ReadKeys        uint64            `json:"read_keys"`
 	ApproximateSize int64             `json:"approximate_size"`
 	ApproximateKeys int64             `json:"approximate_keys"`
 }
