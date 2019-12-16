@@ -106,7 +106,11 @@ retool-setup:
 	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
 	@./scripts/retool sync
 
-check: retool-setup check-all
+check: retool-setup check-all check-plugin
+
+check-plugin:
+	@echo "checking plugin"
+	cd ./plugin/scheduler_example && make evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
 static: export GO111MODULE=on
 static:

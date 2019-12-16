@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -30,6 +31,7 @@ import (
 	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const (
@@ -228,7 +230,12 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		if target == nil {
 			continue
 		}
-		op := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		if err != nil {
+			log.Debug("fail to create evict leader operator", zap.Error(err))
+			continue
+
+		}
 		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)
 	}
