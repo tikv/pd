@@ -147,6 +147,11 @@ func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, 
 		},
 	})
 	c.Assert(err, IsNil)
+	_, err = svr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Stats:  &pdpb.StoreStats{StoreId: id},
+	})
+	c.Assert(err, IsNil)
 }
 
 func mustRegionHeartbeat(c *C, svr *server.Server, region *core.RegionInfo) {

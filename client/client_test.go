@@ -112,6 +112,7 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	c.Assert(cluster, NotNil)
 	for _, store := range stores {
 		s.srv.PutStore(context.Background(), &pdpb.PutStoreRequest{Header: newHeader(s.srv), Store: store})
+		s.srv.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{Header: newHeader(s.srv), Stats: &pdpb.StoreStats{StoreId: store.GetId()}})
 	}
 }
 

@@ -19,6 +19,14 @@
     {
       "Repository": "golang.org/x/tools/cmd/goimports",
       "Commit": "04b5d21e00f1f47bd824a6ade581e7189bacde87"
+    },
+    {
+      "Repository": "github.com/kevinburke/go-bindata",
+      "Commit": "f6a432f39fbebd7aaaf4f29ca1aac539edbf6834"
+    },
+    {
+      "Repository": "gopkg.in/alecthomas/gometalinter.v2",
+      "Commit": "46cc1ea3778b247666c2949669a3333c532fa9c6"
     }
   ],
   "RetoolVersion": "1.3.7"

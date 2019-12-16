@@ -178,7 +178,21 @@ func (s *testMergeCheckerSuite) checkSteps(c *C, op *operator.Operator, steps []
 	c.Assert(steps, NotNil)
 	c.Assert(op.Len(), Equals, len(steps))
 	for i := range steps {
-		c.Assert(op.Step(i), DeepEquals, steps[i])
+		switch op.Step(i).(type) {
+		case operator.AddLearner:
+			c.Assert(op.Step(i).(operator.AddLearner).ToStore, Equals, steps[i].(operator.AddLearner).ToStore)
+		case operator.PromoteLearner:
+			c.Assert(op.Step(i).(operator.PromoteLearner).ToStore, Equals, steps[i].(operator.PromoteLearner).ToStore)
+		case operator.TransferLeader:
+			c.Assert(op.Step(i).(operator.TransferLeader).FromStore, Equals, steps[i].(operator.TransferLeader).FromStore)
+			c.Assert(op.Step(i).(operator.TransferLeader).ToStore, Equals, steps[i].(operator.TransferLeader).ToStore)
+		case operator.RemovePeer:
+			c.Assert(op.Step(i).(operator.RemovePeer).FromStore, Equals, steps[i].(operator.RemovePeer).FromStore)
+		case operator.MergeRegion:
+			c.Assert(op.Step(i).(operator.MergeRegion).IsPassive, Equals, steps[i].(operator.MergeRegion).IsPassive)
+		default:
+			c.Fatal("unknown operator step type")
+		}
 	}
 }
 
@@ -187,17 +201,13 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	ops := s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	s.checkSteps(c, ops[0], []operator.OpStep{
-		operator.AddLearner{ToStore: 4, PeerID: 1},
-		operator.PromoteLearner{ToStore: 4, PeerID: 1},
-
+		operator.AddLearner{ToStore: 1},
+		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 2},
-
-		operator.AddLearner{ToStore: 1, PeerID: 2},
-		operator.PromoteLearner{ToStore: 1, PeerID: 2},
-
+		operator.AddLearner{ToStore: 4},
+		operator.PromoteLearner{ToStore: 4},
 		operator.TransferLeader{FromStore: 6, ToStore: 5},
 		operator.RemovePeer{FromStore: 6},
-
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
@@ -225,8 +235,8 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []operator.OpStep{
-		operator.AddLearner{ToStore: 4, PeerID: 3},
-		operator.PromoteLearner{ToStore: 4, PeerID: 3},
+		operator.AddLearner{ToStore: 4},
+		operator.PromoteLearner{ToStore: 4},
 		operator.RemovePeer{FromStore: 6},
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
@@ -274,22 +284,16 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[2])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []operator.OpStep{
-		operator.AddLearner{ToStore: 4, PeerID: 4},
-		operator.PromoteLearner{ToStore: 4, PeerID: 4},
-
+		operator.AddLearner{ToStore: 1},
+		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 3},
-
-		operator.AddLearner{ToStore: 1, PeerID: 5},
-		operator.PromoteLearner{ToStore: 1, PeerID: 5},
-
+		operator.AddLearner{ToStore: 4},
+		operator.PromoteLearner{ToStore: 4},
 		operator.RemovePeer{FromStore: 6},
-
-		operator.AddLearner{ToStore: 5, PeerID: 6},
-		operator.PromoteLearner{ToStore: 5, PeerID: 6},
-
-		operator.TransferLeader{FromStore: 2, ToStore: 4},
+		operator.AddLearner{ToStore: 5},
+		operator.PromoteLearner{ToStore: 5},
+		operator.TransferLeader{FromStore: 2, ToStore: 1},
 		operator.RemovePeer{FromStore: 2},
-
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
@@ -316,19 +320,16 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[1])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []operator.OpStep{
-		operator.AddLearner{ToStore: 1, PeerID: 7},
-		operator.PromoteLearner{ToStore: 1, PeerID: 7},
-
+		operator.AddLearner{ToStore: 1},
+		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 3},
 
-		operator.AddLearner{ToStore: 7, PeerID: 8},
-		operator.PromoteLearner{ToStore: 7, PeerID: 8},
-
+		operator.AddLearner{ToStore: 7},
+		operator.PromoteLearner{ToStore: 7},
 		operator.RemovePeer{FromStore: 6},
 
-		operator.AddLearner{ToStore: 8, PeerID: 9},
-		operator.PromoteLearner{ToStore: 8, PeerID: 9},
-
+		operator.AddLearner{ToStore: 8},
+		operator.PromoteLearner{ToStore: 8},
 		operator.TransferLeader{FromStore: 2, ToStore: 1},
 		operator.RemovePeer{FromStore: 2},
 
@@ -366,17 +367,13 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	s.cluster.PutRegion(s.regions[1])
 	ops = s.mc.Check(s.regions[2])
 	s.checkSteps(c, ops[0], []operator.OpStep{
-		operator.AddLearner{ToStore: 1, PeerID: 10},
-		operator.PromoteLearner{ToStore: 1, PeerID: 10},
-
+		operator.AddLearner{ToStore: 1},
+		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 3},
-
-		operator.AddLearner{ToStore: 8, PeerID: 11},
-		operator.PromoteLearner{ToStore: 8, PeerID: 11},
-
+		operator.AddLearner{ToStore: 8},
+		operator.PromoteLearner{ToStore: 8},
 		operator.TransferLeader{FromStore: 2, ToStore: 1},
 		operator.RemovePeer{FromStore: 2},
-
 		operator.MergeRegion{
 			FromRegion: s.regions[2].GetMeta(),
 			ToRegion:   s.regions[1].GetMeta(),
