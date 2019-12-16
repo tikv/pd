@@ -259,21 +259,14 @@ func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) 
 
 func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request) {
 	bound := minRegionHistogramsize
-	if boundStr := r.URL.Query().Get("bound"); boundStr != "" {
-		var err error
-		var bountInput int
-		bountInput, err = strconv.Atoi(boundStr)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if bound < bountInput {
-			bound = bountInput
-		}
+	bound, err := calBound(bound, r)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	rc := getCluster(r.Context())
 	regions := rc.GetRegions()
-	var histsize *[]int64 = new([]int64)
+	var histsize = new([]int64)
 	for _, core := range regions {
 		*histsize = append(*histsize, core.GetApproximateSize())
 	}
@@ -283,26 +276,32 @@ func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request
 
 func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request) {
 	bound := minRegionHistogramkeys
-	if boundStr := r.URL.Query().Get("bound"); boundStr != "" {
-		var err error
-		var bountInput int
-		bountInput, err = strconv.Atoi(boundStr)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if bound < bountInput {
-			bound = bountInput
-		}
+	bound, err := calBound(bound, r)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	rc := getCluster(r.Context())
 	regions := rc.GetRegions()
-	var histkeys *[]int64 = new([]int64)
+	var histkeys = new([]int64)
 	for _, core := range regions {
 		*histkeys = append(*histkeys, core.GetApproximateKeys())
 	}
 	histkeysMap := calHist(bound, histkeys)
 	h.rd.JSON(w, http.StatusOK, histkeysMap)
+}
+
+func calBound(bound int, r *http.Request) (int, error) {
+	if boundStr := r.URL.Query().Get("bound"); boundStr != "" {
+		bountInput, err := strconv.Atoi(boundStr)
+		if err != nil {
+			return -1, err
+		}
+		if bound < bountInput {
+			bound = bountInput
+		}
+	}
+	return bound, nil
 }
 
 func calHist(bound int, list *[]int64) *map[string]int {
