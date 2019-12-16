@@ -95,11 +95,26 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 		c.Assert(err, IsNil)
 	}
 	// merge case
-	// region2-> region 1 -> region 0
-	regions[2] = regions[0].Clone(core.WithEndKey(regions[2].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
+	// region2 -> region1 -> region0
+	regions[0] = regions[0].Clone(core.WithEndKey(regions[2].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
 	err = rc.HandleRegionHeartbeat(regions[2])
 	c.Assert(err, IsNil)
 	regionLen -= 2
+
+	// merge case
+	// region3 -> region4
+	regions[4] = regions[3].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
+	err = rc.HandleRegionHeartbeat(regions[4])
+	c.Assert(err, IsNil)
+	regionLen -= 1
+
+	// merge case
+	// region0 -> region4
+	regions[4] = regions[0].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
+	err = rc.HandleRegionHeartbeat(regions[4])
+	c.Assert(err, IsNil)
+	regionLen -= 1
+	regions = regions[4:]
 
 	// ensure flush to region storage, we use a duration larger than the
 	// region storage flush rate limit (3s).
@@ -111,6 +126,9 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	c.Assert(leaderServer, NotNil)
 	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
 	c.Assert(len(loadRegions), Equals, regionLen)
+	for _, region := range regions {
+		c.Assert(leaderServer.GetRegionInfoByID(region.GetID()).GetMeta(), DeepEquals, region.GetMeta())
+	}
 }
 
 func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
