@@ -518,7 +518,7 @@ Usage:
 }
 ```
 
-### `region check [miss-peer | extra-peer | down-peer | pending-peer | offline-peer | empty-region| histogram]`
+### `region check [miss-peer | extra-peer | down-peer | pending-peer | offline-peer | empty-region | histsize | histkeys]`
 
 Use this command to check the Regions in abnormal conditions.
 

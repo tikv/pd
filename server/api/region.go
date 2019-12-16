@@ -15,7 +15,6 @@ package api
 
 import (
 	"container/heap"
-	"github.com/beorn7/perks/histogram"
 	"net/http"
 	"strconv"
 
@@ -258,59 +257,70 @@ func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
-type regionSize struct {
-	Size  int64 `json:"size"`
-	Count int   `json:"count"`
-}
-
-type regionKeys struct {
-	Keys  int64 `json:"keys"`
-	Count int   `json:"count"`
-}
-
-type regionHist struct {
-	SizeHist []*regionSize `json:"region size histogram"`
-	KeysHist []*regionKeys `json:"region keys histogram"`
-}
-
-func (h *regionsHandler) GetHistogram(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request) {
+	bound := minRegionHistogramsize
+	if boundStr := r.URL.Query().Get("bound"); boundStr != "" {
+		var err error
+		var bountInput int
+		bountInput, err = strconv.Atoi(boundStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if bound < bountInput {
+			bound = bountInput
+		}
+	}
 	rc := getCluster(r.Context())
 	regions := rc.GetRegions()
-	sizeHistgoram := histogram.New(10)
-	keysHistgoram := histogram.New(10)
-	for _, region := range regions {
-		sizeHistgoram.Insert(float64(region.GetApproximateSize()))
-		keysHistgoram.Insert(float64(region.GetApproximateKeys()))
+	var histsize *[]int64 = new([]int64)
+	for _, core := range regions {
+		*histsize = append(*histsize, core.GetApproximateSize())
 	}
-	sizeBins := sizeHistgoram.Bins()
-	keysBins := keysHistgoram.Bins()
-	var sizeHist [10]*regionSize
-	var keysHist [10]*regionKeys
+	histsizeMap := calHist(bound, histsize)
+	h.rd.JSON(w, http.StatusOK, histsizeMap)
+}
 
-	for i, bin := range sizeBins {
-		if bin == nil {
-			continue
+func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request) {
+	bound := minRegionHistogramkeys
+	if boundStr := r.URL.Query().Get("bound"); boundStr != "" {
+		var err error
+		var bountInput int
+		bountInput, err = strconv.Atoi(boundStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
 		}
-		reginSize := &regionSize{}
-		reginSize.Count = bin.Count
-		reginSize.Size = int64(bin.Mean())
-		sizeHist[i] = reginSize
-	}
-	for i, bin := range keysBins {
-		if bin == nil {
-			continue
+		if bound < bountInput {
+			bound = bountInput
 		}
-		reginKeys := &regionKeys{}
-		reginKeys.Count = bin.Count
-		reginKeys.Keys = int64(bin.Mean())
-		keysHist[i] = reginKeys
 	}
+	rc := getCluster(r.Context())
+	regions := rc.GetRegions()
+	var histkeys *[]int64 = new([]int64)
+	for _, core := range regions {
+		*histkeys = append(*histkeys, core.GetApproximateKeys())
+	}
+	histkeysMap := calHist(bound, histkeys)
+	h.rd.JSON(w, http.StatusOK, histkeysMap)
+}
 
-	regionHist := &regionHist{
-		SizeHist: sizeHist[:],
-		KeysHist: keysHist[:],
+func calHist(bound int, list *[]int64) *map[string]int {
+	var histMap = make(map[int64]int)
+	var outPutMap = make(map[string]int)
+	for _, item := range *list {
+		boundStep := item / int64(bound)
+		if value, ok := histMap[boundStep]; ok {
+			histMap[boundStep] = value + 1
+		} else {
+			histMap[boundStep] = 1
+		}
 	}
-	h.rd.JSON(w, http.StatusOK, regionHist)
+	for k, v := range histMap {
+		str := "[" + strconv.FormatInt(k*int64(bound), 10) + "," + strconv.FormatInt((k+1)*int64(bound), 10) + ")"
+		outPutMap[str] = v
+	}
+	return &outPutMap
 }
 
 func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Request) {
@@ -334,8 +344,10 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 }
 
 const (
-	defaultRegionLimit = 16
-	maxRegionLimit     = 10240
+	defaultRegionLimit     = 16
+	maxRegionLimit         = 10240
+	minRegionHistogramsize = 1
+	minRegionHistogramkeys = 1000
 )
 
 func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request) {
