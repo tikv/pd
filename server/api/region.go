@@ -258,7 +258,7 @@ func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request) {
-	bound := minRegionHistogramsize
+	bound := minRegionHistogramSize
 	bound, err := calBound(bound, r)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
@@ -266,16 +266,16 @@ func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request
 	}
 	rc := getCluster(r.Context())
 	regions := rc.GetRegions()
-	var histsize = new([]int64)
-	for _, core := range regions {
-		*histsize = append(*histsize, core.GetApproximateSize())
+	histSizes := make([]int64, 0, len(regions))
+	for _, region := range regions {
+		histSizes = append(histSizes, region.GetApproximateSize())
 	}
-	histsizeMap := calHist(bound, histsize)
-	h.rd.JSON(w, http.StatusOK, histsizeMap)
+	histSizesMap := calHist(bound, &histSizes)
+	h.rd.JSON(w, http.StatusOK, histSizesMap)
 }
 
 func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request) {
-	bound := minRegionHistogramkeys
+	bound := minRegionHistogramKeys
 	bound, err := calBound(bound, r)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
@@ -283,12 +283,12 @@ func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request
 	}
 	rc := getCluster(r.Context())
 	regions := rc.GetRegions()
-	var histkeys = new([]int64)
-	for _, core := range regions {
-		*histkeys = append(*histkeys, core.GetApproximateKeys())
+	histKeys := make([]int64, 0, len(regions))
+	for _, region := range regions {
+		histKeys = append(histKeys, region.GetApproximateKeys())
 	}
-	histkeysMap := calHist(bound, histkeys)
-	h.rd.JSON(w, http.StatusOK, histkeysMap)
+	histKeysMap := calHist(bound, &histKeys)
+	h.rd.JSON(w, http.StatusOK, histKeysMap)
 }
 
 func calBound(bound int, r *http.Request) (int, error) {
@@ -306,20 +306,20 @@ func calBound(bound int, r *http.Request) (int, error) {
 
 func calHist(bound int, list *[]int64) *map[string]int {
 	var histMap = make(map[int64]int)
-	var outPutMap = make(map[string]int)
+	var outputMap = make(map[string]int)
 	for _, item := range *list {
-		boundStep := item / int64(bound)
-		if value, ok := histMap[boundStep]; ok {
-			histMap[boundStep] = value + 1
+		multiple := item / int64(bound)
+		if oldCount, ok := histMap[multiple]; ok {
+			histMap[multiple] = oldCount + 1
 		} else {
-			histMap[boundStep] = 1
+			histMap[multiple] = 1
 		}
 	}
-	for k, v := range histMap {
-		str := "[" + strconv.FormatInt(k*int64(bound), 10) + "," + strconv.FormatInt((k+1)*int64(bound), 10) + ")"
-		outPutMap[str] = v
+	for multiple, count := range histMap {
+		outputStr := "[" + strconv.FormatInt(multiple*int64(bound), 10) + "," + strconv.FormatInt((multiple+1)*int64(bound), 10) + ")"
+		outputMap[outputStr] = count
 	}
-	return &outPutMap
+	return &outputMap
 }
 
 func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Request) {
@@ -345,8 +345,8 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 const (
 	defaultRegionLimit     = 16
 	maxRegionLimit         = 10240
-	minRegionHistogramsize = 1
-	minRegionHistogramkeys = 1000
+	minRegionHistogramSize = 1
+	minRegionHistogramKeys = 1000
 )
 
 func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request) {

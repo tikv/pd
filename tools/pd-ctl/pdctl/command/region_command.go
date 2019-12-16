@@ -448,9 +448,6 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 		} else {
 			prefix += "?bound=10000"
 		}
-	} else if len(args) == 2 {
-		cmd.Println(cmd.UsageString())
-		return
 	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
