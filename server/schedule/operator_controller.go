@@ -773,5 +773,6 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
 func (oc *OperatorController) RemoveStoreLimit(storeID uint64) {
 	oc.Lock()
 	defer oc.Unlock()
+	oc.cluster.AttachOverloadStatus(storeID, nil)
 	delete(oc.storesLimit, storeID)
 }
