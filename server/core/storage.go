@@ -358,12 +358,17 @@ func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
 // SaveComponentsConfig stores marshalable cfg to the componentsConfigPath.
 func (s *Storage) SaveComponentsConfig(cfg interface{}) error {
 <<<<<<< HEAD
+<<<<<<< HEAD
 	var value bytes.Buffer
 	if err := toml.NewEncoder(&value).Encode(cfg); err != nil {
 =======
 	value := new(bytes.Buffer)
 	if err := toml.NewEncoder(value).Encode(cfg); err != nil {
 >>>>>>> add config manager
+=======
+	var value bytes.Buffer
+	if err := toml.NewEncoder(&value).Encode(cfg); err != nil {
+>>>>>>> address comments
 		return errors.WithStack(err)
 	}
 	return s.Save(componentsConfigPath, value.String())
