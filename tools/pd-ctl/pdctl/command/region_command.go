@@ -414,7 +414,7 @@ func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithCheckCommand returns a region with check subcommand of regionCmd
 func NewRegionWithCheckCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "check [miss-peer|extra-peer|down-peer|pending-peer|offline-peer|empty-region]",
+		Use:   "check [miss-peer|extra-peer|down-peer|pending-peer|offline-peer|empty-region|hist-size|hist-keys]",
 		Short: "show the region with check specific status",
 		Run:   showRegionWithCheckCommandFunc,
 	}
@@ -422,12 +422,33 @@ func NewRegionWithCheckCommand() *cobra.Command {
 }
 
 func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
+	if len(args) < 1 || len(args) > 2 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
 	state := args[0]
 	prefix := regionsCheckPrefix + "/" + state
+	if strings.EqualFold(state, "hist-size") {
+		if len(args) == 2 {
+			if _, err := strconv.Atoi(args[1]); err != nil {
+				cmd.Println("region size histogram bound should be a number")
+				return
+			}
+			prefix += "?bound=" + args[1]
+		} else {
+			prefix += "?bound=10"
+		}
+	} else if strings.EqualFold(state, "hist-keys") {
+		if len(args) == 2 {
+			if _, err := strconv.Atoi(args[1]); err != nil {
+				cmd.Println("region keys histogram bound should be a number")
+				return
+			}
+			prefix += "?bound=" + args[1]
+		} else {
+			prefix += "?bound=10000"
+		}
+	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get region: %s\n", err)
