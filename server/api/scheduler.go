@@ -14,14 +14,20 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/schedulers"
 	"github.com/unrolled/render"
 )
+
+const schedulerConfigPrefix = "pd/api/v1/scheduler-config"
 
 type schedulerHandler struct {
 	*server.Handler
@@ -123,7 +129,14 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
 			return
 		}
-		if err := h.AddGrantLeaderScheduler(uint64(storeID)); err != nil {
+		err := h.AddGrantLeaderScheduler(uint64(storeID))
+		if err == cluster.ErrSchedulerExisted {
+			if err := h.redirectSchedulerUpdate(schedulers.GrantLeaderName, storeID); err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		if err != nil && err != cluster.ErrSchedulerExisted {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -133,7 +146,14 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
 			return
 		}
-		if err := h.AddEvictLeaderScheduler(uint64(storeID)); err != nil {
+		err := h.AddEvictLeaderScheduler(uint64(storeID))
+		if err == cluster.ErrSchedulerExisted {
+			if err := h.redirectSchedulerUpdate(schedulers.EvictLeaderName, storeID); err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		if err != nil && err != cluster.ErrSchedulerExisted {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -170,15 +190,49 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, nil)
 }
 
+func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64) error {
+	input := make(map[string]interface{})
+	input["name"] = name
+	input["store_id"] = storeID
+	updateURL := fmt.Sprintf("%s/%s/%s/config", h.GetAddr(), schedulerConfigPrefix, name)
+	body, err := json.Marshal(input)
+	if err != nil {
+		return err
+	}
+	return postJSON(updateURL, body)
+}
+
 func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
-
-	if err := h.RemoveScheduler(name); err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
-		return
+	switch {
+	case strings.HasPrefix(name, schedulers.EvictLeaderName) && name != schedulers.EvictLeaderName:
+		if err := h.redirectSchedulerDelete(name, schedulers.EvictLeaderName); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case strings.HasPrefix(name, schedulers.GrantLeaderName) && name != schedulers.GrantLeaderName:
+		if err := h.redirectSchedulerDelete(name, schedulers.GrantLeaderName); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	default:
+		if err := h.RemoveScheduler(name); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
-
 	h.r.JSON(w, http.StatusOK, nil)
+}
+
+func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) error {
+	args := strings.Split(name, "-")
+	args = args[len(args)-1:]
+	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
+	err := doDelete(url)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {

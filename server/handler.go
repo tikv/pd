@@ -868,3 +868,8 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 	}
 	return ErrPluginNotFound(pluginPath)
 }
+
+// GetAddr returns the server urls for clients.
+func (h *Handler) GetAddr() string {
+	return h.s.GetAddr()
+}

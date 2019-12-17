@@ -63,6 +63,8 @@ type Options interface {
 	GetLeaderScheduleStrategy() core.ScheduleStrategy
 	GetKeyType() core.KeyType
 
+	RemoveScheduler(name string) error
+
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
 

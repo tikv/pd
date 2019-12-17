@@ -480,6 +480,11 @@ func (mc *Cluster) PutStoreWithLabels(id uint64, labelPairs ...string) {
 	mc.AddLabelsStore(id, 0, labels)
 }
 
+// RemoveScheduler returns mocks method.
+func (mc *Cluster) RemoveScheduler(name string) error {
+	return nil
+}
+
 // MockRegionInfo returns a mock region
 func (mc *Cluster) MockRegionInfo(regionID uint64, leaderID uint64,
 	followerIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
