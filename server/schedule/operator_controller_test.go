@@ -567,6 +567,7 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 }
 
 func (t *testOperatorControllerSuite) TestRemoveTombstone(c *C) {
+	var mu sync.Mutex
 	cfg := mockoption.NewScheduleOptions()
 	cfg.StoreBalanceRate = 1000
 	cfg.LocationLabels = []string{"zone", "rack"}
@@ -598,11 +599,15 @@ func (t *testOperatorControllerSuite) TestRemoveTombstone(c *C) {
 	go func() {
 		defer wg.Done()
 		time.Sleep(100 * time.Millisecond)
+		mu.Lock()
+		defer mu.Unlock()
 		oc.RemoveStoreLimit(4)
 	}()
 	for i := 2; i < 20; i++ {
 		time.Sleep(10 * time.Millisecond)
+		mu.Lock()
 		op := rc.Check(regions[i])
+		mu.Unlock()
 		oc.AddOperator(op)
 		oc.RemoveOperator(op)
 	}
