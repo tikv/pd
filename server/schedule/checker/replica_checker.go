@@ -28,7 +28,6 @@ import (
 
 const (
 	replicaCheckerName = "replica-checker"
-	minReplicaCount    = 1
 )
 
 const (
@@ -89,7 +88,12 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 			return nil
 		}
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
-		return operator.CreateAddPeerOperator("make-up-replica", region, newPeer, operator.OpReplica)
+		op, err := operator.CreateAddPeerOperator("make-up-replica", r.cluster, region, newPeer, operator.OpReplica)
+		if err != nil {
+			log.Debug("create make-up-replica operator fail", zap.Error(err))
+			return nil
+		}
+		return op
 	}
 
 	// when add learner peer, the number of peer will exceed max replicas for a while,
@@ -279,12 +283,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 	}
 
 	replace := fmt.Sprintf("replace-%s-replica", status)
-	var op *operator.Operator
-	if status == offlineStatus && r.cluster.GetMaxReplicas() > minReplicaCount {
-		op, err = operator.CreateOfflinePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer)
-	} else {
-		op, err = operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer)
-	}
+	op, err := operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer)
 	if err != nil {
 		reason := fmt.Sprintf("%s-fail", replace)
 		checkerCounter.WithLabelValues("replica_checker", reason).Inc()

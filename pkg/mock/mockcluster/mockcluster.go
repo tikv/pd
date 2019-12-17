@@ -473,11 +473,11 @@ func (mc *Cluster) PutRegionStores(id uint64, stores ...uint64) {
 
 // PutStoreWithLabels mocks method.
 func (mc *Cluster) PutStoreWithLabels(id uint64, labelPairs ...string) {
-	var labels []*metapb.StoreLabel
+	labels := make(map[string]string)
 	for i := 0; i < len(labelPairs); i += 2 {
-		labels = append(labels, &metapb.StoreLabel{Key: labelPairs[i], Value: labelPairs[i+1]})
+		labels[labelPairs[i]] = labelPairs[i+1]
 	}
-	mc.PutStore(core.NewStoreInfo(&metapb.Store{Id: id, Labels: labels}))
+	mc.AddLabelsStore(id, 0, labels)
 }
 
 // MockRegionInfo returns a mock region
