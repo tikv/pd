@@ -294,7 +294,7 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	defer c.connMu.Unlock()
 	if old, ok := c.connMu.clientConns[addr]; ok {
 		cc.Close()
-		log.Warn("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
+		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
 		return old, nil
 	}
 
