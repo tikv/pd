@@ -41,6 +41,17 @@ type HotPeerStat struct {
 	isNew      bool
 }
 
+// ID returns region ID. Implementing TopNItem.
+func (stat *HotPeerStat) ID() uint64 {
+	return stat.RegionID
+}
+
+// Less compares two HotPeerStat.Implementing TopNItem.
+func (stat *HotPeerStat) Less(than TopNItem) bool {
+	rhs := than.(*HotPeerStat)
+	return stat.BytesRate < rhs.BytesRate
+}
+
 // IsNeedDelete to delete the item in cache.
 func (stat *HotPeerStat) IsNeedDelete() bool {
 	return stat.needDelete

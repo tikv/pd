@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -26,6 +27,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const (
@@ -218,7 +220,11 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		}
 
 		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-		op := operator.CreateTransferLeaderOperator(GrantLeaderType, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(GrantLeaderType, cluster, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
+		if err != nil {
+			log.Debug("fail to create grant leader operator", zap.Error(err))
+			continue
+		}
 		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)
 	}

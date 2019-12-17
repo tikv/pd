@@ -16,6 +16,7 @@ package schedule
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -563,6 +564,49 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 		c.Assert(ops, NotNil)
 		c.Assert(oc.AddOperator(ops...), IsFalse)
 	}
+}
+
+func (t *testOperatorControllerSuite) TestRemoveTombstone(c *C) {
+	cfg := mockoption.NewScheduleOptions()
+	cfg.StoreBalanceRate = 1000
+	cfg.LocationLabels = []string{"zone", "rack"}
+	tc := mockcluster.NewCluster(cfg)
+	rc := checker.NewReplicaChecker(tc)
+	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+
+	tc.AddLabelsStore(1, 100, map[string]string{"zone": "zone1", "rack": "rack1"})
+	tc.AddLabelsStore(2, 100, map[string]string{"zone": "zone1", "rack": "rack1"})
+	tc.AddLabelsStore(3, 100, map[string]string{"zone": "zone2", "rack": "rack1"})
+	tc.AddLabelsStore(4, 10, map[string]string{"zone": "zone3", "rack": "rack1"})
+	peers := []*metapb.Peer{
+		{Id: 4, StoreId: 1},
+		{Id: 5, StoreId: 2},
+		{Id: 6, StoreId: 3},
+	}
+	regions := make([]*core.RegionInfo, 100)
+	for i := 2; i < 20; i++ {
+		r := core.NewRegionInfo(&metapb.Region{
+			Id:       uint64(i),
+			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			Peers:    peers}, peers[0], core.SetApproximateSize(50*(1<<20)))
+		regions[i] = r
+		tc.PutRegion(r)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		time.Sleep(100 * time.Millisecond)
+		oc.RemoveStoreLimit(4)
+	}()
+	for i := 2; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
+		op := rc.Check(regions[i])
+		oc.AddOperator(op)
+		oc.RemoveOperator(op)
+	}
+	wg.Wait()
 }
 
 func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {

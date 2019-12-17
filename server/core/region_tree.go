@@ -226,9 +226,11 @@ func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 		}
 
 		if endIndex <= startIndex {
-			log.Error("wrong keys",
-				zap.String("start-key", string(HexRegionKey(startKey))),
-				zap.String("end-key", string(HexRegionKey(endKey))))
+			if len(endKey) > 0 && bytes.Compare(startKey, endKey) > 0 {
+				log.Error("wrong range keys",
+					zap.String("start-key", string(HexRegionKey(startKey))),
+					zap.String("end-key", string(HexRegionKey(endKey))))
+			}
 			continue
 		}
 		index := rand.Intn(endIndex-startIndex) + startIndex
