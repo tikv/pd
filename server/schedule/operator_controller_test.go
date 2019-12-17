@@ -15,6 +15,7 @@ package schedule
 
 import (
 	"container/heap"
+	"fmt"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/pingcap/pd/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/namespace"
 )
 
 var _ = Suite(&testOperatorControllerSuite{})
@@ -202,4 +204,52 @@ func (t *testOperatorControllerSuite) TestPollDispatchRegion(c *C) {
 	r, next = oc.pollNeedDispatchRegion()
 	c.Assert(r, IsNil)
 	c.Assert(next, IsFalse)
+}
+
+func (t *testOperatorControllerSuite) TestRemoveTombstone(c *C) {
+	var mu sync.Mutex
+	cfg := mockoption.NewScheduleOptions()
+	cfg.StoreBalanceRate = 1000
+	cfg.LocationLabels = []string{"zone", "rack"}
+	tc := mockcluster.NewCluster(cfg)
+	rc := NewReplicaChecker(tc, namespace.DefaultClassifier)
+	oc := NewOperatorController(tc, mockhbstream.NewHeartbeatStream())
+
+	tc.AddLabelsStore(1, 100, map[string]string{"zone": "zone1", "rack": "rack1"})
+	tc.AddLabelsStore(2, 100, map[string]string{"zone": "zone1", "rack": "rack1"})
+	tc.AddLabelsStore(3, 100, map[string]string{"zone": "zone2", "rack": "rack1"})
+	tc.AddLabelsStore(4, 10, map[string]string{"zone": "zone3", "rack": "rack1"})
+	peers := []*metapb.Peer{
+		{Id: 4, StoreId: 1},
+		{Id: 5, StoreId: 2},
+		{Id: 6, StoreId: 3},
+	}
+	regions := make([]*core.RegionInfo, 100)
+	for i := 2; i < 20; i++ {
+		r := core.NewRegionInfo(&metapb.Region{
+			Id:       uint64(i),
+			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			Peers:    peers}, peers[0], core.SetApproximateSize(50*(1<<20)))
+		regions[i] = r
+		tc.PutRegion(r)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		time.Sleep(100 * time.Millisecond)
+		mu.Lock()
+		defer mu.Unlock()
+		oc.RemoveStoreLimit(4)
+	}()
+	for i := 2; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
+		mu.Lock()
+		op := rc.Check(regions[i])
+		mu.Unlock()
+		oc.AddOperator(op)
+		oc.RemoveOperator(op)
+	}
+	wg.Wait()
 }
