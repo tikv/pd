@@ -404,7 +404,8 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster opt.Cluster, storesSt
 
 		srcPeer := srcRegion.GetStorePeer(srcStoreID)
 		if srcPeer == nil {
-			return nil, nil, nil, Influence{}
+			log.Debug("region does not peer on source store, maybe stat out of date", zap.Uint64("region-id", rs.RegionID))
+			continue
 		}
 
 		var scoreGuard filter.Filter
