@@ -45,8 +45,10 @@ var (
 // ConfigManager is used to manage all components' config.
 type ConfigManager struct {
 	sync.RWMutex
+	// component -> GlobalConfig
 	GlobalCfgs map[string]*GlobalConfig
-	LocalCfgs  map[string]map[string]*LocalConfig
+	// component -> componentID -> LocalConfig
+	LocalCfgs map[string]map[string]*LocalConfig
 }
 
 // NewConfigManager creates a new ConfigManager.
@@ -72,12 +74,11 @@ func (c *ConfigManager) Reload(storage *core.Storage) error {
 	return nil
 }
 
-func (c *ConfigManager) getComponent(ComponentID string) string {
-	for component := range c.LocalCfgs {
-		for componentID := range c.LocalCfgs[component] {
-			if componentID == ComponentID {
-				return component
-			}
+// getComponent returns the component from a given component ID.
+func (c *ConfigManager) getComponent(id string) string {
+	for component, cfgs := range c.LocalCfgs {
+		if _, ok := cfgs[id]; ok {
+			return component
 		}
 	}
 	return ""
@@ -90,26 +91,31 @@ func (c *ConfigManager) Get(version *configpb.Version, component, componentID st
 	var config string
 	var err error
 	var status *configpb.Status
-	if componentsCfg, ok := c.LocalCfgs[component]; ok {
-		if cfg, ok := componentsCfg[componentID]; ok {
-			config, err = c.getComponentCfg(component, componentID)
-			if err != nil {
-				return version, "", &configpb.Status{
-					Code:    configpb.StatusCode_UNKNOWN,
-					Message: ErrEncode(err),
-				}
-			}
-			if reflect.DeepEqual(cfg.getVersion(), version) {
-				status = &configpb.Status{Code: configpb.StatusCode_OK}
-			} else {
-				status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
-			}
-		} else {
-			status = &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
-		}
-	} else {
-		status = &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
+	var localCfgs map[string]*LocalConfig
+	var cfg *LocalConfig
+	var ok bool
+
+	if localCfgs, ok = c.LocalCfgs[component]; !ok {
+		return c.getLatestVersion(component, componentID), config, &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
 	}
+
+	if cfg, ok = localCfgs[componentID]; !ok {
+		return c.getLatestVersion(component, componentID), config, &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
+	}
+
+	config, err = c.getComponentCfg(component, componentID)
+	if err != nil {
+		return version, "", &configpb.Status{
+			Code:    configpb.StatusCode_UNKNOWN,
+			Message: ErrEncode(err),
+		}
+	}
+	if reflect.DeepEqual(cfg.getVersion(), version) {
+		status = &configpb.Status{Code: configpb.StatusCode_OK}
+	} else {
+		status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
+	}
+
 	return c.getLatestVersion(component, componentID), config, status
 }
 
@@ -120,8 +126,8 @@ func (c *ConfigManager) Create(version *configpb.Version, component, componentID
 	var status *configpb.Status
 	latestVersion := c.getLatestVersion(component, componentID)
 	initVersion := &configpb.Version{Local: 0, Global: 0}
-	if componentsCfg, ok := c.LocalCfgs[component]; ok {
-		if _, ok := componentsCfg[componentID]; ok {
+	if localCfgs, ok := c.LocalCfgs[component]; ok {
+		if _, ok := localCfgs[componentID]; ok {
 			// restart a component
 			if reflect.DeepEqual(initVersion, version) {
 				status = &configpb.Status{Code: configpb.StatusCode_OK}
@@ -134,7 +140,7 @@ func (c *ConfigManager) Create(version *configpb.Version, component, componentID
 			if err != nil {
 				status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrDecode(err)}
 			} else {
-				componentsCfg[componentID] = lc
+				localCfgs[componentID] = lc
 				status = &configpb.Status{Code: configpb.StatusCode_OK}
 			}
 		}
@@ -204,10 +210,11 @@ func (c *ConfigManager) ApplyGlobalConifg(globalCfg *GlobalConfig, component str
 	updateEntries := make(map[string]*EntryValue)
 	for _, entry := range entries {
 		globalCfg.updateEntry(entry, &configpb.Version{Global: newGlobalVersion, Local: 0})
-		globalUpdateEntries := c.GlobalCfgs[component].getUpdateEntries()
-		for k, v := range globalUpdateEntries {
-			updateEntries[k] = v
-		}
+	}
+
+	globalUpdateEntries := c.GlobalCfgs[component].getUpdateEntries()
+	for k, v := range globalUpdateEntries {
+		updateEntries[k] = v
 	}
 
 	// update all local config
