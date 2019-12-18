@@ -123,3 +123,23 @@ func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 func (bc *BasicCluster) PutRegion(region *RegionInfo) {
 	bc.Regions.SetRegion(region)
 }
+
+// PreCheckPutRegion checks if the region is valid to put.
+func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
+	for _, item := range bc.Regions.GetOverlaps(region) {
+		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
+			return nil, ErrRegionIsStale(region.GetMeta(), item)
+		}
+	}
+	origin := bc.Regions.GetRegion(region.GetID())
+	if origin == nil {
+		return nil, nil
+	}
+	r := region.GetRegionEpoch()
+	o := origin.GetRegionEpoch()
+	// Region meta is stale, return an error.
+	if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
+		return origin, ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
+	}
+	return origin, nil
+}
