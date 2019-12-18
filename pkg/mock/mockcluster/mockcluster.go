@@ -480,7 +480,7 @@ func (mc *Cluster) PutStoreWithLabels(id uint64, labelPairs ...string) {
 	mc.AddLabelsStore(id, 0, labels)
 }
 
-// RemoveScheduler returns mocks method.
+// RemoveScheduler mocks method.
 func (mc *Cluster) RemoveScheduler(name string) error {
 	return nil
 }
