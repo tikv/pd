@@ -210,6 +210,7 @@ func (c *client) updateURLs(members []*pdpb.Member) {
 	for _, url := range c.urls {
 		if _, ok := urlsMap[url]; !ok {
 			containsOldURLs = false
+			break
 		}
 	}
 
