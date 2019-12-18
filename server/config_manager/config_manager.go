@@ -24,6 +24,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -61,17 +62,17 @@ func NewConfigManager() *ConfigManager {
 
 // Persist saves the configuration to the storage.
 func (c *ConfigManager) Persist(storage *core.Storage) error {
-	err := storage.SaveComponentsConfig(c)
-	return err
+	c.Lock()
+	defer c.Unlock()
+	return storage.SaveComponentsConfig(c)
 }
 
 // Reload reloads the configuration from the storage.
 func (c *ConfigManager) Reload(storage *core.Storage) error {
+	c.Lock()
+	defer c.Unlock()
 	_, err := storage.LoadComponentsConfig(c)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 // getComponent returns the component from a given component ID.
@@ -110,7 +111,7 @@ func (c *ConfigManager) Get(version *configpb.Version, component, componentID st
 			Message: ErrEncode(err),
 		}
 	}
-	if reflect.DeepEqual(cfg.getVersion(), version) {
+	if versionEqual(cfg.getVersion(), version) {
 		status = &configpb.Status{Code: configpb.StatusCode_OK}
 	} else {
 		status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
@@ -129,7 +130,7 @@ func (c *ConfigManager) Create(version *configpb.Version, component, componentID
 	if localCfgs, ok := c.LocalCfgs[component]; ok {
 		if _, ok := localCfgs[componentID]; ok {
 			// restart a component
-			if reflect.DeepEqual(initVersion, version) {
+			if versionEqual(initVersion, version) {
 				status = &configpb.Status{Code: configpb.StatusCode_OK}
 			} else {
 				status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
@@ -303,7 +304,7 @@ func (c *ConfigManager) updateLocal(componentID string, version *configpb.Versio
 	}
 	if localCfg, ok := c.LocalCfgs[component][componentID]; ok {
 		localLatestVersion := localCfg.getVersion()
-		if !reflect.DeepEqual(localLatestVersion, version) {
+		if !versionEqual(localLatestVersion, version) {
 			return localLatestVersion, &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
 		for _, entry := range entries {
@@ -347,7 +348,7 @@ func (c *ConfigManager) deleteLocal(componentID string, version *configpb.Versio
 	}
 	if localCfg, ok := c.LocalCfgs[component][componentID]; ok {
 		localLatestVersion := localCfg.getVersion()
-		if !reflect.DeepEqual(localLatestVersion, version) {
+		if !versionEqual(localLatestVersion, version) {
 			return &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
 		delete(c.LocalCfgs[component], componentID)
@@ -487,9 +488,10 @@ func update(config map[string]interface{}, configName []string, value string) er
 	case reflect.String:
 		v = value
 	case reflect.Slice:
-		// TODO: make slice work
+		// TODO: make slice work for any other type
+		v = strings.Split(value, ",")
 	default:
-		v = value
+		return errors.Errorf("unsupported type")
 	}
 
 	if err != nil {
@@ -513,4 +515,8 @@ func decodeConfigs(cfg string, configs map[string]interface{}) error {
 		return err
 	}
 	return nil
+}
+
+func versionEqual(a, b *configpb.Version) bool {
+	return a.GetGlobal() == b.GetGlobal() && a.GetLocal() == b.GetLocal()
 }
