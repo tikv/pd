@@ -41,6 +41,10 @@ const (
 	maxLoadConfigRetries      = 10
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
+	// PluginLoad means action for load plugin
+	PluginLoad = "PluginLoad"
+	// PluginUnload means action for unload plugin
+	PluginUnload = "PluginUnload"
 )
 
 var (
@@ -63,6 +67,7 @@ type coordinator struct {
 	schedulers      map[string]*scheduleController
 	opController    *schedule.OperatorController
 	hbStreams       opt.HeartbeatStreams
+	pluginInterface *schedule.PluginInterface
 }
 
 // newCoordinator creates a new coordinator.
@@ -78,6 +83,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams opt.Hea
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
 		hbStreams:       hbStreams,
+		pluginInterface: schedule.NewPluginInterface(),
 	}
 }
 
@@ -256,6 +262,64 @@ func (c *coordinator) run() {
 	go c.drivePushOperator()
 }
 
+// LoadPlugin load user plugin
+func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
+	log.Info("load plugin", zap.String("plugin-path", pluginPath))
+	// get func: SchedulerType from plugin
+	SchedulerType, err := c.pluginInterface.GetFunction(pluginPath, "SchedulerType")
+	if err != nil {
+		log.Error("GetFunction SchedulerType error", zap.Error(err))
+		return
+	}
+	schedulerType := SchedulerType.(func() string)
+	// get func: SchedulerArgs from plugin
+	SchedulerArgs, err := c.pluginInterface.GetFunction(pluginPath, "SchedulerArgs")
+	if err != nil {
+		log.Error("GetFunction SchedulerArgs error", zap.Error(err))
+		return
+	}
+	schedulerArgs := SchedulerArgs.(func() []string)
+	// create and add user scheduler
+	s, err := schedule.CreateScheduler(schedulerType(), c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerType(), schedulerArgs()))
+	if err != nil {
+		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), zap.Error(err))
+		return
+	}
+	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+	if err = c.addScheduler(s); err != nil {
+		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		return
+	}
+
+	c.wg.Add(1)
+	go c.waitPluginUnload(pluginPath, s.GetName(), ch)
+}
+
+func (c *coordinator) waitPluginUnload(pluginPath, schedulerName string, ch chan string) {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+	// Get signal from channel which means user unload the plugin
+	for {
+		select {
+		case action := <-ch:
+			if action == PluginUnload {
+				err := c.removeScheduler(schedulerName)
+				if err != nil {
+					log.Error("can not remove scheduler", zap.String("scheduler-name", schedulerName), zap.Error(err))
+				} else {
+					log.Info("unload plugin", zap.String("plugin", pluginPath))
+					return
+				}
+			} else {
+				log.Error("unknown action", zap.String("action", action))
+			}
+		case <-c.ctx.Done():
+			log.Info("unload plugin has been stopped")
+			return
+		}
+	}
+}
+
 func (c *coordinator) stop() {
 	c.cancel()
 }
@@ -265,6 +329,8 @@ func (c *coordinator) stop() {
 type hasHotStatus interface {
 	GetHotReadStatus() *statistics.StoreHotPeersInfos
 	GetHotWriteStatus() *statistics.StoreHotPeersInfos
+	GetWritePendingInfluence() map[uint64]schedulers.Influence
+	GetReadPendingInfluence() map[uint64]schedulers.Influence
 	GetStoresScore() map[uint64]float64
 }
 
@@ -328,6 +394,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	}
 	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
+	pendings := s.Scheduler.(hasHotStatus).GetWritePendingInfluence()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
@@ -349,10 +416,15 @@ func (c *coordinator) collectHotSpotMetrics() {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(0)
 		}
+
+		infl := pendings[storeID]
+		// TODO: add to tidb-ansible after merging pending influence into operator influence.
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.ByteRate)
 	}
 
 	// Collects hot read region metrics.
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
+	pendings = s.Scheduler.(hasHotStatus).GetReadPendingInfluence()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
@@ -365,6 +437,9 @@ func (c *coordinator) collectHotSpotMetrics() {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
 		}
+
+		infl := pendings[storeID]
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.ByteRate)
 	}
 
 	// Collects score of stores stats metrics.

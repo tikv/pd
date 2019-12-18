@@ -16,6 +16,7 @@ package schedule
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -313,7 +314,7 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	for i := uint64(1); i <= 1000; i++ {
 		tc.AddLeaderRegion(i, i)
 	}
-	oc.SetStoreLimit(2, 1)
+	oc.SetStoreLimit(2, 1, StoreLimitManual)
 	for i := uint64(1); i <= 5; i++ {
 		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
@@ -323,13 +324,13 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
-	oc.SetStoreLimit(2, 2)
+	oc.SetStoreLimit(2, 2, StoreLimitManual)
 	for i := uint64(1); i <= 10; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		checkRemoveOperatorSuccess(c, oc, op)
 	}
-	oc.SetAllStoresLimit(1)
+	oc.SetAllStoresLimit(1, StoreLimitManual)
 	for i := uint64(1); i <= 5; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
@@ -563,6 +564,54 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 		c.Assert(ops, NotNil)
 		c.Assert(oc.AddOperator(ops...), IsFalse)
 	}
+}
+
+func (t *testOperatorControllerSuite) TestRemoveTombstone(c *C) {
+	var mu sync.Mutex
+	cfg := mockoption.NewScheduleOptions()
+	cfg.StoreBalanceRate = 1000
+	cfg.LocationLabels = []string{"zone", "rack"}
+	tc := mockcluster.NewCluster(cfg)
+	rc := checker.NewReplicaChecker(tc)
+	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+
+	tc.AddLabelsStore(1, 100, map[string]string{"zone": "zone1", "rack": "rack1"})
+	tc.AddLabelsStore(2, 100, map[string]string{"zone": "zone1", "rack": "rack1"})
+	tc.AddLabelsStore(3, 100, map[string]string{"zone": "zone2", "rack": "rack1"})
+	tc.AddLabelsStore(4, 10, map[string]string{"zone": "zone3", "rack": "rack1"})
+	peers := []*metapb.Peer{
+		{Id: 4, StoreId: 1},
+		{Id: 5, StoreId: 2},
+		{Id: 6, StoreId: 3},
+	}
+	regions := make([]*core.RegionInfo, 100)
+	for i := 2; i < 20; i++ {
+		r := core.NewRegionInfo(&metapb.Region{
+			Id:       uint64(i),
+			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			Peers:    peers}, peers[0], core.SetApproximateSize(50*(1<<20)))
+		regions[i] = r
+		tc.PutRegion(r)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		time.Sleep(100 * time.Millisecond)
+		mu.Lock()
+		defer mu.Unlock()
+		oc.RemoveStoreLimit(4)
+	}()
+	for i := 2; i < 20; i++ {
+		time.Sleep(10 * time.Millisecond)
+		mu.Lock()
+		op := rc.Check(regions[i])
+		mu.Unlock()
+		oc.AddOperator(op)
+		oc.RemoveOperator(op)
+	}
+	wg.Wait()
 }
 
 func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {

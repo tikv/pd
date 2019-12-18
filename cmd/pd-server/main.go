@@ -33,6 +33,8 @@ import (
 
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"
+	// Register UI
+	_ "github.com/pingcap/pd/pkg/ui/dist"
 )
 
 func main() {

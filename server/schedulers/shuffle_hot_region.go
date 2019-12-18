@@ -74,7 +74,7 @@ type shuffleHotRegionSchedulerConfig struct {
 // to a random store, and then transfer the leader to
 // the hot peer.
 type shuffleHotRegionScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	stats *storeStatistics
 	r     *rand.Rand
 	conf  *shuffleHotRegionSchedulerConfig
@@ -83,9 +83,9 @@ type shuffleHotRegionScheduler struct {
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
 func newShuffleHotRegionScheduler(opController *schedule.OperatorController, conf *shuffleHotRegionSchedulerConfig) schedule.Scheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	return &shuffleHotRegionScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		stats:         newStoreStaticstics(),
 		types:         []BalanceType{hotReadRegionBalance, hotWriteRegionBalance},
@@ -106,9 +106,9 @@ func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpHotRegion) < s.conf.Limit &&
-		s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit() &&
-		s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit &&
+		s.OpController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit() &&
+		s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
@@ -147,10 +147,18 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeSta
 		if srcStore == nil {
 			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
 		}
+
+		var scoreGuard filter.Filter
+		if cluster.IsPlacementRulesEnabled() {
+			scoreGuard = filter.NewRuleFitFilter(s.GetName(), cluster, srcRegion, srcStoreID)
+		} else {
+			scoreGuard = filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore)
+		}
+
 		filters := []filter.Filter{
 			filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
+			scoreGuard,
 		}
 		stores := cluster.GetStores()
 		destStoreIDs := make([]uint64, 0, len(stores))
@@ -179,6 +187,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeSta
 		}
 		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
 		if err != nil {
+			log.Debug("fail to create move leader operator", zap.Error(err))
 			return nil
 		}
 		schedulerCounter.WithLabelValues(s.GetName(), "create-operator").Inc()

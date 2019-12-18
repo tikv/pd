@@ -69,7 +69,7 @@ type balanceLeaderSchedulerConfig struct {
 }
 
 type balanceLeaderScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf         *balanceLeaderSchedulerConfig
 	opController *schedule.OperatorController
 	filters      []filter.Filter
@@ -79,10 +79,10 @@ type balanceLeaderScheduler struct {
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
 func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *balanceLeaderSchedulerConfig, opts ...BalanceLeaderCreateOption) schedule.Scheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 
 	s := &balanceLeaderScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceLeaderCounter,
@@ -256,6 +256,10 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel).Inc()
 	l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel).Inc()
 	balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel).Inc()
-	op := operator.CreateTransferLeaderOperator(BalanceLeaderType, region, region.GetLeader().GetStoreId(), targetID, operator.OpBalance)
+	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, cluster, region, region.GetLeader().GetStoreId(), targetID, operator.OpBalance)
+	if err != nil {
+		log.Debug("fail to create balance leader operator", zap.Error(err))
+		return nil
+	}
 	return []*operator.Operator{op}
 }

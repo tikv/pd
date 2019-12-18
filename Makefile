@@ -54,6 +54,9 @@ pd-server: export GO111MODULE=on
 pd-server:
 ifeq ("$(WITH_RACE)", "1")
 	CGO_ENABLED=1 go build -race -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+else ifeq ("$(PD_WEB)", "1")
+	@./scripts/build-ui.sh
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
@@ -103,7 +106,11 @@ retool-setup:
 	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
 	@./scripts/retool sync
 
-check: retool-setup check-all
+check: retool-setup check-all check-plugin
+
+check-plugin:
+	@echo "checking plugin"
+	cd ./plugin/scheduler_example && make evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
 static: export GO111MODULE=on
 static:

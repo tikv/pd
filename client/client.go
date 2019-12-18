@@ -34,6 +34,9 @@ import (
 type Client interface {
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
+	// GetLeaderAddr returns current leader's address. It returns "" before
+	// syncing leader from server.
+	GetLeaderAddr() string
 	// GetTS gets a timestamp from PD.
 	GetTS(ctx context.Context) (int64, int64, error)
 	// GetTSAsync gets a timestamp from PD, without block the caller.
@@ -144,23 +147,30 @@ type SecurityOption struct {
 
 // NewClient creates a PD client.
 func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
+	return NewClientWithContext(context.Background(), pdAddrs, security)
+}
+
+// NewClientWithContext creates a PD client with context.
+func NewClientWithContext(ctx context.Context, pdAddrs []string, security SecurityOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", pdAddrs))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx1, cancel := context.WithCancel(ctx)
 	c := &client{
 		urls:          addrsToUrls(pdAddrs),
 		tsoRequests:   make(chan *tsoRequest, maxMergeTSORequests),
 		tsDeadlineCh:  make(chan deadline, 1),
 		checkLeaderCh: make(chan struct{}, 1),
-		ctx:           ctx,
+		ctx:           ctx1,
 		cancel:        cancel,
 		security:      security,
 	}
 	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
 
 	if err := c.initRetry(c.initClusterID); err != nil {
+		cancel()
 		return nil, err
 	}
 	if err := c.initRetry(c.updateLeader); err != nil {
+		cancel()
 		return nil, err
 	}
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
@@ -187,7 +197,11 @@ func (c *client) initRetry(f func() error) error {
 		if err = f(); err == nil {
 			return nil
 		}
-		time.Sleep(time.Second)
+		select {
+		case <-c.ctx.Done():
+			return err
+		case <-time.After(time.Second):
+		}
 	}
 	return errors.WithStack(err)
 }
@@ -213,6 +227,9 @@ func (c *client) updateLeader() error {
 	for _, u := range c.urls {
 		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
 		members, err := c.getMembers(ctx, u)
+		if err != nil {
+			log.Warn("cannot update leader", zap.String("address", u), zap.Error(err))
+		}
 		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			select {
@@ -235,7 +252,8 @@ func (c *client) getMembers(ctx context.Context, url string) (*pdpb.GetMembersRe
 	}
 	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
-		return nil, errors.WithStack(err)
+		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+		return nil, errors.WithStack(attachErr)
 	}
 	return members, nil
 }
@@ -279,6 +297,7 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	defer c.connMu.Unlock()
 	if old, ok := c.connMu.clientConns[addr]; ok {
 		cc.Close()
+		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
 		return old, nil
 	}
 
@@ -529,7 +548,6 @@ func (c *client) GetClusterID(context.Context) uint64 {
 	return c.clusterID
 }
 
-// For testing use.
 func (c *client) GetLeaderAddr() string {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()

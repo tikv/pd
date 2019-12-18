@@ -37,7 +37,7 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, opController
 	return &CheckerController{
 		cluster:        cluster,
 		opController:   opController,
-		learnerChecker: checker.NewLearnerChecker(),
+		learnerChecker: checker.NewLearnerChecker(cluster),
 		replicaChecker: checker.NewReplicaChecker(cluster),
 		mergeChecker:   checker.NewMergeChecker(ctx, cluster),
 	}
