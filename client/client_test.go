@@ -500,6 +500,7 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 100*time.Millisecond)
 	defer cancel()
+	// nolint
 	_, err := NewClientWithContext(ctx, []string{"localhost:8080"}, SecurityOption{}, WithGRPCDialOptions(grpc.WithBlock(), grpc.WithTimeout(time.Second)))
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Greater, 800*time.Millisecond)

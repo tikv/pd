@@ -206,15 +206,18 @@ func (c *client) updateURLs(members []*pdpb.Member) {
 	for _, url := range urls {
 		urlsMap[url] = struct{}{}
 	}
-	needUpdate := false
+	containsOldURLs := true
 	for _, url := range c.urls {
 		if _, ok := urlsMap[url]; !ok {
-			needUpdate = true
+			containsOldURLs = false
 		}
 	}
-	if !needUpdate {
+
+	// the url list is same.
+	if len(urls) == len(c.urls) && containsOldURLs {
 		return
 	}
+
 	log.Info("[pd] update member urls", zap.Strings("old-urls", c.urls), zap.Strings("new-urls", urls))
 	c.urls = urls
 }
