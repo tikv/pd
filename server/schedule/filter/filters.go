@@ -531,23 +531,23 @@ type RegionFitter interface {
 }
 
 type ruleFitFilter struct {
-	scope   string
-	fitter  RegionFitter
-	region  *core.RegionInfo
-	oldFit  *placement.RegionFit
-	oldPeer uint64
+	scope    string
+	fitter   RegionFitter
+	region   *core.RegionInfo
+	oldFit   *placement.RegionFit
+	oldStore uint64
 }
 
 // NewRuleFitFilter creates a filter that ensures after replace a peer with new
 // one, the isolation level will not decrease. Its function is the same as
 // distinctScoreFilter but used when placement rules is enabled.
-func NewRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldPeerID uint64) Filter {
+func NewRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldStoreID uint64) Filter {
 	return &ruleFitFilter{
-		scope:   scope,
-		fitter:  fitter,
-		region:  region,
-		oldFit:  fitter.FitRegion(region),
-		oldPeer: oldPeerID,
+		scope:    scope,
+		fitter:   fitter,
+		region:   region,
+		oldFit:   fitter.FitRegion(region),
+		oldStore: oldStoreID,
 	}
 }
 
@@ -564,7 +564,7 @@ func (f *ruleFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	region := f.region.Clone(core.WithReplacePeerStore(f.oldPeer, store.GetID()))
+	region := f.region.Clone(core.WithReplacePeerStore(f.oldStore, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) > 0
 }
