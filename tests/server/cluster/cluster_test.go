@@ -624,12 +624,13 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient())
 
 	// Cluster is not bootstrapped.
-	rc.InitCluster(svr.GetAllocator(), svr.GetScheduleOption(), svr.GetStorage())
+	rc.InitCluster(svr.GetAllocator(), svr.GetScheduleOption(), svr.GetStorage(), svr.GetBasicCluster())
 	raftCluster, err := rc.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, IsNil)
 
 	storage := rc.GetStorage()
+	basicCluster := rc.GetCacheCluster()
 	opt := rc.GetOpt()
 	// Save meta, stores and regions.
 	n := 10
@@ -662,7 +663,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	c.Assert(storage.Flush(), IsNil)
 
 	raftCluster = &cluster.RaftCluster{}
-	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage)
+	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, NotNil)

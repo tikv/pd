@@ -58,6 +58,7 @@ type Server interface {
 	GetStorage() *core.Storage
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
+	GetBasicCluster() *core.BasicCluster
 }
 
 // RaftCluster is used for cluster config management.
@@ -168,8 +169,8 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage) {
-	c.core = core.NewBasicCluster()
+func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster) {
+	c.core = basicCluster
 	c.opt = opt
 	c.storage = storage
 	c.id = id
@@ -190,7 +191,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage())
+	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage(), s.GetBasicCluster())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -247,7 +248,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		}
 		return c.core.PutRegion(region)
 	}
-	if err := c.storage.LoadRegions(putRegion); err != nil {
+	if err := c.storage.LoadRegionsOnce(putRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
