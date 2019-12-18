@@ -28,16 +28,16 @@ import (
 )
 
 var (
-	// ErrUnknownKind is error info for the kind.
-	ErrUnknownKind = func(k *configpb.ConfigKind) string {
+	// errUnknownKind is error info for the kind.
+	errUnknownKind = func(k *configpb.ConfigKind) string {
 		return fmt.Sprintf("unknown kind: %v", k.String())
 	}
-	// ErrEncode is error info for the encode process.
-	ErrEncode = func(e error) string {
+	// errEncode is error info for the encode process.
+	errEncode = func(e error) string {
 		return fmt.Sprintf("encode error: %v", e)
 	}
-	// ErrDecode is error info for the decode process.
-	ErrDecode = func(e error) string {
+	// errDecode is error info for the decode process.
+	errDecode = func(e error) string {
 		return fmt.Sprintf("decode error: %v", e)
 	}
 	errNotSupported = "not supported"
@@ -108,7 +108,7 @@ func (c *ConfigManager) Get(version *configpb.Version, component, componentID st
 	if err != nil {
 		return version, "", &configpb.Status{
 			Code:    configpb.StatusCode_UNKNOWN,
-			Message: ErrEncode(err),
+			Message: errEncode(err),
 		}
 	}
 	if versionEqual(cfg.getVersion(), version) {
@@ -139,7 +139,7 @@ func (c *ConfigManager) Create(version *configpb.Version, component, componentID
 			// add a new component
 			lc, err := NewLocalConfig(cfg, initVersion)
 			if err != nil {
-				status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrDecode(err)}
+				status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: errDecode(err)}
 			} else {
 				localCfgs[componentID] = lc
 				status = &configpb.Status{Code: configpb.StatusCode_OK}
@@ -150,7 +150,7 @@ func (c *ConfigManager) Create(version *configpb.Version, component, componentID
 		// start the first component
 		lc, err := NewLocalConfig(cfg, initVersion)
 		if err != nil {
-			status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrDecode(err)}
+			status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: errDecode(err)}
 		} else {
 			c.LocalCfgs[component][componentID] = lc
 			status = &configpb.Status{Code: configpb.StatusCode_OK}
@@ -168,7 +168,7 @@ func (c *ConfigManager) Create(version *configpb.Version, component, componentID
 
 	config, err := c.getComponentCfg(component, componentID)
 	if err != nil {
-		status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrEncode(err)}
+		status = &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: errEncode(err)}
 		return latestVersion, "", status
 	}
 
@@ -202,7 +202,7 @@ func (c *ConfigManager) Update(kind *configpb.ConfigKind, version *configpb.Vers
 	if local != nil {
 		return c.updateLocal(local.GetComponentId(), version, entries)
 	}
-	return &configpb.Version{Global: 0, Local: 0}, &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrUnknownKind(kind)}
+	return &configpb.Version{Global: 0, Local: 0}, &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: errUnknownKind(kind)}
 }
 
 // ApplyGlobalConifg applies the global change to each local component.
@@ -333,7 +333,7 @@ func (c *ConfigManager) Delete(kind *configpb.ConfigKind, version *configpb.Vers
 		return c.deleteLocal(local.GetComponentId(), version)
 	}
 
-	return &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: ErrUnknownKind(kind)}
+	return &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: errUnknownKind(kind)}
 }
 
 func (c *ConfigManager) deleteGlobal(component string, version *configpb.Version) *configpb.Status {
