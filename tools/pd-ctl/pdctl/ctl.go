@@ -64,6 +64,7 @@ func Start(args []string) {
 		command.NewClusterCommand(),
 		command.NewHealthCommand(),
 		command.NewLogCommand(),
+		command.NewPluginCommand(),
 	)
 
 	rootCmd.SetArgs(args)

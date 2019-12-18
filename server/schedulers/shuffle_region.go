@@ -64,7 +64,7 @@ type shuffleRegionSchedulerConfig struct {
 }
 
 type shuffleRegionScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf     *shuffleRegionSchedulerConfig
 	selector *selector.RandomSelector
 }
@@ -75,9 +75,9 @@ func newShuffleRegionScheduler(opController *schedule.OperatorController, conf *
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: conf.Name, MoveRegion: true},
 	}
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	return &shuffleRegionScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
 	}
@@ -96,7 +96,7 @@ func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
 }
 
 func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

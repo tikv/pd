@@ -65,7 +65,7 @@ type randomMergeSchedulerConfig struct {
 }
 
 type randomMergeScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf     *randomMergeSchedulerConfig
 	selector *selector.RandomSelector
 }
@@ -76,9 +76,9 @@ func newRandomMergeScheduler(opController *schedule.OperatorController, conf *ra
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: conf.Name, MoveRegion: true},
 	}
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	return &randomMergeScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
 	}
@@ -97,7 +97,7 @@ func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *randomMergeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpMerge) < cluster.GetMergeScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpMerge) < cluster.GetMergeScheduleLimit()
 }
 
 func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

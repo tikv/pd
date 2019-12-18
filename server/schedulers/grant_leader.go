@@ -150,7 +150,7 @@ func (conf *grantLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (s
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf    *grantLeaderSchedulerConfig
 	handler http.Handler
 }
@@ -158,10 +158,10 @@ type grantLeaderScheduler struct {
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
 func newGrantLeaderScheduler(opController *schedule.OperatorController, conf *grantLeaderSchedulerConfig) schedule.Scheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	handler := newGrantLeaderHandler(conf)
 	return &grantLeaderScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		handler:       handler,
 	}
@@ -204,7 +204,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster opt.Cluster) {
 }
 
 func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {

@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2019 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,10 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedulers
+package main
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
+	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -34,10 +36,10 @@ import (
 
 const (
 	// EvictLeaderName is evict leader scheduler name.
-	EvictLeaderName = "evict-leader-scheduler"
+	EvictLeaderName = "user-evict-leader-scheduler"
 	// EvictLeaderType is evict leader scheduler type.
-	EvictLeaderType     = "evict-leader"
-	lastStoreDeleteInfo = "The last store has been deleted"
+	EvictLeaderType        = "user-evict-leader"
+	noStoreInSchedulerInfo = "No store in user-evict-leader-scheduler-config"
 )
 
 func init() {
@@ -48,7 +50,7 @@ func init() {
 			}
 			conf, ok := v.(*evictLeaderSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errors.New("the config does not exist")
 			}
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
@@ -59,14 +61,14 @@ func init() {
 			if err != nil {
 				return errors.WithStack(err)
 			}
-			conf.StoreIDWithRanges[id] = ranges
+			conf.StoreIDWitRanges[id] = ranges
 			return nil
 
 		}
 	})
 
 	schedule.RegisterScheduler(EvictLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange), storage: storage}
+		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
@@ -75,11 +77,24 @@ func init() {
 	})
 }
 
+// SchedulerType returns the type of the scheduler
+// nolint
+func SchedulerType() string {
+	return EvictLeaderType
+}
+
+// SchedulerArgs returns the args for the scheduler
+// nolint
+func SchedulerArgs() []string {
+	args := []string{"1"}
+	return args
+}
+
 type evictLeaderSchedulerConfig struct {
-	mu                sync.RWMutex
-	storage           *core.Storage
-	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster           opt.Cluster
+	mu               sync.RWMutex
+	storage          *core.Storage
+	StoreIDWitRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
+	cluster          opt.Cluster
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -97,7 +112,7 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 	}
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
-	conf.StoreIDWithRanges[id] = ranges
+	conf.StoreIDWitRanges[id] = ranges
 	return nil
 }
 
@@ -105,12 +120,12 @@ func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	return &evictLeaderSchedulerConfig{
-		StoreIDWithRanges: conf.StoreIDWithRanges,
+		StoreIDWitRanges: conf.StoreIDWitRanges,
 	}
 }
 
 func (conf *evictLeaderSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
+	name := conf.getScheduleName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedule.EncodeConfig(conf)
@@ -121,7 +136,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	return nil
 }
 
-func (conf *evictLeaderSchedulerConfig) getSchedulerName() string {
+func (conf *evictLeaderSchedulerConfig) getScheduleName() string {
 	return EvictLeaderName
 }
 
@@ -129,30 +144,15 @@ func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	var res []string
-	ranges := conf.StoreIDWithRanges[id]
-	for index := range ranges {
-		res = append(res, (string)(ranges[index].StartKey))
-		res = append(res, (string)(ranges[index].EndKey))
+	for index := range conf.StoreIDWitRanges[id] {
+		res = append(res, (string)(conf.StoreIDWitRanges[id][index].StartKey))
+		res = append(res, (string)(conf.StoreIDWitRanges[id][index].EndKey))
 	}
 	return res
 }
 
-func (conf *evictLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (succ bool, last bool) {
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
-	_, exists := conf.StoreIDWithRanges[id]
-	succ, last = false, false
-	if exists {
-		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.UnblockStore(id)
-		succ = true
-		last = len(conf.StoreIDWithRanges) == 0
-	}
-	return succ, last
-}
-
 type evictLeaderScheduler struct {
-	*BaseScheduler
+	*schedulers.BaseScheduler
 	conf     *evictLeaderSchedulerConfig
 	selector *selector.RandomSelector
 	handler  http.Handler
@@ -165,7 +165,7 @@ func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *ev
 		filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true},
 	}
 
-	base := NewBaseScheduler(opController)
+	base := schedulers.NewBaseScheduler(opController)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,
@@ -197,7 +197,7 @@ func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
-	for id := range s.conf.StoreIDWithRanges {
+	for id := range s.conf.StoreIDWitRanges {
 		if err := cluster.BlockStore(id); err != nil {
 			res = err
 		}
@@ -208,7 +208,7 @@ func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
 func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
-	for id := range s.conf.StoreIDWithRanges {
+	for id := range s.conf.StoreIDWitRanges {
 		cluster.UnblockStore(id)
 	}
 }
@@ -218,26 +218,23 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	var ops []*operator.Operator
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
-	for id, ranges := range s.conf.StoreIDWithRanges {
+	for id, ranges := range s.conf.StoreIDWitRanges {
 		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
 		if region == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 			continue
 		}
 		target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
 		if target == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 			continue
 		}
-		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", zap.Error(err))
 			continue
+
 		}
 		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)
@@ -262,7 +259,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	idFloat, ok := input["store_id"].(float64)
 	if ok {
 		id = (uint64)(idFloat)
-		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
+		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
 			if err := handler.config.cluster.BlockStore(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
 				return
@@ -282,7 +279,6 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	err := handler.config.Persist()
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err)
-		return
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
@@ -300,22 +296,26 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var resp interface{}
-	succ, last := handler.config.mayBeRemoveStoreFromConfig(id)
-	if succ {
-		err = handler.config.Persist()
-		if err != nil {
-			handler.rd.JSON(w, http.StatusInternalServerError, err)
-			return
-		}
-		if last {
-			resp = lastStoreDeleteInfo
+	handler.config.mu.Lock()
+	defer handler.config.mu.Unlock()
+	_, exists := handler.config.StoreIDWitRanges[id]
+	if exists {
+		delete(handler.config.StoreIDWitRanges, id)
+		handler.config.cluster.UnblockStore(id)
+
+		handler.config.mu.Unlock()
+		handler.config.Persist()
+		handler.config.mu.Lock()
+
+		var resp interface{}
+		if len(handler.config.StoreIDWitRanges) == 0 {
+			resp = noStoreInSchedulerInfo
 		}
 		handler.rd.JSON(w, http.StatusOK, resp)
 		return
 	}
 
-	handler.rd.JSON(w, http.StatusInternalServerError, ErrScheduleConfigNotExist)
+	handler.rd.JSON(w, http.StatusInternalServerError, errors.New("the config does not exist"))
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
@@ -328,4 +328,24 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 	router.HandleFunc("/list", h.ListConfig).Methods("GET")
 	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods("DELETE")
 	return router
+}
+
+func getKeyRanges(args []string) ([]core.KeyRange, error) {
+	var ranges []core.KeyRange
+	for len(args) > 1 {
+		startKey, err := url.QueryUnescape(args[0])
+		if err != nil {
+			return nil, err
+		}
+		endKey, err := url.QueryUnescape(args[1])
+		if err != nil {
+			return nil, err
+		}
+		args = args[2:]
+		ranges = append(ranges, core.NewKeyRange(startKey, endKey))
+	}
+	if len(ranges) == 0 {
+		return []core.KeyRange{core.NewKeyRange("", "")}, nil
+	}
+	return ranges, nil
 }

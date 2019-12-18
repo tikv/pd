@@ -64,7 +64,7 @@ type shuffleLeaderSchedulerConfig struct {
 }
 
 type shuffleLeaderScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf     *shuffleLeaderSchedulerConfig
 	selector *selector.RandomSelector
 }
@@ -75,9 +75,9 @@ func newShuffleLeaderScheduler(opController *schedule.OperatorController, conf *
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true},
 	}
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	return &shuffleLeaderScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
 	}
@@ -96,7 +96,7 @@ func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
