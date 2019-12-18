@@ -40,7 +40,7 @@ func createIndentRender() *render.Render {
 	})
 }
 
-func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.Router {
+func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.Router, func()) {
 	rd := createIndentRender()
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
@@ -48,18 +48,6 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 
 	clusterRouter := rootRouter.NewRoute().Subrouter()
 	clusterRouter.Use(newClusterMiddleware(svr).Middleware)
-
-	configRouter := clusterRouter.PathPrefix("/api/v1/config").Methods("POST").Subrouter()
-	gwmux := runtime.NewServeMux()
-	opts := []grpc.DialOption{grpc.WithInsecure()}
-	err := configpb.RegisterConfigHandlerFromEndpoint(ctx, gwmux, svr.GetAddr()[7:], opts)
-	if err != nil {
-		log.Error("fail to register grpc gateway", zap.Error(err))
-	}
-
-	middleware := newConfigMiddleware(svr)
-	configRouter.Use(middleware.Middleware)
-	configRouter.Handle("", gwmux)
 
 	operatorHandler := newOperatorHandler(handler, rd)
 	rootRouter.HandleFunc("/api/v1/operators", operatorHandler.List).Methods("GET")
@@ -197,5 +185,18 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	// Deprecated
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
-	return rootRouter
+	f := func(){
+		configRouter := clusterRouter.PathPrefix("/api/v1/config").Methods("POST").Subrouter()
+		gwmux := runtime.NewServeMux()
+		opts := []grpc.DialOption{grpc.WithInsecure()}
+		err := configpb.RegisterConfigHandlerFromEndpoint(ctx, gwmux, svr.GetAddr()[7:], opts)
+		if err != nil {
+			log.Error("fail to register grpc gateway", zap.Error(err))
+		}
+
+		middleware := newConfigMiddleware(svr)
+		configRouter.Use(middleware.Middleware)
+		configRouter.Handle("", gwmux)
+	}
+	return rootRouter, f
 }

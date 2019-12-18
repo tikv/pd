@@ -31,9 +31,10 @@ require (
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
-	github.com/pingcap/failpoint v0.0.0-20190512135322-30cc7431d99c
-	github.com/pingcap/kvproto v0.0.0-20191211032946-5dbce7e7b868
-	github.com/pingcap/log v0.0.0-20190715063458-479153f07ebd
+	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
+	github.com/pingcap/kvproto v0.0.0-20191211054548-3c6b38ea5107
+	github.com/pingcap/log v0.0.0-20191012051959-b742a5d432e9
+	github.com/pingcap/sysutil v0.0.0-20191216090214-5f9620d22b3b
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v0.8.0
 	github.com/sirupsen/logrus v1.0.5

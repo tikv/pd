@@ -135,7 +135,8 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetScheduleConfig()
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
+	c := config.Clone()
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &c); err != nil {
 		return
 	}
 

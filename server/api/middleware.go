@@ -75,6 +75,11 @@ type entry struct {
 // is through the context, so store it here
 func (m *configMiddleware) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := m.s.GetRaftCluster()
+		if rc == nil {
+			m.rd.JSON(w, http.StatusInternalServerError, cluster.ErrNotBootstrapped.Error())
+			return
+		}
 		req := make(map[string]interface{})
 		json.NewDecoder(r.Body).Decode(&req)
 		mapKeys := reflect.ValueOf(req).MapKeys()
@@ -102,7 +107,7 @@ func newBody(s *server.Server, entries []*entry) (string, error) {
 		configEntry := &configpb.ConfigEntry{Name: e.key, Value: e.value}
 		configEntries = append(configEntries, configEntry)
 	}
-	version := s.GetComponentsConfig().GlobalCfgs[server.Component].GetVersion()
+	version := s.GetConfigManager().GlobalCfgs[server.Component].GetVersion()
 
 	req := &configpb.UpdateRequest{
 		Header: &configpb.Header{

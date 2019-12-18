@@ -21,7 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -750,110 +749,6 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 	}, nil
 }
 
-// Create ...
-func (s *Server) Create(ctx context.Context, request *configpb.CreateRequest) (*configpb.CreateResponse, error) {
-	if err := s.validateComponentRequest(request.GetHeader()); err != nil {
-		return nil, err
-	}
-
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
-		return &configpb.CreateResponse{Header: s.componentHeader(), Status: &configpb.Status{
-			Code:    configpb.StatusCode_UNKNOWN,
-			Message: "cluster is not bootstrapped",
-		}}, nil
-	}
-
-	componentsCfg := s.GetComponentsConfig()
-	version, config, status := componentsCfg.Create(request.GetVersion(), request.GetComponent(), request.GetComponentId(), request.GetConfig())
-	if status.GetCode() == configpb.StatusCode_OK {
-		componentsCfg.Persist(s.storage)
-	}
-
-	return &configpb.CreateResponse{
-		Header:  s.componentHeader(),
-		Status:  status,
-		Version: version,
-		Config:  config,
-	}, nil
-}
-
-// Get ...
-func (s *Server) Get(ctx context.Context, request *configpb.GetRequest) (*configpb.GetResponse, error) {
-	if err := s.validateComponentRequest(request.GetHeader()); err != nil {
-		return nil, err
-	}
-
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
-		return &configpb.GetResponse{Header: s.componentHeader(), Status: &configpb.Status{
-			Code:    configpb.StatusCode_UNKNOWN,
-			Message: "cluster is not bootstrapped",
-		}}, nil
-	}
-
-	componentsCfg := s.GetComponentsConfig()
-	version, config, status := componentsCfg.Get(request.GetVersion(), request.GetComponent(), request.GetComponentId())
-
-	return &configpb.GetResponse{
-		Header:  s.componentHeader(),
-		Status:  status,
-		Version: version,
-		Config:  config,
-	}, nil
-}
-
-// Update ...
-func (s *Server) Update(ctx context.Context, request *configpb.UpdateRequest) (*configpb.UpdateResponse, error) {
-	if err := s.validateComponentRequest(request.GetHeader()); err != nil {
-		return nil, err
-	}
-
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
-		return &configpb.UpdateResponse{Header: &configpb.Header{ClusterId: s.clusterID}, Status: &configpb.Status{
-			Code:    configpb.StatusCode_UNKNOWN,
-			Message: "cluster is not bootstrapped",
-		}}, nil
-	}
-	componentsCfg := s.GetComponentsConfig()
-	version, status := componentsCfg.Update(request.GetKind(), request.GetVersion(), request.GetEntries())
-	if status.GetCode() == configpb.StatusCode_OK {
-		componentsCfg.Persist(s.storage)
-	}
-
-	return &configpb.UpdateResponse{
-		Header:  s.componentHeader(),
-		Status:  status,
-		Version: version,
-	}, nil
-}
-
-// Delete ...
-func (s *Server) Delete(ctx context.Context, request *configpb.DeleteRequest) (*configpb.DeleteResponse, error) {
-	if err := s.validateComponentRequest(request.GetHeader()); err != nil {
-		return nil, err
-	}
-
-	cluster := s.GetRaftCluster()
-	if cluster == nil {
-		return &configpb.DeleteResponse{Header: &configpb.Header{ClusterId: s.clusterID}, Status: &configpb.Status{
-			Code:    configpb.StatusCode_UNKNOWN,
-			Message: "cluster is not bootstrapped",
-		}}, nil
-	}
-	componentsCfg := s.GetComponentsConfig()
-	status := componentsCfg.Delete(request.GetKind(), request.GetVersion())
-	if status.GetCode() == configpb.StatusCode_OK {
-		componentsCfg.Persist(s.storage)
-	}
-
-	return &configpb.DeleteResponse{
-		Header: s.componentHeader(),
-		Status: status,
-	}, nil
-}
-
 // validateRequest checks if Server is leader and clusterID is matched.
 // TODO: Call it in gRPC intercepter.
 func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
@@ -866,22 +761,8 @@ func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
 	return nil
 }
 
-func (s *Server) validateComponentRequest(header *configpb.Header) error {
-	if s.IsClosed() || !s.member.IsLeader() {
-		return errors.WithStack(notLeaderError)
-	}
-	if header.GetClusterId() != s.clusterID {
-		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
-	}
-	return nil
-}
-
 func (s *Server) header() *pdpb.ResponseHeader {
 	return &pdpb.ResponseHeader{ClusterId: s.clusterID}
-}
-
-func (s *Server) componentHeader() *configpb.Header {
-	return &configpb.Header{ClusterId: s.clusterID}
 }
 
 func (s *Server) errorHeader(err *pdpb.Error) *pdpb.ResponseHeader {

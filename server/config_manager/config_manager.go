@@ -23,7 +23,10 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/member"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -42,9 +45,19 @@ var (
 	errNotSupported = "not supported"
 )
 
+// Server ...
+type Server interface {
+	IsClosed() bool
+	ClusterID() uint64
+	GetRaftCluster() *cluster.RaftCluster
+	GetStorage() *core.Storage
+	GetMember() *member.Member
+}
+
 // ConfigManager is used to manage all components' config.
 type ConfigManager struct {
 	sync.RWMutex
+	svr Server
 	// component -> GlobalConfig
 	GlobalCfgs map[string]*GlobalConfig
 	// component -> componentID -> LocalConfig
@@ -52,8 +65,9 @@ type ConfigManager struct {
 }
 
 // NewConfigManager creates a new ConfigManager.
-func NewConfigManager() *ConfigManager {
+func NewConfigManager(svr Server) *ConfigManager {
 	return &ConfigManager{
+		svr:        svr,
 		GlobalCfgs: make(map[string]*GlobalConfig),
 		LocalCfgs:  make(map[string]map[string]*LocalConfig),
 	}
@@ -61,17 +75,17 @@ func NewConfigManager() *ConfigManager {
 
 // Persist saves the configuration to the storage.
 func (c *ConfigManager) Persist(storage *core.Storage) error {
-	err := storage.SaveComponentsConfig(c)
-	return err
+	c.Lock()
+	defer c.Unlock()
+	return storage.SaveComponentsConfig(c)
 }
 
 // Reload reloads the configuration from the storage.
 func (c *ConfigManager) Reload(storage *core.Storage) error {
+	c.Lock()
+	defer c.Unlock()
 	_, err := storage.LoadComponentsConfig(c)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 // getComponent returns the component from a given component ID.
@@ -84,8 +98,8 @@ func (c *ConfigManager) getComponent(id string) string {
 	return ""
 }
 
-// Get returns config and the latest version.
-func (c *ConfigManager) Get(version *configpb.Version, component, componentID string) (*configpb.Version, string, *configpb.Status) {
+// GetConfig returns config and the latest version.
+func (c *ConfigManager) GetConfig(version *configpb.Version, component, componentID string) (*configpb.Version, string, *configpb.Status) {
 	c.RLock()
 	defer c.RUnlock()
 	var config string
@@ -110,7 +124,7 @@ func (c *ConfigManager) Get(version *configpb.Version, component, componentID st
 			Message: ErrEncode(err),
 		}
 	}
-	if reflect.DeepEqual(cfg.getVersion(), version) {
+	if versionEqual(cfg.getVersion(), version) {
 		status = &configpb.Status{Code: configpb.StatusCode_OK}
 	} else {
 		status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
@@ -119,8 +133,8 @@ func (c *ConfigManager) Get(version *configpb.Version, component, componentID st
 	return c.getLatestVersion(component, componentID), config, status
 }
 
-// Create is used for registering a component to PD.
-func (c *ConfigManager) Create(version *configpb.Version, component, componentID, cfg string) (*configpb.Version, string, *configpb.Status) {
+// CreateConfig is used for registering a component to PD.
+func (c *ConfigManager) CreateConfig(version *configpb.Version, component, componentID, cfg string) (*configpb.Version, string, *configpb.Status) {
 	c.Lock()
 	defer c.Unlock()
 	var status *configpb.Status
@@ -129,7 +143,7 @@ func (c *ConfigManager) Create(version *configpb.Version, component, componentID
 	if localCfgs, ok := c.LocalCfgs[component]; ok {
 		if _, ok := localCfgs[componentID]; ok {
 			// restart a component
-			if reflect.DeepEqual(initVersion, version) {
+			if versionEqual(initVersion, version) {
 				status = &configpb.Status{Code: configpb.StatusCode_OK}
 			} else {
 				status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
@@ -160,7 +174,7 @@ func (c *ConfigManager) Create(version *configpb.Version, component, componentID
 	globalCfg := c.GlobalCfgs[component]
 	if globalCfg != nil {
 		entries := globalCfg.GetConfigEntries()
-		if err := c.ApplyGlobalConifg(globalCfg, component, globalCfg.getVersion(), entries); err != nil {
+		if err := c.ApplyGlobalConifg(globalCfg, component, globalCfg.GetVersion(), entries); err != nil {
 			return latestVersion, "", &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: err.Error()}
 		}
 	}
@@ -176,7 +190,7 @@ func (c *ConfigManager) Create(version *configpb.Version, component, componentID
 
 func (c *ConfigManager) getLatestVersion(component, componentID string) *configpb.Version {
 	v := &configpb.Version{
-		Global: c.GlobalCfgs[component].getVersion(),
+		Global: c.GlobalCfgs[component].GetVersion(),
 		Local:  c.LocalCfgs[component][componentID].getVersion().GetLocal(),
 	}
 	return v
@@ -187,8 +201,8 @@ func (c *ConfigManager) getComponentCfg(component, componentID string) (string, 
 	return encodeConfigs(config)
 }
 
-// Update is used to update a config with a given config type.
-func (c *ConfigManager) Update(kind *configpb.ConfigKind, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
+// UpdateConfig is used to update a config with a given config type.
+func (c *ConfigManager) UpdateConfig(kind *configpb.ConfigKind, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -234,7 +248,7 @@ func (c *ConfigManager) ApplyGlobalConifg(globalCfg *GlobalConfig, component str
 func (c *ConfigManager) updateGlobal(component string, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
 	// if the global config of the component is existed.
 	if globalCfg, ok := c.GlobalCfgs[component]; ok {
-		globalLatestVersion := globalCfg.getVersion()
+		globalLatestVersion := globalCfg.GetVersion()
 		if globalLatestVersion != version.GetGlobal() {
 			return &configpb.Version{Global: globalLatestVersion, Local: version.GetLocal()},
 				&configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
@@ -258,7 +272,7 @@ func (c *ConfigManager) updateGlobal(component string, version *configpb.Version
 				&configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: err.Error()}
 		}
 	}
-	return &configpb.Version{Global: c.GlobalCfgs[component].getVersion(), Local: 0}, &configpb.Status{Code: configpb.StatusCode_OK}
+	return &configpb.Version{Global: c.GlobalCfgs[component].GetVersion(), Local: 0}, &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
 func mergeAndUpdateConfig(localCfg *LocalConfig, updateEntries map[string]*EntryValue) error {
@@ -303,7 +317,7 @@ func (c *ConfigManager) updateLocal(componentID string, version *configpb.Versio
 	}
 	if localCfg, ok := c.LocalCfgs[component][componentID]; ok {
 		localLatestVersion := localCfg.getVersion()
-		if !reflect.DeepEqual(localLatestVersion, version) {
+		if !versionEqual(localLatestVersion, version) {
 			return localLatestVersion, &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
 		for _, entry := range entries {
@@ -317,8 +331,8 @@ func (c *ConfigManager) updateLocal(componentID string, version *configpb.Versio
 	return c.LocalCfgs[component][componentID].getVersion(), &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
-// Delete removes a component from the config manager.
-func (c *ConfigManager) Delete(kind *configpb.ConfigKind, version *configpb.Version) *configpb.Status {
+// DeleteConfig removes a component from the config manager.
+func (c *ConfigManager) DeleteConfig(kind *configpb.ConfigKind, version *configpb.Version) *configpb.Status {
 	c.Lock()
 	defer c.Unlock()
 
@@ -347,7 +361,7 @@ func (c *ConfigManager) deleteLocal(componentID string, version *configpb.Versio
 	}
 	if localCfg, ok := c.LocalCfgs[component][componentID]; ok {
 		localLatestVersion := localCfg.getVersion()
-		if !reflect.DeepEqual(localLatestVersion, version) {
+		if !versionEqual(localLatestVersion, version) {
 			return &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
 		delete(c.LocalCfgs[component], componentID)
@@ -394,8 +408,8 @@ func (gc *GlobalConfig) updateEntry(entry *configpb.ConfigEntry, version *config
 	entries[entry.GetName()] = NewEntryValue(entry, version)
 }
 
-// getVersion returns the global version.
-func (gc *GlobalConfig) getVersion() uint64 {
+// GetVersion returns the global version.
+func (gc *GlobalConfig) GetVersion() uint64 {
 	if gc == nil {
 		return 0
 	}
@@ -487,9 +501,10 @@ func update(config map[string]interface{}, configName []string, value string) er
 	case reflect.String:
 		v = value
 	case reflect.Slice:
-		// TODO: make slice work
+		// TODO: make slice work for any other type
+		v = strings.Split(value, ",")
 	default:
-		v = value
+		return errors.Errorf("unsupported type")
 	}
 
 	if err != nil {
@@ -513,4 +528,8 @@ func decodeConfigs(cfg string, configs map[string]interface{}) error {
 		return err
 	}
 	return nil
+}
+
+func versionEqual(a, b *configpb.Version) bool {
+	return a.GetGlobal() == b.GetGlobal() && a.GetLocal() == b.GetLocal()
 }

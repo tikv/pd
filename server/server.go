@@ -33,8 +33,8 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -45,6 +45,7 @@ import (
 	"github.com/pingcap/pd/pkg/ui"
 	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/server/config_manager"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
@@ -89,11 +90,11 @@ type Server struct {
 	isServing int64
 
 	// Configs and initial fields.
-	cfg           *config.Config
-	componentsCfg *config.ComponentsConfig
-	etcdCfg       *embed.Config
-	scheduleOpt   *config.ScheduleOption
-	handler       *Handler
+	cfg         *config.Config
+	cfgManager  *configmanager.ConfigManager
+	etcdCfg     *embed.Config
+	scheduleOpt *config.ScheduleOption
+	handler     *Handler
 
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
@@ -127,7 +128,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, APIGroup)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, APIGroup, func())
 
 // APIGroup used to register the api service.
 type APIGroup struct {
@@ -143,14 +144,31 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
+type lazyHandler struct {
+	options []func()
+	engine *negroni.Negroni
+}
+
+func (lazy *lazyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	for _, f := range lazy.options {
+		f()
+	}
+
+	lazy.engine.ServeHTTP(w, r)
+}
+
 func combineBuilderServerHTTPService(ctx context.Context, svr *Server, apiBuilders ...HandlerBuilder) (http.Handler, error) {
 	engine := negroni.New()
 	recovery := negroni.NewRecovery()
 	engine.Use(recovery)
 	router := mux.NewRouter()
 	registerMap := make(map[string]struct{})
+	var options []func()
 	for _, build := range apiBuilders {
-		handler, info := build(ctx, svr)
+		handler, info, f := build(ctx, svr)
+		if f != nil {
+			options = append(options, f)
+		}
 		var pathPrefix string
 		if info.IsCore {
 			pathPrefix = CorePath
@@ -166,7 +184,6 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, apiBuilde
 		log.Info("register REST path", zap.String("path", pathPrefix))
 		registerMap[pathPrefix] = struct{}{}
 		router.PathPrefix(pathPrefix).Handler(handler)
-
 		if info.IsCore {
 			// Deprecated
 			router.Path("/pd/health").Handler(handler)
@@ -176,9 +193,12 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, apiBuilde
 			router.Path("/pd/ping").Handler(handler)
 		}
 	}
-
 	engine.UseHandler(router)
-	return engine, nil
+
+	return &lazyHandler{
+		engine: engine,
+		options: options,
+	}, nil
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
@@ -188,11 +208,11 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 
 	s := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		componentsCfg: 		config.NewComponentsConfig(),
 		cfg:               cfg,
 		scheduleOpt:       config.NewScheduleOption(cfg),
 		member:            &member.Member{},
 	}
+	s.cfgManager = configmanager.NewConfigManager(s)
 	s.handler = newHandler(s)
 
 	// Adjust etcd config.
@@ -214,7 +234,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		configpb.RegisterConfigServer(gs, s)
+		configpb.RegisterConfigServer(gs, s.cfgManager)
 	}
 	s.etcdCfg = etcdCfg
 	if EnableZap {
@@ -571,9 +591,9 @@ func (s *Server) GetClient() *clientv3.Client {
 	return s.client
 }
 
-// GetComponentsConfig returns the components config of server.
-func (s *Server) GetComponentsConfig() *config.ComponentsConfig {
-	return s.componentsCfg
+// GetConfigManager returns the config manager of server.
+func (s *Server) GetConfigManager() *configmanager.ConfigManager {
+	return s.cfgManager
 }
 
 // GetLeader returns leader of etcd.
@@ -1121,6 +1141,6 @@ func (s *Server) reloadConfigFromKV() error {
 		log.Info("server disable region storage")
 	}
 
-	err = s.componentsCfg.Reload(s.storage)
+	err = s.cfgManager.Reload(s.storage)
 	return err
 }
