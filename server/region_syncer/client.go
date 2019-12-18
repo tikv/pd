@@ -49,19 +49,19 @@ func (s *RegionSyncer) reset() {
 	s.regionSyncerCancel, s.regionSyncerCtx = nil, nil
 }
 
-func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
+func (s *RegionSyncer) establish(addr string) (ClientStream, *grpc.ClientConn, error) {
 	s.reset()
 
 	cc, err := grpcutil.GetClientConn(addr, s.securityConfig.CAPath, s.securityConfig.CertPath, s.securityConfig.KeyPath, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)))
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, nil, errors.WithStack(err)
 	}
 
 	ctx, cancel := context.WithCancel(s.server.Context())
 	client, err := pdpb.NewPDClient(cc).SyncRegions(ctx)
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, cc, err
 	}
 	err = client.Send(&pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
@@ -70,12 +70,12 @@ func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
 	})
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, cc, err
 	}
 	s.Lock()
 	s.regionSyncerCtx, s.regionSyncerCancel = ctx, cancel
 	s.Unlock()
-	return client, nil
+	return client, cc, nil
 }
 
 // StartSyncWithLeader starts to sync with leader.
@@ -93,8 +93,11 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			default:
 			}
 			// establish client
-			client, err := s.establish(addr)
+			client, rpcC, err := s.establish(addr)
 			if err != nil {
+				if rpcC != nil {
+					rpcC.Close()
+				}
 				if ev, ok := status.FromError(err); ok {
 					if ev.Code() == codes.Canceled {
 						return
@@ -131,6 +134,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 				}
 			}
+			rpcC.Close()
 		}
 	}()
 }
