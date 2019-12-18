@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/core"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 )
 
 func TestClient(t *testing.T) {
@@ -489,4 +490,17 @@ func (s *testClientCtxSuite) TestClientCtx(c *C) {
 	_, err := NewClientWithContext(ctx, []string{"localhost:8080"}, SecurityOption{})
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Less, time.Second*4)
+}
+
+var _ = Suite(&testClientDialOptionSuite{})
+
+type testClientDialOptionSuite struct{}
+
+func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.TODO(), 100*time.Millisecond)
+	defer cancel()
+	_, err := NewClientWithContext(ctx, []string{"localhost:8080"}, SecurityOption{}, WithGRPCDialOptions(grpc.WithBlock(), grpc.WithTimeout(time.Second)))
+	c.Assert(err, NotNil)
+	c.Assert(time.Since(start), Greater, 800*time.Millisecond)
 }
