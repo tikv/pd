@@ -257,6 +257,71 @@ func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
+func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request) {
+	bound := minRegionHistogramSize
+	bound, err := calBound(bound, r)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rc := getCluster(r.Context())
+	regions := rc.GetRegions()
+	histSizes := make([]int64, 0, len(regions))
+	for _, region := range regions {
+		histSizes = append(histSizes, region.GetApproximateSize())
+	}
+	histSizesMap := calHist(bound, &histSizes)
+	h.rd.JSON(w, http.StatusOK, histSizesMap)
+}
+
+func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request) {
+	bound := minRegionHistogramKeys
+	bound, err := calBound(bound, r)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rc := getCluster(r.Context())
+	regions := rc.GetRegions()
+	histKeys := make([]int64, 0, len(regions))
+	for _, region := range regions {
+		histKeys = append(histKeys, region.GetApproximateKeys())
+	}
+	histKeysMap := calHist(bound, &histKeys)
+	h.rd.JSON(w, http.StatusOK, histKeysMap)
+}
+
+func calBound(bound int, r *http.Request) (int, error) {
+	if boundStr := r.URL.Query().Get("bound"); boundStr != "" {
+		boundInput, err := strconv.Atoi(boundStr)
+		if err != nil {
+			return -1, err
+		}
+		if bound < boundInput {
+			bound = boundInput
+		}
+	}
+	return bound, nil
+}
+
+func calHist(bound int, list *[]int64) *map[string]int {
+	var histMap = make(map[int64]int)
+	var outputMap = make(map[string]int)
+	for _, item := range *list {
+		multiple := item / int64(bound)
+		if oldCount, ok := histMap[multiple]; ok {
+			histMap[multiple] = oldCount + 1
+		} else {
+			histMap[multiple] = 1
+		}
+	}
+	for multiple, count := range histMap {
+		outputStr := "[" + strconv.FormatInt(multiple*int64(bound), 10) + "," + strconv.FormatInt((multiple+1)*int64(bound), 10) + ")"
+		outputMap[outputStr] = count
+	}
+	return &outputMap
+}
+
 func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
 
@@ -278,8 +343,10 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 }
 
 const (
-	defaultRegionLimit = 16
-	maxRegionLimit     = 10240
+	defaultRegionLimit     = 16
+	maxRegionLimit         = 10240
+	minRegionHistogramSize = 1
+	minRegionHistogramKeys = 1000
 )
 
 func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request) {

@@ -227,6 +227,9 @@ func (c *client) updateLeader() error {
 	for _, u := range c.urls {
 		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
 		members, err := c.getMembers(ctx, u)
+		if err != nil {
+			log.Warn("cannot update leader", zap.String("address", u), zap.Error(err))
+		}
 		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
 			select {
@@ -249,7 +252,8 @@ func (c *client) getMembers(ctx context.Context, url string) (*pdpb.GetMembersRe
 	}
 	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
-		return nil, errors.WithStack(err)
+		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+		return nil, errors.WithStack(attachErr)
 	}
 	return members, nil
 }
@@ -293,6 +297,7 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	defer c.connMu.Unlock()
 	if old, ok := c.connMu.clientConns[addr]; ok {
 		cc.Close()
+		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
 		return old, nil
 	}
 

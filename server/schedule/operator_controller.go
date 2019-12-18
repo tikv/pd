@@ -899,5 +899,6 @@ func (oc *OperatorController) GetLeaderScheduleStrategy() core.ScheduleStrategy 
 func (oc *OperatorController) RemoveStoreLimit(storeID uint64) {
 	oc.Lock()
 	defer oc.Unlock()
+	oc.cluster.AttachAvailableFunc(storeID, nil)
 	delete(oc.storesLimit, storeID)
 }

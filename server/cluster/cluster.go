@@ -51,11 +51,6 @@ const (
 	defaultChangedRegionsLimit = 10000
 )
 
-// ErrRegionIsStale is error info for region is stale.
-var ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
-	return errors.Errorf("region is stale: region %v origin %v", region, origin)
-}
-
 // Server is the interface for cluster.
 type Server interface {
 	GetAllocator() *id.AllocatorImpl
@@ -242,7 +237,17 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 
 	start = time.Now()
 
-	if err := c.storage.LoadRegions(c.core.PutRegion); err != nil {
+	// used to load region from kv storage to cache storage.
+	putRegion := func(region *core.RegionInfo) []*core.RegionInfo {
+		origin, err := c.core.PreCheckPutRegion(region)
+		if err != nil {
+			log.Warn("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
+			// return the state region to delete.
+			return []*core.RegionInfo{region}
+		}
+		return c.core.PutRegion(region)
+	}
+	if err := c.storage.LoadRegions(putRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -394,14 +399,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
-	origin := c.GetRegion(region.GetID())
-	if origin == nil {
-		for _, item := range c.core.GetOverlaps(region) {
-			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
-				c.RUnlock()
-				return ErrRegionIsStale(region.GetMeta(), item.GetMeta())
-			}
-		}
+	origin, err := c.core.PreCheckPutRegion(region)
+	if err != nil {
+		c.RUnlock()
+		return err
 	}
 	writeItems := c.CheckWriteStatus(region)
 	readItems := c.CheckReadStatus(region)
@@ -420,10 +421,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	} else {
 		r := region.GetRegionEpoch()
 		o := origin.GetRegionEpoch()
-		// Region meta is stale, return an error.
-		if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-			return ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
-		}
 		if r.GetVersion() > o.GetVersion() {
 			log.Info("region Version changed",
 				zap.Uint64("region-id", region.GetID()),
@@ -1454,6 +1451,8 @@ func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.Hot
 	return c.hotSpotCache.CheckRead(region, c.storesStats)
 }
 
+// TODO: remove me.
+// only used in test.
 func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()
