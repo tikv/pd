@@ -82,7 +82,19 @@ func loadClusterInfo(id core.IDAllocator, kv *core.KV, opt *scheduleOption) (*cl
 	)
 
 	start = time.Now()
-	if err := kv.LoadRegions(c.core.Regions); err != nil {
+	// used to load region from kv storage to cache storage.
+	putRegion := func(region *core.RegionInfo) []*metapb.Region {
+		c.Lock()
+		defer c.Unlock()
+		origin, err := c.core.PreCheckPutRegion(region)
+		if err != nil {
+			log.Warn("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
+			// return the state region to delete.
+			return []*metapb.Region{region.GetMeta()}
+		}
+		return c.core.Regions.SetRegion(region)
+	}
+	if err := kv.LoadRegions(putRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -512,14 +524,10 @@ func (c *clusterInfo) updateStoreStatusLocked(id uint64) {
 // handleRegionHeartbeat updates the region information.
 func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
-	origin := c.core.Regions.GetRegion(region.GetID())
-	if origin == nil {
-		for _, item := range c.core.Regions.GetOverlaps(region) {
-			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
-				c.RUnlock()
-				return ErrRegionIsStale(region.GetMeta(), item)
-			}
-		}
+	origin, err := c.core.PreCheckPutRegion(region)
+	if err != nil {
+		c.RUnlock()
+		return err
 	}
 	isWriteUpdate, writeItem := c.CheckWriteStatus(region)
 	isReadUpdate, readItem := c.CheckReadStatus(region)
@@ -538,10 +546,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	} else {
 		r := region.GetRegionEpoch()
 		o := origin.GetRegionEpoch()
-		// Region meta is stale, return an error.
-		if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-			return ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
-		}
+
 		if r.GetVersion() > o.GetVersion() {
 			log.Info("region Version changed",
 				zap.Uint64("region-id", region.GetID()),

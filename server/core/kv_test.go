@@ -137,7 +137,7 @@ func (s *testKVSuite) TestLoadRegions(c *C) {
 
 	n := 10
 	regions := mustSaveRegions(c, kv, n)
-	c.Assert(kv.LoadRegions(cache), IsNil)
+	c.Assert(kv.LoadRegions(cache.SetRegion), IsNil)
 
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
@@ -151,7 +151,7 @@ func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
 
 	n := 1000
 	regions := mustSaveRegions(c, kv, n)
-	c.Assert(kv.LoadRegions(cache), IsNil)
+	c.Assert(kv.LoadRegions(cache.SetRegion), IsNil)
 	c.Assert(cache.GetRegionCount(), Equals, n)
 	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])

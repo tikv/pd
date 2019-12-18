@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errcode"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -46,10 +45,6 @@ var (
 	// ErrRegionAbnormalPeer is error info for region has abonormal peer
 	ErrRegionAbnormalPeer = func(regionID uint64) error {
 		return errors.Errorf("region %v has abnormal peer", regionID)
-	}
-	// ErrRegionIsStale is error info for region is stale
-	ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
-		return errors.Errorf("region is stale: region %v origin %v", region, origin)
 	}
 )
 

@@ -296,6 +296,9 @@ func (r *RegionInfo) GetID() uint64 {
 
 // GetMeta returns the meta information of the region.
 func (r *RegionInfo) GetMeta() *metapb.Region {
+	if r == nil {
+		return nil
+	}
 	return r.meta
 }
 
