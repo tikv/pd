@@ -564,14 +564,9 @@ func (s *Server) SetStorage(storage *core.Storage) {
 	s.storage = storage
 }
 
-// GetStorage returns the backend storage of server.
+// GetBasicCluster returns the basic cluster of server.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster
-}
-
-// SetStorage changes the storage for test purpose.
-func (s *Server) SetBasicCluster(basicCluster *core.BasicCluster) {
-	s.basicCluster = basicCluster
 }
 
 // GetScheduleOption returns the schedule option.

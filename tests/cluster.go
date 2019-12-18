@@ -400,7 +400,7 @@ func (c *TestCluster) GetLeader() string {
 	return ""
 }
 
-// GetLeader returns the leader of all servers
+// GetFollower returns an follower of all servers
 func (c *TestCluster) GetFollower() string {
 	for name, s := range c.servers {
 		if !s.server.IsClosed() && !s.server.GetMember().IsLeader() {

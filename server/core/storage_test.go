@@ -161,7 +161,7 @@ func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
 
 	old := n
 	n = 20
-	regions = mustSaveRegions(c, storage, n)
+	mustSaveRegions(c, storage, n)
 	c.Assert(storage.LoadRegionsOnce(cache.SetRegion), IsNil)
 	c.Assert(cache.GetRegionCount(), Equals, old)
 }
