@@ -21,6 +21,8 @@ import (
 	"net/http"
 
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -61,3 +63,8 @@ func (e StoreBlockedErr) Error() string {
 
 // Code returns StoreBlockedCode
 func (e StoreBlockedErr) Code() errcode.Code { return StoreBlockedCode }
+
+// ErrRegionIsStale is error info for region is stale
+var ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
+	return errors.Errorf("region is stale: region %v origin %v", region, origin)
+}

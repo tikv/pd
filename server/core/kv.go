@@ -128,11 +128,11 @@ func (kv *KV) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {
 }
 
 // LoadRegions loads all regions from KV to RegionsInfo.
-func (kv *KV) LoadRegions(regions *RegionsInfo) error {
+func (kv *KV) LoadRegions(f func(region *RegionInfo) []*metapb.Region) error {
 	if atomic.LoadInt32(&kv.useRegionKV) > 0 {
-		return loadRegions(kv.regionKV, regions)
+		return loadRegions(kv.regionKV, f)
 	}
-	return loadRegions(kv.KVBase, regions)
+	return loadRegions(kv.KVBase, f)
 }
 
 // SaveRegion saves one region to KV.
