@@ -15,6 +15,8 @@ package pd
 
 import (
 	"context"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -132,7 +134,8 @@ type client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	security SecurityOption
+	security        SecurityOption
+	gRPCDialOptions []grpc.DialOption
 }
 
 // SecurityOption records options about tls
@@ -142,13 +145,23 @@ type SecurityOption struct {
 	KeyPath  string
 }
 
+// ClientOption configures client.
+type ClientOption func(c *client)
+
+// WithGRPCDialOptions configures the client with gRPC dial options.
+func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
+	return func(c *client) {
+		c.gRPCDialOptions = append(c.gRPCDialOptions, opts...)
+	}
+}
+
 // NewClient creates a PD client.
-func NewClient(pdAddrs []string, security SecurityOption) (Client, error) {
-	return NewClientWithContext(context.Background(), pdAddrs, security)
+func NewClient(pdAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+	return NewClientWithContext(context.Background(), pdAddrs, security, opts...)
 }
 
 // NewClientWithContext creates a PD client with context.
-func NewClientWithContext(ctx context.Context, pdAddrs []string, security SecurityOption) (Client, error) {
+func NewClientWithContext(ctx context.Context, pdAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", pdAddrs))
 	ctx1, cancel := context.WithCancel(ctx)
 	c := &client{
@@ -161,6 +174,9 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 		security:      security,
 	}
 	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
+	for _, opt := range opts {
+		opt(c)
+	}
 
 	if err := c.initRetry(c.initClusterID); err != nil {
 		cancel()
@@ -185,6 +201,14 @@ func (c *client) updateURLs(members []*pdpb.Member) {
 	for _, m := range members {
 		urls = append(urls, m.GetClientUrls()...)
 	}
+
+	sort.Strings(urls)
+	// the url list is same.
+	if reflect.DeepEqual(c.urls, urls) {
+		return
+	}
+
+	log.Info("[pd] update member urls", zap.Strings("old-urls", c.urls), zap.Strings("new-urls", urls))
 	c.urls = urls
 }
 
@@ -225,7 +249,7 @@ func (c *client) updateLeader() error {
 		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
 		members, err := c.getMembers(ctx, u)
 		if err != nil {
-			log.Warn("cannot update leader", zap.String("address", u), zap.Error(err))
+			log.Warn("[pd] cannot update leader", zap.String("address", u), zap.Error(err))
 		}
 		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
@@ -286,7 +310,7 @@ func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 		return conn, nil
 	}
 
-	cc, err := grpcutil.GetClientConn(addr, c.security.CAPath, c.security.CertPath, c.security.KeyPath)
+	cc, err := grpcutil.GetClientConn(addr, c.security.CAPath, c.security.CertPath, c.security.KeyPath, c.gRPCDialOptions...)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
