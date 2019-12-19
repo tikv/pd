@@ -166,7 +166,7 @@ func (s *Storage) LoadRegionsOnce(f func(region *RegionInfo) []*RegionInfo) erro
 		return loadRegions(s.Base, f)
 	}
 	if atomic.CompareAndSwapInt32(&s.regionLoaded, 0, 1) {
-		if err := s.LoadRegions(f); err != nil {
+		if err := loadRegions(s.regionStorage, f); err != nil {
 			return err
 		}
 	}
