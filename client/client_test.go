@@ -471,6 +471,28 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	c.Succeed()
 }
 
+func (s *testClientSuite) TestUpdateURLs(c *C) {
+	members := []*pdpb.Member{
+		{Name: "pd4", ClientUrls: []string{"tmp//pd4"}},
+		{Name: "pd1", ClientUrls: []string{"tmp//pd1"}},
+		{Name: "pd3", ClientUrls: []string{"tmp//pd3"}},
+		{Name: "pd2", ClientUrls: []string{"tmp//pd2"}},
+	}
+	getUrls := func(ms []*pdpb.Member) (urls []string) {
+		for _, m := range ms {
+			urls = append(urls, m.GetClientUrls()[0])
+		}
+		return
+	}
+	cli := &client{}
+	cli.updateURLs(members[1:])
+	c.Assert(cli.urls, DeepEquals, getUrls([]*pdpb.Member{members[1], members[3], members[2]}))
+	cli.updateURLs(members[1:])
+	c.Assert(cli.urls, DeepEquals, getUrls([]*pdpb.Member{members[1], members[3], members[2]}))
+	cli.updateURLs(members)
+	c.Assert(cli.urls, DeepEquals, getUrls([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
+}
+
 func (s *testClientSuite) TestTsLessEqual(c *C) {
 	c.Assert(tsLessEqual(9, 9, 9, 9), IsTrue)
 	c.Assert(tsLessEqual(8, 9, 9, 8), IsTrue)

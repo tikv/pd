@@ -15,6 +15,8 @@ package pd
 
 import (
 	"context"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -199,23 +201,13 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 
 func (c *client) updateURLs(members []*pdpb.Member) {
 	urls := make([]string, 0, len(members))
-	urlsMap := make(map[string]struct{})
 	for _, m := range members {
 		urls = append(urls, m.GetClientUrls()...)
 	}
-	for _, url := range urls {
-		urlsMap[url] = struct{}{}
-	}
-	containsOldURLs := true
-	for _, url := range c.urls {
-		if _, ok := urlsMap[url]; !ok {
-			containsOldURLs = false
-			break
-		}
-	}
 
+	sort.Strings(urls)
 	// the url list is same.
-	if len(urls) == len(c.urls) && containsOldURLs {
+	if reflect.DeepEqual(c.urls, urls) {
 		return
 	}
 
