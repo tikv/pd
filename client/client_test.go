@@ -478,7 +478,7 @@ func (s *testClientSuite) TestUpdateURLs(c *C) {
 		{Name: "pd3", ClientUrls: []string{"tmp//pd3"}},
 		{Name: "pd2", ClientUrls: []string{"tmp//pd2"}},
 	}
-	getUrls := func(ms []*pdpb.Member) (urls []string) {
+	getURLs := func(ms []*pdpb.Member) (urls []string) {
 		for _, m := range ms {
 			urls = append(urls, m.GetClientUrls()[0])
 		}
@@ -486,11 +486,11 @@ func (s *testClientSuite) TestUpdateURLs(c *C) {
 	}
 	cli := &client{}
 	cli.updateURLs(members[1:])
-	c.Assert(cli.urls, DeepEquals, getUrls([]*pdpb.Member{members[1], members[3], members[2]}))
+	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
 	cli.updateURLs(members[1:])
-	c.Assert(cli.urls, DeepEquals, getUrls([]*pdpb.Member{members[1], members[3], members[2]}))
+	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
 	cli.updateURLs(members)
-	c.Assert(cli.urls, DeepEquals, getUrls([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
+	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
 }
 
 func (s *testClientSuite) TestTsLessEqual(c *C) {
