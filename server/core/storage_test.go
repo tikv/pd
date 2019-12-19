@@ -159,11 +159,10 @@ func (s *testKVSuite) TestLoadRegionsToCache(c *C) {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
 
-	old := n
 	n = 20
 	mustSaveRegions(c, storage, n)
 	c.Assert(storage.LoadRegionsOnce(cache.SetRegion), IsNil)
-	c.Assert(cache.GetRegionCount(), Equals, old)
+	c.Assert(cache.GetRegionCount(), Equals, n)
 }
 
 func (s *testKVSuite) TestLoadRegionsExceedRangeLimit(c *C) {
