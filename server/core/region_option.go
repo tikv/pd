@@ -248,10 +248,10 @@ func WithPromoteLearner(peerID uint64) RegionCreateOption {
 }
 
 // WithReplacePeerStore replaces a peer's storeID with another ID.
-func WithReplacePeerStore(peerID, newStoreID uint64) RegionCreateOption {
+func WithReplacePeerStore(oldStoreID, newStoreID uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		for _, p := range region.GetPeers() {
-			if p.GetId() == peerID {
+			if p.GetStoreId() == oldStoreID {
 				p.StoreId = newStoreID
 			}
 		}

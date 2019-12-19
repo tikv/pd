@@ -401,10 +401,24 @@ func (h *balanceHotRegionsScheduler) balanceByPeer(cluster opt.Cluster, storesSt
 		if srcStore == nil {
 			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
 		}
+
+		srcPeer := srcRegion.GetStorePeer(srcStoreID)
+		if srcPeer == nil {
+			log.Debug("region does not peer on source store, maybe stat out of date", zap.Uint64("region-id", rs.RegionID))
+			continue
+		}
+
+		var scoreGuard filter.Filter
+		if cluster.IsPlacementRulesEnabled() {
+			scoreGuard = filter.NewRuleFitFilter(h.GetName(), cluster, srcRegion, srcStoreID)
+		} else {
+			scoreGuard = filter.NewDistinctScoreFilter(h.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore)
+		}
+
 		filters := []filter.Filter{
 			filter.StoreStateFilter{ActionScope: h.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(h.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			filter.NewDistinctScoreFilter(h.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore),
+			scoreGuard,
 		}
 		candidateStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {

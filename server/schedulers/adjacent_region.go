@@ -317,8 +317,12 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 		log.Error("failed to get the source store", zap.Uint64("store-id", leaderStoreID))
 		return nil
 	}
-
-	scoreGuard := filter.NewDistinctScoreFilter(l.GetName(), cluster.GetLocationLabels(), stores, source)
+	var scoreGuard filter.Filter
+	if cluster.IsPlacementRulesEnabled() {
+		scoreGuard = filter.NewRuleFitFilter(l.GetName(), cluster, region, leaderStoreID)
+	} else {
+		scoreGuard = filter.NewDistinctScoreFilter(l.GetName(), cluster.GetLocationLabels(), stores, source)
+	}
 	excludeStores := region.GetStoreIds()
 	for _, storeID := range l.cacheRegions.assignedStoreIds {
 		if _, ok := excludeStores[storeID]; !ok {
