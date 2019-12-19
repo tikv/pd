@@ -20,7 +20,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/gogo/protobuf/proto"
@@ -50,15 +49,13 @@ type Storage struct {
 	kv.Base
 	regionStorage    *RegionStorage
 	useRegionStorage int32
-	regionLoaded     bool
-	mu               sync.RWMutex
+	regionLoaded     int32
 }
 
 // NewStorage creates Storage instance with Base.
 func NewStorage(base kv.Base) *Storage {
 	return &Storage{
-		Base:         base,
-		regionLoaded: false,
+		Base: base,
 	}
 }
 
@@ -165,13 +162,10 @@ func (s *Storage) LoadRegions(f func(region *RegionInfo) []*RegionInfo) error {
 
 // LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
 func (s *Storage) LoadRegionsOnce(f func(region *RegionInfo) []*RegionInfo) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.regionLoaded {
+	if atomic.CompareAndSwapInt32(&s.regionLoaded, 0, 1) {
 		if err := s.LoadRegions(f); err != nil {
 			return err
 		}
-		s.regionLoaded = true
 	}
 	return nil
 }

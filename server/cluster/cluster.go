@@ -239,16 +239,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	putRegion := func(region *core.RegionInfo) []*core.RegionInfo {
-		origin, err := c.core.PreCheckPutRegion(region)
-		if err != nil {
-			log.Warn("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
-			// return the state region to delete.
-			return []*core.RegionInfo{region}
-		}
-		return c.core.PutRegion(region)
-	}
-	if err := c.storage.LoadRegionsOnce(putRegion); err != nil {
+	if err := c.storage.LoadRegionsOnce(c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",

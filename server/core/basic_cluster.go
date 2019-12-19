@@ -16,6 +16,9 @@ package core
 import (
 	"sync"
 
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/slice"
 )
@@ -310,6 +313,17 @@ func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	bc.Lock()
 	defer bc.Unlock()
 	return bc.Regions.SetRegion(region)
+}
+
+// CheckAndPutRegion checks if the region is valid to put,if valid then put.
+func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
+	origin, err := bc.PreCheckPutRegion(region)
+	if err != nil {
+		log.Warn("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
+		// return the state region to delete.
+		return []*RegionInfo{region}
+	}
+	return bc.PutRegion(region)
 }
 
 // RemoveRegion removes RegionInfo from regionTree and regionMap.

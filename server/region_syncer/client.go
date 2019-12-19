@@ -87,16 +87,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	go func() {
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.
-		putRegion := func(region *core.RegionInfo) []*core.RegionInfo {
-			origin, err := s.server.GetBasicCluster().PreCheckPutRegion(region)
-			if err != nil {
-				log.Warn("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
-				// return the state region to delete.
-				return []*core.RegionInfo{region}
-			}
-			return s.server.GetBasicCluster().PutRegion(region)
-		}
-		s.server.GetStorage().LoadRegionsOnce(putRegion)
+		s.server.GetStorage().LoadRegionsOnce(s.server.GetBasicCluster().CheckAndPutRegion)
 		for {
 			select {
 			case <-closed:
@@ -139,7 +130,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					s.history.ResetWithIndex(resp.GetStartIndex())
 				}
 				for _, r := range resp.GetRegions() {
-					putRegion(core.NewRegionInfo(r, nil))
+					s.server.GetBasicCluster().CheckAndPutRegion(core.NewRegionInfo(r, nil))
 					err = s.server.GetStorage().SaveRegion(r)
 					if err == nil {
 						s.history.Record(core.NewRegionInfo(r, nil))
