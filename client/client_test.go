@@ -469,6 +469,28 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	c.Succeed()
 }
 
+func (s *testClientSuite) TestUpdateURLs(c *C) {
+	members := []*pdpb.Member{
+		{Name: "pd4", ClientUrls: []string{"tmp//pd4"}},
+		{Name: "pd1", ClientUrls: []string{"tmp//pd1"}},
+		{Name: "pd3", ClientUrls: []string{"tmp//pd3"}},
+		{Name: "pd2", ClientUrls: []string{"tmp//pd2"}},
+	}
+	getURLs := func(ms []*pdpb.Member) (urls []string) {
+		for _, m := range ms {
+			urls = append(urls, m.GetClientUrls()[0])
+		}
+		return
+	}
+	cli := &client{}
+	cli.updateURLs(members[1:])
+	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
+	cli.updateURLs(members[1:])
+	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
+	cli.updateURLs(members)
+	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
+}
+
 var _ = Suite(&testClientCtxSuite{})
 
 type testClientCtxSuite struct{}
@@ -480,4 +502,18 @@ func (s *testClientCtxSuite) TestClientCtx(c *C) {
 	_, err := NewClientWithContext(ctx, []string{"localhost:8080"}, SecurityOption{})
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), Less, time.Second*4)
+}
+
+var _ = Suite(&testClientDialOptionSuite{})
+
+type testClientDialOptionSuite struct{}
+
+func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.TODO(), 100*time.Millisecond)
+	defer cancel()
+	// nolint
+	_, err := NewClientWithContext(ctx, []string{"localhost:8080"}, SecurityOption{}, WithGRPCDialOptions(grpc.WithBlock(), grpc.WithTimeout(time.Second)))
+	c.Assert(err, NotNil)
+	c.Assert(time.Since(start), Greater, 800*time.Millisecond)
 }
