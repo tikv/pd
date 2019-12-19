@@ -163,7 +163,7 @@ func (s *Storage) LoadRegions(f func(region *RegionInfo) []*RegionInfo) error {
 // LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
 func (s *Storage) LoadRegionsOnce(f func(region *RegionInfo) []*RegionInfo) error {
 	if atomic.LoadInt32(&s.useRegionStorage) == 0 {
-		return s.LoadRegions(f)
+		return loadRegions(s.Base, f)
 	}
 	if atomic.CompareAndSwapInt32(&s.regionLoaded, 0, 1) {
 		if err := s.LoadRegions(f); err != nil {
