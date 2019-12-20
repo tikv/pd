@@ -50,6 +50,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 
 	fit := c.cluster.FitRegion(region)
 	if len(fit.RuleFits) == 0 {
+		checkerCounter.WithLabelValues("rule_checker", "fix-range").Inc()
 		// If the region matches no rules, the most possible reason is it spans across
 		// multiple rules.
 		return c.fixRange(region)
@@ -87,8 +88,13 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	}
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
-		if c.isDownPeer(region, peer) || c.isOfflinePeer(region, peer) {
-			return c.replaceRulePeer(region, fit, rf, peer)
+		if c.isDownPeer(region, peer) {
+			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
+			return c.replaceRulePeer(region, fit, rf, peer, downStatus)
+		}
+		if c.isOfflinePeer(region, peer) {
+			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
+			return c.replaceRulePeer(region, fit, rf, peer, offlineStatus)
 		}
 	}
 	// fix loose matched peers.
@@ -105,6 +111,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 }
 
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
+	checkerCounter.WithLabelValues("rule_checker", "add-rule-peer").Inc()
 	store := SelectStoreToAddPeerByRule(c.name, c.cluster, region, rf)
 	if store == nil {
 		return nil, errors.New("no store to add peer")
@@ -113,20 +120,22 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 	return operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
 }
 
-func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer) (*operator.Operator, error) {
+func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
 	store := SelectStoreToReplacePeerByRule(c.name, c.cluster, region, fit, rf, peer)
 	if store == nil {
 		return nil, errors.New("no store to add peer")
 	}
 	newPeer := &metapb.Peer{StoreId: store.GetID(), IsLearner: rf.Rule.Role == placement.Learner}
-	return operator.CreateMovePeerOperator("replace-rule-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+	return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
 }
 
 func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer) (*operator.Operator, error) {
 	if peer.IsLearner && rf.Rule.Role != placement.Learner {
+		checkerCounter.WithLabelValues("rule_checker", "fix-peer-role").Inc()
 		return operator.CreatePromoteLearnerOperator("fix-peer-role", c.cluster, region, peer)
 	}
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.Role == placement.Follower {
+		checkerCounter.WithLabelValues("rule_checker", "fix-leader-role").Inc()
 		for _, p := range region.GetPeers() {
 			if c.allowLeader(fit, p) {
 				return operator.CreateTransferLeaderOperator("fix-peer-role", c.cluster, region, peer.GetStoreId(), p.GetStoreId(), 0)
@@ -177,6 +186,7 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.
 		log.Debug("no better peer", zap.Uint64("region-id", region.GetID()), zap.Float64("new-score", newScore), zap.Float64("old-score", oldScore))
 		return nil, nil
 	}
+	checkerCounter.WithLabelValues("rule_checker", "move-to-better-location").Inc()
 	newPeer := &metapb.Peer{StoreId: newPeerStore.GetID(), IsLearner: oldPeer.IsLearner}
 	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldPeer.GetStoreId(), newPeer)
 }
@@ -185,8 +195,9 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
 	}
+	checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 	peer := fit.OrphanPeers[0]
-	return operator.CreateRemovePeerOperator("remove-orphan-peers", c.cluster, 0, region, peer.StoreId)
+	return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, peer.StoreId)
 }
 
 func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) bool {

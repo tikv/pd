@@ -14,6 +14,7 @@
 package checker
 
 import (
+	"encoding/hex"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -56,8 +57,9 @@ func (s *testRuleCheckerSuite) TestFixRange(c *C) {
 	op := s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
 	c.Assert(op.Len(), Equals, 1)
-	var split operator.SplitRegion
-	c.Assert(op.Step(0), FitsTypeOf, split)
+	splitKeys := op.Step(0).(operator.SplitRegion).SplitKeys
+	c.Assert(hex.EncodeToString(splitKeys[0]), Equals, "aa")
+	c.Assert(hex.EncodeToString(splitKeys[1]), Equals, "ff")
 }
 
 func (s *testRuleCheckerSuite) TestAddRulePeer(c *C) {
@@ -84,14 +86,14 @@ func (s *testRuleCheckerSuite) TestFixPeer(c *C) {
 	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 60000}}))
 	op = s.rc.Check(r)
 	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "replace-rule-peer")
+	c.Assert(op.Desc(), Equals, "replace-rule-down-peer")
 	var add operator.AddLearner
 	c.Assert(op.Step(0), FitsTypeOf, add)
 	s.cluster.SetStoreUp(2)
 	s.cluster.SetStoreOffline(2)
 	op = s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "replace-rule-peer")
+	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
 	c.Assert(op.Step(0), FitsTypeOf, add)
 }
 
@@ -103,7 +105,7 @@ func (s *testRuleCheckerSuite) TestFixOrphanPeers(c *C) {
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
 	op := s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "remove-orphan-peers")
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
 	c.Assert(op.Step(0).(operator.RemovePeer).FromStore, Equals, uint64(4))
 }
 
