@@ -34,7 +34,7 @@ type RuleChecker struct {
 	name        string
 }
 
-// NewRuleChecker creates an checker instance.
+// NewRuleChecker creates a checker instance.
 func NewRuleChecker(cluster opt.Cluster, ruleManager *placement.RuleManager) *RuleChecker {
 	return &RuleChecker{
 		cluster:     cluster,
