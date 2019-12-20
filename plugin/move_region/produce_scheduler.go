@@ -20,8 +20,10 @@ import (
 )
 
 const (
-	aiURL         = "http://192.168.1.127:8000/"
-	fetchInterval = time.Hour / 3
+	aiURL                = "http://192.168.1.127:8000/"
+	fetchInterval        = time.Hour / 3
+	uint64Min     uint64 = 0
+	uint64Max     uint64 = ^uint64(0)
 )
 
 var hightPerformanceStoreID = []uint64{1}
@@ -225,15 +227,16 @@ func (p *predictInfo) calculateScheduleTime(threshold float64) ([]scheduleTime, 
 	return scheduleT, nil
 }
 
-func (p *predictInfo) getTableIndexByRegion(meta *metapb.Region) int {
+func (p *predictInfo) getTableIndexByRegion(meta *metapb.Region) (int, error) {
 	tableInfo := p.TableInfo
 	str := string(core.HexRegionKey(meta.GetStartKey()))
 	for index, t := range tableInfo {
 		if strings.Compare(t.StartKey, str) <= 0 && (t.EndKey == "" || strings.Compare(t.EndKey, str) > 0) {
-			return index
+			return index, nil
 		}
 	}
-	return 1
+	err := errors.New("region is not in all table")
+	return 0, err
 }
 
 type dispatchTiming struct {
@@ -293,11 +296,16 @@ func getTopK(cluster *server.RaftCluster, index int, dispatchT *dispatchTiming) 
 		log.Info("not found region")
 		return []uint64{}
 	}
-	minrw := regions[0].GetRwBytesTotal() / uint64(DeltT[dispatchT.predictData.getTableIndexByRegion(regions[0].GetMeta())])
-	maxrw := regions[0].GetRwBytesTotal() / uint64(DeltT[dispatchT.predictData.getTableIndexByRegion(regions[0].GetMeta())])
+	minrw := uint64Max
+	maxrw := uint64Min
 	tmp := make([]uint64, len(regions))
 	for index, v := range regions {
-		tmp[index] = v.GetRwBytesTotal() / uint64(DeltT[dispatchT.predictData.getTableIndexByRegion(v.GetMeta())])
+		tableIndex, err := dispatchT.predictData.getTableIndexByRegion(v.GetMeta())
+		if err != nil {
+			tmp[index] = 0
+			continue
+		}
+		tmp[index] = v.GetRwBytesTotal() / uint64(DeltT[tableIndex]*v.GetApproximateSize())
 		if minrw > tmp[index] {
 			minrw = tmp[index]
 		}
@@ -312,6 +320,9 @@ func getTopK(cluster *server.RaftCluster, index int, dispatchT *dispatchTiming) 
 	HotDegree := make([]RegionHotTable, len(regions)+1)
 	for index, v := range regions {
 		data := tmp[index]
+		if data == 0 {
+			continue
+		}
 		index := (data - minrw) / segment
 		HotDegree[index].count++
 		HotDegree[index].regionID = append(HotDegree[index].regionID, v.GetID())
@@ -336,17 +347,13 @@ func getTopK(cluster *server.RaftCluster, index int, dispatchT *dispatchTiming) 
 func generateScheduleInfo(cluster *server.RaftCluster, regionIDs []uint64, scheduleT scheduleTime) {
 	schedule.ScheduleInfoLock.Lock()
 	defer schedule.ScheduleInfoLock.Unlock()
-	for _, id := range regionIDs {
-		region := cluster.GetRegion(id)
-		moveRegionInfo := schedule.MoveRegion{
-			StartKey:  region.GetStartKey(),
-			EndKey:    region.GetEndKey(),
-			StoreIDs:  hightPerformanceStoreID,
-			StartTime: time.Unix(scheduleT.StartTime, 0),
-			EndTime:   time.Unix(scheduleT.EndTime, 0),
-		}
-		schedule.ScheduleInfo = append(schedule.ScheduleInfo, moveRegionInfo)
+	moveRegionInfo := schedule.MoveRegion{
+		RegionIDs: regionIDs,
+		StoreIDs:  hightPerformanceStoreID,
+		StartTime: time.Unix(scheduleT.StartTime, 0),
+		EndTime:   time.Unix(scheduleT.EndTime, 0),
 	}
+	schedule.ScheduleInfo = append(schedule.ScheduleInfo, moveRegionInfo)
 	log.Info("generateScheduleInfo", zap.Any("ScheudleInfo", schedule.ScheduleInfo))
 }
 
@@ -387,7 +394,7 @@ func CreateUserScheduler(opController *schedule.OperatorController, cluster sche
 		name := "move-region-use-scheduler-" + strconv.Itoa(id)
 		schedulers = append(schedulers,
 			newMoveRegionUserScheduler(opController, name,
-				info.StartKey, info.EndKey, info.StoreIDs, info.StartTime, info.EndTime))
+				info.RegionIDs, info.StoreIDs, info.StartTime, info.EndTime))
 	}
 
 	return schedulers

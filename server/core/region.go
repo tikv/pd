@@ -534,7 +534,7 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) []*metapb.Region {
 		region.rwBytesTotal = region.rwBytesTotal / 2
 	}
 	if region.approximateSize > 0 {
-		region.rwBytesTotal = region.rwBytesTotal + (region.readBytes+region.writtenBytes)/uint64(region.approximateSize)
+		region.rwBytesTotal = region.rwBytesTotal + (region.readBytes + region.writtenBytes)
 	} else {
 		region.rwBytesTotal = 0
 	}
