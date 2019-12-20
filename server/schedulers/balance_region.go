@@ -70,7 +70,7 @@ type balanceRegionSchedulerConfig struct {
 }
 
 type balanceRegionScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf         *balanceRegionSchedulerConfig
 	opController *schedule.OperatorController
 	filters      []filter.Filter
@@ -80,9 +80,9 @@ type balanceRegionScheduler struct {
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
 func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) schedule.Scheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	scheduler := &balanceRegionScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceRegionCounter,

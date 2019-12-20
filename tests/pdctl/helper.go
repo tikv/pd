@@ -60,6 +60,7 @@ func InitCommand() *cobra.Command {
 		command.NewClusterCommand(),
 		command.NewHealthCommand(),
 		command.NewLogCommand(),
+		command.NewPluginCommand(),
 	)
 	return rootCmd
 }

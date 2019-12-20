@@ -20,6 +20,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pingcap/errcode"
@@ -62,16 +63,22 @@ var (
 	ErrStoreNotFound = func(storeID uint64) error {
 		return errors.Errorf("store %v not found", storeID)
 	}
+	// ErrPluginNotFound is error info for plugin not found.
+	ErrPluginNotFound = func(pluginPath string) error {
+		return errors.Errorf("plugin is not found: %s", pluginPath)
+	}
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
 type Handler struct {
-	s   *Server
-	opt *config.ScheduleOption
+	s               *Server
+	opt             *config.ScheduleOption
+	pluginChMap     map[string]chan string
+	pluginChMapLock sync.RWMutex
 }
 
 func newHandler(s *Server) *Handler {
-	return &Handler{s: s, opt: s.scheduleOpt}
+	return &Handler{s: s, opt: s.scheduleOpt, pluginChMap: make(map[string]chan string), pluginChMapLock: sync.RWMutex{}}
 }
 
 // GetRaftCluster returns RaftCluster.
@@ -834,4 +841,30 @@ func (h *Handler) ResetTS(ts uint64) error {
 		return ErrServerNotStarted
 	}
 	return tsoServer.ResetUserTimestamp(ts)
+}
+
+// PluginLoad loads the plugin referenced by the pluginPath
+func (h *Handler) PluginLoad(pluginPath string) error {
+	h.pluginChMapLock.Lock()
+	defer h.pluginChMapLock.Unlock()
+	cluster, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	c := cluster.GetCoordinator()
+	ch := make(chan string)
+	h.pluginChMap[pluginPath] = ch
+	c.LoadPlugin(pluginPath, ch)
+	return nil
+}
+
+// PluginUnload unloads the plugin referenced by the pluginPath
+func (h *Handler) PluginUnload(pluginPath string) error {
+	h.pluginChMapLock.Lock()
+	defer h.pluginChMapLock.Unlock()
+	if ch, ok := h.pluginChMap[pluginPath]; ok {
+		ch <- cluster.PluginUnload
+		return nil
+	}
+	return ErrPluginNotFound(pluginPath)
 }

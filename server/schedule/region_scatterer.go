@@ -142,7 +142,12 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 	if sourceStore == nil {
 		log.Error("failed to get the store", zap.Uint64("store-id", storeID))
 	}
-	scoreGuard := filter.NewDistinctScoreFilter(r.name, r.cluster.GetLocationLabels(), regionStores, sourceStore)
+	var scoreGuard filter.Filter
+	if r.cluster.IsPlacementRulesEnabled() {
+		scoreGuard = filter.NewRuleFitFilter(r.name, r.cluster, region, oldPeer.GetStoreId())
+	} else {
+		scoreGuard = filter.NewDistinctScoreFilter(r.name, r.cluster.GetLocationLabels(), regionStores, sourceStore)
+	}
 
 	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {

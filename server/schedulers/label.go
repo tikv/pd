@@ -64,7 +64,7 @@ type labelSchedulerConfig struct {
 }
 
 type labelScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf     *labelSchedulerConfig
 	selector *selector.BalanceSelector
 }
@@ -78,7 +78,7 @@ func newLabelScheduler(opController *schedule.OperatorController, conf *labelSch
 	}
 	kind := core.NewScheduleKind(core.LeaderKind, core.ByCount)
 	return &labelScheduler{
-		baseScheduler: newBaseScheduler(opController),
+		BaseScheduler: NewBaseScheduler(opController),
 		conf:          conf,
 		selector:      selector.NewBalanceSelector(kind, filters),
 	}
@@ -97,7 +97,7 @@ func (s *labelScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *labelScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
