@@ -108,10 +108,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			return nil
 		}
 	}
-	if op := c.checkBestReplacement(region, fit, rf); op != nil {
-		return op
-	}
-	return nil
+	return c.checkBestReplacement(region, fit, rf)
 }
 
 func (c *RuleChecker) checkBestReplacement(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) *operator.Operator {
