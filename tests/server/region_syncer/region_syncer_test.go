@@ -125,7 +125,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	followerServer := cluster.GetServer(cluster.GetFollower())
 	c.Assert(followerServer, NotNil)
 	cacheRegions := followerServer.GetServer().GetBasicCluster().GetRegions()
-	c.Assert(len(cacheRegions), Equals, regionLen)
+	c.Assert(cacheRegions, HasLen, regionLen)
 	for _, region := range cacheRegions {
 		c.Assert(followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID()).GetMeta(), DeepEquals, region.GetMeta())
 	}

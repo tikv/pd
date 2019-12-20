@@ -16,11 +16,10 @@ package core
 import (
 	"sync"
 
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/slice"
+	"go.uber.org/zap"
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
