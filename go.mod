@@ -48,3 +48,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+replace go.etcd.io/etcd v0.0.0-20190320044326-77d4b742cdbf => github.com/nolouch/etcd v0.5.0-alpha.5.0.20191222164125-86bb085f041b
