@@ -678,6 +678,24 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	for _, region := range raftCluster.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
+
+	n = 20
+	regions = make([]*metapb.Region, 0, n)
+	for i := uint64(0); i < uint64(n); i++ {
+		region := &metapb.Region{
+			Id:          i,
+			StartKey:    []byte(fmt.Sprintf("%20d", i)),
+			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
+			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		}
+		regions = append(regions, region)
+	}
+
+	for _, region := range regions {
+		c.Assert(storage.SaveRegion(region), IsNil)
+	}
+	raftCluster.GetStorage().LoadRegionsOnce(raftCluster.GetCacheCluster().PutRegion)
+	c.Assert(raftCluster.GetRegionCount(), Equals, 10)
 }
 
 func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
