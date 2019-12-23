@@ -679,9 +679,9 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
 
-	n = 20
+	m := 20
 	regions = make([]*metapb.Region, 0, n)
-	for i := uint64(0); i < uint64(n); i++ {
+	for i := uint64(0); i < uint64(m); i++ {
 		region := &metapb.Region{
 			Id:          i,
 			StartKey:    []byte(fmt.Sprintf("%20d", i)),
@@ -695,7 +695,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 		c.Assert(storage.SaveRegion(region), IsNil)
 	}
 	raftCluster.GetStorage().LoadRegionsOnce(raftCluster.GetCacheCluster().PutRegion)
-	c.Assert(raftCluster.GetRegionCount(), Equals, 10)
+	c.Assert(raftCluster.GetRegionCount(), Equals, n)
 }
 
 func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
