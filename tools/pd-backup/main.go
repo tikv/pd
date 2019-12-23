@@ -29,7 +29,7 @@ const (
 	etcdTimeout     = 3 * time.Second
 	pdRootPath      = "/pd"
 	pdClusterIDPath = "/pd/cluster_id"
-	pdConfigApiPath = "/pd/api/v1/config"
+	pdConfigAPIPath = "/pd/api/v1/config"
 )
 
 type backupInfo struct {
@@ -75,8 +75,8 @@ func getBackupInfo(client *clientv3.Client) *backupInfo {
 	backOut.clusterID = clusterID
 
 	rootPath := path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
-	allocIdPath := path.Join(rootPath, "alloc_id")
-	resp, err = etcdutil.EtcdKVGet(client, allocIdPath)
+	allocIDPath := path.Join(rootPath, "alloc_id")
+	resp, err = etcdutil.EtcdKVGet(client, allocIDPath)
 	checkErr(err)
 	allocIDMax, err := typeutil.BytesToUint64(resp.Kvs[0].Value)
 	checkErr(err)
@@ -114,7 +114,7 @@ func outputToFile(backOut *backupInfo, f *os.File) {
 }
 
 func getConfig() string {
-	resp, err := http.Get(*pdAddr + pdConfigApiPath)
+	resp, err := http.Get(*pdAddr + pdConfigAPIPath)
 	checkErr(err)
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
