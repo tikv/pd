@@ -817,6 +817,9 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 	}
 	keysSet := make(map[string]struct{})
 	for _, k := range c.GetLocationLabels() {
+		if k == "" {
+			continue
+		}
 		keysSet[k] = struct{}{}
 		if v := s.GetLabelValue(k); len(v) == 0 {
 			log.Warn("label configuration is incorrect",

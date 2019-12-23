@@ -37,6 +37,8 @@ func (s *testConfigSuite) SetUpSuite(c *C) {
 
 	addr := s.svr.GetAddr()
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+
+	mustBootstrapCluster(c, s.svr)
 }
 
 func (s *testConfigSuite) TearDownSuite(c *C) {
@@ -55,14 +57,13 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 	l := map[string]interface{}{
-		"location-labels":       "zone,rack",
+		"location-labels":       []string{"zone", "rack"},
 		"region-schedule-limit": 10,
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
-
 	l = map[string]interface{}{
 		"metric-storage": "http://127.0.0.1:9090",
 	}
@@ -112,7 +113,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	c.Assert(err, IsNil)
 	rc.LocationLabels = []string{"zone", "rack"}
 
-	rc2 := map[string]string{"location-labels": "zone,rack"}
+	rc2 := map[string]interface{}{"location-labels": []string{"zone", "rack"}}
 	postData, err = json.Marshal(rc2)
 	c.Assert(err, IsNil)
 	err = postJSON(addr, postData)

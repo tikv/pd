@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"path"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -232,10 +233,17 @@ func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 
 func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 	var val interface{}
+	var err error
 	data := make(map[string]interface{})
-	val, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		val = value
+	if strings.Contains(value, "[") {
+		s := strings.TrimLeft(value, "[")
+		s = strings.TrimRight(s, "]")
+		val = strings.Split(s, ",")
+	} else {
+		val, err = strconv.ParseFloat(value, 64)
+		if err != nil {
+			val = value
+		}
 	}
 	data[key] = val
 	reqData, err := json.Marshal(data)
