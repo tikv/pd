@@ -474,7 +474,13 @@ L:
 		}
 		storeLabels = append(storeLabels, newLabel)
 	}
-	return storeLabels
+	res := storeLabels[:0]
+	for _, l := range storeLabels {
+		if l.Value != "" {
+			res = append(res, l)
+		}
+	}
+	return res
 }
 
 type storeNotFoundErr struct {
