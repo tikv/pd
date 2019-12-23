@@ -51,7 +51,7 @@ type Storage struct {
 	regionStorage    *RegionStorage
 	useRegionStorage int32
 	regionLoaded     int32
-	mu               sync.RWMutex
+	mu               sync.Mutex
 }
 
 // NewStorage creates Storage instance with Base.
