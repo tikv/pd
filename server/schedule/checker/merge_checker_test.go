@@ -127,7 +127,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 		s.cluster.PutRegion(region)
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.mc = NewMergeChecker(s.ctx, s.cluster)
+	s.mc = NewMergeChecker(s.ctx, s.cluster, s.cluster.RuleManager)
 }
 
 func (s *testMergeCheckerSuite) TearDownTest(c *C) {
@@ -442,7 +442,7 @@ func (s *testMergeCheckerSuite) TestCache(c *C) {
 		s.cluster.PutRegion(region)
 	}
 
-	s.mc = NewMergeChecker(s.ctx, s.cluster)
+	s.mc = NewMergeChecker(s.ctx, s.cluster, s.cluster.RuleManager)
 
 	ops := s.mc.Check(s.regions[1])
 	c.Assert(ops, IsNil)

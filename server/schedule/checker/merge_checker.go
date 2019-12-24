@@ -14,6 +14,7 @@
 package checker
 
 import (
+	"bytes"
 	"context"
 	"time"
 
@@ -23,23 +24,26 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/server/schedule/placement"
 	"go.uber.org/zap"
 )
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
-	cluster    opt.Cluster
-	splitCache *cache.TTLUint64
-	startTime  time.Time // it's used to judge whether server recently start.
+	cluster     opt.Cluster
+	splitCache  *cache.TTLUint64
+	ruleManager *placement.RuleManager
+	startTime   time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(ctx context.Context, cluster opt.Cluster) *MergeChecker {
+func NewMergeChecker(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager) *MergeChecker {
 	splitCache := cache.NewIDTTL(ctx, time.Minute, cluster.GetSplitMergeInterval())
 	return &MergeChecker{
-		cluster:    cluster,
-		splitCache: splitCache,
-		startTime:  time.Now(),
+		cluster:     cluster,
+		splitCache:  splitCache,
+		ruleManager: ruleManager,
+		startTime:   time.Now(),
 	}
 }
 
@@ -137,6 +141,17 @@ func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 
 // allowMerge returns true if two regions can be merged according to the key type.
 func (m *MergeChecker) allowMerge(region *core.RegionInfo, adjacent *core.RegionInfo) bool {
+	var start, end []byte
+	if bytes.Equal(region.GetEndKey(), adjacent.GetStartKey()) && len(region.GetEndKey()) != 0 {
+		start, end = region.GetStartKey(), adjacent.GetEndKey()
+	} else if bytes.Equal(adjacent.GetEndKey(), region.GetStartKey()) && len(adjacent.GetEndKey()) != 0 {
+		start, end = adjacent.GetStartKey(), region.GetEndKey()
+	} else {
+		return false
+	}
+	if m.cluster.IsPlacementRulesEnabled() && len(m.ruleManager.GetSplitKeys(start, end)) > 0 {
+		return false
+	}
 	strategy := m.cluster.GetKeyType()
 	switch strategy {
 	case core.Table:
