@@ -14,14 +14,17 @@
 package core
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
+	"github.com/BurntSushi/toml"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/kv"
@@ -37,6 +40,7 @@ const (
 	rulesPath    = "rules"
 
 	customScheduleConfigPath = "scheduler_config"
+	componentsConfigPath     = "components_config"
 )
 
 const (
@@ -49,6 +53,8 @@ type Storage struct {
 	kv.Base
 	regionStorage    *RegionStorage
 	useRegionStorage int32
+	regionLoaded     int32
+	mu               sync.Mutex
 }
 
 // NewStorage creates Storage instance with Base.
@@ -157,6 +163,22 @@ func (s *Storage) LoadRegions(f func(region *RegionInfo) []*RegionInfo) error {
 		return loadRegions(s.regionStorage, f)
 	}
 	return loadRegions(s.Base, f)
+}
+
+// LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
+func (s *Storage) LoadRegionsOnce(f func(region *RegionInfo) []*RegionInfo) error {
+	if atomic.LoadInt32(&s.useRegionStorage) == 0 {
+		return loadRegions(s.Base, f)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.regionLoaded == 0 {
+		if err := loadRegions(s.regionStorage, f); err != nil {
+			return err
+		}
+		s.regionLoaded = 1
+	}
+	return nil
 }
 
 // SaveRegion saves one region to storage.
@@ -331,6 +353,31 @@ func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
 		keys[i] = strings.TrimPrefix(key, customScheduleConfigPath+"/")
 	}
 	return keys, values, err
+}
+
+// SaveComponentsConfig stores marshalable cfg to the componentsConfigPath.
+func (s *Storage) SaveComponentsConfig(cfg interface{}) error {
+	var value bytes.Buffer
+	if err := toml.NewEncoder(&value).Encode(cfg); err != nil {
+		return errors.WithStack(err)
+	}
+	return s.Save(componentsConfigPath, value.String())
+}
+
+// LoadComponentsConfig loads config from componentsConfigPath then unmarshal it to cfg.
+func (s *Storage) LoadComponentsConfig(cfg interface{}) (bool, error) {
+	value, err := s.Load(componentsConfigPath)
+	if err != nil {
+		return false, err
+	}
+	if value == "" {
+		return false, nil
+	}
+	_, err = toml.Decode(value, cfg)
+	if err != nil {
+		return false, errors.WithStack(err)
+	}
+	return true, nil
 }
 
 func loadProto(s kv.Base, key string, msg proto.Message) (bool, error) {

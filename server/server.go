@@ -101,6 +101,8 @@ type Server struct {
 	idAllocator *id.AllocatorImpl
 	// for storage operation.
 	storage *core.Storage
+	// for baiscCluster operation.
+	basicCluster *core.BasicCluster
 	// for tso.
 	tso *tso.TimestampOracle
 	// for raft cluster
@@ -307,6 +309,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
+	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// Server has started.
@@ -559,6 +562,11 @@ func (s *Server) GetStorage() *core.Storage {
 // SetStorage changes the storage for test purpose.
 func (s *Server) SetStorage(storage *core.Storage) {
 	s.storage = storage
+}
+
+// GetBasicCluster returns the basic cluster of server.
+func (s *Server) GetBasicCluster() *core.BasicCluster {
+	return s.basicCluster
 }
 
 // GetScheduleOption returns the schedule option.

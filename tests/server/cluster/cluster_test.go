@@ -624,12 +624,13 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient())
 
 	// Cluster is not bootstrapped.
-	rc.InitCluster(svr.GetAllocator(), svr.GetScheduleOption(), svr.GetStorage())
+	rc.InitCluster(svr.GetAllocator(), svr.GetScheduleOption(), svr.GetStorage(), svr.GetBasicCluster())
 	raftCluster, err := rc.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, IsNil)
 
 	storage := rc.GetStorage()
+	basicCluster := rc.GetCacheCluster()
 	opt := rc.GetOpt()
 	// Save meta, stores and regions.
 	n := 10
@@ -662,7 +663,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	c.Assert(storage.Flush(), IsNil)
 
 	raftCluster = &cluster.RaftCluster{}
-	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage)
+	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, NotNil)
@@ -677,6 +678,24 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	for _, region := range raftCluster.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
+
+	m := 20
+	regions = make([]*metapb.Region, 0, n)
+	for i := uint64(0); i < uint64(m); i++ {
+		region := &metapb.Region{
+			Id:          i,
+			StartKey:    []byte(fmt.Sprintf("%20d", i)),
+			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
+			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		}
+		regions = append(regions, region)
+	}
+
+	for _, region := range regions {
+		c.Assert(storage.SaveRegion(region), IsNil)
+	}
+	raftCluster.GetStorage().LoadRegionsOnce(raftCluster.GetCacheCluster().PutRegion)
+	c.Assert(raftCluster.GetRegionCount(), Equals, n)
 }
 
 func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
