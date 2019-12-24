@@ -120,7 +120,17 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	replicationCfg = config.ReplicationConfig{}
 	c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
-	c.Assert(replicationCfg.LocationLabels, DeepEquals, []string{""})
+	c.Assert(replicationCfg.LocationLabels, DeepEquals, []string{})
+
+	// config set location-labels [""]
+	args2 = []string{"-u", pdAddr, "config", "set", "location-labels", "[\"\"]"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
+	c.Assert(err, IsNil)
+	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	replicationCfg = config.ReplicationConfig{}
+	c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
+	c.Assert(replicationCfg.LocationLabels, DeepEquals, []string{})
 
 	// config show cluster-version
 	args1 = []string{"-u", pdAddr, "config", "show", "cluster-version"}

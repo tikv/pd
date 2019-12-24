@@ -16,6 +16,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -124,6 +125,12 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	c.Assert(err, IsNil)
 
 	c.Assert(*rc, DeepEquals, *rc3)
+
+	rc2 = map[string]interface{}{"location-labels": []string{""}}
+	postData, err = json.Marshal(rc2)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(strings.Contains(err.Error(), "invalid label"), IsTrue)
 }
 
 func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
