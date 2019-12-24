@@ -10,7 +10,7 @@ You can build your changes with
 
 It is difficult to ensure dependencies in a production environment, so it is recommended to try in a development environment.
 
-* Make sure [​*Go*​](https://golang.org/) (version 1.12) is installed.
+* Make sure [​*Go*​](https://golang.org/) (version 1.13) is installed.
 * Make sure [​*Git*​](https://git-scm.com/) and [*Git LFS*](https://git-lfs.github.com/) is installed.
 * Make sure [*Node*](https://nodejs.org/) and [*Yarn*](https://yarnpkg.com/en/docs/install) is installed.
 
