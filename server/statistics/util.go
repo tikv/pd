@@ -15,8 +15,10 @@ package statistics
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/montanaflynn/stats"
+	"github.com/phf/go-queue/queue"
 )
 
 func storeTag(id uint64) string {
@@ -88,4 +90,60 @@ func maxInt(x int, y int) int {
 		return x
 	}
 	return y
+}
+
+type deltaWithInterval struct {
+	delta    float64
+	interval time.Duration
+}
+
+type AvgOverTime struct {
+	que      *queue.Queue
+	sum      float64
+	dur      time.Duration
+	interval time.Duration
+}
+
+func NewAvgOverTime(interval time.Duration) *AvgOverTime {
+	return &AvgOverTime{
+		que:      queue.New(),
+		sum:      0,
+		dur:      0,
+		interval: interval,
+	}
+}
+
+func (aot *AvgOverTime) Get() float64 {
+	if aot.dur.Seconds() < 1 {
+		return 0
+	}
+	return aot.sum / aot.dur.Seconds()
+}
+
+func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
+	aot.que.PushBack(deltaWithInterval{delta, interval})
+	aot.sum += delta
+	aot.dur += interval
+	if aot.dur <= aot.interval {
+		return
+	}
+	for aot.que.Len() > 0 {
+		front := aot.que.Front().(deltaWithInterval)
+		if aot.dur-front.interval >= aot.interval {
+			aot.que.PopFront()
+			aot.sum -= front.delta
+			aot.dur -= front.interval
+		} else {
+			break
+		}
+	}
+}
+
+func (aot *AvgOverTime) Set(avg float64) {
+	for aot.que.Len() > 0 {
+		aot.que.PopFront()
+	}
+	aot.sum = avg * aot.interval.Seconds()
+	aot.dur = aot.interval
+	aot.que.PushBack(deltaWithInterval{delta: aot.sum, interval: aot.dur})
 }
