@@ -61,6 +61,7 @@ type Server interface {
 	Name() string
 	GetMetaRegions() []*metapb.Region
 	GetSecurityConfig() *config.SecurityConfig
+	GetBasicCluster() *core.BasicCluster
 }
 
 // RegionSyncer is used to sync the region information without raft.

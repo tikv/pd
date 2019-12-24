@@ -86,6 +86,11 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	s.RUnlock()
 	go func() {
 		defer s.wg.Done()
+		// used to load region from kv storage to cache storage.
+		err := s.server.GetStorage().LoadRegionsOnce(s.server.GetBasicCluster().CheckAndPutRegion)
+		if err != nil {
+			log.Warn("failed to load regions.", zap.Error(err))
+		}
 		for {
 			select {
 			case <-closed:
@@ -128,6 +133,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					s.history.ResetWithIndex(resp.GetStartIndex())
 				}
 				for _, r := range resp.GetRegions() {
+					s.server.GetBasicCluster().CheckAndPutRegion(core.NewRegionInfo(r, nil))
 					err = s.server.GetStorage().SaveRegion(r)
 					if err == nil {
 						s.history.Record(core.NewRegionInfo(r, nil))

@@ -21,6 +21,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/BurntSushi/toml"
@@ -52,6 +53,8 @@ type Storage struct {
 	kv.Base
 	regionStorage    *RegionStorage
 	useRegionStorage int32
+	regionLoaded     int32
+	mu               sync.Mutex
 }
 
 // NewStorage creates Storage instance with Base.
@@ -160,6 +163,22 @@ func (s *Storage) LoadRegions(f func(region *RegionInfo) []*RegionInfo) error {
 		return loadRegions(s.regionStorage, f)
 	}
 	return loadRegions(s.Base, f)
+}
+
+// LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
+func (s *Storage) LoadRegionsOnce(f func(region *RegionInfo) []*RegionInfo) error {
+	if atomic.LoadInt32(&s.useRegionStorage) == 0 {
+		return loadRegions(s.Base, f)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.regionLoaded == 0 {
+		if err := loadRegions(s.regionStorage, f); err != nil {
+			return err
+		}
+		s.regionLoaded = 1
+	}
+	return nil
 }
 
 // SaveRegion saves one region to storage.
