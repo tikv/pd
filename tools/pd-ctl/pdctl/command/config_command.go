@@ -236,9 +236,16 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 	var err error
 	data := make(map[string]interface{})
 	if strings.Contains(value, "[") {
-		s := strings.TrimLeft(value, "[")
-		s = strings.TrimRight(s, "]")
-		val = strings.Split(s, ",")
+		str := strings.TrimLeft(value, "[")
+		str = strings.TrimRight(str, "]")
+		ssTmp := strings.Split(str, ",")
+		ss := []string{}
+		for _, s := range ssTmp {
+			if s != "" {
+				ss = append(ss, s)
+			}
+		}
+		val = ss
 	} else {
 		val, err = strconv.ParseFloat(value, 64)
 		if err != nil {

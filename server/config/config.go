@@ -834,9 +834,6 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 // Validate is used to validate if some replication configurations are right.
 func (c *ReplicationConfig) Validate() error {
 	for _, label := range c.LocationLabels {
-		if label == "" {
-			continue
-		}
 		err := ValidateLabelString(label)
 		if err != nil {
 			return err
@@ -851,7 +848,7 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
 	}
 	if !meta.IsDefined("location-labels") {
-		c.LocationLabels = []string{""}
+		c.LocationLabels = []string{}
 	}
 	return c.Validate()
 }
