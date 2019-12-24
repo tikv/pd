@@ -2,6 +2,7 @@
 set -euo pipefail
 
 git submodule update --init --recursive
+git submodule foreach --recursive git lfs pull
 
 BASE_DIR=$(git rev-parse --show-toplevel)
 WEB_DIR="$BASE_DIR/pkg/ui/pd-web"
