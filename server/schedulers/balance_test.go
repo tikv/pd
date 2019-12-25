@@ -815,7 +815,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	c.Assert(rc.Check(region), IsNil)
 	opt.EnableRemoveExtraReplica = true
 
-	region = region.Clone(core.WithRemoveStorePeer(1))
+	region = region.Clone(core.WithRemoveStorePeer(1), core.WithLeader(region.GetStorePeer(3)))
 
 	// Peer in store 2 is down, remove it.
 	tc.SetStoreDown(2)
@@ -966,7 +966,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	peer6, _ := tc.AllocPeer(6)
 	region = region.Clone(core.WithAddPeer(peer6))
 	testutil.CheckRemovePeer(c, rc.Check(region), 1)
-	region = region.Clone(core.WithRemoveStorePeer(1))
+	region = region.Clone(core.WithRemoveStorePeer(1), core.WithLeader(region.GetStorePeer(2)))
 	c.Assert(rc.Check(region), IsNil)
 
 	// Store 8 has the same zone and different rack with store 7.
@@ -1090,7 +1090,7 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.MergeScheduleLimit = 1
 	tc := mockcluster.NewCluster(opt)
-	hb := mockhbstream.NewHeartbeatStreams(tc.ID)
+	hb := mockhbstream.NewHeartbeatStreams(tc.ID, false /* need to run */)
 	oc := schedule.NewOperatorController(ctx, tc, hb)
 
 	mb, err := schedule.CreateScheduler(RandomMergeType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(RandomMergeType, []string{"", ""}))

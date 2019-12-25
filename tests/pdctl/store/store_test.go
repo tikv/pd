@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/tests"
 	"github.com/pingcap/pd/tests/pdctl"
 )
@@ -126,15 +127,15 @@ func (s *storeTestSuite) TestStore(c *C) {
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	limits := leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
-	c.Assert(limits[1]*60, Equals, float64(10))
+	c.Assert(limits[1].Rate()/float64(operator.RegionInfluence)*60, Equals, float64(10))
 
 	// store limit all <rate>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "20"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
-	c.Assert(limits[1]*60, Equals, float64(20))
-	c.Assert(limits[3]*60, Equals, float64(20))
+	c.Assert(limits[1].Rate()/float64(operator.RegionInfluence)*60, Equals, float64(20))
+	c.Assert(limits[3].Rate()/float64(operator.RegionInfluence)*60, Equals, float64(20))
 	_, ok := limits[2]
 	c.Assert(ok, IsFalse)
 
@@ -143,8 +144,8 @@ func (s *storeTestSuite) TestStore(c *C) {
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
-	c.Assert(limits[1]*60, Equals, float64(20))
-	c.Assert(limits[3]*60, Equals, float64(20))
+	c.Assert(limits[1].Rate()/float64(operator.RegionInfluence)*60, Equals, float64(20))
+	c.Assert(limits[3].Rate()/float64(operator.RegionInfluence)*60, Equals, float64(20))
 	_, ok = limits[2]
 	c.Assert(ok, IsFalse)
 

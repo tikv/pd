@@ -75,39 +75,6 @@ func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, pe
 	return regionInfo
 }
 
-func genAddPeers(store uint64, groups [][]uint64) [][]OpStep {
-	ret := make([][]OpStep, len(groups))
-	for i, grp := range groups {
-		steps := make([]OpStep, len(grp))
-		for j, id := range grp {
-			steps[j] = AddPeer{ToStore: store, PeerID: id}
-		}
-		ret[i] = steps
-	}
-	return ret
-}
-
-func (s *testOperatorSuite) TestInterleaveStepGroups(c *C) {
-	a := genAddPeers(1, [][]uint64{{1, 2}, {3}, {4, 5, 6}})
-	b := genAddPeers(1, [][]uint64{{11}, {12}, {13, 14}, {15, 16}})
-	ans := genAddPeers(1, [][]uint64{{1, 2, 11, 3, 12, 4, 5, 6, 13, 14, 15, 16}})
-	res := interleaveStepGroups(a, b, 12)
-	c.Assert(res, DeepEquals, ans[0])
-}
-
-func (s *testOperatorSuite) TestFindNoLabelProperty(c *C) {
-	stores := []uint64{8, 7, 3, 4, 7, 3, 1, 5, 6}
-	i, id := findNoLabelProperty(s.cluster, opt.RejectLeader, stores)
-	c.Assert(i, Equals, 2)
-	c.Assert(id, Equals, uint64(3))
-	i, id = findNoLabelProperty(s.cluster, opt.RejectLeader, stores[2:])
-	c.Assert(i, Equals, 0)
-	c.Assert(id, Equals, uint64(3))
-	i, id = findNoLabelProperty(s.cluster, opt.RejectLeader, stores[:2])
-	c.Assert(i, Less, 0)
-	c.Assert(id, Equals, uint64(0))
-}
-
 func (s *testOperatorSuite) TestOperatorStep(c *C) {
 	region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	c.Assert(TransferLeader{FromStore: 1, ToStore: 2}.IsFinish(region), IsFalse)

@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -28,6 +29,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/selector"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const (
@@ -150,7 +152,7 @@ func (conf *evictLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (s
 }
 
 type evictLeaderScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf     *evictLeaderSchedulerConfig
 	selector *selector.RandomSelector
 	handler  http.Handler
@@ -163,10 +165,10 @@ func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *ev
 		filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true},
 	}
 
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		selector:      selector.NewRandomSelector(filters),
 		handler:       handler,
@@ -212,7 +214,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 }
 
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
@@ -232,7 +234,11 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 			continue
 		}
 		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-		op := operator.CreateTransferLeaderOperator(EvictLeaderType, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		if err != nil {
+			log.Debug("fail to create evict leader operator", zap.Error(err))
+			continue
+		}
 		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)
 	}

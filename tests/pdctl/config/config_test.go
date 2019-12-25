@@ -175,13 +175,13 @@ func (s *configTestSuite) TestConfig(c *C) {
 		args1 = []string{"-u", pdAddr, "config", "set", item.name, reflect.TypeOf(item.value).String()}
 		_, _, err = pdctl.ExecuteCommandC(cmd, args1...)
 		c.Assert(err, IsNil)
-		//read
+		// read
 		args2 = []string{"-u", pdAddr, "config", "show"}
 		_, output, err = pdctl.ExecuteCommandC(cmd, args2...)
 		c.Assert(err, IsNil)
 		cfg = config.Config{}
 		c.Assert(json.Unmarshal(output, &cfg), IsNil)
-		//judge
+		// judge
 		item.judge(c, &cfg.Schedule, svr.GetScheduleConfig())
 	}
 

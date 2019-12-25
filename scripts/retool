@@ -3,6 +3,5 @@
 # Add standard retool options
 set -euo pipefail
 
-
-cd $(dirname "$0")/..
+cd "$(dirname "$0")/.."
 exec retool -tool-dir "$PWD/.retools" "$@"

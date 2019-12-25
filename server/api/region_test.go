@@ -134,6 +134,26 @@ func (s *testRegionSuite) TestRegionCheck(c *C) {
 	err = readJSON(url, r5)
 	c.Assert(err, IsNil)
 	c.Assert(r5, DeepEquals, &RegionsInfo{Count: 1, Regions: []*RegionInfo{NewRegionInfo(r)}})
+
+	r = r.Clone(core.SetApproximateSize(1))
+	mustRegionHeartbeat(c, s.svr, r)
+	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "hist-size")
+	r6 := make(map[string]int)
+	err = readJSON(url, &r6)
+	histSizesMap := make(map[string]int)
+	histSizesMap["[1,2)"] = 1
+	c.Assert(err, IsNil)
+	c.Assert(r6, DeepEquals, histSizesMap)
+
+	r = r.Clone(core.SetApproximateKeys(1000))
+	mustRegionHeartbeat(c, s.svr, r)
+	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "hist-keys")
+	r7 := make(map[string]int)
+	err = readJSON(url, &r7)
+	histKeysMap := make(map[string]int)
+	histKeysMap["[1000,2000)"] = 1
+	c.Assert(err, IsNil)
+	c.Assert(r7, DeepEquals, histKeysMap)
 }
 
 func (s *testRegionSuite) TestRegions(c *C) {

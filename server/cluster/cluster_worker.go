@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package cluster
 
 import (
 	"bytes"
@@ -45,21 +45,22 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	return nil
 }
 
-func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
+// HandleAskSplit handles the split request.
+func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
 	reqRegion := request.GetRegion()
-	err := c.validRequestRegion(reqRegion)
+	err := c.ValidRequestRegion(reqRegion)
 	if err != nil {
 		return nil, err
 	}
 
-	newRegionID, err := c.s.idAllocator.Alloc()
+	newRegionID, err := c.id.Alloc()
 	if err != nil {
 		return nil, err
 	}
 
 	peerIDs := make([]uint64, len(request.Region.Peers))
 	for i := 0; i < len(peerIDs); i++ {
-		if peerIDs[i], err = c.s.idAllocator.Alloc(); err != nil {
+		if peerIDs[i], err = c.id.Alloc(); err != nil {
 			return nil, err
 		}
 	}
@@ -77,7 +78,8 @@ func (c *RaftCluster) handleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	return split, nil
 }
 
-func (c *RaftCluster) validRequestRegion(reqRegion *metapb.Region) error {
+// ValidRequestRegion is used to decide if the region is valid.
+func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
 	region, _ := c.GetRegionByKey(startKey)
 	if region == nil {
@@ -93,10 +95,11 @@ func (c *RaftCluster) validRequestRegion(reqRegion *metapb.Region) error {
 	return nil
 }
 
-func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
+// HandleAskBatchSplit handles the batch split request.
+func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
 	reqRegion := request.GetRegion()
 	splitCount := request.GetSplitCount()
-	err := c.validRequestRegion(reqRegion)
+	err := c.ValidRequestRegion(reqRegion)
 	if err != nil {
 		return nil, err
 	}
@@ -104,14 +107,14 @@ func (c *RaftCluster) handleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	recordRegions := make([]uint64, 0, splitCount+1)
 
 	for i := 0; i < int(splitCount); i++ {
-		newRegionID, err := c.s.idAllocator.Alloc()
+		newRegionID, err := c.id.Alloc()
 		if err != nil {
 			return nil, errSchedulerNotFound
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
 		for i := 0; i < len(peerIDs); i++ {
-			if peerIDs[i], err = c.s.idAllocator.Alloc(); err != nil {
+			if peerIDs[i], err = c.id.Alloc(); err != nil {
 				return nil, err
 			}
 		}
@@ -168,7 +171,8 @@ func (c *RaftCluster) checkSplitRegions(regions []*metapb.Region) error {
 	return nil
 }
 
-func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
+// HandleReportSplit handles the report split request.
+func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
 	left := request.GetLeft()
 	right := request.GetRight()
 
@@ -191,7 +195,8 @@ func (c *RaftCluster) handleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	return &pdpb.ReportSplitResponse{}, nil
 }
 
-func (c *RaftCluster) handleBatchReportSplit(request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
+// HandleBatchReportSplit handles the batch report split request.
+func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
 	regions := request.GetRegions()
 
 	hrm := core.RegionsToHexMeta(regions)

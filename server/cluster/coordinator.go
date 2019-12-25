@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package cluster
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedulers"
 	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
@@ -39,11 +40,16 @@ const (
 	maxScheduleRetries        = 10
 	maxLoadConfigRetries      = 10
 
-	heartbeatChanCapacity = 1024
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
+	// PluginLoad means action for load plugin
+	PluginLoad = "PluginLoad"
+	// PluginUnload means action for unload plugin
+	PluginUnload = "PluginUnload"
 )
 
 var (
+	// ErrNotBootstrapped is error info for cluster not bootstrapped.
+	ErrNotBootstrapped   = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
 	errSchedulerExisted  = errors.New("scheduler existed")
 	errSchedulerNotFound = errors.New("scheduler not found")
 )
@@ -60,11 +66,12 @@ type coordinator struct {
 	regionScatterer *schedule.RegionScatterer
 	schedulers      map[string]*scheduleController
 	opController    *schedule.OperatorController
-	hbStreams       *heartbeatStreams
+	hbStreams       opt.HeartbeatStreams
+	pluginInterface *schedule.PluginInterface
 }
 
 // newCoordinator creates a new coordinator.
-func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *heartbeatStreams) *coordinator {
+func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams opt.HeartbeatStreams) *coordinator {
 	ctx, cancel := context.WithCancel(ctx)
 	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
 	return &coordinator{
@@ -76,6 +83,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *heartb
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
 		hbStreams:       hbStreams,
+		pluginInterface: schedule.NewPluginInterface(),
 	}
 }
 
@@ -254,6 +262,64 @@ func (c *coordinator) run() {
 	go c.drivePushOperator()
 }
 
+// LoadPlugin load user plugin
+func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
+	log.Info("load plugin", zap.String("plugin-path", pluginPath))
+	// get func: SchedulerType from plugin
+	SchedulerType, err := c.pluginInterface.GetFunction(pluginPath, "SchedulerType")
+	if err != nil {
+		log.Error("GetFunction SchedulerType error", zap.Error(err))
+		return
+	}
+	schedulerType := SchedulerType.(func() string)
+	// get func: SchedulerArgs from plugin
+	SchedulerArgs, err := c.pluginInterface.GetFunction(pluginPath, "SchedulerArgs")
+	if err != nil {
+		log.Error("GetFunction SchedulerArgs error", zap.Error(err))
+		return
+	}
+	schedulerArgs := SchedulerArgs.(func() []string)
+	// create and add user scheduler
+	s, err := schedule.CreateScheduler(schedulerType(), c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerType(), schedulerArgs()))
+	if err != nil {
+		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), zap.Error(err))
+		return
+	}
+	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+	if err = c.addScheduler(s); err != nil {
+		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		return
+	}
+
+	c.wg.Add(1)
+	go c.waitPluginUnload(pluginPath, s.GetName(), ch)
+}
+
+func (c *coordinator) waitPluginUnload(pluginPath, schedulerName string, ch chan string) {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+	// Get signal from channel which means user unload the plugin
+	for {
+		select {
+		case action := <-ch:
+			if action == PluginUnload {
+				err := c.removeScheduler(schedulerName)
+				if err != nil {
+					log.Error("can not remove scheduler", zap.String("scheduler-name", schedulerName), zap.Error(err))
+				} else {
+					log.Info("unload plugin", zap.String("plugin", pluginPath))
+					return
+				}
+			} else {
+				log.Error("unknown action", zap.String("action", action))
+			}
+		case <-c.ctx.Done():
+			log.Info("unload plugin has been stopped")
+			return
+		}
+	}
+}
+
 func (c *coordinator) stop() {
 	c.cancel()
 }
@@ -263,6 +329,8 @@ func (c *coordinator) stop() {
 type hasHotStatus interface {
 	GetHotReadStatus() *statistics.StoreHotPeersInfos
 	GetHotWriteStatus() *statistics.StoreHotPeersInfos
+	GetWritePendingInfluence() map[uint64]schedulers.Influence
+	GetReadPendingInfluence() map[uint64]schedulers.Influence
 	GetStoresScore() map[uint64]float64
 }
 
@@ -292,15 +360,10 @@ func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
 	return nil
 }
 
-func (c *coordinator) getSchedulers() []string {
+func (c *coordinator) getSchedulers() map[string]*scheduleController {
 	c.RLock()
 	defer c.RUnlock()
-
-	names := make([]string, 0, len(c.schedulers))
-	for name := range c.schedulers {
-		names = append(names, name)
-	}
-	return names
+	return c.schedulers
 }
 
 func (c *coordinator) collectSchedulerMetrics() {
@@ -331,6 +394,7 @@ func (c *coordinator) collectHotSpotMetrics() {
 	}
 	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
+	pendings := s.Scheduler.(hasHotStatus).GetWritePendingInfluence()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
@@ -352,10 +416,15 @@ func (c *coordinator) collectHotSpotMetrics() {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_written_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_write_region_as_leader").Set(0)
 		}
+
+		infl := pendings[storeID]
+		// TODO: add to tidb-ansible after merging pending influence into operator influence.
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.ByteRate)
 	}
 
 	// Collects hot read region metrics.
 	status = s.Scheduler.(hasHotStatus).GetHotReadStatus()
+	pendings = s.Scheduler.(hasHotStatus).GetReadPendingInfluence()
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
@@ -368,6 +437,9 @@ func (c *coordinator) collectHotSpotMetrics() {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_read_bytes_as_leader").Set(0)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
 		}
+
+		infl := pendings[storeID]
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.ByteRate)
 	}
 
 	// Collects score of stores stats metrics.
@@ -549,11 +621,11 @@ func (s *scheduleController) GetInterval() time.Duration {
 
 // AllowSchedule returns if a scheduler is allowed to schedule.
 func (s *scheduleController) AllowSchedule() bool {
-	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.isPaused()
+	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.IsPaused()
 }
 
 // isPaused returns if a schedueler is paused.
-func (s *scheduleController) isPaused() bool {
+func (s *scheduleController) IsPaused() bool {
 	delayUntil := atomic.LoadInt64(&s.delayUntil)
 	return time.Now().Unix() < delayUntil
 }

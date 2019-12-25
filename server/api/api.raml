@@ -9,7 +9,7 @@ baseUriParameters:
 protocols: [ HTTP, HTTPS ]
 
 types:
-  ClusterStatus:
+  Status:
     type: object
     properties:
       raft_bootstrap_time?: string
@@ -409,7 +409,7 @@ types:
       200:
         body:
           application/json:
-            type: ClusterStatus
+            type: Status
       500:
         description: PD server failed to proceed the request.
 
@@ -1077,7 +1077,7 @@ types:
     uriParameters:
       filter:
         type: string
-        enum: [ miss-peer, extra-peer, pending-peer, down-peer, incorrect-ns, offline-peer, empty-region ]
+        enum: [ miss-peer, extra-peer, pending-peer, down-peer, offline-peer, empty-region, hist-size, hist-keys ]
     get:
       description: List regions with unhealthy status.
       responses:

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pingcap/pd/server/statistics"
@@ -87,4 +88,15 @@ type Cluster interface {
 	AllocPeer(storeID uint64) (*metapb.Peer, error)
 
 	FitRegion(*core.RegionInfo) *placement.RegionFit
+}
+
+// HeartbeatStream is an interface.
+type HeartbeatStream interface {
+	Send(*pdpb.RegionHeartbeatResponse) error
+}
+
+// HeartbeatStreams is an interface of async region heartbeat.
+type HeartbeatStreams interface {
+	SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse)
+	BindStream(storeID uint64, stream HeartbeatStream)
 }

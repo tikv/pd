@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/pd/pkg/keyvisual"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
@@ -266,7 +267,7 @@ func (s *TestServer) GetStore(storeID uint64) *core.StoreInfo {
 
 // GetRaftCluster returns Raft cluster.
 // If cluster has not been bootstrapped, return nil.
-func (s *TestServer) GetRaftCluster() *server.RaftCluster {
+func (s *TestServer) GetRaftCluster() *cluster.RaftCluster {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetRaftCluster()
@@ -299,13 +300,6 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetRaftCluster().GetStoreRegions(storeID)
-}
-
-// CheckHealth checks if members are healthy.
-func (s *TestServer) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
-	s.RLock()
-	defer s.RUnlock()
-	return s.server.CheckHealth(members)
 }
 
 // BootstrapCluster is used to bootstrap the cluster.
@@ -412,6 +406,16 @@ func (c *TestCluster) GetLeader() string {
 	return ""
 }
 
+// GetFollower returns an follower of all servers
+func (c *TestCluster) GetFollower() string {
+	for name, s := range c.servers {
+		if !s.server.IsClosed() && !s.server.GetMember().IsLeader() {
+			return name
+		}
+	}
+	return ""
+}
+
 // WaitLeader is used to get leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
 func (c *TestCluster) WaitLeader() string {
@@ -461,12 +465,6 @@ func (c *TestCluster) GetEtcdClient() *clientv3.Client {
 // GetConfig returns the current TestCluster's configuration.
 func (c *TestCluster) GetConfig() *clusterConfig {
 	return c.config
-}
-
-// CheckHealth checks if members are healthy.
-func (c *TestCluster) CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
-	leader := c.GetLeader()
-	return c.servers[leader].CheckHealth(members)
 }
 
 // HandleRegionHeartbeat processes RegionInfo reports from the client.
