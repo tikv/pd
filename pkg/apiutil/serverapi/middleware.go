@@ -54,7 +54,7 @@ type runtimeServiceValidator struct {
 	group server.APIGroup
 }
 
-// NewRuntimeServiceValidator a checks if the path is invalid.
+// NewRuntimeServiceValidator checks if the path is invalid.
 func NewRuntimeServiceValidator(s *server.Server, group server.APIGroup) negroni.Handler {
 	return &runtimeServiceValidator{s: s, group: group}
 }
