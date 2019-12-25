@@ -27,16 +27,16 @@ const apiPrefix = "/pd"
 
 // NewHandler creates a HTTP handler for API.
 func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, server.APIGroup) {
+	group := server.APIGroup{
+		Name:   "core",
+		IsCore: true,
+	}
 	router := mux.NewRouter()
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
-		serverapi.NewRuntimeServiceAuth(svr),
+		serverapi.NewRuntimeServiceAuth(svr, group),
 		serverapi.NewRedirector(svr),
 		negroni.Wrap(createRouter(apiPrefix, svr)),
 	))
 
-	info := server.APIGroup{
-		Name:   "core",
-		IsCore: true,
-	}
-	return router, info
+	return router, group
 }

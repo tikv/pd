@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/config"
+	"github.com/urfave/negroni"
 	"go.uber.org/zap"
 )
 
@@ -41,7 +42,7 @@ const (
 
 var initHTTPClientOnce sync.Once
 
-// dialClient used to dail http request.
+// dialClient used to dial http request.
 var dialClient = &http.Client{
 	Transport: &http.Transport{
 		DisableKeepAlives: true,
@@ -49,16 +50,17 @@ var dialClient = &http.Client{
 }
 
 type runtimeServiceAuth struct {
-	s *server.Server
+	s     *server.Server
+	group server.APIGroup
 }
 
 // NewRuntimeServiceAuth checks if the path is invalid.
-func NewRuntimeServiceAuth(s *server.Server) *runtimeServiceAuth {
-	return &runtimeServiceAuth{s: s}
+func NewRuntimeServiceAuth(s *server.Server, group server.APIGroup) negroni.Handler {
+	return &runtimeServiceAuth{s: s, group: group}
 }
 
 func (h *runtimeServiceAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if IsServiceAllowed(h.s, r.RequestURI) {
+	if IsServiceAllowed(h.s, h.group) {
 		next(w, r)
 		return
 	}
@@ -67,18 +69,18 @@ func (h *runtimeServiceAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 }
 
 // IsServiceAllowed checks the service through the path.
-func IsServiceAllowed(s *server.Server, path string) bool {
+func IsServiceAllowed(s *server.Server, group server.APIGroup) bool {
 	opt := s.GetServerOption()
 	cfg := opt.LoadPDServerConfig()
 	if cfg != nil {
 		for _, allow := range cfg.RuntimeServices {
-			if len(allow) != 0 && strings.Contains(path, allow) {
+			if len(allow) != 0 && group.Name == allow {
 				return true
 			}
 		}
 	}
 	// for core path
-	if strings.Contains(path, "api/v1") {
+	if group.IsCore {
 		return true
 	}
 	return false
@@ -89,13 +91,13 @@ type redirector struct {
 }
 
 // NewRedirector redirects request to the leader if needs to be handled in the leader.
-func NewRedirector(s *server.Server) *redirector {
+func NewRedirector(s *server.Server) negroni.Handler {
 	return &redirector{s: s}
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	allowFollowerHandle := len(r.Header.Get(AllowFollowerHandle)) > 0
-	if !h.s.IsClosed() && (h.s.GetMember().IsLeader() || allowFollowerHandle) {
+	if !h.s.IsClosed() && (allowFollowerHandle || h.s.GetMember().IsLeader()) {
 		if allowFollowerHandle {
 			w.Header().Add(FollowerHandle, "true")
 		}
@@ -145,7 +147,7 @@ type customReverseProxies struct {
 	client *http.Client
 }
 
-// NewCustomReverseProxies returns the custome rerverse proxies.
+// NewCustomReverseProxies returns the custom reverse proxies.
 func NewCustomReverseProxies(urls []url.URL) *customReverseProxies {
 	p := &customReverseProxies{
 		client: dialClient,

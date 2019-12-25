@@ -84,8 +84,8 @@ func (s *serverTestSuite) TestLeader(c *C) {
 		c.Assert(string(bodyBytes), Equals, target)
 	}
 	leader := cluster.GetServer(leaderName)
-	leaderURL := fmt.Sprintf("%s/pd/apis/keyvisual/v1/heatmap", leader.GetAddr())
-	followerURL := fmt.Sprintf("%s/pd/apis/keyvisual/v1/heatmap", followerSvr.GetAddr())
+	leaderURL := fmt.Sprintf("%s/pd/apis/keyvisual/v1/heatmaps", leader.GetAddr())
+	followerURL := fmt.Sprintf("%s/pd/apis/keyvisual/v1/heatmaps", followerSvr.GetAddr())
 	checkReq(leaderURL, "no service\n")
 	checkReq(followerURL, "no service\n")
 

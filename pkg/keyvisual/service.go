@@ -15,7 +15,6 @@ package keyvisual
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil/serverapi"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/core"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
@@ -55,9 +55,9 @@ func NewKeyvisualService(ctx context.Context, svr *server.Server) (http.Handler,
 		rd:       render.New(render.Options{StreamingJSON: true}),
 	}
 
-	k.HandleFunc("/pd/apis/keyvisual/v1/heatmap", k.Heatmap)
+	k.HandleFunc("/pd/apis/keyvisual/v1/heatmaps", k.Heatmap)
 	handler := negroni.New(
-		serverapi.NewRuntimeServiceAuth(svr),
+		serverapi.NewRuntimeServiceAuth(svr, defaultRegisterAPIGroupInfo),
 		serverapi.NewRedirector(svr),
 		negroni.Wrap(k),
 	)
@@ -118,7 +118,7 @@ func (s *keyvisualService) run() {
 			return
 		case <-ticker.C:
 			cluster := s.svr.GetRaftCluster()
-			if cluster == nil || !serverapi.IsServiceAllowed(s.svr, fmt.Sprintf("pd/apis/%s", defaultRegisterAPIGroupInfo.Name)) {
+			if cluster == nil || !serverapi.IsServiceAllowed(s.svr, defaultRegisterAPIGroupInfo) {
 				continue
 			}
 			s.scanRegions(cluster)
@@ -127,7 +127,7 @@ func (s *keyvisualService) run() {
 	}
 }
 
-func (s *keyvisualService) scanRegions(cluster *server.RaftCluster) []*core.RegionInfo {
+func (s *keyvisualService) scanRegions(cluster *cluster.RaftCluster) []*core.RegionInfo {
 	var key []byte
 	limit := 1024
 	regions := make([]*core.RegionInfo, 0, limit)
