@@ -52,20 +52,20 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 	checkerIsBusy := true
-	if !c.cluster.IsPlacementRulesEnabled() {
+	if c.cluster.IsPlacementRulesEnabled() {
+		if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+			checkerIsBusy = false
+			if op := c.ruleChecker.Check(region); op != nil {
+				return checkerIsBusy, []*operator.Operator{op}
+			}
+		}
+	} else {
 		if op := c.learnerChecker.Check(region); op != nil {
 			return false, []*operator.Operator{op}
 		}
 		if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
 			checkerIsBusy = false
 			if op := c.replicaChecker.Check(region); op != nil {
-				return checkerIsBusy, []*operator.Operator{op}
-			}
-		}
-	} else {
-		if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-			checkerIsBusy = false
-			if op := c.ruleChecker.Check(region); op != nil {
 				return checkerIsBusy, []*operator.Operator{op}
 			}
 		}
