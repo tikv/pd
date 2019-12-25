@@ -42,7 +42,7 @@ const (
 
 // CheckClusterID checks Etcd's cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.
-func CheckClusterID(localClusterID uint64, um types.URLsMap, tlsConfig *tls.Config) error {
+func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Config) error {
 	if len(um) == 0 {
 		return nil
 	}
@@ -65,7 +65,7 @@ func CheckClusterID(localClusterID uint64, um types.URLsMap, tlsConfig *tls.Conf
 		}
 
 		remoteClusterID := remoteCluster.ID()
-		if uint64(remoteClusterID) != localClusterID {
+		if remoteClusterID != localClusterID {
 			return errors.Errorf("Etcd cluster ID mismatch, expect %d, got %d", localClusterID, remoteClusterID)
 		}
 	}

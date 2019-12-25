@@ -158,7 +158,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = etcdutil.CheckClusterID(uint64(etcd.Server.Cluster().ID()), urlmap, tlsConfig); err != nil {
+	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap, tlsConfig); err != nil {
 		return err
 	}
 

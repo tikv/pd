@@ -338,7 +338,7 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 			}
 
 			for _, ev := range wresp.Events {
-				if int32(ev.Type) == int32(mvccpb.DELETE) {
+				if ev.Type == mvccpb.DELETE {
 					log.Info("leader is deleted")
 					return
 				}
