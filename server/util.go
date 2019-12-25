@@ -22,13 +22,13 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 

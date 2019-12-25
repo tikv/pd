@@ -21,11 +21,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/embed"
-	"github.com/coreos/etcd/pkg/types"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/pkg/tempurl"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/pkg/types"
 )
 
 func Test(t *testing.T) {
@@ -123,7 +123,7 @@ func (s *testEtcdutilSuite) TestMemberHelpers(c *C) {
 	// Test CheckClusterID
 	urlmap, err := types.NewURLsMap(cfg2.InitialCluster)
 	c.Assert(err, IsNil)
-	err = CheckClusterID(etcd1.Server.Cluster().ID(), urlmap, &tls.Config{})
+	err = CheckClusterID(uint64(etcd1.Server.Cluster().ID()), urlmap, &tls.Config{})
 	c.Assert(err, IsNil)
 
 	// Test RemoveEtcdMember

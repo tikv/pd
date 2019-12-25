@@ -21,10 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	. "github.com/pingcap/check"
 	pd "github.com/pingcap/pd/client"
 	"github.com/pingcap/pd/pkg/testutil"
+	"go.etcd.io/etcd/clientv3"
 )
 
 type client interface {

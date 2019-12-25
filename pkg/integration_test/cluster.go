@@ -19,12 +19,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
 )
 
 // testServer states.

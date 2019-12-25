@@ -20,7 +20,7 @@ import (
 
 const (
 	//etcd peer detail API
-	//return struct https://github.com/coreos/etcd/blob/master/etcdserver/stats/server.go
+	//ref: https://github.com/etcd-io/etcd/blob/master/Documentation/v2/api.md#self-statistics
 	etcdPeerStatsAPI = "/v2/stats/self"
 )
 

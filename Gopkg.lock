@@ -25,92 +25,6 @@
   revision = "f6d7a1f6fbf35bbf9beb80dc63c56a29dcfb759f"
 
 [[projects]]
-  digest = "1:9610254926720daa703fae889010d45e190e8c264c6da76354f0ac8540ca3271"
-  name = "github.com/coreos/bbolt"
-  packages = ["."]
-  pruneopts = "NUT"
-  revision = "48ea1b39c25fc1bab3506fbc712ecbaa842c4d2d"
-  version = "v1.3.1-coreos.6"
-
-[[projects]]
-  branch = "master"
-  digest = "1:2a2f8e4e89100426685d021dda3131cc22df8c1e5c22af56f6780021ad262067"
-  name = "github.com/coreos/etcd"
-  packages = [
-    "auth",
-    "auth/authpb",
-    "client",
-    "clientv3",
-    "clientv3/balancer",
-    "clientv3/concurrency",
-    "embed",
-    "etcdserver",
-    "etcdserver/api",
-    "etcdserver/api/etcdhttp",
-    "etcdserver/api/membership",
-    "etcdserver/api/rafthttp",
-    "etcdserver/api/snap",
-    "etcdserver/api/snap/snappb",
-    "etcdserver/api/v2auth",
-    "etcdserver/api/v2discovery",
-    "etcdserver/api/v2error",
-    "etcdserver/api/v2http",
-    "etcdserver/api/v2http/httptypes",
-    "etcdserver/api/v2stats",
-    "etcdserver/api/v2store",
-    "etcdserver/api/v2v3",
-    "etcdserver/api/v3alarm",
-    "etcdserver/api/v3client",
-    "etcdserver/api/v3compactor",
-    "etcdserver/api/v3election",
-    "etcdserver/api/v3election/v3electionpb",
-    "etcdserver/api/v3election/v3electionpb/gw",
-    "etcdserver/api/v3lock",
-    "etcdserver/api/v3lock/v3lockpb",
-    "etcdserver/api/v3lock/v3lockpb/gw",
-    "etcdserver/api/v3rpc",
-    "etcdserver/api/v3rpc/rpctypes",
-    "etcdserver/etcdserverpb",
-    "etcdserver/etcdserverpb/gw",
-    "lease",
-    "lease/leasehttp",
-    "lease/leasepb",
-    "mvcc",
-    "mvcc/backend",
-    "mvcc/mvccpb",
-    "pkg/adt",
-    "pkg/contention",
-    "pkg/cpuutil",
-    "pkg/crc",
-    "pkg/debugutil",
-    "pkg/fileutil",
-    "pkg/flags",
-    "pkg/httputil",
-    "pkg/idutil",
-    "pkg/ioutil",
-    "pkg/logutil",
-    "pkg/netutil",
-    "pkg/pathutil",
-    "pkg/pbutil",
-    "pkg/runtime",
-    "pkg/schedule",
-    "pkg/srv",
-    "pkg/systemd",
-    "pkg/tlsutil",
-    "pkg/transport",
-    "pkg/types",
-    "pkg/wait",
-    "proxy/grpcproxy/adapter",
-    "raft",
-    "raft/raftpb",
-    "version",
-    "wal",
-    "wal/walpb",
-  ]
-  pruneopts = "NUT"
-  revision = "2b3aa7e1d49dd8484138c95ac9ab7dfc8e1e7dc0"
-
-[[projects]]
   digest = "1:0ef770954bca104ee99b3b6b7f9b240605ac03517d9f98cbc1893daa03f3c038"
   name = "github.com/coreos/go-semver"
   packages = ["semver"]
@@ -171,7 +85,7 @@
   version = "v1.0.0"
 
 [[projects]]
-  digest = "1:9aa21412e5a184d06dfcdf5cc7babdf5b29da82727744a2056b9fab91f3f8491"
+  digest = "1:04a14fb7f3ef185124cc21f9f28bfd1f6f52fc00d55c9d1afdeeb53307bb940f"
   name = "github.com/golang/protobuf"
   packages = [
     "jsonpb",
@@ -183,8 +97,8 @@
     "ptypes/timestamp",
   ]
   pruneopts = "NUT"
-  revision = "b4deda0973fb4c70b50d226b1af49f3da59f5265"
-  version = "v1.1.0"
+  revision = "6c65a5562fc06764971b7c5d05c76c75e84bdbf7"
+  version = "v1.3.2"
 
 [[projects]]
   branch = "master"
@@ -193,6 +107,14 @@
   packages = ["."]
   pruneopts = "NUT"
   revision = "4030bb1f1f0c35b30ca7009e9ebd06849dd45306"
+
+[[projects]]
+  digest = "1:ab3ec1fe3e39bac4b3ab63390767766622be35b7cab03f47f787f9ec60522a53"
+  name = "github.com/google/uuid"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "0cd6bf5da1e1c83f8b45653022c74f71af0538a4"
+  version = "v1.1.1"
 
 [[projects]]
   digest = "1:dbd86d229eacaa86a98b10f8fb3e3fc69a1913e0f4e010e7cc1f92bf12edca92"
@@ -217,6 +139,14 @@
   pruneopts = "NUT"
   revision = "ea4d1f681babbce9545c9c5f3d5194a789c89f5b"
   version = "v1.2.0"
+
+[[projects]]
+  digest = "1:432e8b04365b52add2d6256a42de45cebebf6b7a132d4eacb052602fe199a80a"
+  name = "github.com/grpc-ecosystem/go-grpc-middleware"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "dd15ed025b6054e5253963e355991f3070d4e593"
+  version = "v1.1.0"
 
 [[projects]]
   digest = "1:96c558cff0532e2e9ffc0b6d7c8c7431c592d781b109343aa51e27f9fd9a6b82"
@@ -255,6 +185,14 @@
   version = "v0.1.0"
 
 [[projects]]
+  digest = "1:88116f979a2f3ff8e6748a942ec37efd668ba2db062fc9a5e47f4dd2de339a38"
+  name = "github.com/json-iterator/go"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "acfec88f7a0d5140ace3dcdbee10184e3684a9e1"
+  version = "v1.1.9"
+
+[[projects]]
   digest = "1:d0164259ed17929689df11205194d80288e8ae25351778f7a3421a24774c36f8"
   name = "github.com/mattn/go-shellwords"
   packages = ["."]
@@ -269,6 +207,22 @@
   pruneopts = "NUT"
   revision = "3247c84500bff8d9fb6d579d800f20b3e091582c"
   version = "v1.0.0"
+
+[[projects]]
+  digest = "1:2f42fa12d6911c7b7659738758631bec870b7e9b4c6be5444f963cdcfccc191f"
+  name = "github.com/modern-go/concurrent"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "bacd9c7ef1dd9b15be4a9909b8ac7a4e313eec94"
+  version = "1.0.3"
+
+[[projects]]
+  digest = "1:c6aca19413b13dc59c220ad7430329e2ec454cc310bc6d8de2c7e2b93c18a0f6"
+  name = "github.com/modern-go/reflect2"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "4b7aa43c6742a2c18fdef89dd197aaae7dac7ccd"
+  version = "1.0.1"
 
 [[projects]]
   digest = "1:76c75adacf9772de879180a7ede189bd780a9345e64d4919bf09e63d74db0b25"
@@ -427,14 +381,6 @@
   revision = "830351dc03c6f07d625727d5f993a463babb20e1"
 
 [[projects]]
-  digest = "1:919fc2a81add8ac4a7a236dceaf3e4c29ba4df96d13c3f2ce13a4d0132ebefb8"
-  name = "github.com/ugorji/go"
-  packages = ["codec"]
-  pruneopts = "NUT"
-  revision = "b4c50a2b199d93b13dc15e78929cfb23bfdf21ab"
-  version = "v1.1.1"
-
-[[projects]]
   branch = "master"
   digest = "1:991d4b44fee52141a7cb695a18d5a3b80f742e16591d74b9b801ac6feb8f42aa"
   name = "github.com/unrolled/render"
@@ -457,6 +403,101 @@
   pruneopts = "NUT"
   revision = "07dd2e8dfe18522e9c447ba95f2fe95262f63bb2"
   version = "0.0.1"
+
+[[projects]]
+  digest = "1:3a4c90791db3bf894a26cf6ffc0f792a31d0f225664c38b0577f02a36bc0cda7"
+  name = "go.etcd.io/bbolt"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "a0458a2b35708eef59eb5f620ceb3cd1c01a824d"
+  version = "v1.3.3"
+
+[[projects]]
+  digest = "1:a2dc78f5200d8099bba14a42137c1a39e96656c603bd657089b0644c50334873"
+  name = "go.etcd.io/etcd"
+  packages = [
+    "auth",
+    "auth/authpb",
+    "client",
+    "clientv3",
+    "clientv3/balancer",
+    "clientv3/balancer/connectivity",
+    "clientv3/balancer/picker",
+    "clientv3/balancer/resolver/endpoint",
+    "clientv3/concurrency",
+    "clientv3/credentials",
+    "embed",
+    "etcdserver",
+    "etcdserver/api",
+    "etcdserver/api/etcdhttp",
+    "etcdserver/api/membership",
+    "etcdserver/api/rafthttp",
+    "etcdserver/api/snap",
+    "etcdserver/api/snap/snappb",
+    "etcdserver/api/v2auth",
+    "etcdserver/api/v2discovery",
+    "etcdserver/api/v2error",
+    "etcdserver/api/v2http",
+    "etcdserver/api/v2http/httptypes",
+    "etcdserver/api/v2stats",
+    "etcdserver/api/v2store",
+    "etcdserver/api/v2v3",
+    "etcdserver/api/v3alarm",
+    "etcdserver/api/v3client",
+    "etcdserver/api/v3compactor",
+    "etcdserver/api/v3election",
+    "etcdserver/api/v3election/v3electionpb",
+    "etcdserver/api/v3election/v3electionpb/gw",
+    "etcdserver/api/v3lock",
+    "etcdserver/api/v3lock/v3lockpb",
+    "etcdserver/api/v3lock/v3lockpb/gw",
+    "etcdserver/api/v3rpc",
+    "etcdserver/api/v3rpc/rpctypes",
+    "etcdserver/etcdserverpb",
+    "etcdserver/etcdserverpb/gw",
+    "lease",
+    "lease/leasehttp",
+    "lease/leasepb",
+    "mvcc",
+    "mvcc/backend",
+    "mvcc/mvccpb",
+    "pkg/adt",
+    "pkg/contention",
+    "pkg/cpuutil",
+    "pkg/crc",
+    "pkg/debugutil",
+    "pkg/fileutil",
+    "pkg/flags",
+    "pkg/httputil",
+    "pkg/idutil",
+    "pkg/ioutil",
+    "pkg/logutil",
+    "pkg/netutil",
+    "pkg/pathutil",
+    "pkg/pbutil",
+    "pkg/runtime",
+    "pkg/schedule",
+    "pkg/srv",
+    "pkg/systemd",
+    "pkg/tlsutil",
+    "pkg/traceutil",
+    "pkg/transport",
+    "pkg/types",
+    "pkg/wait",
+    "proxy/grpcproxy/adapter",
+    "raft",
+    "raft/confchange",
+    "raft/quorum",
+    "raft/raftpb",
+    "raft/tracker",
+    "version",
+    "wal",
+    "wal/walpb",
+  ]
+  pruneopts = "NUT"
+  revision = "3cf2f69b5738fb702ba1a935590f36b52b18979b"
+  source = "github.com/etcd-io/etcd.git"
+  version = "v3.4.3"
 
 [[projects]]
   digest = "1:22f696cee54865fb8e9ff91df7b633f6b8f22037a8015253c6b6a71ca82219c7"
@@ -569,24 +610,33 @@
   revision = "86e600f69ee4704c6efbf6a2a40a5c10700e76c2"
 
 [[projects]]
-  digest = "1:0547cc571133c0dcc6422e5c53b72aafaa0ba3f14bcf33b2fd16ac5f3ea11d33"
+  digest = "1:35a2be7619445f1285bfc82fdcb2a328d389e98e6df127d1365d025749d94c4e"
   name = "google.golang.org/grpc"
   packages = [
     ".",
     "balancer",
     "balancer/base",
     "balancer/roundrobin",
-    "channelz",
+    "binarylog/grpc_binarylog_v1",
     "codes",
     "connectivity",
     "credentials",
+    "credentials/internal",
     "encoding",
     "encoding/proto",
-    "grpclb/grpc_lb_v1/messages",
     "grpclog",
     "health",
     "health/grpc_health_v1",
     "internal",
+    "internal/backoff",
+    "internal/balancerload",
+    "internal/binarylog",
+    "internal/channelz",
+    "internal/envconfig",
+    "internal/grpcrand",
+    "internal/grpcsync",
+    "internal/syscall",
+    "internal/transport",
     "keepalive",
     "metadata",
     "naming",
@@ -594,15 +644,15 @@
     "resolver",
     "resolver/dns",
     "resolver/passthrough",
+    "serviceconfig",
     "stats",
     "status",
     "tap",
-    "transport",
   ]
   pruneopts = "NUT"
-  revision = "7a6a684ca69eb4cae85ad0a484f2e531598c047b"
+  revision = "f6d0f9ee430895e87ef1ceb5ac8f39725bafceef"
   source = "https://github.com/grpc/grpc-go.git"
-  version = "v1.12.2"
+  version = "v1.24.0"
 
 [[projects]]
   digest = "1:80c34337e8a734e190f2d1b716cae774cca74db98315166f92074434e9af0227"
@@ -620,19 +670,20 @@
   revision = "5420a8b6744d3b0345ab293f6fcba19c978f1183"
   version = "v2.2.1"
 
+[[projects]]
+  digest = "1:8730e0150dfb2b7e173890c8b9868e7a273082ef8e39f4940e3506a481cf895c"
+  name = "sigs.k8s.io/yaml"
+  packages = ["."]
+  pruneopts = "NUT"
+  revision = "fd68e9863619f6ec2fdd8625fe1f02e7c877e480"
+  version = "v1.1.0"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
     "github.com/BurntSushi/toml",
     "github.com/chzyer/readline",
-    "github.com/coreos/etcd/clientv3",
-    "github.com/coreos/etcd/embed",
-    "github.com/coreos/etcd/etcdserver",
-    "github.com/coreos/etcd/mvcc/mvccpb",
-    "github.com/coreos/etcd/pkg/transport",
-    "github.com/coreos/etcd/pkg/types",
-    "github.com/coreos/etcd/raft",
     "github.com/coreos/go-semver/semver",
     "github.com/coreos/pkg/capnslog",
     "github.com/dustin/go-humanize",
@@ -659,6 +710,13 @@
     "github.com/spf13/pflag",
     "github.com/unrolled/render",
     "github.com/urfave/negroni",
+    "go.etcd.io/etcd/clientv3",
+    "go.etcd.io/etcd/embed",
+    "go.etcd.io/etcd/etcdserver",
+    "go.etcd.io/etcd/mvcc/mvccpb",
+    "go.etcd.io/etcd/pkg/transport",
+    "go.etcd.io/etcd/pkg/types",
+    "go.etcd.io/etcd/raft",
     "go.uber.org/zap",
     "go.uber.org/zap/zapcore",
     "golang.org/x/net/context",

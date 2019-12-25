@@ -20,11 +20,11 @@ import (
 	"path"
 	"strings"
 
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/embed"
 	log "github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
 	"go.uber.org/zap"
 )
 
