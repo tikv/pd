@@ -49,17 +49,17 @@ var dialClient = &http.Client{
 	},
 }
 
-type runtimeServiceAuth struct {
+type runtimeServiceValidator struct {
 	s     *server.Server
 	group server.APIGroup
 }
 
 // NewRuntimeServiceAuth checks if the path is invalid.
-func NewRuntimeServiceAuth(s *server.Server, group server.APIGroup) negroni.Handler {
-	return &runtimeServiceAuth{s: s, group: group}
+func NewRuntimeServiceValidator(s *server.Server, group server.APIGroup) negroni.Handler {
+	return &runtimeServiceValidator{s: s, group: group}
 }
 
-func (h *runtimeServiceAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	if IsServiceAllowed(h.s, h.group) {
 		next(w, r)
 		return
@@ -70,19 +70,22 @@ func (h *runtimeServiceAuth) ServeHTTP(w http.ResponseWriter, r *http.Request, n
 
 // IsServiceAllowed checks the service through the path.
 func IsServiceAllowed(s *server.Server, group server.APIGroup) bool {
-	opt := s.GetServerOption()
-	cfg := opt.LoadPDServerConfig()
-	if cfg != nil {
-		for _, allow := range cfg.RuntimeServices {
-			if len(allow) != 0 && group.Name == allow {
-				return true
-			}
-		}
-	}
+
 	// for core path
 	if group.IsCore {
 		return true
 	}
+
+	opt := s.GetServerOption()
+	cfg := opt.LoadPDServerConfig()
+	if cfg != nil {
+		for _, allow := range cfg.RuntimeServices {
+			if group.Name == allow {
+				return true
+			}
+		}
+	}
+
 	return false
 }
 

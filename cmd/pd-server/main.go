@@ -92,16 +92,13 @@ func main() {
 		log.Fatal("join meet error", zap.Error(err))
 	}
 
-	coreAPIServiceBuilder := api.NewHandler
-	keyvisualServiceBuilder := keyvisual.NewKeyvisualService
-
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := server.CreateServer(
 		ctx,
 		cfg,
-		coreAPIServiceBuilder,
-		keyvisualServiceBuilder)
+		api.NewHandler,
+		keyvisual.NewKeyvisualService)
 	if err != nil {
 		log.Fatal("create server failed", zap.Error(err))
 	}

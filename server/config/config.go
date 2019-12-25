@@ -199,7 +199,7 @@ const (
 	defaultDisableErrorVerbose = true
 )
 
-var defaultRuntimeServices = []string{""}
+var defaultRuntimeServices = []string{}
 
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {

@@ -57,7 +57,7 @@ func NewKeyvisualService(ctx context.Context, svr *server.Server) (http.Handler,
 
 	k.HandleFunc("/pd/apis/keyvisual/v1/heatmaps", k.Heatmap)
 	handler := negroni.New(
-		serverapi.NewRuntimeServiceAuth(svr, defaultRegisterAPIGroupInfo),
+		serverapi.NewRuntimeServiceValidator(svr, defaultRegisterAPIGroupInfo),
 		serverapi.NewRedirector(svr),
 		negroni.Wrap(k),
 	)
@@ -81,19 +81,19 @@ func (s *keyvisualService) Heatmap(w http.ResponseWriter, r *http.Request) {
 		tsSec, err := strconv.ParseInt(startTimeString, 10, 64)
 		if err != nil {
 			log.Error("parse ts failed", zap.Error(err))
-
+			s.rd.JSON(w, http.StatusBadRequest, "bad request")
+			return
 		}
 		startTime = time.Unix(tsSec, 0)
-
 	}
 	if endTimeString != "" {
 		tsSec, err := strconv.ParseInt(endTimeString, 10, 64)
 		if err != nil {
 			log.Error("parse ts failed", zap.Error(err))
-
+			s.rd.JSON(w, http.StatusBadRequest, "bad request")
+			return
 		}
 		endTime = time.Unix(tsSec, 0)
-
 	}
 
 	log.Info("Request matrix",
