@@ -400,6 +400,16 @@ func (c *TestCluster) GetLeader() string {
 	return ""
 }
 
+// GetFollower returns an follower of all servers
+func (c *TestCluster) GetFollower() string {
+	for name, s := range c.servers {
+		if !s.server.IsClosed() && !s.server.GetMember().IsLeader() {
+			return name
+		}
+	}
+	return ""
+}
+
 // WaitLeader is used to get leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
 func (c *TestCluster) WaitLeader() string {

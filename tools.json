@@ -21,8 +21,8 @@
       "Commit": "04b5d21e00f1f47bd824a6ade581e7189bacde87"
     },
     {
-      "Repository": "github.com/kevinburke/go-bindata",
-      "Commit": "f6a432f39fbebd7aaaf4f29ca1aac539edbf6834"
+      "Repository": "github.com/kevinburke/go-bindata/go-bindata",
+      "Commit": "c7c189834d8e8384b8aa7428c02e4deee6df6b17"
     },
     {
       "Repository": "gopkg.in/alecthomas/gometalinter.v2",
