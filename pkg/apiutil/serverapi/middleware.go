@@ -148,7 +148,7 @@ type customReverseProxies struct {
 }
 
 // NewCustomReverseProxies returns the custom reverse proxies.
-func NewCustomReverseProxies(urls []url.URL) *customReverseProxies {
+func NewCustomReverseProxies(urls []url.URL) http.Handler {
 	p := &customReverseProxies{
 		client: dialClient,
 	}
