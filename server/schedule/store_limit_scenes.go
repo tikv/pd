@@ -15,7 +15,6 @@ package schedule
 
 // StoreLimitScene defines the store limitation on difference
 // scenes
-// 
 // Idle/Low/Normal/High indicates the load of the cluster, it is defined
 // in cluster.State. See the details there for how to calculate the
 // load.
