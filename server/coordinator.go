@@ -418,7 +418,6 @@ func (c *coordinator) collectHotSpotMetrics() {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_read_region_as_leader").Set(0)
 		}
 	}
-
 }
 
 func (c *coordinator) shouldRun() bool {
