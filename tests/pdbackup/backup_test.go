@@ -56,6 +56,7 @@ func (s *backupTestSuite) TestBackup(c *C) {
 		DialTimeout: 3 * time.Second,
 		TLS:         nil,
 	})
+	c.Assert(err, IsNil)
 	backupInfo, err := pdbackup.GetBackupInfo(client, pdAddr)
 	c.Assert(err, IsNil)
 	c.Assert(backupInfo, NotNil)
