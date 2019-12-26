@@ -71,13 +71,13 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 }
 
 func collectClusterStateCurrent(state LoadState) {
-	for i := LoadStateNone; i < state; i++ {
+	for i := LoadStateNone; i <= LoadStateHigh; i++ {
+		if i == state {
+			clusterStateCurrent.WithLabelValues(state.String()).Set(1)
+			continue
+		}
 		clusterStateCurrent.WithLabelValues(i.String()).Set(0)
 	}
-	for i := state + 1; i <= LoadStateHigh; i++ {
-		clusterStateCurrent.WithLabelValues(i.String()).Set(0)
-	}
-	clusterStateCurrent.WithLabelValues(state.String()).Set(1)
 }
 
 // ReplaceStoreLimitScene replaces the store limit values for different scenes
