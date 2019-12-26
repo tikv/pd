@@ -30,14 +30,6 @@ func (c *ConfigManager) Create(ctx context.Context, request *configpb.CreateRequ
 		return nil, err
 	}
 
-	cluster := c.svr.GetRaftCluster()
-	if cluster == nil {
-		return &configpb.CreateResponse{Header: c.componentHeader(), Status: &configpb.Status{
-			Code:    configpb.StatusCode_UNKNOWN,
-			Message: "cluster is not bootstrapped",
-		}}, nil
-	}
-
 	version, config, status := c.CreateConfig(request.GetVersion(), request.GetComponent(), request.GetComponentId(), request.GetConfig())
 	if status.GetCode() == configpb.StatusCode_OK {
 		c.Persist(c.svr.GetStorage())
@@ -57,14 +49,6 @@ func (c *ConfigManager) Get(ctx context.Context, request *configpb.GetRequest) (
 		return nil, err
 	}
 
-	cluster := c.svr.GetRaftCluster()
-	if cluster == nil {
-		return &configpb.GetResponse{Header: c.componentHeader(), Status: &configpb.Status{
-			Code:    configpb.StatusCode_UNKNOWN,
-			Message: "cluster is not bootstrapped",
-		}}, nil
-	}
-
 	version, config, status := c.GetConfig(request.GetVersion(), request.GetComponent(), request.GetComponentId())
 
 	return &configpb.GetResponse{
@@ -79,14 +63,6 @@ func (c *ConfigManager) Get(ctx context.Context, request *configpb.GetRequest) (
 func (c *ConfigManager) Update(ctx context.Context, request *configpb.UpdateRequest) (*configpb.UpdateResponse, error) {
 	if err := c.validateComponentRequest(request.GetHeader()); err != nil {
 		return nil, err
-	}
-
-	cluster := c.svr.GetRaftCluster()
-	if cluster == nil {
-		return &configpb.UpdateResponse{Header: &configpb.Header{ClusterId: c.svr.ClusterID()}, Status: &configpb.Status{
-			Code:    configpb.StatusCode_UNKNOWN,
-			Message: "cluster is not bootstrapped",
-		}}, nil
 	}
 
 	version, status := c.UpdateConfig(request.GetKind(), request.GetVersion(), request.GetEntries())
@@ -107,13 +83,6 @@ func (c *ConfigManager) Delete(ctx context.Context, request *configpb.DeleteRequ
 		return nil, err
 	}
 
-	cluster := c.svr.GetRaftCluster()
-	if cluster == nil {
-		return &configpb.DeleteResponse{Header: &configpb.Header{ClusterId: c.svr.ClusterID()}, Status: &configpb.Status{
-			Code:    configpb.StatusCode_UNKNOWN,
-			Message: "cluster is not bootstrapped",
-		}}, nil
-	}
 	status := c.DeleteConfig(request.GetKind(), request.GetVersion())
 	if status.GetCode() == configpb.StatusCode_OK {
 		c.Persist(c.svr.GetStorage())
