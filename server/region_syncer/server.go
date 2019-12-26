@@ -53,7 +53,7 @@ type ServerStream interface {
 
 // Server is the abstraction of the syncer storage server.
 type Server interface {
-	Context() context.Context
+	LoopContext() context.Context
 	ClusterID() uint64
 	GetMemberInfo() *pdpb.Member
 	GetLeader() *pdpb.Member
@@ -61,6 +61,7 @@ type Server interface {
 	Name() string
 	GetMetaRegions() []*metapb.Region
 	GetSecurityConfig() *config.SecurityConfig
+	GetBasicCluster() *core.BasicCluster
 }
 
 // RegionSyncer is used to sync the region information without raft.

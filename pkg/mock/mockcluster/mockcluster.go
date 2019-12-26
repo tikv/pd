@@ -43,7 +43,8 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
-	ruleManager, _ := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()), opt.MaxReplicas, opt.GetLocationLabels())
+	ruleManager := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()))
+	ruleManager.Initialize(opt.MaxReplicas, opt.GetLocationLabels())
 	return &Cluster{
 		BasicCluster:    core.NewBasicCluster(),
 		IDAllocator:     mockid.NewIDAllocator(),

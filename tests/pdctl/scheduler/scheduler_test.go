@@ -42,9 +42,9 @@ func (s *schedulerTestSuite) SetUpSuite(c *C) {
 func (s *schedulerTestSuite) TestScheduler(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers(ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()

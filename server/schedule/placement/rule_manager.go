@@ -28,23 +28,28 @@ import (
 type RuleManager struct {
 	store *core.Storage
 	sync.RWMutex
-	rules     map[[2]string]*Rule
-	splitKeys [][]byte
+	initialized bool
+	rules       map[[2]string]*Rule
+	splitKeys   [][]byte
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(store *core.Storage, maxReplica int, locationLabels []string) (*RuleManager, error) {
-	m := &RuleManager{
+func NewRuleManager(store *core.Storage) *RuleManager {
+	return &RuleManager{
 		store: store,
 		rules: make(map[[2]string]*Rule),
 	}
-	if err := m.initialize(maxReplica, locationLabels); err != nil {
-		return nil, err
-	}
-	return m, nil
 }
 
-func (m *RuleManager) initialize(maxReplica int, locationLabels []string) error {
+// Initialize loads rules from storage. If Placement Rules feature is never enabled, it creates default rule that is
+// compatible with previous configuration.
+func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error {
+	m.Lock()
+	defer m.Unlock()
+	if m.initialized {
+		return nil
+	}
+
 	var rules []*Rule
 	ok, err := m.store.LoadRules(&rules)
 	if err != nil {
@@ -66,6 +71,7 @@ func (m *RuleManager) initialize(maxReplica int, locationLabels []string) error 
 		m.rules[r.Key()] = r
 	}
 	m.updateSplitKeys()
+	m.initialized = true
 	return nil
 }
 

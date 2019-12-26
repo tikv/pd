@@ -58,6 +58,7 @@ type Server interface {
 	GetStorage() *core.Storage
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
+	GetBasicCluster() *core.BasicCluster
 }
 
 // RaftCluster is used for cluster config management.
@@ -168,8 +169,8 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage) {
-	c.core = core.NewBasicCluster()
+func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster) {
+	c.core = basicCluster
 	c.opt = opt
 	c.storage = storage
 	c.id = id
@@ -190,13 +191,21 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage())
+	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage(), s.GetBasicCluster())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
 	}
 	if cluster == nil {
 		return nil
+	}
+
+	c.ruleManager = placement.NewRuleManager(c.storage)
+	if c.IsPlacementRulesEnabled() {
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		if err != nil {
+			return err
+		}
 	}
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
@@ -238,16 +247,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	putRegion := func(region *core.RegionInfo) []*core.RegionInfo {
-		origin, err := c.core.PreCheckPutRegion(region)
-		if err != nil {
-			log.Warn("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
-			// return the state region to delete.
-			return []*core.RegionInfo{region}
-		}
-		return c.core.PutRegion(region)
-	}
-	if err := c.storage.LoadRegions(putRegion); err != nil {
+	if err := c.storage.LoadRegionsOnce(c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -805,7 +805,16 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			core.SetStoreLabels(labels),
 		)
 	}
-	// Check location labels.
+	if err = c.checkStoreLabels(s); err != nil {
+		return err
+	}
+	return c.putStoreLocked(s)
+}
+
+func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
+	if c.opt.IsPlacementRulesEnabled() {
+		return nil
+	}
 	keysSet := make(map[string]struct{})
 	for _, k := range c.GetLocationLabels() {
 		keysSet[k] = struct{}{}
@@ -829,7 +838,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			}
 		}
 	}
-	return c.putStoreLocked(s)
+	return nil
 }
 
 // RemoveStore marks a store as offline in cluster.

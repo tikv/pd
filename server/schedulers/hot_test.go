@@ -42,6 +42,12 @@ func (s *testHotWriteRegionSchedulerSuite) TestSchedule(c *C) {
 	c.Assert(err, IsNil)
 	opt.HotRegionCacheHitsThreshold = 0
 
+	s.checkSchedule(c, tc, opt, hb)
+	opt.EnablePlacementRules = true
+	s.checkSchedule(c, tc, opt, hb)
+}
+
+func (s *testHotWriteRegionSchedulerSuite) checkSchedule(c *C, tc *mockcluster.Cluster, opt *mockoption.ScheduleOptions, hb schedule.Scheduler) {
 	// Add stores 1, 2, 3, 4, 5, 6  with region counts 3, 2, 2, 2, 0, 0.
 
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})

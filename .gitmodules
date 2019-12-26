@@ -1,3 +1,3 @@
 [submodule "pkg/ui/pd-web"]
 	path = pkg/ui/pd-web
-	url = https://github.com/pingcap-fe/pd-web.git
+	url = https://github.com/pingcap/pd-web.git
