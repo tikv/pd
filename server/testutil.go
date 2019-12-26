@@ -40,12 +40,12 @@ type CleanupFunc func()
 func NewTestServer(c *check.C) (*Server, CleanupFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
-	s, err := CreateServer(cfg)
+	s, err := CreateServer(ctx, cfg)
 	if err != nil {
 		cancel()
 		return nil, nil, err
 	}
-	if err = s.Run(ctx); err != nil {
+	if err = s.Run(); err != nil {
 		cancel()
 		return nil, nil, err
 	}

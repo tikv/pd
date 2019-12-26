@@ -53,7 +53,7 @@ type ServerStream interface {
 
 // Server is the abstraction of the syncer storage server.
 type Server interface {
-	Context() context.Context
+	LoopContext() context.Context
 	ClusterID() uint64
 	GetMemberInfo() *pdpb.Member
 	GetLeader() *pdpb.Member

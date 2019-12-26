@@ -83,9 +83,9 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 			for _, opt := range opts {
 				opt(cfg)
 			}
-			s, err := server.CreateServer(cfg, NewHandler)
+			s, err := server.CreateServer(ctx, cfg, NewHandler)
 			c.Assert(err, IsNil)
-			err = s.Run(ctx)
+			err = s.Run()
 			c.Assert(err, IsNil)
 			ch <- s
 		}(cfg)

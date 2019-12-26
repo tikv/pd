@@ -55,11 +55,11 @@ func (s *testTsoSuite) TearDownSuite(c *C) {
 
 func (s *testTsoSuite) testGetTimestamp(c *C, n int) *pdpb.Timestamp {
 	var err error
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -117,11 +117,11 @@ func (s *testTsoSuite) TestTso(c *C) {
 }
 
 func (s *testTsoSuite) TestConcurrcyRequest(c *C) {
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -146,11 +146,11 @@ func (s *testTsoSuite) TestConcurrcyRequest(c *C) {
 
 func (s *testTsoSuite) TestTsoCount0(c *C) {
 	var err error
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -185,10 +185,10 @@ func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/fallBackSync", `return(true)`), IsNil)
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/fallBackUpdate", `return(true)`), IsNil)
 	var err error
-	s.cluster, err = tests.NewTestCluster(1)
+	s.cluster, err = tests.NewTestCluster(s.ctx, 1)
 	c.Assert(err, IsNil)
 
-	err = s.cluster.RunInitialServers(s.ctx)
+	err = s.cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	s.cluster.WaitLeader()
 
@@ -198,7 +198,7 @@ func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	svr.Close()
 	failpoint.Disable("github.com/pingcap/pd/server/tso/fallBackSync")
 	failpoint.Disable("github.com/pingcap/pd/server/tso/fallBackUpdate")
-	err = svr.Run(s.ctx)
+	err = svr.Run()
 	c.Assert(err, IsNil)
 	s.cluster.WaitLeader()
 }
@@ -279,11 +279,11 @@ func (s *testFollowerTsoSuite) TearDownSuite(c *C) {
 func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/skipRetryGetTS", `return(true)`), IsNil)
 	var err error
-	cluster, err := tests.NewTestCluster(2)
+	cluster, err := tests.NewTestCluster(s.ctx, 2)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 

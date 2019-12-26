@@ -44,9 +44,9 @@ func (s *regionTestSuite) SetUpSuite(c *C) {
 func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers(ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	url := cluster.GetConfig().GetClientURLs()
@@ -65,9 +65,9 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 func (s *regionTestSuite) TestRegion(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers(ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()
