@@ -840,13 +840,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			}
 		}
 	}
-	// Set the store limit according to current state of the cluster
-	c.updateStoreLimit(s)
 	return c.putStoreLocked(s)
-}
-
-func (c *RaftCluster) updateStoreLimit(s *core.StoreInfo) {
-
 }
 
 // RemoveStore marks a store as offline in cluster.
