@@ -59,11 +59,11 @@ func (s *serverTestSuite) TearDownSuite(c *C) {
 }
 
 func (s *serverTestSuite) TestMemberDelete(c *C) {
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	leaderName := cluster.WaitLeader()
 	c.Assert(leaderName, Not(Equals), "")
@@ -145,11 +145,11 @@ func (s *serverTestSuite) checkMemberList(c *C, clientURL string, configs []*con
 }
 
 func (s *serverTestSuite) TestLeaderPriority(c *C) {
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	cluster.WaitLeader()
@@ -202,11 +202,11 @@ func (s *serverTestSuite) waitEtcdLeaderChange(c *C, server *tests.TestServer, o
 }
 
 func (s *serverTestSuite) TestLeaderResign(c *C) {
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	leader1 := cluster.WaitLeader()
@@ -235,11 +235,11 @@ func (s *serverTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old
 }
 
 func (s *serverTestSuite) TestMoveLeader(c *C) {
-	cluster, err := tests.NewTestCluster(5)
+	cluster, err := tests.NewTestCluster(s.ctx, 5)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -286,9 +286,9 @@ func (s *leaderTestSuite) SetUpSuite(c *C) {
 	s.cfg = server.NewTestSingleConfig(c)
 	s.wg.Add(1)
 	s.done = make(chan bool)
-	svr, err := server.CreateServer(s.cfg)
+	svr, err := server.CreateServer(s.ctx, s.cfg)
 	c.Assert(err, IsNil)
-	err = svr.Run(s.ctx)
+	err = svr.Run()
 	// Send requests after server has started.
 	go s.sendRequest(c, s.cfg.ClientUrls)
 	time.Sleep(100 * time.Millisecond)

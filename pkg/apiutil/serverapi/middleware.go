@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package serverapi
 
 import (
 	"crypto/tls"
@@ -24,13 +24,15 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/config"
+	"github.com/urfave/negroni"
 	"go.uber.org/zap"
 )
 
+// HTTP headers.
 const (
-	redirectorHeader    = "PD-Redirector"
-	allowFollowerHandle = "PD-Allow-follower-handle"
-	followerHandle      = "PD-Follwer-handle"
+	RedirectorHeader    = "PD-Redirector"
+	AllowFollowerHandle = "PD-Allow-follower-handle"
+	FollowerHandle      = "PD-Follwer-handle"
 )
 
 const (
@@ -40,32 +42,80 @@ const (
 
 var initHTTPClientOnce sync.Once
 
+// dialClient used to dial http request.
+var dialClient = &http.Client{
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
+
+type runtimeServiceValidator struct {
+	s     *server.Server
+	group server.APIGroup
+}
+
+// NewRuntimeServiceValidator checks if the path is invalid.
+func NewRuntimeServiceValidator(s *server.Server, group server.APIGroup) negroni.Handler {
+	return &runtimeServiceValidator{s: s, group: group}
+}
+
+func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if IsServiceAllowed(h.s, h.group) {
+		next(w, r)
+		return
+	}
+
+	http.Error(w, "no service", http.StatusServiceUnavailable)
+}
+
+// IsServiceAllowed checks the service through the path.
+func IsServiceAllowed(s *server.Server, group server.APIGroup) bool {
+
+	// for core path
+	if group.IsCore {
+		return true
+	}
+
+	opt := s.GetServerOption()
+	cfg := opt.LoadPDServerConfig()
+	if cfg != nil {
+		for _, allow := range cfg.RuntimeServices {
+			if group.Name == allow {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 type redirector struct {
 	s *server.Server
 }
 
-func newRedirector(s *server.Server) *redirector {
+// NewRedirector redirects request to the leader if needs to be handled in the leader.
+func NewRedirector(s *server.Server) negroni.Handler {
 	return &redirector{s: s}
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	allowFollowerHandle := len(r.Header.Get(allowFollowerHandle)) > 0
-	if !h.s.IsClosed() && (h.s.GetMember().IsLeader() || allowFollowerHandle) {
+	allowFollowerHandle := len(r.Header.Get(AllowFollowerHandle)) > 0
+	if !h.s.IsClosed() && (allowFollowerHandle || h.s.GetMember().IsLeader()) {
 		if allowFollowerHandle {
-			w.Header().Add(followerHandle, "true")
+			w.Header().Add(FollowerHandle, "true")
 		}
 		next(w, r)
 		return
 	}
 
 	// Prevent more than one redirection.
-	if name := r.Header.Get(redirectorHeader); len(name) != 0 {
+	if name := r.Header.Get(RedirectorHeader); len(name) != 0 {
 		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()))
 		http.Error(w, errRedirectToNotLeader, http.StatusInternalServerError)
 		return
 	}
 
-	r.Header.Set(redirectorHeader, h.s.Name())
+	r.Header.Set(RedirectorHeader, h.s.Name())
 
 	leader := h.s.GetMember().GetLeader()
 	if leader == nil {
@@ -92,7 +142,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	newCustomReverseProxies(urls).ServeHTTP(w, r)
+	NewCustomReverseProxies(urls).ServeHTTP(w, r)
 }
 
 type customReverseProxies struct {
@@ -100,7 +150,8 @@ type customReverseProxies struct {
 	client *http.Client
 }
 
-func newCustomReverseProxies(urls []url.URL) *customReverseProxies {
+// NewCustomReverseProxies returns the custom reverse proxies.
+func NewCustomReverseProxies(urls []url.URL) http.Handler {
 	p := &customReverseProxies{
 		client: dialClient,
 	}

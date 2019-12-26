@@ -199,6 +199,8 @@ const (
 	defaultDisableErrorVerbose = true
 )
 
+var defaultRuntimeServices = []string{}
+
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {
 		*v = defValue
@@ -886,6 +888,8 @@ type PDServerConfig struct {
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
+	// RuntimeSercives is the running the running extension services.
+	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.
 	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
@@ -900,6 +904,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("key-type") {
 		c.KeyType = defaultKeyType
+	}
+	if !meta.IsDefined("runtime-services") {
+		c.RuntimeServices = defaultRuntimeServices
 	}
 	return nil
 }

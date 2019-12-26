@@ -72,11 +72,11 @@ func (kv *testErrorKV) Save(key, value string) error {
 }
 
 func (s *clusterTestSuite) TestBootstrap(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -110,11 +110,11 @@ func (s *clusterTestSuite) TestBootstrap(c *C) {
 }
 
 func (s *clusterTestSuite) TestGetPutConfig(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -297,11 +297,11 @@ func testRemoveStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClie
 
 // Make sure PD will not panic if it start and stop again and again.
 func (s *clusterTestSuite) TestRaftClusterRestart(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -324,11 +324,11 @@ func (s *clusterTestSuite) TestRaftClusterRestart(c *C) {
 
 // Make sure PD will not deadlock if it start and stop again and again.
 func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -363,11 +363,11 @@ func newMetaStore(storeID uint64, addr, version string, state metapb.StoreState)
 }
 
 func (s *clusterTestSuite) TestGetPDMembers(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -385,11 +385,11 @@ func (s *clusterTestSuite) TestGetPDMembers(c *C) {
 }
 
 func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -420,11 +420,11 @@ func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
 }
 
 func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -533,11 +533,11 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 }
 
 func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -611,11 +611,11 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 }
 
 func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()

@@ -53,11 +53,11 @@ func (s *testAllocIDSuite) TearDownSuite(c *C) {
 }
 func (s *testAllocIDSuite) TestID(c *C) {
 	var err error
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -97,11 +97,11 @@ func (s *testAllocIDSuite) TestID(c *C) {
 
 func (s *testAllocIDSuite) TestCommand(c *C) {
 	var err error
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
