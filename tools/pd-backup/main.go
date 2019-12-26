@@ -1,13 +1,25 @@
+// Copyright 2019 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/pingcap/pd/pkg/etcdutil"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/pkg/transport"
+	"github.com/pingcap/pd/server/config"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -15,11 +27,16 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/typeutil"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/pkg/transport"
 )
 
 var (
 	pdAddr   = flag.String("pd", "http://127.0.0.1:2379", "pd address")
-	filePath = flag.String("file", "backup.dump", "the backup file path and name")
+	filePath = flag.String("file", "backup.json", "the backup file path and name")
 	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
 	certPath = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
 	keyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format.")
@@ -33,10 +50,10 @@ const (
 )
 
 type backupInfo struct {
-	clusterID         uint64
-	allocIDMax        uint64
-	allocTimestampMax uint64
-	config            string
+	ClusterID         uint64         `json:"clusterID"`
+	AllocIDMax        uint64         `json:"allocIDMax"`
+	AllocTimestampMax uint64         `json:"allocTimestampMax"`
+	Config            *config.Config `json:"config"`
 }
 
 func main() {
@@ -61,18 +78,18 @@ func main() {
 	})
 	checkErr(err)
 
-	backOut := getBackupInfo(client)
-	outputToFile(backOut, f)
+	backInfo := getBackupInfo(client)
+	outputToFile(backInfo, f)
 	fmt.Println("pd backup successful! dump file is:", *filePath)
 }
 
 func getBackupInfo(client *clientv3.Client) *backupInfo {
-	backOut := &backupInfo{}
+	backInfo := &backupInfo{}
 	resp, err := etcdutil.EtcdKVGet(client, pdClusterIDPath)
 	checkErr(err)
 	clusterID, err := typeutil.BytesToUint64(resp.Kvs[0].Value)
 	checkErr(err)
-	backOut.clusterID = clusterID
+	backInfo.ClusterID = clusterID
 
 	rootPath := path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
 	allocIDPath := path.Join(rootPath, "alloc_id")
@@ -80,17 +97,17 @@ func getBackupInfo(client *clientv3.Client) *backupInfo {
 	checkErr(err)
 	allocIDMax, err := typeutil.BytesToUint64(resp.Kvs[0].Value)
 	checkErr(err)
-	backOut.allocIDMax = allocIDMax
+	backInfo.AllocIDMax = allocIDMax
 
-	timestapPath := path.Join(rootPath, "timestamp")
-	resp, err = etcdutil.EtcdKVGet(client, timestapPath)
+	timestampPath := path.Join(rootPath, "timestamp")
+	resp, err = etcdutil.EtcdKVGet(client, timestampPath)
 	checkErr(err)
 	allocTimestampMax, err := typeutil.BytesToUint64(resp.Kvs[0].Value)
 	checkErr(err)
-	backOut.allocTimestampMax = allocTimestampMax
+	backInfo.AllocTimestampMax = allocTimestampMax
 
-	backOut.config = getConfig()
-	return backOut
+	backInfo.Config = getConfig()
+	return backInfo
 }
 
 func checkErr(err error) {
@@ -100,24 +117,24 @@ func checkErr(err error) {
 	}
 }
 
-func outputToFile(backOut *backupInfo, f *os.File) {
+func outputToFile(backInfo *backupInfo, f *os.File) {
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	clusterIDOut := "clusterID:" + strconv.FormatUint(backOut.clusterID, 10)
-	allocIDMaxOut := "allocIDMax:" + strconv.FormatUint(backOut.allocIDMax, 10)
-	allocTimestampMaxOut := "allocTimestampMax:" + strconv.FormatUint(backOut.allocTimestampMax, 10)
-	fmt.Fprintln(w, clusterIDOut)
-	fmt.Fprintln(w, allocIDMaxOut)
-	fmt.Fprintln(w, allocTimestampMaxOut)
-	fmt.Fprintln(w, "config:")
-	fmt.Fprintln(w, backOut.config)
+	backBytes, err := json.Marshal(backInfo)
+	checkErr(err)
+	var formatBuffer bytes.Buffer
+	checkErr(json.Indent(&formatBuffer, []byte(backBytes), "", "    "))
+	fmt.Fprintln(w, formatBuffer.String())
 }
 
-func getConfig() string {
+func getConfig() *config.Config {
 	resp, err := http.Get(*pdAddr + pdConfigAPIPath)
 	checkErr(err)
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	checkErr(err)
-	return string(body)
+	conf := &config.Config{}
+	err = json.Unmarshal(body, conf)
+	checkErr(err)
+	return conf
 }
