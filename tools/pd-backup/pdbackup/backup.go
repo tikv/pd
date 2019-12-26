@@ -91,7 +91,7 @@ func GetBackupInfo(client *clientv3.Client, pdAddr string) (*BackupInfo, error) 
 }
 
 //OutputToFile output the backupInfo to the file.
-func OutputToFile(backInfo *backupInfo, f *os.File) error {
+func OutputToFile(backInfo *BackupInfo, f *os.File) error {
 	w := bufio.NewWriter(f)
 	defer w.Flush()
 	backBytes, err := json.Marshal(backInfo)
