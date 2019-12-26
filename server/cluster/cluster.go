@@ -200,11 +200,12 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	defaultReplicas := c.opt.GetMaxReplicas()
-	defaultLocationLabels := c.opt.GetLocationLabels()
-	c.ruleManager, err = placement.NewRuleManager(c.storage, defaultReplicas, defaultLocationLabels)
-	if err != nil {
-		return err
+	c.ruleManager = placement.NewRuleManager(c.storage)
+	if c.IsPlacementRulesEnabled() {
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		if err != nil {
+			return err
+		}
 	}
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())

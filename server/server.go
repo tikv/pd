@@ -659,6 +659,12 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if cfg.EnablePlacementRules {
+		// initialize rule manager.
+		if err := s.GetRaftCluster().GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
+			return err
+		}
+	}
 	old := s.scheduleOpt.GetReplication().Load()
 	s.scheduleOpt.GetReplication().Store(&cfg)
 	if err := s.scheduleOpt.Persist(s.storage); err != nil {
