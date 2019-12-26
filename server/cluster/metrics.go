@@ -69,7 +69,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "server",
 			Name:      "cluster_state_current",
-			Help:      "CPU usage to determine the cluster state",
+			Help:      "Current state of the cluster",
 		}, []string{"state"})
 )
 
