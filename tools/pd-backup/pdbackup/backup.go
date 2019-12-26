@@ -35,6 +35,7 @@ const (
 	pdClusterIDPath = "/pd/cluster_id"
 	pdConfigAPIPath = "/pd/api/v1/config"
 )
+
 // BackupInfo is the backup infos.
 type BackupInfo struct {
 	ClusterID         uint64         `json:"clusterID"`
@@ -45,7 +46,7 @@ type BackupInfo struct {
 
 //GetBackupInfo return the BackupInfo
 func GetBackupInfo(client *clientv3.Client, pdAddr string) (*BackupInfo, error) {
-	backInfo := & BackupInfo{}
+	backInfo := &BackupInfo{}
 	resp, err := etcdutil.EtcdKVGet(client, pdClusterIDPath)
 	if err != nil {
 		return nil, err

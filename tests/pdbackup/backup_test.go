@@ -14,7 +14,9 @@
 package pdbackup
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -57,4 +59,14 @@ func (s *backupTestSuite) TestBackup(c *C) {
 	backupInfo, err := pdbackup.GetBackupInfo(client, pdAddr)
 	c.Assert(err, IsNil)
 	c.Assert(backupInfo, NotNil)
+	backBytes, err := json.Marshal(backupInfo)
+	c.Assert(err, IsNil)
+
+	var formatBuffer bytes.Buffer
+	err = json.Indent(&formatBuffer, []byte(backBytes), "", "    ")
+	c.Assert(err, IsNil)
+	newInfo := &pdbackup.BackupInfo{}
+	err = json.Unmarshal(formatBuffer.Bytes(), newInfo)
+	c.Assert(err, IsNil)
+	c.Assert(backupInfo, DeepEquals, newInfo)
 }
