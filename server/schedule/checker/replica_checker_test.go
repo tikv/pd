@@ -14,7 +14,6 @@
 package checker
 
 import (
-	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -26,10 +25,6 @@ import (
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
 )
-
-func TestReplicaChecker(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testReplicaCheckerSuite{})
 

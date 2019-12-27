@@ -200,6 +200,14 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
+	c.ruleManager = placement.NewRuleManager(c.storage)
+	if c.IsPlacementRulesEnabled() {
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		if err != nil {
+			return err
+		}
+	}
+
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt)
 	c.quit = make(chan struct{})
@@ -797,7 +805,16 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			core.SetStoreLabels(labels),
 		)
 	}
-	// Check location labels.
+	if err = c.checkStoreLabels(s); err != nil {
+		return err
+	}
+	return c.putStoreLocked(s)
+}
+
+func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
+	if c.opt.IsPlacementRulesEnabled() {
+		return nil
+	}
 	keysSet := make(map[string]struct{})
 	for _, k := range c.GetLocationLabels() {
 		keysSet[k] = struct{}{}
@@ -821,7 +838,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			}
 		}
 	}
-	return c.putStoreLocked(s)
+	return nil
 }
 
 // RemoveStore marks a store as offline in cluster.

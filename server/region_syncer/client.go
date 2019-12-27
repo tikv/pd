@@ -57,7 +57,7 @@ func (s *RegionSyncer) establish(addr string) (ClientStream, *grpc.ClientConn, e
 		return nil, nil, errors.WithStack(err)
 	}
 
-	ctx, cancel := context.WithCancel(s.server.Context())
+	ctx, cancel := context.WithCancel(s.server.LoopContext())
 	client, err := pdpb.NewPDClient(cc).SyncRegions(ctx)
 	if err != nil {
 		cancel()

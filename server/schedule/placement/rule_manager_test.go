@@ -32,7 +32,8 @@ type testManagerSuite struct {
 func (s *testManagerSuite) SetUpTest(c *C) {
 	s.store = core.NewStorage(kv.NewMemoryKV())
 	var err error
-	s.manager, err = NewRuleManager(s.store, 3, []string{"zone", "rack", "host"})
+	s.manager = NewRuleManager(s.store)
+	err = s.manager.Initialize(3, []string{"zone", "rack", "host"})
 	c.Assert(err, IsNil)
 }
 
@@ -77,7 +78,8 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 	for _, r := range rules {
 		s.manager.SetRule(r)
 	}
-	m2, err := NewRuleManager(s.store, 3, []string{"no", "labels"})
+	m2 := NewRuleManager(s.store)
+	err := m2.Initialize(3, []string{"no", "labels"})
 	c.Assert(err, IsNil)
 	c.Assert(m2.GetAllRules(), HasLen, 2)
 	c.Assert(m2.GetRule("pd", "default"), DeepEquals, rules[0])

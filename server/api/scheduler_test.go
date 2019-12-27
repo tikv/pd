@@ -48,6 +48,39 @@ func (s *testScheduleSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
+func (s *testScheduleSuite) TestOriginAPI(c *C) {
+	addURL := s.urlPrefix
+	input := make(map[string]interface{})
+	input["name"] = "evict-leader-scheduler"
+	input["store_id"] = 1
+	body, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(addURL, body), IsNil)
+	input1 := make(map[string]interface{})
+	input1["name"] = "evict-leader-scheduler"
+	input1["store_id"] = 2
+	body, err = json.Marshal(input1)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(addURL, body), IsNil)
+	rc := s.svr.GetRaftCluster()
+	c.Assert(rc.GetSchedulers(), HasLen, 1)
+	resp := make(map[string]interface{})
+	listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
+	c.Assert(readJSON(listURL, &resp), IsNil)
+	c.Assert(resp["store-id-ranges"], HasLen, 2)
+	deleteURL := fmt.Sprintf("%s/%s", s.urlPrefix, "evict-leader-scheduler-1")
+	c.Assert(doDelete(deleteURL), IsNil)
+	c.Assert(rc.GetSchedulers(), HasLen, 1)
+	resp1 := make(map[string]interface{})
+	c.Assert(readJSON(listURL, &resp1), IsNil)
+	c.Assert(resp1["store-id-ranges"], HasLen, 1)
+	deleteURL = fmt.Sprintf("%s/%s", s.urlPrefix, "evict-leader-scheduler-2")
+	c.Assert(doDelete(deleteURL), IsNil)
+	c.Assert(rc.GetSchedulers(), HasLen, 0)
+	resp2 := make(map[string]interface{})
+	c.Assert(readJSON(listURL, &resp2), NotNil)
+}
+
 func (s *testScheduleSuite) TestAPI(c *C) {
 	type arg struct {
 		opt   string

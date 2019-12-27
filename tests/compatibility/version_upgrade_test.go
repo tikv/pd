@@ -46,11 +46,11 @@ func (s *compatibilityTestSuite) TearDownSuite(c *C) {
 }
 
 func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
@@ -74,7 +74,7 @@ func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
 	// Restart all PDs.
 	err = cluster.StopAll()
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -97,10 +97,10 @@ func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
 }
 
 func (s *compatibilityTestSuite) TestRollingUpgrade(c *C) {
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())

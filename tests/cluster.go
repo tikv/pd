@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/keyvisual"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/cluster"
@@ -55,7 +56,7 @@ var initHTTPClientOnce sync.Once
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
-func NewTestServer(cfg *config.Config) (*TestServer, error) {
+func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
 	err := cfg.SetupLogger()
 	if err != nil {
 		return nil, err
@@ -67,7 +68,12 @@ func NewTestServer(cfg *config.Config) (*TestServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	svr, err := server.CreateServer(cfg, api.NewHandler)
+	svr, err := server.CreateServer(
+		ctx,
+		cfg,
+		api.NewHandler,
+		keyvisual.NewKeyvisualService,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -84,13 +90,13 @@ func NewTestServer(cfg *config.Config) (*TestServer, error) {
 }
 
 // Run starts to run a TestServer.
-func (s *TestServer) Run(ctx context.Context) error {
+func (s *TestServer) Run() error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
 		return errors.Errorf("server(state%d) cannot run", s.state)
 	}
-	if err := s.server.Run(ctx); err != nil {
+	if err := s.server.Run(); err != nil {
 		return err
 	}
 	s.state = Running
@@ -320,7 +326,7 @@ type TestCluster struct {
 type ConfigOption func(conf *config.Config)
 
 // NewTestCluster creates a new TestCluster.
-func NewTestCluster(initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
+func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
 	for _, conf := range config.InitialServers {
@@ -328,7 +334,7 @@ func NewTestCluster(initialServerCount int, opts ...ConfigOption) (*TestCluster,
 		if err != nil {
 			return nil, err
 		}
-		s, err := NewTestServer(serverConf)
+		s, err := NewTestServer(ctx, serverConf)
 		if err != nil {
 			return nil, err
 		}
@@ -341,17 +347,17 @@ func NewTestCluster(initialServerCount int, opts ...ConfigOption) (*TestCluster,
 }
 
 // RunServer starts to run TestServer.
-func (c *TestCluster) RunServer(ctx context.Context, server *TestServer) <-chan error {
+func (c *TestCluster) RunServer(server *TestServer) <-chan error {
 	resC := make(chan error)
-	go func() { resC <- server.Run(ctx) }()
+	go func() { resC <- server.Run() }()
 	return resC
 }
 
 // RunServers starts to run multiple TestServer.
-func (c *TestCluster) RunServers(ctx context.Context, servers []*TestServer) error {
+func (c *TestCluster) RunServers(servers []*TestServer) error {
 	res := make([]<-chan error, len(servers))
 	for i, s := range servers {
-		res[i] = c.RunServer(ctx, s)
+		res[i] = c.RunServer(s)
 	}
 	for _, c := range res {
 		if err := <-c; err != nil {
@@ -362,12 +368,12 @@ func (c *TestCluster) RunServers(ctx context.Context, servers []*TestServer) err
 }
 
 // RunInitialServers starts to run servers in InitialServers.
-func (c *TestCluster) RunInitialServers(ctx context.Context) error {
+func (c *TestCluster) RunInitialServers() error {
 	servers := make([]*TestServer, 0, len(c.config.InitialServers))
 	for _, conf := range c.config.InitialServers {
 		servers = append(servers, c.GetServer(conf.Name))
 	}
-	return c.RunServers(ctx, servers)
+	return c.RunServers(servers)
 }
 
 // StopAll is used to stop all servers.
@@ -469,12 +475,12 @@ func (c *TestCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 }
 
 // Join is used to add a new TestServer into the cluster.
-func (c *TestCluster) Join() (*TestServer, error) {
+func (c *TestCluster) Join(ctx context.Context) (*TestServer, error) {
 	conf, err := c.config.Join().Generate()
 	if err != nil {
 		return nil, err
 	}
-	s, err := NewTestServer(conf)
+	s, err := NewTestServer(ctx, conf)
 	if err != nil {
 		return nil, err
 	}

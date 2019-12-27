@@ -74,7 +74,6 @@ func readJSON(url string, data interface{}) error {
 	if resp.StatusCode != http.StatusOK {
 		return errors.Errorf("http get url %s return code %d", url, resp.StatusCode)
 	}
-
 	err = json.Unmarshal(b, data)
 	if err != nil {
 		return errors.WithStack(err)
