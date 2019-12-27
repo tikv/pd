@@ -30,18 +30,18 @@ type deltaWithInterval struct {
 // stores recent changes that happened in the last avgInterval,
 // then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
-	que      *queue.Queue
-	deltaSum float64
-	durSum   time.Duration
+	que         *queue.Queue
+	deltaSum    float64
+	durSum      time.Duration
 	avgInterval time.Duration
 }
 
 // NewAvgOverTime returns an AvgOverTime with given interval.
 func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 	return &AvgOverTime{
-		que:      queue.New(),
-		deltaSum: 0,
-		durSum:   0,
+		que:         queue.New(),
+		deltaSum:    0,
+		durSum:      0,
 		avgInterval: interval,
 	}
 }
