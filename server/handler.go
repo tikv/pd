@@ -854,6 +854,7 @@ func (h *Handler) GetStoreLimitScene() *schedule.StoreLimitScene {
 	cluster := h.s.GetRaftCluster()
 	return cluster.GetStoreLimiter().StoreLimitScene()
 }
+
 // PluginLoad loads the plugin referenced by the pluginPath
 func (h *Handler) PluginLoad(pluginPath string) error {
 	h.pluginChMapLock.Lock()
