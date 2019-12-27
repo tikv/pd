@@ -199,10 +199,7 @@ const (
 	defaultDisableErrorVerbose = true
 )
 
-var (
-	defaultLocationLabels  = []string{}
-	defaultRuntimeServices = []string{}
-)
+var defaultRuntimeServices = []string{}
 
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {
@@ -817,7 +814,7 @@ type ReplicationConfig struct {
 	// The placement priorities is implied by the order of label keys.
 	// For example, ["zone", "rack"] means that we should place replicas to
 	// different zones first, then to different racks if we don't have enough zones.
-	LocationLabels []string `toml:"location-labels" json:"location-labels"`
+	LocationLabels typeutil.StringSlice `toml:"location-labels" json:"location-labels"`
 	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
 	StrictlyMatchLabel bool `toml:"strictly-match-label" json:"strictly-match-label,string"`
 
@@ -826,9 +823,11 @@ type ReplicationConfig struct {
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
+	locationLabels := make(typeutil.StringSlice, len(c.LocationLabels))
+	copy(locationLabels, c.LocationLabels)
 	return &ReplicationConfig{
 		MaxReplicas:          c.MaxReplicas,
-		LocationLabels:       c.LocationLabels,
+		LocationLabels:       locationLabels,
 		StrictlyMatchLabel:   c.StrictlyMatchLabel,
 		EnablePlacementRules: c.EnablePlacementRules,
 	}
@@ -837,7 +836,7 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 // Validate is used to validate if some replication configurations are right.
 func (c *ReplicationConfig) Validate() error {
 	for _, label := range c.LocationLabels {
-		err := ValidateLabelString(label, false /* allowEmpty */)
+		err := ValidateLabelString(label)
 		if err != nil {
 			return err
 		}
@@ -849,9 +848,6 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	if !meta.IsDefined("strictly-match-label") {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
-	}
-	if !meta.IsDefined("location-labels") {
-		c.LocationLabels = defaultLocationLabels
 	}
 	return c.Validate()
 }
@@ -893,7 +889,7 @@ type PDServerConfig struct {
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
 	// RuntimeSercives is the running the running extension services.
-	RuntimeServices []string `toml:"runtime-services" json:"runtime-services"`
+	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.
 	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`

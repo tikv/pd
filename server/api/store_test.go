@@ -177,7 +177,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	c.Assert(err, IsNil)
 	err = postJSON(url+"/label", b)
 	c.Assert(strings.Contains(err.Error(), "key matching the label was not found"), IsTrue)
-	locationLabels := map[string]interface{}{"location-labels": []string{"zone", "host"}}
+	locationLabels := map[string]string{"location-labels": "zone,host"}
 	ll, _ := json.Marshal(locationLabels)
 	err = postJSON(s.urlPrefix+"/config", ll)
 	c.Assert(err, IsNil)

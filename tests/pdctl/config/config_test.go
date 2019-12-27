@@ -95,45 +95,15 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(&scheduleCfg, DeepEquals, svr.GetScheduleConfig())
 
 	// config show replication
-	args1 := []string{"-u", pdAddr, "config", "show", "replication"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
+	args = []string{"-u", pdAddr, "config", "show", "replication"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	replicationCfg := config.ReplicationConfig{}
 	c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
 	c.Assert(&replicationCfg, DeepEquals, svr.GetReplicationConfig())
 
-	// config set location-labels [zone,rack]
-	args2 := []string{"-u", pdAddr, "config", "set", "location-labels", "[zone,rack]"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
-	c.Assert(err, IsNil)
-	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	replicationCfg = config.ReplicationConfig{}
-	c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
-	c.Assert(replicationCfg.LocationLabels, DeepEquals, []string{"zone", "rack"})
-
-	// config set location-labels []
-	args2 = []string{"-u", pdAddr, "config", "set", "location-labels", "[]"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
-	c.Assert(err, IsNil)
-	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	replicationCfg = config.ReplicationConfig{}
-	c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
-	c.Assert(replicationCfg.LocationLabels, DeepEquals, []string{})
-
-	// config set location-labels [""]
-	args2 = []string{"-u", pdAddr, "config", "set", "location-labels", "[\"\"]"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
-	c.Assert(err, IsNil)
-	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
-	c.Assert(err, IsNil)
-	replicationCfg = config.ReplicationConfig{}
-	c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
-	c.Assert(replicationCfg.LocationLabels, DeepEquals, []string{})
-
 	// config show cluster-version
-	args1 = []string{"-u", pdAddr, "config", "show", "cluster-version"}
+	args1 := []string{"-u", pdAddr, "config", "show", "cluster-version"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	clusterVersion := semver.Version{}
@@ -141,7 +111,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(clusterVersion, DeepEquals, svr.GetClusterVersion())
 
 	// config set cluster-version <value>
-	args2 = []string{"-u", pdAddr, "config", "set", "cluster-version", "2.1.0-rc.5"}
+	args2 := []string{"-u", pdAddr, "config", "set", "cluster-version", "2.1.0-rc.5"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
 	c.Assert(clusterVersion, Not(DeepEquals), svr.GetClusterVersion())

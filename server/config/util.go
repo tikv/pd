@@ -25,8 +25,8 @@ const matchRule = "^[A-Za-z0-9]([-A-Za-z0-9_./]*[A-Za-z0-9])?$"
 // ValidateLabelString checks the legality of the label string.
 // The valid label consists of alphanumeric characters, '-', '_', '.' or '/',
 // and must start and end with an alphanumeric character.
-func ValidateLabelString(s string, allowEmpty bool) error { // revive:disable-line:flag-parameter
-	if allowEmpty && s == "" {
+func ValidateLabelString(s string) error {
+	if s == "" {
 		return nil
 	}
 	isValid, _ := regexp.MatchString(matchRule, s)
@@ -39,11 +39,11 @@ func ValidateLabelString(s string, allowEmpty bool) error { // revive:disable-li
 // ValidateLabels checks the legality of the labels.
 func ValidateLabels(labels []*metapb.StoreLabel) error {
 	for _, label := range labels {
-		err := ValidateLabelString(label.Key, true /* allowEmpty */)
+		err := ValidateLabelString(label.Key)
 		if err != nil {
 			return err
 		}
-		err = ValidateLabelString(label.Value, true /* allowEmpty */)
+		err = ValidateLabelString(label.Value)
 		if err != nil {
 			return err
 		}
