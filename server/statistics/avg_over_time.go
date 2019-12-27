@@ -24,12 +24,16 @@ type deltaWithInterval struct {
 	interval time.Duration
 }
 
-// AvgOverTime maintains change rate in the last interval.
+// AvgOverTime maintains change rate in the last avgInterval.
+//
+// AvgOverTime takes changes with their own intervals,
+// stores recent changes that happened in the last avgInterval,
+// then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
 	que      *queue.Queue
 	deltaSum float64
 	durSum   time.Duration
-	interval time.Duration
+	avgInterval time.Duration
 }
 
 // NewAvgOverTime returns an AvgOverTime with given interval.
@@ -38,7 +42,7 @@ func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 		que:      queue.New(),
 		deltaSum: 0,
 		durSum:   0,
-		interval: interval,
+		avgInterval: interval,
 	}
 }
 
@@ -55,12 +59,12 @@ func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
 	aot.que.PushBack(deltaWithInterval{delta, interval})
 	aot.deltaSum += delta
 	aot.durSum += interval
-	if aot.durSum <= aot.interval {
+	if aot.durSum <= aot.avgInterval {
 		return
 	}
 	for aot.que.Len() > 0 {
 		front := aot.que.Front().(deltaWithInterval)
-		if aot.durSum-front.interval >= aot.interval {
+		if aot.durSum-front.interval >= aot.avgInterval {
 			aot.que.PopFront()
 			aot.deltaSum -= front.delta
 			aot.durSum -= front.interval
@@ -75,7 +79,7 @@ func (aot *AvgOverTime) Set(avg float64) {
 	for aot.que.Len() > 0 {
 		aot.que.PopFront()
 	}
-	aot.deltaSum = avg * aot.interval.Seconds()
-	aot.durSum = aot.interval
+	aot.deltaSum = avg * aot.avgInterval.Seconds()
+	aot.durSum = aot.avgInterval
 	aot.que.PushBack(deltaWithInterval{delta: aot.deltaSum, interval: aot.durSum})
 }
