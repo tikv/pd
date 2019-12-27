@@ -986,6 +986,8 @@ func (s *Server) reloadConfigFromKV() error {
 		log.Info("server disable region storage")
 	}
 
+	// The request only valid when there is a leader.
+	// And before the a PD becomes a leader it will firstly reload the config.
 	if s.cfg.EnableConfigManager {
 		err = s.cfgManager.Reload(s.storage)
 		return err
