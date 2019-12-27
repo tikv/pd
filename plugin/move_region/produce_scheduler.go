@@ -162,7 +162,7 @@ func (p *predictInfo) calculateScheduleTime(threshold float64) ([]scheduleTime, 
 	startT := hotSpotArr[0].StartTime
 	endT := hotSpotArr[j].EndTime
 	for {
-		if hotSpotArr[j].StartTime-endT > 4*60 {
+		if hotSpotArr[j].StartTime-endT > 2*60 {
 			period = append(period, hotSpotPeriod{startT, endT, tableArr})
 			startT = hotSpotArr[j].StartTime
 			endT = hotSpotArr[j].EndTime
@@ -191,7 +191,7 @@ func (p *predictInfo) calculateScheduleTime(threshold float64) ([]scheduleTime, 
 	scheduleT := make([]scheduleTime, 0, p.TableNum)
 	for i := 1; i < len(period); i++ {
 		tmp := (period[i].StartTime + period[i-1].EndTime) / 2
-		if period[i].StartTime-period[i-1].EndTime > 4*60 {
+		if period[i].StartTime-period[i-1].EndTime > 2*60 {
 			if period[i-1].EndTime == 0 {
 				tmp = p.Time
 			}
@@ -205,14 +205,17 @@ func (p *predictInfo) calculateScheduleTime(threshold float64) ([]scheduleTime, 
 			if tmp >= v.StartTime && tmp <= v.EndTime {
 				v.DeltT[h.TableKey[0]] = 1
 			} else if tmp > v.EndTime {
-				t := (tmp - v.StartTime) / 60
+				var t int64
+				tfloat := float64((tmp - v.StartTime) / 60)
+				t = int64(math.Floor(math.Pow(tfloat, 2)))
+
 				if v.DeltT[h.TableKey[0]] == 0 || t < v.DeltT[h.TableKey[0]] {
 					v.DeltT[h.TableKey[0]] = t
 				}
 			} else {
 				var t int64
 				tfloat := float64((tmp - v.StartTime) / 60)
-				t = int64(math.Floor(math.Pow(tfloat, 2)))
+				t = int64(math.Floor(math.Pow(tfloat, 3)))
 
 				if v.DeltT[h.TableKey[0]] == 0 || t < v.DeltT[h.TableKey[0]] {
 					v.DeltT[h.TableKey[0]] = t
@@ -330,12 +333,13 @@ func getTopK(cluster *server.RaftCluster, index int, dispatchT *dispatchTiming) 
 	k := 0
 	topk := len(regions) / 10
 	var retRegionID []uint64
+LOOP:
 	for _, h := range HotDegree {
 		for _, i := range h.regionID {
 			retRegionID = append(retRegionID, i)
 			k++
 			if k == topk {
-				break
+				break LOOP
 			}
 		}
 	}
