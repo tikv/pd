@@ -41,9 +41,9 @@ func (s *healthTestSuite) SetUpSuite(c *C) {
 func (s *healthTestSuite) TestHealth(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestCluster(3)
+	tc, err := tests.NewTestCluster(ctx, 3)
 	c.Assert(err, IsNil)
-	err = tc.RunInitialServers(ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())

@@ -63,11 +63,11 @@ func (i *idAllocator) alloc() uint64 {
 }
 
 func (s *serverTestSuite) TestRegionSyncer(c *C) {
-	cluster, err := tests.NewTestCluster(3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
@@ -143,11 +143,11 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 }
 
 func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
-	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
@@ -179,14 +179,14 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	// restart pd1
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
-	err = leaderServer.Run(s.ctx)
+	err = leaderServer.Run()
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd1")
 
 	// join new PD
-	pd2, err := cluster.Join()
+	pd2, err := cluster.Join(s.ctx)
 	c.Assert(err, IsNil)
-	err = pd2.Run(s.ctx)
+	err = pd2.Run()
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd1")
 	// waiting for synchronization to complete

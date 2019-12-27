@@ -86,8 +86,8 @@ func run(simCase string) {
 	if *pdAddr != "" {
 		simStart(*pdAddr, simCase, simConfig)
 	} else {
-		local, clean := NewSingleServer(simConfig)
-		err := local.Run(context.Background())
+		local, clean := NewSingleServer(context.Background(), simConfig)
+		err := local.Run()
 		if err != nil {
 			simutil.Logger.Fatal("run server error", zap.Error(err))
 		}
@@ -102,7 +102,7 @@ func run(simCase string) {
 }
 
 // NewSingleServer creates a pd server for simulator.
-func NewSingleServer(simConfig *simulator.SimConfig) (*server.Server, server.CleanupFunc) {
+func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*server.Server, server.CleanupFunc) {
 	err := simConfig.ServerConfig.SetupLogger()
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.GetZapLogger(), simConfig.ServerConfig.GetZapLogProperties())
@@ -115,7 +115,7 @@ func NewSingleServer(simConfig *simulator.SimConfig) (*server.Server, server.Cle
 		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
-	s, err := server.CreateServer(simConfig.ServerConfig, api.NewHandler)
+	s, err := server.CreateServer(ctx, simConfig.ServerConfig, api.NewHandler)
 	if err != nil {
 		panic("create server failed")
 	}

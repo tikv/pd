@@ -51,13 +51,15 @@ ci: build check basic-test
 build: pd-server pd-ctl
 tools: pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench
 pd-server: export GO111MODULE=on
-pd-server:
 ifeq ("$(WITH_RACE)", "1")
+pd-server:
 	CGO_ENABLED=1 go build -race -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else ifeq ("$(PD_WEB)", "1")
+pd-server: retool-setup
 	@./scripts/build-ui.sh
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags web -o bin/pd-server cmd/pd-server/main.go
 else
+pd-server:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
 

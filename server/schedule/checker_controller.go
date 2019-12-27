@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/checker"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/server/schedule/placement"
 )
 
 // CheckerController is used to manage all checkers.
@@ -28,18 +29,20 @@ type CheckerController struct {
 	opController   *OperatorController
 	learnerChecker *checker.LearnerChecker
 	replicaChecker *checker.ReplicaChecker
+	ruleChecker    *checker.RuleChecker
 	mergeChecker   *checker.MergeChecker
 }
 
 // NewCheckerController create a new CheckerController.
 // TODO: isSupportMerge should be removed.
-func NewCheckerController(ctx context.Context, cluster opt.Cluster, opController *OperatorController) *CheckerController {
+func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, opController *OperatorController) *CheckerController {
 	return &CheckerController{
 		cluster:        cluster,
 		opController:   opController,
 		learnerChecker: checker.NewLearnerChecker(cluster),
 		replicaChecker: checker.NewReplicaChecker(cluster),
-		mergeChecker:   checker.NewMergeChecker(ctx, cluster),
+		ruleChecker:    checker.NewRuleChecker(cluster, ruleManager),
+		mergeChecker:   checker.NewMergeChecker(ctx, cluster, ruleManager),
 	}
 }
 
@@ -49,15 +52,25 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) (bool, []*opera
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 	checkerIsBusy := true
-	if op := c.learnerChecker.Check(region); op != nil {
-		return false, []*operator.Operator{op}
-	}
-	if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
-		checkerIsBusy = false
-		if op := c.replicaChecker.Check(region); op != nil {
-			return checkerIsBusy, []*operator.Operator{op}
+	if c.cluster.IsPlacementRulesEnabled() {
+		if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+			checkerIsBusy = false
+			if op := c.ruleChecker.Check(region); op != nil {
+				return checkerIsBusy, []*operator.Operator{op}
+			}
+		}
+	} else {
+		if op := c.learnerChecker.Check(region); op != nil {
+			return false, []*operator.Operator{op}
+		}
+		if opController.OperatorCount(operator.OpReplica) < c.cluster.GetReplicaScheduleLimit() {
+			checkerIsBusy = false
+			if op := c.replicaChecker.Check(region); op != nil {
+				return checkerIsBusy, []*operator.Operator{op}
+			}
 		}
 	}
+
 	if c.mergeChecker != nil && opController.OperatorCount(operator.OpMerge) < c.cluster.GetMergeScheduleLimit() {
 		checkerIsBusy = false
 		if ops := c.mergeChecker.Check(region); ops != nil {

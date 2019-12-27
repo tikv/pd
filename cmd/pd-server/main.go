@@ -22,6 +22,7 @@ import (
 
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/keyvisual"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
@@ -33,8 +34,6 @@ import (
 
 	// Register schedulers.
 	_ "github.com/pingcap/pd/server/schedulers"
-	// Register UI
-	_ "github.com/pingcap/pd/pkg/ui/dist"
 )
 
 func main() {
@@ -92,7 +91,14 @@ func main() {
 	if err != nil {
 		log.Fatal("join meet error", zap.Error(err))
 	}
-	svr, err := server.CreateServer(cfg, api.NewHandler)
+
+	// Creates server.
+	ctx, cancel := context.WithCancel(context.Background())
+	svr, err := server.CreateServer(
+		ctx,
+		cfg,
+		api.NewHandler,
+		keyvisual.NewKeyvisualService)
 	if err != nil {
 		log.Fatal("create server failed", zap.Error(err))
 	}
@@ -108,14 +114,13 @@ func main() {
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
-	ctx, cancel := context.WithCancel(context.Background())
 	var sig os.Signal
 	go func() {
 		sig = <-sc
 		cancel()
 	}()
 
-	if err := svr.Run(ctx); err != nil {
+	if err := svr.Run(); err != nil {
 		log.Fatal("run server failed", zap.Error(err))
 	}
 

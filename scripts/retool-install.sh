@@ -4,8 +4,8 @@ set -euo pipefail
 # This script generates tools.json
 # It helps record what releases/branches are being used
 
-cd $(dirname "$0")/..
-which retool >/dev/null || go get github.com/twitchtv/retool
+cd "$(dirname "$0")/.."
+command -v retool >/dev/null || go get github.com/twitchtv/retool
 
 # tool environment
 # check runner
@@ -26,4 +26,4 @@ which retool >/dev/null || go get github.com/twitchtv/retool
 # deadlock detection
 ./scripts/retool add golang.org/x/tools/cmd/goimports 04b5d21e00f1f47bd824a6ade581e7189bacde87
 # bindata
-./scripts/retool add github.com/kevinburke/go-bindata v3.16.0
+./scripts/retool add github.com/kevinburke/go-bindata/go-bindata v3.16.0

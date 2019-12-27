@@ -212,6 +212,19 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 		c.Assert(expectLabel[l.Key], Equals, l.Value)
 	}
 
+	// delete label
+	b, err = json.Marshal(map[string]string{"host": ""})
+	c.Assert(err, IsNil)
+	err = postJSON(url+"/label", b)
+	c.Assert(err, IsNil)
+	err = readJSON(url, &info)
+	c.Assert(err, IsNil)
+	delete(expectLabel, "host")
+	c.Assert(info.Store.Labels, HasLen, len(expectLabel))
+	for _, l := range info.Store.Labels {
+		c.Assert(expectLabel[l.Key], Equals, l.Value)
+	}
+
 	s.stores[0].Labels = info.Store.Labels
 }
 

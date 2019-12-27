@@ -274,6 +274,22 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 			c.Assert(strings.Contains(err.Error(), t.expectError), IsTrue)
 		}
 	}
+
+	// enable placement rules. Report no error any more.
+	c.Assert(postJSON(fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`)), IsNil)
+	for _, t := range cases {
+		_, err := s.svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
+			Store: &metapb.Store{
+				Id:      t.store.Id,
+				Address: fmt.Sprintf("tikv%d", t.store.Id),
+				State:   t.store.State,
+				Labels:  t.store.Labels,
+				Version: t.store.Version,
+			},
+		})
+		c.Assert(err, IsNil)
+	}
 }
 
 func (s *testStrictlyLabelsStoreSuite) TearDownSuite(c *C) {

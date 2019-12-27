@@ -52,27 +52,27 @@ func (s *serverTestSuite) TearDownSuite(c *C) {
 }
 
 func (s *serverTestSuite) TestWatcher(c *C) {
-	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pd1 := cluster.GetServer(cluster.GetLeader())
 	c.Assert(pd1, NotNil)
 
-	pd2, err := cluster.Join()
+	pd2, err := cluster.Join(s.ctx)
 	c.Assert(err, IsNil)
-	err = pd2.Run(s.ctx)
+	err = pd2.Run()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	time.Sleep(5 * time.Second)
-	pd3, err := cluster.Join()
+	pd3, err := cluster.Join(s.ctx)
 	c.Assert(err, IsNil)
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/delayWatcher", `pause`), IsNil)
-	err = pd3.Run(s.ctx)
+	err = pd3.Run()
 	c.Assert(err, IsNil)
 	time.Sleep(200 * time.Millisecond)
 	c.Assert(pd3.GetLeader().GetName(), Equals, pd1.GetConfig().Name)
@@ -88,11 +88,11 @@ func (s *serverTestSuite) TestWatcher(c *C) {
 }
 
 func (s *serverTestSuite) TestWatcherCompacted(c *C) {
-	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pd1 := cluster.GetServer(cluster.GetLeader())
@@ -102,9 +102,9 @@ func (s *serverTestSuite) TestWatcherCompacted(c *C) {
 	c.Assert(err, IsNil)
 	// wait compaction
 	time.Sleep(2 * time.Second)
-	pd2, err := cluster.Join()
+	pd2, err := cluster.Join(s.ctx)
 	c.Assert(err, IsNil)
-	err = pd2.Run(s.ctx)
+	err = pd2.Run()
 	c.Assert(err, IsNil)
 	testutil.WaitUntil(c, func(c *C) bool {
 		return c.Check(pd2.GetLeader().GetName(), Equals, pd1.GetConfig().Name)
