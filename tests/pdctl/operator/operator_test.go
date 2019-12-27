@@ -46,13 +46,13 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	var err error
 	var t time.Time
 	t = t.Add(time.Hour)
-	cluster, err := tests.NewTestCluster(1,
+	cluster, err := tests.NewTestCluster(ctx, 1,
 		func(conf *config.Config) { conf.Replication.MaxReplicas = 2 },
 		func(conf *config.Config) { conf.Schedule.MaxStoreDownTime.Duration = time.Since(t) },
 		func(conf *config.Config) { conf.Schedule.StoreBalanceRate = 240 },
 	)
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers(ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURLs()

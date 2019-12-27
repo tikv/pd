@@ -64,7 +64,7 @@ type labelSchedulerConfig struct {
 }
 
 type labelScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf     *labelSchedulerConfig
 	selector *selector.BalanceSelector
 }
@@ -78,7 +78,7 @@ func newLabelScheduler(opController *schedule.OperatorController, conf *labelSch
 	}
 	kind := core.NewScheduleKind(core.LeaderKind, core.ByCount)
 	return &labelScheduler{
-		baseScheduler: newBaseScheduler(opController),
+		BaseScheduler: NewBaseScheduler(opController),
 		conf:          conf,
 		selector:      selector.NewBalanceSelector(kind, filters),
 	}
@@ -97,7 +97,7 @@ func (s *labelScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *labelScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
@@ -133,7 +133,11 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 			}
 
 			schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-			op := operator.CreateTransferLeaderOperator("label-reject-leader", region, id, target.GetID(), operator.OpLeader)
+			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, id, target.GetID(), operator.OpLeader)
+			if err != nil {
+				log.Debug("fail to create transfer label reject leader operator", zap.Error(err))
+				return nil
+			}
 			return []*operator.Operator{op}
 		}
 	}

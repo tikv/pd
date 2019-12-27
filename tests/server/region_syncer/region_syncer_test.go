@@ -63,11 +63,11 @@ func (i *idAllocator) alloc() uint64 {
 }
 
 func (s *serverTestSuite) TestRegionSyncer(c *C) {
-	cluster, err := tests.NewTestCluster(3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
@@ -94,9 +94,42 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 		err = rc.HandleRegionHeartbeat(region)
 		c.Assert(err, IsNil)
 	}
+	// merge case
+	// region2 -> region1 -> region0
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	regions[0] = regions[0].Clone(core.WithEndKey(regions[2].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
+	err = rc.HandleRegionHeartbeat(regions[2])
+	c.Assert(err, IsNil)
+
+	// merge case
+	// region3 -> region4
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	regions[4] = regions[3].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
+	err = rc.HandleRegionHeartbeat(regions[4])
+	c.Assert(err, IsNil)
+
+	// merge case
+	// region0 -> region4
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	regions[4] = regions[0].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
+	err = rc.HandleRegionHeartbeat(regions[4])
+	c.Assert(err, IsNil)
+	regions = regions[4:]
+	regionLen = len(regions)
+
 	// ensure flush to region storage, we use a duration larger than the
 	// region storage flush rate limit (3s).
 	time.Sleep(4 * time.Second)
+
+	//test All regions have been synchronized to the cache of followerServer
+	followerServer := cluster.GetServer(cluster.GetFollower())
+	c.Assert(followerServer, NotNil)
+	cacheRegions := followerServer.GetServer().GetBasicCluster().GetRegions()
+	c.Assert(cacheRegions, HasLen, regionLen)
+	for _, region := range cacheRegions {
+		c.Assert(followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID()).GetMeta(), DeepEquals, region.GetMeta())
+	}
+
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
@@ -104,14 +137,17 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	c.Assert(leaderServer, NotNil)
 	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
 	c.Assert(len(loadRegions), Equals, regionLen)
+	for _, region := range regions {
+		c.Assert(leaderServer.GetRegionInfoByID(region.GetID()).GetMeta(), DeepEquals, region.GetMeta())
+	}
 }
 
 func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
-	cluster, err := tests.NewTestCluster(1, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
@@ -143,14 +179,14 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	// restart pd1
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
-	err = leaderServer.Run(s.ctx)
+	err = leaderServer.Run()
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd1")
 
 	// join new PD
-	pd2, err := cluster.Join()
+	pd2, err := cluster.Join(s.ctx)
 	c.Assert(err, IsNil)
-	err = pd2.Run(s.ctx)
+	err = pd2.Run()
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd1")
 	// waiting for synchronization to complete

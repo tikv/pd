@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -26,6 +27,7 @@ import (
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const (
@@ -148,7 +150,7 @@ func (conf *grantLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (s
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
 type grantLeaderScheduler struct {
-	*baseScheduler
+	*BaseScheduler
 	conf    *grantLeaderSchedulerConfig
 	handler http.Handler
 }
@@ -156,10 +158,10 @@ type grantLeaderScheduler struct {
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
 func newGrantLeaderScheduler(opController *schedule.OperatorController, conf *grantLeaderSchedulerConfig) schedule.Scheduler {
-	base := newBaseScheduler(opController)
+	base := NewBaseScheduler(opController)
 	handler := newGrantLeaderHandler(conf)
 	return &grantLeaderScheduler{
-		baseScheduler: base,
+		BaseScheduler: base,
 		conf:          conf,
 		handler:       handler,
 	}
@@ -202,7 +204,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster opt.Cluster) {
 }
 
 func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
+	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
@@ -218,7 +220,11 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		}
 
 		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-		op := operator.CreateTransferLeaderOperator(GrantLeaderType, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(GrantLeaderType, cluster, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
+		if err != nil {
+			log.Debug("fail to create grant leader operator", zap.Error(err))
+			continue
+		}
 		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)
 	}
@@ -289,6 +295,10 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
+			if err := handler.config.cluster.RemoveScheduler(GrantLeaderName); err != nil {
+				handler.rd.JSON(w, http.StatusInternalServerError, err)
+				return
+			}
 			resp = lastStoreDeleteInfo
 		}
 		handler.rd.JSON(w, http.StatusOK, resp)

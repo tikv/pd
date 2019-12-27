@@ -60,6 +60,7 @@ func InitCommand() *cobra.Command {
 		command.NewClusterCommand(),
 		command.NewHealthCommand(),
 		command.NewLogCommand(),
+		command.NewPluginCommand(),
 	)
 	return rootCmd
 }
@@ -114,6 +115,11 @@ func MustPutStore(c *check.C, svr *server.Server, id uint64, state metapb.StoreS
 			Labels:  labels,
 			Version: (*cluster.MinSupportedVersion(cluster.Version2_0)).String(),
 		},
+	})
+	c.Assert(err, check.IsNil)
+	_, err = svr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Stats:  &pdpb.StoreStats{StoreId: id},
 	})
 	c.Assert(err, check.IsNil)
 }

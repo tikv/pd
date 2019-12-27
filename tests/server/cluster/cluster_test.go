@@ -72,11 +72,11 @@ func (kv *testErrorKV) Save(key, value string) error {
 }
 
 func (s *clusterTestSuite) TestBootstrap(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -110,11 +110,11 @@ func (s *clusterTestSuite) TestBootstrap(c *C) {
 }
 
 func (s *clusterTestSuite) TestGetPutConfig(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -297,11 +297,11 @@ func testRemoveStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClie
 
 // Make sure PD will not panic if it start and stop again and again.
 func (s *clusterTestSuite) TestRaftClusterRestart(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -324,11 +324,11 @@ func (s *clusterTestSuite) TestRaftClusterRestart(c *C) {
 
 // Make sure PD will not deadlock if it start and stop again and again.
 func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -363,11 +363,11 @@ func newMetaStore(storeID uint64, addr, version string, state metapb.StoreState)
 }
 
 func (s *clusterTestSuite) TestGetPDMembers(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -385,11 +385,11 @@ func (s *clusterTestSuite) TestGetPDMembers(c *C) {
 }
 
 func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -420,11 +420,11 @@ func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
 }
 
 func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -533,11 +533,11 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 }
 
 func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -611,11 +611,11 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 }
 
 func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
-	tc, err := tests.NewTestCluster(1)
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
-	err = tc.RunInitialServers(s.ctx)
+	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	tc.WaitLeader()
@@ -624,12 +624,13 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient())
 
 	// Cluster is not bootstrapped.
-	rc.InitCluster(svr.GetAllocator(), svr.GetScheduleOption(), svr.GetStorage())
+	rc.InitCluster(svr.GetAllocator(), svr.GetScheduleOption(), svr.GetStorage(), svr.GetBasicCluster())
 	raftCluster, err := rc.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, IsNil)
 
 	storage := rc.GetStorage()
+	basicCluster := rc.GetCacheCluster()
 	opt := rc.GetOpt()
 	// Save meta, stores and regions.
 	n := 10
@@ -662,7 +663,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	c.Assert(storage.Flush(), IsNil)
 
 	raftCluster = &cluster.RaftCluster{}
-	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage)
+	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, NotNil)
@@ -677,6 +678,24 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	for _, region := range raftCluster.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
+
+	m := 20
+	regions = make([]*metapb.Region, 0, n)
+	for i := uint64(0); i < uint64(m); i++ {
+		region := &metapb.Region{
+			Id:          i,
+			StartKey:    []byte(fmt.Sprintf("%20d", i)),
+			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
+			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		}
+		regions = append(regions, region)
+	}
+
+	for _, region := range regions {
+		c.Assert(storage.SaveRegion(region), IsNil)
+	}
+	raftCluster.GetStorage().LoadRegionsOnce(raftCluster.GetCacheCluster().PutRegion)
+	c.Assert(raftCluster.GetRegionCount(), Equals, n)
 }
 
 func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {

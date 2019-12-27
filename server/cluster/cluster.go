@@ -51,11 +51,6 @@ const (
 	defaultChangedRegionsLimit = 10000
 )
 
-// ErrRegionIsStale is error info for region is stale.
-var ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
-	return errors.Errorf("region is stale: region %v origin %v", region, origin)
-}
-
 // Server is the interface for cluster.
 type Server interface {
 	GetAllocator() *id.AllocatorImpl
@@ -63,6 +58,7 @@ type Server interface {
 	GetStorage() *core.Storage
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
+	GetBasicCluster() *core.BasicCluster
 }
 
 // RaftCluster is used for cluster config management.
@@ -174,8 +170,8 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage) {
-	c.core = core.NewBasicCluster()
+func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster) {
+	c.core = basicCluster
 	c.opt = opt
 	c.storage = storage
 	c.id = id
@@ -196,13 +192,21 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage())
+	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage(), s.GetBasicCluster())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
 	}
 	if cluster == nil {
 		return nil
+	}
+
+	c.ruleManager = placement.NewRuleManager(c.storage)
+	if c.IsPlacementRulesEnabled() {
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		if err != nil {
+			return err
+		}
 	}
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
@@ -244,7 +248,8 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 
 	start = time.Now()
 
-	if err := c.storage.LoadRegions(c.core.PutRegion); err != nil {
+	// used to load region from kv storage to cache storage.
+	if err := c.storage.LoadRegionsOnce(c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -402,14 +407,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
-	origin := c.GetRegion(region.GetID())
-	if origin == nil {
-		for _, item := range c.core.GetOverlaps(region) {
-			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
-				c.RUnlock()
-				return ErrRegionIsStale(region.GetMeta(), item.GetMeta())
-			}
-		}
+	origin, err := c.core.PreCheckPutRegion(region)
+	if err != nil {
+		c.RUnlock()
+		return err
 	}
 	writeItems := c.CheckWriteStatus(region)
 	readItems := c.CheckReadStatus(region)
@@ -428,10 +429,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	} else {
 		r := region.GetRegionEpoch()
 		o := origin.GetRegionEpoch()
-		// Region meta is stale, return an error.
-		if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-			return ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
-		}
 		if r.GetVersion() > o.GetVersion() {
 			log.Info("region Version changed",
 				zap.Uint64("region-id", region.GetID()),
@@ -816,7 +813,16 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			core.SetStoreLabels(labels),
 		)
 	}
-	// Check location labels.
+	if err = c.checkStoreLabels(s); err != nil {
+		return err
+	}
+	return c.putStoreLocked(s)
+}
+
+func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
+	if c.opt.IsPlacementRulesEnabled() {
+		return nil
+	}
 	keysSet := make(map[string]struct{})
 	for _, k := range c.GetLocationLabels() {
 		keysSet[k] = struct{}{}
@@ -840,7 +846,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			}
 		}
 	}
-	return c.putStoreLocked(s)
+	return nil
 }
 
 // RemoveStore marks a store as offline in cluster.
@@ -1462,6 +1468,8 @@ func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.Hot
 	return c.hotSpotCache.CheckRead(region, c.storesStats)
 }
 
+// TODO: remove me.
+// only used in test.
 func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()

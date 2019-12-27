@@ -46,6 +46,7 @@ type joinTestSuite struct {
 func (s *joinTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
+	server.EtcdStartTimeout = 5 * time.Second
 }
 
 func (s *joinTestSuite) TearDownSuite(c *C) {
@@ -53,11 +54,11 @@ func (s *joinTestSuite) TearDownSuite(c *C) {
 }
 
 func (s *joinTestSuite) TestSimpleJoin(c *C) {
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
@@ -68,9 +69,9 @@ func (s *joinTestSuite) TestSimpleJoin(c *C) {
 	c.Assert(members.Members, HasLen, 1)
 
 	// Join the second PD.
-	pd2, err := cluster.Join()
+	pd2, err := cluster.Join(s.ctx)
 	c.Assert(err, IsNil)
-	err = pd2.Run(s.ctx)
+	err = pd2.Run()
 	c.Assert(err, IsNil)
 	_, err = os.Stat(path.Join(pd2.GetConfig().DataDir, "join"))
 	c.Assert(os.IsNotExist(err), IsFalse)
@@ -83,9 +84,9 @@ func (s *joinTestSuite) TestSimpleJoin(c *C) {
 	time.Sleep(time.Second * 5)
 
 	// Join another PD.
-	pd3, err := cluster.Join()
+	pd3, err := cluster.Join(s.ctx)
 	c.Assert(err, IsNil)
-	err = pd3.Run(s.ctx)
+	err = pd3.Run()
 	c.Assert(err, IsNil)
 	_, err = os.Stat(path.Join(pd3.GetConfig().DataDir, "join"))
 	c.Assert(os.IsNotExist(err), IsFalse)
@@ -98,11 +99,11 @@ func (s *joinTestSuite) TestSimpleJoin(c *C) {
 // A failed PD tries to join the previous cluster but it has been deleted
 // during its downtime.
 func (s *joinTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	// Wait for all nodes becoming healthy.
@@ -117,12 +118,7 @@ func (s *joinTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 	c.Assert(err, IsNil)
 
 	// The server should not successfully start.
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(10 * time.Second)
-		cancel()
-	}()
-	res := cluster.RunServer(ctx, pd3)
+	res := cluster.RunServer(pd3)
 	c.Assert(<-res, NotNil)
 
 	members, err := etcdutil.ListEtcdMembers(client)
@@ -132,11 +128,11 @@ func (s *joinTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
 
 // A deleted PD joins the previous cluster.
 func (s *joinTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	// Wait for all nodes becoming healthy.
@@ -151,12 +147,8 @@ func (s *joinTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 	c.Assert(err, IsNil)
 
 	// The server should not successfully start.
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(10 * time.Second)
-		cancel()
-	}()
-	res := cluster.RunServer(ctx, pd3)
+	//ctx, cancel := context.WithCancel(context.Background())
+	res := cluster.RunServer(pd3)
 	c.Assert(<-res, NotNil)
 
 	members, err := etcdutil.ListEtcdMembers(client)
@@ -165,18 +157,18 @@ func (s *joinTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
 }
 
 func (s *joinTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
-	cluster, err := tests.NewTestCluster(1)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	// Join the second PD.
-	pd2, err := cluster.Join()
+	pd2, err := cluster.Join(s.ctx)
 	c.Assert(err, IsNil)
-	err = pd2.Run(s.ctx)
+	err = pd2.Run()
 	c.Assert(err, IsNil)
 	err = pd2.Stop()
 	c.Assert(err, IsNil)

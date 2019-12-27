@@ -53,11 +53,11 @@ func (s *serverTestSuite) TearDownSuite(c *C) {
 }
 
 func (s *serverTestSuite) TestUpdateAdvertiseUrls(c *C) {
-	cluster, err := tests.NewTestCluster(2)
+	cluster, err := tests.NewTestCluster(s.ctx, 2)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	// AdvertisePeerUrls should equals to PeerUrls.
@@ -78,11 +78,11 @@ func (s *serverTestSuite) TestUpdateAdvertiseUrls(c *C) {
 	for _, conf := range cluster.GetConfig().InitialServers {
 		serverConf, e := conf.Generate()
 		c.Assert(e, IsNil)
-		s, e := tests.NewTestServer(serverConf)
+		s, e := tests.NewTestServer(s.ctx, serverConf)
 		c.Assert(e, IsNil)
 		cluster.GetServers()[conf.Name] = s
 	}
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	for _, conf := range cluster.GetConfig().InitialServers {
 		serverConf := cluster.GetServer(conf.Name).GetConfig()
@@ -91,11 +91,11 @@ func (s *serverTestSuite) TestUpdateAdvertiseUrls(c *C) {
 }
 
 func (s *serverTestSuite) TestClusterID(c *C) {
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	clusterID := cluster.GetServer("pd1").GetClusterID()
@@ -106,7 +106,7 @@ func (s *serverTestSuite) TestClusterID(c *C) {
 	// Restart all PDs.
 	err = cluster.StopAll()
 	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	// All PDs should have the same cluster ID as before.
@@ -116,11 +116,11 @@ func (s *serverTestSuite) TestClusterID(c *C) {
 }
 
 func (s *serverTestSuite) TestLeader(c *C) {
-	cluster, err := tests.NewTestCluster(3)
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 
 	leader1 := cluster.WaitLeader()

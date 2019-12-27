@@ -58,7 +58,7 @@ func (s *testBuilderSuite) TestNewBuilder(c *C) {
 	c.Assert(builder.targetPeers.Get(1), DeepEquals, peers[0])
 	c.Assert(builder.targetPeers.Get(2), DeepEquals, peers[1])
 	region = region.Clone(core.WithLeader(nil))
-	builder = NewBuilder("test", nil, region)
+	builder = NewBuilder("test", s.cluster, region)
 	c.Assert(builder.err, NotNil)
 }
 

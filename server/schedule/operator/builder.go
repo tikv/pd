@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/server/schedule/placement"
 	"github.com/pkg/errors"
 )
 
@@ -37,6 +38,7 @@ type Builder struct {
 	cluster     Cluster
 	regionID    uint64
 	regionEpoch *metapb.RegionEpoch
+	rules       []*placement.Rule
 
 	// operation record
 	originPeers  peersMap
@@ -67,11 +69,23 @@ func NewBuilder(desc string, cluster Cluster, region *core.RegionInfo) *Builder 
 		err = errors.Errorf("cannot build operator for region with no leader")
 	}
 
+	var rules []*placement.Rule
+	if cluster.IsPlacementRulesEnabled() {
+		fit := cluster.FitRegion(region)
+		for _, rf := range fit.RuleFits {
+			rules = append(rules, rf.Rule)
+		}
+		if len(rules) == 0 {
+			err = errors.Errorf("cannot build operator for region match no placement rule")
+		}
+	}
+
 	return &Builder{
 		desc:         desc,
 		cluster:      cluster,
 		regionID:     region.GetID(),
 		regionEpoch:  region.GetRegionEpoch(),
+		rules:        rules,
 		originPeers:  originPeers,
 		originLeader: region.GetLeader().GetStoreId(),
 		targetPeers:  originPeers.Copy(),
@@ -338,7 +352,19 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 		return false
 	}
 	stateFilter := filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
-	return !stateFilter.Target(b.cluster, store)
+	if stateFilter.Target(b.cluster, store) {
+		return false
+	}
+	if len(b.rules) == 0 {
+		return true
+	}
+	for _, r := range b.rules {
+		if (r.Role == placement.Leader || r.Role == placement.Voter) &&
+			placement.MatchLabelConstraints(store, r.LabelConstraints) {
+			return true
+		}
+	}
+	return false
 }
 
 // stepPlan is exec step. It can be:

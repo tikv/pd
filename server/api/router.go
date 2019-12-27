@@ -129,6 +129,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/api/v1/regions/check/down-peer", regionsHandler.GetDownPeerRegions).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/check/offline-peer", regionsHandler.GetOfflinePeer).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/check/empty-region", regionsHandler.GetEmptyRegion).Methods("GET")
+	clusterRouter.HandleFunc("/api/v1/regions/check/hist-size", regionsHandler.GetSizeHistogram).Methods("GET")
+	clusterRouter.HandleFunc("/api/v1/regions/check/hist-keys", regionsHandler.GetKeysHistogram).Methods("GET")
 	clusterRouter.HandleFunc("/api/v1/regions/sibling/{id}", regionsHandler.GetRegionSiblings).Methods("GET")
 
 	rootRouter.Handle("/api/v1/version", newVersionHandler(rd)).Methods("GET")
@@ -157,6 +159,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	logHandler := newlogHandler(svr, rd)
 	rootRouter.HandleFunc("/api/v1/admin/log", logHandler.Handle).Methods("POST")
+
+	pluginHandler := newPluginHandler(handler, rd)
+	rootRouter.HandleFunc("/api/v1/plugin", pluginHandler.LoadPlugin).Methods("POST")
+	rootRouter.HandleFunc("/api/v1/plugin", pluginHandler.UnloadPlugin).Methods("DELETE")
 
 	rootRouter.Handle("/api/v1/health", newHealthHandler(svr, rd)).Methods("GET")
 	rootRouter.Handle("/api/v1/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")

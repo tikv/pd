@@ -156,7 +156,6 @@ func NewConfig() *Config {
 
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
-	fs.BoolVar(&cfg.Log.File.LogRotate, "log-rotate", true, "rotate log")
 
 	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "Path of file that contains list of trusted TLS CAs")
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
@@ -199,6 +198,8 @@ const (
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 )
+
+var defaultRuntimeServices = []string{}
 
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {
@@ -831,7 +832,7 @@ type ReplicationConfig struct {
 	StrictlyMatchLabel bool `toml:"strictly-match-label,omitempty" json:"strictly-match-label,string"`
 
 	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not uesd any more.
-	EnablePlacementRules bool // Keep it false before full feature get merged. `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
+	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
@@ -900,6 +901,8 @@ type PDServerConfig struct {
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
+	// RuntimeSercives is the running the running extension services.
+	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.
 	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
@@ -914,6 +917,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("key-type") {
 		c.KeyType = defaultKeyType
+	}
+	if !meta.IsDefined("runtime-services") {
+		c.RuntimeServices = defaultRuntimeServices
 	}
 	return nil
 }

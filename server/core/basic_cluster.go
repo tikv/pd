@@ -17,7 +17,9 @@ import (
 	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/slice"
+	"go.uber.org/zap"
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
@@ -282,11 +284,45 @@ func (bc *BasicCluster) TakeStore(storeID uint64) *StoreInfo {
 	return bc.Stores.TakeStore(storeID)
 }
 
+// PreCheckPutRegion checks if the region is valid to put.
+func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
+	bc.RLock()
+	for _, item := range bc.Regions.GetOverlaps(region) {
+		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
+			bc.RUnlock()
+			return nil, ErrRegionIsStale(region.GetMeta(), item.GetMeta())
+		}
+	}
+	origin := bc.Regions.GetRegion(region.GetID())
+	bc.RUnlock()
+	if origin == nil {
+		return nil, nil
+	}
+	r := region.GetRegionEpoch()
+	o := origin.GetRegionEpoch()
+	// Region meta is stale, return an error.
+	if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
+		return origin, ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
+	}
+	return origin, nil
+}
+
 // PutRegion put a region.
 func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	bc.Lock()
 	defer bc.Unlock()
 	return bc.Regions.SetRegion(region)
+}
+
+// CheckAndPutRegion checks if the region is valid to put,if valid then put.
+func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
+	origin, err := bc.PreCheckPutRegion(region)
+	if err != nil {
+		log.Warn("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
+		// return the state region to delete.
+		return []*RegionInfo{region}
+	}
+	return bc.PutRegion(region)
 }
 
 // RemoveRegion removes RegionInfo from regionTree and regionMap.

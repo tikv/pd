@@ -26,6 +26,9 @@ const matchRule = "^[A-Za-z0-9]([-A-Za-z0-9_./]*[A-Za-z0-9])?$"
 // The valid label consists of alphanumeric characters, '-', '_', '.' or '/',
 // and must start and end with an alphanumeric character.
 func ValidateLabelString(s string) error {
+	if s == "" {
+		return nil
+	}
 	isValid, _ := regexp.MatchString(matchRule, s)
 	if !isValid {
 		return errors.Errorf("invalid label: %s", s)
