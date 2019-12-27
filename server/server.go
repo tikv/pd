@@ -831,6 +831,7 @@ func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
+	time.Sleep(120 * time.Second)
 	for {
 		if s.IsClosed() {
 			log.Info("server is closed, return leader loop")
