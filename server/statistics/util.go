@@ -97,53 +97,58 @@ type deltaWithInterval struct {
 	interval time.Duration
 }
 
+// AvgOverTime maintains change rate in the last interval.
 type AvgOverTime struct {
 	que      *queue.Queue
-	sum      float64
-	dur      time.Duration
+	deltaSum float64
+	durSum   time.Duration
 	interval time.Duration
 }
 
+// NewAvgOverTime returns an AvgOverTime with given interval.
 func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 	return &AvgOverTime{
 		que:      queue.New(),
-		sum:      0,
-		dur:      0,
+		deltaSum: 0,
+		durSum:   0,
 		interval: interval,
 	}
 }
 
+// Get returns change rate in the last interval.
 func (aot *AvgOverTime) Get() float64 {
-	if aot.dur.Seconds() < 1 {
+	if aot.durSum.Seconds() < 1 {
 		return 0
 	}
-	return aot.sum / aot.dur.Seconds()
+	return aot.deltaSum / aot.durSum.Seconds()
 }
 
+// Add adds recent change to AvgOverTime.
 func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
 	aot.que.PushBack(deltaWithInterval{delta, interval})
-	aot.sum += delta
-	aot.dur += interval
-	if aot.dur <= aot.interval {
+	aot.deltaSum += delta
+	aot.durSum += interval
+	if aot.durSum <= aot.interval {
 		return
 	}
 	for aot.que.Len() > 0 {
 		front := aot.que.Front().(deltaWithInterval)
-		if aot.dur-front.interval >= aot.interval {
+		if aot.durSum-front.interval >= aot.interval {
 			aot.que.PopFront()
-			aot.sum -= front.delta
-			aot.dur -= front.interval
+			aot.deltaSum -= front.delta
+			aot.durSum -= front.interval
 		} else {
 			break
 		}
 	}
 }
 
+// Set sets AvgOverTime to the given average.
 func (aot *AvgOverTime) Set(avg float64) {
 	for aot.que.Len() > 0 {
 		aot.que.PopFront()
 	}
-	aot.sum = avg * aot.interval.Seconds()
-	aot.dur = aot.interval
-	aot.que.PushBack(deltaWithInterval{delta: aot.sum, interval: aot.dur})
+	aot.deltaSum = avg * aot.interval.Seconds()
+	aot.durSum = aot.interval
+	aot.que.PushBack(deltaWithInterval{delta: aot.deltaSum, interval: aot.durSum})
 }
