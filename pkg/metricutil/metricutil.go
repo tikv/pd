@@ -61,9 +61,9 @@ func camelCaseToSnakeCase(str string) string {
 
 // prometheusPushClient pushs metrics to Prometheus Pushgateway.
 func prometheusPushClient(job, addr string, interval time.Duration) {
-	pusher := push.New(addr, job)
-	pusher = pusher.Gatherer(prometheus.DefaultGatherer)
-	pusher = pusher.Grouping("instance", instanceName())
+	pusher := push.New(addr, job).
+		Gatherer(prometheus.DefaultGatherer).
+		Grouping("instance", instanceName())
 
 	for {
 		err := pusher.Push()
