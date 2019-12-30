@@ -88,8 +88,8 @@ func newShuffleHotRegionScheduler(opController *schedule.OperatorController, con
 	return &shuffleHotRegionScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		stats:         newStoreStaticstics(),
-		types:         []BalanceType{hotReadRegionBalance, hotWriteRegionBalance},
+		stats:         newStoreStatistics(),
+		types:         []BalanceType{hotRead, hotWrite},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
@@ -121,10 +121,10 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster opt.Cluster) []*operator.Operator {
 	storesStats := cluster.GetStoresStats()
 	switch typ {
-	case hotReadRegionBalance:
+	case hotRead:
 		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), storesStats.GetStoresBytesReadStat(), cluster, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stats.readStatAsLeader)
-	case hotWriteRegionBalance:
+	case hotWrite:
 		s.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), storesStats.GetStoresBytesWriteStat(), cluster, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stats.writeStatAsLeader)
 	}

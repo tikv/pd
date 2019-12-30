@@ -332,7 +332,8 @@ type hasHotStatus interface {
 	GetHotWriteStatus() *statistics.StoreHotPeersInfos
 	GetWritePendingInfluence() map[uint64]schedulers.Influence
 	GetReadPendingInfluence() map[uint64]schedulers.Influence
-	GetStoresScore() map[uint64]float64
+	GetReadScores() map[uint64]float64
+	GetWriteScores() map[uint64]float64
 }
 
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
@@ -444,13 +445,17 @@ func (c *coordinator) collectHotSpotMetrics() {
 	}
 
 	// Collects score of stores stats metrics.
-	scores := s.Scheduler.(hasHotStatus).GetStoresScore()
+	readScores := s.Scheduler.(hasHotStatus).GetReadScores()
+	writeScores := s.Scheduler.(hasHotStatus).GetWriteScores()
 	for _, store := range stores {
 		storeAddress := store.GetAddress()
 		storeID := store.GetID()
-		score, ok := scores[storeID]
-		if ok {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, strconv.FormatUint(storeID, 10), "store_score").Set(score)
+		storeLabel := strconv.FormatUint(storeID, 10)
+		if score, ok := readScores[storeID]; ok {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "store_read_score").Set(score)
+		}
+		if score, ok := writeScores[storeID]; ok {
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "store_write_score").Set(score)
 		}
 	}
 }
