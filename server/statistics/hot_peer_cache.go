@@ -28,8 +28,8 @@ const (
 
 	rollingWindowsSize = 5
 
-	hotWriteRegionMinBytesRate = 16 * 1024
-	hotReadRegionMinBytesRate  = 128 * 1024
+	hotWriteRegionMinBytesRate = 1 * 1024
+	hotReadRegionMinBytesRate  = 8 * 1024
 
 	hotRegionReportMinInterval = 3
 
