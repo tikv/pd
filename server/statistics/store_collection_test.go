@@ -40,6 +40,7 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 		{Id: 6, Address: "mock://tikv-6", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z3"}, {Key: "host", Value: "h2"}}},
 		{Id: 7, Address: "mock://tikv-7", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h1"}}},
 		{Id: 8, Address: "mock://tikv-8", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h2"}}},
+		{Id: 8, Address: "mock://tikv-9", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h3"}}, State: metapb.StoreState_Tombstone},
 	}
 	storesStats := NewStoresStats()
 	var stores []*core.StoreInfo
@@ -65,7 +66,7 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 	c.Assert(stats.RegionCount, Equals, 0)
 	c.Assert(stats.Unhealth, Equals, 0)
 	c.Assert(stats.Disconnect, Equals, 0)
-	c.Assert(stats.Tombstone, Equals, 0)
+	c.Assert(stats.Tombstone, Equals, 1)
 	c.Assert(stats.LowSpace, Equals, 8)
 	c.Assert(stats.LabelCounter["zone:z1"], Equals, 2)
 	c.Assert(stats.LabelCounter["zone:z2"], Equals, 2)
