@@ -129,6 +129,8 @@ type Config struct {
 
 	logger   *zap.Logger
 	logProps *log.ZapProperties
+
+	EnableConfigManager bool
 }
 
 // NewConfig creates a new config.
@@ -161,6 +163,8 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
+
+	fs.BoolVar(&cfg.EnableConfigManager, "enable-config-manager", false, "Enable configuration manager")
 
 	return cfg
 }
