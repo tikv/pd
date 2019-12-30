@@ -298,9 +298,6 @@ func collect(records []*pdpb.RecordPair) float64 {
 func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	statInterval := stats.GetInterval()
 	interval := statInterval.GetEndTimestamp() - statInterval.GetStartTimestamp()
-	//if interval == 0 {
-	//	return
-	//}
 	r.Lock()
 	defer r.Unlock()
 	r.bytesWriteRate.Add(float64(stats.BytesWritten), time.Duration(interval)*time.Second)
