@@ -828,7 +828,7 @@ func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
 			continue
 		}
 
-		available := oc.getOrCreateStoreLimit(storeID).Available()
+		available := oc.getOrCreateStoreLimit(storeID).bucket.Available()
 		storeLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), "available").Set(float64(available) / float64(operator.RegionInfluence))
 		if available < stepCost {
 			return true
@@ -844,6 +844,22 @@ func (oc *OperatorController) SetAllStoresLimit(rate float64, mode StoreLimitMod
 	stores := oc.cluster.GetStores()
 	for _, s := range stores {
 		oc.newStoreLimit(s.GetID(), rate, mode)
+	}
+}
+
+// SetAllStoresLimitAuto updates the store limit in StoreLimitAuto mode
+func (oc *OperatorController) SetAllStoresLimitAuto(rate float64) {
+	oc.Lock()
+	defer oc.Unlock()
+	stores := oc.cluster.GetStores()
+	for _, s := range stores {
+		sid := s.GetID()
+		if old, ok := oc.storesLimit[sid]; ok {
+			if old.Mode() == StoreLimitManual {
+				continue
+			}
+		}
+		oc.storesLimit[sid] = NewStoreLimit(rate, StoreLimitAuto)
 	}
 }
 

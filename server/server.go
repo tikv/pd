@@ -30,6 +30,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -40,6 +41,7 @@ import (
 	"github.com/pingcap/pd/pkg/ui"
 	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
+	configmanager "github.com/pingcap/pd/server/config_manager"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
@@ -116,6 +118,9 @@ type Server struct {
 	// Zap logger
 	lg       *zap.Logger
 	logProps *log.ZapProperties
+
+	// components' configuration management
+	cfgManager *configmanager.ConfigManager
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -185,6 +190,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		ctx:               ctx,
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 	}
+
+	s.cfgManager = configmanager.NewConfigManager(s)
 	s.handler = newHandler(s)
 
 	// Adjust etcd config.
@@ -206,6 +213,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
+
+		if cfg.EnableConfigManager {
+			configpb.RegisterConfigServer(gs, s.cfgManager)
+		}
 	}
 	s.etcdCfg = etcdCfg
 	if EnableZap {
@@ -974,5 +985,13 @@ func (s *Server) reloadConfigFromKV() error {
 		s.storage.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
 	}
+
+	// The request only valid when there is a leader.
+	// And before the a PD becomes a leader it will firstly reload the config.
+	if s.cfg.EnableConfigManager {
+		err = s.cfgManager.Reload(s.storage)
+		return err
+	}
+
 	return nil
 }

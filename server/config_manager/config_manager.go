@@ -23,7 +23,9 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/server/member"
 	"github.com/pkg/errors"
 )
 
@@ -43,9 +45,19 @@ var (
 	errNotSupported = "not supported"
 )
 
+// Server is the interface for configuration manager.
+type Server interface {
+	IsClosed() bool
+	ClusterID() uint64
+	GetRaftCluster() *cluster.RaftCluster
+	GetStorage() *core.Storage
+	GetMember() *member.Member
+}
+
 // ConfigManager is used to manage all components' config.
 type ConfigManager struct {
 	sync.RWMutex
+	svr Server
 	// component -> GlobalConfig
 	GlobalCfgs map[string]*GlobalConfig
 	// component -> componentID -> LocalConfig
@@ -53,8 +65,9 @@ type ConfigManager struct {
 }
 
 // NewConfigManager creates a new ConfigManager.
-func NewConfigManager() *ConfigManager {
+func NewConfigManager(svr Server) *ConfigManager {
 	return &ConfigManager{
+		svr:        svr,
 		GlobalCfgs: make(map[string]*GlobalConfig),
 		LocalCfgs:  make(map[string]map[string]*LocalConfig),
 	}
@@ -85,8 +98,8 @@ func (c *ConfigManager) getComponent(id string) string {
 	return ""
 }
 
-// Get returns config and the latest version.
-func (c *ConfigManager) Get(version *configpb.Version, component, componentID string) (*configpb.Version, string, *configpb.Status) {
+// GetConfig returns config and the latest version.
+func (c *ConfigManager) GetConfig(version *configpb.Version, component, componentID string) (*configpb.Version, string, *configpb.Status) {
 	c.RLock()
 	defer c.RUnlock()
 	var config string
@@ -120,8 +133,8 @@ func (c *ConfigManager) Get(version *configpb.Version, component, componentID st
 	return c.getLatestVersion(component, componentID), config, status
 }
 
-// Create is used for registering a component to PD.
-func (c *ConfigManager) Create(version *configpb.Version, component, componentID, cfg string) (*configpb.Version, string, *configpb.Status) {
+// CreateConfig is used for registering a component to PD.
+func (c *ConfigManager) CreateConfig(version *configpb.Version, component, componentID, cfg string) (*configpb.Version, string, *configpb.Status) {
 	c.Lock()
 	defer c.Unlock()
 	var status *configpb.Status
@@ -188,8 +201,8 @@ func (c *ConfigManager) getComponentCfg(component, componentID string) (string, 
 	return encodeConfigs(config)
 }
 
-// Update is used to update a config with a given config type.
-func (c *ConfigManager) Update(kind *configpb.ConfigKind, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
+// UpdateConfig is used to update a config with a given config type.
+func (c *ConfigManager) UpdateConfig(kind *configpb.ConfigKind, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -318,8 +331,8 @@ func (c *ConfigManager) updateLocal(componentID string, version *configpb.Versio
 	return c.LocalCfgs[component][componentID].getVersion(), &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
-// Delete removes a component from the config manager.
-func (c *ConfigManager) Delete(kind *configpb.ConfigKind, version *configpb.Version) *configpb.Status {
+// DeleteConfig removes a component from the config manager.
+func (c *ConfigManager) DeleteConfig(kind *configpb.ConfigKind, version *configpb.Version) *configpb.Status {
 	c.Lock()
 	defer c.Unlock()
 
