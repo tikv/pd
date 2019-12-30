@@ -1005,7 +1005,8 @@ func (c *RaftCluster) checkStores() {
 		return
 	}
 
-	if upStoreCount < c.GetMaxReplicas() {
+	// When placement rules feature is enabled. It is hard to determine required replica count precisely.
+	if !c.IsPlacementRulesEnabled() && upStoreCount < c.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
 			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
