@@ -848,6 +848,18 @@ func (h *Handler) ResetTS(ts uint64) error {
 	return tsoServer.ResetUserTimestamp(ts)
 }
 
+// SetStoreLimitScene sets the limit values for differents scenes
+func (h *Handler) SetStoreLimitScene(scene *schedule.StoreLimitScene) {
+	cluster := h.s.GetRaftCluster()
+	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene)
+}
+
+// GetStoreLimitScene returns the limit valus for different scenes
+func (h *Handler) GetStoreLimitScene() *schedule.StoreLimitScene {
+	cluster := h.s.GetRaftCluster()
+	return cluster.GetStoreLimiter().StoreLimitScene()
+}
+
 // PluginLoad loads the plugin referenced by the pluginPath
 func (h *Handler) PluginLoad(pluginPath string) error {
 	h.pluginChMapLock.Lock()

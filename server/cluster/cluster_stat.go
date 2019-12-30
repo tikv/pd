@@ -11,15 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License
 
-package server
+package cluster
 
 import (
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/slice"
 	"github.com/pingcap/pd/server/statistics"
+	"go.uber.org/zap"
 )
 
 // Cluster State Statistics
@@ -91,29 +94,38 @@ func (s LoadState) String() string {
 	return "none"
 }
 
+// ThreadsCollected filters the threads to take into
+// the calculation of CPU usage.
+var ThreadsCollected = []string{"grpc-server-"}
+
 // NumberOfEntries is the max number of StatEntry that preserved,
 // it is the history of a store's heartbeats. The interval of store
 // heartbeats from TiKV is 10s, so we can preserve 30 entries per
 // store which is about 5 minutes.
 const NumberOfEntries = 30
 
+// StaleEntriesTimeout is the time before an entry is deleted as stale.
+// It is about 30 entries * 10s
+const StaleEntriesTimeout = 300 * time.Second
+
 // StatEntry is an entry of store statistics
 type StatEntry pdpb.StoreStats
 
-// CPUStatEntries saves a history of store statistics
-type CPUStatEntries struct {
-	cpu statistics.MovingAvg
+// CPUEntries saves a history of store statistics
+type CPUEntries struct {
+	cpu     statistics.MovingAvg
+	updated time.Time
 }
 
-// NewCPUStatEntries returns the StateEntries with a fixed size
-func NewCPUStatEntries(size int) *CPUStatEntries {
-	return &CPUStatEntries{
+// NewCPUEntries returns the StateEntries with a fixed size
+func NewCPUEntries(size int) *CPUEntries {
+	return &CPUEntries{
 		cpu: statistics.NewMedianFilter(size),
 	}
 }
 
 // Append a StatEntry, it accepts an optional threads as a filter of CPU usage
-func (s *CPUStatEntries) Append(stat *StatEntry, threads ...string) bool {
+func (s *CPUEntries) Append(stat *StatEntry, threads ...string) bool {
 	usages := stat.CpuUsages
 	// all gRPC fields are optional, so we must check the empty value
 	if usages == nil {
@@ -135,34 +147,37 @@ func (s *CPUStatEntries) Append(stat *StatEntry, threads ...string) bool {
 	}
 	if appended > 0 {
 		s.cpu.Add(cpu / float64(appended))
+		s.updated = time.Now()
 		return true
 	}
 	return false
 }
 
 // CPU returns the cpu usage
-func (s *CPUStatEntries) CPU() float64 {
+func (s *CPUEntries) CPU() float64 {
 	return s.cpu.Get()
 }
 
-// ClusterStatEntries saves the StatEntries for each store in the cluster
-type ClusterStatEntries struct {
+// StatEntries saves the StatEntries for each store in the cluster
+type StatEntries struct {
 	m     sync.RWMutex
-	stats map[uint64]*CPUStatEntries
+	stats map[uint64]*CPUEntries
 	size  int   // size of entries to keep for each store
 	total int64 // total of StatEntry appended
+	ttl   time.Duration
 }
 
-// NewClusterStatEntries returns a statistics object for the cluster
-func NewClusterStatEntries(size int) *ClusterStatEntries {
-	return &ClusterStatEntries{
-		stats: make(map[uint64]*CPUStatEntries),
+// NewStatEntries returns a statistics object for the cluster
+func NewStatEntries(size int) *StatEntries {
+	return &StatEntries{
+		stats: make(map[uint64]*CPUEntries),
 		size:  size,
+		ttl:   StaleEntriesTimeout,
 	}
 }
 
 // Append an store StatEntry
-func (cst *ClusterStatEntries) Append(stat *StatEntry) {
+func (cst *StatEntries) Append(stat *StatEntry) bool {
 	cst.m.Lock()
 	defer cst.m.Unlock()
 
@@ -172,11 +187,11 @@ func (cst *ClusterStatEntries) Append(stat *StatEntry) {
 	storeID := stat.StoreId
 	entries, ok := cst.stats[storeID]
 	if !ok {
-		entries = NewCPUStatEntries(cst.size)
+		entries = NewCPUEntries(cst.size)
 		cst.stats[storeID] = entries
 	}
 
-	entries.Append(stat)
+	return entries.Append(stat, ThreadsCollected...)
 }
 
 func contains(slice []uint64, value uint64) bool {
@@ -189,9 +204,9 @@ func contains(slice []uint64, value uint64) bool {
 }
 
 // CPU returns the cpu usage of the cluster
-func (cst *ClusterStatEntries) CPU(excludes ...uint64) float64 {
-	cst.m.RLock()
-	defer cst.m.RUnlock()
+func (cst *StatEntries) CPU(excludes ...uint64) float64 {
+	cst.m.Lock()
+	defer cst.m.Unlock()
 
 	// no entries have been collected
 	if cst.total == 0 {
@@ -203,50 +218,63 @@ func (cst *ClusterStatEntries) CPU(excludes ...uint64) float64 {
 		if contains(excludes, sid) {
 			continue
 		}
+		if time.Since(stat.updated) > cst.ttl {
+			delete(cst.stats, sid)
+			continue
+		}
 		sum += stat.CPU()
+	}
+	if len(cst.stats) == 0 {
+		return 0.0
 	}
 	return sum / float64(len(cst.stats))
 }
 
-// ClusterState collects information from store heartbeat
+// State collects information from store heartbeat
 // and caculates the load state of the cluster
-type ClusterState struct {
-	cst *ClusterStatEntries
+type State struct {
+	cst *StatEntries
 }
 
-// NewClusterState return the ClusterState object which collects
+// NewState return the LoadState object which collects
 // information from store heartbeats and gives the current state of
 // the cluster
-func NewClusterState() *ClusterState {
-	return &ClusterState{
-		cst: NewClusterStatEntries(NumberOfEntries),
+func NewState() *State {
+	return &State{
+		cst: NewStatEntries(NumberOfEntries),
 	}
 }
 
 // State returns the state of the cluster, excludes is the list of store ID
 // to be excluded
-func (cs *ClusterState) State(excludes ...uint64) LoadState {
+func (cs *State) State(excludes ...uint64) LoadState {
 	// Return LoadStateNone if there is not enough heartbeats
 	// collected.
 	if cs.cst.total < NumberOfEntries {
 		return LoadStateNone
 	}
 
+	// The CPU usage in fact is collected from grpc-server, so it is not the
+	// CPU usage for the whole TiKV process. The boundaries are empirical
+	// values.
+	// TODO we may get a more accurate state with the information of the number // of the CPU cores
 	cpu := cs.cst.CPU(excludes...)
+	log.Debug("calculated cpu", zap.Float64("usage", cpu))
+	clusterStateCPUGuage.Set(cpu)
 	switch {
-	case cpu == 0:
+	case cpu < 5:
 		return LoadStateIdle
-	case cpu > 0 && cpu < 30:
+	case cpu >= 5 && cpu < 10:
 		return LoadStateLow
-	case cpu >= 30 && cpu < 80:
+	case cpu >= 10 && cpu < 30:
 		return LoadStateNormal
-	case cpu >= 80:
+	case cpu >= 30:
 		return LoadStateHigh
 	}
 	return LoadStateNone
 }
 
 // Collect statistics from store heartbeat
-func (cs *ClusterState) Collect(stat *StatEntry) {
+func (cs *State) Collect(stat *StatEntry) {
 	cs.cst.Append(stat)
 }

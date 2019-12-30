@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License
 
-package server
+package cluster
 
 import (
 	"fmt"
@@ -38,11 +38,11 @@ func cpu(usage int64) []*pdpb.RecordPair {
 	return pairs
 }
 
-func (s *testClusterStatSuite) TestCPUStatEntriesAppend(c *C) {
+func (s *testClusterStatSuite) TestCPUEntriesAppend(c *C) {
 	N := 10
 
 	checkAppend := func(appended bool, usage int64, threads ...string) {
-		entries := NewCPUStatEntries(N)
+		entries := NewCPUEntries(N)
 		c.Assert(entries, NotNil)
 		for i := 0; i < N; i++ {
 			entry := &StatEntry{
@@ -58,9 +58,9 @@ func (s *testClusterStatSuite) TestCPUStatEntriesAppend(c *C) {
 	checkAppend(false, 0, "cup")
 }
 
-func (s *testClusterStatSuite) TestCPUStatEntriesCPU(c *C) {
+func (s *testClusterStatSuite) TestCPUEntriesCPU(c *C) {
 	N := 10
-	entries := NewCPUStatEntries(N)
+	entries := NewCPUEntries(N)
 	c.Assert(entries, NotNil)
 
 	usages := cpu(20)
@@ -73,10 +73,11 @@ func (s *testClusterStatSuite) TestCPUStatEntriesCPU(c *C) {
 	c.Assert(entries.CPU(), Equals, float64(20))
 }
 
-func (s *testClusterStatSuite) TestClusterStatEntriesAppend(c *C) {
+func (s *testClusterStatSuite) TestStatEntriesAppend(c *C) {
 	N := 10
-	cst := NewClusterStatEntries(N)
+	cst := NewStatEntries(N)
 	c.Assert(cst, NotNil)
+	ThreadsCollected = []string{"cpu:"}
 
 	// fill 2*N entries, 2 entries for each store
 	for i := 0; i < 2*N; i++ {
@@ -84,7 +85,7 @@ func (s *testClusterStatSuite) TestClusterStatEntriesAppend(c *C) {
 			StoreId:   uint64(i % N),
 			CpuUsages: cpu(20),
 		}
-		cst.Append(entry)
+		c.Assert(cst.Append(entry), IsTrue)
 	}
 
 	// use i as the store ID
@@ -93,39 +94,53 @@ func (s *testClusterStatSuite) TestClusterStatEntriesAppend(c *C) {
 	}
 }
 
-func (s *testClusterStatSuite) TestClusterStatCPU(c *C) {
+func (s *testClusterStatSuite) TestStatEntriesCPU(c *C) {
 	N := 10
-	cst := NewClusterStatEntries(N)
+	cst := NewStatEntries(N)
 	c.Assert(cst, NotNil)
 
-	// heartbeat per 10s
-	interval := &pdpb.TimeInterval{
-		StartTimestamp: 1,
-		EndTimestamp:   11,
-	}
 	// the average cpu usage is 20%
 	usages := cpu(20)
+	ThreadsCollected = []string{"cpu:"}
 
 	// 2 entries per store
 	for i := 0; i < 2*N; i++ {
 		entry := &StatEntry{
 			StoreId:   uint64(i % N),
-			Interval:  interval,
+			CpuUsages: usages,
+		}
+		c.Assert(cst.Append(entry), IsTrue)
+	}
+
+	c.Assert(cst.total, Equals, int64(2*N))
+	// the cpu usage of the whole cluster is 20%
+	c.Assert(cst.CPU(), Equals, float64(20))
+}
+func (s *testClusterStatSuite) TestStatEntriesCPUStale(c *C) {
+	N := 10
+	cst := NewStatEntries(N)
+	// make all entries stale immediately
+	cst.ttl = 0
+
+	usages := cpu(20)
+	ThreadsCollected = []string{"cpu:"}
+	for i := 0; i < 2*N; i++ {
+		entry := &StatEntry{
+			StoreId:   uint64(i % N),
 			CpuUsages: usages,
 		}
 		cst.Append(entry)
 	}
-
-	// the cpu usage of the whole cluster is 20%
-	c.Assert(cst.CPU(), Equals, float64(20))
+	c.Assert(cst.CPU(), Equals, float64(0))
 }
 
-func (s *testClusterStatSuite) TestClusterStatState(c *C) {
-	Load := func(usage int64) *ClusterState {
-		cst := NewClusterStatEntries(10)
+func (s *testClusterStatSuite) TestStatEntriesState(c *C) {
+	Load := func(usage int64) *State {
+		cst := NewStatEntries(10)
 		c.Assert(cst, NotNil)
 
 		usages := cpu(usage)
+		ThreadsCollected = []string{"cpu:"}
 
 		for i := 0; i < NumberOfEntries; i++ {
 			entry := &StatEntry{
@@ -134,10 +149,10 @@ func (s *testClusterStatSuite) TestClusterStatState(c *C) {
 			}
 			cst.Append(entry)
 		}
-		return &ClusterState{cst}
+		return &State{cst}
 	}
 	c.Assert(Load(0).State(), Equals, LoadStateIdle)
-	c.Assert(Load(20).State(), Equals, LoadStateLow)
-	c.Assert(Load(50).State(), Equals, LoadStateNormal)
-	c.Assert(Load(90).State(), Equals, LoadStateHigh)
+	c.Assert(Load(5).State(), Equals, LoadStateLow)
+	c.Assert(Load(10).State(), Equals, LoadStateNormal)
+	c.Assert(Load(30).State(), Equals, LoadStateHigh)
 }
