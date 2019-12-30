@@ -26,10 +26,10 @@ const (
 	topNTTL           = 3 * RegionHeartBeatReportInterval * time.Second
 	hotThresholdRatio = 0.8
 
-	regionAvgInterval = RegionHeartBeatReportInterval * time.Second
+	rollingWindowsSize = 5
 
-	hotWriteRegionMinBytesRate = 1 * 1024
-	hotReadRegionMinBytesRate  = 8 * 1024
+	hotWriteRegionMinBytesRate = 16 * 1024
+	hotReadRegionMinBytesRate  = 128 * 1024
 
 	hotRegionReportMinInterval = 3
 
@@ -101,10 +101,10 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 	totalKeys := float64(f.getTotalKeys(region))
 
 	reportInterval := region.GetInterval()
-	interval := time.Duration(reportInterval.GetEndTimestamp()-reportInterval.GetStartTimestamp()) * time.Second
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
-	bytesPerSec := totalBytes / interval.Seconds()
-	keysPerSec := totalKeys / interval.Seconds()
+	bytesPerSec := totalBytes / float64(interval)
+	keysPerSec := totalKeys / float64(interval)
 
 	for storeID := range storeIDs {
 		isExpired := f.isRegionExpired(region, storeID)
@@ -128,7 +128,7 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 		}
 
 		hotThreshold := f.calcHotThreshold(stats, storeID)
-		newItem = updateHotPeerStat(newItem, oldItem, totalBytes, interval, hotThreshold)
+		newItem = updateHotPeerStat(newItem, oldItem, bytesPerSec, hotThreshold)
 		if newItem != nil {
 			ret = append(ret, newItem)
 		}
@@ -259,21 +259,13 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 	return false
 }
 
-func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes float64, interval time.Duration, hotThreshold float64) *HotPeerStat {
+func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytesRate float64, hotThreshold float64) *HotPeerStat {
+	isHot := bytesRate >= hotThreshold
 	if newItem.needDelete {
 		return newItem
 	}
-
 	if oldItem != nil {
 		newItem.RollingBytesRate = oldItem.RollingBytesRate
-	} else {
-		newItem.RollingBytesRate = NewAvgOverTime(regionAvgInterval)
-	}
-
-	newItem.RollingBytesRate.Add(bytes, interval)
-	isHot := newItem.GetBytesRate() >= hotThreshold
-
-	if oldItem != nil {
 		if isHot {
 			newItem.HotDegree = oldItem.HotDegree + 1
 			newItem.AntiCount = hotRegionAntiCount
@@ -288,9 +280,11 @@ func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytes float64, interval ti
 		if !isHot {
 			return nil
 		}
+		newItem.RollingBytesRate = NewMedianFilter(rollingWindowsSize)
 		newItem.AntiCount = hotRegionAntiCount
 		newItem.isNew = true
 	}
+	newItem.RollingBytesRate.Add(bytesRate)
 
 	return newItem
 }

@@ -271,15 +271,15 @@ type RollingStoreStats struct {
 }
 
 const storeStatsRollingWindows = 3
-const storeAvgInterval time.Duration = 3 * StoreHeartBeatReportInterval * time.Second
+const avgInterval time.Duration = 3 * StoreHeartBeatReportInterval * time.Second
 
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate:          NewAvgOverTime(storeAvgInterval),
-		bytesReadRate:           NewAvgOverTime(storeAvgInterval),
-		keysWriteRate:           NewAvgOverTime(storeAvgInterval),
-		keysReadRate:            NewAvgOverTime(storeAvgInterval),
+		bytesWriteRate:          NewAvgOverTime(avgInterval),
+		bytesReadRate:           NewAvgOverTime(avgInterval),
+		keysWriteRate:           NewAvgOverTime(avgInterval),
+		keysReadRate:            NewAvgOverTime(avgInterval),
 		totalCPUUsage:           NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskReadRate:  NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskWriteRate: NewMedianFilter(storeStatsRollingWindows),

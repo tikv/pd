@@ -29,7 +29,7 @@ type HotPeerStat struct {
 	BytesRate float64  `json:"flow_bytes"`
 	KeysRate  float64  `json:"flow_keys"`
 	// RollingBytesRate is a rolling statistics, recording some recently added records.
-	RollingBytesRate *AvgOverTime
+	RollingBytesRate MovingAvg
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
