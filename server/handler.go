@@ -480,6 +480,11 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return err
 	}
 
+	if c.IsPlacementRulesEnabled() {
+		// Cannot determine role when placement rules enabled. Not supported now.
+		return errors.New("transfer region is not supported when placement rules enabled")
+	}
+
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
