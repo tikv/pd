@@ -83,6 +83,7 @@ type RaftCluster struct {
 	opt     *config.ScheduleOption
 	storage *core.Storage
 	id      id.Allocator
+	limiter *StoreLimiter
 
 	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
@@ -200,8 +201,17 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
+	c.ruleManager = placement.NewRuleManager(c.storage)
+	if c.IsPlacementRulesEnabled() {
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		if err != nil {
+			return err
+		}
+	}
+
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt)
+	c.limiter = NewStoreLimiter(c.coordinator.opController)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(3)
@@ -385,6 +395,12 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
+
+	// c.limiter is nil before "start" is called
+	if c.limiter != nil && c.opt.Load().StoreLimitMode == "auto" {
+		c.limiter.Collect(newStore.GetStoreStats())
+	}
+
 	return nil
 }
 
@@ -797,7 +813,16 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			core.SetStoreLabels(labels),
 		)
 	}
-	// Check location labels.
+	if err = c.checkStoreLabels(s); err != nil {
+		return err
+	}
+	return c.putStoreLocked(s)
+}
+
+func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
+	if c.opt.IsPlacementRulesEnabled() {
+		return nil
+	}
 	keysSet := make(map[string]struct{})
 	for _, k := range c.GetLocationLabels() {
 		keysSet[k] = struct{}{}
@@ -821,7 +846,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			}
 		}
 	}
-	return c.putStoreLocked(s)
+	return nil
 }
 
 // RemoveStore marks a store as offline in cluster.
@@ -988,7 +1013,8 @@ func (c *RaftCluster) checkStores() {
 		return
 	}
 
-	if upStoreCount < c.GetMaxReplicas() {
+	// When placement rules feature is enabled. It is hard to determine required replica count precisely.
+	if !c.IsPlacementRulesEnabled() && upStoreCount < c.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
 			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
@@ -1555,6 +1581,11 @@ func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.pauseOrResumeScheduler(name, t)
+}
+
+// GetStoreLimiter returns the dynamic adjusting limiter
+func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
+	return c.limiter
 }
 
 // DialClient used to dial http request.

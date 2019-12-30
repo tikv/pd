@@ -49,8 +49,9 @@ const (
 
 var (
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
-	ErrNotBootstrapped   = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
-	errSchedulerExisted  = errors.New("scheduler existed")
+	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	// ErrSchedulerExisted is error info for scheduler has already existed.
+	ErrSchedulerExisted  = errors.New("scheduler existed")
 	errSchedulerNotFound = errors.New("scheduler not found")
 )
 
@@ -78,7 +79,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams opt.Hea
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
-		checkers:        schedule.NewCheckerController(ctx, cluster, opController),
+		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, opController),
 		regionScatterer: schedule.NewRegionScatterer(cluster),
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
@@ -240,7 +241,7 @@ func (c *coordinator) run() {
 		}
 
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != errSchedulerExisted {
+		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != ErrSchedulerExisted {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		} else {
 			// Only records the valid scheduler config.
@@ -467,7 +468,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	defer c.Unlock()
 
 	if _, ok := c.schedulers[scheduler.GetName()]; ok {
-		return errSchedulerExisted
+		return ErrSchedulerExisted
 	}
 
 	s := newScheduleController(c, scheduler)

@@ -138,16 +138,20 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		sourceID := source.GetID()
 
 		for i := 0; i < balanceRegionRetryLimit; i++ {
-			// Priority picks the region that has a pending peer.
+			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
 			region := cluster.RandPendingRegion(sourceID, s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster))
 			if region == nil {
-				// Then picks the region that has a follower in the source store.
+				// Then pick the region that has a follower in the source store.
 				region = cluster.RandFollowerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
 			}
 			if region == nil {
-				// Last, picks the region has the leader in the source store.
+				// Then pick the region has the leader in the source store.
 				region = cluster.RandLeaderRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+			}
+			if region == nil {
+				// Finally pick learner.
+				region = cluster.RandLearnerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
 			}
 			if region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
@@ -180,24 +184,35 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 	source := cluster.GetStore(sourceStoreID)
 	if source == nil {
 		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
+		return nil
 	}
-	scoreGuard := filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), stores, source)
-	replicaChecker := checker.NewReplicaChecker(cluster, s.GetName())
 	exclude := make(map[uint64]struct{})
 	excludeFilter := filter.NewExcludedFilter(s.GetName(), nil, exclude)
 	for {
-		storeID, _ := replicaChecker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
-		if storeID == 0 {
+		var target *core.StoreInfo
+		if cluster.IsPlacementRulesEnabled() {
+			scoreGuard := filter.NewRuleFitFilter(s.GetName(), cluster, region, sourceStoreID)
+			fit := cluster.FitRegion(region)
+			rf := fit.GetRuleFit(oldPeer.GetId())
+			if rf == nil {
+				schedulerCounter.WithLabelValues(s.GetName(), "skip-orphan-peer").Inc()
+				return nil
+			}
+			target = checker.SelectStoreToReplacePeerByRule(s.GetName(), cluster, region, fit, rf, oldPeer, scoreGuard, excludeFilter)
+		} else {
+			scoreGuard := filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), stores, source)
+			replicaChecker := checker.NewReplicaChecker(cluster, s.GetName())
+			storeID, _ := replicaChecker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
+			if storeID != 0 {
+				target = cluster.GetStore(storeID)
+			}
+		}
+		if target == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
 			return nil
 		}
-		exclude[storeID] = struct{}{} // exclude next round.
+		exclude[target.GetID()] = struct{}{} // exclude next round.
 
-		target := cluster.GetStore(storeID)
-		if target == nil {
-			log.Error("failed to get the target store", zap.Uint64("store-id", storeID))
-			continue
-		}
 		regionID := region.GetID()
 		sourceID := source.GetID()
 		targetID := target.GetID()
@@ -210,12 +225,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			continue
 		}
 
-		newPeer, err := cluster.AllocPeer(storeID)
-		if err != nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-peer").Inc()
-			return nil
-		}
-		op, err := operator.CreateMovePeerOperator(BalanceRegionType, cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer)
+		newPeer := &metapb.Peer{StoreId: target.GetID(), IsLearner: oldPeer.IsLearner}
+		op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil

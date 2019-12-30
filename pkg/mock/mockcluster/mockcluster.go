@@ -43,7 +43,8 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
-	ruleManager, _ := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()), opt.MaxReplicas, opt.GetLocationLabels())
+	ruleManager := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()))
+	ruleManager.Initialize(opt.MaxReplicas, opt.GetLocationLabels())
 	return &Cluster{
 		BasicCluster:    core.NewBasicCluster(),
 		IDAllocator:     mockid.NewIDAllocator(),
@@ -478,6 +479,11 @@ func (mc *Cluster) PutStoreWithLabels(id uint64, labelPairs ...string) {
 		labels[labelPairs[i]] = labelPairs[i+1]
 	}
 	mc.AddLabelsStore(id, 0, labels)
+}
+
+// RemoveScheduler mocks method.
+func (mc *Cluster) RemoveScheduler(name string) error {
+	return nil
 }
 
 // MockRegionInfo returns a mock region

@@ -129,6 +129,8 @@ type Config struct {
 
 	logger   *zap.Logger
 	logProps *log.ZapProperties
+
+	EnableConfigManager bool
 }
 
 // NewConfig creates a new config.
@@ -161,6 +163,8 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
+
+	fs.BoolVar(&cfg.EnableConfigManager, "enable-config-manager", false, "Enable configuration manager")
 
 	return cfg
 }
@@ -468,45 +472,45 @@ func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
 type ScheduleConfig struct {
 	// If the snapshot count of one store is greater than this value,
 	// it will never be used as a source or target store.
-	MaxSnapshotCount    uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
-	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count,omitempty" json:"max-pending-peer-count"`
+	MaxSnapshotCount    uint64 `toml:"max-snapshot-count" json:"max-snapshot-count"`
+	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count" json:"max-pending-peer-count"`
 	// If both the size of region is smaller than MaxMergeRegionSize
 	// and the number of rows in region is smaller than MaxMergeRegionKeys,
 	// it will try to merge with adjacent regions.
-	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
-	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys,omitempty" json:"max-merge-region-keys"`
+	MaxMergeRegionSize uint64 `toml:"max-merge-region-size" json:"max-merge-region-size"`
+	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
-	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
+	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
-	EnableOneWayMerge bool `toml:"enable-one-way-merge,omitempty" json:"enable-one-way-merge,string"`
+	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
 	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
 	// This option only works when key type is "table".
-	EnableCrossTableMerge bool `toml:"enable-cross-table-merge,omitempty" json:"enable-cross-table-merge,string"`
+	EnableCrossTableMerge bool `toml:"enable-cross-table-merge" json:"enable-cross-table-merge,string"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
-	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
+	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval" json:"patrol-region-interval"`
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
+	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
-	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
+	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
 	// LeaderScheduleStrategy is the option to balance leader, there are some strategics supported: ["count", "size"], default: "count"
-	LeaderScheduleStrategy string `toml:"leader-schedule-strategy,omitempty" json:"leader-schedule-strategy,string"`
+	LeaderScheduleStrategy string `toml:"leader-schedule-strategy" json:"leader-schedule-strategy,string"`
 	// RegionScheduleLimit is the max coexist region schedules.
-	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
+	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
-	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
+	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
 	// MergeScheduleLimit is the max coexist merge schedules.
-	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
+	MergeScheduleLimit uint64 `toml:"merge-schedule-limit" json:"merge-schedule-limit"`
 	// HotRegionScheduleLimit is the max coexist hot region schedules.
-	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit,omitempty" json:"hot-region-schedule-limit"`
+	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit" json:"hot-region-schedule-limit"`
 	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
 	// If the number of times a region hits the hot cache is greater than this
 	// threshold, it is considered a hot region.
-	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold,omitempty" json:"hot-region-cache-hits-threshold"`
+	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
 	// StoreBalanceRate is the maximum of balance rate for each store.
-	StoreBalanceRate float64 `toml:"store-balance-rate,omitempty" json:"store-balance-rate"`
+	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
-	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
+	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
 	//
 	//      high space stage         transition stage           low space stage
 	//   |--------------------|-----------------------------|-------------------------|
@@ -515,12 +519,12 @@ type ScheduleConfig struct {
 	//
 	// LowSpaceRatio is the lowest usage ratio of store which regraded as low space.
 	// When in low space, store region score increases to very large and varies inversely with available size.
-	LowSpaceRatio float64 `toml:"low-space-ratio,omitempty" json:"low-space-ratio"`
+	LowSpaceRatio float64 `toml:"low-space-ratio" json:"low-space-ratio"`
 	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
-	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
+	HighSpaceRatio float64 `toml:"high-space-ratio" json:"high-space-ratio"`
 	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
-	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator,omitempty" json:"scheduler-max-waiting-operator"`
+	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator" json:"scheduler-max-waiting-operator"`
 	// WARN: DisableLearner is deprecated.
 	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
 	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
@@ -559,10 +563,18 @@ type ScheduleConfig struct {
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
 
 	// Schedulers support for loading customized schedulers
-	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
+	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
 	// Only used to display
 	SchedulersPayload map[string]string `json:"schedulers,omitempty"`
+
+	// StoreLimitMode can be auto or manual, when set to auto,
+	// PD tries to change the store limit values according to
+	// the load state of the cluster dynamically. User can
+	// overwrite the auto-tuned value by pd-ctl, when the value
+	// is overwritten, the value is fixed until it is deleted.
+	// Default: manual
+	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -603,6 +615,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
 		EnableLocationReplacement:    c.EnableLocationReplacement,
 		EnableDebugMetrics:           c.EnableDebugMetrics,
+		StoreLimitMode:               c.StoreLimitMode,
 		Schedulers:                   schedulers,
 	}
 }
@@ -630,6 +643,7 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultLeaderScheduleStrategy      = "count"
+	defaultStoreLimitMode              = "manual"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -674,6 +688,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("leader-schedule-strategy") {
 		adjustString(&c.LeaderScheduleStrategy, defaultLeaderScheduleStrategy)
+	}
+	if !meta.IsDefined("store-limit-mode") {
+		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
@@ -783,9 +800,9 @@ type SchedulerConfigs []SchedulerConfig
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
 	Type        string   `toml:"type" json:"type"`
-	Args        []string `toml:"args,omitempty" json:"args"`
+	Args        []string `toml:"args" json:"args"`
 	Disable     bool     `toml:"disable" json:"disable"`
-	ArgsPayload string   `toml:"args-payload,omitempty" json:"args-payload"`
+	ArgsPayload string   `toml:"args-payload" json:"args-payload"`
 }
 
 var defaultSchedulers = SchedulerConfigs{
@@ -808,18 +825,18 @@ func IsDefaultScheduler(typ string) bool {
 // ReplicationConfig is the replication configuration.
 type ReplicationConfig struct {
 	// MaxReplicas is the number of replicas for each region.
-	MaxReplicas uint64 `toml:"max-replicas,omitempty" json:"max-replicas"`
+	MaxReplicas uint64 `toml:"max-replicas" json:"max-replicas"`
 
 	// The label keys specified the location of a store.
 	// The placement priorities is implied by the order of label keys.
 	// For example, ["zone", "rack"] means that we should place replicas to
 	// different zones first, then to different racks if we don't have enough zones.
-	LocationLabels typeutil.StringSlice `toml:"location-labels,omitempty" json:"location-labels"`
+	LocationLabels typeutil.StringSlice `toml:"location-labels" json:"location-labels"`
 	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
-	StrictlyMatchLabel bool `toml:"strictly-match-label,omitempty" json:"strictly-match-label,string"`
+	StrictlyMatchLabel bool `toml:"strictly-match-label" json:"strictly-match-label,string"`
 
 	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not uesd any more.
-	EnablePlacementRules bool // Keep it false before full feature get merged. `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
+	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {

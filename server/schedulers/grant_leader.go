@@ -295,6 +295,10 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
+			if err := handler.config.cluster.RemoveScheduler(GrantLeaderName); err != nil {
+				handler.rd.JSON(w, http.StatusInternalServerError, err)
+				return
+			}
 			resp = lastStoreDeleteInfo
 		}
 		handler.rd.JSON(w, http.StatusOK, resp)
