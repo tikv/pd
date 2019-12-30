@@ -48,11 +48,11 @@ func (s *configClientTestSuite) TearDownSuite(c *C) {
 }
 
 func (s *configClientTestSuite) TestUpdateWrongEntry(c *C) {
-	cluster, err := tests.NewTestCluster(1, func(cfg *config.Config) { cfg.EnableConfigManager = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config) { cfg.EnableConfigManager = true })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
@@ -105,11 +105,11 @@ func (s *configClientTestSuite) TestUpdateWrongEntry(c *C) {
 }
 
 func (s *configClientTestSuite) TestClientLeaderChange(c *C) {
-	cluster, err := tests.NewTestCluster(3, func(cfg *config.Config) { cfg.EnableConfigManager = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 3, func(cfg *config.Config) { cfg.EnableConfigManager = true })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
@@ -196,11 +196,11 @@ func (s *configClientTestSuite) TestClientLeaderChange(c *C) {
 }
 
 func (s *configClientTestSuite) TestLeaderTransfer(c *C) {
-	cluster, err := tests.NewTestCluster(2, func(cfg *config.Config) { cfg.EnableConfigManager = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 2, func(cfg *config.Config) { cfg.EnableConfigManager = true })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers(s.ctx)
+	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())

@@ -56,7 +56,7 @@ type client interface {
 	GetURLs() []string
 }
 
-func (s *serverTestSuite) TestClientLeaderChange(c *C) {
+func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -110,7 +110,7 @@ func (s *serverTestSuite) TestClientLeaderChange(c *C) {
 	c.Assert(urls, DeepEquals, endpoints)
 }
 
-func (s *serverTestSuite) TestLeaderTransfer(c *C) {
+func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 2)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
