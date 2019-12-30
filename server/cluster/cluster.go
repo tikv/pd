@@ -83,6 +83,7 @@ type RaftCluster struct {
 	opt     *config.ScheduleOption
 	storage *core.Storage
 	id      id.Allocator
+	limiter *StoreLimiter
 
 	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
@@ -210,6 +211,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt)
+	c.limiter = NewStoreLimiter(c.coordinator.opController)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(3)
@@ -393,6 +395,12 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
+
+	// c.limiter is nil before "start" is called
+	if c.limiter != nil && c.opt.Load().StoreLimitMode == "auto" {
+		c.limiter.Collect(newStore.GetStoreStats())
+	}
+
 	return nil
 }
 
@@ -1573,6 +1581,11 @@ func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.pauseOrResumeScheduler(name, t)
+}
+
+// GetStoreLimiter returns the dynamic adjusting limiter
+func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
+	return c.limiter
 }
 
 // DialClient used to dial http request.
