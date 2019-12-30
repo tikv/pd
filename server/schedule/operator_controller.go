@@ -296,6 +296,11 @@ func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 			return false
 		}
 	}
+	for _, op := range ops {
+		if op.UpdateMetric != nil {
+			op.UpdateMetric()
+		}
+	}
 	return true
 }
 

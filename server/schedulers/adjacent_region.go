@@ -252,6 +252,9 @@ func (l *balanceAdjacentRegionScheduler) process(cluster opt.Cluster) []*operato
 		l.cacheRegions.assignedStoreIds = l.cacheRegions.assignedStoreIds[:0]
 		return nil
 	}
+	op.UpdateMetric = func() {
+		schedulerCounter.WithLabelValues(l.GetName(), "new-operator").Inc()
+	}
 	return []*operator.Operator{op}
 }
 

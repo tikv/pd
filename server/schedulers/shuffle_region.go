@@ -119,7 +119,9 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 		return nil
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
+	op.UpdateMetric = func() {
+		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
+	}
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }
