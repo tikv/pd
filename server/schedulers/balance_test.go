@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -1309,5 +1310,33 @@ func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 			continue
 		}
 		schedule.ApplyOperator(tc, ops[0])
+	}
+}
+
+var _ = Suite(&testTTL{})
+
+type testTTL struct{}
+
+func (s *testTTL) TestTTL(c *C) {
+	hitsStoreBuilder := newHitsStoreBuilder(hitsStoreTTL, hitsStoreCountThreshold)
+	c.Assert(hitsStoreBuilder.ttl, HasLen, 0)
+	hitsStoreBuilder.updateTTL(s.getStoreLimits(10, 15))
+	s.checkTTL(c, hitsStoreBuilder.ttl, 15*hitLimitFactor)
+	hitsStoreBuilder.updateTTL(s.getStoreLimits(10, 100))
+	s.checkTTL(c, hitsStoreBuilder.ttl, 100*hitLimitFactor)
+	hitsStoreBuilder.updateTTL(s.getStoreLimits(10, 500))
+	s.checkTTL(c, hitsStoreBuilder.ttl, 100*hitLimitFactor)
+}
+
+func (s *testTTL) getStoreLimits(stores uint64, limit float64) map[uint64]float64 {
+	limits := make(map[uint64]float64)
+	for i := uint64(1); i < stores; i++ {
+		limits[i] = limit
+	}
+	return limits
+}
+func (s *testTTL) checkTTL(c *C, ttl map[uint64]time.Duration, limit float64) {
+	for _, duration := range ttl {
+		c.Assert(duration, Equals, time.Second*time.Duration(limit))
 	}
 }
