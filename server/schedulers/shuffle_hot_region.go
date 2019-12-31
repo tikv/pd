@@ -190,9 +190,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeSta
 			log.Debug("fail to create move leader operator", zap.Error(err))
 			return nil
 		}
-		op.UpdateMetric = func() {
-			schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-		}
+		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()

@@ -297,8 +297,8 @@ func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 		}
 	}
 	for _, op := range ops {
-		if op.UpdateMetric != nil {
-			op.UpdateMetric()
+		for _, counter := range op.Counters {
+			counter.Inc()
 		}
 	}
 	return true

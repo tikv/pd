@@ -121,8 +121,6 @@ func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return nil
 	}
 	op.SetPriorityLevel(core.HighPriority)
-	op.UpdateMetric = func() {
-		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-	}
+	op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 	return []*operator.Operator{op}
 }

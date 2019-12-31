@@ -151,9 +151,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			l.counter.WithLabelValues("high-score", sourceAddress, sourceStoreLabel).Inc()
 			for j := 0; j < balanceLeaderRetryLimit; j++ {
 				if ops := l.transferLeaderOut(cluster, source); len(ops) > 0 {
-					ops[0].UpdateMetric = func() {
-						l.counter.WithLabelValues("transfer-out", sourceAddress, sourceStoreLabel).Inc()
-					}
+					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", sourceAddress, sourceStoreLabel))
 					return ops
 				}
 			}
@@ -169,9 +167,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 
 			for j := 0; j < balanceLeaderRetryLimit; j++ {
 				if ops := l.transferLeaderIn(cluster, target); len(ops) > 0 {
-					ops[0].UpdateMetric = func() {
-						l.counter.WithLabelValues("transfer-in", targetAddress, targetStoreLabel).Inc()
-					}
+					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-in", targetAddress, targetStoreLabel))
 					return ops
 				}
 			}
@@ -259,13 +255,13 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 		log.Debug("fail to create balance leader operator", zap.Error(err))
 		return nil
 	}
-	op.UpdateMetric = func() {
-		schedulerCounter.WithLabelValues(l.GetName(), "new-operator").Inc()
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(targetID, 10)
-		l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel).Inc()
-		l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel).Inc()
-		balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel).Inc()
-	}
+	sourceLabel := strconv.FormatUint(sourceID, 10)
+	targetLabel := strconv.FormatUint(targetID, 10)
+	op.Counters = append(op.Counters,
+		schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
+		l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel),
+		l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel),
+		balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel),
+	)
 	return []*operator.Operator{op}
 }

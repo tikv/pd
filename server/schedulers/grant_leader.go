@@ -224,9 +224,7 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 			log.Debug("fail to create grant leader operator", zap.Error(err))
 			continue
 		}
-		op.UpdateMetric = func() {
-			schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-		}
+		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)
 	}

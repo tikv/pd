@@ -239,9 +239,7 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 			continue
 		}
 		op.SetPriorityLevel(core.HighPriority)
-		op.UpdateMetric = func() {
-			schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-		}
+		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 		ops = append(ops, op)
 	}
 

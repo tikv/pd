@@ -168,9 +168,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 
 			oldPeer := region.GetStorePeer(sourceID)
 			if op := s.transferPeer(cluster, region, oldPeer); op != nil {
-				op.UpdateMetric = func() {
-					schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
-				}
+				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}
 			}
 		}
@@ -235,11 +233,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		}
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
-		op.UpdateMetric = func() {
-			s.counter.WithLabelValues("move-peer", source.GetAddress()+"-out", sourceLabel).Inc()
-			s.counter.WithLabelValues("move-peer", target.GetAddress()+"-in", targetLabel).Inc()
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel).Inc()
-		}
+		op.Counters = append(op.Counters,
+			s.counter.WithLabelValues("move-peer", source.GetAddress()+"-out", sourceLabel),
+			s.counter.WithLabelValues("move-peer", target.GetAddress()+"-in", targetLabel),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+		)
 		return op
 	}
 }
