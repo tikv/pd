@@ -206,4 +206,10 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 	echo = pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
 	c.Assert(strings.Contains(echo, "Success!"), IsFalse)
+
+	_, _, err = pdctl.ExecuteCommandC(cmd, "config", "set", "enable-placement-rules", "true")
+	c.Assert(err, IsNil)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "3")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "not supported"), IsTrue)
 }

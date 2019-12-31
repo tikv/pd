@@ -480,6 +480,11 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return err
 	}
 
+	if c.IsPlacementRulesEnabled() {
+		// Cannot determine role when placement rules enabled. Not supported now.
+		return errors.New("transfer region is not supported when placement rules enabled")
+	}
+
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
@@ -841,6 +846,18 @@ func (h *Handler) ResetTS(ts uint64) error {
 		return ErrServerNotStarted
 	}
 	return tsoServer.ResetUserTimestamp(ts)
+}
+
+// SetStoreLimitScene sets the limit values for differents scenes
+func (h *Handler) SetStoreLimitScene(scene *schedule.StoreLimitScene) {
+	cluster := h.s.GetRaftCluster()
+	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene)
+}
+
+// GetStoreLimitScene returns the limit valus for different scenes
+func (h *Handler) GetStoreLimitScene() *schedule.StoreLimitScene {
+	cluster := h.s.GetRaftCluster()
+	return cluster.GetStoreLimiter().StoreLimitScene()
 }
 
 // PluginLoad loads the plugin referenced by the pluginPath

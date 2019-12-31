@@ -112,7 +112,7 @@ Usage:
     "hot-region-cache-hits-threshold": 3,
     "hot-region-schedule-limit": 4,
     "leader-schedule-limit": 4,
-    "leader-schedule-strategy": "\"count\"",
+    "leader-schedule-strategy": "count",
     "low-space-ratio": 0.8,
     "max-merge-region-keys": 200000,
     "max-merge-region-size": 20,

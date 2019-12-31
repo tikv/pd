@@ -16,6 +16,7 @@ package api
 import (
 	"container/heap"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -257,6 +258,26 @@ func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
+type histItem struct {
+	Start int64 `json:"start"`
+	End   int64 `json:"end"`
+	Count int64 `json:"count"`
+}
+
+type histSlice []*histItem
+
+func (hist histSlice) Len() int {
+	return len(hist)
+}
+
+func (hist histSlice) Swap(i, j int) {
+	hist[i], hist[j] = hist[j], hist[i]
+}
+
+func (hist histSlice) Less(i, j int) bool {
+	return hist[i].Start < hist[j].Start
+}
+
 func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request) {
 	bound := minRegionHistogramSize
 	bound, err := calBound(bound, r)
@@ -270,8 +291,8 @@ func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request
 	for _, region := range regions {
 		histSizes = append(histSizes, region.GetApproximateSize())
 	}
-	histSizesMap := calHist(bound, &histSizes)
-	h.rd.JSON(w, http.StatusOK, histSizesMap)
+	histItems := calHist(bound, &histSizes)
+	h.rd.JSON(w, http.StatusOK, histItems)
 }
 
 func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request) {
@@ -287,8 +308,8 @@ func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request
 	for _, region := range regions {
 		histKeys = append(histKeys, region.GetApproximateKeys())
 	}
-	histKeysMap := calHist(bound, &histKeys)
-	h.rd.JSON(w, http.StatusOK, histKeysMap)
+	histItems := calHist(bound, &histKeys)
+	h.rd.JSON(w, http.StatusOK, histItems)
 }
 
 func calBound(bound int, r *http.Request) (int, error) {
@@ -304,9 +325,8 @@ func calBound(bound int, r *http.Request) (int, error) {
 	return bound, nil
 }
 
-func calHist(bound int, list *[]int64) *map[string]int {
+func calHist(bound int, list *[]int64) *[]*histItem {
 	var histMap = make(map[int64]int)
-	var outputMap = make(map[string]int)
 	for _, item := range *list {
 		multiple := item / int64(bound)
 		if oldCount, ok := histMap[multiple]; ok {
@@ -315,11 +335,16 @@ func calHist(bound int, list *[]int64) *map[string]int {
 			histMap[multiple] = 1
 		}
 	}
+	histItems := make([]*histItem, 0, len(histMap))
 	for multiple, count := range histMap {
-		outputStr := "[" + strconv.FormatInt(multiple*int64(bound), 10) + "," + strconv.FormatInt((multiple+1)*int64(bound), 10) + ")"
-		outputMap[outputStr] = count
+		histInfo := &histItem{}
+		histInfo.Start = multiple * int64(bound)
+		histInfo.End = (multiple+1)*int64(bound) - 1
+		histInfo.Count = int64(count)
+		histItems = append(histItems, histInfo)
 	}
-	return &outputMap
+	sort.Sort(histSlice(histItems))
+	return &histItems
 }
 
 func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Request) {

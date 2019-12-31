@@ -138,22 +138,30 @@ func (s *testRegionSuite) TestRegionCheck(c *C) {
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(c, s.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "hist-size")
-	r6 := make(map[string]int)
+	r6 := make([]*histItem, 1)
 	err = readJSON(url, &r6)
-	histSizesMap := make(map[string]int)
-	histSizesMap["[1,2)"] = 1
+	histSizes := make([]*histItem, 1)
+	histSize := &histItem{}
+	histSize.Start = 1
+	histSize.End = 1
+	histSize.Count = 1
+	histSizes[0] = histSize
 	c.Assert(err, IsNil)
-	c.Assert(r6, DeepEquals, histSizesMap)
+	c.Assert(r6, DeepEquals, histSizes)
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	mustRegionHeartbeat(c, s.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "hist-keys")
-	r7 := make(map[string]int)
+	r7 := make([]*histItem, 1)
 	err = readJSON(url, &r7)
-	histKeysMap := make(map[string]int)
-	histKeysMap["[1000,2000)"] = 1
+	histKeys := make([]*histItem, 1)
+	histKey := &histItem{}
+	histKey.Start = 1000
+	histKey.End = 1999
+	histKey.Count = 1
+	histKeys[0] = histKey
 	c.Assert(err, IsNil)
-	c.Assert(r7, DeepEquals, histKeysMap)
+	c.Assert(r7, DeepEquals, histKeys)
 }
 
 func (s *testRegionSuite) TestRegions(c *C) {
