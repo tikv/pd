@@ -92,7 +92,10 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 			v = unknown
 		}
 		key := fmt.Sprintf("%s:%s", k, v)
-		s.LabelCounter[key]++
+		// exclude tombstone
+		if store.GetState() != metapb.StoreState_Tombstone {
+			s.LabelCounter[key]++
+		}
 	}
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
@@ -268,4 +271,5 @@ func (m *storeStatisticsMap) Collect() {
 func (m *storeStatisticsMap) Reset() {
 	storeStatusGauge.Reset()
 	clusterStatusGauge.Reset()
+	placementStatusGauge.Reset()
 }
