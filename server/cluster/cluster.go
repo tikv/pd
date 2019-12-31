@@ -1363,6 +1363,21 @@ func (c *RaftCluster) GetLeaderScheduleStrategy() core.ScheduleStrategy {
 	return c.opt.GetLeaderScheduleStrategy()
 }
 
+// GetAllStoresLimit is to get all store limits.
+func (c *RaftCluster) GetAllStoresLimit() map[uint64]float64 {
+	c.RLock()
+	defer c.RUnlock()
+	limits := make(map[uint64]float64)
+	co := c.coordinator
+	if co == nil {
+		return limits
+	}
+	for storeID, limiter := range co.opController.GetAllStoresLimit() {
+		limits[storeID] = limiter.Rate() * schedule.StoreBalanceBaseTime
+	}
+	return limits
+}
+
 // GetKeyType is to get key type.
 func (c *RaftCluster) GetKeyType() core.KeyType {
 	return c.opt.GetKeyType()
@@ -1586,7 +1601,7 @@ var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.
 func CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
-	unhealthMembers := make(map[uint64]*pdpb.Member)
+	unhealthyMembers := make(map[uint64]*pdpb.Member)
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
 			resp, err := DialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
@@ -1594,12 +1609,12 @@ func CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
 				resp.Body.Close()
 			}
 			if err != nil || resp.StatusCode != http.StatusOK {
-				unhealthMembers[member.GetMemberId()] = member
+				unhealthyMembers[member.GetMemberId()] = member
 				break
 			}
 		}
 	}
-	return unhealthMembers
+	return unhealthyMembers
 }
 
 // GetMembers return a slice of Members.

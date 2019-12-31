@@ -14,8 +14,10 @@
 package schedulers
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -62,6 +64,14 @@ const (
 	BalanceRegionName = "balance-region-scheduler"
 	// BalanceRegionType is balance region scheduler type.
 	BalanceRegionType = "balance-region"
+	hitsStoreTTL      = 5 * time.Minute
+	// The scheduler selects the same source or source-target for a long time
+	// and do not create an operator will trigger the hit filter. the
+	// calculation of this time is as follows:
+	// ScheduleIntervalFactor default is 1.3 , and MinScheduleInterval is 10ms,
+	// the total time spend  t = a1 * (1-pow(q,n)) / (1 - q), where a1 = 10,
+	// q = 1.3, and n = 30, so t = 87299ms ≈ 87s.
+	hitsStoreCountThreshold = 30 * balanceRegionRetryLimit
 )
 
 type balanceRegionSchedulerConfig struct {
@@ -74,6 +84,7 @@ type balanceRegionScheduler struct {
 	conf         *balanceRegionSchedulerConfig
 	opController *schedule.OperatorController
 	filters      []filter.Filter
+	hitsCounter  *hitsStoreBuilder
 	counter      *prometheus.CounterVec
 }
 
@@ -85,12 +96,15 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 		BaseScheduler: base,
 		conf:          conf,
 		opController:  opController,
+		hitsCounter:   newHitsStoreBuilder(hitsStoreTTL, hitsStoreCountThreshold),
 		counter:       balanceRegionCounter,
 	}
 	for _, setOption := range opts {
 		setOption(scheduler)
 	}
-	scheduler.filters = []filter.Filter{filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true}}
+	scheduler.filters = make([]filter.Filter, 2)
+	scheduler.filters[0] = filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true}
+
 	return scheduler
 }
 
@@ -130,6 +144,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
+	s.filters[1] = s.hitsCounter.buildSourceFilter(s.GetName(), cluster)
 	stores = filter.SelectSourceStores(stores, s.filters, cluster)
 	sort.Slice(stores, func(i, j int) bool {
 		return stores[i].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0) > stores[j].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)
@@ -154,6 +169,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 				region = cluster.RandLearnerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
 			}
 			if region == nil {
+				s.hitsCounter.put(source, nil)
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 				continue
 			}
@@ -163,6 +179,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			if cluster.IsRegionHot(region) {
 				log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", region.GetID()))
 				schedulerCounter.WithLabelValues(s.GetName(), "region-hot").Inc()
+				s.hitsCounter.put(source, nil)
 				continue
 			}
 
@@ -184,10 +201,12 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 	source := cluster.GetStore(sourceStoreID)
 	if source == nil {
 		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
+		s.hitsCounter.put(source, nil)
 		return nil
 	}
 	exclude := make(map[uint64]struct{})
 	excludeFilter := filter.NewExcludedFilter(s.GetName(), nil, exclude)
+	hitsFilter := s.hitsCounter.buildTargetFilter(s.GetName(), cluster, source)
 	for {
 		var target *core.StoreInfo
 		if cluster.IsPlacementRulesEnabled() {
@@ -198,11 +217,11 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 				schedulerCounter.WithLabelValues(s.GetName(), "skip-orphan-peer").Inc()
 				return nil
 			}
-			target = checker.SelectStoreToReplacePeerByRule(s.GetName(), cluster, region, fit, rf, oldPeer, scoreGuard, excludeFilter)
+			target = checker.SelectStoreToReplacePeerByRule(s.GetName(), cluster, region, fit, rf, oldPeer, scoreGuard, excludeFilter, hitsFilter)
 		} else {
 			scoreGuard := filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), stores, source)
 			replicaChecker := checker.NewReplicaChecker(cluster, s.GetName())
-			storeID, _ := replicaChecker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
+			storeID, _ := replicaChecker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter, hitsFilter)
 			if storeID != 0 {
 				target = cluster.GetStore(storeID)
 			}
@@ -222,6 +241,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		kind := core.NewScheduleKind(core.RegionKind, core.BySize)
 		if !shouldBalance(cluster, source, target, region, kind, opInfluence, s.GetName()) {
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+			s.hitsCounter.put(source, target)
 			continue
 		}
 
@@ -231,6 +251,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil
 		}
+		s.hitsCounter.remove(source, target)
+		s.hitsCounter.remove(source, nil)
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.Counters = append(op.Counters,
@@ -239,5 +261,132 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
 		)
 		return op
+	}
+}
+
+const hitLimitFactor = 3
+
+type record struct {
+	lastTime time.Time
+	count    int
+}
+type hitsStoreBuilder struct {
+	hits       map[string]*record
+	ttl        map[uint64]time.Duration
+	defaultTTL time.Duration
+	threshold  int
+}
+
+func newHitsStoreBuilder(defaultTTL time.Duration, threshold int) *hitsStoreBuilder {
+	return &hitsStoreBuilder{
+		hits:       make(map[string]*record),
+		ttl:        make(map[uint64]time.Duration),
+		defaultTTL: defaultTTL,
+		threshold:  threshold,
+	}
+}
+
+func (h *hitsStoreBuilder) getKey(source, target *core.StoreInfo) string {
+	if source == nil {
+		return ""
+	}
+	key := fmt.Sprintf("s%d", source.GetID())
+	if target != nil {
+		key = fmt.Sprintf("%s->t%d", key, target.GetID())
+	}
+	return key
+}
+
+func (h *hitsStoreBuilder) filter(source, target *core.StoreInfo) bool {
+	key := h.getKey(source, target)
+	ttl := h.getTTL(source, target)
+	if key == "" {
+		return false
+	}
+	if item, ok := h.hits[key]; ok {
+		if time.Since(item.lastTime) > ttl {
+			delete(h.hits, key)
+		}
+		if time.Since(item.lastTime) <= ttl && item.count >= h.threshold {
+			log.Debug("skip the the store", zap.String("scheduler", BalanceRegionName), zap.String("filter-key", key))
+			return true
+		}
+	}
+	return false
+}
+
+func (h *hitsStoreBuilder) remove(source, target *core.StoreInfo) {
+	key := h.getKey(source, target)
+	if _, ok := h.hits[key]; ok && key != "" {
+		delete(h.hits, key)
+	}
+}
+
+func (h *hitsStoreBuilder) put(source, target *core.StoreInfo) {
+	key := h.getKey(source, target)
+	ttl := h.getTTL(source, target)
+	if key == "" {
+		return
+	}
+	if item, ok := h.hits[key]; ok {
+		if time.Since(item.lastTime) >= ttl {
+			item.count = 0
+		} else {
+			item.count++
+		}
+		item.lastTime = time.Now()
+	} else {
+		item := &record{lastTime: time.Now()}
+		h.hits[key] = item
+	}
+}
+
+func (h *hitsStoreBuilder) buildSourceFilter(scope string, cluster opt.Cluster) filter.Filter {
+	f := filter.NewBlacklistStoreFilter(scope, filter.BlacklistSource)
+	h.updateTTL(cluster.GetAllStoresLimit())
+	for _, source := range cluster.GetStores() {
+		if h.filter(source, nil) {
+			f.Add(source.GetID())
+		}
+	}
+	return f
+}
+
+func (h *hitsStoreBuilder) buildTargetFilter(scope string, cluster opt.Cluster, source *core.StoreInfo) filter.Filter {
+	f := filter.NewBlacklistStoreFilter(scope, filter.BlacklistTarget)
+	h.updateTTL(cluster.GetAllStoresLimit())
+	for _, target := range cluster.GetStores() {
+		if h.filter(source, target) {
+			f.Add(target.GetID())
+		}
+	}
+	return f
+}
+
+func (h *hitsStoreBuilder) getTTL(source, target *core.StoreInfo) time.Duration {
+	sourceTTL := h.readTTL(source)
+	targetTTL := h.readTTL(target)
+	if sourceTTL < targetTTL {
+		return sourceTTL
+	}
+	return targetTTL
+}
+
+func (h *hitsStoreBuilder) readTTL(store *core.StoreInfo) time.Duration {
+	ttl := h.defaultTTL
+	if store != nil {
+		if sourceTTL, ok := h.ttl[store.GetID()]; ok && sourceTTL < ttl {
+			ttl = sourceTTL
+		}
+	}
+	return ttl
+}
+
+func (h *hitsStoreBuilder) updateTTL(limits map[uint64]float64) {
+	for storeID, limit := range limits {
+		h.ttl[storeID] = time.Second * time.Duration(limit*hitLimitFactor)
+		if h.ttl[storeID] > h.defaultTTL {
+			h.ttl[storeID] = h.defaultTTL
+		}
 	}
 }

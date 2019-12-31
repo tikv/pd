@@ -62,6 +62,7 @@ type Options interface {
 	IsDebugMetricsEnabled() bool
 	GetLeaderScheduleStrategy() core.ScheduleStrategy
 	GetKeyType() core.KeyType
+	GetAllStoresLimit() map[uint64]float64
 
 	RemoveScheduler(name string) error
 

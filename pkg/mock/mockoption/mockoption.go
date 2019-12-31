@@ -279,3 +279,8 @@ func (mso *ScheduleOptions) GetLeaderScheduleStrategy() core.ScheduleStrategy {
 func (mso *ScheduleOptions) GetKeyType() core.KeyType {
 	return core.StringToKeyType(mso.KeyType)
 }
+
+// GetAllStoresLimit mocks method
+func (mso *ScheduleOptions) GetAllStoresLimit() map[uint64]float64 {
+	return make(map[uint64]float64)
+}
