@@ -77,7 +77,6 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		steps:       steps,
 		status:      NewOpStatusTracker(),
 		level:       level,
-		Counters:    make([]prometheus.Counter, 0),
 	}
 }
 
