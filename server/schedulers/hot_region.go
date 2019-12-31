@@ -243,12 +243,11 @@ func (h *hotScheduler) updateStatsByPendingOpInfo(storeStatsMap map[uint64]float
 		var n *list.Element
 		for e := pendingOpInfos.Front(); e != nil; e = n {
 			opInfo := e.Value.(*pendingInfluence)
+			n = e.Next()
 			if opInfo.balanceType != balanceType {
 				continue
 			}
-
 			now := uint64(time.Now().Unix())
-			n = e.Next()
 			if opInfo.isDone() {
 				if now >= opInfo.scheduleTime+statistics.StoreHeartBeatReportInterval {
 					schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
