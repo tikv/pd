@@ -546,11 +546,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
 	}
 
-	newPeer, err := c.AllocPeer(toStoreID)
-	if err != nil {
-		return err
-	}
-
+	newPeer := &metapb.Peer{StoreId: toStoreID, IsLearner: oldPeer.GetIsLearner()}
 	op, err := operator.CreateMovePeerOperator("admin-move-peer", c, region, operator.OpAdmin, fromStoreID, newPeer)
 	if err != nil {
 		log.Debug("fail to create move peer operator", zap.Error(err))
@@ -596,11 +592,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return err
 	}
 
-	newPeer, err := c.AllocPeer(toStoreID)
-	if err != nil {
-		return err
-	}
-
+	newPeer := &metapb.Peer{StoreId: toStoreID}
 	op, err := operator.CreateAddPeerOperator("admin-add-peer", c, region, newPeer, operator.OpAdmin)
 	if err != nil {
 		log.Debug("fail to create add peer operator", zap.Error(err))
@@ -619,11 +611,10 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 		return err
 	}
 
-	newPeer, err := c.AllocPeer(toStoreID)
-	if err != nil {
-		return err
+	newPeer := &metapb.Peer{
+		StoreId:   toStoreID,
+		IsLearner: true,
 	}
-	newPeer.IsLearner = true
 
 	op, err := operator.CreateAddPeerOperator("admin-add-learner", c, region, newPeer, operator.OpAdmin)
 	if err != nil {

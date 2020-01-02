@@ -41,6 +41,14 @@ func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind oper
 	return operator.NewOperator("test", "test", regionID, regionEpoch, kind, steps...)
 }
 
+func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
+	id, err := c.AllocID()
+	if err != nil {
+		return nil, err
+	}
+	return &metapb.Peer{Id: id, StoreId: storeID}, nil
+}
+
 func (c *testCluster) addRegionStore(storeID uint64, regionCount int, regionSizes ...uint64) error {
 	var regionSize uint64
 	if len(regionSizes) == 0 {
