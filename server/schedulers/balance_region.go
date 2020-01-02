@@ -102,9 +102,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 	for _, setOption := range opts {
 		setOption(scheduler)
 	}
-	scheduler.filters = make([]filter.Filter, 2)
-	scheduler.filters[0] = filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true}
-
+	scheduler.filters = []filter.Filter{filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true}}
 	return scheduler
 }
 
@@ -144,8 +142,8 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
-	s.filters[1] = s.hitsCounter.buildSourceFilter(s.GetName(), cluster)
-	stores = filter.SelectSourceStores(stores, s.filters, cluster)
+	filters := append(s.filters, s.hitsCounter.buildSourceFilter(s.GetName(), cluster))
+	stores = filter.SelectSourceStores(stores, filters, cluster)
 	sort.Slice(stores, func(i, j int) bool {
 		return stores[i].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0) > stores[j].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)
 	})
