@@ -1335,6 +1335,7 @@ func (s *testTTL) getStoreLimits(stores uint64, limit float64) map[uint64]float6
 	}
 	return limits
 }
+
 func (s *testTTL) checkTTL(c *C, ttl map[uint64]time.Duration, limit float64) {
 	for _, duration := range ttl {
 		c.Assert(duration, Equals, time.Second*time.Duration(limit))
