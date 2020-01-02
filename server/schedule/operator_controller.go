@@ -296,11 +296,6 @@ func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 			return false
 		}
 	}
-	for _, op := range ops {
-		for _, counter := range op.Counters {
-			counter.Inc()
-		}
-	}
 	return true
 }
 
