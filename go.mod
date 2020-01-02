@@ -28,6 +28,7 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/montanaflynn/stats v0.0.0-20151014174947-eeaced052adb
 	github.com/opentracing/opentracing-go v1.0.2
+	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
 	github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
