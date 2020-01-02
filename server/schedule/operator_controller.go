@@ -437,6 +437,9 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 
 	heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op, time: oc.getNextPushOperatorTime(step, time.Now())})
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
+	for _, counter := range op.Counters {
+		counter.Inc()
+	}
 	return true
 }
 
