@@ -66,7 +66,7 @@ func (c *LabelConstraint) MatchStore(store *core.StoreInfo) bool {
 // If a store has exclusiveLabels, it can only be selected when the label is
 // exciplitly specified in constraints.
 // TODO: move it to config.
-var exclusiveLabels = []string{"engine"}
+var exclusiveLabels = []string{"engine", "exclusive"}
 
 // MatchLabelConstraints checks if a store matches label constraints list.
 func MatchLabelConstraints(store *core.StoreInfo, constraints []LabelConstraint) bool {
