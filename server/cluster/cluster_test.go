@@ -87,7 +87,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
-
+	cluster.enableMovingAverage = false
 	n, np := uint64(3), uint64(3)
 
 	stores := newTestStores(3)
