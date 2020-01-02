@@ -229,7 +229,6 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) 
 	// balance by leader
 	srcRegion, newLeader, infl := h.balanceByLeader(cluster, h.stats.readStatAsLeader)
 	if srcRegion != nil {
-		schedulerCounter.WithLabelValues(h.GetName(), "move-leader").Inc()
 		srcStore := srcRegion.GetLeader().GetStoreId()
 		dstStore := newLeader.GetStoreId()
 		op, err := operator.CreateTransferLeaderOperator("transfer-hot-read-leader", cluster, srcRegion, srcStore, dstStore, operator.OpHotRegion)
@@ -238,6 +237,10 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) 
 			return nil
 		}
 		op.SetPriorityLevel(core.HighPriority)
+		op.Counters = append(op.Counters,
+			schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
+			schedulerCounter.WithLabelValues(h.GetName(), "move-leader"),
+		)
 		h.readPendings[newPendingInfluence(op, srcStore, dstStore, infl)] = struct{}{}
 		return []*operator.Operator{op}
 	}
@@ -251,7 +254,10 @@ func (h *balanceHotRegionsScheduler) balanceHotReadRegions(cluster opt.Cluster) 
 			return nil
 		}
 		op.SetPriorityLevel(core.HighPriority)
-		schedulerCounter.WithLabelValues(h.GetName(), "move-peer").Inc()
+		op.Counters = append(op.Counters,
+			schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
+			schedulerCounter.WithLabelValues(h.GetName(), "move-peer"),
+		)
 		h.readPendings[newPendingInfluence(op, srcPeer.GetStoreId(), destPeer.GetStoreId(), infl)] = struct{}{}
 		return []*operator.Operator{op}
 	}
@@ -276,7 +282,10 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster)
 					return nil
 				}
 				op.SetPriorityLevel(core.HighPriority)
-				schedulerCounter.WithLabelValues(h.GetName(), "move-peer").Inc()
+				op.Counters = append(op.Counters,
+					schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
+					schedulerCounter.WithLabelValues(h.GetName(), "move-peer"),
+				)
 				h.writePendings[newPendingInfluence(op, srcPeer.GetStoreId(), dstPeer.GetStoreId(), infl)] = struct{}{}
 				return []*operator.Operator{op}
 			}
@@ -284,7 +293,6 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster)
 			// balance by leader
 			srcRegion, newLeader, infl := h.balanceByLeader(cluster, h.stats.writeStatAsLeader)
 			if srcRegion != nil {
-				schedulerCounter.WithLabelValues(h.GetName(), "move-leader").Inc()
 				srcStore := srcRegion.GetLeader().GetStoreId()
 				dstStore := newLeader.GetStoreId()
 				op, err := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", cluster, srcRegion, srcStore, dstStore, operator.OpHotRegion)
@@ -293,8 +301,11 @@ func (h *balanceHotRegionsScheduler) balanceHotWriteRegions(cluster opt.Cluster)
 					return nil
 				}
 				op.SetPriorityLevel(core.HighPriority)
-				// transfer leader do not influence the byte rate
-				infl.ByteRate = 0
+				op.Counters = append(op.Counters,
+					schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
+					schedulerCounter.WithLabelValues(h.GetName(), "move-leader"),
+				)
+				infl.ByteRate = 0 // transfer leader do not influence the byte rate
 				h.writePendings[newPendingInfluence(op, srcStore, dstStore, infl)] = struct{}{}
 				return []*operator.Operator{op}
 			}

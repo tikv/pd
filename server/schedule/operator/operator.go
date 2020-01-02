@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/placement"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -58,6 +59,7 @@ type Operator struct {
 	status      OpStatusTracker
 	stepTime    int64
 	level       core.PriorityLevel
+	Counters    []prometheus.Counter
 }
 
 // NewOperator creates a new operator.

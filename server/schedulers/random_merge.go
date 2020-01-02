@@ -129,6 +129,6 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		log.Debug("fail to create merge region operator", zap.Error(err))
 		return nil
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
+	ops[0].Counters = append(ops[0].Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 	return ops
 }

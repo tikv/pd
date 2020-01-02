@@ -15,6 +15,7 @@ package statistics
 
 import (
 	"sync"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server/core"
@@ -260,24 +261,25 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex
-	bytesWriteRate          MovingAvg
-	bytesReadRate           MovingAvg
-	keysWriteRate           MovingAvg
-	keysReadRate            MovingAvg
+	bytesWriteRate          *AvgOverTime
+	bytesReadRate           *AvgOverTime
+	keysWriteRate           *AvgOverTime
+	keysReadRate            *AvgOverTime
 	totalCPUUsage           MovingAvg
 	totalBytesDiskReadRate  MovingAvg
 	totalBytesDiskWriteRate MovingAvg
 }
 
 const storeStatsRollingWindows = 3
+const storeAvgInterval time.Duration = 3 * StoreHeartBeatReportInterval * time.Second
 
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate:          NewMedianFilter(storeStatsRollingWindows),
-		bytesReadRate:           NewMedianFilter(storeStatsRollingWindows),
-		keysWriteRate:           NewMedianFilter(storeStatsRollingWindows),
-		keysReadRate:            NewMedianFilter(storeStatsRollingWindows),
+		bytesWriteRate:          NewAvgOverTime(storeAvgInterval),
+		bytesReadRate:           NewAvgOverTime(storeAvgInterval),
+		keysWriteRate:           NewAvgOverTime(storeAvgInterval),
+		keysReadRate:            NewAvgOverTime(storeAvgInterval),
 		totalCPUUsage:           NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskReadRate:  NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskWriteRate: NewMedianFilter(storeStatsRollingWindows),
@@ -296,15 +298,12 @@ func collect(records []*pdpb.RecordPair) float64 {
 func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	statInterval := stats.GetInterval()
 	interval := statInterval.GetEndTimestamp() - statInterval.GetStartTimestamp()
-	if interval == 0 {
-		return
-	}
 	r.Lock()
 	defer r.Unlock()
-	r.bytesWriteRate.Add(float64(stats.BytesWritten) / float64(interval))
-	r.bytesReadRate.Add(float64(stats.BytesRead) / float64(interval))
-	r.keysWriteRate.Add(float64(stats.KeysWritten) / float64(interval))
-	r.keysReadRate.Add(float64(stats.KeysRead) / float64(interval))
+	r.bytesWriteRate.Add(float64(stats.BytesWritten), time.Duration(interval)*time.Second)
+	r.bytesReadRate.Add(float64(stats.BytesRead), time.Duration(interval)*time.Second)
+	r.keysWriteRate.Add(float64(stats.KeysWritten), time.Duration(interval)*time.Second)
+	r.keysReadRate.Add(float64(stats.KeysRead), time.Duration(interval)*time.Second)
 
 	// Updates the cpu usages and disk rw rates of store.
 	r.totalCPUUsage.Add(collect(stats.GetCpuUsages()))
