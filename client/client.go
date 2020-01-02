@@ -113,7 +113,7 @@ var (
 )
 
 type client struct {
-	*BaseClient
+	*baseClient
 	tsoRequests chan *tsoRequest
 
 	lastPhysical int64
@@ -130,27 +130,19 @@ func NewClient(pdAddrs []string, security SecurityOption, opts ...ClientOption) 
 // NewClientWithContext creates a PD client with context.
 func NewClientWithContext(ctx context.Context, pdAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", pdAddrs))
-	base := NewBaseClient(ctx, addrsToUrls(pdAddrs), security, opts...)
+	base, err := newBaseClient(ctx, addrsToUrls(pdAddrs), security, opts...)
+	if err != nil {
+		return nil, err
+	}
 	c := &client{
-		BaseClient:   base,
+		baseClient:   base,
 		tsoRequests:  make(chan *tsoRequest, maxMergeTSORequests),
 		tsDeadlineCh: make(chan deadline, 1),
 	}
 
-	if err := c.initRetry(c.initClusterID); err != nil {
-		c.cancel()
-		return nil, err
-	}
-	if err := c.initRetry(c.updateLeader); err != nil {
-		c.cancel()
-		return nil, err
-	}
-	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
-
-	c.wg.Add(3)
+	c.wg.Add(2)
 	go c.tsLoop()
 	go c.tsCancelLoop()
-	go c.leaderLoop()
 
 	return c, nil
 }

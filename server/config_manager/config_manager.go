@@ -326,7 +326,6 @@ func (c *ConfigManager) updateLocal(componentID string, version *configpb.Versio
 		}
 		if wrongEntry, err := mergeAndUpdateConfig(localCfg, updateEntries); err != nil {
 			c.deleteEntry(component, wrongEntry)
-
 			return localLatestVersion, &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: err.Error()}
 		}
 		localCfg.Version = &configpb.Version{Global: version.GetGlobal(), Local: version.GetLocal() + 1}

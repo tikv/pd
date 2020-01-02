@@ -28,8 +28,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-// BaseClient is a basic client for all other complex client.
-type BaseClient struct {
+// baseClient is a basic client for all other complex client.
+type baseClient struct {
 	urls      []string
 	clusterID uint64
 	connMu    struct {
@@ -57,19 +57,19 @@ type SecurityOption struct {
 }
 
 // ClientOption configures client.
-type ClientOption func(c *BaseClient)
+type ClientOption func(c *baseClient)
 
 // WithGRPCDialOptions configures the client with gRPC dial options.
 func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
-	return func(c *BaseClient) {
+	return func(c *baseClient) {
 		c.gRPCDialOptions = append(c.gRPCDialOptions, opts...)
 	}
 }
 
-// NewBaseClient returns a new BaseClient.
-func NewBaseClient(ctx context.Context, urls []string, security SecurityOption, opts ...ClientOption) *BaseClient {
+// newBaseClient returns a new baseClient.
+func newBaseClient(ctx context.Context, urls []string, security SecurityOption, opts ...ClientOption) (*baseClient, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	c := &BaseClient{
+	c := &baseClient{
 		urls:          urls,
 		checkLeaderCh: make(chan struct{}, 1),
 		ctx:           ctx1,
@@ -80,10 +80,24 @@ func NewBaseClient(ctx context.Context, urls []string, security SecurityOption, 
 	for _, opt := range opts {
 		opt(c)
 	}
-	return c
+
+	if err := c.initRetry(c.initClusterID); err != nil {
+		c.cancel()
+		return nil, err
+	}
+	if err := c.initRetry(c.updateLeader); err != nil {
+		c.cancel()
+		return nil, err
+	}
+	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
+
+	c.wg.Add(1)
+	go c.leaderLoop()
+
+	return c, nil
 }
 
-func (c *BaseClient) initRetry(f func() error) error {
+func (c *baseClient) initRetry(f func() error) error {
 	var err error
 	for i := 0; i < maxInitClusterRetries; i++ {
 		if err = f(); err == nil {
@@ -98,7 +112,7 @@ func (c *BaseClient) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
-func (c *BaseClient) leaderLoop() {
+func (c *baseClient) leaderLoop() {
 	defer c.wg.Done()
 
 	ctx, cancel := context.WithCancel(c.ctx)
@@ -119,7 +133,7 @@ func (c *BaseClient) leaderLoop() {
 }
 
 // ScheduleCheckLeader is used to check leader.
-func (c *BaseClient) ScheduleCheckLeader() {
+func (c *baseClient) ScheduleCheckLeader() {
 	select {
 	case c.checkLeaderCh <- struct{}{}:
 	default:
@@ -127,13 +141,13 @@ func (c *BaseClient) ScheduleCheckLeader() {
 }
 
 // GetClusterID returns the ClusterID.
-func (c *BaseClient) GetClusterID(context.Context) uint64 {
+func (c *baseClient) GetClusterID(context.Context) uint64 {
 	return c.clusterID
 }
 
 // GetLeaderAddr returns the leader address.
 // For testing use.
-func (c *BaseClient) GetLeaderAddr() string {
+func (c *baseClient) GetLeaderAddr() string {
 	c.connMu.RLock()
 	defer c.connMu.RUnlock()
 	return c.connMu.leader
@@ -141,11 +155,11 @@ func (c *BaseClient) GetLeaderAddr() string {
 
 // GetURLs returns the URLs.
 // For testing use. It should only be called when the client is closed.
-func (c *BaseClient) GetURLs() []string {
+func (c *baseClient) GetURLs() []string {
 	return c.urls
 }
 
-func (c *BaseClient) initClusterID() error {
+func (c *baseClient) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	for _, u := range c.urls {
@@ -162,7 +176,7 @@ func (c *BaseClient) initClusterID() error {
 	return errors.WithStack(errFailInitClusterID)
 }
 
-func (c *BaseClient) updateLeader() error {
+func (c *baseClient) updateLeader() error {
 	for _, u := range c.urls {
 		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
 		members, err := c.getMembers(ctx, u)
@@ -184,7 +198,7 @@ func (c *BaseClient) updateLeader() error {
 	return errors.Errorf("failed to get leader from %v", c.urls)
 }
 
-func (c *BaseClient) getMembers(ctx context.Context, url string) (*pdpb.GetMembersResponse, error) {
+func (c *baseClient) getMembers(ctx context.Context, url string) (*pdpb.GetMembersResponse, error) {
 	cc, err := c.getOrCreateGRPCConn(url)
 	if err != nil {
 		return nil, err
@@ -197,7 +211,7 @@ func (c *BaseClient) getMembers(ctx context.Context, url string) (*pdpb.GetMembe
 	return members, nil
 }
 
-func (c *BaseClient) updateURLs(members []*pdpb.Member) {
+func (c *baseClient) updateURLs(members []*pdpb.Member) {
 	urls := make([]string, 0, len(members))
 	for _, m := range members {
 		urls = append(urls, m.GetClientUrls()...)
@@ -213,7 +227,7 @@ func (c *BaseClient) updateURLs(members []*pdpb.Member) {
 	c.urls = urls
 }
 
-func (c *BaseClient) switchLeader(addrs []string) error {
+func (c *baseClient) switchLeader(addrs []string) error {
 	// FIXME: How to safely compare leader urls? For now, only allows one client url.
 	addr := addrs[0]
 
@@ -236,7 +250,7 @@ func (c *BaseClient) switchLeader(addrs []string) error {
 	return nil
 }
 
-func (c *BaseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
+func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	c.connMu.RLock()
 	conn, ok := c.connMu.clientConns[addr]
 	c.connMu.RUnlock()

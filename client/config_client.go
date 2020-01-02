@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 // ConfigClient is a client to manage the configuration.
@@ -38,7 +37,7 @@ type ConfigClient interface {
 }
 
 type configClient struct {
-	*BaseClient
+	*baseClient
 }
 
 // NewConfigClient creates a PD configuration client.
@@ -49,22 +48,11 @@ func NewConfigClient(pdAddrs []string, security SecurityOption) (ConfigClient, e
 // NewConfigClientWithContext creates a PD configuration client with the context.
 func NewConfigClientWithContext(ctx context.Context, pdAddrs []string, security SecurityOption) (ConfigClient, error) {
 	log.Info("[pd] create pd configuration client with endpoints", zap.Strings("pd-address", pdAddrs))
-	base := NewBaseClient(ctx, addrsToUrls(pdAddrs), security)
-	c := &configClient{base}
-	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
-
-	if err := c.initRetry(c.initClusterID); err != nil {
+	base, err := newBaseClient(ctx, addrsToUrls(pdAddrs), security)
+	if err != nil {
 		return nil, err
 	}
-	if err := c.initRetry(c.updateLeader); err != nil {
-		return nil, err
-	}
-	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
-
-	c.wg.Add(1)
-	go c.leaderLoop()
-
-	return c, nil
+	return &configClient{base}, nil
 }
 
 func (c *configClient) Close() {
