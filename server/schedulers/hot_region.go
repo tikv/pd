@@ -334,7 +334,6 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 			schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
 			schedulerCounter.WithLabelValues(h.GetName(), "move-peer"),
 		)
-		h.readPendings[newPendingInfluence(op, srcPeer.GetStoreId(), destPeer.GetStoreId(), infl)] = struct{}{}
 		h.addPendingInfluence(op, srcPeer.GetStoreId(), dstPeer.GetStoreId(), srcRegion.GetID(), infl, balanceType)
 		return []*operator.Operator{op}
 	}
