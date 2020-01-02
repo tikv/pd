@@ -1372,9 +1372,9 @@ func (c *RaftCluster) IsRemoveDownReplicaEnabled() bool {
 	return c.opt.IsRemoveDownReplicaEnabled()
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule strategy.
-func (c *RaftCluster) GetLeaderScheduleStrategy() core.ScheduleStrategy {
-	return c.opt.GetLeaderScheduleStrategy()
+// GetLeaderSchedulePolicy is to get leader schedule policy.
+func (c *RaftCluster) GetLeaderSchedulePolicy() core.SchedulePolicy {
+	return c.opt.GetLeaderSchedulePolicy()
 }
 
 // GetKeyType is to get key type.

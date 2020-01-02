@@ -60,7 +60,7 @@ type Options interface {
 	IsRemoveExtraReplicaEnabled() bool
 	IsLocationReplacementEnabled() bool
 	IsDebugMetricsEnabled() bool
-	GetLeaderScheduleStrategy() core.ScheduleStrategy
+	GetLeaderSchedulePolicy() core.SchedulePolicy
 	GetKeyType() core.KeyType
 
 	RemoveScheduler(name string) error

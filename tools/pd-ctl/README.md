@@ -112,7 +112,7 @@ Usage:
     "hot-region-cache-hits-threshold": 3,
     "hot-region-schedule-limit": 4,
     "leader-schedule-limit": 4,
-    "leader-schedule-strategy": "count",
+    "leader-schedule-policy": "count",
     "low-space-ratio": 0.8,
     "max-merge-region-keys": 200000,
     "max-merge-region-size": 20,
@@ -541,7 +541,7 @@ Usage:
 
 ### `scheduler [show | add | remove]`
 
-Use this command to view and control the scheduling strategy.
+Use this command to view and control the scheduling policy.
 
 Usage:
 

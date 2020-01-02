@@ -76,7 +76,7 @@ func (s *BalanceSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo
 
 func (s *BalanceSelector) updateConfig(opt opt.Options) {
 	if s.kind.Resource == core.LeaderKind {
-		s.kind.Strategy = opt.GetLeaderScheduleStrategy()
+		s.kind.Policy = opt.GetLeaderSchedulePolicy()
 	}
 }
 

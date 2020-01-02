@@ -908,12 +908,12 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]*StoreLimit {
 	return limits
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule strategy
-func (oc *OperatorController) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+// GetLeaderSchedulePolicy is to get leader schedule policy.
+func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	if oc.cluster == nil {
 		return core.ByCount
 	}
-	return oc.cluster.GetLeaderScheduleStrategy()
+	return oc.cluster.GetLeaderSchedulePolicy()
 }
 
 // RemoveStoreLimit removes the store limit for a given store ID.

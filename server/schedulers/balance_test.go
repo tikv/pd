@@ -47,7 +47,7 @@ type testBalanceSpeedCase struct {
 	targetCount    uint64
 	regionSize     int64
 	expectedResult bool
-	kind           core.ScheduleStrategy
+	kind           core.SchedulePolicy
 }
 
 func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
@@ -119,7 +119,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 		target := tc.GetStore(2)
 		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 		tc.PutRegion(region)
-		tc.LeaderScheduleStrategy = t.kind.String()
+		tc.LeaderSchedulePolicy = t.kind.String()
 		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
 		c.Assert(shouldBalance(tc, source, target, region, kind, oc.GetOpInfluence(tc), ""), Equals, t.expectedResult)
 	}
@@ -215,7 +215,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	c.Check(s.schedule(), NotNil)
 }
 
-func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderScheduleStrategy(c *C) {
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderSchedulePolicy(c *C) {
 	// Stores:          1       2       3       4
 	// Leader Count:    10      10      10      10
 	// Leader Size :    10000   100    	100    	100
@@ -225,9 +225,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderScheduleStrategy(c *C
 	s.tc.AddLeaderStore(3, 10, 100)
 	s.tc.AddLeaderStore(4, 10, 100)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	c.Assert(s.tc.LeaderScheduleStrategy, Equals, core.ByCount.String()) // default by count
+	c.Assert(s.tc.LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), IsNil)
-	s.tc.LeaderScheduleStrategy = core.BySize.String()
+	s.tc.LeaderSchedulePolicy = core.BySize.String()
 	c.Check(s.schedule(), NotNil)
 }
 
@@ -240,16 +240,16 @@ func (s *testBalanceSpeedSuite) TestTolerantRatio(c *C) {
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
 
 	tc.TolerantSizeRatio = 0
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Strategy: core.ByCount}), Equals, int64(leaderTolerantSizeRatio))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Strategy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Strategy: core.ByCount}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Strategy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.ByCount}), Equals, int64(leaderTolerantSizeRatio))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.ByCount}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
 
 	tc.TolerantSizeRatio = 10
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Strategy: core.ByCount}), Equals, int64(tc.TolerantSizeRatio))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Strategy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Strategy: core.ByCount}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
-	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Strategy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.ByCount}), Equals, int64(tc.TolerantSizeRatio))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.ByCount}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
+	c.Assert(getTolerantResource(tc, region, core.ScheduleKind{Resource: core.RegionKind, Policy: core.BySize}), Equals, int64(adjustTolerantRatio(tc)*float64(regionSize)))
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
@@ -263,7 +263,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
 	s.tc.AddLeaderStore(3, 10, 100)
 	s.tc.AddLeaderStore(4, 10, 100)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	c.Assert(s.tc.LeaderScheduleStrategy, Equals, core.ByCount.String()) // default by count
+	c.Assert(s.tc.LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), IsNil)
 	c.Assert(s.tc.GetStore(1).GetLeaderCount(), Equals, 14)
 	s.tc.AddLeaderStore(1, 15, 100)
@@ -288,9 +288,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	// After considering the scheduled operator, leaders of store1 and store4 are 8
 	// and 13 respectively. As the `TolerantSizeRatio` is 2.5, `shouldBalance`
 	// returns false when leader difference is not greater than 5.
-	c.Assert(s.tc.LeaderScheduleStrategy, Equals, core.ByCount.String()) // default by count
+	c.Assert(s.tc.LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), NotNil)
-	s.tc.LeaderScheduleStrategy = core.BySize.String()
+	s.tc.LeaderSchedulePolicy = core.BySize.String()
 	c.Check(s.schedule(), IsNil)
 
 	// Stores:     1    2    3    4

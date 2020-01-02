@@ -61,10 +61,10 @@ func (s *testSelectorSuite) TestScheduleConfig(c *C) {
 
 	kinds := []core.ScheduleKind{{
 		Resource: core.RegionKind,
-		Strategy: core.ByCount,
+		Policy:   core.ByCount,
 	}, {
 		Resource: core.RegionKind,
-		Strategy: core.BySize,
+		Policy:   core.BySize,
 	}}
 
 	for _, kind := range kinds {
@@ -80,7 +80,7 @@ func (s *testSelectorSuite) TestScheduleConfig(c *C) {
 
 	selector := NewBalanceSelector(core.ScheduleKind{
 		Resource: core.LeaderKind,
-		Strategy: core.ByCount,
+		Policy:   core.ByCount,
 	}, filters)
 	stores := []*core.StoreInfo{
 		core.NewStoreInfoWithSizeCount(1, 2, 20, 10, 25),
@@ -89,6 +89,6 @@ func (s *testSelectorSuite) TestScheduleConfig(c *C) {
 		core.NewStoreInfoWithSizeCount(4, 2, 20, 10, 1),
 	}
 	testScheduleConfig(selector, stores, 2, 3)
-	s.tc.LeaderScheduleStrategy = core.BySize.String()
+	s.tc.LeaderSchedulePolicy = core.BySize.String()
 	testScheduleConfig(selector, stores, 1, 4)
 }

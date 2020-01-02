@@ -254,8 +254,8 @@ const minWeight = 1e-6
 const maxScore = 1024 * 1024 * 1024
 
 // LeaderScore returns the store's leader score.
-func (s *StoreInfo) LeaderScore(strategy ScheduleStrategy, delta int64) float64 {
-	switch strategy {
+func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
+	switch policy {
 	case BySize:
 		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
 	case ByCount:
@@ -357,7 +357,7 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 func (s *StoreInfo) ResourceScore(scheduleKind ScheduleKind, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	switch scheduleKind.Resource {
 	case LeaderKind:
-		return s.LeaderScore(scheduleKind.Strategy, delta)
+		return s.LeaderScore(scheduleKind.Policy, delta)
 	case RegionKind:
 		return s.RegionScore(highSpaceRatio, lowSpaceRatio, delta)
 	default:
