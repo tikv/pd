@@ -1150,20 +1150,6 @@ func (c *RaftCluster) AllocID() (uint64, error) {
 	return c.id.Alloc()
 }
 
-// AllocPeer allocs a new peer on a store.
-func (c *RaftCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := c.AllocID()
-	if err != nil {
-		log.Error("failed to alloc peer", zap.Error(err))
-		return nil, err
-	}
-	peer := &metapb.Peer{
-		Id:      peerID,
-		StoreId: storeID,
-	}
-	return peer, nil
-}
-
 // OnStoreVersionChange changes the version of the cluster when needed.
 func (c *RaftCluster) OnStoreVersionChange() {
 	c.RLock()

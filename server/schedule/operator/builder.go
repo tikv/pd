@@ -232,11 +232,11 @@ func (b *Builder) prepareBuild() (string, error) {
 			// old peer not exists, or target is learner while old one is voter.
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
-				t, err := b.cluster.AllocPeer(0)
+				id, err := b.cluster.AllocID()
 				if err != nil {
 					return "", err
 				}
-				n.Id = t.Id
+				n.Id = id
 			}
 			b.toAdd.Set(n)
 		}

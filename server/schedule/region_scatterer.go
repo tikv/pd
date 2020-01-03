@@ -162,12 +162,10 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 	}
 
 	target := candidates[rand.Intn(len(candidates))]
-	newPeer, err := r.cluster.AllocPeer(target.GetID())
-	if err != nil {
-		return nil
+	return &metapb.Peer{
+		StoreId:   target.GetID(),
+		IsLearner: oldPeer.GetIsLearner(),
 	}
-	newPeer.IsLearner = oldPeer.GetIsLearner()
-	return newPeer
 }
 
 func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo) map[uint64]*core.StoreInfo {

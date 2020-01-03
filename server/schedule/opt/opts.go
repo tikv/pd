@@ -85,10 +85,7 @@ type Cluster interface {
 	statistics.StoreStatInformer
 	Options
 
-	// TODO: it should be removed. Schedulers don't need to know anything
-	// about peers.
-	AllocPeer(storeID uint64) (*metapb.Peer, error)
-
+	AllocID() (uint64, error)
 	FitRegion(*core.RegionInfo) *placement.RegionFit
 }
 

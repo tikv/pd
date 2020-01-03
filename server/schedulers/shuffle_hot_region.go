@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -180,11 +181,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeSta
 		if srcPeer == nil {
 			return nil
 		}
-		destPeer, err := cluster.AllocPeer(destStoreID)
-		if err != nil {
-			log.Error("failed to allocate peer", zap.Error(err))
-			return nil
-		}
+		destPeer := &metapb.Peer{StoreId: destStoreID}
 		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
 		if err != nil {
 			log.Debug("fail to create move leader operator", zap.Error(err))
