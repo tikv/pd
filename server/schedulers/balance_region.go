@@ -382,7 +382,7 @@ func (h *hitsStoreBuilder) readTTL(store *core.StoreInfo) time.Duration {
 
 func (h *hitsStoreBuilder) updateTTL(limits map[uint64]float64) {
 	for storeID, limit := range limits {
-		h.ttl[storeID] = time.Second * time.Duration(limit*hitLimitFactor)
+		h.ttl[storeID] = time.Second * time.Duration(limit*limit*limit*4/10000)
 		if h.ttl[storeID] > h.defaultTTL {
 			h.ttl[storeID] = h.defaultTTL
 		}
