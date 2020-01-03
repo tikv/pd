@@ -64,7 +64,7 @@ const (
 	BalanceRegionName = "balance-region-scheduler"
 	// BalanceRegionType is balance region scheduler type.
 	BalanceRegionType = "balance-region"
-	hitsStoreTTL      = 5 * time.Minute
+	hitsStoreTTL      = 10 * time.Minute
 	// The scheduler selects the same source or source-target for a long time
 	// and do not create an operator will trigger the hit filter. the
 	// calculation of this time is as follows:
@@ -382,7 +382,7 @@ func (h *hitsStoreBuilder) readTTL(store *core.StoreInfo) time.Duration {
 
 func (h *hitsStoreBuilder) updateTTL(limits map[uint64]float64) {
 	for storeID, limit := range limits {
-		h.ttl[storeID] = time.Second * time.Duration(limit*limit*limit*4/10000)
+		h.ttl[storeID] = time.Second * time.Duration(limit*limit*limit*6/10000)
 		if h.ttl[storeID] > h.defaultTTL {
 			h.ttl[storeID] = h.defaultTTL
 		}
