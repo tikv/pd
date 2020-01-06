@@ -55,7 +55,8 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 	}
 }
 
-func (mc *Cluster) allocID() (uint64, error) {
+// AllocID allocs a new unique ID.
+func (mc *Cluster) AllocID() (uint64, error) {
 	return mc.Alloc()
 }
 
@@ -112,7 +113,7 @@ func (mc *Cluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind
 
 // AllocPeer allocs a new peer on a store.
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := mc.allocID()
+	peerID, err := mc.AllocID()
 	if err != nil {
 		log.Error("failed to alloc peer", zap.Error(err))
 		return nil, err

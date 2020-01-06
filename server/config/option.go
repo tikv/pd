@@ -188,9 +188,9 @@ func (o *ScheduleOption) GetSchedulerMaxWaitingOperator() uint64 {
 	return o.Load().SchedulerMaxWaitingOperator
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule strategy.
-func (o *ScheduleOption) GetLeaderScheduleStrategy() core.ScheduleStrategy {
-	return core.StringToScheduleStrategy(o.Load().LeaderScheduleStrategy)
+// GetLeaderSchedulePolicy is to get leader schedule policy.
+func (o *ScheduleOption) GetLeaderSchedulePolicy() core.SchedulePolicy {
+	return core.StringToSchedulePolicy(o.Load().LeaderSchedulePolicy)
 }
 
 // GetKeyType is to get key type.

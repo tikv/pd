@@ -130,15 +130,15 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
-	leaderScheduleStrategy := l.opController.GetLeaderScheduleStrategy()
+	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
 	stores := cluster.GetStores()
 	sources := filter.SelectSourceStores(stores, l.filters, cluster)
 	targets := filter.SelectTargetStores(stores, l.filters, cluster)
 	sort.Slice(sources, func(i, j int) bool {
-		return sources[i].LeaderScore(leaderScheduleStrategy, 0) > sources[j].LeaderScore(leaderScheduleStrategy, 0)
+		return sources[i].LeaderScore(leaderSchedulePolicy, 0) > sources[j].LeaderScore(leaderSchedulePolicy, 0)
 	})
 	sort.Slice(targets, func(i, j int) bool {
-		return targets[i].LeaderScore(leaderScheduleStrategy, 0) < targets[j].LeaderScore(leaderScheduleStrategy, 0)
+		return targets[i].LeaderScore(leaderSchedulePolicy, 0) < targets[j].LeaderScore(leaderSchedulePolicy, 0)
 	})
 
 	for i := 0; i < len(sources) || i < len(targets); i++ {
@@ -190,9 +190,9 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 	}
 	targets := cluster.GetFollowerStores(region)
 	targets = filter.SelectTargetStores(targets, l.filters, cluster)
-	leaderScheduleStrategy := l.opController.GetLeaderScheduleStrategy()
+	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
-		return targets[i].LeaderScore(leaderScheduleStrategy, 0) < targets[j].LeaderScore(leaderScheduleStrategy, 0)
+		return targets[i].LeaderScore(leaderSchedulePolicy, 0) < targets[j].LeaderScore(leaderSchedulePolicy, 0)
 	})
 	for _, target := range targets {
 		if op := l.createOperator(cluster, region, source, target); len(op) > 0 {
@@ -244,7 +244,7 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	targetID := target.GetID()
 
 	opInfluence := l.opController.GetOpInfluence(cluster)
-	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetLeaderScheduleStrategy())
+	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetLeaderSchedulePolicy())
 	if !shouldBalance(cluster, source, target, region, kind, opInfluence, l.GetName()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil

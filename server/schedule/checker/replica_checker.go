@@ -131,11 +131,7 @@ func (r *ReplicaChecker) selectBestPeerToAddReplica(region *core.RegionInfo, fil
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		return nil, 0
 	}
-	newPeer, err := r.cluster.AllocPeer(storeID)
-	if err != nil {
-		return nil, 0
-	}
-	return newPeer, score
+	return &metapb.Peer{StoreId: storeID}, score
 }
 
 // selectBestStoreToAddReplica returns the store to add a replica.
@@ -244,10 +240,7 @@ func (r *ReplicaChecker) checkBestReplacement(region *core.RegionInfo) *operator
 		checkerCounter.WithLabelValues("replica_checker", "not-better").Inc()
 		return nil
 	}
-	newPeer, err := r.cluster.AllocPeer(storeID)
-	if err != nil {
-		return nil
-	}
+	newPeer := &metapb.Peer{StoreId: storeID}
 	op, err := operator.CreateMovePeerOperator("move-to-better-location", r.cluster, region, operator.OpReplica, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		checkerCounter.WithLabelValues("replica_checker", "create-operator-fail").Inc()
@@ -277,11 +270,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, peer *metapb.Peer, sta
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		return nil
 	}
-	newPeer, err := r.cluster.AllocPeer(storeID)
-	if err != nil {
-		return nil
-	}
-
+	newPeer := &metapb.Peer{StoreId: storeID}
 	replace := fmt.Sprintf("replace-%s-replica", status)
 	op, err := operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, peer.GetStoreId(), newPeer)
 	if err != nil {

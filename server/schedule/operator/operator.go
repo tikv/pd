@@ -43,7 +43,7 @@ const (
 type Cluster interface {
 	opt.Options
 	GetStore(id uint64) *core.StoreInfo
-	AllocPeer(storeID uint64) (*metapb.Peer, error)
+	AllocID() (uint64, error)
 	FitRegion(region *core.RegionInfo) *placement.RegionFit
 }
 

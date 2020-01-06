@@ -43,7 +43,7 @@ type StoreInfluence struct {
 func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
 	switch kind.Resource {
 	case core.LeaderKind:
-		switch kind.Strategy {
+		switch kind.Policy {
 		case core.ByCount:
 			return s.LeaderCount
 		case core.BySize:

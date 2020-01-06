@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
@@ -339,15 +340,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 	if target == nil {
 		return nil
 	}
-	newPeer, err := cluster.AllocPeer(target.GetID())
-	if err != nil {
-		return nil
-	}
-	if newPeer == nil {
-		schedulerCounter.WithLabelValues(l.GetName(), "no-peer").Inc()
-		return nil
-	}
-
+	newPeer := &metapb.Peer{StoreId: target.GetID()}
 	// record the store id and exclude it in next time
 	l.cacheRegions.assignedStoreIds = append(l.cacheRegions.assignedStoreIds, newPeer.GetStoreId())
 
