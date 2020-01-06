@@ -32,7 +32,7 @@ type testConfigSuite struct {
 }
 
 func (s *testConfigSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.EnableConfigManager = true })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -71,6 +71,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
+	time.Sleep(2 * time.Second)
 	newCfg := &config.Config{}
 	err = readJSON(addr, newCfg)
 	c.Assert(err, IsNil)
@@ -92,6 +93,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
+	time.Sleep(2 * time.Second)
 	sc1 := &config.ScheduleConfig{}
 	c.Assert(readJSON(addr, sc1), IsNil)
 	c.Assert(*sc, DeepEquals, *sc1)
@@ -118,6 +120,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
+	time.Sleep(2 * time.Second)
 	rc3 := &config.ReplicationConfig{}
 	err = readJSON(addr, rc3)
 	c.Assert(err, IsNil)

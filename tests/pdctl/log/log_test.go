@@ -16,6 +16,7 @@ package log_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -87,6 +88,7 @@ func (s *logTestSuite) TestLog(c *C) {
 	for _, testCase := range testCases {
 		_, _, err = pdctl.ExecuteCommandC(cmd, testCase.cmd...)
 		c.Assert(err, IsNil)
+		time.Sleep(2 * time.Second)
 		c.Assert(svr.GetConfig().Log.Level, Equals, testCase.expect)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -227,7 +228,13 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	rc.OnStoreVersionChange()
+	v := rc.OnStoreVersionChange()
+	if s.GetConfig().EnableConfigManager && v != nil {
+		status := s.updateConfigManager("cluster-version", v.String())
+		if status.GetCode() != configpb.StatusCode_OK {
+			log.Error("failed to update the cluster version", zap.Error(errors.New(status.GetMessage())))
+		}
+	}
 	CheckPDVersion(s.scheduleOpt)
 
 	return &pdpb.PutStoreResponse{

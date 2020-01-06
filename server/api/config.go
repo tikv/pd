@@ -22,11 +22,14 @@ import (
 	"strings"
 
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 type confHandler struct {
@@ -211,6 +214,13 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInternalErr(err))
 		return
+	}
+	kind := &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: server.Component}}}
+	v := &configpb.Version{Global: h.svr.GetConfigManager().GlobalCfgs[server.Component].GetVersion()}
+	entry := &configpb.ConfigEntry{Name: "cluster-version", Value: version}
+	_, _, err = h.svr.GetConfigClient().Update(h.svr.Context(), v, kind, []*configpb.ConfigEntry{entry})
+	if err != nil {
+		log.Error("update cluster version meet error", zap.Error(err))
 	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }

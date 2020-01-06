@@ -178,7 +178,8 @@ func (s *testComponentsConfigSuite) TestUpdateConfig(c *C) {
 		"defaultcf":         defaultcfMap,
 	}
 	cfg["rocksdb"] = rocksdbMap
-	update(cfg, strings.Split("rocksdb.defaultcf.titan.discardable-ratio", "."), "0.002")
+	err := update(cfg, strings.Split("rocksdb.defaultcf.titan.discardable-ratio", "."), "0.002")
+	c.Assert(err, IsNil)
 	c.Assert(defaultcfTitanMap["discardable-ratio"], Equals, 0.002)
 }
 
@@ -280,7 +281,7 @@ discardable-ratio = 0.00156
 	cfg.GlobalCfgs["tikv"] = gc
 	cfg.LocalCfgs["tikv"] = make(map[string]*LocalConfig)
 	cfg.LocalCfgs["tikv"]["tikv1"] = lc
-	err = cfg.ApplyGlobalConifg(cfg.GlobalCfgs["tikv"], "tikv", 1, entry)
+	err = cfg.applyGlobalConifg(cfg.GlobalCfgs["tikv"], "tikv", 1, entry)
 	c.Assert(err, IsNil)
 	str, err := cfg.getComponentCfg("tikv", "tikv1")
 	c.Assert(err, IsNil)

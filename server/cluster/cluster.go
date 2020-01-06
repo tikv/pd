@@ -1151,7 +1151,7 @@ func (c *RaftCluster) AllocID() (uint64, error) {
 }
 
 // OnStoreVersionChange changes the version of the cluster when needed.
-func (c *RaftCluster) OnStoreVersionChange() {
+func (c *RaftCluster) OnStoreVersionChange() *semver.Version {
 	c.RLock()
 	defer c.RUnlock()
 	var (
@@ -1188,7 +1188,9 @@ func (c *RaftCluster) OnStoreVersionChange() {
 		log.Info("cluster version changed",
 			zap.Stringer("old-cluster-version", clusterVersion),
 			zap.Stringer("new-cluster-version", minVersion))
+		return minVersion
 	}
+	return nil
 }
 
 func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {

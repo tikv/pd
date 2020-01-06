@@ -84,7 +84,7 @@ type Config struct {
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
-	ClusterVersion semver.Version `json:"cluster-version"`
+	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
@@ -165,7 +165,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
 
-	fs.BoolVar(&cfg.EnableConfigManager, "enable-config-manager", false, "Enable configuration manager")
+	fs.BoolVar(&cfg.EnableConfigManager, "enable-config-manager", true, "Enable configuration manager")
 
 	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", true, "Enable Dashboard API and UI on this node")
 
@@ -207,7 +207,10 @@ const (
 	defaultDisableErrorVerbose = true
 )
 
-var defaultRuntimeServices = []string{}
+var (
+	defaultRuntimeServices = []string{}
+	defaultLocationLabels  = []string{}
+)
 
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {
@@ -801,6 +804,24 @@ func (c *ScheduleConfig) Deprecated() error {
 	return nil
 }
 
+var deprecateConfigs = []string{
+	"disable-remove-down-replica",
+	"disable-replace-offline-replica",
+	"disable-make-up-replica",
+	"disable-remove-extra-replica",
+	"disable-location-replacement",
+}
+
+// IsDeprecated returns if a config is deprecated.
+func IsDeprecated(config string) bool {
+	for _, t := range deprecateConfigs {
+		if t == config {
+			return true
+		}
+	}
+	return false
+}
+
 // SchedulerConfigs is a slice of customized scheduler configuration.
 type SchedulerConfigs []SchedulerConfig
 
@@ -872,6 +893,9 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	if !meta.IsDefined("strictly-match-label") {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
+	}
+	if !meta.IsDefined("location-labels") {
+		c.LocationLabels = defaultLocationLabels
 	}
 	return c.Validate()
 }
