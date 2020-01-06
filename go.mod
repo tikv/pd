@@ -20,7 +20,7 @@ require (
 	github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db // indirect
 	github.com/google/btree v0.0.0-20180813153112-4030bb1f1f0c
 	github.com/gorilla/context v0.0.0-20160226214623-1ea25387ff6f // indirect
-	github.com/gorilla/mux v1.6.1
+	github.com/gorilla/mux v1.7.3
 	github.com/gorilla/websocket v1.2.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/juju/ratelimit v1.0.1
@@ -29,6 +29,7 @@ require (
 	github.com/montanaflynn/stats v0.0.0-20151014174947-eeaced052adb
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
+	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200106155313-2082b0f3cabc // indirect
 	github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
@@ -47,9 +48,7 @@ require (
 	go.etcd.io/etcd v0.0.0-20190320044326-77d4b742cdbf
 	go.uber.org/goleak v0.10.0
 	go.uber.org/zap v1.12.0
-	golang.org/x/crypto v0.0.0-20190909091759-094676da4a83 // indirect
-	golang.org/x/net v0.0.0-20190909003024-a7b16738d86b // indirect
-	golang.org/x/sys v0.0.0-20190909082730-f460065e899a // indirect
+	golang.org/x/sys v0.0.0-20200106114638-5f8ca72cd632 // indirect
 	google.golang.org/grpc v1.25.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )

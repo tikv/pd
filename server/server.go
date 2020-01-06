@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/typeutil"
@@ -67,6 +68,7 @@ const (
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
 	webPath         = "/web/"
+	dashboardPath   = "/dashboard/"
 	pdClusterIDPath = "/pd/cluster_id"
 )
 
@@ -206,8 +208,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		}
 
 		etcdCfg.UserHandlers = map[string]http.Handler{
-			pdAPIPrefix: apiHandler,
-			webPath:     http.StripPrefix(webPath, ui.Handler()),
+			pdAPIPrefix:   apiHandler,
+			webPath:       http.StripPrefix(webPath, ui.Handler()),
+			dashboardPath: uiserver.Handler(),
 		}
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
