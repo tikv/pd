@@ -71,6 +71,8 @@ type Client interface {
 	ScatterRegion(ctx context.Context, regionID uint64) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
+	// ConfigClient gets the configuration client.
+	ConfigClient() ConfigClient
 	// Close closes the client.
 	Close()
 }
@@ -145,6 +147,10 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	go c.tsCancelLoop()
 
 	return c, nil
+}
+
+func (c *client) ConfigClient() ConfigClient {
+	return &configClient{c.baseClient}
 }
 
 type deadline struct {
