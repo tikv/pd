@@ -15,8 +15,6 @@ package pd
 
 import (
 	"context"
-	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,10 +23,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 // Client is a PD (Placement Driver) client.
@@ -75,6 +71,8 @@ type Client interface {
 	ScatterRegion(ctx context.Context, regionID uint64) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
+	// ConfigClient gets the configuration client.
+	ConfigClient() ConfigClient
 	// Close closes the client.
 	Close()
 }
@@ -117,45 +115,13 @@ var (
 )
 
 type client struct {
-	urls        []string
-	clusterID   uint64
+	*baseClient
 	tsoRequests chan *tsoRequest
 
 	lastPhysical int64
 	lastLogical  int64
 
-	connMu struct {
-		sync.RWMutex
-		clientConns map[string]*grpc.ClientConn
-		leader      string
-	}
-
-	tsDeadlineCh  chan deadline
-	checkLeaderCh chan struct{}
-
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	security        SecurityOption
-	gRPCDialOptions []grpc.DialOption
-}
-
-// SecurityOption records options about tls
-type SecurityOption struct {
-	CAPath   string
-	CertPath string
-	KeyPath  string
-}
-
-// ClientOption configures client.
-type ClientOption func(c *client)
-
-// WithGRPCDialOptions configures the client with gRPC dial options.
-func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
-	return func(c *client) {
-		c.gRPCDialOptions = append(c.gRPCDialOptions, opts...)
-	}
+	tsDeadlineCh chan deadline
 }
 
 // NewClient creates a PD client.
@@ -166,187 +132,25 @@ func NewClient(pdAddrs []string, security SecurityOption, opts ...ClientOption) 
 // NewClientWithContext creates a PD client with context.
 func NewClientWithContext(ctx context.Context, pdAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", pdAddrs))
-	ctx1, cancel := context.WithCancel(ctx)
+	base, err := newBaseClient(ctx, addrsToUrls(pdAddrs), security, opts...)
+	if err != nil {
+		return nil, err
+	}
 	c := &client{
-		urls:          addrsToUrls(pdAddrs),
-		tsoRequests:   make(chan *tsoRequest, maxMergeTSORequests),
-		tsDeadlineCh:  make(chan deadline, 1),
-		checkLeaderCh: make(chan struct{}, 1),
-		ctx:           ctx1,
-		cancel:        cancel,
-		security:      security,
-	}
-	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
-	for _, opt := range opts {
-		opt(c)
+		baseClient:   base,
+		tsoRequests:  make(chan *tsoRequest, maxMergeTSORequests),
+		tsDeadlineCh: make(chan deadline, 1),
 	}
 
-	if err := c.initRetry(c.initClusterID); err != nil {
-		cancel()
-		return nil, err
-	}
-	if err := c.initRetry(c.updateLeader); err != nil {
-		cancel()
-		return nil, err
-	}
-	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
-
-	c.wg.Add(3)
+	c.wg.Add(2)
 	go c.tsLoop()
 	go c.tsCancelLoop()
-	go c.leaderLoop()
 
 	return c, nil
 }
 
-func (c *client) updateURLs(members []*pdpb.Member) {
-	urls := make([]string, 0, len(members))
-	for _, m := range members {
-		urls = append(urls, m.GetClientUrls()...)
-	}
-
-	sort.Strings(urls)
-	// the url list is same.
-	if reflect.DeepEqual(c.urls, urls) {
-		return
-	}
-
-	log.Info("[pd] update member urls", zap.Strings("old-urls", c.urls), zap.Strings("new-urls", urls))
-	c.urls = urls
-}
-
-func (c *client) initRetry(f func() error) error {
-	var err error
-	for i := 0; i < maxInitClusterRetries; i++ {
-		if err = f(); err == nil {
-			return nil
-		}
-		select {
-		case <-c.ctx.Done():
-			return err
-		case <-time.After(time.Second):
-		}
-	}
-	return errors.WithStack(err)
-}
-
-func (c *client) initClusterID() error {
-	ctx, cancel := context.WithCancel(c.ctx)
-	defer cancel()
-	for _, u := range c.urls {
-		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, pdTimeout)
-		members, err := c.getMembers(timeoutCtx, u)
-		timeoutCancel()
-		if err != nil || members.GetHeader() == nil {
-			log.Warn("[pd] failed to get cluster id", zap.String("url", u), zap.Error(err))
-			continue
-		}
-		c.clusterID = members.GetHeader().GetClusterId()
-		return nil
-	}
-	return errors.WithStack(errFailInitClusterID)
-}
-
-func (c *client) updateLeader() error {
-	for _, u := range c.urls {
-		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
-		members, err := c.getMembers(ctx, u)
-		if err != nil {
-			log.Warn("[pd] cannot update leader", zap.String("address", u), zap.Error(err))
-		}
-		cancel()
-		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
-			select {
-			case <-c.ctx.Done():
-				return errors.WithStack(err)
-			default:
-				continue
-			}
-		}
-		c.updateURLs(members.GetMembers())
-		return c.switchLeader(members.GetLeader().GetClientUrls())
-	}
-	return errors.Errorf("failed to get leader from %v", c.urls)
-}
-
-func (c *client) getMembers(ctx context.Context, url string) (*pdpb.GetMembersResponse, error) {
-	cc, err := c.getOrCreateGRPCConn(url)
-	if err != nil {
-		return nil, err
-	}
-	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
-	if err != nil {
-		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
-		return nil, errors.WithStack(attachErr)
-	}
-	return members, nil
-}
-
-func (c *client) switchLeader(addrs []string) error {
-	// FIXME: How to safely compare leader urls? For now, only allows one client url.
-	addr := addrs[0]
-
-	c.connMu.RLock()
-	oldLeader := c.connMu.leader
-	c.connMu.RUnlock()
-
-	if addr == oldLeader {
-		return nil
-	}
-
-	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
-	if _, err := c.getOrCreateGRPCConn(addr); err != nil {
-		return err
-	}
-
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
-	c.connMu.leader = addr
-	return nil
-}
-
-func (c *client) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
-	c.connMu.RLock()
-	conn, ok := c.connMu.clientConns[addr]
-	c.connMu.RUnlock()
-	if ok {
-		return conn, nil
-	}
-
-	cc, err := grpcutil.GetClientConn(addr, c.security.CAPath, c.security.CertPath, c.security.KeyPath, c.gRPCDialOptions...)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
-	if old, ok := c.connMu.clientConns[addr]; ok {
-		cc.Close()
-		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
-		return old, nil
-	}
-
-	c.connMu.clientConns[addr] = cc
-	return cc, nil
-}
-
-func (c *client) leaderLoop() {
-	defer c.wg.Done()
-
-	ctx, cancel := context.WithCancel(c.ctx)
-	defer cancel()
-
-	for {
-		select {
-		case <-c.checkLeaderCh:
-		case <-time.After(time.Minute):
-		case <-ctx.Done():
-			return
-		}
-
-		if err := c.updateLeader(); err != nil {
-			log.Error("[pd] failed updateLeader", zap.Error(err))
-		}
-	}
+func (c *client) ConfigClient() ConfigClient {
+	return &configClient{c.baseClient}
 }
 
 type deadline struct {
@@ -559,28 +363,6 @@ func (c *client) leaderClient() pdpb.PDClient {
 	defer c.connMu.RUnlock()
 
 	return pdpb.NewPDClient(c.connMu.clientConns[c.connMu.leader])
-}
-
-func (c *client) ScheduleCheckLeader() {
-	select {
-	case c.checkLeaderCh <- struct{}{}:
-	default:
-	}
-}
-
-func (c *client) GetClusterID(context.Context) uint64 {
-	return c.clusterID
-}
-
-func (c *client) GetLeaderAddr() string {
-	c.connMu.RLock()
-	defer c.connMu.RUnlock()
-	return c.connMu.leader
-}
-
-// For testing use. It should only be called when the client is closed.
-func (c *client) GetURLs() []string {
-	return c.urls
 }
 
 var tsoReqPool = sync.Pool{
