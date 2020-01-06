@@ -46,7 +46,7 @@ type keyvisualService struct {
 }
 
 // NewKeyvisualService creates a HTTP handler for heatmap service.
-func NewKeyvisualService(ctx context.Context, svr *server.Server) (http.Handler, server.APIGroup) {
+func NewKeyvisualService(ctx context.Context, svr *server.Server) (http.Handler, server.APIGroup, func()) {
 	mux := http.NewServeMux()
 	k := &keyvisualService{
 		ServeMux: mux,
@@ -62,7 +62,7 @@ func NewKeyvisualService(ctx context.Context, svr *server.Server) (http.Handler,
 		negroni.Wrap(k),
 	)
 	go k.run()
-	return handler, defaultRegisterAPIGroupInfo
+	return handler, defaultRegisterAPIGroupInfo, nil
 }
 
 // Heatmap returns the heatmap data.

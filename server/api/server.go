@@ -32,11 +32,12 @@ func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, server.S
 		IsCore: true,
 	}
 	router := mux.NewRouter()
+	r, f := createRouter(ctx, apiPrefix, svr)
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		serverapi.NewRuntimeServiceValidator(svr, group),
 		serverapi.NewRedirector(svr),
-		negroni.Wrap(createRouter(apiPrefix, svr)),
-	))
+		negroni.Wrap(r)),
+	)
 
-	return router, group
+	return router, group, f
 }

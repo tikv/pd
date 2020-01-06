@@ -199,7 +199,7 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 			Name:    "mok",
 			Version: "v1",
 		}
-		return mux, info
+		return mux, info, nil
 	}
 	cfg := NewTestSingleConfig(c)
 	ctx, cancel := context.WithCancel(context.Background())

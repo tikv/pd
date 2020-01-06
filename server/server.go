@@ -182,8 +182,12 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 	apiService.Use(recovery)
 	router := mux.NewRouter()
 	registerMap := make(map[string]struct{})
+	var options []func()
 	for _, build := range apiBuilders {
-		handler, info := build(svr.ctx, svr)
+		handler, info, f := build(ctx, svr)
+		if f != nil {
+			options = append(options, f)
+		}
 		var pathPrefix string
 		if len(info.PathPrefix) != 0 {
 			pathPrefix = info.PathPrefix
