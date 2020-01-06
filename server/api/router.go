@@ -14,12 +14,19 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/pprof"
 
 	"github.com/gorilla/mux"
+	"github.com/grpc-ecosystem/grpc-gateway/runtime"
+	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 func createStreamingRender() *render.Render {
@@ -34,7 +41,7 @@ func createIndentRender() *render.Render {
 	})
 }
 
-func createRouter(prefix string, svr *server.Server) *mux.Router {
+func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.Router, func()) {
 	rd := createIndentRender()
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
@@ -188,5 +195,40 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// Deprecated
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
-	return rootRouter
+	if svr.GetConfig().EnableConfigManager {
+		f := func() {
+			configRouter := apiRouter.PathPrefix("/config").Methods("POST").Subrouter()
+			adminRouter := apiRouter.PathPrefix("/admin").Methods("POST").Subrouter()
+			gwmux := runtime.NewServeMux()
+			UnaryClientInterceptor := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+				invoker(ctx, method, req, reply, cc, opts...)
+				errMsg := reply.(*configpb.UpdateResponse).GetStatus().GetMessage()
+				if errMsg != "" {
+					return errors.New(errMsg)
+				}
+				return nil
+			}
+			opts := []grpc.DialOption{grpc.WithInsecure(), grpc.WithUnaryInterceptor(UnaryClientInterceptor)}
+			err := configpb.RegisterConfigHandlerFromEndpoint(ctx, gwmux, svr.GetAddr()[7:], opts)
+			if err != nil {
+				log.Error("fail to register grpc gateway", zap.Error(err))
+			}
+
+			configRouter.Handle("", gwmux).Methods("POST")
+			configRouter.Handle("/replicate", gwmux).Methods("POST")
+			configRouter.Handle("/schedule", gwmux).Methods("POST")
+
+			adminRouter.Handle("/log", gwmux).Methods("POST")
+
+			configRouter.Use(newConfigMiddleware(svr).Middleware)
+			adminRouter.Use(newAdminMiddleware(svr).Middleware)
+		}
+		return rootRouter, f
+	}
+	apiRouter.HandleFunc("/config", confHandler.Post).Methods("POST")
+	apiRouter.HandleFunc("/config/schedule", confHandler.SetSchedule).Methods("POST")
+	apiRouter.HandleFunc("/config/replicate", confHandler.SetReplication).Methods("POST")
+
+	apiRouter.HandleFunc("/admin/log", logHandler.Handle).Methods("POST")
+	return rootRouter, nil
 }
