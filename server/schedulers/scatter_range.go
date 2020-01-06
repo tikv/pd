@@ -205,14 +205,19 @@ func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operat
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-leader-%s", l.config.RangeName))
 		ops[0].AttachKind(operator.OpRange)
-		schedulerCounter.WithLabelValues(l.GetName(), "new-leader-operator").Inc()
+		ops[0].Counters = append(ops[0].Counters,
+			schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
+			schedulerCounter.WithLabelValues(l.GetName(), "new-leader-operator"))
 		return ops
 	}
 	ops = l.balanceRegion.Schedule(c)
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-region-%s", l.config.RangeName))
 		ops[0].AttachKind(operator.OpRange)
-		schedulerCounter.WithLabelValues(l.GetName(), "new-region-operator").Inc()
+		ops[0].Counters = append(ops[0].Counters,
+			schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
+			schedulerCounter.WithLabelValues(l.GetName(), "new-region-operator"),
+		)
 		return ops
 	}
 	schedulerCounter.WithLabelValues(l.GetName(), "no-need").Inc()

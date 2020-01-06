@@ -15,7 +15,6 @@ package schedulers
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pingcap/pd/server/schedule/filter"
@@ -23,7 +22,6 @@ import (
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/selector"
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
 )
 
 const (
@@ -119,7 +117,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 		return nil
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
+	op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 	op.SetPriorityLevel(core.HighPriority)
 	return []*operator.Operator{op}
 }
@@ -152,12 +150,5 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, filter fil
 	if target == nil {
 		return nil
 	}
-
-	newPeer, err := cluster.AllocPeer(target.GetID())
-	if err != nil {
-		log.Error("failed to allocate peer", zap.Error(err))
-		return nil
-	}
-
-	return newPeer
+	return &metapb.Peer{StoreId: target.GetID()}
 }

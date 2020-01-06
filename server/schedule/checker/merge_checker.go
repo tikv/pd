@@ -152,8 +152,8 @@ func (m *MergeChecker) allowMerge(region *core.RegionInfo, adjacent *core.Region
 	if m.cluster.IsPlacementRulesEnabled() && len(m.ruleManager.GetSplitKeys(start, end)) > 0 {
 		return false
 	}
-	strategy := m.cluster.GetKeyType()
-	switch strategy {
+	policy := m.cluster.GetKeyType()
+	switch policy {
 	case core.Table:
 		if m.cluster.IsCrossTableMergeEnabled() {
 			return true

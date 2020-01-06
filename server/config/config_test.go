@@ -99,6 +99,8 @@ func (s *testConfigSuite) TestValidation(c *C) {
 	c.Assert(cfg.Schedule.Validate(), IsNil)
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	c.Assert(cfg.Schedule.Validate(), NotNil)
+	// check quota
+	c.Assert(cfg.QuotaBackendBytes, Equals, defaultQuotaBackendBytes)
 }
 
 func (s *testConfigSuite) TestAdjust(c *C) {

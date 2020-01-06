@@ -174,6 +174,7 @@ const (
 	defaultNextRetryDelay          = time.Second
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
+	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -411,6 +412,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustString(&c.AutoCompactionMode, defaultCompactionMode)
 	adjustString(&c.AutoCompactionRetention, defaultAutoCompactionRetention)
+	if !configMetaData.IsDefined("quota-backend-bytes") {
+		c.QuotaBackendBytes = defaultQuotaBackendBytes
+	}
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
@@ -493,8 +497,8 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
-	// LeaderScheduleStrategy is the option to balance leader, there are some strategics supported: ["count", "size"], default: "count"
-	LeaderScheduleStrategy string `toml:"leader-schedule-strategy" json:"leader-schedule-strategy"`
+	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
+	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -590,7 +594,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
-		LeaderScheduleStrategy:       c.LeaderScheduleStrategy,
+		LeaderSchedulePolicy:         c.LeaderSchedulePolicy,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
@@ -642,7 +646,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
-	defaultLeaderScheduleStrategy      = "count"
+	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
 )
 
@@ -686,8 +690,8 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
-	if !meta.IsDefined("leader-schedule-strategy") {
-		adjustString(&c.LeaderScheduleStrategy, defaultLeaderScheduleStrategy)
+	if !meta.IsDefined("leader-schedule-policy") {
+		adjustString(&c.LeaderSchedulePolicy, defaultLeaderSchedulePolicy)
 	}
 	if !meta.IsDefined("store-limit-mode") {
 		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)

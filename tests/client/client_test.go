@@ -34,19 +34,19 @@ func Test(t *testing.T) {
 	TestingT(t)
 }
 
-var _ = Suite(&serverTestSuite{})
+var _ = Suite(&clientTestSuite{})
 
-type serverTestSuite struct {
+type clientTestSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func (s *serverTestSuite) SetUpSuite(c *C) {
+func (s *clientTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
 }
 
-func (s *serverTestSuite) TearDownSuite(c *C) {
+func (s *clientTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
 
@@ -56,7 +56,7 @@ type client interface {
 	GetURLs() []string
 }
 
-func (s *serverTestSuite) TestClientLeaderChange(c *C) {
+func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -110,7 +110,7 @@ func (s *serverTestSuite) TestClientLeaderChange(c *C) {
 	c.Assert(urls, DeepEquals, endpoints)
 }
 
-func (s *serverTestSuite) TestLeaderTransfer(c *C) {
+func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 2)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -176,13 +176,13 @@ func (s *serverTestSuite) TestLeaderTransfer(c *C) {
 	wg.Wait()
 }
 
-func (s *serverTestSuite) waitLeader(c *C, cli client, leader string) {
+func (s *clientTestSuite) waitLeader(c *C, cli client, leader string) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		cli.ScheduleCheckLeader()
 		return cli.GetLeaderAddr() == leader
 	})
 }
 
-func (s *serverTestSuite) makeTS(physical, logical int64) uint64 {
+func (s *clientTestSuite) makeTS(physical, logical int64) uint64 {
 	return uint64(physical<<18 + logical)
 }

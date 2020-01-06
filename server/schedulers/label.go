@@ -132,12 +132,12 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 				continue
 			}
 
-			schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, id, target.GetID(), operator.OpLeader)
 			if err != nil {
 				log.Debug("fail to create transfer label reject leader operator", zap.Error(err))
 				return nil
 			}
+			op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 			return []*operator.Operator{op}
 		}
 	}

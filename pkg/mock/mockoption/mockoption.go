@@ -40,7 +40,7 @@ const (
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true
-	defaultLeaderScheduleStrategy      = "count"
+	defaultLeaderSchedulePolicy        = "count"
 	defaultEnablePlacementRules        = false
 	defaultKeyType                     = "table"
 )
@@ -83,7 +83,7 @@ type ScheduleOptions struct {
 	DisableMakeUpReplica         bool
 	DisableRemoveExtraReplica    bool
 	DisableLocationReplacement   bool
-	LeaderScheduleStrategy       string
+	LeaderSchedulePolicy         string
 	LabelProperties              map[string][]*metapb.StoreLabel
 }
 
@@ -115,7 +115,7 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.EnableMakeUpReplica = true
 	mso.EnableRemoveExtraReplica = true
 	mso.EnableLocationReplacement = true
-	mso.LeaderScheduleStrategy = defaultLeaderScheduleStrategy
+	mso.LeaderSchedulePolicy = defaultLeaderSchedulePolicy
 	mso.KeyType = defaultKeyType
 	return mso
 }
@@ -270,9 +270,9 @@ func (mso *ScheduleOptions) IsDebugMetricsEnabled() bool {
 	return mso.EnableDebugMetrics
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule strategy.
-func (mso *ScheduleOptions) GetLeaderScheduleStrategy() core.ScheduleStrategy {
-	return core.StringToScheduleStrategy(mso.LeaderScheduleStrategy)
+// GetLeaderSchedulePolicy is to get leader schedule policy.
+func (mso *ScheduleOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
+	return core.StringToSchedulePolicy(mso.LeaderSchedulePolicy)
 }
 
 // GetKeyType is to get key type.

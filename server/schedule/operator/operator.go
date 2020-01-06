@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/schedule/placement"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -42,7 +43,7 @@ const (
 type Cluster interface {
 	opt.Options
 	GetStore(id uint64) *core.StoreInfo
-	AllocPeer(storeID uint64) (*metapb.Peer, error)
+	AllocID() (uint64, error)
 	FitRegion(region *core.RegionInfo) *placement.RegionFit
 }
 
@@ -58,6 +59,7 @@ type Operator struct {
 	status      OpStatusTracker
 	stepTime    int64
 	level       core.PriorityLevel
+	Counters    []prometheus.Counter
 }
 
 // NewOperator creates a new operator.
