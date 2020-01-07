@@ -245,7 +245,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	if err := c.storage.LoadStores(c.core.PutStore); err != nil {
 		return nil, err
 	}
-	stores := c.core.GetStoresAfterUpdateMaxScore(c.opt.GetFlexibleScore())
+	stores := c.core.UpdateMaxScore()
 	c.core.PutStores(stores)
 
 	log.Info("load stores",
@@ -407,7 +407,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		}
 	}
 	c.core.PutStore(newStore)
-	stores := c.core.GetStoresAfterUpdateMaxScore(c.opt.GetFlexibleScore(), newStore)
+	stores := c.core.UpdateMaxScore(newStore)
 	c.core.PutStores(stores)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
@@ -990,7 +990,7 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 			return err
 		}
 	}
-	stores := c.core.GetStoresAfterUpdateMaxScore(c.opt.GetFlexibleScore(), store)
+	stores := c.core.UpdateMaxScore(store)
 	c.core.PutStores(stores)
 	c.storesStats.CreateRollingStoreStats(store.GetID())
 	return nil

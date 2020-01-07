@@ -39,7 +39,6 @@ const (
 	defaultHighSpaceRatio              = 0.6
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultHotRegionCacheHitsThreshold = 3
-	defaultFlexibleScore               = 4 * 1024 * 1024
 	defaultStrictlyMatchLabel          = true
 	defaultLeaderSchedulePolicy        = "count"
 	defaultEnablePlacementRules        = false
@@ -60,7 +59,6 @@ type ScheduleOptions struct {
 	MaxMergeRegionSize           uint64
 	MaxMergeRegionKeys           uint64
 	SchedulerMaxWaitingOperator  uint64
-	FlexibleScore                uint64
 	SplitMergeInterval           time.Duration
 	EnableOneWayMerge            bool
 	EnableCrossTableMerge        bool
@@ -119,7 +117,6 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.EnableLocationReplacement = true
 	mso.LeaderSchedulePolicy = defaultLeaderSchedulePolicy
 	mso.KeyType = defaultKeyType
-	mso.FlexibleScore = defaultFlexibleScore
 	return mso
 }
 
@@ -226,11 +223,6 @@ func (mso *ScheduleOptions) GetTolerantSizeRatio() float64 {
 // GetLowSpaceRatio mocks method
 func (mso *ScheduleOptions) GetLowSpaceRatio() float64 {
 	return mso.LowSpaceRatio
-}
-
-// GetFlexibleScore mocks method
-func (mso *ScheduleOptions) GetFlexibleScore() uint64 {
-	return mso.FlexibleScore
 }
 
 // GetHighSpaceRatio mocks method

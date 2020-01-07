@@ -111,7 +111,7 @@ func putStore(stores *StoresInfo, flexibleScore, capacity uint64, storeIDs ...ui
 	}
 	var results []*StoreInfo
 	if storeID == 0 {
-		results = stores.GetStoresAfterUpdateMaxScore(flexibleScore)
+		results = stores.UpdateMaxScore(flexibleScore)
 	} else {
 		store := NewStoreInfo(
 			&metapb.Store{
@@ -121,7 +121,7 @@ func putStore(stores *StoresInfo, flexibleScore, capacity uint64, storeIDs ...ui
 				Capacity: capacity,
 			}),
 		)
-		results = stores.GetStoresAfterUpdateMaxScore(flexibleScore, store)
+		results = stores.UpdateMaxScore(flexibleScore, store)
 	}
 	for _, result := range results {
 		stores.SetStore(result)
@@ -137,7 +137,7 @@ func checkAllStoresMaxScore(c *C, stores *StoresInfo, maxScore float64) {
 func (s *testMaxScoreSuite) TestMaxScore(c *C) {
 	stores := NewStoresInfo()
 	flexibleScore := 4 * TB / bytesPerMB
-	results := stores.GetStoresAfterUpdateMaxScore(flexibleScore)
+	results := stores.UpdateMaxScore(flexibleScore)
 	c.Assert(results, HasLen, 0)
 
 	// 6 tikv stores of 1t
