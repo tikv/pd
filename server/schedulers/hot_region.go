@@ -239,7 +239,7 @@ func (h *hotScheduler) updateStatsByPendingOpInfo(storeStatsMap map[uint64]float
 		}
 	}
 
-	for _, pendingOpInfos := range h.pendingOpInfos {
+	for regionID, pendingOpInfos := range h.pendingOpInfos {
 		var n *list.Element
 		for e := pendingOpInfos.Front(); e != nil; e = n {
 			opInfo := e.Value.(*pendingInfluence)
@@ -254,6 +254,9 @@ func (h *hotScheduler) updateStatsByPendingOpInfo(storeStatsMap map[uint64]float
 					pendingOpInfos.Remove(e)
 				}
 			}
+		}
+		if pendingOpInfos.Len() == 0 {
+			delete(h.pendingOpInfos, regionID)
 		}
 	}
 }
