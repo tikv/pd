@@ -648,9 +648,9 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(evict, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 6)
-	sches, _, err := storage.LoadAllScheduleConfig()
+	scheduleConfig, _, err := storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 6)
+	c.Assert(scheduleConfig, HasLen, 6)
 	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
@@ -670,9 +670,9 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
 	c.Assert(newOpt.Reload(storage), IsNil)
 	// only remains 3 items with independent config.
-	sches, _, err = storage.LoadAllScheduleConfig()
+	scheduleConfig, _, err = storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 3)
+	c.Assert(scheduleConfig, HasLen, 3)
 
 	// option have 7 items because the default scheduler do not remove.
 	c.Assert(newOpt.GetSchedulers(), HasLen, 7)
