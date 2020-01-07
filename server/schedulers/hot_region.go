@@ -529,7 +529,7 @@ func (h *hotScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.
 
 		regionBytesRate := rs.GetBytesRate()
 		dstStoreID = h.selectDstStoreByScore(candidateStoreIDs, regionBytesRate, balanceType)
-		if dstStoreID != 0 && h.checkVariation(srcStoreID, dstStoreID, regionBytesRate, balanceType) {
+		if dstStoreID != 0 {
 			h.peerLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
 			srcPeer := srcRegion.GetStorePeer(srcStoreID)
 			if srcPeer == nil {
@@ -599,7 +599,7 @@ func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistic
 			dstStoreID = h.selectDstStoreByScore(candidateStoreIDs, regionBytesRate, balanceType)
 		}
 
-		if dstStoreID != 0 && h.checkVariation(srcStoreID, dstStoreID, regionBytesRate, balanceType) {
+		if dstStoreID != 0 {
 			dstPeer := srcRegion.GetStoreVoter(dstStoreID)
 			if dstPeer != nil {
 				h.leaderLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
@@ -715,28 +715,6 @@ func (h *hotScheduler) selectDstStoreByScore(candidates map[uint64]struct{}, reg
 		}
 	}
 	return 0
-}
-
-func (h *hotScheduler) checkVariation(src, dst uint64, regionBytesRate float64, balanceType BalanceType) bool {
-	var storesScore *ScoreInfos
-	if balanceType == hotRead {
-		storesScore = h.readScores
-	} else {
-		storesScore = h.writeScores
-	}
-	afterStoresScore := NewScoreInfos()
-	for _, scoreInfo := range storesScore.scoreInfos {
-		id := scoreInfo.GetStoreID()
-		score := scoreInfo.GetScore()
-		if id == src {
-			score -= regionBytesRate
-		}
-		if id == dst {
-			score += regionBytesRate
-		}
-		afterStoresScore.Add(NewScoreInfo(id, score))
-	}
-	return storesScore.Variation() > afterStoresScore.Variation()
 }
 
 func (h *hotScheduler) adjustBalanceLimit(storeID uint64, storesStat statistics.StoreHotPeersStat) uint64 {

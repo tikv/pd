@@ -343,7 +343,7 @@ func (p *pendingInfluence) isDone() bool {
 }
 
 func (p *pendingInfluence) isTransferLeader() bool {
-	return p.op.Kind() == operator.OpLeader|operator.OpAdmin
+	return p.op.Kind()^operator.OpLeader != 0
 }
 
 func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence, balanceType BalanceType) *pendingInfluence {
