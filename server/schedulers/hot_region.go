@@ -279,7 +279,7 @@ func (h *hotScheduler) analyzeStoreLoad(cluster opt.Cluster, balanceType Balance
 }
 
 func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore, regionID uint64, infl Influence, balanceType BalanceType) {
-	influence := newPendingInfluence(op, srcStore, dstStore, infl, hotRead)
+	influence := newPendingInfluence(op, srcStore, dstStore, infl, balanceType)
 	if balanceType == hotRead {
 		h.readPendings[influence] = struct{}{}
 	} else {
