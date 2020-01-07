@@ -195,6 +195,7 @@ func (h *hotScheduler) dispatch(typ BalanceType, cluster opt.Cluster) []*operato
 	h.summaryPendingInfluence()
 	h.readScores = h.analyzeStoreLoad(cluster, hotRead)
 	h.writeScores = h.analyzeStoreLoad(cluster, hotWrite)
+	h.gcPendingOpInfos()
 	storesStat := cluster.GetStoresStats()
 	switch typ {
 	case hotRead:
@@ -238,18 +239,16 @@ func (h *hotScheduler) updateStatsByPendingOpInfo(storeStatsMap map[uint64]float
 			storeStatsMap[storeID] += h.writePendingSum[storeID].ByteRate
 		}
 	}
+}
 
+func (h *hotScheduler) gcPendingOpInfos() {
 	for regionID, pendingOpInfos := range h.pendingOpInfos {
 		var n *list.Element
 		for e := pendingOpInfos.Front(); e != nil; e = n {
-			opInfo := e.Value.(*pendingInfluence)
 			n = e.Next()
-			if opInfo.balanceType != balanceType {
-				continue
-			}
-			now := uint64(time.Now().Unix())
+			opInfo := e.Value.(*pendingInfluence)
 			if opInfo.isDone() {
-				if now >= opInfo.scheduleTime+statistics.StoreHeartBeatReportInterval {
+				if time.Now().After(opInfo.op.GetCreateTime().Add(statistics.StoreHeartBeatReportInterval * time.Second)) {
 					schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
 					pendingOpInfos.Remove(e)
 				}
@@ -515,6 +514,7 @@ func (h *hotScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.
 		filters := []filter.Filter{
 			filter.StoreStateFilter{ActionScope: h.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(h.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			filter.NewHealthFilter(h.GetName()),
 			scoreGuard,
 		}
 		candidateStoreIDs := make(map[uint64]struct{}, len(stores))
@@ -584,6 +584,7 @@ func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistic
 		}
 
 		filters := []filter.Filter{filter.StoreStateFilter{ActionScope: h.GetName(), TransferLeader: true}}
+		filters = append(filters, filter.NewHealthFilter(h.GetName()))
 		candidateStoreIDs := make(map[uint64]struct{}, len(srcRegion.GetPeers())-1)
 		for _, store := range cluster.GetFollowerStores(srcRegion) {
 			if !filter.Target(cluster, store, filters) {
@@ -689,15 +690,13 @@ func (h *hotScheduler) selectSrcStoreByScore(stats statistics.StoreHotPeersStat,
 	} else {
 		storesScore = h.writeScores
 	}
-	if storesScore.Variation() > minScoreVariationLimit {
-		maxScore := storesScore.Max()                 // with sort
-		for i := storesScore.Len() - 1; i >= 0; i-- { // select from large to small
-			scoreInfo := storesScore.scoreInfos[i]
-			if scoreInfo.GetScore() >= maxScore*hotRegionScheduleFactor {
-				storeID := scoreInfo.GetStoreID()
-				if stat, ok := stats[storeID]; ok && len(stat.Stats) > 1 {
-					return storeID
-				}
+	maxScore := storesScore.Max()                 // with sort
+	for i := storesScore.Len() - 1; i >= 0; i-- { // select from large to small
+		scoreInfo := storesScore.scoreInfos[i]
+		if scoreInfo.GetScore() >= maxScore*hotRegionScheduleFactor {
+			storeID := scoreInfo.GetStoreID()
+			if stat, ok := stats[storeID]; ok && len(stat.Stats) > 1 {
+				return storeID
 			}
 		}
 	}
@@ -711,14 +710,12 @@ func (h *hotScheduler) selectDstStoreByScore(candidates map[uint64]struct{}, reg
 	} else {
 		storesScore = h.writeScores
 	}
-	if storesScore.Variation() > minScoreVariationLimit {
-		maxScore := storesScore.Max()                      // with sort
-		for _, scoreInfo := range storesScore.scoreInfos { // select from small to large
-			if scoreInfo.GetScore()+regionBytesRate < maxScore*hotRegionScheduleFactor {
-				dstStoreID := scoreInfo.GetStoreID()
-				if _, ok := candidates[dstStoreID]; ok {
-					return dstStoreID
-				}
+	maxScore := storesScore.Max()                      // with sort
+	for _, scoreInfo := range storesScore.scoreInfos { // select from small to large
+		if scoreInfo.GetScore()+regionBytesRate < maxScore*hotRegionScheduleFactor {
+			dstStoreID := scoreInfo.GetStoreID()
+			if _, ok := candidates[dstStoreID]; ok {
+				return dstStoreID
 			}
 		}
 	}

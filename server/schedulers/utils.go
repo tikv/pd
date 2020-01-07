@@ -18,7 +18,6 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/montanaflynn/stats"
@@ -333,11 +332,10 @@ func (infl Influence) add(rhs *Influence, w float64) Influence {
 
 // TODO: merge it into OperatorInfluence.
 type pendingInfluence struct {
-	op           *operator.Operator
-	from, to     uint64
-	origin       Influence
-	scheduleTime uint64
-	balanceType  BalanceType
+	op          *operator.Operator
+	from, to    uint64
+	origin      Influence
+	balanceType BalanceType
 }
 
 func (p *pendingInfluence) isDone() bool {
@@ -345,17 +343,16 @@ func (p *pendingInfluence) isDone() bool {
 }
 
 func (p *pendingInfluence) isTransferLeader() bool {
-	return strings.Contains(p.op.Desc(), "transfer-leader")
+	return p.op.Kind() == operator.OpLeader|operator.OpAdmin
 }
 
 func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence, balanceType BalanceType) *pendingInfluence {
 	return &pendingInfluence{
-		op:           op,
-		from:         from,
-		to:           to,
-		origin:       infl,
-		scheduleTime: uint64(time.Now().Unix()),
-		balanceType:  balanceType,
+		op:          op,
+		from:        from,
+		to:          to,
+		origin:      infl,
+		balanceType: balanceType,
 	}
 }
 
