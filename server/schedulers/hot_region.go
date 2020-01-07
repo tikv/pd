@@ -527,18 +527,16 @@ func (h *hotScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.
 			continue
 		}
 
-		dstStoreID = h.selectDstStoreByScore(candidateStoreIDs, rs.GetBytesRate(), balanceType)
-		if dstStoreID != 0 {
+		regionBytesRate := rs.GetBytesRate()
+		dstStoreID = h.selectDstStoreByScore(candidateStoreIDs, regionBytesRate, balanceType)
+		if dstStoreID != 0 && h.checkVariation(srcStoreID, dstStoreID, regionBytesRate, balanceType) {
 			h.peerLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
-
 			srcPeer := srcRegion.GetStorePeer(srcStoreID)
 			if srcPeer == nil {
 				return nil, nil, nil, Influence{}
 			}
-
 			dstPeer := &metapb.Peer{StoreId: dstStoreID, IsLearner: srcPeer.IsLearner}
-			return srcRegion, srcPeer, dstPeer, Influence{ByteRate: rs.GetBytesRate()}
-
+			return srcRegion, srcPeer, dstPeer, Influence{ByteRate: regionBytesRate}
 		}
 	}
 
@@ -594,21 +592,19 @@ func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistic
 			continue
 		}
 
+		regionBytesRate := rs.GetBytesRate()
 		if balanceType == hotWrite {
-			dstStoreID = h.selectDstStoreByHot(candidateStoreIDs, rs.GetBytesRate(), srcStoreID, storesStat)
+			dstStoreID = h.selectDstStoreByHot(candidateStoreIDs, regionBytesRate, srcStoreID, storesStat)
 		} else {
-			dstStoreID = h.selectDstStoreByScore(candidateStoreIDs, rs.GetBytesRate(), balanceType)
+			dstStoreID = h.selectDstStoreByScore(candidateStoreIDs, regionBytesRate, balanceType)
 		}
 
-		if dstStoreID == 0 {
-			continue
-		}
-
-		dstPeer := srcRegion.GetStoreVoter(dstStoreID)
-		if dstPeer != nil {
-			h.leaderLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
-
-			return srcRegion, dstPeer, Influence{ByteRate: rs.GetBytesRate()}
+		if dstStoreID != 0 && h.checkVariation(srcStoreID, dstStoreID, regionBytesRate, balanceType) {
+			dstPeer := srcRegion.GetStoreVoter(dstStoreID)
+			if dstPeer != nil {
+				h.leaderLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
+				return srcRegion, dstPeer, Influence{ByteRate: rs.GetBytesRate()}
+			}
 		}
 	}
 	return nil, nil, Influence{}
@@ -719,6 +715,28 @@ func (h *hotScheduler) selectDstStoreByScore(candidates map[uint64]struct{}, reg
 		}
 	}
 	return 0
+}
+
+func (h *hotScheduler) checkVariation(src, dst uint64, regionBytesRate float64, balanceType BalanceType) bool {
+	var storesScore *ScoreInfos
+	if balanceType == hotRead {
+		storesScore = h.readScores
+	} else {
+		storesScore = h.writeScores
+	}
+	afterStoresScore := NewScoreInfos()
+	for _, scoreInfo := range storesScore.scoreInfos {
+		id := scoreInfo.GetStoreID()
+		score := scoreInfo.GetScore()
+		if id == src {
+			score -= regionBytesRate
+		}
+		if id == dst {
+			score += regionBytesRate
+		}
+		afterStoresScore.Add(NewScoreInfo(id, score))
+	}
+	return storesScore.Variation() > afterStoresScore.Variation()
 }
 
 func (h *hotScheduler) adjustBalanceLimit(storeID uint64, storesStat statistics.StoreHotPeersStat) uint64 {
