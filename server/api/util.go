@@ -103,15 +103,15 @@ func postJSON(url string, data []byte, checkOpts ...func([]byte, int)) error {
 	return nil
 }
 
-func doDelete(url string) error {
+func doDelete(url string) (*http.Response, error) {
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	res, err := dialClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	res.Body.Close()
-	return nil
+	return res, nil
 }
