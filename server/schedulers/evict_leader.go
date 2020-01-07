@@ -245,7 +245,7 @@ func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Ope
 	return ops
 }
 
-func (s *evictLeaderScheduler) uniqeAppend(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
+func (s *evictLeaderScheduler) uniqueAppend(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
 	regionIDs := make(map[uint64]struct{})
 	for i := range dst {
 		regionIDs[dst[i].RegionID()] = struct{}{}
@@ -272,7 +272,7 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		if len(once) == 0 {
 			break
 		}
-		ops = s.uniqeAppend(ops, once...)
+		ops = s.uniqueAppend(ops, once...)
 		// the batch has been fulfilled
 		if len(ops) > EvictLeaderBatchSize {
 			break
