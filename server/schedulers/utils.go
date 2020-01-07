@@ -76,8 +76,28 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(targetInfluence))
 		tolerantResourceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), strconv.FormatUint(targetID, 10)).Set(float64(tolerantResource))
 	}
+
+	checkVariation := func() bool {
+		stores := cluster.GetStores()
+		scoreInfos := NewScoreInfos()
+		afterStoresScore := NewScoreInfos()
+		for _, store := range stores {
+			id := store.GetID()
+			score := store.ResourceScore(kind, cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), opInfluence.GetStoreInfluence(id).ResourceProperty(kind))
+			scoreInfos.Add(NewScoreInfo(id, score))
+			if id == sourceID {
+				score = sourceScore
+			}
+			if id == targetID {
+				score = targetScore
+			}
+			afterStoresScore.Add(NewScoreInfo(id, score))
+		}
+		return scoreInfos.Variation() > afterStoresScore.Variation()
+	}
+
 	// Make sure after move, source score is still greater than target score.
-	shouldBalance := sourceScore > targetScore
+	shouldBalance := sourceScore > targetScore && checkVariation()
 
 	if !shouldBalance {
 		log.Debug("skip balance "+kind.Resource.String(),
@@ -253,6 +273,16 @@ func (s *ScoreInfos) StdDev() float64 {
 	res = math.Sqrt(res)
 
 	return res
+}
+
+// Variation uses slice's stddev/mean,which is coefficient of variation, to measure the data imbalance.
+func (s *ScoreInfos) Variation() float64 {
+	mean := s.Mean()
+	if mean == 0 {
+		return 0
+	}
+
+	return s.StdDev() / mean
 }
 
 // MeanStoresStats returns the mean of stores' stats.

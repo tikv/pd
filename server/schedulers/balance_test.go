@@ -38,9 +38,9 @@ func newTestReplication(mso *mockoption.ScheduleOptions, maxReplicas int, locati
 	mso.LocationLabels = locationLabels
 }
 
-var _ = Suite(&testBalanceSpeedSuite{})
+var _ = Suite(&testBalanceSuite{})
 
-type testBalanceSpeedSuite struct{}
+type testBalanceSuite struct{}
 
 type testBalanceSpeedCase struct {
 	sourceCount    uint64
@@ -50,7 +50,7 @@ type testBalanceSpeedCase struct {
 	kind           core.SchedulePolicy
 }
 
-func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
+func (s *testBalanceSuite) TestShouldBalance(c *C) {
 	tests := []testBalanceSpeedCase{
 		// all store capacity is 1024MB
 		// size = count * 10
@@ -138,7 +138,7 @@ func (s *testBalanceSpeedSuite) TestShouldBalance(c *C) {
 	}
 }
 
-func (s *testBalanceSpeedSuite) TestBalanceLimit(c *C) {
+func (s *testBalanceSuite) TestBalanceLimit(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	tc.AddLeaderStore(1, 10)
@@ -231,7 +231,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderSchedulePolicy(c *C) 
 	c.Check(s.schedule(), NotNil)
 }
 
-func (s *testBalanceSpeedSuite) TestTolerantRatio(c *C) {
+func (s *testBalanceSuite) TestTolerantRatio(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	// create a region to control average region size.
