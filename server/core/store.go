@@ -641,18 +641,23 @@ func calculateMaxScore(capacity uint64) float64 {
 	return float64(capacity / bytesPerMB)
 }
 
-func getMaxScore(stores []*StoreInfo) float64 {
+func getMaxScore(stores []*StoreInfo, newStores ...*StoreInfo) float64 {
 	var maxScore float64
+	var newStoreID uint64
+	if len(newStores) != 0 {
+		newStore := newStores[0]
+		newStoreID = newStore.GetID()
+		maxScore = calculateMaxScore(newStore.GetCapacity())
+	}
+
 	for _, store := range stores {
-		if store == nil {
-			continue
-		}
 		capacity := store.GetCapacity()
 		curMaxScore := calculateMaxScore(capacity)
-		if curMaxScore > maxScore {
+		if store.GetID() != newStoreID && curMaxScore > maxScore {
 			maxScore = curMaxScore
 		}
 	}
+
 	return maxScore
 }
 
@@ -669,12 +674,8 @@ func withMaxScore(stores []*StoreInfo, maxScore float64) []*StoreInfo {
 
 // UpdateMaxScore update maxScore when flexible score change or add a new store
 func (s *StoresInfo) UpdateMaxScore(newStores ...*StoreInfo) []*StoreInfo {
-	var newStore *StoreInfo
-	if len(newStores) != 0 {
-		newStore = newStores[0]
-	}
-	stores := append(s.GetStores(), newStore)
-	maxScore := getMaxScore(stores)
+	stores := append(s.GetStores(), newStores...)
+	maxScore := getMaxScore(s.GetStores(), newStores...)
 	return withMaxScore(stores, maxScore)
 }
 
