@@ -174,6 +174,7 @@ const (
 	defaultNextRetryDelay          = time.Second
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
+	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -411,6 +412,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustString(&c.AutoCompactionMode, defaultCompactionMode)
 	adjustString(&c.AutoCompactionRetention, defaultAutoCompactionRetention)
+	if !configMetaData.IsDefined("quota-backend-bytes") {
+		c.QuotaBackendBytes = defaultQuotaBackendBytes
+	}
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
