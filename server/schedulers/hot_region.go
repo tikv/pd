@@ -279,8 +279,8 @@ func (h *hotScheduler) analyzeStoreLoad(cluster opt.Cluster, balanceType Balance
 	return ConvertStoresStats(storeStatsMap)
 }
 
-func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore, regionID uint64, infl Influence, balanceType BalanceType) {
-	influence := newPendingInfluence(op, srcStore, dstStore, infl, balanceType)
+func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore, regionID uint64, infl Influence, balanceType BalanceType, isTransferLeader bool) {
+	influence := newPendingInfluence(op, srcStore, dstStore, infl, balanceType, isTransferLeader)
 	if balanceType == hotRead {
 		h.readPendings[influence] = struct{}{}
 	} else {
@@ -318,7 +318,7 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 			schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
 			schedulerCounter.WithLabelValues(h.GetName(), "move-leader"),
 		)
-		h.addPendingInfluence(op, srcStore, dstStore, srcRegion.GetID(), infl, balanceType)
+		h.addPendingInfluence(op, srcStore, dstStore, srcRegion.GetID(), infl, balanceType, true /*isTransferLeader*/)
 		return []*operator.Operator{op}
 	}
 
@@ -335,7 +335,7 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 			schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
 			schedulerCounter.WithLabelValues(h.GetName(), "move-peer"),
 		)
-		h.addPendingInfluence(op, srcPeer.GetStoreId(), dstPeer.GetStoreId(), srcRegion.GetID(), infl, balanceType)
+		h.addPendingInfluence(op, srcPeer.GetStoreId(), dstPeer.GetStoreId(), srcRegion.GetID(), infl, balanceType, false /*isTransferLeader*/)
 		return []*operator.Operator{op}
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -364,7 +364,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 					schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
 					schedulerCounter.WithLabelValues(h.GetName(), "move-peer"),
 				)
-				h.addPendingInfluence(op, srcPeer.GetStoreId(), dstPeer.GetStoreId(), srcRegion.GetID(), infl, balanceType)
+				h.addPendingInfluence(op, srcPeer.GetStoreId(), dstPeer.GetStoreId(), srcRegion.GetID(), infl, balanceType, false /*isTransferLeader*/)
 				return []*operator.Operator{op}
 			}
 		} else if h.allowBalanceLeader(cluster) {
@@ -385,7 +385,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 				)
 				// transfer leader do not influence the byte rate
 				infl.ByteRate = 0
-				h.addPendingInfluence(op, srcStore, dstStore, srcRegion.GetID(), infl, balanceType)
+				h.addPendingInfluence(op, srcStore, dstStore, srcRegion.GetID(), infl, balanceType, true /*isTransferLeader*/)
 				return []*operator.Operator{op}
 			}
 		} else {
@@ -476,7 +476,7 @@ func (h *hotScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.
 		}
 
 		if pendingOpInfo := h.getPendingInfluence(srcRegion.GetID()); pendingOpInfo != nil {
-			if !pendingOpInfo.isTransferLeader() || !pendingOpInfo.isDone() {
+			if !pendingOpInfo.isTransferLeader || !pendingOpInfo.isDone() {
 				continue
 			}
 		}
