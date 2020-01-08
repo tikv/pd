@@ -14,15 +14,6 @@ PD supports distribution and fault-tolerance by embedding [etcd](https://github.
 1. Make sure [​*Go*​](https://golang.org/) (version 1.13) is installed.
 2. Use `make` to install PD. PD is installed in the `bin` directory.
 
-### Build with [TiDB Dashboard](https://github.com/pingcap-incubator/tidb-dashboard)
-
-```sh
-WITH_DASHBOARD=1 make pd-server
-# Start PD: bin/pd-server
-```
-
-Dashboard UI is available at http://127.0.0.1:2379/dashboard by default.
-
 ## Usage
 
 ### Command flags

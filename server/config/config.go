@@ -131,6 +131,8 @@ type Config struct {
 	logProps *log.ZapProperties
 
 	EnableConfigManager bool
+
+	EnableDashboard bool
 }
 
 // NewConfig creates a new config.
@@ -165,6 +167,8 @@ func NewConfig() *Config {
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
 
 	fs.BoolVar(&cfg.EnableConfigManager, "enable-config-manager", false, "Enable configuration manager")
+
+	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", false, "Enable Dashboard API and UI on this node")
 
 	return cfg
 }

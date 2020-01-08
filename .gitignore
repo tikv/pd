@@ -13,4 +13,3 @@ default*
 .vscode/
 bindata.go
 /pkg/ui/pd-web/*
-/.cache

@@ -30,6 +30,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
+	dashboardConfig "github.com/pingcap-incubator/tidb-dashboard/pkg/config"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
@@ -210,10 +211,18 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		}
 
 		etcdCfg.UserHandlers = map[string]http.Handler{
-			pdAPIPrefix:      apiHandler,
-			webPath:          http.StripPrefix(webPath, ui.Handler()),
-			dashboardUIPath:  http.StripPrefix(dashboardUIPath, uiserver.Handler()),
-			dashboardAPIPath: apiserver.Handler(dashboardAPIPath),
+			pdAPIPrefix: apiHandler,
+			webPath:     http.StripPrefix(webPath, ui.Handler()),
+		}
+
+		if cfg.EnableDashboard {
+			etcdCfg.UserHandlers[dashboardUIPath] = http.StripPrefix(dashboardUIPath, uiserver.Handler())
+			etcdCfg.UserHandlers[dashboardAPIPath] = apiserver.Handler(dashboardAPIPath, &dashboardConfig.Config{
+				DataDir:    cfg.DataDir,
+				PDEndPoint: etcdCfg.ACUrls[0].String(),
+			})
+			log.Info("Enabled Dashboard API", zap.String("path", dashboardAPIPath))
+			log.Info("Enabled Dashboard UI", zap.String("path", dashboardUIPath))
 		}
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE_DIR=$(git rev-parse --show-toplevel)
-CACHE_DIR=${BASE_DIR}/.cache
+CACHE_DIR=${BASE_DIR}/scripts/.dashboard_asset_cache
 
 echo '+ Create cache directory'
 mkdir -p ${CACHE_DIR}
@@ -25,7 +25,7 @@ if [[ -f "$CACHE_FILE" ]]; then
 else
   echo '  - Cached archive does not exist'
   echo '  - Download pre-built embedded assets from GitHub release'
-  
+
   DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/releases/download/ui_release_${DASHBOARD_UI_VERSION}/embedded-assets-golang.zip"
   echo "  - Download ${DOWNLOAD_URL}"
   curl -L ${DOWNLOAD_URL} > embedded-assets-golang.zip

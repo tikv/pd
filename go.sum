@@ -199,8 +199,8 @@ github.com/opentracing/opentracing-go v1.0.2/go.mod h1:UkNAQd3GIcIGf0SeVgPpRdFSt
 github.com/pelletier/go-toml v1.3.0/go.mod h1:PN7xzY2wHTK0K9p34ErDQMlFxa51Fk0OUruD3k1mMwo=
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d h1:U+PMnTlV2tu7RuMK5etusZG3Cf+rpow5hqQByeCzJ2g=
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d/go.mod h1:lXfE4PvvTW5xOjO6Mba8zDPyw8M93B6AQ7frTGnMlA8=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200108014525-06bfab74f3b7 h1:CXjxxx38HnMs/R4NkXoMkntBhKP+D28gAjxB7xAc0AA=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200108014525-06bfab74f3b7/go.mod h1:Yx2Ix+adNvCO8F3tHgZmgt9sJhOjJy/B4CW/6filV4w=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200108090704-cf6df9ce95b7 h1:iLLJ/Kn1Vvqfrrzjwsp7nhGPYPsPpobm3s4Xv1LBGpk=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200108090704-cf6df9ce95b7/go.mod h1:Yx2Ix+adNvCO8F3tHgZmgt9sJhOjJy/B4CW/6filV4w=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8 h1:USx2/E1bX46VG32FIw034Au6seQ2fY9NEILmNh/UlQg=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8/go.mod h1:B1+S9LNcuMyLH/4HMTViQOJevkGiik3wW2AN9zb2fNQ=
 github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4 h1:iRtOAQ6FXkY/BGvst3CDfTva4nTqh6CL8WXvanLdbu0=
