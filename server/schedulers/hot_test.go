@@ -413,7 +413,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	//|    1     |       7.1MB      |
 	//|    2     |       6.1MB      |
 	//|    3     |        6MB       |
-	//|    4     |        4MB       |
+	//|    4     |        5MB       |
 	tc.UpdateStorageReadBytes(1, 7.1*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(2, 6.1*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
