@@ -484,7 +484,7 @@ func (s *testClientSuite) TestUpdateURLs(c *C) {
 		}
 		return
 	}
-	cli := &client{}
+	cli := &baseClient{}
 	cli.updateURLs(members[1:])
 	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
 	cli.updateURLs(members[1:])

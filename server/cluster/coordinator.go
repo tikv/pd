@@ -51,8 +51,9 @@ var (
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
 	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
 	// ErrSchedulerExisted is error info for scheduler has already existed.
-	ErrSchedulerExisted  = errors.New("scheduler existed")
-	errSchedulerNotFound = errors.New("scheduler not found")
+	ErrSchedulerExisted = errors.New("scheduler existed")
+	// ErrSchedulerNotFound is error info for scheduler is not found.
+	ErrSchedulerNotFound = errors.New("scheduler not found")
 )
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -492,7 +493,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	}
 	s, ok := c.schedulers[name]
 	if !ok {
-		return errSchedulerNotFound
+		return ErrSchedulerNotFound
 	}
 
 	s.Stop()
@@ -524,7 +525,7 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	if name != "all" {
 		sc, ok := c.schedulers[name]
 		if !ok {
-			return errSchedulerNotFound
+			return ErrSchedulerNotFound
 		}
 		s = append(s, sc)
 	} else {
