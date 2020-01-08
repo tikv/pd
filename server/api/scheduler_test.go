@@ -81,6 +81,9 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	c.Assert(rc.GetSchedulers(), HasLen, 0)
 	resp2 := make(map[string]interface{})
 	c.Assert(readJSON(listURL, &resp2), NotNil)
+
+	r, _ := doDelete(deleteURL)
+	c.Assert(r.StatusCode, Equals, 500)
 }
 
 func (s *testScheduleSuite) TestAPI(c *C) {

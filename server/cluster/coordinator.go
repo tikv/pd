@@ -51,7 +51,8 @@ var (
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
 	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
 	// ErrSchedulerExisted is error info for scheduler has already existed.
-	ErrSchedulerExisted  = errors.New("scheduler existed")
+	ErrSchedulerExisted = errors.New("scheduler existed")
+	// ErrSchedulerNotFound is error info for scheduler is not found.
 	ErrSchedulerNotFound = errors.New("scheduler not found")
 )
 
