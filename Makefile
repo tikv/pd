@@ -6,7 +6,7 @@ INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; |
                      sort -u | sed -e "s/^\./github.com\/pingcap\/pd/" | grep -E "tests")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 
-PACKAGES := go list ./...
+PACKAGES := go list ./... | grep -v 'dashboard/uiserver'
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 RETOOL := ./scripts/retool

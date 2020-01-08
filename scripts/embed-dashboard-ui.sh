@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_DIR=$(git rev-parse --show-toplevel)
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+BASE_DIR="$(dirname "$DIR")"
 CACHE_DIR=${BASE_DIR}/scripts/.dashboard_asset_cache
 
 echo '+ Create cache directory'
