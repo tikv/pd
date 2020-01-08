@@ -29,6 +29,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
@@ -65,11 +66,12 @@ const (
 	serverMetricsInterval = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
-	pdRootPath      = "/pd"
-	pdAPIPrefix     = "/pd/"
-	webPath         = "/web/"
-	dashboardPath   = "/dashboard/"
-	pdClusterIDPath = "/pd/cluster_id"
+	pdRootPath       = "/pd"
+	pdAPIPrefix      = "/pd/"
+	webPath          = "/web/"
+	dashboardUiPath  = "/dashboard/"
+	dashboardApiPath = "/dashboard/api/"
+	pdClusterIDPath  = "/pd/cluster_id"
 )
 
 var (
@@ -208,9 +210,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		}
 
 		etcdCfg.UserHandlers = map[string]http.Handler{
-			pdAPIPrefix:   apiHandler,
-			webPath:       http.StripPrefix(webPath, ui.Handler()),
-			dashboardPath: uiserver.Handler(),
+			pdAPIPrefix:      apiHandler,
+			webPath:          http.StripPrefix(webPath, ui.Handler()),
+			dashboardUiPath:  http.StripPrefix(dashboardUiPath, uiserver.Handler()),
+			dashboardApiPath: apiserver.Handler(dashboardApiPath),
 		}
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
