@@ -335,7 +335,6 @@ type pendingInfluence struct {
 	op               *operator.Operator
 	from, to         uint64
 	origin           Influence
-	balanceType      BalanceType
 	isTransferLeader bool
 }
 
@@ -343,13 +342,12 @@ func (p *pendingInfluence) isDone() bool {
 	return p.op.IsEnd()
 }
 
-func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence, balanceType BalanceType, isTransferLeader bool) *pendingInfluence {
+func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence, isTransferLeader bool) *pendingInfluence {
 	return &pendingInfluence{
 		op:               op,
 		from:             from,
 		to:               to,
 		origin:           infl,
-		balanceType:      balanceType,
 		isTransferLeader: isTransferLeader,
 	}
 }
