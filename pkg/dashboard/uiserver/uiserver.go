@@ -18,14 +18,15 @@ import (
 	"net/http"
 )
 
+// Handler returns an http.Handler that serves the dashboard UI.
 func Handler() http.Handler {
 	fs := assetFS()
-	if fs == nil {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = io.WriteString(w, "Dashboard UI is not built.\n")
-		})
-	} else {
-		fileServer := http.FileServer(assetFS())
+	if fs != nil {
+		fileServer := http.FileServer(fs)
 		return fileServer
 	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "Dashboard UI is not built.\n")
+	})
 }

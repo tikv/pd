@@ -69,8 +69,8 @@ const (
 	pdRootPath       = "/pd"
 	pdAPIPrefix      = "/pd/"
 	webPath          = "/web/"
-	dashboardUiPath  = "/dashboard/"
-	dashboardApiPath = "/dashboard/api/"
+	dashboardUIPath  = "/dashboard/"
+	dashboardAPIPath = "/dashboard/api/"
 	pdClusterIDPath  = "/pd/cluster_id"
 )
 
@@ -212,8 +212,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		etcdCfg.UserHandlers = map[string]http.Handler{
 			pdAPIPrefix:      apiHandler,
 			webPath:          http.StripPrefix(webPath, ui.Handler()),
-			dashboardUiPath:  http.StripPrefix(dashboardUiPath, uiserver.Handler()),
-			dashboardApiPath: apiserver.Handler(dashboardApiPath),
+			dashboardUIPath:  http.StripPrefix(dashboardUIPath, uiserver.Handler()),
+			dashboardAPIPath: apiserver.Handler(dashboardAPIPath),
 		}
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
