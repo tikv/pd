@@ -14,7 +14,6 @@
 package config
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -27,12 +26,12 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -110,7 +109,7 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
-	Security SecurityConfig `toml:"security" json:"security"`
+	Security grpcutil.SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
@@ -869,33 +868,6 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	return c.Validate()
 }
 
-// SecurityConfig is the configuration for supporting tls.
-type SecurityConfig struct {
-	// CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
-	CAPath string `toml:"cacert-path" json:"cacert-path"`
-	// CertPath is the path of file that contains X509 certificate in PEM format.
-	CertPath string `toml:"cert-path" json:"cert-path"`
-	// KeyPath is the path of file that contains X509 key in PEM format.
-	KeyPath string `toml:"key-path" json:"key-path"`
-}
-
-// ToTLSConfig generatres tls config.
-func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
-	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
-		return nil, nil
-	}
-	tlsInfo := transport.TLSInfo{
-		CertFile:      s.CertPath,
-		KeyFile:       s.KeyPath,
-		TrustedCAFile: s.CAPath,
-	}
-	tlsConfig, err := tlsInfo.ClientConfig()
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	return tlsConfig, nil
-}
-
 // PDServerConfig is the configuration for pd server.
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
@@ -905,7 +877,7 @@ type PDServerConfig struct {
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
-	// RuntimeSercives is the running the running extension services.
+	// RuntimeServices is the running the running extension services.
 	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.
 	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.

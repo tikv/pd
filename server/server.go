@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/pkg/ui"
@@ -788,7 +789,7 @@ func (s *Server) GetClusterVersion() semver.Version {
 }
 
 // GetSecurityConfig get the security config.
-func (s *Server) GetSecurityConfig() *config.SecurityConfig {
+func (s *Server) GetSecurityConfig() *grpcutil.SecurityConfig {
 	return &s.cfg.Security
 }
 
