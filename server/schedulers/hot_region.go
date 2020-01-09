@@ -610,8 +610,6 @@ func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistic
 	return nil, nil, Influence{}
 }
 
-const pickByFlowBytes = false
-
 // Select the store to move hot regions from.
 // We choose the store with the maximum number of hot region first.
 // Inside these stores, we choose the one with maximum flow bytes.
@@ -626,18 +624,11 @@ func (h *hotScheduler) selectSrcStoreByHot(stats statistics.StoreHotPeersStat) (
 		if count <= 1 {
 			continue
 		}
-		if pickByFlowBytes {
-			if flowBytes > maxFlowBytes || (flowBytes == maxFlowBytes && count > maxCount) {
-				maxCount = count
-				maxFlowBytes = flowBytes
-				srcStoreID = storeID
-			}
-		} else {
-			if count > maxCount || (count == maxCount && flowBytes > maxFlowBytes) {
-				maxCount = count
-				maxFlowBytes = flowBytes
-				srcStoreID = storeID
-			}
+		// pick by count
+		if count > maxCount || (count == maxCount && flowBytes > maxFlowBytes) {
+			maxCount = count
+			maxFlowBytes = flowBytes
+			srcStoreID = storeID
 		}
 	}
 	return
@@ -655,21 +646,14 @@ func (h *hotScheduler) selectDstStoreByHot(candidates map[uint64]struct{}, regio
 	for storeID := range candidates {
 		if s, ok := storesStat[storeID]; ok {
 			dstCount, dstBytesRate := len(s.Stats), math.Max(s.StoreBytesRate, s.FutureBytesRate)
-			if pickByFlowBytes {
-				if minBytesRate > dstBytesRate || (minBytesRate == dstBytesRate && minCount > dstCount) {
-					minCount = dstCount
-					minBytesRate = dstBytesRate
-					dstStoreID = storeID
-				}
-			} else {
-				if srcCount < dstCount+2 { // ensure srcCount >= dstCount after the operation.
-					continue
-				}
-				if minCount > dstCount || (minCount == dstCount && minBytesRate > dstBytesRate) {
-					dstStoreID = storeID
-					minBytesRate = dstBytesRate
-					minCount = dstCount
-				}
+			// pick by count
+			if srcCount < dstCount+2 { // ensure srcCount >= dstCount after the operation.
+				continue
+			}
+			if minCount > dstCount || (minCount == dstCount && minBytesRate > dstBytesRate) {
+				dstStoreID = storeID
+				minBytesRate = dstBytesRate
+				minCount = dstCount
 			}
 		} else {
 			return storeID
