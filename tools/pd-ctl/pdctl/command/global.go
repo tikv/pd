@@ -85,6 +85,7 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 			method = http.MethodGet
 		}
 		var req *http.Request
+
 		req, err = http.NewRequest(method, url, b.body)
 		if err != nil {
 			return err

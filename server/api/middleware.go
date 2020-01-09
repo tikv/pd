@@ -27,6 +27,11 @@ import (
 	"github.com/unrolled/render"
 )
 
+const (
+	localKind  = "local"
+	globalKind = "global"
+)
+
 type clusterMiddleware struct {
 	s  *server.Server
 	rd *render.Render

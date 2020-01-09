@@ -197,14 +197,20 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 
 	if svr.GetConfig().EnableConfigManager {
 		f := func() {
+			// TODO: support GET and DELETE
+			componentRouter := apiRouter.PathPrefix("/component").Methods("POST").Subrouter()
 			configRouter := apiRouter.PathPrefix("/config").Methods("POST").Subrouter()
 			adminRouter := apiRouter.PathPrefix("/admin").Methods("POST").Subrouter()
 			gwmux := runtime.NewServeMux()
 			UnaryClientInterceptor := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 				invoker(ctx, method, req, reply, cc, opts...)
-				errMsg := reply.(*configpb.UpdateResponse).GetStatus().GetMessage()
-				if errMsg != "" {
-					return errors.New(errMsg)
+				var errMsg string
+				switch method {
+				case "/configpb.Config/Update":
+					errMsg = reply.(*configpb.UpdateResponse).GetStatus().GetMessage()
+					if errMsg != "" {
+						return errors.New(errMsg)
+					}
 				}
 				return nil
 			}
@@ -213,6 +219,9 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 			if err != nil {
 				log.Error("fail to register grpc gateway", zap.Error(err))
 			}
+
+			componentRouter.Handle("", gwmux).Methods("POST")
+			componentRouter.Use(newComponentMiddleware(svr).Middleware)
 
 			configRouter.Handle("", gwmux).Methods("POST")
 			configRouter.Handle("/replicate", gwmux).Methods("POST")
@@ -229,6 +238,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	apiRouter.HandleFunc("/config/schedule", confHandler.SetSchedule).Methods("POST")
 	apiRouter.HandleFunc("/config/replicate", confHandler.SetReplication).Methods("POST")
 
+	logHandler := newlogHandler(svr, rd)
 	apiRouter.HandleFunc("/admin/log", logHandler.Handle).Methods("POST")
 	return rootRouter, nil
 }
