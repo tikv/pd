@@ -100,6 +100,7 @@ type tsoRequest struct {
 
 const (
 	pdTimeout             = 3 * time.Second
+	dialTimeout           = 3 * time.Second
 	updateLeaderTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
 	maxMergeTSORequests   = 10000
 	maxInitClusterRetries = 100
