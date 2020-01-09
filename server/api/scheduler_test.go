@@ -69,16 +69,21 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	c.Assert(readJSON(listURL, &resp), IsNil)
 	c.Assert(resp["store-id-ranges"], HasLen, 2)
 	deleteURL := fmt.Sprintf("%s/%s", s.urlPrefix, "evict-leader-scheduler-1")
-	c.Assert(doDelete(deleteURL), IsNil)
+	_, err = doDelete(deleteURL)
+	c.Assert(err, IsNil)
 	c.Assert(rc.GetSchedulers(), HasLen, 1)
 	resp1 := make(map[string]interface{})
 	c.Assert(readJSON(listURL, &resp1), IsNil)
 	c.Assert(resp1["store-id-ranges"], HasLen, 1)
 	deleteURL = fmt.Sprintf("%s/%s", s.urlPrefix, "evict-leader-scheduler-2")
-	c.Assert(doDelete(deleteURL), IsNil)
+	_, err = doDelete(deleteURL)
+	c.Assert(err, IsNil)
 	c.Assert(rc.GetSchedulers(), HasLen, 0)
 	resp2 := make(map[string]interface{})
 	c.Assert(readJSON(listURL, &resp2), NotNil)
+
+	r, _ := doDelete(deleteURL)
+	c.Assert(r.StatusCode, Equals, 500)
 }
 
 func (s *testScheduleSuite) TestAPI(c *C) {
@@ -124,7 +129,8 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 
 				// using /pd/v1/schedule-config/grant-leader-scheduler/config to delete exists store from grant-leader-scheduler
 				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name, "2")
-				c.Assert(doDelete(deleteURL), IsNil)
+				_, err = doDelete(deleteURL)
+				c.Assert(err, IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				delete(exceptMap, "2")
@@ -184,7 +190,8 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 
 				// using /pd/v1/schedule-config/evict-leader-scheduler/config to delete exist store from evict-leader-scheduler
 				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name, "2")
-				c.Assert(doDelete(deleteURL), IsNil)
+				_, err = doDelete(deleteURL)
+				c.Assert(err, IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				delete(exceptMap, "2")
@@ -297,7 +304,7 @@ func (s *testScheduleSuite) addScheduler(name, createdName string, body []byte, 
 
 func (s *testScheduleSuite) deleteScheduler(createdName string, c *C) {
 	deleteURL := fmt.Sprintf("%s/%s", s.urlPrefix, createdName)
-	err := doDelete(deleteURL)
+	_, err := doDelete(deleteURL)
 	c.Assert(err, IsNil)
 }
 
