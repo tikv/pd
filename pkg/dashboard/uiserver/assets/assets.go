@@ -11,24 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package uiserver
+package assets
 
-import (
-	"io"
-	"net/http"
+import assetfs "github.com/elazarl/go-bindata-assetfs"
 
-	"github.com/pingcap/pd/pkg/dashboard/uiserver/assets"
-)
-
-// Handler returns an http.Handler that serves the dashboard UI.
-func Handler() http.Handler {
-	fs := assets.AssetFS()
-	if fs != nil {
-		fileServer := http.FileServer(fs)
-		return fileServer
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "Dashboard UI is not built.\n")
-	})
+func AssetFS() *assetfs.AssetFS {
+	return assetFS()
 }

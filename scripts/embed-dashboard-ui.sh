@@ -3,7 +3,7 @@ set -euo pipefail
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 BASE_DIR="$(dirname "$DIR")"
-CACHE_DIR=${BASE_DIR}/scripts/.dashboard_asset_cache
+CACHE_DIR=${BASE_DIR}/.dashboard_asset_cache
 
 echo '+ Create cache directory'
 mkdir -p "${CACHE_DIR}"
@@ -38,6 +38,6 @@ fi
 echo '+ Unpack embedded asset from archive'
 unzip -o "${CACHE_FILE}"
 MOVE_FILE=embedded_assets_handler.go
-MOVE_DEST=pkg/dashboard/uiserver
+MOVE_DEST=pkg/dashboard/uiserver/assets/handler.go
 mv ${MOVE_FILE} ${MOVE_DEST}
-echo "  - Unpacked ${MOVE_DEST}/${MOVE_FILE}"
+echo "  - Unpacked ${MOVE_DEST}"
