@@ -38,6 +38,6 @@ fi
 echo '+ Unpack embedded asset from archive'
 unzip -o "${CACHE_FILE}"
 MOVE_FILE=embedded_assets_handler.go
-MOVE_DEST=pkg/dashboard/uiserver/assets/handler.go
+MOVE_DEST=pkg/dashboard/uiserver/${MOVE_FILE}
 mv ${MOVE_FILE} ${MOVE_DEST}
 echo "  - Unpacked ${MOVE_DEST}"

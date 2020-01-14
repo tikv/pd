@@ -14,21 +14,11 @@
 package uiserver
 
 import (
-	"io"
 	"net/http"
-
-	"github.com/pingcap/pd/pkg/dashboard/uiserver/assets"
 )
 
 // Handler returns an http.Handler that serves the dashboard UI.
 func Handler() http.Handler {
-	fs := assets.AssetFS()
-	if fs != nil {
-		fileServer := http.FileServer(fs)
-		return fileServer
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "Dashboard UI is not built.\n")
-	})
+	fileServer := http.FileServer(assetFS())
+	return fileServer
 }
