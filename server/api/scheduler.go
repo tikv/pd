@@ -228,7 +228,10 @@ func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) e
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
 	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
-	err := doDelete(url)
+	resp, err := doDelete(url)
+	if resp.StatusCode != 200 {
+		return cluster.ErrSchedulerNotFound
+	}
 	if err != nil {
 		return err
 	}

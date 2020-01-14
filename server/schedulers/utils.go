@@ -217,10 +217,32 @@ func (s *ScoreInfos) ToSlice() []*ScoreInfo {
 	return s.scoreInfos
 }
 
-// Min returns the min of the slice.
-func (s *ScoreInfos) Min() *ScoreInfo {
+// Min returns the min score of the slice.
+func (s *ScoreInfos) Min() float64 {
+	if len(s.scoreInfos) == 0 {
+		return 0
+	}
 	s.Sort()
-	return s.scoreInfos[0]
+	return s.scoreInfos[0].score
+}
+
+// Max returns the Max score of the slice.
+func (s *ScoreInfos) Max() float64 {
+	if len(s.scoreInfos) == 0 {
+		return 0
+	}
+	s.Sort()
+	return s.scoreInfos[len(s.scoreInfos)-1].score
+}
+
+// Variation uses slice's stddev/mean,which is coefficient of variation, to measure the data imbalance.
+func (s *ScoreInfos) Variation() float64 {
+	mean := s.Mean()
+	if mean == 0 {
+		return 0
+	}
+
+	return s.StdDev() / mean
 }
 
 // Mean returns the mean of the slice.
@@ -268,50 +290,14 @@ func MeanStoresStats(storesStats map[uint64]float64) float64 {
 	return sum / float64(len(storesStats))
 }
 
-// NormalizeStoresStats returns the normalized score scoreInfos. Normalize: x_i => (x_i - x_min)/x_avg.
-func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
+// ConvertStoresStats converts a map to a ScoreInfos.
+func ConvertStoresStats(storesStats map[uint64]float64) *ScoreInfos {
 	scoreInfos := NewScoreInfos()
-
 	for storeID, score := range storesStats {
 		scoreInfos.Add(NewScoreInfo(storeID, score))
 	}
-
-	mean := scoreInfos.Mean()
-	if mean == 0 {
-		return scoreInfos
-	}
-
-	minScore := scoreInfos.Min().GetScore()
-
-	for _, info := range scoreInfos.ToSlice() {
-		info.SetScore((info.GetScore() - minScore) / mean)
-	}
-
+	scoreInfos.Sort()
 	return scoreInfos
-}
-
-// AggregateScores aggregates stores' scores by using their weights.
-func AggregateScores(storesStats []*ScoreInfos, weights []float64) *ScoreInfos {
-	num := len(storesStats)
-	if num > len(weights) {
-		num = len(weights)
-	}
-
-	scoreMap := make(map[uint64]float64)
-	for i := 0; i < num; i++ {
-		scoreInfos := storesStats[i]
-		for _, info := range scoreInfos.ToSlice() {
-			scoreMap[info.GetStoreID()] += info.GetScore() * weights[i]
-		}
-	}
-
-	res := NewScoreInfos()
-	for storeID, score := range scoreMap {
-		res.Add(NewScoreInfo(storeID, score))
-	}
-
-	res.Sort()
-	return res
 }
 
 func getKeyRanges(args []string) ([]core.KeyRange, error) {
@@ -346,14 +332,23 @@ func (infl Influence) add(rhs *Influence, w float64) Influence {
 
 // TODO: merge it into OperatorInfluence.
 type pendingInfluence struct {
-	op       *operator.Operator
-	from, to uint64
-	origin   Influence
+	op               *operator.Operator
+	from, to         uint64
+	origin           Influence
+	isTransferLeader bool
 }
 
-func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence) *pendingInfluence {
+func (p *pendingInfluence) isDone() bool {
+	return p.op.IsEnd()
+}
+
+func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence, isTransferLeader bool) *pendingInfluence {
 	return &pendingInfluence{
-		op, from, to, infl,
+		op:               op,
+		from:             from,
+		to:               to,
+		origin:           infl,
+		isTransferLeader: isTransferLeader,
 	}
 }
 
