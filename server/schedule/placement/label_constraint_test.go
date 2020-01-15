@@ -76,18 +76,21 @@ func (s *testLabelConstraintsSuite) TestLabelConstraints(c *C) {
 		{"k1": "v1", "k2": "v1"},                 // 8
 		{"k2": "v2", "engine": "e1"},             // 9
 		{"k1": "v1", "k2": "v2", "engine": "e2"}, // 10
+		{"$foo": "bar"},                          // 11
 	}
 	constraints := [][]LabelConstraint{
 		{},
 		{{Key: "engine", Op: "in", Values: []string{"e1", "e2"}}},
 		{{Key: "k1", Op: "notExists"}, {Key: "k2", Op: "exists"}},
 		{{Key: "engine", Op: "exists"}, {Key: "k1", Op: "in", Values: []string{"v1", "v2"}}, {Key: "k2", Op: "notIn", Values: []string{"v3"}}},
+		{{Key: "$foo", Op: "in", Values: []string{"bar", "baz"}}},
 	}
 	expect := [][]int{
 		{1, 2, 3, 4, 5, 8},
 		{6, 7, 9, 10},
 		{4, 5},
 		{10},
+		{11},
 	}
 	for i, cs := range constraints {
 		var matched []int
