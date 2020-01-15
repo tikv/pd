@@ -306,94 +306,43 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 }
 
 func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
-	balanceType := hotRead
-	// balance by leader
-	srcRegion, newLeader, infl := h.balanceByLeader(cluster, h.stats.readStatAsLeader, balanceType)
-	if srcRegion != nil {
-		srcStore := srcRegion.GetLeader().GetStoreId()
-		dstStore := newLeader.GetStoreId()
-		op, err := operator.CreateTransferLeaderOperator("transfer-hot-read-leader", cluster, srcRegion, srcStore, dstStore, operator.OpHotRegion)
-		if err != nil {
-			log.Debug("fail to create transfer hot read leader operator", zap.Error(err))
-			return nil
+	// prefer to balance by leader
+	if h.allowBalanceLeader(cluster) {
+		ops := h.balanceByLeader(cluster, h.stats.readStatAsLeader, hotRead)
+		if len(ops) > 0 {
+			return ops
 		}
-		op.SetPriorityLevel(core.HighPriority)
-		op.Counters = append(op.Counters,
-			schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
-			schedulerCounter.WithLabelValues(h.GetName(), "move-leader"),
-		)
-		h.addPendingInfluence(op, srcStore, dstStore, infl, balanceType, byLeader)
-		return []*operator.Operator{op}
 	}
 
-	// balance by peer
-	srcRegion, srcPeer, dstPeer, infl := h.balanceByPeer(cluster, h.stats.readStatAsLeader, balanceType)
-	if srcRegion != nil {
-		op, err := operator.CreateMoveLeaderOperator("move-hot-read-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), dstPeer)
-		if err != nil {
-			schedulerCounter.WithLabelValues(h.GetName(), "create-operator-fail").Inc()
-			return nil
+	if h.allowBalanceRegion(cluster) {
+		ops := h.balanceByPeer(cluster, h.stats.readStatAsLeader, hotRead)
+		if len(ops) > 0 {
+			return ops
 		}
-		op.SetPriorityLevel(core.HighPriority)
-		op.Counters = append(op.Counters,
-			schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
-			schedulerCounter.WithLabelValues(h.GetName(), "move-peer"),
-		)
-		h.addPendingInfluence(op, srcPeer.GetStoreId(), dstPeer.GetStoreId(), infl, balanceType, byPeer)
-		return []*operator.Operator{op}
 	}
+
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
 }
 
 // balanceHotRetryLimit is the limit to retry schedule for selected balance strategy.
-const balanceHotRetryLimit = 10
+const balanceHotRetryLimit = 5
 
 func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
-	balanceType := hotWrite
-	balancePeer := h.r.Int()%2 == 0
 	for i := 0; i < balanceHotRetryLimit; i++ {
-		balancePeer = !balancePeer
-		if h.allowBalanceRegion(cluster) && (!h.allowBalanceLeader(cluster) || balancePeer) {
-			// balance by peer
-			srcRegion, srcPeer, dstPeer, infl := h.balanceByPeer(cluster, h.stats.writeStatAsPeer, balanceType)
-			if srcRegion != nil {
-				op, err := operator.CreateMovePeerOperator("move-hot-write-region", cluster, srcRegion, operator.OpHotRegion, srcPeer.GetStoreId(), dstPeer)
-				if err != nil {
-					schedulerCounter.WithLabelValues(h.GetName(), "create-operator-fail").Inc()
-					return nil
-				}
-				op.SetPriorityLevel(core.HighPriority)
-				op.Counters = append(op.Counters,
-					schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
-					schedulerCounter.WithLabelValues(h.GetName(), "move-peer"),
-				)
-				h.addPendingInfluence(op, srcPeer.GetStoreId(), dstPeer.GetStoreId(), infl, balanceType, byPeer)
-				return []*operator.Operator{op}
+		// prefer to balance by peer
+		if h.allowBalanceRegion(cluster) {
+			ops := h.balanceByPeer(cluster, h.stats.writeStatAsPeer, hotWrite)
+			if len(ops) > 0 {
+				return ops
 			}
-		} else if h.allowBalanceLeader(cluster) {
-			// balance by leader
-			srcRegion, newLeader, infl := h.balanceByLeader(cluster, h.stats.writeStatAsLeader, balanceType)
-			if srcRegion != nil {
-				srcStore := srcRegion.GetLeader().GetStoreId()
-				dstStore := newLeader.GetStoreId()
-				op, err := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", cluster, srcRegion, srcStore, dstStore, operator.OpHotRegion)
-				if err != nil {
-					log.Debug("fail to create transfer hot write leader operator", zap.Error(err))
-					return nil
-				}
-				op.SetPriorityLevel(core.HighPriority)
-				op.Counters = append(op.Counters,
-					schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
-					schedulerCounter.WithLabelValues(h.GetName(), "move-leader"),
-				)
-				// transfer leader do not influence the byte rate
-				infl.ByteRate = 0
-				h.addPendingInfluence(op, srcStore, dstStore, infl, balanceType, byLeader)
-				return []*operator.Operator{op}
+		}
+
+		if h.allowBalanceLeader(cluster) {
+			ops := h.balanceByLeader(cluster, h.stats.writeStatAsLeader, hotWrite)
+			if len(ops) > 0 {
+				return ops
 			}
-		} else {
-			break
 		}
 	}
 
@@ -442,14 +391,14 @@ func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesSta
 }
 
 // balanceByPeer balances the peer distribution of hot regions.
-func (h *hotScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.StoreHotPeersStat, balanceType BalanceType) (*core.RegionInfo, *metapb.Peer, *metapb.Peer, Influence) {
+func (h *hotScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.StoreHotPeersStat, balanceType BalanceType) []*operator.Operator {
 	if !h.allowBalanceRegion(cluster) {
-		return nil, nil, nil, Influence{}
+		return nil
 	}
 
 	srcStoreID := h.selectSrcStoreByScore(storesStat, balanceType)
 	if srcStoreID == 0 {
-		return nil, nil, nil, Influence{}
+		return nil
 	}
 	// get one source region and a target store.
 	// For each region in the source store, we try to find the best target store;
@@ -523,20 +472,41 @@ func (h *hotScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.
 			h.peerLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
 			srcPeer := srcRegion.GetStorePeer(srcStoreID)
 			if srcPeer == nil {
-				return nil, nil, nil, Influence{}
+				return nil
 			}
 			dstPeer := &metapb.Peer{StoreId: dstStoreID, IsLearner: srcPeer.IsLearner}
-			return srcRegion, srcPeer, dstPeer, Influence{ByteRate: regionBytesRate}
+			{ // build the operator
+				var desc string
+				switch balanceType {
+				case hotRead:
+					desc = "move-hot-read-region"
+				case hotWrite:
+					desc = "move-hot-write-region"
+				}
+				op, err := operator.CreateMovePeerOperator(desc, cluster, srcRegion, operator.OpHotRegion, srcStoreID, dstPeer)
+				if err != nil {
+					schedulerCounter.WithLabelValues(h.GetName(), "create-operator-fail").Inc()
+					return nil
+				}
+				op.SetPriorityLevel(core.HighPriority)
+				op.Counters = append(op.Counters,
+					schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
+					schedulerCounter.WithLabelValues(h.GetName(), "move-peer"),
+				)
+				infl := Influence{ByteRate: regionBytesRate}
+				h.addPendingInfluence(op, srcStoreID, dstStoreID, infl, balanceType, byPeer)
+				return []*operator.Operator{op}
+			}
 		}
 	}
 
-	return nil, nil, nil, Influence{}
+	return nil
 }
 
 // balanceByLeader balances the leader distribution of hot regions.
-func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistics.StoreHotPeersStat, balanceType BalanceType) (*core.RegionInfo, *metapb.Peer, Influence) {
+func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistics.StoreHotPeersStat, balanceType BalanceType) []*operator.Operator {
 	if !h.allowBalanceLeader(cluster) {
-		return nil, nil, Influence{}
+		return nil
 	}
 	var (
 		srcStoreID, dstStoreID uint64
@@ -549,7 +519,7 @@ func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistic
 	}
 
 	if srcStoreID == 0 {
-		return nil, nil, Influence{}
+		return nil
 	}
 
 	// select dstPeer
@@ -593,11 +563,30 @@ func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistic
 			dstPeer := srcRegion.GetStoreVoter(dstStoreID)
 			if dstPeer != nil {
 				h.leaderLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
-				return srcRegion, dstPeer, Influence{ByteRate: rs.GetBytesRate()}
+				{ // build the operator
+					srcStore := srcRegion.GetLeader().GetStoreId()
+					op, err := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", cluster, srcRegion, srcStore, dstStoreID, operator.OpHotRegion)
+					if err != nil {
+						log.Debug("fail to create transfer hot write leader operator", zap.Error(err))
+						return nil
+					}
+					op.SetPriorityLevel(core.HighPriority)
+					op.Counters = append(op.Counters,
+						schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
+						schedulerCounter.WithLabelValues(h.GetName(), "move-leader"),
+					)
+					infl := Influence{ByteRate: rs.GetBytesRate()}
+					if balanceType == hotWrite {
+						// transfer leader do not influence the byte rate
+						infl.ByteRate = 0
+					}
+					h.addPendingInfluence(op, srcStore, dstStoreID, infl, balanceType, byLeader)
+					return []*operator.Operator{op}
+				}
 			}
 		}
 	}
-	return nil, nil, Influence{}
+	return nil
 }
 
 // Select the store to move hot regions from.
