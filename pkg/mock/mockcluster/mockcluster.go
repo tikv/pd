@@ -77,6 +77,11 @@ func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
 	return mc.StoresStats
 }
 
+// IsTrendDiff returns whether region size and store used size are consistent.
+func (mc *Cluster) IsTrendDiff(storeID uint64) bool {
+	return false
+}
+
 // GetStoreRegionCount gets region count with a given store.
 func (mc *Cluster) GetStoreRegionCount(storeID uint64) int {
 	return mc.Regions.GetStoreRegionCount(storeID)

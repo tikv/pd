@@ -14,6 +14,7 @@
 package statistics
 
 import (
+	"container/list"
 	"sync"
 	"time"
 
@@ -380,4 +381,82 @@ func (r *RollingStoreStats) GetDiskWriteRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
 	return r.totalBytesDiskWriteRate.Get()
+}
+
+const defaultInterval = time.Minute
+const defaultSize = 10
+
+type trendNode struct {
+	num        uint64
+	createTime time.Time
+}
+
+func newTrendNode(num uint64) *trendNode {
+	return &trendNode{
+		num:        num,
+		createTime: time.Now(),
+	}
+}
+
+// CompareKind is the compare result
+type CompareKind int
+
+const (
+	less CompareKind = iota
+	equal
+	greater
+	unsure
+)
+
+// TrendMonitor is used to monitor the change of region size and used size in a store.
+type TrendMonitor struct {
+	l        *list.List
+	interval time.Duration
+	capacity int
+}
+
+// NewTrendMonitor creates a TrendMonitor
+func NewTrendMonitor() *TrendMonitor {
+	return &TrendMonitor{
+		l:        list.New(),
+		interval: defaultInterval,
+		capacity: defaultSize,
+	}
+}
+
+// Put is used to update info.
+func (m *TrendMonitor) Put(num uint64) {
+	if m.l.Len() > 0 {
+		lastTime := m.l.Back().Value.(*trendNode).createTime
+		if time.Since(lastTime) < m.interval {
+			return
+		}
+	}
+	m.l.PushBack(newTrendNode(num))
+	var next *list.Element
+	for e := m.l.Front(); e != nil; e = next {
+		next = e.Next()
+		curNode := e.Value.(*trendNode)
+		if time.Since(curNode.createTime) > m.interval*time.Duration(m.capacity+1) {
+			m.l.Remove(e)
+		} else {
+			break
+		}
+	}
+}
+
+// GetStatus is used to get trend status
+func (m *TrendMonitor) GetStatus() CompareKind {
+	if m.l.Len() < m.capacity {
+		return unsure
+	}
+	head := m.l.Front().Value.(*trendNode)
+	tail := m.l.Back().Value.(*trendNode)
+	if tail.num > head.num {
+		return greater
+	} else if tail.num < head.num {
+		return less
+	} else {
+		return equal
+	}
 }

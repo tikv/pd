@@ -225,6 +225,17 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			continue
 		}
 
+		if cluster.IsTrendDiff(sourceID) {
+			label := strconv.FormatUint(sourceID, 10)
+			schedulerCounter.WithLabelValues(s.GetName(), "trend"+label).Inc()
+			continue
+		}
+		if cluster.IsTrendDiff(targetID) {
+			label := strconv.FormatUint(targetID, 10)
+			schedulerCounter.WithLabelValues(s.GetName(), "trend"+label).Inc()
+			continue
+		}
+
 		newPeer := &metapb.Peer{StoreId: target.GetID(), IsLearner: oldPeer.IsLearner}
 		op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer)
 		if err != nil {

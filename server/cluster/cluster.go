@@ -88,10 +88,12 @@ type RaftCluster struct {
 	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
 
-	labelLevelStats *statistics.LabelStatistics
-	regionStats     *statistics.RegionStatistics
-	storesStats     *statistics.StoresStats
-	hotSpotCache    *statistics.HotCache
+	labelLevelStats      *statistics.LabelStatistics
+	regionStats          *statistics.RegionStatistics
+	storesStats          *statistics.StoresStats
+	hotSpotCache         *statistics.HotCache
+	regionSizeMonitor    map[uint64]*statistics.TrendMonitor
+	storeUsedSizeMonitor map[uint64]*statistics.TrendMonitor
 
 	coordinator *coordinator
 
@@ -180,6 +182,8 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
+	c.regionSizeMonitor = make(map[uint64]*statistics.TrendMonitor)
+	c.storeUsedSizeMonitor = make(map[uint64]*statistics.TrendMonitor)
 }
 
 // Start starts a cluster.
@@ -395,6 +399,17 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
+
+	// simple for test
+	if _, ok := c.storeUsedSizeMonitor[storeID]; !ok {
+		c.storeUsedSizeMonitor[storeID] = statistics.NewTrendMonitor()
+	}
+	c.storeUsedSizeMonitor[storeID].Put(stats.UsedSize)
+
+	if _, ok := c.regionSizeMonitor[storeID]; !ok {
+		c.regionSizeMonitor[storeID] = statistics.NewTrendMonitor()
+	}
+	c.regionSizeMonitor[storeID].Put(uint64(newStore.GetRegionSize()))
 
 	// c.limiter is nil before "start" is called
 	if c.limiter != nil && c.opt.Load().StoreLimitMode == "auto" {
@@ -712,6 +727,19 @@ func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats
+}
+
+// IsTrendDiff returns whether region size and store used size are different.
+func (c *RaftCluster) IsTrendDiff(storeID uint64) bool {
+	c.RLock()
+	defer c.RUnlock()
+	if _, ok := c.regionSizeMonitor[storeID]; !ok {
+		return false
+	}
+	if _, ok := c.storeUsedSizeMonitor[storeID]; !ok {
+		return false
+	}
+	return c.regionSizeMonitor[storeID].GetStatus() != c.storeUsedSizeMonitor[storeID].GetStatus()
 }
 
 // DropCacheRegion removes a region from the cache.
