@@ -13,3 +13,4 @@ default*
 .vscode/
 bindata.go
 /pkg/ui/pd-web/*
+/.dashboard_asset_cache
