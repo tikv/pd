@@ -16,6 +16,7 @@ package placement
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"sort"
 	"sync"
 
@@ -51,18 +52,30 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 	}
 
 	var rules []*Rule
-	ok, err := m.store.LoadRules(&rules)
+	ok, err := m.store.LoadRules(func(v string) error {
+		var r Rule
+		if err := json.Unmarshal([]byte(v), &r); err != nil {
+			return err
+		}
+		rules = append(rules, &r)
+		return nil
+	})
 	if err != nil {
 		return err
 	}
 	if !ok {
-		rules = append(rules, &Rule{
+		// migrate from old config.
+		defaultRule := &Rule{
 			GroupID:        "pd",
 			ID:             "default",
 			Role:           Voter,
 			Count:          maxReplica,
 			LocationLabels: locationLabels,
-		})
+		}
+		if err := m.store.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
+			return err
+		}
+		rules = append(rules, defaultRule)
 	}
 	for _, r := range rules {
 		if err = m.adjustRule(r); err != nil {
@@ -109,14 +122,6 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 	return nil
 }
 
-func (m *RuleManager) saveRules() error {
-	rules := make([]*Rule, 0, len(m.rules))
-	for _, r := range m.rules {
-		rules = append(rules, r)
-	}
-	return m.store.SaveRules(rules)
-}
-
 // GetRule returns the Rule with the same (group, id).
 func (m *RuleManager) GetRule(group, id string) *Rule {
 	m.RLock()
@@ -135,7 +140,7 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 	old := m.rules[rule.Key()]
 	m.rules[rule.Key()] = rule
 
-	if err = m.saveRules(); err != nil {
+	if err = m.store.SaveRule(rule.StoreKey(), rule); err != nil {
 		// restore
 		if old == nil {
 			delete(m.rules, rule.Key())
@@ -158,7 +163,7 @@ func (m *RuleManager) DeleteRule(group, id string) error {
 		return nil
 	}
 	delete(m.rules, [2]string{group, id})
-	if err := m.saveRules(); err != nil {
+	if err := m.store.DeleteRule(old.StoreKey()); err != nil {
 		// restore
 		m.rules[key] = old
 		return err
