@@ -1110,9 +1110,8 @@ func (s *Server) getComponentConfig(ctx context.Context, version *configpb.Versi
 	}
 	var config string
 	switch status.GetCode() {
-	case configpb.StatusCode_OK:
-		config = cfg
 	case configpb.StatusCode_WRONG_VERSION:
+		config = cfg
 		s.setConfigVersion(v)
 	case configpb.StatusCode_UNKNOWN:
 		return "", errors.Errorf("unknown error: %v", status.GetMessage())
