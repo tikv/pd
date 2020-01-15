@@ -52,9 +52,12 @@ const (
 	// HotRegionName is balance hot region scheduler name.
 	HotRegionName = "balance-hot-region-scheduler"
 
-	HotRegionType      = "hot-region"       // HotRegionType is balance hot region scheduler type.
-	HotReadRegionType  = "hot-read-region"  // HotReadRegionType is hot read region scheduler type.
-	HotWriteRegionType = "hot-write-region" // HotWriteRegionType is hot write region scheduler type.
+	// HotRegionType is balance hot region scheduler type.
+	HotRegionType = "hot-region"
+	// HotReadRegionType is hot read region scheduler type.
+	HotReadRegionType = "hot-read-region"
+	// HotWriteRegionType is hot write region scheduler type.
+	HotWriteRegionType = "hot-write-region"
 
 	hotRegionLimitFactor    = 0.75
 	storeHotPeersDefaultLen = 100
@@ -379,7 +382,7 @@ func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesSta
 		hotPeers, ok := ret[id]
 		if !ok {
 			hotPeers = &statistics.HotPeersStat{
-				Stats: make([]statistics.HotPeerStat, 0, 0),
+				Stats: make([]statistics.HotPeerStat, 0),
 			}
 			ret[id] = hotPeers
 		}
