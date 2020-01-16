@@ -310,18 +310,14 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 
 func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
 	// prefer to balance by leader
-	if h.allowBalanceLeader(cluster) {
-		ops := h.balanceByLeader(cluster, h.stats.readStatAsLeader, hotRead)
-		if len(ops) > 0 {
-			return ops
-		}
+	ops := h.balanceByLeader(cluster, h.stats.readStatAsLeader, hotRead)
+	if len(ops) > 0 {
+		return ops
 	}
 
-	if h.allowBalanceRegion(cluster) {
-		ops := h.balanceByPeer(cluster, h.stats.readStatAsLeader, hotRead)
-		if len(ops) > 0 {
-			return ops
-		}
+	ops = h.balanceByPeer(cluster, h.stats.readStatAsLeader, hotRead)
+	if len(ops) > 0 {
+		return ops
 	}
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -334,18 +330,14 @@ const balanceHotRetryLimit = 5
 func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
 	for i := 0; i < balanceHotRetryLimit; i++ {
 		// prefer to balance by peer
-		if h.allowBalanceRegion(cluster) {
-			ops := h.balanceByPeer(cluster, h.stats.writeStatAsPeer, hotWrite)
-			if len(ops) > 0 {
-				return ops
-			}
+		ops := h.balanceByPeer(cluster, h.stats.writeStatAsPeer, hotWrite)
+		if len(ops) > 0 {
+			return ops
 		}
 
-		if h.allowBalanceLeader(cluster) {
-			ops := h.balanceByLeader(cluster, h.stats.writeStatAsLeader, hotWrite)
-			if len(ops) > 0 {
-				return ops
-			}
+		ops = h.balanceByLeader(cluster, h.stats.writeStatAsLeader, hotWrite)
+		if len(ops) > 0 {
+			return ops
 		}
 	}
 
@@ -399,52 +391,38 @@ func (h *hotScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.
 		return nil
 	}
 
+	// select srcStore
 	srcStoreID := h.selectSrcStoreByScore(storesStat, balanceType)
 	if srcStoreID == 0 {
 		return nil
 	}
+
+	// check srcStore
+	srcStore := cluster.GetStore(srcStoreID)
+	if srcStore == nil {
+		log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
+		return nil
+	}
+
 	// get one source region and a target store.
 	// For each region in the source store, we try to find the best target store;
 	// If we can find a target store, then return from this method.
 	stores := cluster.GetStores()
-	var dstStoreID uint64
 	for _, i := range h.r.Perm(len(storesStat[srcStoreID].Stats)) {
 		rs := storesStat[srcStoreID].Stats[i]
-		srcRegion := cluster.GetRegion(rs.RegionID)
+
+		srcRegion := h.checkRegionStatus(rs.RegionID, byPeer, cluster)
 		if srcRegion == nil {
-			schedulerCounter.WithLabelValues(h.GetName(), "no-region").Inc()
 			continue
-		}
-
-		if pendings, ok := h.regionPendings[srcRegion.GetID()]; ok {
-			if pendings[byPeer] != nil ||
-				(pendings[byLeader] != nil && !pendings[byLeader].isDone()) {
-				continue
-			}
-		}
-
-		if !opt.IsHealthyAllowPending(cluster, srcRegion) {
-			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy-replica").Inc()
-			continue
-		}
-
-		if !opt.IsRegionReplicated(cluster, srcRegion) {
-			log.Debug("region has abnormal replica count", zap.String("scheduler", h.GetName()), zap.Uint64("region-id", srcRegion.GetID()))
-			schedulerCounter.WithLabelValues(h.GetName(), "abnormal-replica").Inc()
-			continue
-		}
-
-		srcStore := cluster.GetStore(srcStoreID)
-		if srcStore == nil {
-			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
 		}
 
 		srcPeer := srcRegion.GetStorePeer(srcStoreID)
 		if srcPeer == nil {
-			log.Debug("region does not peer on source store, maybe stat out of date", zap.Uint64("region-id", rs.RegionID))
+			log.Debug("region does not have a peer on source store, maybe stat out of date", zap.Uint64("region-id", rs.RegionID))
 			continue
 		}
 
+		// filter candidates
 		var scoreGuard filter.Filter
 		if cluster.IsPlacementRulesEnabled() {
 			scoreGuard = filter.NewRuleFitFilter(h.GetName(), cluster, srcRegion, srcStoreID)
@@ -458,26 +436,26 @@ func (h *hotScheduler) balanceByPeer(cluster opt.Cluster, storesStat statistics.
 			filter.NewHealthFilter(h.GetName()),
 			scoreGuard,
 		}
+
 		candidateStoreIDs := make(map[uint64]struct{}, len(stores))
 		for _, store := range stores {
-			if filter.Target(cluster, store, filters) {
-				continue
+			if !filter.Target(cluster, store, filters) {
+				candidateStoreIDs[store.GetID()] = struct{}{}
 			}
-			candidateStoreIDs[store.GetID()] = struct{}{}
 		}
 		if len(candidateStoreIDs) == 0 {
 			continue
 		}
 
+		// select dstStore
 		regionBytesRate := rs.GetBytesRate()
-		dstStoreID = h.selectDstStoreByScore(candidateStoreIDs, regionBytesRate, balanceType)
+		dstStoreID := h.selectDstStoreByScore(candidateStoreIDs, regionBytesRate, balanceType)
+
+		// check dstStore and build operator
 		if dstStoreID != 0 {
-			h.peerLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
-			srcPeer := srcRegion.GetStorePeer(srcStoreID)
-			if srcPeer == nil {
-				return nil
-			}
 			dstPeer := &metapb.Peer{StoreId: dstStoreID, IsLearner: srcPeer.IsLearner}
+			h.peerLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
+
 			{ // build the operator
 				var desc string
 				switch balanceType {
@@ -515,37 +493,45 @@ func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistic
 		srcStoreID, dstStoreID uint64
 	)
 
+	// select srcStore
 	if balanceType == hotWrite {
 		srcStoreID = h.selectSrcStoreByHot(storesStat)
 	} else {
 		srcStoreID = h.selectSrcStoreByScore(storesStat, balanceType)
 	}
-
 	if srcStoreID == 0 {
+		return nil
+	}
+
+	// check srcStore
+	srcStore := cluster.GetStore(srcStoreID)
+	if srcStore == nil {
+		log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
 		return nil
 	}
 
 	// select dstPeer
 	for _, i := range h.r.Perm(len(storesStat[srcStoreID].Stats)) {
 		rs := storesStat[srcStoreID].Stats[i]
-		srcRegion := cluster.GetRegion(rs.RegionID)
+
+		srcRegion := h.checkRegionStatus(rs.RegionID, byLeader, cluster)
 		if srcRegion == nil {
-			schedulerCounter.WithLabelValues(h.GetName(), "no-region").Inc()
 			continue
 		}
 
-		if _, ok := h.regionPendings[srcRegion.GetID()]; ok {
+		if srcRegion.GetLeader().GetStoreId() != srcStoreID {
+			log.Debug("region leader is not on source store, maybe stat out of date", zap.Uint64("region-id", rs.RegionID))
 			continue
 		}
 
-		if !opt.IsHealthyAllowPending(cluster, srcRegion) {
-			schedulerCounter.WithLabelValues(h.GetName(), "unhealthy-replica").Inc()
-			continue
+		// filter candidates
+		filters := []filter.Filter{
+			filter.StoreStateFilter{ActionScope: h.GetName(), TransferLeader: true},
+			filter.NewHealthFilter(h.GetName()),
 		}
 
-		filters := []filter.Filter{filter.StoreStateFilter{ActionScope: h.GetName(), TransferLeader: true}}
-		filters = append(filters, filter.NewHealthFilter(h.GetName()))
 		candidateStoreIDs := make(map[uint64]struct{}, len(srcRegion.GetPeers())-1)
+
 		for _, store := range cluster.GetFollowerStores(srcRegion) {
 			if !filter.Target(cluster, store, filters) {
 				candidateStoreIDs[store.GetID()] = struct{}{}
@@ -555,6 +541,7 @@ func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistic
 			continue
 		}
 
+		// select dstStore
 		regionBytesRate := rs.GetBytesRate()
 		if balanceType == hotWrite {
 			dstStoreID = h.selectDstStoreByHot(candidateStoreIDs, regionBytesRate, srcStoreID, storesStat)
@@ -562,31 +549,35 @@ func (h *hotScheduler) balanceByLeader(cluster opt.Cluster, storesStat statistic
 			dstStoreID = h.selectDstStoreByScore(candidateStoreIDs, regionBytesRate, balanceType)
 		}
 
+		// check dstStore and build operator
 		if dstStoreID != 0 {
 			dstPeer := srcRegion.GetStoreVoter(dstStoreID)
-			if dstPeer != nil {
-				h.leaderLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
-				{ // build the operator
-					srcStore := srcRegion.GetLeader().GetStoreId()
-					op, err := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", cluster, srcRegion, srcStore, dstStoreID, operator.OpHotRegion)
-					if err != nil {
-						log.Debug("fail to create transfer hot write leader operator", zap.Error(err))
-						return nil
-					}
-					op.SetPriorityLevel(core.HighPriority)
-					op.Counters = append(op.Counters,
-						schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
-						schedulerCounter.WithLabelValues(h.GetName(), "move-leader"),
-					)
-					infl := Influence{ByteRate: rs.GetBytesRate()}
-					if balanceType == hotWrite {
-						// transfer leader do not influence the byte rate
-						infl.ByteRate = 0
-					}
-					h.addPendingInfluence(op, srcStore, dstStoreID, infl, balanceType, byLeader)
-					return []*operator.Operator{op}
-				}
+			if dstPeer == nil {
+				continue
 			}
+			h.leaderLimit = h.adjustBalanceLimit(srcStoreID, storesStat)
+
+			{ // build the operator
+				srcStore := srcRegion.GetLeader().GetStoreId()
+				op, err := operator.CreateTransferLeaderOperator("transfer-hot-write-leader", cluster, srcRegion, srcStore, dstStoreID, operator.OpHotRegion)
+				if err != nil {
+					log.Debug("fail to create transfer hot write leader operator", zap.Error(err))
+					return nil
+				}
+				op.SetPriorityLevel(core.HighPriority)
+				op.Counters = append(op.Counters,
+					schedulerCounter.WithLabelValues(h.GetName(), "new-operator"),
+					schedulerCounter.WithLabelValues(h.GetName(), "move-leader"),
+				)
+				infl := Influence{ByteRate: rs.GetBytesRate()}
+				if balanceType == hotWrite {
+					// transfer leader do not influence the byte rate
+					infl.ByteRate = 0
+				}
+				h.addPendingInfluence(op, srcStore, dstStoreID, infl, balanceType, byLeader)
+				return []*operator.Operator{op}
+			}
+
 		}
 	}
 	return nil
@@ -810,4 +801,36 @@ func (h *hotScheduler) clearPendingInfluence() {
 	h.readPendingSum = nil
 	h.writePendingSum = nil
 	h.regionPendings = make(map[uint64][2]*pendingInfluence)
+}
+
+// checkRegionStatus returns nil if the given region is not available to schedule.
+func (h *hotScheduler) checkRegionStatus(regionID uint64, ty opType, cluster opt.Cluster) *core.RegionInfo {
+	region := cluster.GetRegion(regionID)
+	if region == nil {
+		schedulerCounter.WithLabelValues(h.GetName(), "no-region").Inc()
+		return nil
+	}
+
+	if pendings, ok := h.regionPendings[region.GetID()]; ok {
+		if ty == byLeader {
+			return nil
+		}
+		if pendings[byPeer] != nil ||
+			(pendings[byLeader] != nil && !pendings[byLeader].isDone()) {
+			return nil
+		}
+	}
+
+	if !opt.IsHealthyAllowPending(cluster, region) {
+		schedulerCounter.WithLabelValues(h.GetName(), "unhealthy-replica").Inc()
+		return nil
+	}
+
+	if !opt.IsRegionReplicated(cluster, region) {
+		log.Debug("region has abnormal replica count", zap.String("scheduler", h.GetName()), zap.Uint64("region-id", region.GetID()))
+		schedulerCounter.WithLabelValues(h.GetName(), "abnormal-replica").Inc()
+		return nil
+	}
+
+	return region
 }
