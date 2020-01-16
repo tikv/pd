@@ -447,6 +447,9 @@ func (m *TrendMonitor) Put(num uint64) {
 
 const factor = 0.975
 
+// It was observed that  the slowly decreasing store used size, while the region size continues to decrease due to
+// move out of the region.So we need to ensure the bigger one is big enough to avoid the trend monitor cannot work
+// properly in such a situation.
 func isRealGreater(a, b uint64) bool {
 	if a > b && float64(a)*factor > float64(b) {
 		return true
