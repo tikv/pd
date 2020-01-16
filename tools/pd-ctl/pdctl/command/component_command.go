@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"path"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -32,8 +33,19 @@ func NewComponentConfigCommand() *cobra.Command {
 		Use:   "component <subcommand>",
 		Short: "manipulate components' configs",
 	}
+	conf.AddCommand(NewShowComponentConfigCommand())
 	conf.AddCommand(NewSetComponentConfigCommand())
 	return conf
+}
+
+// NewShowComponentConfigCommand return a show subcommand of componentCmd.
+func NewShowComponentConfigCommand() *cobra.Command {
+	sc := &cobra.Command{
+		Use:   "show [<component>|<componentID>]",
+		Short: "show component config",
+		Run:   showComponentConfigCommandFunc,
+	}
+	return sc
 }
 
 // NewSetComponentConfigCommand return a set subcommand of componentCmd.
@@ -44,6 +56,21 @@ func NewSetComponentConfigCommand() *cobra.Command {
 		Run:   setComponentConfigCommandFunc,
 	}
 	return sc
+}
+
+func showComponentConfigCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+
+	prefix := path.Join(componentConfigPrefix, args[0])
+	r, err := doRequest(cmd, prefix, http.MethodGet, WithAccept("application/toml"))
+	if err != nil {
+		cmd.Printf("Failed to get component config: %s\n", err)
+		return
+	}
+	cmd.Println(r)
 }
 
 func postComponentConfigData(cmd *cobra.Command, componentInfo, key, value string) error {

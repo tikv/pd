@@ -16,9 +16,11 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/pprof"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/pingcap/kvproto/pkg/configpb"
@@ -197,20 +199,33 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 
 	if svr.GetConfig().EnableConfigManager {
 		f := func() {
-			// TODO: support GET and DELETE
-			componentRouter := apiRouter.PathPrefix("/component").Methods("POST").Subrouter()
+			// TODO: support DELETE
+			componentRouter := apiRouter.PathPrefix("/component").Methods("POST", "GET").Subrouter()
 			configRouter := apiRouter.PathPrefix("/config").Methods("POST").Subrouter()
 			adminRouter := apiRouter.PathPrefix("/admin").Methods("POST").Subrouter()
-			gwmux := runtime.NewServeMux()
+			CustomForwardResponseOption := func(ctx context.Context, w http.ResponseWriter, pm proto.Message) error {
+				if _, ok := pm.(*configpb.GetResponse); ok {
+					str := pm.(*configpb.GetResponse).GetConfig()
+					w.Write([]byte(str))
+				}
+				return nil
+			}
+			gwmux := runtime.NewServeMux(
+				runtime.WithForwardResponseOption(CustomForwardResponseOption),
+				runtime.WithMarshalerOption("application/json", &runtime.JSONPb{OrigName: true}),
+				runtime.WithMarshalerOption("application/toml", &customMarshaler{}),
+			)
 			UnaryClientInterceptor := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 				invoker(ctx, method, req, reply, cc, opts...)
 				var errMsg string
 				switch method {
 				case "/configpb.Config/Update":
 					errMsg = reply.(*configpb.UpdateResponse).GetStatus().GetMessage()
-					if errMsg != "" {
-						return errors.New(errMsg)
-					}
+				case "/configpb.Config/Get":
+					errMsg = reply.(*configpb.GetResponse).GetStatus().GetMessage()
+				}
+				if errMsg != "" {
+					return errors.New(errMsg)
 				}
 				return nil
 			}
@@ -221,6 +236,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 			}
 
 			componentRouter.Handle("", gwmux).Methods("POST")
+			componentRouter.Handle("/{component_id}", gwmux).Methods("GET")
 			componentRouter.Use(newComponentMiddleware(svr).Middleware)
 
 			configRouter.Handle("", gwmux).Methods("POST")
@@ -242,3 +258,17 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	apiRouter.HandleFunc("/admin/log", logHandler.Handle).Methods("POST")
 	return rootRouter, nil
 }
+
+type customMarshaler struct{}
+
+func (c *customMarshaler) Marshal(v interface{}) ([]byte, error) {
+	return nil, nil
+}
+
+func (c *customMarshaler) Unmarshal(data []byte, v interface{}) error { return nil }
+
+func (c *customMarshaler) NewDecoder(r io.Reader) runtime.Decoder { return nil }
+
+func (c *customMarshaler) NewEncoder(w io.Writer) runtime.Encoder { return nil }
+
+func (c *customMarshaler) ContentType() string { return "application/toml" }
