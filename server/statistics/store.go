@@ -445,6 +445,15 @@ func (m *TrendMonitor) Put(num uint64) {
 	}
 }
 
+const factor = 0.975
+
+func isRealGreater(a, b uint64) bool {
+	if a > b && float64(a)*factor > float64(b) {
+		return true
+	}
+	return false
+}
+
 // GetStatus is used to get trend status
 func (m *TrendMonitor) GetStatus() CompareKind {
 	if m.l.Len() < m.capacity {
@@ -452,9 +461,9 @@ func (m *TrendMonitor) GetStatus() CompareKind {
 	}
 	head := m.l.Front().Value.(*trendNode)
 	tail := m.l.Back().Value.(*trendNode)
-	if tail.num > head.num {
+	if isRealGreater(tail.num, head.num) {
 		return greater
-	} else if tail.num < head.num {
+	} else if isRealGreater(head.num, tail.num) {
 		return less
 	} else {
 		return equal
