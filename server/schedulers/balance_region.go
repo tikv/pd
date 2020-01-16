@@ -227,12 +227,12 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 
 		if cluster.IsTrendDiff(sourceID) {
 			label := strconv.FormatUint(sourceID, 10)
-			schedulerCounter.WithLabelValues(s.GetName(), "trend"+label).Inc()
+			schedulerCounter.WithLabelValues(s.GetName(), "trend-"+label).Inc()
 			continue
 		}
 		if cluster.IsTrendDiff(targetID) {
 			label := strconv.FormatUint(targetID, 10)
-			schedulerCounter.WithLabelValues(s.GetName(), "trend"+label).Inc()
+			schedulerCounter.WithLabelValues(s.GetName(), "trend-"+label).Inc()
 			continue
 		}
 
