@@ -308,6 +308,46 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
 }
 
+func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesStat map[uint64]float64, cluster opt.Cluster, kind core.ResourceKind) statistics.StoreHotPeersStat {
+	ret := make(statistics.StoreHotPeersStat)
+
+	for storeID, items := range storeHotPeers {
+		hotPeers, ok := ret[storeID]
+		if !ok {
+			hotPeers = &statistics.HotPeersStat{
+				Stats: make([]statistics.HotPeerStat, 0, storeHotPeersDefaultLen),
+			}
+			ret[storeID] = hotPeers
+		}
+
+		cacheHitsThreshold := cluster.GetHotRegionCacheHitsThreshold()
+		for _, peerStat := range items {
+			if (kind == core.LeaderKind && !peerStat.IsLeader()) ||
+				peerStat.HotDegree < cacheHitsThreshold ||
+				cluster.GetRegion(peerStat.RegionID) == nil {
+				continue
+			}
+			hotPeers.TotalBytesRate += peerStat.GetBytesRate()
+			hotPeers.Stats = append(hotPeers.Stats, peerStat.Clone())
+		}
+		hotPeers.Count = len(hotPeers.Stats)
+	}
+
+	for id, rate := range storeBytesStat {
+		hotPeers, ok := ret[id]
+		if !ok {
+			hotPeers = &statistics.HotPeersStat{
+				Stats: make([]statistics.HotPeerStat, 0),
+			}
+			ret[id] = hotPeers
+		}
+		hotPeers.StoreBytesRate = rate
+		hotPeers.FutureBytesRate = rate
+	}
+
+	return ret
+}
+
 func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
 	// prefer to balance by leader
 	leaderSolver := newBalanceSolver(h, cluster, h.stats.readStatAsLeader, read, transferLeader)
@@ -347,46 +387,6 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
 	return nil
-}
-
-func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesStat map[uint64]float64, cluster opt.Cluster, kind core.ResourceKind) statistics.StoreHotPeersStat {
-	ret := make(statistics.StoreHotPeersStat)
-
-	for storeID, items := range storeHotPeers {
-		hotPeers, ok := ret[storeID]
-		if !ok {
-			hotPeers = &statistics.HotPeersStat{
-				Stats: make([]statistics.HotPeerStat, 0, storeHotPeersDefaultLen),
-			}
-			ret[storeID] = hotPeers
-		}
-
-		cacheHitsThreshold := cluster.GetHotRegionCacheHitsThreshold()
-		for _, peerStat := range items {
-			if (kind == core.LeaderKind && !peerStat.IsLeader()) ||
-				peerStat.HotDegree < cacheHitsThreshold ||
-				cluster.GetRegion(peerStat.RegionID) == nil {
-				continue
-			}
-			hotPeers.TotalBytesRate += peerStat.GetBytesRate()
-			hotPeers.Stats = append(hotPeers.Stats, peerStat.Clone())
-		}
-		hotPeers.Count = len(hotPeers.Stats)
-	}
-
-	for id, rate := range storeBytesStat {
-		hotPeers, ok := ret[id]
-		if !ok {
-			hotPeers = &statistics.HotPeersStat{
-				Stats: make([]statistics.HotPeerStat, 0),
-			}
-			ret[id] = hotPeers
-		}
-		hotPeers.StoreBytesRate = rate
-		hotPeers.FutureBytesRate = rate
-	}
-
-	return ret
 }
 
 type balanceSolver struct {
