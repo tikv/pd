@@ -79,7 +79,7 @@ type shuffleHotRegionScheduler struct {
 	stats *storeStatistics
 	r     *rand.Rand
 	conf  *shuffleHotRegionSchedulerConfig
-	types []BalanceType
+	types []rwType
 }
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
@@ -89,7 +89,7 @@ func newShuffleHotRegionScheduler(opController *schedule.OperatorController, con
 		BaseScheduler: base,
 		conf:          conf,
 		stats:         newStoreStatistics(),
-		types:         []BalanceType{hotRead, hotWrite},
+		types:         []rwType{read, write},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
@@ -118,13 +118,13 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 	return s.dispatch(s.types[i], cluster)
 }
 
-func (s *shuffleHotRegionScheduler) dispatch(typ BalanceType, cluster opt.Cluster) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
 	storesStats := cluster.GetStoresStats()
 	switch typ {
-	case hotRead:
+	case read:
 		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), storesStats.GetStoresBytesReadStat(), cluster, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stats.readStatAsLeader)
-	case hotWrite:
+	case write:
 		s.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), storesStats.GetStoresBytesWriteStat(), cluster, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stats.writeStatAsLeader)
 	}
