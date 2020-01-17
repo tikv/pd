@@ -14,7 +14,6 @@
 package schedulers
 
 import (
-	"github.com/pingcap/pd/server/statistics"
 	"math"
 	"net/url"
 	"sort"
@@ -26,6 +25,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
