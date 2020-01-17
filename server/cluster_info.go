@@ -547,10 +547,16 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		if len(region.GetPeers()) != len(origin.GetPeers()) {
 			saveKV, saveCache = true, true
 		}
-		if region.GetApproximateSize() != origin.GetApproximateSize() {
+
+		if region.GetApproximateSize() != origin.GetApproximateSize() ||
+			region.GetApproximateKeys() != origin.GetApproximateKeys() {
 			saveCache = true
 		}
-		if region.GetApproximateKeys() != origin.GetApproximateKeys() {
+
+		if region.GetBytesWritten() != origin.GetBytesWritten() ||
+			region.GetBytesRead() != origin.GetBytesRead() ||
+			region.GetKeysWritten() != origin.GetKeysWritten() ||
+			region.GetKeysRead() != origin.GetKeysRead() {
 			saveCache = true
 		}
 	}
@@ -564,6 +570,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
 				zap.Error(err))
 		}
+		regionEventCounter.WithLabelValues("update_kv").Inc()
 	}
 	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
 		return nil
@@ -603,6 +610,7 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		for _, p := range region.GetPeers() {
 			c.updateStoreStatusLocked(p.GetStoreId())
 		}
+		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
 	if c.regionStats != nil {

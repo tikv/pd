@@ -106,6 +106,14 @@ var (
 			Help:      "Counter of region hearbeat.",
 		}, []string{"store", "type", "status"})
 
+	regionEventCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "region_event",
+			Help:      "Counter of the region event",
+		}, []string{"event"})
+
 	regionHeartbeatLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -183,6 +191,7 @@ func init() {
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(regionHeartbeatCounter)
+	prometheus.MustRegister(regionEventCounter)
 	prometheus.MustRegister(regionHeartbeatLatency)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(tsoCounter)
