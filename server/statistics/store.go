@@ -402,30 +402,31 @@ func newTrendNode(num uint64) *trendNode {
 type CompareKind int
 
 const (
-	less CompareKind = iota
-	equal
-	greater
-	unsure
+	// IsLess means that current one is less than previous one
+	IsLess CompareKind = iota
+	// Equal means that current one is equal with previous one
+	Equal
+	// IsGreater means that current one is greater than previous one
+	IsGreater
+	// Unsure means that trend is unsure
+	Unsure
 )
 
-// TrendMonitor is used to monitor the change of region size and used size in a store.
-type TrendMonitor struct {
+type trendMonitor struct {
 	l        *list.List
 	interval time.Duration
 	capacity int
 }
 
-// NewTrendMonitor creates a TrendMonitor
-func NewTrendMonitor() *TrendMonitor {
-	return &TrendMonitor{
+func newTrendMonitor() *trendMonitor {
+	return &trendMonitor{
 		l:        list.New(),
 		interval: defaultInterval,
 		capacity: defaultSize,
 	}
 }
 
-// Put is used to update info.
-func (m *TrendMonitor) Put(num uint64) {
+func (m *trendMonitor) put(num uint64) {
 	if m.l.Len() > 0 {
 		lastTime := m.l.Back().Value.(*trendNode).createTime
 		if time.Since(lastTime) < m.interval {
@@ -457,18 +458,55 @@ func isRealGreater(a, b uint64) bool {
 	return false
 }
 
-// GetStatus is used to get trend status
-func (m *TrendMonitor) GetStatus() CompareKind {
+func (m *trendMonitor) getStatus() CompareKind {
 	if m.l.Len() < m.capacity {
-		return unsure
+		return Unsure
 	}
 	head := m.l.Front().Value.(*trendNode)
 	tail := m.l.Back().Value.(*trendNode)
 	if isRealGreater(tail.num, head.num) {
-		return greater
+		return IsGreater
 	} else if isRealGreater(head.num, tail.num) {
-		return less
+		return IsLess
 	} else {
-		return equal
+		return Equal
 	}
+}
+
+// MonitorKind is the monitor kind
+type MonitorKind int
+
+const (
+	// RegionSize indicates the RegionSize Monitor
+	RegionSize MonitorKind = iota
+	// UsedSize indicates the UsedSize Monitor
+	UsedSize
+)
+
+// TrendMonitorHub is used to monitor the change of region size and used size .
+type TrendMonitorHub struct {
+	monitors map[uint64][2]*trendMonitor
+}
+
+// NewTrendMonitorHub creates a TrendMonitorHub
+func NewTrendMonitorHub() *TrendMonitorHub {
+	return &TrendMonitorHub{
+		monitors: make(map[uint64][2]*trendMonitor),
+	}
+}
+
+// Put is used to update info.
+func (h *TrendMonitorHub) Put(kind MonitorKind, storeID, num uint64) {
+	if _, ok := h.monitors[storeID]; !ok {
+		h.monitors[storeID] = [2]*trendMonitor{newTrendMonitor(), newTrendMonitor()}
+	}
+	h.monitors[storeID][kind].put(num)
+}
+
+// GetStatus is used to get trend status.
+func (h *TrendMonitorHub) GetStatus(kind MonitorKind, storeID uint64) CompareKind {
+	if _, ok := h.monitors[storeID]; !ok {
+		return Unsure
+	}
+	return h.monitors[storeID][kind].getStatus()
 }
