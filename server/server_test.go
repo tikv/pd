@@ -190,7 +190,7 @@ var _ = Suite(&testServerHandlerSuite{})
 type testServerHandlerSuite struct{}
 
 func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, APIGroup, func()) {
+	mokHandler := func(ctx context.Context, s *Server) (http.Handler, APIGroup) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
@@ -199,9 +199,8 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 			Name:    "mok",
 			Version: "v1",
 		}
-		return mux, info, nil
+		return mux, info
 	}
-
 	cfg := NewTestSingleConfig(c)
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)

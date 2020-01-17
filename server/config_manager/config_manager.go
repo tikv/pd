@@ -95,8 +95,8 @@ func (c *ConfigManager) Reload(storage *core.Storage) error {
 	return err
 }
 
-// getComponent returns the component from a given component ID.
-func (c *ConfigManager) getComponent(id string) string {
+// GetComponent returns the component from a given component ID.
+func (c *ConfigManager) GetComponent(id string) string {
 	for component, cfgs := range c.LocalCfgs {
 		if _, ok := cfgs[id]; ok {
 			return component
@@ -131,7 +131,7 @@ func (c *ConfigManager) GetConfig(version *configpb.Version, component, componen
 			Message: errEncode(err),
 		}
 	}
-	if versionEqual(cfg.getVersion(), version) {
+	if versionEqual(cfg.GetVersion(), version) {
 		status = &configpb.Status{Code: configpb.StatusCode_OK}
 	} else {
 		status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
@@ -198,7 +198,7 @@ func (c *ConfigManager) CreateConfig(version *configpb.Version, component, compo
 func (c *ConfigManager) getLatestVersion(component, componentID string) *configpb.Version {
 	v := &configpb.Version{
 		Global: c.GlobalCfgs[component].GetVersion(),
-		Local:  c.LocalCfgs[component][componentID].getVersion().GetLocal(),
+		Local:  c.LocalCfgs[component][componentID].GetVersion().GetLocal(),
 	}
 	return v
 }
@@ -312,7 +312,7 @@ func mergeAndUpdateConfig(localCfg *LocalConfig, updateEntries map[string]*Entry
 }
 
 func (c *ConfigManager) updateLocal(componentID string, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
-	component := c.getComponent(componentID)
+	component := c.GetComponent(componentID)
 	if component == "" {
 		return &configpb.Version{Global: 0, Local: 0}, &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
 	}
@@ -324,7 +324,7 @@ func (c *ConfigManager) updateLocal(componentID string, version *configpb.Versio
 		}
 	}
 	if localCfg, ok := c.LocalCfgs[component][componentID]; ok {
-		localLatestVersion := localCfg.getVersion()
+		localLatestVersion := localCfg.GetVersion()
 		if !versionEqual(localLatestVersion, version) {
 			return localLatestVersion, &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
@@ -339,7 +339,7 @@ func (c *ConfigManager) updateLocal(componentID string, version *configpb.Versio
 	} else {
 		return version, &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
 	}
-	return c.LocalCfgs[component][componentID].getVersion(), &configpb.Status{Code: configpb.StatusCode_OK}
+	return c.LocalCfgs[component][componentID].GetVersion(), &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
 func (c *ConfigManager) deleteEntry(component, e string) {
@@ -375,12 +375,12 @@ func (c *ConfigManager) deleteGlobal(component string, version *configpb.Version
 }
 
 func (c *ConfigManager) deleteLocal(componentID string, version *configpb.Version) *configpb.Status {
-	component := c.getComponent(componentID)
+	component := c.GetComponent(componentID)
 	if component == "" {
 		return &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
 	}
 	if localCfg, ok := c.LocalCfgs[component][componentID]; ok {
-		localLatestVersion := localCfg.getVersion()
+		localLatestVersion := localCfg.GetVersion()
 		if !versionEqual(localLatestVersion, version) {
 			return &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 		}
@@ -481,8 +481,8 @@ func (lc *LocalConfig) updateEntry(entry *configpb.ConfigEntry, version *configp
 	entries[entry.GetName()] = NewEntryValue(entry, version)
 }
 
-// getVersion return the local config version for a component.
-func (lc *LocalConfig) getVersion() *configpb.Version {
+// GetVersion return the local config version for a component.
+func (lc *LocalConfig) GetVersion() *configpb.Version {
 	if lc == nil {
 		return nil
 	}
@@ -509,7 +509,7 @@ func update(config map[string]interface{}, configName []string, value string) er
 	if !ok {
 		// TODO: remove it
 		if configName[0] != "schedulers-v2" {
-			return errors.New("cannot find the config item")
+			return errors.Errorf("cannot find the config item: %v", configName[0])
 		}
 	}
 
@@ -527,6 +527,9 @@ func update(config map[string]interface{}, configName []string, value string) er
 			return errors.Errorf("failed to decode value: %v", err.Error())
 		}
 		container[configName[0]] = value
+	} else if configName[0] == "label-property" {
+		config[configName[0]] = container
+		return nil
 	}
 
 	v, err := getUpdateValue(config[configName[0]], container[configName[0]])
@@ -541,6 +544,7 @@ func update(config map[string]interface{}, configName []string, value string) er
 func getUpdateValue(item, updateItem interface{}) (interface{}, error) {
 	var err error
 	var v interface{}
+	var tmp float64
 	switch item.(type) {
 	case bool:
 		switch t1 := updateItem.(type) {
@@ -554,7 +558,8 @@ func getUpdateValue(item, updateItem interface{}) (interface{}, error) {
 	case int64:
 		switch t1 := updateItem.(type) {
 		case string:
-			v, err = strconv.ParseInt(updateItem.(string), 10, 64)
+			tmp, err = strconv.ParseFloat(updateItem.(string), 64)
+			v = int64(tmp)
 		case float64:
 			v = int64(updateItem.(float64))
 		case int64:

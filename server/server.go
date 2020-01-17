@@ -144,7 +144,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, APIGroup, func())
+type HandlerBuilder func(context.Context, *Server) (http.Handler, APIGroup)
 
 // APIGroup used to register the api service.
 type APIGroup struct {
@@ -160,31 +160,14 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-type lazyHandler struct {
-	options []func()
-	engine  *negroni.Negroni
-}
-
-func (lazy *lazyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	for _, f := range lazy.options {
-		f()
-	}
-
-	lazy.engine.ServeHTTP(w, r)
-}
-
-func combineBuilderServerHTTPService(ctx context.Context, svr *Server, apiBuilders ...HandlerBuilder) (http.Handler, error) {
+func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder) (http.Handler, error) {
 	engine := negroni.New()
 	recovery := negroni.NewRecovery()
 	engine.Use(recovery)
 	router := mux.NewRouter()
 	registerMap := make(map[string]struct{})
-	var options []func()
 	for _, build := range apiBuilders {
-		handler, info, f := build(ctx, svr)
-		if f != nil {
-			options = append(options, f)
-		}
+		handler, info := build(svr.ctx, svr)
 		var pathPrefix string
 		if info.IsCore {
 			pathPrefix = CorePath
@@ -210,11 +193,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, apiBuilde
 		}
 	}
 	engine.UseHandler(router)
-
-	return &lazyHandler{
-		engine:  engine,
-		options: options,
-	}, nil
+	return engine, nil
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
@@ -239,7 +218,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		return nil, err
 	}
 	if len(apiBuilders) != 0 {
-		apiHandler, err := combineBuilderServerHTTPService(ctx, s, apiBuilders...)
+		apiHandler, err := combineBuilderServerHTTPService(s, apiBuilders...)
 		if err != nil {
 			return nil, err
 		}
@@ -845,16 +824,6 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 			zap.Error(err))
 		return err
 	}
-	var buf bytes.Buffer
-	cfg := s.scheduleOpt.LoadLabelPropertyConfig()
-	toml.NewEncoder(&buf).Encode(cfg)
-
-	if s.GetConfig().EnableConfigManager {
-		status := s.updateConfigManager("label-property", buf.String())
-		if status.GetCode() != configpb.StatusCode_OK {
-			log.Error("failed to update the label property", zap.Error(errors.New(status.GetMessage())))
-		}
-	}
 
 	log.Info("label property config is updated", zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()))
 	return nil
@@ -874,16 +843,6 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 			zap.Error(err))
 		return err
 	}
-	var buf bytes.Buffer
-	cfg := s.scheduleOpt.LoadLabelPropertyConfig()
-	toml.NewEncoder(&buf).Encode(cfg)
-
-	if s.GetConfig().EnableConfigManager {
-		status := s.updateConfigManager("label-property", buf.String())
-		if status.GetCode() != configpb.StatusCode_OK {
-			log.Error("failed to delete the label property", zap.Error(errors.New(status.GetMessage())))
-		}
-	}
 
 	log.Info("label property config is deleted", zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()))
 	return nil
@@ -894,6 +853,8 @@ func (s *Server) updateConfigManager(name, value string) *configpb.Status {
 	globalVersion := configManager.GetGlobalConfigs(Component).GetVersion()
 	version := &configpb.Version{Global: globalVersion}
 	entries := []*configpb.ConfigEntry{{Name: name, Value: value}}
+	configManager.Lock()
+	defer configManager.Unlock()
 	_, status := configManager.UpdateGlobal(Component, version, entries)
 	return status
 }
@@ -1190,7 +1151,7 @@ func (s *Server) configCheckLoop() {
 			return
 		case <-ticker.C:
 			version := s.GetConfigVersion()
-			config, err := s.getComponentConfig(ctx, version, addr)
+			config, err := s.getComponentConfig(ctx, version, compoenntID)
 			if err != nil {
 				log.Error("failed to get config", zap.Error(err))
 			}
