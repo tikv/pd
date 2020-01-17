@@ -546,7 +546,6 @@ func update(config map[string]interface{}, configName []string, value string) er
 	if err != nil {
 		return err
 	}
-
 	config[configName[0]] = v
 	return nil
 }

@@ -151,6 +151,7 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 	}
 	for _, cmd := range cmds {
 		err := postJSON(addr, []byte(cmd))
+		time.Sleep(20 * time.Millisecond)
 		c.Assert(err, IsNil)
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -169,6 +170,7 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 	}
 	for _, cmd := range cmds {
 		err := postJSON(addr, []byte(cmd))
+		time.Sleep(20 * time.Millisecond)
 		c.Assert(err, IsNil)
 		time.Sleep(20 * time.Millisecond)
 	}

@@ -279,8 +279,8 @@ github.com/prometheus/common v0.4.1/go.mod h1:TNfzLD0ON7rHzMJeJkieUDPYmFC7Snx/y8
 github.com/prometheus/procfs v0.0.0-20181005140218-185b4288413d/go.mod h1:c3At6R/oaqEKCNdg8wHV1ftS6bRYblBhIjjI8uT2IGk=
 github.com/prometheus/procfs v0.0.2 h1:6LJUbpNm42llc4HRCuvApCSWB/WfhuNo9K98Q9sNGfs=
 github.com/prometheus/procfs v0.0.2/go.mod h1:TjEm7ze935MbeOT/UhFTIMYKhuLP4wbCsTZCD3I8kEA=
-github.com/rleungx/kvproto v0.0.0-20200109035058-e80ec4ce10a1 h1:9Izw9bNt1YutXPB43I4cOfX3fGqYwCg9D4kAyQsuLHs=
-github.com/rleungx/kvproto v0.0.0-20200109035058-e80ec4ce10a1/go.mod h1:74hTtf0KOCW1kGA7+XpuHDpbZxmlPM8z3VQTpTalS0E=
+github.com/rleungx/kvproto v0.0.0-20200116111714-40527acc49cd h1:LYIrvcglEKVxrTCLtvxFIsvjE/O2Rcvs8dR1CSI/k88=
+github.com/rleungx/kvproto v0.0.0-20200116111714-40527acc49cd/go.mod h1:74hTtf0KOCW1kGA7+XpuHDpbZxmlPM8z3VQTpTalS0E=
 github.com/rogpeppe/fastuuid v0.0.0-20150106093220-6724a57986af/go.mod h1:XWv6SoW27p1b0cqNHllgS5HIMJraePCO15w5zCzIWYg=
 github.com/rogpeppe/fastuuid v1.2.0/go.mod h1:jVj6XXZzXRy/MSR5jhDC/2q6DgLz+nrA6LYCDYWNEvQ=
 github.com/rogpeppe/go-internal v1.3.0/go.mod h1:M8bDsm7K2OlrFYOpmOWEs/qY81heoFRclV5y23lUDJ4=

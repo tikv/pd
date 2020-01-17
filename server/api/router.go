@@ -201,8 +201,6 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 		f := func() {
 			// TODO: support DELETE
 			componentRouter := apiRouter.PathPrefix("/component").Methods("POST", "GET").Subrouter()
-			configRouter := apiRouter.PathPrefix("/config").Methods("POST").Subrouter()
-			adminRouter := apiRouter.PathPrefix("/admin").Methods("POST").Subrouter()
 			CustomForwardResponseOption := func(ctx context.Context, w http.ResponseWriter, pm proto.Message) error {
 				if _, ok := pm.(*configpb.GetResponse); ok {
 					str := pm.(*configpb.GetResponse).GetConfig()
@@ -238,24 +236,9 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 			componentRouter.Handle("", gwmux).Methods("POST")
 			componentRouter.Handle("/{component_id}", gwmux).Methods("GET")
 			componentRouter.Use(newComponentMiddleware(svr).Middleware)
-
-			configRouter.Handle("", gwmux).Methods("POST")
-			configRouter.Handle("/replicate", gwmux).Methods("POST")
-			configRouter.Handle("/schedule", gwmux).Methods("POST")
-
-			adminRouter.Handle("/log", gwmux).Methods("POST")
-
-			configRouter.Use(newConfigMiddleware(svr).Middleware)
-			adminRouter.Use(newAdminMiddleware(svr).Middleware)
 		}
 		return rootRouter, f
 	}
-	apiRouter.HandleFunc("/config", confHandler.Post).Methods("POST")
-	apiRouter.HandleFunc("/config/schedule", confHandler.SetSchedule).Methods("POST")
-	apiRouter.HandleFunc("/config/replicate", confHandler.SetReplication).Methods("POST")
-
-	logHandler := newlogHandler(svr, rd)
-	apiRouter.HandleFunc("/admin/log", logHandler.Handle).Methods("POST")
 	return rootRouter, nil
 }
 

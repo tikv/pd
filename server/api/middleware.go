@@ -62,6 +62,93 @@ type entry struct {
 	value string
 }
 
+type componentMiddleware struct {
+	s  *server.Server
+	rd *render.Render
+}
+
+func newComponentMiddleware(s *server.Server) componentMiddleware {
+	return componentMiddleware{
+		s:  s,
+		rd: render.New(render.Options{IndentJSON: true}),
+	}
+}
+
+func (m componentMiddleware) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var component, componentID string
+		// TODO: support DELETE
+		switch r.Method {
+		case "POST":
+			var kind string
+			req := make(map[string]interface{})
+			json.NewDecoder(r.Body).Decode(&req)
+			cm := m.s.GetConfigManager()
+			componentInfo := getComponentInfo(req)
+			component = cm.GetComponent(componentInfo)
+			if component == "" {
+				component = componentInfo
+				kind = globalKind
+			} else {
+				componentID = componentInfo
+				kind = localKind
+			}
+			mapKeys := reflect.ValueOf(req).MapKeys()
+			var entries []*entry
+			for _, k := range mapKeys {
+				var value string
+				switch req[k.String()].(type) {
+				case float64, float32:
+					value = fmt.Sprintf("%f", req[k.String()])
+				default:
+					value = fmt.Sprintf("%v", req[k.String()])
+				}
+				entries = append(entries, &entry{k.String(), value})
+			}
+			s, err := updateBody(m.s, component, componentID, kind, entries)
+			if err != nil {
+				m.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			r.Body = ioutil.NopCloser(strings.NewReader(s))
+		case "GET":
+			vars := mux.Vars(r)
+			varName := "component_id"
+			componentID, ok := vars[varName]
+			if !ok {
+				m.rd.JSON(w, http.StatusBadRequest, errors.Errorf("field %s not present", varName))
+				return
+			}
+			cm := m.s.GetConfigManager()
+			component = cm.GetComponent(componentID)
+			if component == "" {
+				m.rd.JSON(w, http.StatusBadRequest, errors.Errorf("cannot find component with component ID: %s", componentID))
+				return
+			}
+			clusterID := m.s.ClusterID()
+			getURI := fmt.Sprintf("/pd/api/v1/component?header.cluster_id=%d&component=%s&component_id=%s", clusterID, component, componentID)
+			u, err := url.ParseRequestURI(getURI)
+			if err != nil {
+				m.rd.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			r.URL = u
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func getComponentInfo(req map[string]interface{}) string {
+	var componentInfo string
+	if c, ok := req["componentInfo"]; ok {
+		componentInfo = c.(string)
+	} else {
+		componentInfo = ""
+	}
+	delete(req, "componentInfo")
+	return componentInfo
+}
+
 func transToEntries(req map[string]interface{}) ([]*entry, error) {
 	mapKeys := reflect.ValueOf(req).MapKeys()
 	var entries []*entry
