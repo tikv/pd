@@ -664,9 +664,6 @@ func getMaxScore(stores []*StoreInfo, newStores ...*StoreInfo) float64 {
 func withMaxScore(stores []*StoreInfo, maxScore float64) []*StoreInfo {
 	results := make([]*StoreInfo, 0, len(stores))
 	for _, store := range stores {
-		if store == nil {
-			continue
-		}
 		results = append(results, store.Clone(SetMaxScore(maxScore)))
 	}
 	return results
