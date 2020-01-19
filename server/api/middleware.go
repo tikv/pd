@@ -116,6 +116,12 @@ func (m componentMiddleware) Middleware(next http.Handler) http.Handler {
 				m.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
+			u, err := url.ParseRequestURI("/component")
+			if err != nil {
+				m.rd.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			r.URL = u
 			r.Body = ioutil.NopCloser(strings.NewReader(s))
 		case "GET":
 			vars := mux.Vars(r)
@@ -132,7 +138,7 @@ func (m componentMiddleware) Middleware(next http.Handler) http.Handler {
 				return
 			}
 			clusterID := m.s.ClusterID()
-			getURI := fmt.Sprintf("/pd/api/v1/component?header.cluster_id=%d&component=%s&component_id=%s", clusterID, component, componentID)
+			getURI := fmt.Sprintf("/component?header.cluster_id=%d&component=%s&component_id=%s", clusterID, component, componentID)
 			u, err := url.ParseRequestURI(getURI)
 			if err != nil {
 				m.rd.JSON(w, http.StatusBadRequest, err.Error())
