@@ -19,20 +19,19 @@ func newTestTrendCase(result float64, nums ...uint64) *testTrendCase {
 	t := &testTrendCase{
 		result: result,
 	}
-	for _, num := range nums {
-		t.nums = append(t.nums, num)
-	}
+	t.nums = append(t.nums, nums...)
 	return t
 }
 
 func (s *testTopNSuite) TestGet(c *C) {
 	m := newTrendMonitor()
 
-	testCases := make([]*testTrendCase, 0)
-	testCases = append(testCases, newTestTrendCase(-0.0146875, 209, 208, 205, 205, 200))
-	testCases = append(testCases, newTestTrendCase(0.01875, 230, 235, 240, 245, 250))
-	testCases = append(testCases, newTestTrendCase(0.015, 227, 235, 243, 248, 250))
-	testCases = append(testCases, newTestTrendCase(-0.0359375, 220, 215, 214, 213, 200))
+	testCases := []*testTrendCase{
+		newTestTrendCase(-0.0146875, 209, 208, 205, 205, 200),
+		newTestTrendCase(0.01875, 230, 235, 240, 245, 250),
+		newTestTrendCase(0.015, 227, 235, 243, 248, 250),
+		newTestTrendCase(-0.0359375, 220, 215, 214, 213, 200),
+	}
 
 	for _, testCase := range testCases {
 		nums := make([]uint64, m.capacity)
