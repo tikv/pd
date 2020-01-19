@@ -66,6 +66,8 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.PendingPeers = r.GetPendingPeers()
 	s.WrittenBytes = r.GetBytesWritten()
 	s.ReadBytes = r.GetBytesRead()
+	s.WrittenKeys = r.GetKeysWritten()
+	s.ReadKeys = r.GetKeysRead()
 	s.ApproximateSize = r.GetApproximateSize()
 	s.ApproximateKeys = r.GetApproximateKeys()
 
