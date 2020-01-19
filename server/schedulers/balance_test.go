@@ -663,7 +663,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica5(c *C, tc *mockcluster.Cl
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], operator.OpBalance, 11, 6)
 }
 
-// TestBalance2 for cover case 1:
+// TestBalance2 for corner case 1:
 // 11 regions distributed across 5 stores.
 //| region_id | leader_store | follower_store | follower_store |
 //|-----------|--------------|----------------|----------------|
@@ -770,7 +770,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	tc.AddRegionStoreWithLeader(2, 8)
 	tc.AddRegionStoreWithLeader(3, 8)
 	tc.AddRegionStoreWithLeader(4, 16, 8)
-	// add 8 leader region to store 4 and move them to store 3
+	// add 8 leader regions to store 4 and move them to store 3
 	// ensure store score without operator influence : store 4 > store 3
 	// and store score with operator influence : store 3 > store 4
 	for i := 1; i <= 8; i++ {
