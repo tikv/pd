@@ -444,19 +444,19 @@ func (m *trendMonitor) getTrendSpeed() float64 {
 	}
 
 	i, sum, weight := 0, 0.0, 1.0
-	tail := m.nums.Back().Value.(*trendNode).num
+	tail := float64(m.nums.Back().Value.(*trendNode).num)
 	next := tail
 
 	for e := m.nums.Back().Prev(); e != nil; e = e.Prev() {
-		i += 1
+		i++
 		if i%m.batch == 0 {
 			weight /= 2
-			cur := e.Value.(*trendNode).num
-			sum += (float64(next) - float64(cur)) * weight
+			cur := float64(e.Value.(*trendNode).num)
+			sum += (next - cur) * weight
 			next = cur
 		}
 	}
-	return sum / float64(tail)
+	return sum / tail
 }
 
 // MonitorKind is the monitor kind
