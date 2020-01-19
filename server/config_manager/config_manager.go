@@ -352,15 +352,6 @@ func (c *ConfigManager) deleteEntry(component, e string) {
 	}
 }
 
-func (c *ConfigManager) deleteEntry(component, e string) {
-	if globalCfg, ok := c.GlobalCfgs[component]; ok {
-		delete(globalCfg.UpdateEntries, e)
-	}
-	for _, localCfg := range c.LocalCfgs[component] {
-		delete(localCfg.UpdateEntries, e)
-	}
-}
-
 // DeleteConfig removes a component from the config manager.
 func (c *ConfigManager) DeleteConfig(kind *configpb.ConfigKind, version *configpb.Version) *configpb.Status {
 	c.Lock()

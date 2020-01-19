@@ -15,12 +15,18 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"reflect"
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/gogo/protobuf/jsonpb"
+	"github.com/gorilla/mux"
+	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
@@ -191,4 +197,38 @@ func findTag(t reflect.Type, tag string) string {
 		}
 	}
 	return ""
+}
+
+func updateBody(s *server.Server, component, componentID string, kind string, entries []*entry) (string, error) {
+	clusterID := s.ClusterID()
+	var configEntries []*configpb.ConfigEntry
+	for _, e := range entries {
+		configEntry := &configpb.ConfigEntry{Name: e.key, Value: e.value}
+		configEntries = append(configEntries, configEntry)
+	}
+	var version *configpb.Version
+	var k *configpb.ConfigKind
+	cm := s.GetConfigManager()
+	switch kind {
+	case localKind:
+		version = cm.LocalCfgs[component][componentID].GetVersion()
+		k = &configpb.ConfigKind{Kind: &configpb.ConfigKind_Local{Local: &configpb.Local{ComponentId: componentID}}}
+	case globalKind:
+		version = &configpb.Version{Global: cm.GlobalCfgs[component].GetVersion()}
+		k = &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: component}}}
+	default:
+		return "", errors.New("no valid kind")
+	}
+
+	req := &configpb.UpdateRequest{
+		Header: &configpb.Header{
+			ClusterId: clusterID,
+		},
+		Version: version,
+		Kind:    k,
+		Entries: configEntries,
+	}
+
+	m := jsonpb.Marshaler{}
+	return m.MarshalToString(req)
 }

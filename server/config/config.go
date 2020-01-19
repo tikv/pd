@@ -577,7 +577,7 @@ type ScheduleConfig struct {
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
 	// Only used to display
-	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload,omitempty"`
+	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload"`
 
 	// StoreLimitMode can be auto or manual, when set to auto,
 	// PD tries to change the store limit values according to
