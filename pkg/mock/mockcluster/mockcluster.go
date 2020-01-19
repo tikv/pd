@@ -77,9 +77,9 @@ func (mc *Cluster) GetStoresStats() *statistics.StoresStats {
 	return mc.StoresStats
 }
 
-// GetTrend gets stores trend.
-func (mc *Cluster) GetTrend(kind statistics.MonitorKind, storeID uint64) statistics.CompareKind {
-	return statistics.Unsure
+// GetTrendSpeed gets stores trend.
+func (mc *Cluster) GetTrendSpeed(kind statistics.MonitorKind, storeID uint64) float64 {
+	return 0
 }
 
 // GetStoreRegionCount gets region count with a given store.

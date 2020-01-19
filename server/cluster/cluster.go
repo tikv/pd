@@ -719,9 +719,9 @@ func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 	return c.storesStats
 }
 
-// GetTrend returns stores' trend from cluster.
-func (c *RaftCluster) GetTrend(kind statistics.MonitorKind, storeID uint64) statistics.CompareKind {
-	return c.trendMonitorHub.GetStatus(kind, storeID)
+// GetTrendSpeed returns stores' trend from cluster.
+func (c *RaftCluster) GetTrendSpeed(kind statistics.MonitorKind, storeID uint64) float64 {
+	return c.trendMonitorHub.GetTrendSpeed(kind, storeID)
 }
 
 // DropCacheRegion removes a region from the cache.

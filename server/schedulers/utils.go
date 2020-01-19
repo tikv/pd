@@ -142,14 +142,16 @@ func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
 	return maxUint64(1, uint64(limit))
 }
 
+const threshold = 0.03
+
 func isTrendDiff(cluster opt.Cluster, schedulerName string, storeID uint64) bool {
-	regionSizeStatus := cluster.GetTrend(statistics.RegionSize, storeID)
-	usedSizeStatus := cluster.GetTrend(statistics.UsedSize, storeID)
-	if regionSizeStatus == statistics.Unsure || usedSizeStatus == statistics.Unsure {
+	regionSizeStatus := cluster.GetTrendSpeed(statistics.RegionSize, storeID)
+	usedSizeStatus := cluster.GetTrendSpeed(statistics.UsedSize, storeID)
+	if regionSizeStatus == 0 || usedSizeStatus == 0 {
 		return false
 	}
 
-	if regionSizeStatus != usedSizeStatus {
+	if math.Abs(regionSizeStatus-usedSizeStatus) > threshold {
 		label := strconv.FormatUint(storeID, 10)
 		schedulerCounter.WithLabelValues(schedulerName, "trend-"+label).Inc()
 		return true

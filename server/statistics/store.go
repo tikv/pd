@@ -383,9 +383,6 @@ func (r *RollingStoreStats) GetDiskWriteRate() float64 {
 	return r.totalBytesDiskWriteRate.Get()
 }
 
-const defaultInterval = time.Minute
-const defaultSize = 10
-
 type trendNode struct {
 	num        uint64
 	createTime time.Time
@@ -398,79 +395,68 @@ func newTrendNode(num uint64) *trendNode {
 	}
 }
 
-// CompareKind is the compare result
-type CompareKind int
-
-const (
-	// IsLess means that current one is less than previous one
-	IsLess CompareKind = iota
-	// Equal means that current one is equal with previous one
-	Equal
-	// IsGreater means that current one is greater than previous one
-	IsGreater
-	// Unsure means that trend is unsure
-	Unsure
-)
+const defaultInterval = time.Minute
+const defaultBatch = 10
+const defaultSize = 41
 
 type trendMonitor struct {
-	l        *list.List
+	nums     *list.List
 	interval time.Duration
+	batch    int
 	capacity int
 }
 
 func newTrendMonitor() *trendMonitor {
 	return &trendMonitor{
-		l:        list.New(),
+		nums:     list.New(),
 		interval: defaultInterval,
+		batch:    defaultBatch,
 		capacity: defaultSize,
 	}
 }
 
 func (m *trendMonitor) put(num uint64) {
-	if m.l.Len() > 0 {
-		lastTime := m.l.Back().Value.(*trendNode).createTime
+	if m.nums.Len() > 0 {
+		lastTime := m.nums.Back().Value.(*trendNode).createTime
 		if time.Since(lastTime) < m.interval {
 			return
 		}
 	}
-	m.l.PushBack(newTrendNode(num))
+	m.nums.PushBack(newTrendNode(num))
+}
+
+func (m *trendMonitor) gc() {
 	var next *list.Element
-	for e := m.l.Front(); e != nil; e = next {
+	for e := m.nums.Front(); e != nil; e = next {
 		next = e.Next()
 		curNode := e.Value.(*trendNode)
 		if time.Since(curNode.createTime) > m.interval*time.Duration(m.capacity+1) {
-			m.l.Remove(e)
+			m.nums.Remove(e)
 		} else {
 			break
 		}
 	}
 }
 
-const factor = 0.975
+func (m *trendMonitor) getTrendSpeed() float64 {
+	if m.nums.Len() < m.capacity {
+		return 0
+	}
 
-// It was observed that  the slowly decreasing store used size, while the region size continues to decrease due to
-// move out of the region.So we need to ensure the bigger one is big enough to avoid the trend monitor cannot work
-// properly in such a situation.
-func isRealGreater(a, b uint64) bool {
-	if a > b && float64(a)*factor > float64(b) {
-		return true
-	}
-	return false
-}
+	i, sum, weight := 0, 0.0, 1.0
+	tail := m.nums.Back().Value.(*trendNode).num
+	next := tail
 
-func (m *trendMonitor) getStatus() CompareKind {
-	if m.l.Len() < m.capacity {
-		return Unsure
+	for e := m.nums.Back().Prev(); e != nil; e = e.Prev() {
+		i += 1
+		if i%m.batch == 0 {
+			weight /= 2
+			cur := e.Value.(*trendNode).num
+			sum += (float64(next) - float64(cur)) * weight
+			next = cur
+		}
 	}
-	head := m.l.Front().Value.(*trendNode)
-	tail := m.l.Back().Value.(*trendNode)
-	if isRealGreater(tail.num, head.num) {
-		return IsGreater
-	} else if isRealGreater(head.num, tail.num) {
-		return IsLess
-	} else {
-		return Equal
-	}
+	return sum / float64(tail)
 }
 
 // MonitorKind is the monitor kind
@@ -501,12 +487,13 @@ func (h *TrendMonitorHub) Put(kind MonitorKind, storeID, num uint64) {
 		h.monitors[storeID] = [2]*trendMonitor{newTrendMonitor(), newTrendMonitor()}
 	}
 	h.monitors[storeID][kind].put(num)
+	h.monitors[storeID][kind].gc()
 }
 
-// GetStatus is used to get trend status.
-func (h *TrendMonitorHub) GetStatus(kind MonitorKind, storeID uint64) CompareKind {
+// GetTrendSpeed is used to get trend status.
+func (h *TrendMonitorHub) GetTrendSpeed(kind MonitorKind, storeID uint64) float64 {
 	if _, ok := h.monitors[storeID]; !ok {
-		return Unsure
+		return 0
 	}
-	return h.monitors[storeID][kind].getStatus()
+	return h.monitors[storeID][kind].getTrendSpeed()
 }
