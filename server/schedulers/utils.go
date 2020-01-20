@@ -337,10 +337,6 @@ type pendingInfluence struct {
 	origin   Influence
 }
 
-func (p *pendingInfluence) isDone() bool {
-	return p.op.IsEnd()
-}
-
 func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence) *pendingInfluence {
 	return &pendingInfluence{
 		op:     op,
