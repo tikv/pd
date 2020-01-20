@@ -19,6 +19,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"strings"
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/pd/pkg/apiutil"
@@ -122,7 +123,11 @@ func (h *confHandler) mergeConfig(v interface{}, data []byte) (updated bool, fou
 	}
 	t := reflect.TypeOf(v).Elem()
 	for i := 0; i < t.NumField(); i++ {
-		if _, ok := m[t.Field(i).Tag.Get("json")]; ok {
+		jsonTag := t.Field(i).Tag.Get("json")
+		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
+			jsonTag = jsonTag[:i]
+		}
+		if _, ok := m[jsonTag]; ok {
 			return false, true, nil
 		}
 	}

@@ -38,7 +38,7 @@ import (
 
 // Config is the pd server configuration.
 type Config struct {
-	*flag.FlagSet `json:"-"`
+	flagSet *flag.FlagSet
 
 	Version bool `json:"-"`
 
@@ -130,13 +130,15 @@ type Config struct {
 	logProps *log.ZapProperties
 
 	EnableConfigManager bool
+
+	EnableDashboard bool
 }
 
 // NewConfig creates a new config.
 func NewConfig() *Config {
 	cfg := &Config{}
-	cfg.FlagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
-	fs := cfg.FlagSet
+	cfg.flagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
+	fs := cfg.flagSet
 
 	fs.BoolVar(&cfg.Version, "V", false, "print version information and exit")
 	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
@@ -164,6 +166,8 @@ func NewConfig() *Config {
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
 
 	fs.BoolVar(&cfg.EnableConfigManager, "enable-config-manager", false, "Enable configuration manager")
+
+	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", true, "Enable Dashboard API and UI on this node")
 
 	return cfg
 }
@@ -244,7 +248,7 @@ func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 // Parse parses flag definitions from the argument list.
 func (c *Config) Parse(arguments []string) error {
 	// Parse first to get config file.
-	err := c.FlagSet.Parse(arguments)
+	err := c.flagSet.Parse(arguments)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -275,13 +279,13 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	// Parse again to replace with command line options.
-	err = c.FlagSet.Parse(arguments)
+	err = c.flagSet.Parse(arguments)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	if len(c.FlagSet.Args()) != 0 {
-		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
+	if len(c.flagSet.Args()) != 0 {
+		return errors.Errorf("'%s' is an invalid flag", c.flagSet.Arg(0))
 	}
 
 	err = c.Adjust(meta)
