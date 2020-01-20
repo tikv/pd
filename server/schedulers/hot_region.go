@@ -110,7 +110,7 @@ type hotScheduler struct {
 	// states across multiple `Schedule` calls
 	readPendings   map[*pendingInfluence]struct{}
 	writePendings  map[*pendingInfluence]struct{}
-	regionPendings map[uint64][2]*pendingInfluence
+	regionPendings map[uint64][2]*operator.Operator
 
 	// temporary states but exported to API or metrics
 	stats           *storeStatistics // store id -> hot regions statistics
@@ -134,7 +134,7 @@ func newHotScheduler(opController *schedule.OperatorController) *hotScheduler {
 		writeScores:    NewScoreInfos(),
 		readPendings:   map[*pendingInfluence]struct{}{},
 		writePendings:  map[*pendingInfluence]struct{}{},
-		regionPendings: make(map[uint64][2]*pendingInfluence),
+		regionPendings: make(map[uint64][2]*operator.Operator),
 	}
 }
 
@@ -251,18 +251,21 @@ func (h *hotScheduler) updateStatsByPendingOpInfo(storeStatsMap map[uint64]float
 func (h *hotScheduler) gcPendingOpInfos() {
 	for regionID, pendings := range h.regionPendings {
 		empty := true
-		for ty, pending := range pendings {
-			if pending != nil && pending.isDone() {
-				if time.Now().After(pending.op.GetCreateTime().Add(minRegionScheduleInterval)) {
+		for ty, op := range pendings {
+			if op != nil && op.IsEnd() {
+				if time.Now().After(op.GetCreateTime().Add(minRegionScheduleInterval)) {
 					schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
 					pendings[ty] = nil
-				} else {
-					empty = false
 				}
+			}
+			if pendings[ty] != nil {
+				empty = false
 			}
 		}
 		if empty {
 			delete(h.regionPendings, regionID)
+		} else {
+			h.regionPendings[regionID] = pendings
 		}
 	}
 }
@@ -297,11 +300,11 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 	}
 
 	if _, ok := h.regionPendings[regionID]; !ok {
-		h.regionPendings[regionID] = [2]*pendingInfluence{nil, nil}
+		h.regionPendings[regionID] = [2]*operator.Operator{nil, nil}
 	}
 	{ // h.pendingOpInfos[regionID][ty] = influence
 		tmp := h.regionPendings[regionID]
-		tmp[ty] = influence
+		tmp[ty] = op
 		h.regionPendings[regionID] = tmp
 	}
 
@@ -507,7 +510,7 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 			return false
 		}
 		if pendings[movePeer] != nil ||
-			(pendings[transferLeader] != nil && !pendings[transferLeader].isDone()) {
+			(pendings[transferLeader] != nil && !pendings[transferLeader].IsEnd()) {
 			return false
 		}
 	}
@@ -886,7 +889,7 @@ func (h *hotScheduler) clearPendingInfluence() {
 	h.writePendings = map[*pendingInfluence]struct{}{}
 	h.readPendingSum = nil
 	h.writePendingSum = nil
-	h.regionPendings = make(map[uint64][2]*pendingInfluence)
+	h.regionPendings = make(map[uint64][2]*operator.Operator)
 }
 
 func (rw rwType) String() string {
