@@ -248,7 +248,7 @@ func (h *hotScheduler) updateStatsByPendingOpInfo(storeStatsMap map[uint64]float
 	}
 }
 
-func (h *hotScheduler) gcPendingOpInfos() {
+func (h *hotScheduler) gcRegionPendings() {
 	for regionID, pendings := range h.regionPendings {
 		empty := true
 		for ty, op := range pendings {
@@ -881,7 +881,7 @@ func calcPendingWeight(op *operator.Operator) float64 {
 func (h *hotScheduler) summaryPendingInfluence() {
 	h.readPendingSum = summaryPendingInfluence(h.readPendings, calcPendingWeight)
 	h.writePendingSum = summaryPendingInfluence(h.writePendings, calcPendingWeight)
-	h.gcPendingOpInfos()
+	h.gcRegionPendings()
 }
 
 func (h *hotScheduler) clearPendingInfluence() {

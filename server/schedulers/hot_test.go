@@ -83,7 +83,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		}
 	}
 
-	hb.gcPendingOpInfos()
+	hb.gcRegionPendings()
 
 	for i := 0; i < len(opCreaters); i++ {
 		for j := 0; j < len(opCreaters); j++ {
