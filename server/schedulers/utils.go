@@ -358,3 +358,59 @@ func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*op
 	}
 	return ret
 }
+
+type storeLoad struct {
+	byteRate float64
+	count    int
+}
+
+func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
+	future := *load
+	future.byteRate += infl.ByteRate
+	return &storeLoadPred{
+		current: *load,
+		future:  future,
+	}
+}
+
+// store load prediction
+type storeLoadPred struct {
+	current storeLoad
+	future  storeLoad
+}
+
+func (lp *storeLoadPred) min() storeLoad {
+	return min(&lp.current, &lp.future)
+}
+
+func (lp *storeLoadPred) max() storeLoad {
+	return max(&lp.current, &lp.future)
+}
+
+func min(a, b *storeLoad) storeLoad {
+	return storeLoad{
+		byteRate: math.Min(a.byteRate, b.byteRate),
+		count:    minInt(a.count, b.count),
+	}
+}
+
+func max(a, b *storeLoad) storeLoad {
+	return storeLoad{
+		byteRate: math.Max(a.byteRate, b.byteRate),
+		count:    maxInt(a.count, b.count),
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a < b {
+		return b
+	}
+	return a
+}
