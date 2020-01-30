@@ -361,11 +361,11 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 }
 
 type balanceSolver struct {
-	sche       *hotScheduler
-	cluster    opt.Cluster
+	sche         *hotScheduler
+	cluster      opt.Cluster
 	stLoadDetail map[uint64]*storeLoadDetail
-	rwTy       rwType
-	opTy       opType
+	rwTy         rwType
+	opTy         opType
 
 	// temporary states
 	srcStoreID  uint64
