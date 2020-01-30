@@ -14,9 +14,6 @@
 package schedulers
 
 import (
-	"math"
-	"math/rand"
-	"sort"
 	"testing"
 	"time"
 
@@ -52,66 +49,4 @@ func (s *testMinMaxSuite) TestMinDuration(c *C) {
 	c.Assert(minDuration(time.Minute, time.Second), Equals, time.Second)
 	c.Assert(minDuration(time.Second, time.Minute), Equals, time.Second)
 	c.Assert(minDuration(time.Second, time.Second), Equals, time.Second)
-}
-
-var _ = Suite(&testScoreInfosSuite{})
-
-type testScoreInfosSuite struct {
-	num        int
-	scores     []float64
-	scoreInfos *ScoreInfos
-}
-
-func (s *testScoreInfosSuite) SetUpSuite(c *C) {
-	rand.Seed(time.Now().Unix())
-	s.num = 10
-	s.scores = make([]float64, 0, s.num)
-	s.scoreInfos = NewScoreInfos()
-	c.Assert(s.scoreInfos.isSorted, IsTrue)
-	for i := 0; i < s.num; i++ {
-		score := rand.Float64()
-		s.scoreInfos.Add(NewScoreInfo(uint64(i+1), score))
-		s.scores = append(s.scores, score)
-	}
-}
-
-func (s *testScoreInfosSuite) TestSort(c *C) {
-	sort.Float64s(s.scores)
-	s.scoreInfos.Sort()
-	c.Assert(s.scoreInfos.Min(), Equals, s.scores[0])
-
-	for i := 0; i < s.num; i++ {
-		c.Assert(s.scoreInfos.ToSlice()[i].GetScore(), Equals, s.scores[i])
-	}
-}
-
-func (s *testScoreInfosSuite) TestMin(c *C) {
-	sort.Float64s(s.scores)
-	s.scoreInfos.Sort()
-	c.Assert(s.scoreInfos.isSorted, IsTrue)
-
-	last := s.scores[s.num-1]
-	s.scoreInfos.Add(NewScoreInfo(uint64(s.num)+1, last+1))
-	c.Assert(s.scoreInfos.isSorted, IsTrue)
-
-	s.scoreInfos.Add(NewScoreInfo(uint64(s.num)+2, last))
-	c.Assert(s.scoreInfos.isSorted, IsFalse)
-}
-
-func (s *testScoreInfosSuite) TestMeanAndStdDev(c *C) {
-	sum := 0.0
-	for _, score := range s.scores {
-		sum += score
-	}
-	mean := sum / float64(s.num)
-
-	result := 0.0
-	for _, score := range s.scores {
-		diff := score - mean
-		result += diff * diff
-	}
-	result = math.Sqrt(result / float64(s.num))
-
-	c.Assert(math.Abs(s.scoreInfos.Mean()-mean), LessEqual, 1e-7)
-	c.Assert(math.Abs(s.scoreInfos.StdDev()-result), LessEqual, 1e-7)
 }

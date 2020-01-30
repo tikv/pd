@@ -63,7 +63,6 @@ const (
 	storeHotPeersDefaultLen = 100
 	hotRegionScheduleFactor = 0.95
 
-	minFlowBytes               = 128 * 1024
 	maxZombieDur time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
 
 	minRegionScheduleInterval time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
@@ -130,8 +129,6 @@ type hotScheduler struct {
 	stats           *storeStatistics // store id -> hot regions statistics
 	readPendingSum  map[uint64]Influence
 	writePendingSum map[uint64]Influence
-	readScores      *ScoreInfos
-	writeScores     *ScoreInfos
 
 	// temporary states
 	stLoadPreds *storeLoadPreds
@@ -147,8 +144,6 @@ func newHotScheduler(opController *schedule.OperatorController) *hotScheduler {
 		stats:          newStoreStatistics(),
 		types:          []rwType{write, read},
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
-		readScores:     NewScoreInfos(),
-		writeScores:    NewScoreInfos(),
 		readPendings:   map[*pendingInfluence]struct{}{},
 		writePendings:  map[*pendingInfluence]struct{}{},
 		regionPendings: make(map[uint64][2]*operator.Operator),
@@ -215,9 +210,6 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	h.summaryPendingInfluence()
 
-	h.readScores = h.analyzeStoreLoad(cluster, read)
-	h.writeScores = h.analyzeStoreLoad(cluster, write)
-
 	storesStat := cluster.GetStoresStats()
 
 	{ // update read statistics
@@ -263,22 +255,6 @@ func getUnhealthyStores(cluster opt.Cluster) []uint64 {
 	return ret
 }
 
-func filterUnhealthyStore(cluster opt.Cluster, storeStatsMap map[uint64]float64) {
-	for _, id := range getUnhealthyStores(cluster) {
-		delete(storeStatsMap, id)
-	}
-}
-
-func (h *hotScheduler) updateStatsByPendingOpInfo(storeStatsMap map[uint64]float64, balanceType rwType) {
-	for storeID := range storeStatsMap {
-		if balanceType == read {
-			storeStatsMap[storeID] += h.readPendingSum[storeID].ByteRate
-		} else {
-			storeStatsMap[storeID] += h.writePendingSum[storeID].ByteRate
-		}
-	}
-}
-
 func (h *hotScheduler) gcRegionPendings() {
 	for regionID, pendings := range h.regionPendings {
 		empty := true
@@ -299,26 +275,6 @@ func (h *hotScheduler) gcRegionPendings() {
 			h.regionPendings[regionID] = pendings
 		}
 	}
-}
-
-func (h *hotScheduler) analyzeStoreLoad(cluster opt.Cluster, balanceType rwType) *ScoreInfos {
-	storesStats := cluster.GetStoresStats()
-	var storeStatsMap map[uint64]float64
-	if balanceType == read {
-		storeStatsMap = storesStats.GetStoresBytesReadStat()
-	} else {
-		storeStatsMap = storesStats.GetStoresBytesWriteStat()
-	}
-	flowMean := MeanStoresStats(storeStatsMap)
-	if flowMean <= minFlowBytes {
-		for id := range storeStatsMap {
-			storeStatsMap[id] = 0
-		}
-	} else {
-		filterUnhealthyStore(cluster, storeStatsMap)
-		h.updateStatsByPendingOpInfo(storeStatsMap, balanceType)
-	}
-	return ConvertStoresStats(storeStatsMap)
 }
 
 func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, balanceType rwType, ty opType) {
@@ -889,30 +845,6 @@ func (h *hotScheduler) copyPendingInfluence(typ rwType) map[uint64]Influence {
 		ret[id] = infl
 	}
 	return ret
-}
-
-func (h *hotScheduler) GetReadScores() map[uint64]float64 {
-	return h.GetStoresScore(read)
-}
-
-func (h *hotScheduler) GetWriteScores() map[uint64]float64 {
-	return h.GetStoresScore(write)
-}
-
-func (h *hotScheduler) GetStoresScore(typ rwType) map[uint64]float64 {
-	h.RLock()
-	defer h.RUnlock()
-	storesScore := make(map[uint64]float64)
-	var infos []*ScoreInfo
-	if typ == read {
-		infos = h.readScores.ToSlice()
-	} else {
-		infos = h.writeScores.ToSlice()
-	}
-	for _, info := range infos {
-		storesScore[info.GetStoreID()] = info.GetScore()
-	}
-	return storesScore
 }
 
 func calcPendingWeight(op *operator.Operator) float64 {

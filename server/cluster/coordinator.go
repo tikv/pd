@@ -16,7 +16,6 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -333,8 +332,6 @@ type hasHotStatus interface {
 	GetHotWriteStatus() *statistics.StoreHotPeersInfos
 	GetWritePendingInfluence() map[uint64]schedulers.Influence
 	GetReadPendingInfluence() map[uint64]schedulers.Influence
-	GetReadScores() map[uint64]float64
-	GetWriteScores() map[uint64]float64
 }
 
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
@@ -443,21 +440,6 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 		infl := pendings[storeID]
 		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.ByteRate)
-	}
-
-	// Collects score of stores stats metrics.
-	readScores := s.Scheduler.(hasHotStatus).GetReadScores()
-	writeScores := s.Scheduler.(hasHotStatus).GetWriteScores()
-	for _, store := range stores {
-		storeAddress := store.GetAddress()
-		storeID := store.GetID()
-		storeLabel := strconv.FormatUint(storeID, 10)
-		if score, ok := readScores[storeID]; ok {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "store_read_score").Set(score)
-		}
-		if score, ok := writeScores[storeID]; ok {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "store_write_score").Set(score)
-		}
 	}
 }
 
