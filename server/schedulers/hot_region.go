@@ -235,24 +235,10 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	}
 }
 
-func calcPendingInfluence(load map[uint64]storeLoad, pending map[uint64]Influence) map[uint64]*storeLoadPred {
-	loadPred := make(map[uint64]*storeLoadPred, len(load))
-	for id, current := range load {
-		loadPred[id] = current.ToLoadPred(pending[id])
-	}
-	return loadPred
-}
-
-func getUnhealthyStores(cluster opt.Cluster) []uint64 {
-	ret := make([]uint64, 0)
-	stores := cluster.GetStores()
-	for _, store := range stores {
-		if store.IsTombstone() ||
-			store.DownTime() > cluster.GetMaxStoreDownTime() {
-			ret = append(ret, store.GetID())
-		}
-	}
-	return ret
+func (h *hotScheduler) summaryPendingInfluence() {
+	h.readPendingSum = summaryPendingInfluence(h.readPendings, calcPendingWeight)
+	h.writePendingSum = summaryPendingInfluence(h.writePendings, calcPendingWeight)
+	h.gcRegionPendings()
 }
 
 func (h *hotScheduler) gcRegionPendings() {
@@ -275,27 +261,6 @@ func (h *hotScheduler) gcRegionPendings() {
 			h.regionPendings[regionID] = pendings
 		}
 	}
-}
-
-func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, balanceType rwType, ty opType) {
-	influence := newPendingInfluence(op, srcStore, dstStore, infl)
-	regionID := op.RegionID()
-	if balanceType == read {
-		h.readPendings[influence] = struct{}{}
-	} else {
-		h.writePendings[influence] = struct{}{}
-	}
-
-	if _, ok := h.regionPendings[regionID]; !ok {
-		h.regionPendings[regionID] = [2]*operator.Operator{nil, nil}
-	}
-	{ // h.pendingOpInfos[regionID][ty] = influence
-		tmp := h.regionPendings[regionID]
-		tmp[ty] = op
-		h.regionPendings[regionID] = tmp
-	}
-
-	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
 }
 
 func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesStat map[uint64]float64, cluster opt.Cluster, kind core.ResourceKind) (map[uint64]storeLoad, statistics.StoreHotPeersStat) {
@@ -335,6 +300,35 @@ func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesSta
 	}
 
 	return load, stat
+}
+
+func calcPendingInfluence(load map[uint64]storeLoad, pending map[uint64]Influence) map[uint64]*storeLoadPred {
+	loadPred := make(map[uint64]*storeLoadPred, len(load))
+	for id, current := range load {
+		loadPred[id] = current.ToLoadPred(pending[id])
+	}
+	return loadPred
+}
+
+func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, balanceType rwType, ty opType) {
+	influence := newPendingInfluence(op, srcStore, dstStore, infl)
+	regionID := op.RegionID()
+	if balanceType == read {
+		h.readPendings[influence] = struct{}{}
+	} else {
+		h.writePendings[influence] = struct{}{}
+	}
+
+	if _, ok := h.regionPendings[regionID]; !ok {
+		h.regionPendings[regionID] = [2]*operator.Operator{nil, nil}
+	}
+	{ // h.pendingOpInfos[regionID][ty] = influence
+		tmp := h.regionPendings[regionID]
+		tmp[ty] = op
+		h.regionPendings[regionID] = tmp
+	}
+
+	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
 }
 
 func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
@@ -412,6 +406,18 @@ func (bs *balanceSolver) init() {
 		delete(bs.stLoadPred, id)
 		delete(bs.storesStat, id)
 	}
+}
+
+func getUnhealthyStores(cluster opt.Cluster) []uint64 {
+	ret := make([]uint64, 0)
+	stores := cluster.GetStores()
+	for _, store := range stores {
+		if store.IsTombstone() ||
+			store.DownTime() > cluster.GetMaxStoreDownTime() {
+			ret = append(ret, store.GetID())
+		}
+	}
+	return ret
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
@@ -866,12 +872,6 @@ func calcPendingWeight(op *operator.Operator) float64 {
 	default:
 		return 0
 	}
-}
-
-func (h *hotScheduler) summaryPendingInfluence() {
-	h.readPendingSum = summaryPendingInfluence(h.readPendings, calcPendingWeight)
-	h.writePendingSum = summaryPendingInfluence(h.writePendings, calcPendingWeight)
-	h.gcRegionPendings()
 }
 
 func (h *hotScheduler) clearPendingInfluence() {
