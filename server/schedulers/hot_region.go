@@ -60,7 +60,6 @@ const (
 	HotWriteRegionType = "hot-write-region"
 
 	hotRegionLimitFactor    = 0.75
-	storeHotPeersDefaultLen = 100
 	hotRegionScheduleFactor = 0.95
 
 	maxZombieDur time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
@@ -83,31 +82,17 @@ const (
 	transferLeader
 )
 
-type storeStatistics struct {
-	readStatAsLeader  statistics.StoreHotPeersStat
-	writeStatAsPeer   statistics.StoreHotPeersStat
-	writeStatAsLeader statistics.StoreHotPeersStat
+type storeLoadInfos struct {
+	ReadLeaders  map[uint64]*storeLoadDetail
+	WriteLeaders map[uint64]*storeLoadDetail
+	WritePeers   map[uint64]*storeLoadDetail
 }
 
-func newStoreStatistics() *storeStatistics {
-	return &storeStatistics{
-		readStatAsLeader:  make(statistics.StoreHotPeersStat),
-		writeStatAsLeader: make(statistics.StoreHotPeersStat),
-		writeStatAsPeer:   make(statistics.StoreHotPeersStat),
-	}
-}
-
-type storeLoadPreds struct {
-	readLeaders  map[uint64]*storeLoadPred
-	writeLeaders map[uint64]*storeLoadPred
-	writePeers   map[uint64]*storeLoadPred
-}
-
-func newStoreLoadPreds() *storeLoadPreds {
-	return &storeLoadPreds{
-		readLeaders:  make(map[uint64]*storeLoadPred),
-		writeLeaders: make(map[uint64]*storeLoadPred),
-		writePeers:   make(map[uint64]*storeLoadPred),
+func newStoreLoadInfos() *storeLoadInfos {
+	return &storeLoadInfos{
+		ReadLeaders:  make(map[uint64]*storeLoadDetail),
+		WriteLeaders: make(map[uint64]*storeLoadDetail),
+		WritePeers:   make(map[uint64]*storeLoadDetail),
 	}
 }
 
@@ -126,12 +111,9 @@ type hotScheduler struct {
 	regionPendings map[uint64][2]*operator.Operator
 
 	// temporary states but exported to API or metrics
-	stats           *storeStatistics // store id -> hot regions statistics
+	stLoadInfos     *storeLoadInfos
 	readPendingSum  map[uint64]Influence
 	writePendingSum map[uint64]Influence
-
-	// temporary states
-	stLoadPreds *storeLoadPreds
 }
 
 func newHotScheduler(opController *schedule.OperatorController) *hotScheduler {
@@ -141,14 +123,13 @@ func newHotScheduler(opController *schedule.OperatorController) *hotScheduler {
 		BaseScheduler:  base,
 		leaderLimit:    1,
 		peerLimit:      1,
-		stats:          newStoreStatistics(),
 		types:          []rwType{write, read},
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 		readPendings:   map[*pendingInfluence]struct{}{},
 		writePendings:  map[*pendingInfluence]struct{}{},
 		regionPendings: make(map[uint64][2]*operator.Operator),
 
-		stLoadPreds: newStoreLoadPreds(),
+		stLoadInfos: newStoreLoadInfos(),
 	}
 }
 
@@ -212,26 +193,21 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 
 	storesStat := cluster.GetStoresStats()
 
+	minHotDegree := cluster.GetHotRegionCacheHitsThreshold()
 	{ // update read statistics
 		regionRead := cluster.RegionReadStats()
 		storeRead := storesStat.GetStoresBytesReadStat()
 
-		leadersLoad, asLeader := calcScore(regionRead, storeRead, cluster, core.LeaderKind)
-		h.stats.readStatAsLeader = asLeader
-		h.stLoadPreds.readLeaders = calcPendingInfluence(leadersLoad, h.readPendingSum)
+		h.stLoadInfos.ReadLeaders = summaryStoresLoad(storeRead, h.readPendingSum, regionRead, minHotDegree, read, core.LeaderKind)
 	}
 
 	{ // update write statistics
 		regionWrite := cluster.RegionWriteStats()
 		storeWrite := storesStat.GetStoresBytesWriteStat()
 
-		leadersLoad, asLeader := calcScore(regionWrite, storeWrite, cluster, core.LeaderKind)
-		h.stats.writeStatAsLeader = asLeader
-		h.stLoadPreds.writeLeaders = calcPendingInfluence(leadersLoad, h.writePendingSum)
+		h.stLoadInfos.WriteLeaders = summaryStoresLoad(storeWrite, h.writePendingSum, regionWrite, minHotDegree, write, core.LeaderKind)
 
-		peersLoad, asPeer := calcScore(regionWrite, storeWrite, cluster, core.RegionKind)
-		h.stats.writeStatAsPeer = asPeer
-		h.stLoadPreds.writePeers = calcPendingInfluence(peersLoad, h.writePendingSum)
+		h.stLoadInfos.WritePeers = summaryStoresLoad(storeWrite, h.writePendingSum, regionWrite, minHotDegree, write, core.RegionKind)
 	}
 }
 
@@ -263,51 +239,63 @@ func (h *hotScheduler) gcRegionPendings() {
 	}
 }
 
-func calcScore(storeHotPeers map[uint64][]*statistics.HotPeerStat, storeBytesStat map[uint64]float64, cluster opt.Cluster, kind core.ResourceKind) (map[uint64]storeLoad, statistics.StoreHotPeersStat) {
-	load := make(map[uint64]storeLoad, len(storeHotPeers))
-	stat := make(statistics.StoreHotPeersStat)
+// Load information of all available stores.
+func summaryStoresLoad(
+	storeByteRate map[uint64]float64,
+	pendings map[uint64]Influence,
+	storeHotPeers map[uint64][]*statistics.HotPeerStat,
+	minHotDegree int,
+	rwTy rwType,
+	kind core.ResourceKind,
+) map[uint64]*storeLoadDetail {
+	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
 
-	for storeID, items := range storeHotPeers {
-		hotPeers, ok := stat[storeID]
-		if !ok {
-			hotPeers = &statistics.HotPeersStat{
-				Stats: make([]statistics.HotPeerStat, 0, storeHotPeersDefaultLen),
+	// Stores without byte rate statistics is not available to schedule.
+	for id, rate := range storeByteRate {
+
+		// Find all hot peers first
+		hotPeers := make([]*statistics.HotPeerStat, 0)
+		{
+			// Use sum of hot peers to estimate leader-only byte rate.
+			if kind == core.LeaderKind && rwTy == write {
+				rate = 0
 			}
-			stat[storeID] = hotPeers
-		}
-
-		cacheHitsThreshold := cluster.GetHotRegionCacheHitsThreshold()
-		for _, peerStat := range items {
-			if (kind == core.LeaderKind && !peerStat.IsLeader()) ||
-				peerStat.HotDegree < cacheHitsThreshold ||
-				cluster.GetRegion(peerStat.RegionID) == nil {
-				continue
+			for _, peer := range filterByResourceKind(storeHotPeers[id], kind) {
+				if kind == core.LeaderKind && rwTy == write {
+					rate += peer.GetBytesRate()
+				}
+				if peer.HotDegree >= minHotDegree {
+					hotPeers = append(hotPeers, peer.Clone())
+				}
 			}
-			hotPeers.TotalBytesRate += peerStat.GetBytesRate()
-			hotPeers.Stats = append(hotPeers.Stats, peerStat.Clone())
 		}
-		hotPeers.Count = len(hotPeers.Stats)
-	}
 
-	for id, rate := range storeBytesStat {
-		stLoad := storeLoad{
-			byteRate: rate,
-		}
-		if hotPeers, ok := stat[id]; ok {
-			stLoad.count = hotPeers.Count
-		}
-		load[id] = stLoad
-	}
+		// Build store load prediction from current load and pending influence.
+		stLoadPred := (&storeLoad{
+			ByteRate: rate,
+			Count:    len(hotPeers),
+		}).ToLoadPred(pendings[id])
 
-	return load, stat
+		// Construct store load info.
+		loadDetail[id] = &storeLoadDetail{
+			LoadPred: stLoadPred,
+			HotPeers: hotPeers,
+		}
+	}
+	return loadDetail
 }
 
-func calcPendingInfluence(load map[uint64]storeLoad, pending map[uint64]Influence) map[uint64]*storeLoadPred {
-	loadPred := make(map[uint64]*storeLoadPred, len(load))
-	for id, current := range load {
-		loadPred[id] = current.ToLoadPred(pending[id])
+func filterByResourceKind(peers []*statistics.HotPeerStat, kind core.ResourceKind) []*statistics.HotPeerStat {
+	if kind == core.LeaderKind {
+		leaders := make([]*statistics.HotPeerStat, 0)
+		for _, peer := range peers {
+			if peer.IsLeader() {
+				leaders = append(leaders, peer)
+			}
+		}
+		return leaders
 	}
-	return loadPred
+	return peers
 }
 
 func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, balanceType rwType, ty opType) {
@@ -375,8 +363,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 type balanceSolver struct {
 	sche       *hotScheduler
 	cluster    opt.Cluster
-	stLoadPred map[uint64]*storeLoadPred
-	storesStat statistics.StoreHotPeersStat
+	stLoadDetail map[uint64]*storeLoadDetail
 	rwTy       rwType
 	opTy       opType
 
@@ -390,21 +377,17 @@ type balanceSolver struct {
 func (bs *balanceSolver) init() {
 	switch bs.rwTy {
 	case read:
-		bs.stLoadPred = bs.sche.stLoadPreds.readLeaders
-		bs.storesStat = bs.sche.stats.readStatAsLeader
+		bs.stLoadDetail = bs.sche.stLoadInfos.ReadLeaders
 	case write:
 		switch bs.opTy {
 		case movePeer:
-			bs.stLoadPred = bs.sche.stLoadPreds.writePeers
-			bs.storesStat = bs.sche.stats.writeStatAsPeer
+			bs.stLoadDetail = bs.sche.stLoadInfos.WritePeers
 		case transferLeader:
-			bs.stLoadPred = bs.sche.stLoadPreds.writeLeaders
-			bs.storesStat = bs.sche.stats.writeStatAsLeader
+			bs.stLoadDetail = bs.sche.stLoadInfos.WriteLeaders
 		}
 	}
 	for _, id := range getUnhealthyStores(bs.cluster) {
-		delete(bs.stLoadPred, id)
-		delete(bs.storesStat, id)
+		delete(bs.stLoadDetail, id)
 	}
 }
 
@@ -432,7 +415,7 @@ func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy
 }
 
 func (bs *balanceSolver) isValid() bool {
-	if bs.cluster == nil || bs.sche == nil || bs.storesStat == nil {
+	if bs.cluster == nil || bs.sche == nil || bs.stLoadDetail == nil {
 		return false
 	}
 	switch bs.rwTy {
@@ -458,7 +441,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	}
 
 	for _, srcPeerStat := range bs.getPeerList() {
-		bs.srcPeerStat = &srcPeerStat
+		bs.srcPeerStat = srcPeerStat
 		bs.region = bs.getRegion()
 		if bs.region == nil {
 			continue
@@ -491,12 +474,12 @@ func (bs *balanceSolver) selectSrcStoreID() uint64 {
 	var id uint64
 	switch bs.opTy {
 	case movePeer:
-		id = selectSrcStoreByByteRate(bs.stLoadPred)
+		id = selectSrcStoreByByteRate(bs.stLoadDetail)
 	case transferLeader:
 		if bs.rwTy == write {
-			id = selectSrcStoreByCount(bs.stLoadPred)
+			id = selectSrcStoreByCount(bs.stLoadDetail)
 		} else {
-			id = selectSrcStoreByByteRate(bs.stLoadPred)
+			id = selectSrcStoreByByteRate(bs.stLoadDetail)
 		}
 	}
 	if id != 0 && bs.cluster.GetStore(id) == nil {
@@ -505,8 +488,8 @@ func (bs *balanceSolver) selectSrcStoreID() uint64 {
 	return id
 }
 
-func (bs *balanceSolver) getPeerList() []statistics.HotPeerStat {
-	ret := bs.storesStat[bs.srcStoreID].Stats
+func (bs *balanceSolver) getPeerList() []*statistics.HotPeerStat {
+	ret := bs.stLoadDetail[bs.srcStoreID].HotPeers
 	bs.sche.r.Shuffle(len(ret), func(i, j int) {
 		ret[i], ret[j] = ret[j], ret[i]
 	})
@@ -619,18 +602,18 @@ func (bs *balanceSolver) getDstCandidateIDs() map[uint64]struct{} {
 }
 
 func (bs *balanceSolver) selectDstStoreID(candidateIDs map[uint64]struct{}) uint64 {
-	candidateLoadPred := make(map[uint64]*storeLoadPred, len(candidateIDs))
+	candidateLoadDetail := make(map[uint64]*storeLoadDetail, len(candidateIDs))
 	for id := range candidateIDs {
-		candidateLoadPred[id] = bs.stLoadPred[id]
+		candidateLoadDetail[id] = bs.stLoadDetail[id]
 	}
 	switch bs.opTy {
 	case movePeer:
-		return selectDstStoreByByteRate(candidateLoadPred, bs.srcPeerStat.GetBytesRate(), bs.stLoadPred[bs.srcStoreID])
+		return selectDstStoreByByteRate(candidateLoadDetail, bs.srcPeerStat.GetBytesRate(), bs.stLoadDetail[bs.srcStoreID])
 	case transferLeader:
 		if bs.rwTy == write {
-			return selectDstStoreByCount(candidateLoadPred, bs.srcPeerStat.GetBytesRate(), bs.stLoadPred[bs.srcStoreID])
+			return selectDstStoreByCount(candidateLoadDetail, bs.srcPeerStat.GetBytesRate(), bs.stLoadDetail[bs.srcStoreID])
 		}
-		return selectDstStoreByByteRate(candidateLoadPred, bs.srcPeerStat.GetBytesRate(), bs.stLoadPred[bs.srcStoreID])
+		return selectDstStoreByByteRate(candidateLoadDetail, bs.srcPeerStat.GetBytesRate(), bs.stLoadDetail[bs.srcStoreID])
 	default:
 		return 0
 	}
@@ -661,13 +644,13 @@ func (bs *balanceSolver) buildOperators() []*operator.Operator {
 	case movePeer:
 		srcPeer := bs.region.GetStorePeer(bs.srcStoreID) // checked in getRegionAndSrcPeer
 		dstPeer := &metapb.Peer{StoreId: bs.dstStoreID, IsLearner: srcPeer.IsLearner}
-		bs.sche.peerLimit = bs.sche.adjustBalanceLimit(bs.srcStoreID, bs.storesStat)
+		bs.sche.peerLimit = bs.sche.adjustBalanceLimit(bs.srcStoreID, bs.stLoadDetail)
 		op, err = operator.CreateMovePeerOperator("move-hot-"+bs.rwTy.String()+"-region", bs.cluster, bs.region, operator.OpHotRegion, bs.srcStoreID, dstPeer)
 	case transferLeader:
 		if bs.region.GetStoreVoter(bs.dstStoreID) == nil {
 			return nil
 		}
-		bs.sche.leaderLimit = bs.sche.adjustBalanceLimit(bs.srcStoreID, bs.storesStat)
+		bs.sche.leaderLimit = bs.sche.adjustBalanceLimit(bs.srcStoreID, bs.stLoadDetail)
 		op, err = operator.CreateTransferLeaderOperator("transfer-hot-"+bs.rwTy.String()+"-leader", bs.cluster, bs.region, bs.srcStoreID, bs.dstStoreID, operator.OpHotRegion)
 	}
 
@@ -692,48 +675,48 @@ func (bs *balanceSolver) buildOperators() []*operator.Operator {
 }
 
 // Sort stores according to their load prediction.
-func sortStores(loadPred map[uint64]*storeLoadPred, better func(lp1, lp2 *storeLoadPred) bool) []uint64 {
-	ids := make([]uint64, 0, len(loadPred))
-	for id := range loadPred {
+func sortStores(loadDetail map[uint64]*storeLoadDetail, better func(lp1, lp2 *storeLoadPred) bool) []uint64 {
+	ids := make([]uint64, 0, len(loadDetail))
+	for id := range loadDetail {
 		ids = append(ids, id)
 	}
 	sort.Slice(ids, func(i, j int) bool {
 		id1, id2 := ids[i], ids[j]
-		return better(loadPred[id1], loadPred[id2])
+		return better(loadDetail[id1].LoadPred, loadDetail[id2].LoadPred)
 	})
 	return ids
 }
 
 // Prefer store with larger `count`.
-func selectSrcStoreByCount(loadPred map[uint64]*storeLoadPred) uint64 {
-	stores := sortStores(loadPred, func(lp1, lp2 *storeLoadPred) bool {
+func selectSrcStoreByCount(loadDetail map[uint64]*storeLoadDetail) uint64 {
+	stores := sortStores(loadDetail, func(lp1, lp2 *storeLoadPred) bool {
 		ld1, ld2 := lp1.min(), lp2.min()
-		if ld1.count > ld2.count ||
-			(ld1.count == ld2.count && ld1.byteRate > ld2.byteRate) {
+		if ld1.Count > ld2.Count ||
+			(ld1.Count == ld2.Count && ld1.ByteRate > ld2.ByteRate) {
 			return true
 		}
 		return false
 	})
 
-	if len(stores) > 0 && loadPred[stores[0]].current.count > 1 {
+	if len(stores) > 0 && loadDetail[stores[0]].LoadPred.Current.Count > 1 {
 		return stores[0]
 	}
 	return 0
 }
 
 // Prefer store with larger `byteRate`.
-func selectSrcStoreByByteRate(loadPred map[uint64]*storeLoadPred) uint64 {
-	stores := sortStores(loadPred, func(lp1, lp2 *storeLoadPred) bool {
+func selectSrcStoreByByteRate(loadDetail map[uint64]*storeLoadDetail) uint64 {
+	stores := sortStores(loadDetail, func(lp1, lp2 *storeLoadPred) bool {
 		ld1, ld2 := lp1.min(), lp2.min()
-		if ld1.byteRate > ld2.byteRate ||
-			(ld1.byteRate == ld2.byteRate && ld1.count > ld2.count) {
+		if ld1.ByteRate > ld2.ByteRate ||
+			(ld1.ByteRate == ld2.ByteRate && ld1.Count > ld2.Count) {
 			return true
 		}
 		return false
 	})
 
 	for _, id := range stores {
-		if loadPred[id].current.count > 1 {
+		if loadDetail[id].LoadPred.Current.Count > 1 {
 			return id
 		}
 	}
@@ -741,21 +724,21 @@ func selectSrcStoreByByteRate(loadPred map[uint64]*storeLoadPred) uint64 {
 }
 
 // Prefer store with smaller `count`.
-func selectDstStoreByCount(candidates map[uint64]*storeLoadPred, regionBytesRate float64, srcLoadPred *storeLoadPred) uint64 {
+func selectDstStoreByCount(candidates map[uint64]*storeLoadDetail, regionBytesRate float64, srcLoadDetail *storeLoadDetail) uint64 {
 	stores := sortStores(candidates, func(lp1, lp2 *storeLoadPred) bool {
 		ld1, ld2 := lp1.max(), lp2.max()
-		if ld1.count < ld2.count ||
-			(ld1.count == ld2.count && ld1.byteRate < ld2.byteRate) {
+		if ld1.Count < ld2.Count ||
+			(ld1.Count == ld2.Count && ld1.ByteRate < ld2.ByteRate) {
 			return true
 		}
 		return false
 	})
 
-	srcLoad := srcLoadPred.min()
+	srcLoad := srcLoadDetail.LoadPred.min()
 	for _, id := range stores {
-		dstLoad := candidates[id].max()
-		if srcLoad.count-1 >= dstLoad.count+1 &&
-			srcLoad.byteRate*hotRegionScheduleFactor > dstLoad.byteRate+regionBytesRate {
+		dstLoad := candidates[id].LoadPred.max()
+		if srcLoad.Count-1 >= dstLoad.Count+1 &&
+			srcLoad.ByteRate*hotRegionScheduleFactor > dstLoad.ByteRate+regionBytesRate {
 			return id
 		}
 	}
@@ -763,47 +746,46 @@ func selectDstStoreByCount(candidates map[uint64]*storeLoadPred, regionBytesRate
 }
 
 // Prefer store with smaller `byteRate`.
-func selectDstStoreByByteRate(candidates map[uint64]*storeLoadPred, regionBytesRate float64, srcLoadPred *storeLoadPred) uint64 {
+func selectDstStoreByByteRate(candidates map[uint64]*storeLoadDetail, regionBytesRate float64, srcLoadDetail *storeLoadDetail) uint64 {
 	stores := sortStores(candidates, func(lp1, lp2 *storeLoadPred) bool {
 		ld1, ld2 := lp1.max(), lp2.max()
-		if ld1.byteRate < ld2.byteRate ||
-			(ld1.byteRate == ld2.byteRate && ld1.count < ld2.count) {
+		if ld1.ByteRate < ld2.ByteRate ||
+			(ld1.ByteRate == ld2.ByteRate && ld1.Count < ld2.Count) {
 			return true
 		}
 		return false
 	})
 
-	srcLoad := srcLoadPred.min()
+	srcLoad := srcLoadDetail.LoadPred.min()
 	for _, id := range stores {
-		dstLoad := candidates[id].max()
-		if srcLoad.byteRate*hotRegionScheduleFactor > dstLoad.byteRate+regionBytesRate {
+		dstLoad := candidates[id].LoadPred.max()
+		if srcLoad.ByteRate*hotRegionScheduleFactor > dstLoad.ByteRate+regionBytesRate {
 			return id
 		}
 	}
 	return 0
 }
 
-func (h *hotScheduler) adjustBalanceLimit(storeID uint64, storesStat statistics.StoreHotPeersStat) uint64 {
-	srcStoreStatistics := storesStat[storeID]
+func (h *hotScheduler) adjustBalanceLimit(storeID uint64, loadDetail map[uint64]*storeLoadDetail) uint64 {
+	srcStoreStatistics := loadDetail[storeID]
 
 	var hotRegionTotalCount int
-	for _, m := range storesStat {
-		hotRegionTotalCount += len(m.Stats)
+	for _, m := range loadDetail {
+		hotRegionTotalCount += len(m.HotPeers)
 	}
 
-	avgRegionCount := float64(hotRegionTotalCount) / float64(len(storesStat))
+	avgRegionCount := float64(hotRegionTotalCount) / float64(len(loadDetail))
 	// Multiplied by hotRegionLimitFactor to avoid transfer back and forth
-	limit := uint64((float64(len(srcStoreStatistics.Stats)) - avgRegionCount) * hotRegionLimitFactor)
+	limit := uint64((float64(len(srcStoreStatistics.HotPeers)) - avgRegionCount) * hotRegionLimitFactor)
 	return maxUint64(limit, 1)
 }
 
 func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
 	h.RLock()
 	defer h.RUnlock()
-	asLeader := make(statistics.StoreHotPeersStat, len(h.stats.readStatAsLeader))
-	for id, stat := range h.stats.readStatAsLeader {
-		clone := *stat
-		asLeader[id] = &clone
+	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos.ReadLeaders))
+	for id, detail := range h.stLoadInfos.ReadLeaders {
+		asLeader[id] = detail.toHotPeersStat()
 	}
 	return &statistics.StoreHotPeersInfos{
 		AsLeader: asLeader,
@@ -813,15 +795,13 @@ func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
 func (h *hotScheduler) GetHotWriteStatus() *statistics.StoreHotPeersInfos {
 	h.RLock()
 	defer h.RUnlock()
-	asLeader := make(statistics.StoreHotPeersStat, len(h.stats.writeStatAsLeader))
-	asPeer := make(statistics.StoreHotPeersStat, len(h.stats.writeStatAsPeer))
-	for id, stat := range h.stats.writeStatAsLeader {
-		clone := *stat
-		asLeader[id] = &clone
+	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos.WriteLeaders))
+	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos.WritePeers))
+	for id, detail := range h.stLoadInfos.WriteLeaders {
+		asLeader[id] = detail.toHotPeersStat()
 	}
-	for id, stat := range h.stats.writeStatAsPeer {
-		clone := *stat
-		asPeer[id] = &clone
+	for id, detail := range h.stLoadInfos.WritePeers {
+		asPeer[id] = detail.toHotPeersStat()
 	}
 	return &statistics.StoreHotPeersInfos{
 		AsLeader: asLeader,

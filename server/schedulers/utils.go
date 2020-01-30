@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -200,44 +201,44 @@ func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*op
 }
 
 type storeLoad struct {
-	byteRate float64
-	count    int
+	ByteRate float64
+	Count    int
 }
 
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	future := *load
-	future.byteRate += infl.ByteRate
+	future.ByteRate += infl.ByteRate
 	return &storeLoadPred{
-		current: *load,
-		future:  future,
+		Current: *load,
+		Future:  future,
 	}
 }
 
 // store load prediction
 type storeLoadPred struct {
-	current storeLoad
-	future  storeLoad
+	Current storeLoad
+	Future  storeLoad
 }
 
 func (lp *storeLoadPred) min() storeLoad {
-	return min(&lp.current, &lp.future)
+	return min(&lp.Current, &lp.Future)
 }
 
 func (lp *storeLoadPred) max() storeLoad {
-	return max(&lp.current, &lp.future)
+	return max(&lp.Current, &lp.Future)
 }
 
 func min(a, b *storeLoad) storeLoad {
 	return storeLoad{
-		byteRate: math.Min(a.byteRate, b.byteRate),
-		count:    minInt(a.count, b.count),
+		ByteRate: math.Min(a.ByteRate, b.ByteRate),
+		Count:    minInt(a.Count, b.Count),
 	}
 }
 
 func max(a, b *storeLoad) storeLoad {
 	return storeLoad{
-		byteRate: math.Max(a.byteRate, b.byteRate),
-		count:    maxInt(a.count, b.count),
+		ByteRate: math.Max(a.ByteRate, b.ByteRate),
+		Count:    maxInt(a.Count, b.Count),
 	}
 }
 
@@ -253,4 +254,21 @@ func maxInt(a, b int) int {
 		return b
 	}
 	return a
+}
+
+type storeLoadDetail struct {
+	LoadPred *storeLoadPred
+	HotPeers []*statistics.HotPeerStat
+}
+
+func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
+	peers := make([]statistics.HotPeerStat, 0, len(li.HotPeers))
+	for _, peer := range li.HotPeers {
+		peers = append(peers, *peer.Clone())
+	}
+	return &statistics.HotPeersStat{
+		TotalBytesRate: li.LoadPred.Current.ByteRate,
+		Count:          len(li.HotPeers),
+		Stats:          peers,
+	}
 }
