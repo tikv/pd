@@ -528,8 +528,6 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 		testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
 		op2 := hb.Schedule(tc)[0]
 		testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
-		op3 := hb.Schedule(tc)[0]
-		testutil.CheckTransferPeerWithLeaderTransfer(c, op3, operator.OpHotRegion, 3, 4)
 		ops := hb.Schedule(tc)
 		c.Assert(ops, HasLen, 0)
 	}
