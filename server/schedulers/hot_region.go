@@ -205,7 +205,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionWrite := cluster.RegionWriteStats()
 		storeWrite := storesStat.GetStoresBytesWriteStat()
 
-		h.stLoadInfos.WriteLeaders = summaryStoresLoad(storeWrite, h.writePendingSum, regionWrite, minHotDegree, write, core.LeaderKind)
+		h.stLoadInfos.WriteLeaders = summaryStoresLoad(storeWrite, map[uint64]Influence{}, regionWrite, minHotDegree, write, core.LeaderKind)
 
 		h.stLoadInfos.WritePeers = summaryStoresLoad(storeWrite, h.writePendingSum, regionWrite, minHotDegree, write, core.RegionKind)
 	}
