@@ -357,23 +357,18 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 	return nil
 }
 
-// balanceHotRetryLimit is the limit to retry schedule for selected balance strategy.
-const balanceHotRetryLimit = 5
-
 func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
-	for i := 0; i < balanceHotRetryLimit; i++ {
-		// prefer to balance by peer
-		peerSolver := newBalanceSolver(h, cluster, write, movePeer)
-		ops := peerSolver.solve()
-		if len(ops) > 0 {
-			return ops
-		}
+	// prefer to balance by peer
+	peerSolver := newBalanceSolver(h, cluster, write, movePeer)
+	ops := peerSolver.solve()
+	if len(ops) > 0 {
+		return ops
+	}
 
-		leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
-		ops = leaderSolver.solve()
-		if len(ops) > 0 {
-			return ops
-		}
+	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
+	ops = leaderSolver.solve()
+	if len(ops) > 0 {
+		return ops
 	}
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
@@ -387,7 +382,12 @@ type balanceSolver struct {
 	rwTy         rwType
 	opTy         opType
 
-	// temporary states
+	cur  *solution
+	best *solution
+	ops  []*operator.Operator
+}
+
+type solution struct {
 	srcStoreID  uint64
 	srcPeerStat *statistics.HotPeerStat
 	region      *core.RegionInfo
@@ -455,28 +455,36 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	if !bs.isValid() || !bs.allowBalance() {
 		return nil
 	}
-	bs.srcStoreID = bs.selectSrcStoreID()
-	if bs.srcStoreID == 0 {
-		return nil
-	}
+	bs.cur = &solution{}
+	bs.best = nil
+	bs.ops = nil
 
-	for _, srcPeerStat := range bs.getPeerList() {
-		bs.srcPeerStat = srcPeerStat
-		bs.region = bs.getRegion()
-		if bs.region == nil {
-			continue
-		}
-		dstCandidates := bs.getDstCandidateIDs()
-		if len(dstCandidates) <= 0 {
-			continue
-		}
-		bs.dstStoreID = bs.selectDstStoreID(dstCandidates)
-		ops := bs.buildOperators()
-		if len(ops) > 0 {
-			return ops
+	srcStores := bs.sortSrcStoreIDs(bs.filterSrcStores())
+	for _, srcStoreID := range srcStores {
+		bs.cur.srcStoreID = srcStoreID
+
+		for _, srcPeerStat := range bs.sortHotPeers() {
+			bs.cur.srcPeerStat = srcPeerStat
+			bs.cur.region = bs.getRegion()
+			if bs.cur.region == nil {
+				continue
+			}
+
+			dstStores := bs.sortDstStoreIDs(bs.filterDstStores())
+			for _, dstStoreID := range dstStores {
+				bs.cur.dstStoreID = dstStoreID
+
+				if bs.betterSolution() {
+					if ops := bs.buildOperators(); len(ops) > 0 {
+						bs.ops = ops
+						clone := *bs.cur
+						bs.best = &clone
+					}
+				}
+			}
 		}
 	}
-	return nil
+	return bs.ops
 }
 
 func (bs *balanceSolver) allowBalance() bool {
@@ -490,28 +498,35 @@ func (bs *balanceSolver) allowBalance() bool {
 	}
 }
 
-func (bs *balanceSolver) selectSrcStoreID() uint64 {
-	var id uint64
-	switch bs.opTy {
-	case movePeer:
-		id = selectSrcStoreByByteRate(bs.stLoadDetail)
-	case transferLeader:
-		if bs.rwTy == write {
-			id = selectSrcStoreByCount(bs.stLoadDetail)
-		} else {
-			id = selectSrcStoreByByteRate(bs.stLoadDetail)
+func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
+	ret := make(map[uint64]*storeLoadDetail)
+	for id, detail := range bs.stLoadDetail {
+		if bs.cluster.GetStore(id) == nil {
+			log.Error("failed to get the source store", zap.Uint64("store-id", id))
+			continue
 		}
+		if len(detail.HotPeers) == 0 {
+			continue
+		}
+		ret[id] = detail
 	}
-	if id != 0 && bs.cluster.GetStore(id) == nil {
-		log.Error("failed to get the source store", zap.Uint64("store-id", id))
-	}
-	return id
+	return ret
 }
 
-func (bs *balanceSolver) getPeerList() []*statistics.HotPeerStat {
-	ret := bs.stLoadDetail[bs.srcStoreID].HotPeers
-	bs.sche.r.Shuffle(len(ret), func(i, j int) {
-		ret[i], ret[j] = ret[j], ret[i]
+func (bs *balanceSolver) sortSrcStoreIDs(loadDetail map[uint64]*storeLoadDetail) []uint64 {
+	var cmp storeLoadCmp
+	if bs.opTy == transferLeader && bs.rwTy == write {
+		cmp = neg(sliceCmp(countCmp, byteRateCmp))
+	} else {
+		cmp = neg(sliceCmp(byteRateCmp, countCmp))
+	}
+	return sortSrcStores(loadDetail, cmp)
+}
+
+func (bs *balanceSolver) sortHotPeers() []*statistics.HotPeerStat {
+	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
+	sort.Slice(ret, func(i, j int) bool {
+		return ret[i].GetBytesRate() > ret[j].GetBytesRate()
 	})
 	return ret
 }
@@ -548,21 +563,21 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 }
 
 func (bs *balanceSolver) getRegion() *core.RegionInfo {
-	region := bs.cluster.GetRegion(bs.srcPeerStat.ID())
+	region := bs.cluster.GetRegion(bs.cur.srcPeerStat.ID())
 	if !bs.isRegionAvailable(region) {
 		return nil
 	}
 
 	switch bs.opTy {
 	case movePeer:
-		srcPeer := region.GetStorePeer(bs.srcStoreID)
+		srcPeer := region.GetStorePeer(bs.cur.srcStoreID)
 		if srcPeer == nil {
-			log.Debug("region does not have a peer on source store, maybe stat out of date", zap.Uint64("region-id", bs.srcPeerStat.ID()))
+			log.Debug("region does not have a peer on source store, maybe stat out of date", zap.Uint64("region-id", bs.cur.srcPeerStat.ID()))
 			return nil
 		}
 	case transferLeader:
-		if region.GetLeader().GetStoreId() != bs.srcStoreID {
-			log.Debug("region leader is not on source store, maybe stat out of date", zap.Uint64("region-id", bs.srcPeerStat.ID()))
+		if region.GetLeader().GetStoreId() != bs.cur.srcStoreID {
+			log.Debug("region leader is not on source store, maybe stat out of date", zap.Uint64("region-id", bs.cur.srcPeerStat.ID()))
 			return nil
 		}
 	default:
@@ -572,7 +587,7 @@ func (bs *balanceSolver) getRegion() *core.RegionInfo {
 	return region
 }
 
-func (bs *balanceSolver) getDstCandidateIDs() map[uint64]struct{} {
+func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	var (
 		filters    []filter.Filter
 		candidates []*core.StoreInfo
@@ -582,18 +597,18 @@ func (bs *balanceSolver) getDstCandidateIDs() map[uint64]struct{} {
 	case movePeer:
 		var scoreGuard filter.Filter
 		if bs.cluster.IsPlacementRulesEnabled() {
-			scoreGuard = filter.NewRuleFitFilter(bs.sche.GetName(), bs.cluster, bs.region, bs.srcStoreID)
+			scoreGuard = filter.NewRuleFitFilter(bs.sche.GetName(), bs.cluster, bs.cur.region, bs.cur.srcStoreID)
 		} else {
-			srcStore := bs.cluster.GetStore(bs.srcStoreID)
+			srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
 			if srcStore == nil {
 				return nil
 			}
-			scoreGuard = filter.NewDistinctScoreFilter(bs.sche.GetName(), bs.cluster.GetLocationLabels(), bs.cluster.GetRegionStores(bs.region), srcStore)
+			scoreGuard = filter.NewDistinctScoreFilter(bs.sche.GetName(), bs.cluster.GetLocationLabels(), bs.cluster.GetRegionStores(bs.cur.region), srcStore)
 		}
 
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
-			filter.NewExcludedFilter(bs.sche.GetName(), bs.region.GetStoreIds(), bs.region.GetStoreIds()),
+			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIds(), bs.cur.region.GetStoreIds()),
 			filter.NewHealthFilter(bs.sche.GetName()),
 			scoreGuard,
 		}
@@ -606,46 +621,55 @@ func (bs *balanceSolver) getDstCandidateIDs() map[uint64]struct{} {
 			filter.NewHealthFilter(bs.sche.GetName()),
 		}
 
-		candidates = bs.cluster.GetFollowerStores(bs.region)
+		candidates = bs.cluster.GetFollowerStores(bs.cur.region)
 
 	default:
 		return nil
 	}
 
-	ret := make(map[uint64]struct{}, len(candidates))
+	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
+	ret := make(map[uint64]*storeLoadDetail, len(candidates))
 	for _, store := range candidates {
 		if !filter.Target(bs.cluster, store, filters) {
-			ret[store.GetID()] = struct{}{}
+			detail := bs.stLoadDetail[store.GetID()]
+			dstLd := detail.LoadPred.max()
+			if bs.opTy == transferLeader && bs.rwTy == write {
+				if srcLd.Count-1 < dstLd.Count+1 {
+					continue
+				}
+			} else {
+				if srcLd.ByteRate*hotRegionScheduleFactor < dstLd.ByteRate+bs.cur.srcPeerStat.GetBytesRate() {
+					continue
+				}
+			}
+			ret[store.GetID()] = detail
 		}
 	}
 	return ret
 }
 
-func (bs *balanceSolver) selectDstStoreID(candidateIDs map[uint64]struct{}) uint64 {
-	candidateLoadDetail := make(map[uint64]*storeLoadDetail, len(candidateIDs))
-	for id := range candidateIDs {
-		candidateLoadDetail[id] = bs.stLoadDetail[id]
+func (bs *balanceSolver) sortDstStoreIDs(loadDetail map[uint64]*storeLoadDetail) []uint64 {
+	var cmp storeLoadCmp
+	if bs.opTy == transferLeader && bs.rwTy == write {
+		cmp = sliceCmp(countCmp, byteRateCmp)
+	} else {
+		cmp = sliceCmp(byteRateCmp, countCmp)
 	}
-	switch bs.opTy {
-	case movePeer:
-		return selectDstStoreByByteRate(candidateLoadDetail, bs.srcPeerStat.GetBytesRate(), bs.stLoadDetail[bs.srcStoreID])
-	case transferLeader:
-		if bs.rwTy == write {
-			return selectDstStoreByCount(candidateLoadDetail, bs.srcPeerStat.GetBytesRate(), bs.stLoadDetail[bs.srcStoreID])
-		}
-		return selectDstStoreByByteRate(candidateLoadDetail, bs.srcPeerStat.GetBytesRate(), bs.stLoadDetail[bs.srcStoreID])
-	default:
-		return 0
-	}
+	return sortDstStores(loadDetail, cmp)
+}
+
+// betterSolution returns true if `bs.cur` is a betterSolution solution than `bs.best`.
+func (bs *balanceSolver) betterSolution() bool {
+	return bs.best == nil
 }
 
 func (bs *balanceSolver) isReadyToBuild() bool {
-	if bs.srcStoreID == 0 || bs.dstStoreID == 0 ||
-		bs.srcPeerStat == nil || bs.region == nil {
+	if bs.cur.srcStoreID == 0 || bs.cur.dstStoreID == 0 ||
+		bs.cur.srcPeerStat == nil || bs.cur.region == nil {
 		return false
 	}
-	if bs.srcStoreID != bs.srcPeerStat.StoreID ||
-		bs.region.GetID() != bs.srcPeerStat.ID() {
+	if bs.cur.srcStoreID != bs.cur.srcPeerStat.StoreID ||
+		bs.cur.region.GetID() != bs.cur.srcPeerStat.ID() {
 		return false
 	}
 	return true
@@ -662,16 +686,16 @@ func (bs *balanceSolver) buildOperators() []*operator.Operator {
 
 	switch bs.opTy {
 	case movePeer:
-		srcPeer := bs.region.GetStorePeer(bs.srcStoreID) // checked in getRegionAndSrcPeer
-		dstPeer := &metapb.Peer{StoreId: bs.dstStoreID, IsLearner: srcPeer.IsLearner}
-		bs.sche.peerLimit = bs.sche.adjustBalanceLimit(bs.srcStoreID, bs.stLoadDetail)
-		op, err = operator.CreateMovePeerOperator("move-hot-"+bs.rwTy.String()+"-region", bs.cluster, bs.region, operator.OpHotRegion, bs.srcStoreID, dstPeer)
+		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
+		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, IsLearner: srcPeer.IsLearner}
+		bs.sche.peerLimit = bs.sche.adjustBalanceLimit(bs.cur.srcStoreID, bs.stLoadDetail)
+		op, err = operator.CreateMovePeerOperator("move-hot-"+bs.rwTy.String()+"-region", bs.cluster, bs.cur.region, operator.OpHotRegion, bs.cur.srcStoreID, dstPeer)
 	case transferLeader:
-		if bs.region.GetStoreVoter(bs.dstStoreID) == nil {
+		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
 			return nil
 		}
-		bs.sche.leaderLimit = bs.sche.adjustBalanceLimit(bs.srcStoreID, bs.stLoadDetail)
-		op, err = operator.CreateTransferLeaderOperator("transfer-hot-"+bs.rwTy.String()+"-leader", bs.cluster, bs.region, bs.srcStoreID, bs.dstStoreID, operator.OpHotRegion)
+		bs.sche.leaderLimit = bs.sche.adjustBalanceLimit(bs.cur.srcStoreID, bs.stLoadDetail)
+		op, err = operator.CreateTransferLeaderOperator("transfer-hot-"+bs.rwTy.String()+"-leader", bs.cluster, bs.cur.region, bs.cur.srcStoreID, bs.cur.dstStoreID, operator.OpHotRegion)
 	}
 
 	if err != nil {
@@ -685,11 +709,11 @@ func (bs *balanceSolver) buildOperators() []*operator.Operator {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
 
-	infl := Influence{ByteRate: bs.srcPeerStat.GetBytesRate()}
+	infl := Influence{ByteRate: bs.cur.srcPeerStat.GetBytesRate()}
 	if bs.opTy == transferLeader && bs.rwTy == write {
 		infl.ByteRate = 0
 	}
-	bs.sche.addPendingInfluence(op, bs.srcStoreID, bs.dstStoreID, infl, bs.rwTy, bs.opTy)
+	bs.sche.addPendingInfluence(op, bs.cur.srcStoreID, bs.cur.dstStoreID, infl, bs.rwTy, bs.opTy)
 
 	return []*operator.Operator{op}
 }
@@ -707,83 +731,20 @@ func sortStores(loadDetail map[uint64]*storeLoadDetail, better func(lp1, lp2 *st
 	return ids
 }
 
-// Prefer store with larger `count`.
-func selectSrcStoreByCount(loadDetail map[uint64]*storeLoadDetail) uint64 {
-	stores := sortStores(loadDetail, func(lp1, lp2 *storeLoadPred) bool {
-		ld1, ld2 := lp1.min(), lp2.min()
-		if ld1.Count > ld2.Count ||
-			(ld1.Count == ld2.Count && ld1.ByteRate > ld2.ByteRate) {
-			return true
-		}
-		return false
-	})
-
-	if len(stores) > 0 && loadDetail[stores[0]].LoadPred.Current.Count > 1 {
-		return stores[0]
-	}
-	return 0
+func sortSrcStores(loadDetail map[uint64]*storeLoadDetail, cmp storeLoadCmp) []uint64 {
+	return sortStores(loadDetail,
+		func(lp1, lp2 *storeLoadPred) bool {
+			ld1, ld2 := lp1.min(), lp2.min()
+			return cmp(&ld1, &ld2) < 0
+		})
 }
 
-// Prefer store with larger `byteRate`.
-func selectSrcStoreByByteRate(loadDetail map[uint64]*storeLoadDetail) uint64 {
-	stores := sortStores(loadDetail, func(lp1, lp2 *storeLoadPred) bool {
-		ld1, ld2 := lp1.min(), lp2.min()
-		if ld1.ByteRate > ld2.ByteRate ||
-			(ld1.ByteRate == ld2.ByteRate && ld1.Count > ld2.Count) {
-			return true
-		}
-		return false
-	})
-
-	for _, id := range stores {
-		if loadDetail[id].LoadPred.Current.Count > 1 {
-			return id
-		}
-	}
-	return 0
-}
-
-// Prefer store with smaller `count`.
-func selectDstStoreByCount(candidates map[uint64]*storeLoadDetail, regionBytesRate float64, srcLoadDetail *storeLoadDetail) uint64 {
-	stores := sortStores(candidates, func(lp1, lp2 *storeLoadPred) bool {
-		ld1, ld2 := lp1.max(), lp2.max()
-		if ld1.Count < ld2.Count ||
-			(ld1.Count == ld2.Count && ld1.ByteRate < ld2.ByteRate) {
-			return true
-		}
-		return false
-	})
-
-	srcLoad := srcLoadDetail.LoadPred.min()
-	for _, id := range stores {
-		dstLoad := candidates[id].LoadPred.max()
-		if srcLoad.Count-1 >= dstLoad.Count+1 &&
-			srcLoad.ByteRate*hotRegionScheduleFactor > dstLoad.ByteRate+regionBytesRate {
-			return id
-		}
-	}
-	return 0
-}
-
-// Prefer store with smaller `byteRate`.
-func selectDstStoreByByteRate(candidates map[uint64]*storeLoadDetail, regionBytesRate float64, srcLoadDetail *storeLoadDetail) uint64 {
-	stores := sortStores(candidates, func(lp1, lp2 *storeLoadPred) bool {
-		ld1, ld2 := lp1.max(), lp2.max()
-		if ld1.ByteRate < ld2.ByteRate ||
-			(ld1.ByteRate == ld2.ByteRate && ld1.Count < ld2.Count) {
-			return true
-		}
-		return false
-	})
-
-	srcLoad := srcLoadDetail.LoadPred.min()
-	for _, id := range stores {
-		dstLoad := candidates[id].LoadPred.max()
-		if srcLoad.ByteRate*hotRegionScheduleFactor > dstLoad.ByteRate+regionBytesRate {
-			return id
-		}
-	}
-	return 0
+func sortDstStores(loadDetail map[uint64]*storeLoadDetail, cmp storeLoadCmp) []uint64 {
+	return sortStores(loadDetail,
+		func(lp1, lp2 *storeLoadPred) bool {
+			ld1, ld2 := lp1.max(), lp2.max()
+			return cmp(&ld1, &ld2) < 0
+		})
 }
 
 func (h *hotScheduler) adjustBalanceLimit(storeID uint64, loadDetail map[uint64]*storeLoadDetail) uint64 {

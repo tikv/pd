@@ -214,6 +214,44 @@ func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	}
 }
 
+type storeLoadCmp func(ld1, ld2 *storeLoad) int
+
+func sliceCmp(cmps ...storeLoadCmp) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		for _, cmp := range cmps {
+			r := cmp(ld1, ld2)
+			if r != 0 {
+				return r
+			}
+		}
+		return 0
+	}
+}
+
+func neg(cmp storeLoadCmp) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		return -cmp(ld1, ld2)
+	}
+}
+
+func byteRateCmp(ld1, ld2 *storeLoad) int {
+	if ld1.ByteRate < ld2.ByteRate {
+		return -1
+	} else if ld1.ByteRate > ld2.ByteRate {
+		return 1
+	}
+	return 0
+}
+
+func countCmp(ld1, ld2 *storeLoad) int {
+	if ld1.Count < ld2.Count {
+		return -1
+	} else if ld1.Count > ld2.Count {
+		return 1
+	}
+	return 0
+}
+
 // store load prediction
 type storeLoadPred struct {
 	Current storeLoad
