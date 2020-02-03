@@ -157,7 +157,7 @@ func (s *testBalanceSuite) TestTolerantRatio(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	// create a region to control average region size.
-	tc.AddLeaderRegion(1, 1, 2)
+	c.Assert(tc.AddLeaderRegion(1, 1, 2), NotNil)
 	regionSize := int64(96 * KB)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
 
