@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
@@ -545,7 +546,7 @@ func getUpdateValue(item, updateItem interface{}) (interface{}, error) {
 	var err error
 	var v interface{}
 	var tmp float64
-	switch item.(type) {
+	switch t := item.(type) {
 	case bool:
 		switch t1 := updateItem.(type) {
 		case string:
@@ -590,10 +591,16 @@ func getUpdateValue(item, updateItem interface{}) (interface{}, error) {
 		default:
 			return nil, errors.Errorf("unexpected type: %T\n", t1)
 		}
+	case time.Time:
+		switch t1 := updateItem.(type) {
+		case string:
+			v, err = time.Parse(time.RFC3339, updateItem.(string))
+		default:
+			return nil, errors.Errorf("unexpected type: %T\n", t1)
+		}
 	case nil:
 	default:
-		// TODO: support more types
-		v = updateItem
+		return nil, errors.Errorf("unsupported type: %T\n", t)
 	}
 
 	if err != nil {
