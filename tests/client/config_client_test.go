@@ -62,7 +62,7 @@ func (s *configClientTestSuite) TestUpdateWrongEntry(c *C) {
 	for _, s := range cluster.GetServers() {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
-	cli, err := pd.NewConfigClient(endpoints, pd.SecurityOption{})
+	cli, err := pd.NewConfigClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
 	cfgData := `[aaa]
@@ -119,7 +119,7 @@ func (s *configClientTestSuite) TestClientLeaderChange(c *C) {
 	for _, s := range cluster.GetServers() {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
-	cli, err := pd.NewConfigClient(endpoints, pd.SecurityOption{})
+	cli, err := pd.NewConfigClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 
 	cfgData := `[aaa]
@@ -210,7 +210,7 @@ func (s *configClientTestSuite) TestLeaderTransfer(c *C) {
 	for _, s := range cluster.GetServers() {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
-	cli, err := pd.NewConfigClient(endpoints, pd.SecurityOption{})
+	cli, err := pd.NewConfigClientWithContext(s.ctx, endpoints, pd.SecurityOption{})
 	c.Assert(err, IsNil)
 	cfgData := `[aaa]
   xxx-yyy-zzz = 1

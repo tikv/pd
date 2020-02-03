@@ -194,4 +194,12 @@ func (s *configTestSuite) TestConfig(c *C) {
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "already been deprecated"), IsTrue)
+
+	// set enable-placement-rules twice, make sure it does not return error.
+	args1 = []string{"-u", pdAddr, "config", "set", "enable-placement-rules", "true"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
+	args1 = []string{"-u", pdAddr, "config", "set", "enable-placement-rules", "true"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args1...)
+	c.Assert(err, IsNil)
 }

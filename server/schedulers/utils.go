@@ -332,23 +332,17 @@ func (infl Influence) add(rhs *Influence, w float64) Influence {
 
 // TODO: merge it into OperatorInfluence.
 type pendingInfluence struct {
-	op               *operator.Operator
-	from, to         uint64
-	origin           Influence
-	isTransferLeader bool
+	op       *operator.Operator
+	from, to uint64
+	origin   Influence
 }
 
-func (p *pendingInfluence) isDone() bool {
-	return p.op.IsEnd()
-}
-
-func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence, isTransferLeader bool) *pendingInfluence {
+func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence) *pendingInfluence {
 	return &pendingInfluence{
-		op:               op,
-		from:             from,
-		to:               to,
-		origin:           infl,
-		isTransferLeader: isTransferLeader,
+		op:     op,
+		from:   from,
+		to:     to,
+		origin: infl,
 	}
 }
 

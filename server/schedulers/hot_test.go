@@ -15,7 +15,10 @@ package schedulers
 
 import (
 	"context"
+	"time"
+
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/pkg/mock/mockoption"
 	"github.com/pingcap/pd/pkg/testutil"
@@ -27,6 +30,87 @@ import (
 )
 
 var _ = Suite(&testHotWriteRegionSchedulerSuite{})
+var _ = Suite(&testHotSchedulerSuite{})
+
+type testHotSchedulerSuite struct{}
+
+func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockoption.NewScheduleOptions()
+	newTestReplication(opt, 3, "zone", "host")
+	tc := mockcluster.NewCluster(opt)
+	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	hb := sche.(*hotScheduler)
+
+	nilOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
+		return nil
+	}
+	notDoneOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
+		var op *operator.Operator
+		var err error
+		switch ty {
+		case movePeer:
+			op, err = operator.CreateMovePeerOperator("move-peer-test", tc, region, operator.OpAdmin, 2, &metapb.Peer{Id: region.GetID()*10000 + 1, StoreId: 4})
+		case transferLeader:
+			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 1, 2, operator.OpAdmin)
+		}
+		c.Assert(err, IsNil)
+		c.Assert(op, NotNil)
+		return op
+	}
+	doneOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
+		op := notDoneOp(region, ty)
+		op.Cancel()
+		return op
+	}
+	shouldRemoveOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
+		op := doneOp(region, ty)
+		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-minRegionScheduleInterval))
+		return op
+	}
+	opCreaters := [4]func(region *core.RegionInfo, ty opType) *operator.Operator{nilOp, shouldRemoveOp, notDoneOp, doneOp}
+
+	for i := 0; i < len(opCreaters); i++ {
+		for j := 0; j < len(opCreaters); j++ {
+			regionID := uint64(i*len(opCreaters) + j + 1)
+			region := newTestRegion(regionID)
+			hb.regionPendings[regionID] = [2]*operator.Operator{
+				movePeer:       opCreaters[i](region, movePeer),
+				transferLeader: opCreaters[j](region, transferLeader),
+			}
+		}
+	}
+
+	hb.gcRegionPendings()
+
+	for i := 0; i < len(opCreaters); i++ {
+		for j := 0; j < len(opCreaters); j++ {
+			regionID := uint64(i*len(opCreaters) + j + 1)
+			if i < 2 && j < 2 {
+				c.Assert(hb.regionPendings, Not(HasKey), regionID)
+			} else if i < 2 {
+				c.Assert(hb.regionPendings, HasKey, regionID)
+				c.Assert(hb.regionPendings[regionID][movePeer], IsNil)
+				c.Assert(hb.regionPendings[regionID][transferLeader], NotNil)
+			} else if j < 2 {
+				c.Assert(hb.regionPendings, HasKey, regionID)
+				c.Assert(hb.regionPendings[regionID][movePeer], NotNil)
+				c.Assert(hb.regionPendings[regionID][transferLeader], IsNil)
+			} else {
+				c.Assert(hb.regionPendings, HasKey, regionID)
+				c.Assert(hb.regionPendings[regionID][movePeer], NotNil)
+				c.Assert(hb.regionPendings[regionID][transferLeader], NotNil)
+			}
+		}
+	}
+}
+
+func newTestRegion(id uint64) *core.RegionInfo {
+	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
+	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
+}
 
 type testHotWriteRegionSchedulerSuite struct{}
 

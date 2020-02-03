@@ -14,18 +14,22 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
@@ -37,6 +41,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	pd "github.com/pingcap/pd/client"
 	"github.com/pingcap/pd/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/grpcutil"
@@ -45,7 +50,7 @@ import (
 	"github.com/pingcap/pd/pkg/ui"
 	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
-	configmanager "github.com/pingcap/pd/server/config_manager"
+	"github.com/pingcap/pd/server/config_manager"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
@@ -82,6 +87,12 @@ var (
 	// EtcdStartTimeout the timeout of the startup etcd.
 	EtcdStartTimeout = time.Minute * 5
 )
+
+// Component is used to represent the kind of component in config manager.
+const Component = "pd"
+
+// ConfigCheckInterval represents the time interval of running config check.
+var ConfigCheckInterval = 1 * time.Second
 
 // Server is the pd server.
 type Server struct {
@@ -127,6 +138,9 @@ type Server struct {
 
 	// components' configuration management
 	cfgManager *configmanager.ConfigManager
+	// component config
+	configVersion *configpb.Version
+	configClient  pd.ConfigClient
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -434,7 +448,10 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
-
+	if s.cfg.EnableConfigManager {
+		s.serverLoopWg.Add(1)
+		go s.configCheckLoop()
+	}
 }
 
 func (s *Server) stopServerLoop() {
@@ -720,6 +737,13 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	return nil
 }
 
+// GetPDServerConfig gets the balance config information.
+func (s *Server) GetPDServerConfig() *config.PDServerConfig {
+	cfg := &config.PDServerConfig{}
+	*cfg = *s.scheduleOpt.GetPDServerConfig()
+	return cfg
+}
+
 // SetPDServerConfig sets the server config.
 func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 	old := s.scheduleOpt.LoadPDServerConfig()
@@ -733,6 +757,47 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 		return err
 	}
 	log.Info("PD server config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// SetLabelPropertyConfig sets the label property config.
+func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
+	old := s.scheduleOpt.LoadLabelPropertyConfig()
+	s.scheduleOpt.SetLabelPropertyConfig(cfg)
+	if err := s.scheduleOpt.Persist(s.storage); err != nil {
+		s.scheduleOpt.SetLabelPropertyConfig(old)
+		log.Error("failed to update label property config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", &old),
+			zap.Error(err))
+		return err
+	}
+	log.Info("label property config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// GetLogConfig gets the log config.
+func (s *Server) GetLogConfig() *log.Config {
+	cfg := &log.Config{}
+	*cfg = *s.scheduleOpt.GetLogConfig()
+	return cfg
+}
+
+// SetLogConfig sets the log config.
+func (s *Server) SetLogConfig(cfg log.Config) error {
+	old := s.scheduleOpt.LoadLogConfig()
+	s.scheduleOpt.SetLogConfig(&cfg)
+	log.SetLevel(logutil.StringToZapLogLevel(cfg.Level))
+	if err := s.scheduleOpt.Persist(s.storage); err != nil {
+		s.scheduleOpt.SetLogConfig(old)
+		log.SetLevel(logutil.StringToZapLogLevel(old.Level))
+		log.Error("failed to update log config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			zap.Error(err))
+		return err
+	}
+	log.Info("log config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -856,6 +921,18 @@ func (s *Server) SetLogLevel(level string) {
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
+}
+
+// GetConfigVersion returns the config version.
+func (s *Server) GetConfigVersion() *configpb.Version {
+	if s.configVersion == nil {
+		return &configpb.Version{Local: 0, Global: 0}
+	}
+	return s.configVersion
+}
+
+func (s *Server) setConfigVersion(version *configpb.Version) {
+	s.configVersion = version
 }
 
 func (s *Server) leaderLoop() {
@@ -991,6 +1068,143 @@ func (s *Server) etcdLeaderLoop() {
 			return
 		}
 	}
+}
+
+func (s *Server) configCheckLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+
+	ticker := time.NewTicker(ConfigCheckInterval)
+	defer ticker.Stop()
+	for {
+		// wait leader
+		leader := s.GetLeader()
+		if leader != nil {
+			var err error
+			securityConfig := s.GetSecurityConfig()
+			s.configClient, err = pd.NewConfigClientWithContext(ctx, s.GetEndpoints(), pd.SecurityOption{
+				CAPath:   securityConfig.CAPath,
+				CertPath: securityConfig.CertPath,
+				KeyPath:  securityConfig.KeyPath,
+			})
+			if err != nil {
+				log.Error("failed to create config client", zap.Error(err))
+				return
+			}
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			log.Info("config check stop running")
+			return
+		}
+	}
+
+	addr := s.GetAddr()
+	u, err := url.Parse(addr)
+	if err != nil {
+		log.Error("failed to parse url", zap.Error(err))
+		return
+	}
+	compoenntID := u.Host + u.Path
+	version := s.GetConfigVersion()
+	var config bytes.Buffer
+	if err := toml.NewEncoder(&config).Encode(*s.GetConfig()); err != nil {
+		log.Error("failed to encode config", zap.Error(err))
+		return
+	}
+	if err := s.createComponentConfig(ctx, version, compoenntID, config.String()); err != nil {
+		log.Error("failed to create config", zap.Error(err))
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("config check has been stopped")
+			return
+		case <-ticker.C:
+			version := s.GetConfigVersion()
+			config, err := s.getComponentConfig(ctx, version, addr)
+			if err != nil {
+				log.Error("failed to get config", zap.Error(err))
+			}
+			if config == "" {
+				continue
+			}
+			if err := s.updateComponentConfig(config); err != nil {
+				log.Error("failed to update config", zap.Error(err))
+			}
+		}
+	}
+}
+
+func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Version, componentID, config string) error {
+	status, v, config, err := s.configClient.Create(ctx, version, Component, componentID, config)
+	if err != nil {
+		return err
+	}
+	switch status.GetCode() {
+	case configpb.StatusCode_OK, configpb.StatusCode_WRONG_VERSION:
+		s.setConfigVersion(v)
+		s.updateComponentConfig(config)
+	case configpb.StatusCode_UNKNOWN:
+		return errors.Errorf("unknown error: %v", status.GetMessage())
+	}
+	return nil
+}
+
+func (s *Server) getComponentConfig(ctx context.Context, version *configpb.Version, componentID string) (string, error) {
+	status, v, cfg, err := s.configClient.Get(ctx, version, Component, componentID)
+	if err != nil {
+		return "", err
+	}
+	var config string
+	switch status.GetCode() {
+	case configpb.StatusCode_WRONG_VERSION:
+		config = cfg
+		s.setConfigVersion(v)
+	case configpb.StatusCode_UNKNOWN:
+		return "", errors.Errorf("unknown error: %v", status.GetMessage())
+	}
+	return config, nil
+}
+
+// TODO: support more config item
+func (s *Server) updateComponentConfig(cfg string) error {
+	new := &config.Config{}
+	if _, err := toml.Decode(cfg, &new); err != nil {
+		return err
+	}
+	var err error
+	if !reflect.DeepEqual(s.GetScheduleConfig(), &new.Schedule) {
+		err = s.SetScheduleConfig(new.Schedule)
+	}
+
+	if !reflect.DeepEqual(s.GetReplicationConfig(), &new.Replication) {
+		err = s.SetReplicationConfig(new.Replication)
+	}
+
+	if !reflect.DeepEqual(s.GetPDServerConfig(), &new.PDServerCfg) {
+		err = s.SetPDServerConfig(new.PDServerCfg)
+	}
+
+	if !reflect.DeepEqual(s.GetClusterVersion(), new.ClusterVersion) {
+		err = s.SetClusterVersion(new.ClusterVersion.String())
+	}
+
+	if !reflect.DeepEqual(s.GetLabelProperty(), new.LabelProperty) {
+		err = s.SetLabelPropertyConfig(new.LabelProperty)
+	}
+
+	if !reflect.DeepEqual(s.GetLogConfig(), &new.Log) {
+		err = s.SetLogConfig(new.Log)
+	}
+	return err
 }
 
 func (s *Server) reloadConfigFromKV() error {
