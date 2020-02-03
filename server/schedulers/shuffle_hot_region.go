@@ -122,10 +122,22 @@ func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []
 	minHotDegree := cluster.GetHotRegionCacheHitsThreshold()
 	switch typ {
 	case read:
-		s.stLoadInfos.ReadLeaders = summaryStoresLoad(storesStats.GetStoresBytesReadStat(), map[uint64]Influence{}, cluster.RegionReadStats(), minHotDegree, read, core.LeaderKind)
+		s.stLoadInfos.ReadLeaders = summaryStoresLoad(
+			s.GetName(),
+			storesStats.GetStoresBytesReadStat(),
+			map[uint64]Influence{},
+			cluster.RegionReadStats(),
+			minHotDegree,
+			read, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos.ReadLeaders)
 	case write:
-		s.stLoadInfos.WriteLeaders = summaryStoresLoad(storesStats.GetStoresBytesWriteStat(), map[uint64]Influence{}, cluster.RegionWriteStats(), minHotDegree, write, core.LeaderKind)
+		s.stLoadInfos.WriteLeaders = summaryStoresLoad(
+			s.GetName(),
+			storesStats.GetStoresBytesWriteStat(),
+			map[uint64]Influence{},
+			cluster.RegionWriteStats(),
+			minHotDegree,
+			write, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos.WriteLeaders)
 	}
 	return nil

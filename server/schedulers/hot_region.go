@@ -198,16 +198,33 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionRead := cluster.RegionReadStats()
 		storeRead := storesStat.GetStoresBytesReadStat()
 
-		h.stLoadInfos.ReadLeaders = summaryStoresLoad(storeRead, h.readPendingSum, regionRead, minHotDegree, read, core.LeaderKind)
+		h.stLoadInfos.ReadLeaders = summaryStoresLoad(h.GetName(),
+			storeRead,
+			h.readPendingSum,
+			regionRead,
+			minHotDegree,
+			read, core.LeaderKind)
 	}
 
 	{ // update write statistics
 		regionWrite := cluster.RegionWriteStats()
 		storeWrite := storesStat.GetStoresBytesWriteStat()
 
-		h.stLoadInfos.WriteLeaders = summaryStoresLoad(storeWrite, map[uint64]Influence{}, regionWrite, minHotDegree, write, core.LeaderKind)
+		h.stLoadInfos.WriteLeaders = summaryStoresLoad(
+			h.GetName(),
+			storeWrite,
+			map[uint64]Influence{},
+			regionWrite,
+			minHotDegree,
+			write, core.LeaderKind)
 
-		h.stLoadInfos.WritePeers = summaryStoresLoad(storeWrite, h.writePendingSum, regionWrite, minHotDegree, write, core.RegionKind)
+		h.stLoadInfos.WritePeers = summaryStoresLoad(
+			h.GetName(),
+			storeWrite,
+			h.writePendingSum,
+			regionWrite,
+			minHotDegree,
+			write, core.RegionKind)
 	}
 }
 
@@ -241,6 +258,7 @@ func (h *hotScheduler) gcRegionPendings() {
 
 // Load information of all available stores.
 func summaryStoresLoad(
+	scheName string,
 	storeByteRate map[uint64]float64,
 	pendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
@@ -256,18 +274,19 @@ func summaryStoresLoad(
 		// Find all hot peers first
 		hotPeers := make([]*statistics.HotPeerStat, 0)
 		{
+			hotSum := 0.0
+			for _, peer := range filterHotPeers(kind, minHotDegree, storeHotPeers[id]) {
+				hotSum += peer.GetBytesRate()
+				hotPeers = append(hotPeers, peer.Clone())
+			}
 			// Use sum of hot peers to estimate leader-only byte rate.
 			if kind == core.LeaderKind && rwTy == write {
-				rate = 0
+				rate = hotSum
 			}
-			for _, peer := range filterByResourceKind(storeHotPeers[id], kind) {
-				if kind == core.LeaderKind && rwTy == write {
-					rate += peer.GetBytesRate()
-				}
-				if peer.HotDegree >= minHotDegree {
-					hotPeers = append(hotPeers, peer.Clone())
-				}
-			}
+
+			// Metric for debug.
+			name := "hot-peers-byte-rate-sum-" + rwTy.String() + "-" + kind.String()
+			schedulerStatus.WithLabelValues(scheName, name).Set(hotSum)
 		}
 
 		// Build store load prediction from current load and pending influence.
@@ -285,17 +304,20 @@ func summaryStoresLoad(
 	return loadDetail
 }
 
-func filterByResourceKind(peers []*statistics.HotPeerStat, kind core.ResourceKind) []*statistics.HotPeerStat {
-	if kind == core.LeaderKind {
-		leaders := make([]*statistics.HotPeerStat, 0)
-		for _, peer := range peers {
-			if peer.IsLeader() {
-				leaders = append(leaders, peer)
-			}
+func filterHotPeers(
+	kind core.ResourceKind,
+	minHotDegree int,
+	peers []*statistics.HotPeerStat,
+) []*statistics.HotPeerStat {
+	ret := make([]*statistics.HotPeerStat, 0)
+	for _, peer := range peers {
+		if (kind == core.LeaderKind && !peer.IsLeader()) ||
+			peer.HotDegree < minHotDegree {
+			continue
 		}
-		return leaders
+		ret = append(ret, peer)
 	}
-	return peers
+	return ret
 }
 
 func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, balanceType rwType, ty opType) {
