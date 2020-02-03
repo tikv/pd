@@ -78,7 +78,7 @@ func (s *testScoreInfosSuite) SetUpSuite(c *C) {
 func (s *testScoreInfosSuite) TestSort(c *C) {
 	sort.Float64s(s.scores)
 	s.scoreInfos.Sort()
-	c.Assert(s.scoreInfos.Min().score, Equals, s.scores[0])
+	c.Assert(s.scoreInfos.Min(), Equals, s.scores[0])
 
 	for i := 0; i < s.num; i++ {
 		c.Assert(s.scoreInfos.ToSlice()[i].GetScore(), Equals, s.scores[i])
@@ -114,48 +114,4 @@ func (s *testScoreInfosSuite) TestMeanAndStdDev(c *C) {
 
 	c.Assert(math.Abs(s.scoreInfos.Mean()-mean), LessEqual, 1e-7)
 	c.Assert(math.Abs(s.scoreInfos.StdDev()-result), LessEqual, 1e-7)
-}
-
-func (s *testScoreInfosSuite) TestStoresStats(c *C) {
-	// test NormalizeStoresStats
-	sum := 0.0
-	min := math.MaxFloat64
-	storeStats := make(map[uint64]float64)
-	expect := make(map[uint64]float64)
-	for i := 0; i < s.num; i++ {
-		storeID := uint64(i + 1)
-		storeStats[storeID] = s.scores[i]
-		sum += s.scores[i]
-		if s.scores[i] < min {
-			min = s.scores[i]
-		}
-	}
-
-	mean := sum / float64(s.num)
-	for i := 0; i < s.num; i++ {
-		storeID := uint64(i + 1)
-		expect[storeID] = (s.scores[i] - min) / mean
-	}
-
-	scoreInfos := NormalizeStoresStats(storeStats)
-	for _, info := range scoreInfos.ToSlice() {
-		c.Assert(math.Abs(info.GetScore()-expect[info.storeID]), LessEqual, 1e-7)
-	}
-	// test AggregateScores
-	var weights []float64
-	c.Assert(AggregateScores([]*ScoreInfos{scoreInfos}, weights).ToSlice(), HasLen, 0)
-	{
-		weights = []float64{0.0, 0.0, 2.0, 2.0}
-		results := AggregateScores([]*ScoreInfos{scoreInfos}, weights).ToSlice()
-		c.Assert(results, HasLen, len(scoreInfos.ToSlice()))
-		c.Assert(results[0].score, Equals, 0.0)
-	}
-	{
-		weights = []float64{1.0, 1.0, 1.0}
-		results := AggregateScores([]*ScoreInfos{scoreInfos, scoreInfos}, weights).ToSlice()
-		minNum := 2.0 // []*ScoreInfos{scoreInfos, scoreInfos} is less than weights
-		for i, result := range results {
-			c.Assert(result.score, Equals, scoreInfos.ToSlice()[i].score*minNum)
-		}
-	}
 }

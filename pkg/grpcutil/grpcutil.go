@@ -14,54 +14,67 @@
 package grpcutil
 
 import (
+	"context"
 	"crypto/tls"
-	"crypto/x509"
-	"io/ioutil"
 	"net/url"
 
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/pkg/transport"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
+// SecurityConfig is the configuration for supporting tls.
+type SecurityConfig struct {
+	// CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
+	CAPath string `toml:"cacert-path" json:"cacert-path"`
+	// CertPath is the path of file that contains X509 certificate in PEM format.
+	CertPath string `toml:"cert-path" json:"cert-path"`
+	// KeyPath is the path of file that contains X509 key in PEM format.
+	KeyPath string `toml:"key-path" json:"key-path"`
+}
+
+// ToTLSConfig generatres tls config.
+func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
+	}
+	tlsInfo := transport.TLSInfo{
+		CertFile:      s.CertPath,
+		KeyFile:       s.KeyPath,
+		TrustedCAFile: s.CAPath,
+	}
+	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return tlsConfig, nil
+}
+
 // GetClientConn returns a gRPC client connection.
-func GetClientConn(addr string, caPath string, certPath string, keyPath string, do ...grpc.DialOption) (*grpc.ClientConn, error) {
+// creates a client connection to the given target. By default, it's
+// a non-blocking dial (the function won't wait for connections to be
+// established, and connecting happens in the background). To make it a blocking
+// dial, use WithBlock() dial option.
+//
+// In the non-blocking case, the ctx does not act against the connection. It
+// only controls the setup steps.
+//
+// In the blocking case, ctx can be used to cancel or expire the pending
+// connection. Once this function returns, the cancellation and expiration of
+// ctx will be noop. Users should call ClientConn.Close to terminate all the
+// pending operations after this function returns.
+func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...grpc.DialOption) (*grpc.ClientConn, error) {
 	opt := grpc.WithInsecure()
-	if len(caPath) != 0 {
-		certificates := []tls.Certificate{}
-		if len(certPath) != 0 && len(keyPath) != 0 {
-			// Load the client certificates from disk
-			certificate, err := tls.LoadX509KeyPair(certPath, keyPath)
-			if err != nil {
-				return nil, errors.Errorf("could not load client key pair: %s", err)
-			}
-			certificates = append(certificates, certificate)
-		}
-
-		// Create a certificate pool from the certificate authority
-		certPool := x509.NewCertPool()
-		ca, err := ioutil.ReadFile(caPath)
-		if err != nil {
-			return nil, errors.Errorf("could not read ca certificate: %s", err)
-		}
-
-		// Append the certificates from the CA
-		if !certPool.AppendCertsFromPEM(ca) {
-			return nil, errors.New("failed to append ca certs")
-		}
-
-		creds := credentials.NewTLS(&tls.Config{
-			Certificates: certificates,
-			RootCAs:      certPool,
-		})
-
+	if tlsCfg != nil {
+		creds := credentials.NewTLS(tlsCfg)
 		opt = grpc.WithTransportCredentials(creds)
 	}
 	u, err := url.Parse(addr)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	cc, err := grpc.Dial(u.Host, append(do, opt)...)
+	cc, err := grpc.DialContext(ctx, u.Host, append(do, opt)...)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

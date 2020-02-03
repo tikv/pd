@@ -14,7 +14,6 @@
 package config
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -27,19 +26,19 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/schedule"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
 // Config is the pd server configuration.
 type Config struct {
-	*flag.FlagSet `json:"-"`
+	flagSet *flag.FlagSet
 
 	Version bool `json:"-"`
 
@@ -110,7 +109,7 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
-	Security SecurityConfig `toml:"security" json:"security"`
+	Security grpcutil.SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
@@ -131,13 +130,15 @@ type Config struct {
 	logProps *log.ZapProperties
 
 	EnableConfigManager bool
+
+	EnableDashboard bool
 }
 
 // NewConfig creates a new config.
 func NewConfig() *Config {
 	cfg := &Config{}
-	cfg.FlagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
-	fs := cfg.FlagSet
+	cfg.flagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
+	fs := cfg.flagSet
 
 	fs.BoolVar(&cfg.Version, "V", false, "print version information and exit")
 	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
@@ -166,6 +167,8 @@ func NewConfig() *Config {
 
 	fs.BoolVar(&cfg.EnableConfigManager, "enable-config-manager", false, "Enable configuration manager")
 
+	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", true, "Enable Dashboard API and UI on this node")
+
 	return cfg
 }
 
@@ -174,6 +177,7 @@ const (
 	defaultNextRetryDelay          = time.Second
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
+	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -244,7 +248,7 @@ func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 // Parse parses flag definitions from the argument list.
 func (c *Config) Parse(arguments []string) error {
 	// Parse first to get config file.
-	err := c.FlagSet.Parse(arguments)
+	err := c.flagSet.Parse(arguments)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -275,13 +279,13 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	// Parse again to replace with command line options.
-	err = c.FlagSet.Parse(arguments)
+	err = c.flagSet.Parse(arguments)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	if len(c.FlagSet.Args()) != 0 {
-		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
+	if len(c.flagSet.Args()) != 0 {
+		return errors.Errorf("'%s' is an invalid flag", c.flagSet.Arg(0))
 	}
 
 	err = c.Adjust(meta)
@@ -411,6 +415,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustString(&c.AutoCompactionMode, defaultCompactionMode)
 	adjustString(&c.AutoCompactionRetention, defaultAutoCompactionRetention)
+	if !configMetaData.IsDefined("quota-backend-bytes") {
+		c.QuotaBackendBytes = defaultQuotaBackendBytes
+	}
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
@@ -869,33 +876,6 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	return c.Validate()
 }
 
-// SecurityConfig is the configuration for supporting tls.
-type SecurityConfig struct {
-	// CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
-	CAPath string `toml:"cacert-path" json:"cacert-path"`
-	// CertPath is the path of file that contains X509 certificate in PEM format.
-	CertPath string `toml:"cert-path" json:"cert-path"`
-	// KeyPath is the path of file that contains X509 key in PEM format.
-	KeyPath string `toml:"key-path" json:"key-path"`
-}
-
-// ToTLSConfig generatres tls config.
-func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
-	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
-		return nil, nil
-	}
-	tlsInfo := transport.TLSInfo{
-		CertFile:      s.CertPath,
-		KeyFile:       s.KeyPath,
-		TrustedCAFile: s.CAPath,
-	}
-	tlsConfig, err := tlsInfo.ClientConfig()
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	return tlsConfig, nil
-}
-
 // PDServerConfig is the configuration for pd server.
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
@@ -905,7 +885,7 @@ type PDServerConfig struct {
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
-	// RuntimeSercives is the running the running extension services.
+	// RuntimeServices is the running the running extension services.
 	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.
 	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
@@ -1013,6 +993,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
+	cfg.EnableV2 = true
 	cfg.Logger = "zap"
 	var err error
 

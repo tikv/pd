@@ -234,7 +234,8 @@ func (c *ConfigManager) ApplyGlobalConifg(globalCfg *GlobalConfig, component str
 	// update all local config
 	// merge the global config with each local config and update it
 	for _, LocalCfg := range c.LocalCfgs[component] {
-		if err := mergeAndUpdateConfig(LocalCfg, updateEntries); err != nil {
+		if wrongEntry, err := mergeAndUpdateConfig(LocalCfg, updateEntries); err != nil {
+			c.deleteEntry(component, wrongEntry)
 			return err
 		}
 		LocalCfg.Version = &configpb.Version{Global: newGlobalVersion, Local: 0}
@@ -275,7 +276,7 @@ func (c *ConfigManager) updateGlobal(component string, version *configpb.Version
 	return &configpb.Version{Global: c.GlobalCfgs[component].getVersion(), Local: 0}, &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
-func mergeAndUpdateConfig(localCfg *LocalConfig, updateEntries map[string]*EntryValue) error {
+func mergeAndUpdateConfig(localCfg *LocalConfig, updateEntries map[string]*EntryValue) (string, error) {
 	config := localCfg.getConfigs()
 	newUpdateEntries := make(map[string]*EntryValue)
 	for k, v := range updateEntries {
@@ -297,10 +298,10 @@ func mergeAndUpdateConfig(localCfg *LocalConfig, updateEntries map[string]*Entry
 	for k, v := range newUpdateEntries {
 		configName := strings.Split(k, ".")
 		if err := update(config, configName, v.Value); err != nil {
-			return err
+			return k, err
 		}
 	}
-	return nil
+	return "", nil
 }
 
 func (c *ConfigManager) updateLocal(componentID string, version *configpb.Version, entries []*configpb.ConfigEntry) (*configpb.Version, *configpb.Status) {
@@ -323,12 +324,24 @@ func (c *ConfigManager) updateLocal(componentID string, version *configpb.Versio
 		for _, entry := range entries {
 			localCfg.updateEntry(entry, version)
 		}
-		mergeAndUpdateConfig(localCfg, updateEntries)
+		if wrongEntry, err := mergeAndUpdateConfig(localCfg, updateEntries); err != nil {
+			c.deleteEntry(component, wrongEntry)
+			return localLatestVersion, &configpb.Status{Code: configpb.StatusCode_UNKNOWN, Message: err.Error()}
+		}
 		localCfg.Version = &configpb.Version{Global: version.GetGlobal(), Local: version.GetLocal() + 1}
 	} else {
 		return version, &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
 	}
 	return c.LocalCfgs[component][componentID].getVersion(), &configpb.Status{Code: configpb.StatusCode_OK}
+}
+
+func (c *ConfigManager) deleteEntry(component, e string) {
+	if globalCfg, ok := c.GlobalCfgs[component]; ok {
+		delete(globalCfg.UpdateEntries, e)
+	}
+	for _, localCfg := range c.LocalCfgs[component] {
+		delete(localCfg.UpdateEntries, e)
+	}
 }
 
 // DeleteConfig removes a component from the config manager.
@@ -486,6 +499,9 @@ func update(config map[string]interface{}, configName []string, value string) er
 	}
 
 	t := reflect.TypeOf(res[configName[0]])
+	if t == nil {
+		return errors.Errorf("config item %s is not existed", configName[0])
+	}
 	// TODO: support more types
 	var v interface{}
 	var err error
