@@ -257,8 +257,17 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 	if ok {
 		return conn, nil
 	}
-
-	cc, err := grpcutil.GetClientConn(addr, c.security.CAPath, c.security.CertPath, c.security.KeyPath, c.gRPCDialOptions...)
+	tslCfg, err := grpcutil.SecurityConfig{
+		CAPath:   c.security.CAPath,
+		CertPath: c.security.CertPath,
+		KeyPath:  c.security.CertPath,
+	}.ToTLSConfig()
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	dctx, cancel := context.WithTimeout(c.ctx, dialTimeout)
+	defer cancel()
+	cc, err := grpcutil.GetClientConn(dctx, addr, tslCfg, c.gRPCDialOptions...)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

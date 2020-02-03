@@ -201,7 +201,7 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.steps...), nil
 }
 
-// Initilize intermediate states.
+// Initialize intermediate states.
 func (b *Builder) prepareBuild() (string, error) {
 	var voterCount int
 	for _, p := range b.targetPeers.m {

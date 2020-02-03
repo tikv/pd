@@ -22,6 +22,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/kv"
@@ -35,6 +36,7 @@ type ScheduleOption struct {
 	labelProperty  atomic.Value
 	clusterVersion unsafe.Pointer
 	pdServerConfig atomic.Value
+	logConfig      atomic.Value
 }
 
 // NewScheduleOption creates a new ScheduleOption.
@@ -45,6 +47,7 @@ func NewScheduleOption(cfg *Config) *ScheduleOption {
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
+	o.logConfig.Store(&cfg.Log)
 	return o
 }
 
@@ -63,9 +66,24 @@ func (o *ScheduleOption) GetReplication() *Replication {
 	return o.replication
 }
 
+// GetPDServerConfig returns pd server configurations.
+func (o *ScheduleOption) GetPDServerConfig() *PDServerConfig {
+	return o.pdServerConfig.Load().(*PDServerConfig)
+}
+
 // SetPDServerConfig sets the PD configuration.
 func (o *ScheduleOption) SetPDServerConfig(cfg *PDServerConfig) {
 	o.pdServerConfig.Store(cfg)
+}
+
+// GetLogConfig returns log configuration.
+func (o *ScheduleOption) GetLogConfig() *log.Config {
+	return o.logConfig.Load().(*log.Config)
+}
+
+// SetLogConfig sets the log configuration.
+func (o *ScheduleOption) SetLogConfig(cfg *log.Config) {
+	o.logConfig.Store(cfg)
 }
 
 // GetMaxReplicas returns the number of replicas for each region.
@@ -315,6 +333,11 @@ func (o *ScheduleOption) LoadLabelPropertyConfig() LabelPropertyConfig {
 	return o.labelProperty.Load().(LabelPropertyConfig)
 }
 
+// SetLabelPropertyConfig sets the label property configuration.
+func (o *ScheduleOption) SetLabelPropertyConfig(cfg LabelPropertyConfig) {
+	o.labelProperty.Store(cfg)
+}
+
 // SetClusterVersion sets the cluster version.
 func (o *ScheduleOption) SetClusterVersion(v *semver.Version) {
 	atomic.StorePointer(&o.clusterVersion, unsafe.Pointer(v))
@@ -330,9 +353,14 @@ func (o *ScheduleOption) LoadClusterVersion() *semver.Version {
 	return (*semver.Version)(atomic.LoadPointer(&o.clusterVersion))
 }
 
-// LoadPDServerConfig returns PD server configurations.
+// LoadPDServerConfig returns PD server configuration.
 func (o *ScheduleOption) LoadPDServerConfig() *PDServerConfig {
 	return o.pdServerConfig.Load().(*PDServerConfig)
+}
+
+// LoadLogConfig returns log configuration.
+func (o *ScheduleOption) LoadLogConfig() *log.Config {
+	return o.logConfig.Load().(*log.Config)
 }
 
 // Persist saves the configuration to the storage.
@@ -343,6 +371,7 @@ func (o *ScheduleOption) Persist(storage *core.Storage) error {
 		LabelProperty:  o.LoadLabelPropertyConfig(),
 		ClusterVersion: *o.LoadClusterVersion(),
 		PDServerCfg:    *o.LoadPDServerConfig(),
+		Log:            *o.LoadLogConfig(),
 	}
 	err := storage.SaveConfig(cfg)
 	return err
@@ -356,6 +385,7 @@ func (o *ScheduleOption) Reload(storage *core.Storage) error {
 		LabelProperty:  o.LoadLabelPropertyConfig().Clone(),
 		ClusterVersion: *o.LoadClusterVersion(),
 		PDServerCfg:    *o.LoadPDServerConfig(),
+		Log:            *o.LoadLogConfig(),
 	}
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
@@ -368,6 +398,7 @@ func (o *ScheduleOption) Reload(storage *core.Storage) error {
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.SetClusterVersion(&cfg.ClusterVersion)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
+		o.logConfig.Store(&cfg.Log)
 	}
 	return nil
 }

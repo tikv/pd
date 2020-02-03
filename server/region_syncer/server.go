@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -60,7 +60,7 @@ type Server interface {
 	GetStorage() *core.Storage
 	Name() string
 	GetMetaRegions() []*metapb.Region
-	GetSecurityConfig() *config.SecurityConfig
+	GetSecurityConfig() *grpcutil.SecurityConfig
 	GetBasicCluster() *core.BasicCluster
 }
 
@@ -75,7 +75,7 @@ type RegionSyncer struct {
 	wg                 sync.WaitGroup
 	history            *historyBuffer
 	limit              *ratelimit.Bucket
-	securityConfig     *config.SecurityConfig
+	securityConfig     *grpcutil.SecurityConfig
 }
 
 // NewRegionSyncer returns a region syncer.

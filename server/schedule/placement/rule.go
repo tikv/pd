@@ -56,6 +56,11 @@ func (r Rule) Key() [2]string {
 	return [2]string{r.GroupID, r.ID}
 }
 
+// StoreKey returns the rule's key for persistent store.
+func (r Rule) StoreKey() string {
+	return r.StartKeyHex + "-" + r.EndKeyHex
+}
+
 // Rules are ordered by (GroupID, Index, ID).
 func compareRule(a, b *Rule) int {
 	switch {
