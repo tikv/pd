@@ -221,21 +221,21 @@ type storeLoadPred struct {
 }
 
 func (lp *storeLoadPred) min() storeLoad {
-	return min(&lp.Current, &lp.Future)
+	return minLoad(&lp.Current, &lp.Future)
 }
 
 func (lp *storeLoadPred) max() storeLoad {
-	return max(&lp.Current, &lp.Future)
+	return maxLoad(&lp.Current, &lp.Future)
 }
 
-func min(a, b *storeLoad) storeLoad {
+func minLoad(a, b *storeLoad) storeLoad {
 	return storeLoad{
 		ByteRate: math.Min(a.ByteRate, b.ByteRate),
 		Count:    minInt(a.Count, b.Count),
 	}
 }
 
-func max(a, b *storeLoad) storeLoad {
+func maxLoad(a, b *storeLoad) storeLoad {
 	return storeLoad{
 		ByteRate: math.Max(a.ByteRate, b.ByteRate),
 		Count:    maxInt(a.Count, b.Count),
