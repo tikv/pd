@@ -216,6 +216,19 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	mc.PutStore(store)
 }
 
+// AddRegionStoreWithLeader adds store with specified count of region and leader.
+func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, leaderCounts ...int) {
+	leaderCount := regionCount
+	if len(leaderCounts) != 0 {
+		leaderCount = leaderCounts[0]
+	}
+	mc.AddRegionStore(storeID, regionCount)
+	for i := 0; i < leaderCount; i++ {
+		id, _ := mc.AllocID()
+		mc.AddLeaderRegion(id, storeID)
+	}
+}
+
 // AddLabelsStore adds store with specified count of region and labels.
 func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
 	newLabels := make([]*metapb.StoreLabel, 0, len(labels))
@@ -239,10 +252,11 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 }
 
 // AddLeaderRegion adds region with specified leader and followers.
-func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
+func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {
 	origin := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
+	return region
 }
 
 // AddLeaderRegionWithRange adds region with specified leader, followers and key range.
