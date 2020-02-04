@@ -31,9 +31,10 @@ import (
 
 const (
 	// adjustRatio is used to adjust TolerantSizeRatio according to region count.
-	adjustRatio             float64 = 0.005
-	leaderTolerantSizeRatio float64 = 5.0
-	minTolerantSizeRatio    float64 = 1.0
+	adjustRatio               float64 = 0.005
+	leaderTolerantSizeRatio   float64 = 5.0
+	minTolerantSizeRatio      float64 = 1.0
+	storeLoadByteRateRankSize         = 100 * 1024
 )
 
 // ErrScheduleConfigNotExist the config is not correct.
@@ -205,6 +206,10 @@ type storeLoad struct {
 	Count    int
 }
 
+func (load *storeLoad) ByteRateRank() int64 {
+	return int64(load.ByteRate / storeLoadByteRateRankSize)
+}
+
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	future := *load
 	future.ByteRate += infl.ByteRate
@@ -214,30 +219,11 @@ func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	}
 }
 
-type storeLoadCmp func(ld1, ld2 *storeLoad) int
-
-func sliceCmp(cmps ...storeLoadCmp) storeLoadCmp {
-	return func(ld1, ld2 *storeLoad) int {
-		for _, cmp := range cmps {
-			r := cmp(ld1, ld2)
-			if r != 0 {
-				return r
-			}
-		}
-		return 0
-	}
-}
-
-func neg(cmp storeLoadCmp) storeLoadCmp {
-	return func(ld1, ld2 *storeLoad) int {
-		return -cmp(ld1, ld2)
-	}
-}
-
-func byteRateCmp(ld1, ld2 *storeLoad) int {
-	if ld1.ByteRate < ld2.ByteRate {
+func byteRateRankCmp(ld1, ld2 *storeLoad) int {
+	rk1, rk2 := ld1.ByteRateRank(), ld2.ByteRateRank()
+	if rk1 < rk2 {
 		return -1
-	} else if ld1.ByteRate > ld2.ByteRate {
+	} else if rk1 > rk2 {
 		return 1
 	}
 	return 0
@@ -258,23 +244,31 @@ type storeLoadPred struct {
 	Future  storeLoad
 }
 
-func (lp *storeLoadPred) min() storeLoad {
+func (lp *storeLoadPred) min() *storeLoad {
 	return minLoad(&lp.Current, &lp.Future)
 }
 
-func (lp *storeLoadPred) max() storeLoad {
+func (lp *storeLoadPred) max() *storeLoad {
 	return maxLoad(&lp.Current, &lp.Future)
 }
 
-func minLoad(a, b *storeLoad) storeLoad {
-	return storeLoad{
+func (lp *storeLoadPred) diff() *storeLoad {
+	mx, mn := lp.max(), lp.min()
+	return &storeLoad{
+		ByteRate: mx.ByteRate - mn.ByteRate,
+		Count:    mx.Count - mn.Count,
+	}
+}
+
+func minLoad(a, b *storeLoad) *storeLoad {
+	return &storeLoad{
 		ByteRate: math.Min(a.ByteRate, b.ByteRate),
 		Count:    minInt(a.Count, b.Count),
 	}
 }
 
-func maxLoad(a, b *storeLoad) storeLoad {
-	return storeLoad{
+func maxLoad(a, b *storeLoad) *storeLoad {
+	return &storeLoad{
 		ByteRate: math.Max(a.ByteRate, b.ByteRate),
 		Count:    maxInt(a.Count, b.Count),
 	}

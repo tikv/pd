@@ -382,9 +382,7 @@ type balanceSolver struct {
 	rwTy         rwType
 	opTy         opType
 
-	cur  *solution
-	best *solution
-	ops  []*operator.Operator
+	cur *solution
 }
 
 type solution struct {
@@ -456,35 +454,39 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 	bs.cur = &solution{}
-	bs.best = nil
-	bs.ops = nil
+	var best *solution = nil
+	var ops []*operator.Operator = nil
+	var infls []Influence = nil
 
-	srcStores := bs.sortSrcStoreIDs(bs.filterSrcStores())
-	for _, srcStoreID := range srcStores {
+	for srcStoreID := range bs.filterSrcStores() {
 		bs.cur.srcStoreID = srcStoreID
 
-		for _, srcPeerStat := range bs.sortHotPeers() {
+		for _, srcPeerStat := range bs.getHotPeers() {
 			bs.cur.srcPeerStat = srcPeerStat
 			bs.cur.region = bs.getRegion()
 			if bs.cur.region == nil {
 				continue
 			}
 
-			dstStores := bs.sortDstStoreIDs(bs.filterDstStores())
-			for _, dstStoreID := range dstStores {
+			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
 
-				if bs.betterSolution() {
-					if ops := bs.buildOperators(); len(ops) > 0 {
-						bs.ops = ops
+				if bs.betterThan(best) {
+					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
+						ops = newOps
+						infls = newInfls
 						clone := *bs.cur
-						bs.best = &clone
+						best = &clone
 					}
 				}
 			}
 		}
 	}
-	return bs.ops
+
+	for i := 0; i < len(ops); i++ {
+		bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i], bs.rwTy, bs.opTy)
+	}
+	return ops
 }
 
 func (bs *balanceSolver) allowBalance() bool {
@@ -513,21 +515,14 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	return ret
 }
 
-func (bs *balanceSolver) sortSrcStoreIDs(loadDetail map[uint64]*storeLoadDetail) []uint64 {
-	var cmp storeLoadCmp
-	if bs.opTy == transferLeader && bs.rwTy == write {
-		cmp = neg(sliceCmp(countCmp, byteRateCmp))
-	} else {
-		cmp = neg(sliceCmp(byteRateCmp, countCmp))
-	}
-	return sortSrcStores(loadDetail, cmp)
-}
-
-func (bs *balanceSolver) sortHotPeers() []*statistics.HotPeerStat {
+func (bs *balanceSolver) getHotPeers() []*statistics.HotPeerStat {
 	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
 	sort.Slice(ret, func(i, j int) bool {
 		return ret[i].GetBytesRate() > ret[j].GetBytesRate()
 	})
+	if len(ret) > 1000 {
+		ret = ret[:1000]
+	}
 	return ret
 }
 
@@ -648,19 +643,83 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	return ret
 }
 
-func (bs *balanceSolver) sortDstStoreIDs(loadDetail map[uint64]*storeLoadDetail) []uint64 {
-	var cmp storeLoadCmp
-	if bs.opTy == transferLeader && bs.rwTy == write {
-		cmp = sliceCmp(countCmp, byteRateCmp)
-	} else {
-		cmp = sliceCmp(byteRateCmp, countCmp)
+// betterSolution returns true if `bs.cur` is a betterSolution solution than `bs.best`.
+func (bs *balanceSolver) betterThan(old *solution) bool {
+	if old == nil {
+		return true
 	}
-	return sortDstStores(loadDetail, cmp)
+
+	if r := bs.compareSrcStore(bs.cur.srcStoreID, old.srcStoreID); r < 0 {
+		return true
+	} else if r > 0 {
+		return false
+	}
+
+	if r := bs.compareDstStore(bs.cur.dstStoreID, old.dstStoreID); r < 0 {
+		return true
+	} else if r > 0 {
+		return false
+	}
+
+	if bs.cur.srcPeerStat != old.srcPeerStat {
+		// compare region
+
+		// prefer region with larger byte rate, to converge faster
+		curByteRk, oldByteRk := int64(bs.cur.srcPeerStat.GetBytesRate()/100), int64(old.srcPeerStat.GetBytesRate()/100)
+		if curByteRk > oldByteRk {
+			return true
+		} else if curByteRk < oldByteRk {
+			return false
+		}
+	}
+
+	return false
 }
 
-// betterSolution returns true if `bs.cur` is a betterSolution solution than `bs.best`.
-func (bs *balanceSolver) betterSolution() bool {
-	return bs.best == nil
+// smaller is better
+func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
+	if st1 != st2 {
+		// compare source store
+		lp1, lp2 := bs.stLoadDetail[st1].LoadPred, bs.stLoadDetail[st2].LoadPred
+
+		if bs.opTy == transferLeader && bs.rwTy == write {
+			if r := countCmp(lp1.min(), lp2.min()); r != 0 {
+				return -r
+			}
+		}
+		if r := byteRateRankCmp(lp1.min(), lp2.min()); r != 0 {
+			return -r
+		}
+
+		// prefer store with smaller difference
+		if r := byteRateRankCmp(lp1.diff(), lp2.diff()); r != 0 {
+			return r
+		}
+	}
+	return 0
+}
+
+// smaller is better
+func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
+	if st1 != st2 {
+		// compare source store
+		lp1, lp2 := bs.stLoadDetail[st1].LoadPred, bs.stLoadDetail[st2].LoadPred
+
+		if bs.opTy == transferLeader && bs.rwTy == write {
+			if r := countCmp(lp1.max(), lp2.max()); r != 0 {
+				return r
+			}
+		}
+		if r := byteRateRankCmp(lp1.max(), lp2.max()); r != 0 {
+			return r
+		}
+
+		// prefer store with smaller difference
+		if r := byteRateRankCmp(lp1.diff(), lp2.diff()); r != 0 {
+			return r
+		}
+	}
+	return 0
 }
 
 func (bs *balanceSolver) isReadyToBuild() bool {
@@ -675,9 +734,9 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 	return true
 }
 
-func (bs *balanceSolver) buildOperators() []*operator.Operator {
+func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	if !bs.isReadyToBuild() {
-		return nil
+		return nil, nil
 	}
 	var (
 		op  *operator.Operator
@@ -692,7 +751,7 @@ func (bs *balanceSolver) buildOperators() []*operator.Operator {
 		op, err = operator.CreateMovePeerOperator("move-hot-"+bs.rwTy.String()+"-region", bs.cluster, bs.cur.region, operator.OpHotRegion, bs.cur.srcStoreID, dstPeer)
 	case transferLeader:
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
-			return nil
+			return nil, nil
 		}
 		bs.sche.leaderLimit = bs.sche.adjustBalanceLimit(bs.cur.srcStoreID, bs.stLoadDetail)
 		op, err = operator.CreateTransferLeaderOperator("transfer-hot-"+bs.rwTy.String()+"-leader", bs.cluster, bs.cur.region, bs.cur.srcStoreID, bs.cur.dstStoreID, operator.OpHotRegion)
@@ -701,7 +760,7 @@ func (bs *balanceSolver) buildOperators() []*operator.Operator {
 	if err != nil {
 		log.Debug("fail to create operator", zap.Error(err), zap.Stringer("opType", bs.opTy), zap.Stringer("rwType", bs.rwTy))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
-		return nil
+		return nil, nil
 	}
 
 	op.SetPriorityLevel(core.HighPriority)
@@ -713,38 +772,8 @@ func (bs *balanceSolver) buildOperators() []*operator.Operator {
 	if bs.opTy == transferLeader && bs.rwTy == write {
 		infl.ByteRate = 0
 	}
-	bs.sche.addPendingInfluence(op, bs.cur.srcStoreID, bs.cur.dstStoreID, infl, bs.rwTy, bs.opTy)
 
-	return []*operator.Operator{op}
-}
-
-// Sort stores according to their load prediction.
-func sortStores(loadDetail map[uint64]*storeLoadDetail, better func(lp1, lp2 *storeLoadPred) bool) []uint64 {
-	ids := make([]uint64, 0, len(loadDetail))
-	for id := range loadDetail {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(i, j int) bool {
-		id1, id2 := ids[i], ids[j]
-		return better(loadDetail[id1].LoadPred, loadDetail[id2].LoadPred)
-	})
-	return ids
-}
-
-func sortSrcStores(loadDetail map[uint64]*storeLoadDetail, cmp storeLoadCmp) []uint64 {
-	return sortStores(loadDetail,
-		func(lp1, lp2 *storeLoadPred) bool {
-			ld1, ld2 := lp1.min(), lp2.min()
-			return cmp(&ld1, &ld2) < 0
-		})
-}
-
-func sortDstStores(loadDetail map[uint64]*storeLoadDetail, cmp storeLoadCmp) []uint64 {
-	return sortStores(loadDetail,
-		func(lp1, lp2 *storeLoadPred) bool {
-			ld1, ld2 := lp1.max(), lp2.max()
-			return cmp(&ld1, &ld2) < 0
-		})
+	return []*operator.Operator{op}, []Influence{infl}
 }
 
 func (h *hotScheduler) adjustBalanceLimit(storeID uint64, loadDetail map[uint64]*storeLoadDetail) uint64 {
