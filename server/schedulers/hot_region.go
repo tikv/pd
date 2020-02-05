@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	"fmt"
 	"math/rand"
 	"sort"
 	"sync"
@@ -285,8 +286,8 @@ func summaryStoresLoad(
 			}
 
 			// Metric for debug.
-			name := "hot-peers-byte-rate-sum-" + rwTy.String() + "-" + kind.String()
-			schedulerStatus.WithLabelValues(scheName, name).Set(hotSum)
+			ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(hotSum)
 		}
 
 		// Build store load prediction from current load and pending influence.
