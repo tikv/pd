@@ -222,29 +222,44 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 	return true, nil
 }
 
-// SaveRules stores rule cfg to the rulesPath.
-func (s *Storage) SaveRules(rules interface{}) error {
+// SaveRule stores a rule cfg to the rulesPath.
+func (s *Storage) SaveRule(ruleKey string, rules interface{}) error {
 	value, err := json.Marshal(rules)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	return s.Save(rulesPath, string(value))
+	return s.Save(path.Join(rulesPath, ruleKey), string(value))
+}
+
+// DeleteRule removes a rule from storage.
+func (s *Storage) DeleteRule(ruleKey string) error {
+	return s.Base.Remove(path.Join(rulesPath, ruleKey))
 }
 
 // LoadRules loads placement rules from storage.
-func (s *Storage) LoadRules(rules interface{}) (bool, error) {
-	value, err := s.Load(rulesPath)
-	if err != nil {
-		return false, err
+func (s *Storage) LoadRules(f func(v string) error) (bool, error) {
+	// Range is ['rule/\x00', 'rule0'). 'rule0' is the upper bound of all rules because '0' is next char of '/' in
+	// ascii order.
+	nextKey := path.Join(rulesPath, "\x00")
+	endKey := rulesPath + "0"
+	for {
+		keys, values, err := s.LoadRange(nextKey, endKey, minKVRangeLimit)
+		if err != nil {
+			return false, err
+		}
+		if len(values) == 0 {
+			return false, nil
+		}
+		for _, v := range values {
+			if err := f(v); err != nil {
+				return true, err
+			}
+		}
+		if len(values) < minKVRangeLimit {
+			return true, nil
+		}
+		nextKey = keys[len(keys)-1] + "\x00"
 	}
-	if value == "" {
-		return false, nil
-	}
-	err = json.Unmarshal([]byte(value), rules)
-	if err != nil {
-		return false, errors.WithStack(err)
-	}
-	return true, nil
 }
 
 // LoadStores loads all stores from storage to StoresInfo.
