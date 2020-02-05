@@ -680,21 +680,25 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare source store
-		lp1, lp2 := bs.stLoadDetail[st1].LoadPred, bs.stLoadDetail[st2].LoadPred
-
+		var lpCmp storeLPCmp
 		if bs.opTy == transferLeader && bs.rwTy == write {
-			if r := countCmp(lp1.min(), lp2.min()); r != 0 {
-				return -r
-			}
-		}
-		if r := byteRateRankCmp(lp1.min(), lp2.min()); r != 0 {
-			return -r
+			lpCmp = sliceLPCmp(
+				minLPCmp(negLoadCmp(sliceLoadCmp(
+					countCmp,
+					byteRateRankCmp))),
+				diffCmp(byteRateRankCmp),
+			)
+		} else {
+			lpCmp = sliceLPCmp(
+				minLPCmp(negLoadCmp(byteRateRankCmp)),
+				diffCmp(byteRateRankCmp),
+				minLPCmp(negLoadCmp(countCmp)),
+			)
 		}
 
-		// prefer store with smaller difference
-		if r := byteRateRankCmp(lp1.diff(), lp2.diff()); r != 0 {
-			return r
-		}
+		lp1 := bs.stLoadDetail[st1].LoadPred
+		lp2 := bs.stLoadDetail[st2].LoadPred
+		return lpCmp(lp1, lp2)
 	}
 	return 0
 }
@@ -702,22 +706,26 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 // smaller is better
 func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 	if st1 != st2 {
-		// compare source store
-		lp1, lp2 := bs.stLoadDetail[st1].LoadPred, bs.stLoadDetail[st2].LoadPred
-
+		// compare destination store
+		var lpCmp storeLPCmp
 		if bs.opTy == transferLeader && bs.rwTy == write {
-			if r := countCmp(lp1.max(), lp2.max()); r != 0 {
-				return r
-			}
-		}
-		if r := byteRateRankCmp(lp1.max(), lp2.max()); r != 0 {
-			return r
+			lpCmp = sliceLPCmp(
+				maxLPCmp(sliceLoadCmp(
+					countCmp,
+					byteRateRankCmp)),
+				diffCmp(byteRateRankCmp),
+			)
+		} else {
+			lpCmp = sliceLPCmp(
+				maxLPCmp(byteRateRankCmp),
+				diffCmp(byteRateRankCmp),
+				maxLPCmp(countCmp),
+			)
 		}
 
-		// prefer store with smaller difference
-		if r := byteRateRankCmp(lp1.diff(), lp2.diff()); r != 0 {
-			return r
-		}
+		lp1 := bs.stLoadDetail[st1].LoadPred
+		lp2 := bs.stLoadDetail[st2].LoadPred
+		return lpCmp(lp1, lp2)
 	}
 	return 0
 }

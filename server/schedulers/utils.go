@@ -222,6 +222,25 @@ func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	}
 }
 
+type storeLoadCmp func(ld1, ld2 *storeLoad) int
+
+func negLoadCmp(cmp storeLoadCmp) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		return -cmp(ld1, ld2)
+	}
+}
+
+func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		for _, cmp := range cmps {
+			if r := cmp(ld1, ld2); r != 0 {
+				return r
+			}
+		}
+		return 0
+	}
+}
+
 func byteRateRankCmp(ld1, ld2 *storeLoad) int {
 	rk1, rk2 := ld1.ByteRateRank(), ld2.ByteRateRank()
 	if rk1 < rk2 {
@@ -260,6 +279,43 @@ func (lp *storeLoadPred) diff() *storeLoad {
 	return &storeLoad{
 		ByteRate: mx.ByteRate - mn.ByteRate,
 		Count:    mx.Count - mn.Count,
+	}
+}
+
+type storeLPCmp func(lp1, lp2 *storeLoadPred) int
+
+func negLPCmp(cmp storeLPCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return -cmp(lp1, lp2)
+	}
+}
+
+func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		for _, cmp := range cmps {
+			if r := cmp(lp1, lp2); r != 0 {
+				return r
+			}
+		}
+		return 0
+	}
+}
+
+func minLPCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.min(), lp2.min())
+	}
+}
+
+func maxLPCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.max(), lp2.max())
+	}
+}
+
+func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.diff(), lp2.diff())
 	}
 }
 
