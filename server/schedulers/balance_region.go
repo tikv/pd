@@ -131,8 +131,13 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	stores = filter.SelectSourceStores(stores, s.filters, cluster)
+	opInfluence := s.opController.GetOpInfluence(cluster)
+	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
 	sort.Slice(stores, func(i, j int) bool {
-		return stores[i].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0) > stores[j].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)
+		iOp := opInfluence.GetStoreInfluence(stores[i].GetID()).ResourceProperty(kind)
+		jOp := opInfluence.GetStoreInfluence(stores[j].GetID()).ResourceProperty(kind)
+		return stores[i].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), iOp) >
+			stores[j].RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), jOp)
 	})
 	for _, source := range stores {
 		sourceID := source.GetID()

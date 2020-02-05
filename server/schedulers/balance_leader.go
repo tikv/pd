@@ -134,11 +134,19 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	stores := cluster.GetStores()
 	sources := filter.SelectSourceStores(stores, l.filters, cluster)
 	targets := filter.SelectTargetStores(stores, l.filters, cluster)
+	opInfluence := l.opController.GetOpInfluence(cluster)
+	kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
 	sort.Slice(sources, func(i, j int) bool {
-		return sources[i].LeaderScore(leaderSchedulePolicy, 0) > sources[j].LeaderScore(leaderSchedulePolicy, 0)
+		iOp := opInfluence.GetStoreInfluence(sources[i].GetID()).ResourceProperty(kind)
+		jOp := opInfluence.GetStoreInfluence(sources[j].GetID()).ResourceProperty(kind)
+		return sources[i].LeaderScore(leaderSchedulePolicy, iOp) >
+			sources[j].LeaderScore(leaderSchedulePolicy, jOp)
 	})
 	sort.Slice(targets, func(i, j int) bool {
-		return targets[i].LeaderScore(leaderSchedulePolicy, 0) < targets[j].LeaderScore(leaderSchedulePolicy, 0)
+		iOp := opInfluence.GetStoreInfluence(targets[i].GetID()).ResourceProperty(kind)
+		jOp := opInfluence.GetStoreInfluence(targets[j].GetID()).ResourceProperty(kind)
+		return targets[i].LeaderScore(leaderSchedulePolicy, iOp) <
+			targets[j].LeaderScore(leaderSchedulePolicy, jOp)
 	})
 
 	for i := 0; i < len(sources) || i < len(targets); i++ {
