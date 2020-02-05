@@ -24,7 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/configpb"
 	pd "github.com/pingcap/pd/client"
 	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config_manager"
+	configmanager "github.com/pingcap/pd/server/config_manager"
 	"github.com/pkg/errors"
 )
 

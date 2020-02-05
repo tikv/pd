@@ -16,10 +16,10 @@ package configmanager
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
@@ -545,8 +545,13 @@ func getUpdateValue(item, updateItem interface{}) (interface{}, error) {
 	var err error
 	var v interface{}
 	var tmp float64
-	switch t := item.(type) {
-	case bool:
+	t := reflect.TypeOf(item)
+	// It is used to handle "schedulers-v2".
+	if t == nil {
+		return v, nil
+	}
+	switch t.Kind() {
+	case reflect.Bool:
 		switch t1 := updateItem.(type) {
 		case string:
 			v, err = strconv.ParseBool(updateItem.(string))
@@ -555,7 +560,7 @@ func getUpdateValue(item, updateItem interface{}) (interface{}, error) {
 		default:
 			return nil, errors.Errorf("unexpected type: %T\n", t1)
 		}
-	case int64:
+	case reflect.Int64:
 		switch t1 := updateItem.(type) {
 		case string:
 			tmp, err = strconv.ParseFloat(updateItem.(string), 64)
@@ -567,14 +572,14 @@ func getUpdateValue(item, updateItem interface{}) (interface{}, error) {
 		default:
 			return nil, errors.Errorf("unexpected type: %T\n", t1)
 		}
-	case []interface{}:
+	case reflect.Slice:
 		strSlice := strings.Split(updateItem.(string), ",")
 		slice := make([]interface{}, 0)
 		for _, str := range strSlice {
 			slice = append(slice, str)
 		}
 		v = slice
-	case float64:
+	case reflect.Float64:
 		switch t1 := updateItem.(type) {
 		case string:
 			v, err = strconv.ParseFloat(updateItem.(string), 64)
@@ -583,23 +588,17 @@ func getUpdateValue(item, updateItem interface{}) (interface{}, error) {
 		default:
 			return nil, errors.Errorf("unexpected type: %T\n", t1)
 		}
-	case string:
+	case reflect.String:
 		switch t1 := updateItem.(type) {
 		case string:
 			v = updateItem
 		default:
 			return nil, errors.Errorf("unexpected type: %T\n", t1)
 		}
-	case time.Time:
-		switch t1 := updateItem.(type) {
-		case string:
-			v, err = time.Parse(time.RFC3339, updateItem.(string))
-		default:
-			return nil, errors.Errorf("unexpected type: %T\n", t1)
-		}
-	case nil:
+	case reflect.Map, reflect.Struct, reflect.Ptr:
+		v = updateItem
 	default:
-		return nil, errors.Errorf("unsupported type: %T\n", t)
+		return nil, errors.Errorf("unsupported type: %T\n", t.Kind())
 	}
 
 	if err != nil {

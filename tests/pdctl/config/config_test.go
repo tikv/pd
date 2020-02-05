@@ -83,7 +83,6 @@ func (s *configTestSuite) TestConfig(c *C) {
 	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	cfg := config.Config{}
-	cfg.Adjust(nil)
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
 	c.Assert(&cfg.Schedule, DeepEquals, svr.GetScheduleConfig())
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())

@@ -343,12 +343,5 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 		apiutil.ErrorResp(h.rd, w, errcode.NewInternalErr(err))
 		return
 	}
-	kind := &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: server.Component}}}
-	v := &configpb.Version{Global: h.svr.GetConfigManager().GlobalCfgs[server.Component].GetVersion()}
-	entry := &configpb.ConfigEntry{Name: "cluster-version", Value: version}
-	_, _, err = h.svr.GetConfigClient().Update(h.svr.Context(), v, kind, []*configpb.ConfigEntry{entry})
-	if err != nil {
-		log.Error("update cluster version meet error", zap.Error(err))
-	}
 	h.rd.JSON(w, http.StatusOK, nil)
 }
