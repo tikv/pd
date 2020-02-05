@@ -46,7 +46,7 @@ type joinTestSuite struct {
 func (s *joinTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
-	server.EtcdStartTimeout = 5 * time.Second
+	server.EtcdStartTimeout = 10 * time.Second
 }
 
 func (s *joinTestSuite) TearDownSuite(c *C) {
