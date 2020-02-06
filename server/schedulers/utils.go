@@ -284,12 +284,6 @@ func (lp *storeLoadPred) diff() *storeLoad {
 
 type storeLPCmp func(lp1, lp2 *storeLoadPred) int
 
-func negLPCmp(cmp storeLPCmp) storeLPCmp {
-	return func(lp1, lp2 *storeLoadPred) int {
-		return -cmp(lp1, lp2)
-	}
-}
-
 func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
 	return func(lp1, lp2 *storeLoadPred) int {
 		for _, cmp := range cmps {
