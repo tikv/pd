@@ -17,7 +17,9 @@ import (
 	"context"
 
 	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/log"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -32,6 +34,7 @@ func (c *ConfigManager) Create(ctx context.Context, request *configpb.CreateRequ
 
 	version, config, status := c.CreateConfig(request.GetVersion(), request.GetComponent(), request.GetComponentId(), request.GetConfig())
 	if status.GetCode() == configpb.StatusCode_OK {
+		log.Info("component has registered", zap.String("component", request.GetComponent()), zap.String("component-id", request.GetComponentId()))
 		c.Persist(c.svr.GetStorage())
 	}
 

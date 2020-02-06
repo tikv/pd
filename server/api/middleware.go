@@ -14,10 +14,16 @@
 package api
 
 import (
+	"bytes"
 	"net/http"
+	"reflect"
+	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/cluster"
+	"github.com/pingcap/pd/server/config"
+	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
 
@@ -43,4 +49,53 @@ func (m clusterMiddleware) Middleware(h http.Handler) http.Handler {
 		ctx := withClusterCtx(r.Context(), rc)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+type entry struct {
+	key   string
+	value string
+}
+
+func transToEntries(req map[string]interface{}) ([]*entry, error) {
+	mapKeys := reflect.ValueOf(req).MapKeys()
+	var entries []*entry
+	for _, k := range mapKeys {
+		if config.IsDeprecated(k.String()) {
+			return nil, errors.New("config item has already been deprecated")
+		}
+		itemMap := make(map[string]interface{})
+		itemMap[k.String()] = req[k.String()]
+		var buf bytes.Buffer
+		if err := toml.NewEncoder(&buf).Encode(itemMap); err != nil {
+			return nil, err
+		}
+		value := buf.String()
+		key := findTag(reflect.TypeOf(&config.Config{}).Elem(), k.String())
+		if key == "" {
+			return nil, errors.New("config item not found")
+		}
+		entries = append(entries, &entry{key, value})
+	}
+	return entries, nil
+}
+
+func findTag(t reflect.Type, tag string) string {
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		column := field.Tag.Get("json")
+		c := strings.Split(column, ",")
+		if c[0] == tag {
+			return c[0]
+		}
+
+		if field.Type.Kind() == reflect.Struct {
+			path := findTag(field.Type, tag)
+			if path == "" {
+				continue
+			}
+			return field.Tag.Get("json") + "." + path
+		}
+	}
+	return ""
 }

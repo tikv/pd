@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
@@ -39,6 +40,7 @@ type configTestSuite struct{}
 
 func (s *configTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
+	server.ConfigCheckInterval = 10 * time.Millisecond
 }
 
 type testItem struct {
@@ -114,6 +116,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args2 := []string{"-u", pdAddr, "config", "set", "cluster-version", "2.1.0-rc.5"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
+	time.Sleep(20 * time.Millisecond)
 	c.Assert(clusterVersion, Not(DeepEquals), svr.GetClusterVersion())
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
@@ -133,6 +136,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args2 = []string{"-u", pdAddr, "config", "set", "label-property", "reject-leader", "zone", "cn"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
+	time.Sleep(20 * time.Millisecond)
 	c.Assert(labelPropertyCfg, Not(DeepEquals), svr.GetLabelProperty())
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
@@ -144,6 +148,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args3 := []string{"-u", pdAddr, "config", "delete", "label-property", "reject-leader", "zone", "cn"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args3...)
 	c.Assert(err, IsNil)
+	time.Sleep(20 * time.Millisecond)
 	c.Assert(labelPropertyCfg, Not(DeepEquals), svr.GetLabelProperty())
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)

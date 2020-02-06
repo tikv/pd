@@ -201,7 +201,6 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 		}
 		return mux, info
 	}
-
 	cfg := NewTestSingleConfig(c)
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)

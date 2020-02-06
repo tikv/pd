@@ -84,7 +84,7 @@ type Config struct {
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
-	ClusterVersion semver.Version `json:"cluster-version"`
+	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
@@ -207,7 +207,10 @@ const (
 	defaultDisableErrorVerbose = true
 )
 
-var defaultRuntimeServices = []string{}
+var (
+	defaultRuntimeServices = []string{}
+	defaultLocationLabels  = []string{}
+)
 
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {
@@ -573,7 +576,7 @@ type ScheduleConfig struct {
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
 	// Only used to display
-	SchedulersPayload map[string]string `json:"schedulers,omitempty"`
+	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload,omitempty"`
 
 	// StoreLimitMode can be auto or manual, when set to auto,
 	// PD tries to change the store limit values according to
@@ -801,6 +804,24 @@ func (c *ScheduleConfig) Deprecated() error {
 	return nil
 }
 
+var deprecateConfigs = []string{
+	"disable-remove-down-replica",
+	"disable-replace-offline-replica",
+	"disable-make-up-replica",
+	"disable-remove-extra-replica",
+	"disable-location-replacement",
+}
+
+// IsDeprecated returns if a config is deprecated.
+func IsDeprecated(config string) bool {
+	for _, t := range deprecateConfigs {
+		if t == config {
+			return true
+		}
+	}
+	return false
+}
+
 // SchedulerConfigs is a slice of customized scheduler configuration.
 type SchedulerConfigs []SchedulerConfig
 
@@ -872,6 +893,9 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	if !meta.IsDefined("strictly-match-label") {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
+	}
+	if !meta.IsDefined("location-labels") {
+		c.LocationLabels = defaultLocationLabels
 	}
 	return c.Validate()
 }

@@ -21,12 +21,16 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/kvproto/pkg/configpb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/apiutil"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 type confHandler struct {
@@ -46,6 +50,27 @@ func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
+	if h.svr.GetConfig().EnableConfigManager {
+		client := h.svr.GetConfigClient()
+		if client == nil {
+			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
+		}
+		cm := h.svr.GetConfigManager()
+		m := make(map[string]interface{})
+		json.NewDecoder(r.Body).Decode(&m)
+		entries, err := transToEntries(m)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		err = redirectUpdateReq(h.svr.Context(), client, cm, entries)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, nil)
+		return
+	}
 	config := h.svr.GetConfig()
 	data, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
@@ -139,6 +164,27 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
+	if h.svr.GetConfig().EnableConfigManager {
+		client := h.svr.GetConfigClient()
+		if client == nil {
+			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
+		}
+		cm := h.svr.GetConfigManager()
+		m := make(map[string]interface{})
+		json.NewDecoder(r.Body).Decode(&m)
+		entries, err := transToEntries(m)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		err = redirectUpdateReq(h.svr.Context(), client, cm, entries)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, nil)
+		return
+	}
 	config := h.svr.GetScheduleConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
@@ -156,6 +202,27 @@ func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
+	if h.svr.GetConfig().EnableConfigManager {
+		client := h.svr.GetConfigClient()
+		if client == nil {
+			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
+		}
+		cm := h.svr.GetConfigManager()
+		m := make(map[string]interface{})
+		json.NewDecoder(r.Body).Decode(&m)
+		entries, err := transToEntries(m)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		err = redirectUpdateReq(h.svr.Context(), client, cm, entries)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, nil)
+		return
+	}
 	config := h.svr.GetReplicationConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
@@ -177,6 +244,53 @@ func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
+
+	if h.svr.GetConfig().EnableConfigManager {
+		client := h.svr.GetConfigClient()
+		if client == nil {
+			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
+		}
+		cm := h.svr.GetConfigManager()
+		typ := input["type"]
+		labelKey, labelValue := input["label-key"], input["label-value"]
+		cfg := h.svr.GetScheduleOption().LoadLabelPropertyConfig().Clone()
+		switch input["action"] {
+		case "set":
+			for _, l := range cfg[typ] {
+				if l.Key == labelKey && l.Value == labelValue {
+					return
+				}
+			}
+			cfg[typ] = append(cfg[typ], config.StoreLabel{Key: labelKey, Value: labelValue})
+		case "delete":
+			oldLabels := cfg[typ]
+			cfg[typ] = []config.StoreLabel{}
+			for _, l := range oldLabels {
+				if l.Key == labelKey && l.Value == labelValue {
+					continue
+				}
+				cfg[typ] = append(cfg[typ], l)
+			}
+			if len(cfg[typ]) == 0 {
+				delete(cfg, typ)
+			}
+		default:
+			err := errors.Errorf("unknown action %v", input["action"])
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		var buf bytes.Buffer
+		toml.NewEncoder(&buf).Encode(cfg)
+		entries := []*entry{{key: "label-property", value: buf.String()}}
+		err := redirectUpdateReq(h.svr.Context(), client, cm, entries)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, nil)
+		return
+	}
+
 	var err error
 	switch input["action"] {
 	case "set":
@@ -207,6 +321,23 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set cluster-version")))
 		return
 	}
+
+	if h.svr.GetConfig().EnableConfigManager {
+		kind := &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: server.Component}}}
+		v := &configpb.Version{Global: h.svr.GetConfigManager().GlobalCfgs[server.Component].GetVersion()}
+		entry := &configpb.ConfigEntry{Name: "cluster-version", Value: version}
+		client := h.svr.GetConfigClient()
+		if client == nil {
+			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
+		}
+		_, _, err := h.svr.GetConfigClient().Update(h.svr.Context(), v, kind, []*configpb.ConfigEntry{entry})
+		if err != nil {
+			log.Error("update cluster version meet error", zap.Error(err))
+		}
+		h.rd.JSON(w, http.StatusOK, nil)
+		return
+	}
+
 	err := h.svr.SetClusterVersion(version)
 	if err != nil {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInternalErr(err))

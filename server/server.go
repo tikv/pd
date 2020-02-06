@@ -183,7 +183,6 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 		log.Info("register REST path", zap.String("path", pathPrefix))
 		registerMap[pathPrefix] = struct{}{}
 		router.PathPrefix(pathPrefix).Handler(handler)
-
 		if info.IsCore {
 			// Deprecated
 			router.Path("/pd/health").Handler(handler)
@@ -193,7 +192,6 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 			router.Path("/pd/ping").Handler(handler)
 		}
 	}
-
 	engine.UseHandler(router)
 	return engine, nil
 }
@@ -598,6 +596,16 @@ func (s *Server) GetClient() *clientv3.Client {
 	return s.client
 }
 
+// GetConfigManager returns the config manager of server.
+func (s *Server) GetConfigManager() *configmanager.ConfigManager {
+	return s.cfgManager
+}
+
+// GetConfigClient returns the config client of server.
+func (s *Server) GetConfigClient() pd.ConfigClient {
+	return s.configClient
+}
+
 // GetLeader returns leader of etcd.
 func (s *Server) GetLeader() *pdpb.Member {
 	return s.member.GetLeader()
@@ -656,6 +664,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.LabelProperty = s.scheduleOpt.LoadLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.scheduleOpt.LoadClusterVersion()
 	cfg.PDServerCfg = *s.scheduleOpt.LoadPDServerConfig()
+	cfg.Log = *s.scheduleOpt.LoadLogConfig()
 	storage := s.GetStorage()
 	if storage == nil {
 		return cfg
@@ -815,6 +824,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 			zap.Error(err))
 		return err
 	}
+
 	log.Info("label property config is updated", zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()))
 	return nil
 }
@@ -833,8 +843,20 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 			zap.Error(err))
 		return err
 	}
+
 	log.Info("label property config is deleted", zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()))
 	return nil
+}
+
+func (s *Server) updateConfigManager(name, value string) *configpb.Status {
+	configManager := s.GetConfigManager()
+	globalVersion := configManager.GetGlobalConfigs(Component).GetVersion()
+	version := &configpb.Version{Global: globalVersion}
+	entries := []*configpb.ConfigEntry{{Name: name, Value: value}}
+	configManager.Lock()
+	defer configManager.Unlock()
+	_, status := configManager.UpdateGlobal(Component, version, entries)
+	return status
 }
 
 // GetLabelProperty returns the whole label property config.
@@ -1129,7 +1151,7 @@ func (s *Server) configCheckLoop() {
 			return
 		case <-ticker.C:
 			version := s.GetConfigVersion()
-			config, err := s.getComponentConfig(ctx, version, addr)
+			config, err := s.getComponentConfig(ctx, version, compoenntID)
 			if err != nil {
 				log.Error("failed to get config", zap.Error(err))
 			}

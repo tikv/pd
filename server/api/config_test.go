@@ -32,11 +32,14 @@ type testConfigSuite struct {
 }
 
 func (s *testConfigSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
+	server.ConfigCheckInterval = 10 * time.Millisecond
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.EnableConfigManager = true })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	// make sure the config client is initialized
+	time.Sleep(20 * time.Millisecond)
 }
 
 func (s *testConfigSuite) TearDownSuite(c *C) {
@@ -71,6 +74,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
+	time.Sleep(20 * time.Millisecond)
 	newCfg := &config.Config{}
 	err = readJSON(addr, newCfg)
 	c.Assert(err, IsNil)
@@ -92,6 +96,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
+	time.Sleep(20 * time.Millisecond)
 	sc1 := &config.ScheduleConfig{}
 	c.Assert(readJSON(addr, sc1), IsNil)
 	c.Assert(*sc, DeepEquals, *sc1)
@@ -118,6 +123,7 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(err, IsNil)
 
+	time.Sleep(20 * time.Millisecond)
 	rc3 := &config.ReplicationConfig{}
 	err = readJSON(addr, rc3)
 	c.Assert(err, IsNil)
@@ -146,7 +152,9 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 	for _, cmd := range cmds {
 		err := postJSON(addr, []byte(cmd))
 		c.Assert(err, IsNil)
+		time.Sleep(20 * time.Millisecond)
 	}
+
 	cfg = loadProperties()
 	c.Assert(cfg, HasLen, 2)
 	c.Assert(cfg["foo"], DeepEquals, []config.StoreLabel{
@@ -162,7 +170,9 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 	for _, cmd := range cmds {
 		err := postJSON(addr, []byte(cmd))
 		c.Assert(err, IsNil)
+		time.Sleep(20 * time.Millisecond)
 	}
+
 	cfg = loadProperties()
 	c.Assert(cfg, HasLen, 1)
 	c.Assert(cfg["foo"], DeepEquals, []config.StoreLabel{{Key: "zone", Value: "cn2"}})

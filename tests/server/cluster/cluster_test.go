@@ -533,7 +533,7 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 }
 
 func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
-	tc, err := tests.NewTestCluster(s.ctx, 1)
+	tc, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config) { cfg.EnableConfigManager = true })
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 

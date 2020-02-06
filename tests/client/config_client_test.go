@@ -89,7 +89,7 @@ func (s *configClientTestSuite) TestUpdateWrongEntry(c *C) {
 		[]*configpb.ConfigEntry{{Name: "aaa.xxx-xxx", Value: "2"}},
 	)
 	c.Assert(status.GetCode(), Equals, configpb.StatusCode_UNKNOWN)
-	c.Assert(strings.Contains(status.GetMessage(), "is not existed"), IsTrue)
+	c.Assert(strings.Contains(status.GetMessage(), "cannot find the config item"), IsTrue)
 	c.Assert(version, DeepEquals, &configpb.Version{Global: 0, Local: 0})
 	c.Assert(err, IsNil)
 

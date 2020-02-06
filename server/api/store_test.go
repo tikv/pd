@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/core"
 )
 
@@ -82,8 +83,8 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 			Version: "2.0.0",
 		},
 	}
-
-	s.svr, s.cleanup = mustNewServer(c)
+	server.ConfigCheckInterval = 10 * time.Millisecond
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.EnableConfigManager = true })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
@@ -94,6 +95,8 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 	for _, store := range s.stores {
 		mustPutStore(c, s.svr, store.Id, store.State, nil)
 	}
+	// make sure the config client is initialized
+	time.Sleep(20 * time.Millisecond)
 }
 
 func (s *testStoreSuite) TearDownSuite(c *C) {
@@ -171,6 +174,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	lc, _ := json.Marshal(labelCheck)
 	err = postJSON(s.urlPrefix+"/config", lc)
 	c.Assert(err, IsNil)
+	time.Sleep(20 * time.Millisecond)
 	// Test set.
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
@@ -181,6 +185,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	ll, _ := json.Marshal(locationLabels)
 	err = postJSON(s.urlPrefix+"/config", ll)
 	c.Assert(err, IsNil)
+	time.Sleep(20 * time.Millisecond)
 	err = postJSON(url+"/label", b)
 	c.Assert(err, IsNil)
 
@@ -198,6 +203,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	err = postJSON(s.urlPrefix+"/config", lc)
 	c.Assert(err, IsNil)
 
+	time.Sleep(20 * time.Millisecond)
 	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
 	c.Assert(err, IsNil)
