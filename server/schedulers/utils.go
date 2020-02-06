@@ -165,10 +165,12 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 // Influence records operator influence.
 type Influence struct {
 	ByteRate float64
+	Count    float64
 }
 
 func (infl Influence) add(rhs *Influence, w float64) Influence {
 	infl.ByteRate += rhs.ByteRate * w
+	infl.Count += rhs.Count * w
 	return infl
 }
 
@@ -213,6 +215,7 @@ func (load *storeLoad) ByteRateRank() int64 {
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	future := *load
 	future.ByteRate += infl.ByteRate
+	future.Count += int(math.Round(infl.Count))
 	return &storeLoadPred{
 		Current: *load,
 		Future:  future,

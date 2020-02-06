@@ -768,7 +768,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
 
-	infl := Influence{ByteRate: bs.cur.srcPeerStat.GetBytesRate()}
+	infl := Influence{ByteRate: bs.cur.srcPeerStat.GetBytesRate(), Count: 1}
 	if bs.opTy == transferLeader && bs.rwTy == write {
 		infl.ByteRate = 0
 	}
