@@ -199,7 +199,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionRead := cluster.RegionReadStats()
 		storeRead := storesStat.GetStoresBytesReadStat()
 
-		h.stLoadInfos.ReadLeaders = summaryStoresLoad(h.GetName(),
+		h.stLoadInfos.ReadLeaders = summaryStoresLoad(
 			storeRead,
 			h.readPendingSum,
 			regionRead,
@@ -212,7 +212,6 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		storeWrite := storesStat.GetStoresBytesWriteStat()
 
 		h.stLoadInfos.WriteLeaders = summaryStoresLoad(
-			h.GetName(),
 			storeWrite,
 			map[uint64]Influence{},
 			regionWrite,
@@ -220,7 +219,6 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			write, core.LeaderKind)
 
 		h.stLoadInfos.WritePeers = summaryStoresLoad(
-			h.GetName(),
 			storeWrite,
 			h.writePendingSum,
 			regionWrite,
@@ -259,7 +257,6 @@ func (h *hotScheduler) gcRegionPendings() {
 
 // Load information of all available stores.
 func summaryStoresLoad(
-	scheName string,
 	storeByteRate map[uint64]float64,
 	pendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
