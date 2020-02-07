@@ -31,10 +31,9 @@ import (
 
 const (
 	// adjustRatio is used to adjust TolerantSizeRatio according to region count.
-	adjustRatio               float64 = 0.005
-	leaderTolerantSizeRatio   float64 = 5.0
-	minTolerantSizeRatio      float64 = 1.0
-	storeLoadByteRateRankSize         = 100 * 1024
+	adjustRatio             float64 = 0.005
+	leaderTolerantSizeRatio float64 = 5.0
+	minTolerantSizeRatio    float64 = 1.0
 )
 
 // ErrScheduleConfigNotExist the config is not correct.
@@ -205,17 +204,13 @@ func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*op
 
 type storeLoad struct {
 	ByteRate float64
-	Count    int
-}
-
-func (load *storeLoad) ByteRateRank() int64 {
-	return int64(load.ByteRate / storeLoadByteRateRankSize)
+	Count    float64
 }
 
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	future := *load
 	future.ByteRate += infl.ByteRate
-	future.Count += int(math.Round(infl.Count))
+	future.Count += infl.Count
 	return &storeLoadPred{
 		Current: *load,
 		Future:  future,
@@ -241,14 +236,16 @@ func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
 	}
 }
 
-func byteRateRankCmp(ld1, ld2 *storeLoad) int {
-	rk1, rk2 := ld1.ByteRateRank(), ld2.ByteRateRank()
-	if rk1 < rk2 {
-		return -1
-	} else if rk1 > rk2 {
-		return 1
+func byteRateRankCmp(rank func(rate float64) int64) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		rk1, rk2 := rank(ld1.ByteRate), rank(ld2.ByteRate)
+		if rk1 < rk2 {
+			return -1
+		} else if rk1 > rk2 {
+			return 1
+		}
+		return 0
 	}
-	return 0
 }
 
 func countCmp(ld1, ld2 *storeLoad) int {
@@ -316,29 +313,15 @@ func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
 func minLoad(a, b *storeLoad) *storeLoad {
 	return &storeLoad{
 		ByteRate: math.Min(a.ByteRate, b.ByteRate),
-		Count:    minInt(a.Count, b.Count),
+		Count:    math.Min(a.Count, b.Count),
 	}
 }
 
 func maxLoad(a, b *storeLoad) *storeLoad {
 	return &storeLoad{
 		ByteRate: math.Max(a.ByteRate, b.ByteRate),
-		Count:    maxInt(a.Count, b.Count),
+		Count:    math.Max(a.Count, b.Count),
 	}
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a < b {
-		return b
-	}
-	return a
 }
 
 type storeLoadDetail struct {

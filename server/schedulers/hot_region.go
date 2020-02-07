@@ -15,6 +15,7 @@ package schedulers
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"sort"
 	"sync"
@@ -261,7 +262,7 @@ func summaryStoresLoad(
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
 			ByteRate: rate,
-			Count:    len(hotPeers),
+			Count:    float64(len(hotPeers)),
 		}).ToLoadPred(pendings[id])
 
 		// Construct store load info.
@@ -352,6 +353,10 @@ type balanceSolver struct {
 	opTy         opType
 
 	cur *solution
+
+	maxSrcByteRate   float64
+	minDstByteRate   float64
+	byteRateRankStep float64
 }
 
 type solution struct {
@@ -373,6 +378,15 @@ func (bs *balanceSolver) init() {
 	for _, id := range getUnhealthyStores(bs.cluster) {
 		delete(bs.stLoadDetail, id)
 	}
+	bs.maxSrcByteRate = 0
+	bs.minDstByteRate = math.MaxFloat64
+	maxCurByteRate := 0.0
+	for _, detail := range bs.stLoadDetail {
+		bs.maxSrcByteRate = math.Max(bs.maxSrcByteRate, detail.LoadPred.min().ByteRate)
+		bs.minDstByteRate = math.Min(bs.minDstByteRate, detail.LoadPred.max().ByteRate)
+		maxCurByteRate = math.Max(maxCurByteRate, detail.LoadPred.Current.ByteRate)
+	}
+	bs.byteRateRankStep = maxCurByteRate / 20
 }
 
 func getUnhealthyStores(cluster opt.Cluster) []uint64 {
@@ -594,14 +608,24 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		if !filter.Target(bs.cluster, store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
 			dstLd := detail.LoadPred.max()
+
 			if bs.rwTy == write && bs.opTy == transferLeader {
-				if srcLd.Count-1 < dstLd.Count+1 {
+				if srcLd.Count <= dstLd.Count {
 					continue
 				}
-			} else {
-				if srcLd.ByteRate*hotRegionScheduleFactor < dstLd.ByteRate+bs.cur.srcPeerStat.GetBytesRate() {
+				if !isProgressive(
+					srcLd.ByteRate,
+					dstLd.ByteRate,
+					bs.cur.srcPeerStat.GetBytesRate(),
+					1.0) {
 					continue
 				}
+			} else if !isProgressive(
+				srcLd.ByteRate,
+				dstLd.ByteRate,
+				bs.cur.srcPeerStat.GetBytesRate(),
+				hotRegionScheduleFactor) {
+				continue
 			}
 			ret[store.GetID()] = detail
 		}
@@ -609,7 +633,11 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	return ret
 }
 
-// betterSolution returns true if `bs.cur` is a betterSolution solution than `bs.best`.
+func isProgressive(srcVal, dstVal, change, factor float64) bool {
+	return srcVal*factor >= dstVal+change
+}
+
+// betterThan checks if `bs.cur` is a better solution than `old`.
 func (bs *balanceSolver) betterThan(old *solution) bool {
 	if old == nil {
 		return true
@@ -651,13 +679,13 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
 					countCmp,
-					byteRateRankCmp))),
-				diffCmp(byteRateRankCmp),
+					byteRateRankCmp(stepRank(bs.maxSrcByteRate, bs.byteRateRankStep))))),
+				diffCmp(byteRateRankCmp(stepRank(0, bs.byteRateRankStep))),
 			)
 		} else {
 			lpCmp = sliceLPCmp(
-				minLPCmp(negLoadCmp(byteRateRankCmp)),
-				diffCmp(byteRateRankCmp),
+				minLPCmp(negLoadCmp(byteRateRankCmp(stepRank(bs.maxSrcByteRate, bs.byteRateRankStep)))),
+				diffCmp(byteRateRankCmp(stepRank(0, bs.byteRateRankStep))),
 				minLPCmp(negLoadCmp(countCmp)),
 			)
 		}
@@ -678,13 +706,13 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 			lpCmp = sliceLPCmp(
 				maxLPCmp(sliceLoadCmp(
 					countCmp,
-					byteRateRankCmp)),
-				diffCmp(byteRateRankCmp),
+					byteRateRankCmp(stepRank(bs.minDstByteRate, bs.byteRateRankStep)))),
+				diffCmp(byteRateRankCmp(stepRank(0, bs.byteRateRankStep))),
 			)
 		} else {
 			lpCmp = sliceLPCmp(
-				maxLPCmp(byteRateRankCmp),
-				diffCmp(byteRateRankCmp),
+				maxLPCmp(byteRateRankCmp(stepRank(bs.minDstByteRate, bs.byteRateRankStep))),
+				diffCmp(byteRateRankCmp(stepRank(0, bs.byteRateRankStep))),
 				maxLPCmp(countCmp),
 			)
 		}
@@ -694,6 +722,12 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 		return lpCmp(lp1, lp2)
 	}
 	return 0
+}
+
+func stepRank(rk0 float64, step float64) func(float64) int64 {
+	return func(rate float64) int64 {
+		return int64((rate - rk0) / step)
+	}
 }
 
 func (bs *balanceSolver) isReadyToBuild() bool {
