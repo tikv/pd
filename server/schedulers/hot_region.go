@@ -68,35 +68,6 @@ const (
 	minRegionScheduleInterval time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
 )
 
-// rwType : the perspective of balance
-type rwType int
-
-const (
-	write rwType = iota
-	read
-)
-
-type opType int
-
-const (
-	movePeer opType = iota
-	transferLeader
-)
-
-type storeLoadInfos struct {
-	ReadLeaders  map[uint64]*storeLoadDetail
-	WriteLeaders map[uint64]*storeLoadDetail
-	WritePeers   map[uint64]*storeLoadDetail
-}
-
-func newStoreLoadInfos() *storeLoadInfos {
-	return &storeLoadInfos{
-		ReadLeaders:  make(map[uint64]*storeLoadDetail),
-		WriteLeaders: make(map[uint64]*storeLoadDetail),
-		WritePeers:   make(map[uint64]*storeLoadDetail),
-	}
-}
-
 type hotScheduler struct {
 	name string
 	*BaseScheduler
@@ -107,31 +78,30 @@ type hotScheduler struct {
 	r           *rand.Rand
 
 	// states across multiple `Schedule` calls
-	readPendings   map[*pendingInfluence]struct{}
-	writePendings  map[*pendingInfluence]struct{}
+	pendings       [resourceTypeLen]map[*pendingInfluence]struct{}
 	regionPendings map[uint64][2]*operator.Operator
 
 	// temporary states but exported to API or metrics
-	stLoadInfos     *storeLoadInfos
-	readPendingSum  map[uint64]Influence
-	writePendingSum map[uint64]Influence
+	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
+	pendingSums [resourceTypeLen]map[uint64]Influence
 }
 
 func newHotScheduler(opController *schedule.OperatorController) *hotScheduler {
 	base := NewBaseScheduler(opController)
-	return &hotScheduler{
+	ret := &hotScheduler{
 		name:           HotRegionName,
 		BaseScheduler:  base,
 		leaderLimit:    1,
 		peerLimit:      1,
 		types:          []rwType{write, read},
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
-		readPendings:   map[*pendingInfluence]struct{}{},
-		writePendings:  map[*pendingInfluence]struct{}{},
 		regionPendings: make(map[uint64][2]*operator.Operator),
-
-		stLoadInfos: newStoreLoadInfos(),
 	}
+	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+		ret.pendings[ty] = map[*pendingInfluence]struct{}{}
+		ret.stLoadInfos[ty] = map[uint64]*storeLoadDetail{}
+	}
+	return ret
 }
 
 func newHotReadScheduler(opController *schedule.OperatorController) *hotScheduler {
@@ -199,9 +169,9 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionRead := cluster.RegionReadStats()
 		storeRead := storesStat.GetStoresBytesReadStat()
 
-		h.stLoadInfos.ReadLeaders = summaryStoresLoad(
+		h.stLoadInfos[readLeader] = summaryStoresLoad(
 			storeRead,
-			h.readPendingSum,
+			h.pendingSums[readLeader],
 			regionRead,
 			minHotDegree,
 			read, core.LeaderKind)
@@ -211,16 +181,16 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionWrite := cluster.RegionWriteStats()
 		storeWrite := storesStat.GetStoresBytesWriteStat()
 
-		h.stLoadInfos.WriteLeaders = summaryStoresLoad(
+		h.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storeWrite,
-			map[uint64]Influence{},
+			h.pendingSums[writeLeader],
 			regionWrite,
 			minHotDegree,
 			write, core.LeaderKind)
 
-		h.stLoadInfos.WritePeers = summaryStoresLoad(
+		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storeWrite,
-			h.writePendingSum,
+			h.pendingSums[writePeer],
 			regionWrite,
 			minHotDegree,
 			write, core.RegionKind)
@@ -228,8 +198,9 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 }
 
 func (h *hotScheduler) summaryPendingInfluence() {
-	h.readPendingSum = summaryPendingInfluence(h.readPendings, calcPendingWeight)
-	h.writePendingSum = summaryPendingInfluence(h.writePendings, calcPendingWeight)
+	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+		h.pendingSums[ty] = summaryPendingInfluence(h.pendings[ty], calcPendingWeight)
+	}
 	h.gcRegionPendings()
 }
 
@@ -318,21 +289,19 @@ func filterHotPeers(
 	return ret
 }
 
-func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, balanceType rwType, ty opType) {
+func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, rwTy rwType, opTy opType) {
 	influence := newPendingInfluence(op, srcStore, dstStore, infl)
 	regionID := op.RegionID()
-	if balanceType == read {
-		h.readPendings[influence] = struct{}{}
-	} else {
-		h.writePendings[influence] = struct{}{}
-	}
+
+	rcTy := toResourceType(rwTy, opTy)
+	h.pendings[rcTy][influence] = struct{}{}
 
 	if _, ok := h.regionPendings[regionID]; !ok {
 		h.regionPendings[regionID] = [2]*operator.Operator{nil, nil}
 	}
 	{ // h.pendingOpInfos[regionID][ty] = influence
 		tmp := h.regionPendings[regionID]
-		tmp[ty] = op
+		tmp[opTy] = op
 		h.regionPendings[regionID] = tmp
 	}
 
@@ -393,16 +362,13 @@ type solution struct {
 }
 
 func (bs *balanceSolver) init() {
-	switch bs.rwTy {
-	case read:
-		bs.stLoadDetail = bs.sche.stLoadInfos.ReadLeaders
-	case write:
-		switch bs.opTy {
-		case movePeer:
-			bs.stLoadDetail = bs.sche.stLoadInfos.WritePeers
-		case transferLeader:
-			bs.stLoadDetail = bs.sche.stLoadInfos.WriteLeaders
-		}
+	switch toResourceType(bs.rwTy, bs.opTy) {
+	case writePeer:
+		bs.stLoadDetail = bs.sche.stLoadInfos[writePeer]
+	case writeLeader:
+		bs.stLoadDetail = bs.sche.stLoadInfos[writeLeader]
+	case readLeader:
+		bs.stLoadDetail = bs.sche.stLoadInfos[readLeader]
 	}
 	for _, id := range getUnhealthyStores(bs.cluster) {
 		delete(bs.stLoadDetail, id)
@@ -437,7 +403,7 @@ func (bs *balanceSolver) isValid() bool {
 		return false
 	}
 	switch bs.rwTy {
-	case read, write:
+	case write, read:
 	default:
 		return false
 	}
@@ -628,7 +594,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		if !filter.Target(bs.cluster, store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
 			dstLd := detail.LoadPred.max()
-			if bs.opTy == transferLeader && bs.rwTy == write {
+			if bs.rwTy == write && bs.opTy == transferLeader {
 				if srcLd.Count-1 < dstLd.Count+1 {
 					continue
 				}
@@ -681,7 +647,7 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare source store
 		var lpCmp storeLPCmp
-		if bs.opTy == transferLeader && bs.rwTy == write {
+		if bs.rwTy == write && bs.opTy == transferLeader {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
 					countCmp,
@@ -708,7 +674,7 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare destination store
 		var lpCmp storeLPCmp
-		if bs.opTy == transferLeader && bs.rwTy == write {
+		if bs.rwTy == write && bs.opTy == transferLeader {
 			lpCmp = sliceLPCmp(
 				maxLPCmp(sliceLoadCmp(
 					countCmp,
@@ -756,17 +722,29 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
 		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, IsLearner: srcPeer.IsLearner}
 		bs.sche.peerLimit = bs.sche.adjustBalanceLimit(bs.cur.srcStoreID, bs.stLoadDetail)
-		op, err = operator.CreateMovePeerOperator("move-hot-"+bs.rwTy.String()+"-region", bs.cluster, bs.cur.region, operator.OpHotRegion, bs.cur.srcStoreID, dstPeer)
+		op, err = operator.CreateMovePeerOperator(
+			"move-hot-"+bs.rwTy.String()+"-region",
+			bs.cluster,
+			bs.cur.region,
+			operator.OpHotRegion,
+			bs.cur.srcStoreID,
+			dstPeer)
 	case transferLeader:
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
 			return nil, nil
 		}
 		bs.sche.leaderLimit = bs.sche.adjustBalanceLimit(bs.cur.srcStoreID, bs.stLoadDetail)
-		op, err = operator.CreateTransferLeaderOperator("transfer-hot-"+bs.rwTy.String()+"-leader", bs.cluster, bs.cur.region, bs.cur.srcStoreID, bs.cur.dstStoreID, operator.OpHotRegion)
+		op, err = operator.CreateTransferLeaderOperator(
+			"transfer-hot-"+bs.rwTy.String()+"-leader",
+			bs.cluster,
+			bs.cur.region,
+			bs.cur.srcStoreID,
+			bs.cur.dstStoreID,
+			operator.OpHotRegion)
 	}
 
 	if err != nil {
-		log.Debug("fail to create operator", zap.Error(err), zap.Stringer("opType", bs.opTy), zap.Stringer("rwType", bs.rwTy))
+		log.Debug("fail to create operator", zap.Error(err), zap.Stringer("rwType", bs.rwTy), zap.Stringer("opType", bs.opTy))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
 		return nil, nil
 	}
@@ -777,9 +755,6 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
 
 	infl := Influence{ByteRate: bs.cur.srcPeerStat.GetBytesRate(), Count: 1}
-	if bs.opTy == transferLeader && bs.rwTy == write {
-		infl.ByteRate = 0
-	}
 
 	return []*operator.Operator{op}, []Influence{infl}
 }
@@ -801,8 +776,8 @@ func (h *hotScheduler) adjustBalanceLimit(storeID uint64, loadDetail map[uint64]
 func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
 	h.RLock()
 	defer h.RUnlock()
-	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos.ReadLeaders))
-	for id, detail := range h.stLoadInfos.ReadLeaders {
+	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[readLeader]))
+	for id, detail := range h.stLoadInfos[readLeader] {
 		asLeader[id] = detail.toHotPeersStat()
 	}
 	return &statistics.StoreHotPeersInfos{
@@ -813,12 +788,12 @@ func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
 func (h *hotScheduler) GetHotWriteStatus() *statistics.StoreHotPeersInfos {
 	h.RLock()
 	defer h.RUnlock()
-	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos.WriteLeaders))
-	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos.WritePeers))
-	for id, detail := range h.stLoadInfos.WriteLeaders {
+	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[writeLeader]))
+	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[writePeer]))
+	for id, detail := range h.stLoadInfos[writeLeader] {
 		asLeader[id] = detail.toHotPeersStat()
 	}
-	for id, detail := range h.stLoadInfos.WritePeers {
+	for id, detail := range h.stLoadInfos[writePeer] {
 		asPeer[id] = detail.toHotPeersStat()
 	}
 	return &statistics.StoreHotPeersInfos{
@@ -828,22 +803,17 @@ func (h *hotScheduler) GetHotWriteStatus() *statistics.StoreHotPeersInfos {
 }
 
 func (h *hotScheduler) GetWritePendingInfluence() map[uint64]Influence {
-	return h.copyPendingInfluence(write)
+	return h.copyPendingInfluence(writePeer)
 }
 
 func (h *hotScheduler) GetReadPendingInfluence() map[uint64]Influence {
-	return h.copyPendingInfluence(read)
+	return h.copyPendingInfluence(readLeader)
 }
 
-func (h *hotScheduler) copyPendingInfluence(typ rwType) map[uint64]Influence {
+func (h *hotScheduler) copyPendingInfluence(ty resourceType) map[uint64]Influence {
 	h.RLock()
 	defer h.RUnlock()
-	var pendingSum map[uint64]Influence
-	if typ == read {
-		pendingSum = h.readPendingSum
-	} else {
-		pendingSum = h.writePendingSum
-	}
+	pendingSum := h.pendingSums[ty]
 	ret := make(map[uint64]Influence, len(pendingSum))
 	for id, infl := range pendingSum {
 		ret[id] = infl
@@ -873,12 +843,20 @@ func calcPendingWeight(op *operator.Operator) float64 {
 }
 
 func (h *hotScheduler) clearPendingInfluence() {
-	h.readPendings = map[*pendingInfluence]struct{}{}
-	h.writePendings = map[*pendingInfluence]struct{}{}
-	h.readPendingSum = nil
-	h.writePendingSum = nil
+	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+		h.pendings[ty] = map[*pendingInfluence]struct{}{}
+		h.pendingSums[ty] = nil
+	}
 	h.regionPendings = make(map[uint64][2]*operator.Operator)
 }
+
+// rwType : the perspective of balance
+type rwType int
+
+const (
+	write rwType = iota
+	read
+)
 
 func (rw rwType) String() string {
 	switch rw {
@@ -891,6 +869,13 @@ func (rw rwType) String() string {
 	}
 }
 
+type opType int
+
+const (
+	movePeer opType = iota
+	transferLeader
+)
+
 func (ty opType) String() string {
 	switch ty {
 	case movePeer:
@@ -900,4 +885,28 @@ func (ty opType) String() string {
 	default:
 		return ""
 	}
+}
+
+type resourceType int
+
+const (
+	writePeer resourceType = iota
+	writeLeader
+	readLeader
+	resourceTypeLen
+)
+
+func toResourceType(rwTy rwType, opTy opType) resourceType {
+	switch rwTy {
+	case write:
+		switch opTy {
+		case movePeer:
+			return writePeer
+		case transferLeader:
+			return writeLeader
+		}
+	case read:
+		return readLeader
+	}
+	return resourceTypeLen
 }

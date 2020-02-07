@@ -75,7 +75,7 @@ type shuffleHotRegionSchedulerConfig struct {
 // the hot peer.
 type shuffleHotRegionScheduler struct {
 	*BaseScheduler
-	stLoadInfos *storeLoadInfos
+	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
 	r           *rand.Rand
 	conf        *shuffleHotRegionSchedulerConfig
 	types       []rwType
@@ -84,13 +84,16 @@ type shuffleHotRegionScheduler struct {
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
 func newShuffleHotRegionScheduler(opController *schedule.OperatorController, conf *shuffleHotRegionSchedulerConfig) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
-	return &shuffleHotRegionScheduler{
+	ret := &shuffleHotRegionScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		stLoadInfos:   newStoreLoadInfos(),
 		types:         []rwType{read, write},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+		ret.stLoadInfos[ty] = map[uint64]*storeLoadDetail{}
+	}
+	return ret
 }
 
 func (s *shuffleHotRegionScheduler) GetName() string {
@@ -122,21 +125,21 @@ func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []
 	minHotDegree := cluster.GetHotRegionCacheHitsThreshold()
 	switch typ {
 	case read:
-		s.stLoadInfos.ReadLeaders = summaryStoresLoad(
+		s.stLoadInfos[readLeader] = summaryStoresLoad(
 			storesStats.GetStoresBytesReadStat(),
 			map[uint64]Influence{},
 			cluster.RegionReadStats(),
 			minHotDegree,
 			read, core.LeaderKind)
-		return s.randomSchedule(cluster, s.stLoadInfos.ReadLeaders)
+		return s.randomSchedule(cluster, s.stLoadInfos[readLeader])
 	case write:
-		s.stLoadInfos.WriteLeaders = summaryStoresLoad(
+		s.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storesStats.GetStoresBytesWriteStat(),
 			map[uint64]Influence{},
 			cluster.RegionWriteStats(),
 			minHotDegree,
 			write, core.LeaderKind)
-		return s.randomSchedule(cluster, s.stLoadInfos.WriteLeaders)
+		return s.randomSchedule(cluster, s.stLoadInfos[writeLeader])
 	}
 	return nil
 }
