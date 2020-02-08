@@ -25,11 +25,13 @@ type HotPeerStat struct {
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int
 
-	Kind      FlowKind `json:"kind"`
-	BytesRate float64  `json:"flow_bytes"`
-	KeysRate  float64  `json:"flow_keys"`
-	// RollingBytesRate is a rolling statistics, recording some recently added records.
-	RollingBytesRate MovingAvg
+	Kind     FlowKind `json:"kind"`
+	ByteRate float64  `json:"flow_bytes"`
+	KeyRate  float64  `json:"flow_keys"`
+
+	// rolling statistics, recording some recently added records.
+	rollingByteRate MovingAvg
+	rollingKeyRate  MovingAvg
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
@@ -49,7 +51,7 @@ func (stat *HotPeerStat) ID() uint64 {
 // Less compares two HotPeerStat.Implementing TopNItem.
 func (stat *HotPeerStat) Less(than TopNItem) bool {
 	rhs := than.(*HotPeerStat)
-	return stat.BytesRate < rhs.BytesRate
+	return stat.ByteRate < rhs.ByteRate
 }
 
 // IsNeedDelete to delete the item in cache.
@@ -69,16 +71,26 @@ func (stat *HotPeerStat) IsNew() bool {
 
 // GetBytesRate returns denoised BytesRate if possible.
 func (stat *HotPeerStat) GetBytesRate() float64 {
-	if stat.RollingBytesRate == nil {
-		return stat.BytesRate
+	if stat.rollingByteRate == nil {
+		return stat.ByteRate
 	}
-	return stat.RollingBytesRate.Get()
+	return stat.rollingByteRate.Get()
+}
+
+// GetKeysRate returns denoised KeysRate if possible.
+func (stat *HotPeerStat) GetKeysRate() float64 {
+	if stat.rollingKeyRate == nil {
+		return stat.KeyRate
+	}
+	return stat.rollingKeyRate.Get()
 }
 
 // Clone clones the HotPeerStat
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
-	ret.BytesRate = stat.GetBytesRate()
-	ret.RollingBytesRate = nil
+	ret.ByteRate = stat.GetBytesRate()
+	ret.rollingByteRate = nil
+	ret.KeyRate = stat.GetKeysRate()
+	ret.rollingKeyRate = nil
 	return &ret
 }
