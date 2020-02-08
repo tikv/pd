@@ -119,8 +119,8 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 			StoreID:        storeID,
 			RegionID:       region.GetID(),
 			Kind:           f.kind,
-			BytesRate:      bytesPerSec,
-			KeysRate:       keysPerSec,
+			ByteRate:       bytesPerSec,
+			KeyRate:        keysPerSec,
 			LastUpdateTime: time.Now(),
 			Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
 			needDelete:     isExpired,
@@ -208,7 +208,7 @@ func (f *hotPeerCache) calcHotThreshold(stats *StoresStats, storeID uint64) floa
 	if !ok || tn.Len() < topNN {
 		return minHotThreshold
 	}
-	tnMin := tn.GetTopNMin().(*HotPeerStat).BytesRate
+	tnMin := tn.GetTopNMin().(*HotPeerStat).ByteRate
 	return math.Max(tnMin*hotThresholdRatio, minHotThreshold)
 }
 
@@ -265,7 +265,7 @@ func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytesRate float64, hotThre
 		return newItem
 	}
 	if oldItem != nil {
-		newItem.RollingBytesRate = oldItem.RollingBytesRate
+		newItem.rollingByteRate = oldItem.rollingByteRate
 		if isHot {
 			newItem.HotDegree = oldItem.HotDegree + 1
 			newItem.AntiCount = hotRegionAntiCount
@@ -280,11 +280,11 @@ func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytesRate float64, hotThre
 		if !isHot {
 			return nil
 		}
-		newItem.RollingBytesRate = NewMedianFilter(rollingWindowsSize)
+		newItem.rollingByteRate = NewMedianFilter(rollingWindowsSize)
 		newItem.AntiCount = hotRegionAntiCount
 		newItem.isNew = true
 	}
-	newItem.RollingBytesRate.Add(bytesRate)
+	newItem.rollingByteRate.Add(bytesRate)
 
 	return newItem
 }
