@@ -15,6 +15,12 @@ package statistics
 
 import "time"
 
+const (
+	byteDim int = iota
+	keyDim
+	dimLen
+)
+
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
 	StoreID  uint64 `json:"store_id"`
@@ -49,9 +55,16 @@ func (stat *HotPeerStat) ID() uint64 {
 }
 
 // Less compares two HotPeerStat.Implementing TopNItem.
-func (stat *HotPeerStat) Less(than TopNItem) bool {
+func (stat *HotPeerStat) Less(k int, than TopNItem) bool {
 	rhs := than.(*HotPeerStat)
-	return stat.ByteRate < rhs.ByteRate
+	switch k {
+	case keyDim:
+		return stat.GetKeysRate() < rhs.GetKeysRate()
+	case byteDim:
+		fallthrough
+	default:
+		return stat.GetBytesRate() < rhs.GetBytesRate()
+	}
 }
 
 // IsNeedDelete to delete the item in cache.

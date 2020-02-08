@@ -79,7 +79,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	} else {
 		peers, ok := f.peersOfStore[item.StoreID]
 		if !ok {
-			peers = NewTopN(topNN, topNTTL)
+			peers = NewTopN(dimLen, topNN, topNTTL)
 			f.peersOfStore[item.StoreID] = peers
 		}
 		peers.Put(item)
@@ -208,7 +208,7 @@ func (f *hotPeerCache) calcHotThreshold(stats *StoresStats, storeID uint64) floa
 	if !ok || tn.Len() < topNN {
 		return minHotThreshold
 	}
-	tnMin := tn.GetTopNMin().(*HotPeerStat).ByteRate
+	tnMin := tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate
 	return math.Max(tnMin*hotThresholdRatio, minHotThreshold)
 }
 

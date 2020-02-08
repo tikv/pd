@@ -24,27 +24,30 @@ import (
 type TopNItem interface {
 	// ID is used to check identity.
 	ID() uint64
-	// Less tests whether the current item is less than the given argument.
-	Less(then TopNItem) bool
+	// Less tests whether the current item is less than the given argument in the `k`th dimension.
+	Less(k int, than TopNItem) bool
 }
 
-// TopN maintains the N largest items.
+// TopN maintains the N largest items of multiple dimensions.
 type TopN struct {
 	rw     sync.RWMutex
 	n      int
-	topn   *indexedHeap
-	rest   *indexedHeap
+	topns  []*singleTopN
 	ttlLst *ttlList
 }
 
-// NewTopN returns a TopN with given TTL.
-func NewTopN(n int, ttl time.Duration) *TopN {
-	return &TopN{
+// NewTopN returns a k-dimensional TopN with given TTL.
+func NewTopN(k, n int, ttl time.Duration) *TopN {
+	ret := &TopN{
 		n:      maxInt(n, 1),
-		topn:   newTopNHeap(n),
-		rest:   newRevTopNHeap(n),
+		topns:  make([]*singleTopN, k),
 		ttlLst: newTTLList(ttl),
 	}
+	k = maxInt(k, 1)
+	for i := 0; i < k; i++ {
+		ret.topns[i] = newSingleTopN(i, n)
+	}
+	return ret
 }
 
 // Len returns number of all items.
@@ -54,59 +57,44 @@ func (tn *TopN) Len() int {
 	return tn.ttlLst.Len()
 }
 
-// GetTopNMin returns the min item in top N.
-func (tn *TopN) GetTopNMin() TopNItem {
+// GetTopNMin returns the min item in top N of the `k`th dimension.
+func (tn *TopN) GetTopNMin(k int) TopNItem {
 	tn.rw.RLock()
 	defer tn.rw.RUnlock()
-	return tn.topn.Top()
+	return tn.topns[k].GetTopNMin()
 }
 
-// GetAllTopN returns the top N items.
-func (tn *TopN) GetAllTopN() []TopNItem {
+// GetAllTopN returns the top N items of the `k`th dimension.
+func (tn *TopN) GetAllTopN(k int) []TopNItem {
 	tn.rw.RLock()
 	defer tn.rw.RUnlock()
-	return tn.topn.GetAll()
+	return tn.topns[k].GetAllTopN()
 }
 
 // GetAll returns all items.
 func (tn *TopN) GetAll() []TopNItem {
 	tn.rw.RLock()
 	defer tn.rw.RUnlock()
-	topn := tn.topn.GetAll()
-	return append(topn, tn.rest.GetAll()...)
+	return tn.topns[0].GetAll()
 }
 
 // Get returns the item with given id, nil if there is no such item.
 func (tn *TopN) Get(id uint64) TopNItem {
 	tn.rw.RLock()
 	defer tn.rw.RUnlock()
-	if item := tn.topn.Get(id); item != nil {
-		return item
-	}
-	return tn.rest.Get(id)
+	return tn.topns[0].Get(id)
 }
 
 // Put inserts item or updates the old item if it exists.
 func (tn *TopN) Put(item TopNItem) (isUpdate bool) {
 	tn.rw.Lock()
 	defer tn.rw.Unlock()
-	if tn.topn.Get(item.ID()) != nil {
-		isUpdate = true
-		tn.topn.Put(item)
-	} else {
-		isUpdate = tn.rest.Put(item)
+	for _, stn := range tn.topns {
+		isUpdate = stn.Put(item)
 	}
 	tn.ttlLst.Put(item.ID())
 	tn.maintain()
 	return
-}
-
-func (tn *TopN) removeItemLocked(id uint64) TopNItem {
-	item := tn.topn.Remove(id)
-	if item == nil {
-		item = tn.rest.Remove(id)
-	}
-	return item
 }
 
 // RemoveExpired deletes all expired items.
@@ -117,59 +105,129 @@ func (tn *TopN) RemoveExpired() {
 }
 
 // Remove deletes the item by given ID and returns it.
-func (tn *TopN) Remove(id uint64) TopNItem {
+func (tn *TopN) Remove(id uint64) (item TopNItem) {
 	tn.rw.Lock()
 	defer tn.rw.Unlock()
-	item := tn.removeItemLocked(id)
+	for _, stn := range tn.topns {
+		item = stn.Remove(id)
+	}
 	_ = tn.ttlLst.Remove(id)
 	tn.maintain()
-	return item
-}
-
-func (tn *TopN) promote() {
-	heap.Push(tn.topn, heap.Pop(tn.rest))
-}
-
-func (tn *TopN) demote() {
-	heap.Push(tn.rest, heap.Pop(tn.topn))
+	return
 }
 
 func (tn *TopN) maintain() {
-	for _, id := range tn.ttlLst.takeExpired() {
-		_ = tn.removeItemLocked(id)
+	for _, id := range tn.ttlLst.TakeExpired() {
+		for _, stn := range tn.topns {
+			stn.Remove(id)
+		}
 	}
-	for tn.topn.Len() < tn.n && tn.rest.Len() > 0 {
-		tn.promote()
+}
+
+type singleTopN struct {
+	k    int
+	n    int
+	topn *indexedHeap
+	rest *indexedHeap
+}
+
+func newSingleTopN(k, n int) *singleTopN {
+	return &singleTopN{
+		k:    k,
+		n:    n,
+		topn: newTopNHeap(k, n),
+		rest: newRevTopNHeap(k, n),
 	}
-	rest1 := tn.rest.Top()
+}
+
+func (stn *singleTopN) Len() int {
+	return stn.topn.Len() + stn.rest.Len()
+}
+
+func (stn *singleTopN) GetTopNMin() TopNItem {
+	return stn.topn.Top()
+}
+
+func (stn *singleTopN) GetAllTopN() []TopNItem {
+	return stn.topn.GetAll()
+}
+
+func (stn *singleTopN) GetAll() []TopNItem {
+	topn := stn.topn.GetAll()
+	return append(topn, stn.rest.GetAll()...)
+}
+
+func (stn *singleTopN) Get(id uint64) TopNItem {
+	if item := stn.topn.Get(id); item != nil {
+		return item
+	}
+	return stn.rest.Get(id)
+}
+
+func (stn *singleTopN) Put(item TopNItem) (isUpdate bool) {
+	if stn.topn.Get(item.ID()) != nil {
+		isUpdate = true
+		stn.topn.Put(item)
+	} else {
+		isUpdate = stn.rest.Put(item)
+	}
+	stn.maintain()
+	return
+}
+
+func (stn *singleTopN) Remove(id uint64) TopNItem {
+	item := stn.topn.Remove(id)
+	if item == nil {
+		item = stn.rest.Remove(id)
+	}
+	stn.maintain()
+	return item
+}
+
+func (stn *singleTopN) promote() {
+	heap.Push(stn.topn, heap.Pop(stn.rest))
+}
+
+func (stn *singleTopN) demote() {
+	heap.Push(stn.rest, heap.Pop(stn.topn))
+}
+
+func (stn *singleTopN) maintain() {
+	for stn.topn.Len() < stn.n && stn.rest.Len() > 0 {
+		stn.promote()
+	}
+	rest1 := stn.rest.Top()
 	if rest1 == nil {
 		return
 	}
-	for top1 := tn.topn.Top(); top1.Less(rest1); {
-		tn.demote()
-		tn.promote()
-		rest1 = tn.rest.Top()
-		top1 = tn.topn.Top()
+	for topn1 := stn.topn.Top(); topn1.Less(stn.k, rest1); {
+		stn.demote()
+		stn.promote()
+		rest1 = stn.rest.Top()
+		topn1 = stn.topn.Top()
 	}
 }
 
 // indexedHeap is a heap with index.
 type indexedHeap struct {
+	k     int
 	rev   bool
 	items []TopNItem
 	index map[uint64]int
 }
 
-func newTopNHeap(hint int) *indexedHeap {
+func newTopNHeap(k, hint int) *indexedHeap {
 	return &indexedHeap{
+		k:     k,
 		rev:   false,
 		items: make([]TopNItem, 0, hint),
 		index: map[uint64]int{},
 	}
 }
 
-func newRevTopNHeap(hint int) *indexedHeap {
+func newRevTopNHeap(k, hint int) *indexedHeap {
 	return &indexedHeap{
+		k:     k,
 		rev:   true,
 		items: make([]TopNItem, 0, hint),
 		index: map[uint64]int{},
@@ -184,9 +242,9 @@ func (hp *indexedHeap) Len() int {
 // Implementing heap.Interface.
 func (hp *indexedHeap) Less(i, j int) bool {
 	if !hp.rev {
-		return hp.items[i].Less(hp.items[j])
+		return hp.items[i].Less(hp.k, hp.items[j])
 	}
-	return hp.items[j].Less(hp.items[i])
+	return hp.items[j].Less(hp.k, hp.items[i])
 }
 
 // Implementing heap.Interface.
@@ -282,7 +340,7 @@ func (tl *ttlList) Len() int {
 	return tl.lst.Len()
 }
 
-func (tl *ttlList) takeExpired() []uint64 {
+func (tl *ttlList) TakeExpired() []uint64 {
 	expired := []uint64{}
 	now := time.Now()
 	for ele := tl.lst.Front(); ele != nil; ele = tl.lst.Front() {
