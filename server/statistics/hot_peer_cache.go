@@ -28,12 +28,22 @@ const (
 
 	rollingWindowsSize = 5
 
-	hotWriteRegionMinBytesRate = 1 * 1024
-	hotReadRegionMinBytesRate  = 8 * 1024
-
 	hotRegionReportMinInterval = 3
 
-	hotRegionAntiCount = 1
+	hotRegionAntiCount = 2
+)
+
+var (
+	minHotThresholds = [2][dimLen]float64{
+		WriteFlow: {
+			byteDim: 1 * 1024,
+			keyDim:  32,
+		},
+		ReadFlow: {
+			byteDim: 8 * 1024,
+			keyDim:  128,
+		},
+	}
 )
 
 // hotPeerCache saves the hot peer's statistics.
@@ -94,7 +104,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 }
 
 // CheckRegionFlow checks the flow information of region.
-func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresStats) (ret []*HotPeerStat) {
+func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *StoresStats) (ret []*HotPeerStat) {
 	storeIDs := f.getAllStoreIDs(region)
 
 	totalBytes := float64(f.getTotalBytes(region))
@@ -103,8 +113,8 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
-	bytesPerSec := totalBytes / float64(interval)
-	keysPerSec := totalKeys / float64(interval)
+	byteRate := totalBytes / float64(interval)
+	keyRate := totalKeys / float64(interval)
 
 	for storeID := range storeIDs {
 		isExpired := f.isRegionExpired(region, storeID)
@@ -119,16 +129,15 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, stats *StoresSta
 			StoreID:        storeID,
 			RegionID:       region.GetID(),
 			Kind:           f.kind,
-			ByteRate:       bytesPerSec,
-			KeyRate:        keysPerSec,
+			ByteRate:       byteRate,
+			KeyRate:        keyRate,
 			LastUpdateTime: time.Now(),
 			Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
 			needDelete:     isExpired,
 			isLeader:       region.GetLeader().GetStoreId() == storeID,
 		}
 
-		hotThreshold := f.calcHotThreshold(stats, storeID)
-		newItem = updateHotPeerStat(newItem, oldItem, bytesPerSec, hotThreshold)
+		newItem = f.updateHotPeerStat(newItem, oldItem, storesStats)
 		if newItem != nil {
 			ret = append(ret, newItem)
 		}
@@ -150,9 +159,12 @@ func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool 
 func (f *hotPeerCache) CollectMetrics(stats *StoresStats, typ string) {
 	for storeID, peers := range f.peersOfStore {
 		store := storeTag(storeID)
-		threshold := f.calcHotThreshold(stats, storeID)
+		thresholds := f.calcHotThresholds(stats, storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", store, typ).Set(float64(peers.Len()))
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(threshold)
+		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[byteDim])
+		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[keyDim])
+		// for compatibility
+		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[byteDim])
 	}
 }
 
@@ -195,21 +207,20 @@ func (f *hotPeerCache) isRegionExpired(region *core.RegionInfo, storeID uint64) 
 	return false
 }
 
-func (f *hotPeerCache) calcHotThreshold(stats *StoresStats, storeID uint64) float64 {
-	var minHotThreshold float64
-	switch f.kind {
-	case WriteFlow:
-		minHotThreshold = hotWriteRegionMinBytesRate
-	case ReadFlow:
-		minHotThreshold = hotReadRegionMinBytesRate
-	}
-
+func (f *hotPeerCache) calcHotThresholds(stats *StoresStats, storeID uint64) [dimLen]float64 {
+	minThresholds := minHotThresholds[f.kind]
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < topNN {
-		return minHotThreshold
+		return minThresholds
 	}
-	tnMin := tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate
-	return math.Max(tnMin*hotThresholdRatio, minHotThreshold)
+	ret := [dimLen]float64{
+		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate,
+		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).KeyRate,
+	}
+	for k := 0; k < dimLen; k++ {
+		ret[k] = math.Max(ret[k]*hotThresholdRatio, minThresholds[k])
+	}
+	return ret
 }
 
 // gets the storeIDs, including old region and new region
@@ -259,20 +270,25 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 	return false
 }
 
-func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytesRate float64, hotThreshold float64) *HotPeerStat {
-	isHot := bytesRate >= hotThreshold
+func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesStats *StoresStats) *HotPeerStat {
+	thresholds := f.calcHotThresholds(storesStats, newItem.StoreID)
+	isHot := newItem.ByteRate >= thresholds[byteDim] ||
+		newItem.KeyRate >= thresholds[keyDim]
+
 	if newItem.needDelete {
 		return newItem
 	}
+
 	if oldItem != nil {
 		newItem.rollingByteRate = oldItem.rollingByteRate
+		newItem.rollingKeyRate = oldItem.rollingKeyRate
 		if isHot {
 			newItem.HotDegree = oldItem.HotDegree + 1
 			newItem.AntiCount = hotRegionAntiCount
 		} else {
 			newItem.HotDegree = oldItem.HotDegree - 1
 			newItem.AntiCount = oldItem.AntiCount - 1
-			if newItem.AntiCount < 0 {
+			if newItem.AntiCount <= 0 {
 				newItem.needDelete = true
 			}
 		}
@@ -281,10 +297,13 @@ func updateHotPeerStat(newItem, oldItem *HotPeerStat, bytesRate float64, hotThre
 			return nil
 		}
 		newItem.rollingByteRate = NewMedianFilter(rollingWindowsSize)
+		newItem.rollingKeyRate = NewMedianFilter(rollingWindowsSize)
 		newItem.AntiCount = hotRegionAntiCount
 		newItem.isNew = true
 	}
-	newItem.rollingByteRate.Add(bytesRate)
+
+	newItem.rollingByteRate.Add(newItem.ByteRate)
+	newItem.rollingKeyRate.Add(newItem.KeyRate)
 
 	return newItem
 }
