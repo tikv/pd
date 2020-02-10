@@ -1266,10 +1266,16 @@ func (s *Server) updateComponentConfig(cfg string) error {
 	}
 	var err error
 	if !reflect.DeepEqual(s.GetScheduleConfig(), &new.Schedule) {
+		if err = new.Schedule.Validate(); err != nil {
+			return err
+		}
 		err = s.SetScheduleConfig(new.Schedule)
 	}
 
 	if !reflect.DeepEqual(s.GetReplicationConfig(), &new.Replication) {
+		if err = new.Replication.Validate(); err != nil {
+			return err
+		}
 		err = s.SetReplicationConfig(new.Replication)
 	}
 
