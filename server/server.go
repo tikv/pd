@@ -763,7 +763,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 			zap.Error(err))
 		return err
 	}
-	// log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 

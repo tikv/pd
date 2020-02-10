@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/pprof"
+	"net/url"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
@@ -29,6 +30,7 @@ import (
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 func createStreamingRender() *render.Render {
@@ -227,10 +229,26 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 				}
 				return nil
 			}
-			opts := []grpc.DialOption{grpc.WithInsecure(), grpc.WithUnaryInterceptor(UnaryClientInterceptor)}
-			err := configpb.RegisterConfigHandlerFromEndpoint(ctx, gwmux, svr.GetAddr()[7:], opts)
+			tlsCfg, err := svr.GetSecurityConfig().ToTLSConfig()
+			if err != nil {
+				log.Error("fail to use TLS, use insecure instead", zap.Error(err))
+			}
+			opt := grpc.WithInsecure()
+			if tlsCfg != nil {
+				creds := credentials.NewTLS(tlsCfg)
+				opt = grpc.WithTransportCredentials(creds)
+			}
+			opts := []grpc.DialOption{opt, grpc.WithUnaryInterceptor(UnaryClientInterceptor)}
+			addr := svr.GetAddr()
+			u, err := url.Parse(addr)
+			if err != nil {
+				log.Error("failed to parse url", zap.Error(err))
+				return
+			}
+			err = configpb.RegisterConfigHandlerFromEndpoint(ctx, gwmux, u.Host+u.Path, opts)
 			if err != nil {
 				log.Error("fail to register grpc gateway", zap.Error(err))
+				return
 			}
 
 			componentRouter.Handle("", gwmux).Methods("POST")
