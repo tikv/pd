@@ -61,8 +61,7 @@ const (
 	// HotWriteRegionType is hot write region scheduler type.
 	HotWriteRegionType = "hot-write-region"
 
-	hotRegionLimitFactor    = 0.75
-	hotRegionScheduleFactor = 0.95
+	hotRegionLimitFactor = 0.75
 
 	maxPeerNum = 1000
 
@@ -453,7 +452,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
 
-				if bs.betterThan(best) {
+				if bs.isProgressive() && bs.betterThan(best) {
 					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
 						ops = newOps
 						infls = newInfls
@@ -636,39 +635,35 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		return nil
 	}
 
-	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
 	for _, store := range candidates {
 		if !filter.Target(bs.cluster, store, filters) {
-			detail := bs.stLoadDetail[store.GetID()]
-			dstLd := detail.LoadPred.max()
-
-			if bs.rwTy == write && bs.opTy == transferLeader {
-				if srcLd.Count <= dstLd.Count {
-					continue
-				}
-				if !isProgressive(
-					srcLd.ByteRate,
-					dstLd.ByteRate,
-					bs.cur.srcPeerStat.GetByteRate(),
-					1.0) {
-					continue
-				}
-			} else if !isProgressive(
-				srcLd.ByteRate,
-				dstLd.ByteRate,
-				bs.cur.srcPeerStat.GetByteRate(),
-				hotRegionScheduleFactor) {
-				continue
-			}
-			ret[store.GetID()] = detail
+			ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 		}
 	}
 	return ret
 }
 
-func isProgressive(srcVal, dstVal, change, factor float64) bool {
-	return srcVal*factor >= dstVal+change
+// isProgressive checks `bs.cur` is a progressive solution.
+func (bs *balanceSolver) isProgressive() bool {
+	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
+	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
+	peer := bs.cur.srcPeerStat
+	if bs.rwTy == write && bs.opTy == transferLeader {
+		if srcLd.Count > dstLd.Count &&
+			srcLd.ByteRate >= dstLd.ByteRate+peer.GetByteRate() &&
+			srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
+			return true
+		}
+	} else {
+		if srcLd.ByteRate*0.95 >= dstLd.ByteRate+peer.GetByteRate() {
+			return true
+		} else if srcLd.ByteRate >= dstLd.ByteRate+peer.GetByteRate() &&
+			srcLd.KeyRate*0.95 >= dstLd.KeyRate+peer.GetKeyRate() {
+			return true
+		}
+	}
+	return false
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
