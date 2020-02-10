@@ -64,6 +64,8 @@ const (
 	hotRegionLimitFactor    = 0.75
 	hotRegionScheduleFactor = 0.95
 
+	maxPeerNum = 1000
+
 	maxZombieDur time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
 
 	minRegionScheduleInterval time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
@@ -497,11 +499,43 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) getHotPeers() []*statistics.HotPeerStat {
 	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
-	sort.Slice(ret, func(i, j int) bool {
-		return ret[i].GetByteRate() > ret[j].GetByteRate()
+	if len(ret) <= maxPeerNum {
+		return ret
+	}
+
+	byteSort := make([]*statistics.HotPeerStat, len(ret))
+	copy(byteSort, ret)
+	sort.Slice(byteSort, func(i, j int) bool {
+		return byteSort[i].GetByteRate() > byteSort[j].GetByteRate()
 	})
-	if len(ret) > 1000 {
-		ret = ret[:1000]
+	keySort := make([]*statistics.HotPeerStat, len(ret))
+	copy(keySort, ret)
+	sort.Slice(keySort, func(i, j int) bool {
+		return keySort[i].GetKeyRate() > keySort[j].GetKeyRate()
+	})
+
+	union := make(map[*statistics.HotPeerStat]struct{}, maxPeerNum)
+	for len(union) < maxPeerNum {
+		for len(byteSort) > 0 {
+			peer := byteSort[0]
+			byteSort = byteSort[1:]
+			if _, ok := union[peer]; !ok {
+				union[peer] = struct{}{}
+				break
+			}
+		}
+		for len(keySort) > 0 {
+			peer := keySort[0]
+			keySort = keySort[1:]
+			if _, ok := union[peer]; !ok {
+				union[peer] = struct{}{}
+				break
+			}
+		}
+	}
+	ret = make([]*statistics.HotPeerStat, 0, len(union))
+	for peer := range union {
+		ret = append(ret, peer)
 	}
 	return ret
 }
