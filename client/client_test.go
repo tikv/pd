@@ -25,10 +25,10 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/mock/mockid"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v3/pkg/mock/mockid"
+	"github.com/pingcap/pd/v3/pkg/testutil"
+	"github.com/pingcap/pd/v3/server"
+	"github.com/pingcap/pd/v3/server/core"
 	"google.golang.org/grpc"
 )
 

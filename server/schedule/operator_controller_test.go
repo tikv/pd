@@ -23,11 +23,11 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/pkg/mock/mockoption"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/v3/pkg/mock/mockcluster"
+	"github.com/pingcap/pd/v3/pkg/mock/mockhbstream"
+	"github.com/pingcap/pd/v3/pkg/mock/mockoption"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/namespace"
 )
 
 var _ = Suite(&testOperatorControllerSuite{})

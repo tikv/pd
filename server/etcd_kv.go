@@ -19,7 +19,7 @@ import (
 	"time"
 
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/etcdutil"
+	"github.com/pingcap/pd/v3/pkg/etcdutil"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"

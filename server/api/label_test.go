@@ -21,7 +21,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/v3/server"
 )
 
 var _ = Suite(&testLabelsStoreSuite{})

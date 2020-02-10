@@ -22,7 +22,7 @@ import (
 	"sync"
 
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/v3/server"
 	"go.uber.org/zap"
 )
 

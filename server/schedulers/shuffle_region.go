@@ -16,8 +16,8 @@ package schedulers
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/schedule"
 	"go.uber.org/zap"
 )
 

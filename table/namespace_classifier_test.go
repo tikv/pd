@@ -18,8 +18,8 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/mock/mockid"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v3/pkg/mock/mockid"
+	"github.com/pingcap/pd/v3/server/core"
 )
 
 var _ = Suite(&testTableNamespaceSuite{})

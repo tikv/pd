@@ -19,9 +19,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/v3/server"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/schedule"
 )
 
 var _ = Suite(&testTrendSuite{})

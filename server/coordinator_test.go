@@ -23,13 +23,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/pkg/mock/mockid"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedulers"
+	"github.com/pingcap/pd/v3/pkg/mock/mockhbstream"
+	"github.com/pingcap/pd/v3/pkg/mock/mockid"
+	"github.com/pingcap/pd/v3/pkg/testutil"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/namespace"
+	"github.com/pingcap/pd/v3/server/schedule"
+	"github.com/pingcap/pd/v3/server/schedulers"
 )
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind schedule.OperatorKind, steps ...schedule.OperatorStep) *schedule.Operator {

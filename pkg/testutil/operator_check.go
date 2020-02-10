@@ -15,7 +15,7 @@ package testutil
 
 import (
 	check "github.com/pingcap/check"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/v3/server/schedule"
 )
 
 // CheckAddPeer checks if the operator is to add peer on specified store.

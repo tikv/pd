@@ -24,8 +24,8 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/mock/mockid"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v3/pkg/mock/mockid"
+	"github.com/pingcap/pd/v3/server/core"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 )

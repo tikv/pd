@@ -18,9 +18,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/mock/mockoption"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
+	"github.com/pingcap/pd/v3/pkg/mock/mockoption"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/namespace"
 )
 
 var _ = Suite(&testStoreStatisticsSuite{})

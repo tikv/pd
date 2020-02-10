@@ -18,9 +18,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/namespace"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/namespace"
+	"github.com/pingcap/pd/v3/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )

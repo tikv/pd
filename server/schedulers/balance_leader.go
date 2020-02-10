@@ -17,9 +17,9 @@ import (
 	"strconv"
 
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/server/cache"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/v3/server/cache"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/schedule"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )

@@ -22,7 +22,7 @@ import (
 
 	"github.com/pingcap/errcode"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/apiutil"
+	"github.com/pingcap/pd/v3/pkg/apiutil"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )

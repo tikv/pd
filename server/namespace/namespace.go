@@ -16,7 +16,7 @@ package namespace
 import (
 	"fmt"
 
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v3/server/core"
 	"github.com/pkg/errors"
 )
 

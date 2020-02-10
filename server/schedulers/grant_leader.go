@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/schedule"
 	"github.com/pkg/errors"
 )
 

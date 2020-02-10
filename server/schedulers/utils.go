@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/montanaflynn/stats"
-	"github.com/pingcap/pd/server/cache"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/v3/server/cache"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/schedule"
 )
 
 const (

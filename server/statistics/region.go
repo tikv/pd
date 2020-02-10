@@ -16,7 +16,7 @@ package statistics
 import (
 	"time"
 
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v3/server/core"
 )
 
 // RegionStat records each hot region's statistics

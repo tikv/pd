@@ -13,7 +13,7 @@
 
 package mockclassifier
 
-import "github.com/pingcap/pd/server/core"
+import "github.com/pingcap/pd/v3/server/core"
 
 // Classifier is used for test purpose.
 type Classifier struct{}

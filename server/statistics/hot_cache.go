@@ -17,8 +17,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/pingcap/pd/server/cache"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v3/server/cache"
+	"github.com/pingcap/pd/v3/server/core"
 )
 
 // Simulating is an option to overpass the impact of accelerated time. Should

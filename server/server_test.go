@@ -19,7 +19,7 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/testutil"
+	"github.com/pingcap/pd/v3/pkg/testutil"
 )
 
 func TestServer(t *testing.T) {

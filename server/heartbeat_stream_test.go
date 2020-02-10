@@ -21,8 +21,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/v3/pkg/testutil"
+	"github.com/pingcap/pd/v3/pkg/typeutil"
 	"go.uber.org/zap"
 )
 

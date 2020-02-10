@@ -18,8 +18,8 @@ import (
 	"net/http"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server"
-	_ "github.com/pingcap/pd/server/schedulers"
+	"github.com/pingcap/pd/v3/server"
+	_ "github.com/pingcap/pd/v3/server/schedulers"
 )
 
 var _ = Suite(&testHotStatusSuite{})

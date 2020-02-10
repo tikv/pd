@@ -21,9 +21,9 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tests"
+	"github.com/pingcap/pd/v3/server"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/tests"
 )
 
 func Test(t *testing.T) {

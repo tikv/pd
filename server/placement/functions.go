@@ -16,7 +16,7 @@ package placement
 import (
 	"math"
 
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v3/server/core"
 )
 
 // Score calculates the score of the constraint expression. The greater score is

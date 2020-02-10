@@ -17,7 +17,7 @@ import (
 	"net/http"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/v3/server"
 )
 
 var _ = Suite(&testRedirectorSuite{})

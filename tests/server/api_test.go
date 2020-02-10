@@ -18,10 +18,10 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/tests"
+	"github.com/pingcap/pd/v3/pkg/testutil"
+	"github.com/pingcap/pd/v3/pkg/typeutil"
+	"github.com/pingcap/pd/v3/server"
+	"github.com/pingcap/pd/v3/tests"
 )
 
 func (s *serverTestSuite) TestReconnect(c *C) {
