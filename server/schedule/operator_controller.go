@@ -257,6 +257,12 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 				oc.Unlock()
 				return added
 			}
+			if ops[i+1].Kind()&operator.OpMerge == 0 {
+				log.Error("merge operator should be paired", zap.String("desc",
+					ops[i+1].Desc()))
+				oc.Unlock()
+				return added
+			}
 			isMerge = true
 		}
 		if !oc.checkAddOperator(op) {
