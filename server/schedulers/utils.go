@@ -164,11 +164,13 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 // Influence records operator influence.
 type Influence struct {
 	ByteRate float64
+	KeyRate  float64
 	Count    float64
 }
 
 func (infl Influence) add(rhs *Influence, w float64) Influence {
 	infl.ByteRate += rhs.ByteRate * w
+	infl.KeyRate += rhs.KeyRate * w
 	infl.Count += rhs.Count * w
 	return infl
 }
@@ -204,12 +206,14 @@ func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*op
 
 type storeLoad struct {
 	ByteRate float64
+	KeyRate  float64
 	Count    float64
 }
 
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	future := *load
 	future.ByteRate += infl.ByteRate
+	future.KeyRate += infl.KeyRate
 	future.Count += infl.Count
 	return &storeLoadPred{
 		Current: *load,
@@ -275,6 +279,7 @@ func (lp *storeLoadPred) diff() *storeLoad {
 	mx, mn := lp.max(), lp.min()
 	return &storeLoad{
 		ByteRate: mx.ByteRate - mn.ByteRate,
+		KeyRate:  mx.KeyRate - mn.KeyRate,
 		Count:    mx.Count - mn.Count,
 	}
 }
@@ -313,6 +318,7 @@ func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
 func minLoad(a, b *storeLoad) *storeLoad {
 	return &storeLoad{
 		ByteRate: math.Min(a.ByteRate, b.ByteRate),
+		KeyRate:  math.Min(a.KeyRate, b.KeyRate),
 		Count:    math.Min(a.Count, b.Count),
 	}
 }
@@ -320,6 +326,7 @@ func minLoad(a, b *storeLoad) *storeLoad {
 func maxLoad(a, b *storeLoad) *storeLoad {
 	return &storeLoad{
 		ByteRate: math.Max(a.ByteRate, b.ByteRate),
+		KeyRate:  math.Max(a.KeyRate, b.KeyRate),
 		Count:    math.Max(a.Count, b.Count),
 	}
 }
