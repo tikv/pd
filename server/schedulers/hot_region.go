@@ -169,10 +169,12 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	minHotDegree := cluster.GetHotRegionCacheHitsThreshold()
 	{ // update read statistics
 		regionRead := cluster.RegionReadStats()
-		storeRead := storesStat.GetStoresBytesReadStat()
+		storeByte := storesStat.GetStoresBytesReadStat()
+		storeKey := storesStat.GetStoresKeysReadStat()
 
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
-			storeRead,
+			storeByte,
+			storeKey,
 			h.pendingSums[readLeader],
 			regionRead,
 			minHotDegree,
@@ -181,17 +183,20 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 
 	{ // update write statistics
 		regionWrite := cluster.RegionWriteStats()
-		storeWrite := storesStat.GetStoresBytesWriteStat()
+		storeByte := storesStat.GetStoresBytesWriteStat()
+		storeKey := storesStat.GetStoresKeysWriteStat()
 
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
-			storeWrite,
+			storeByte,
+			storeKey,
 			h.pendingSums[writeLeader],
 			regionWrite,
 			minHotDegree,
 			write, core.LeaderKind)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
-			storeWrite,
+			storeByte,
+			storeKey,
 			h.pendingSums[writePeer],
 			regionWrite,
 			minHotDegree,
@@ -231,6 +236,7 @@ func (h *hotScheduler) gcRegionPendings() {
 // Load information of all available stores.
 func summaryStoresLoad(
 	storeByteRate map[uint64]float64,
+	storeKeyRate map[uint64]float64,
 	pendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
 	minHotDegree int,
@@ -240,29 +246,40 @@ func summaryStoresLoad(
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
 
 	// Stores without byte rate statistics is not available to schedule.
-	for id, rate := range storeByteRate {
+	for id, byteRate := range storeByteRate {
+		keyRate := storeKeyRate[id]
 
 		// Find all hot peers first
 		hotPeers := make([]*statistics.HotPeerStat, 0)
 		{
-			hotSum := 0.0
+			byteSum := 0.0
+			keySum := 0.0
 			for _, peer := range filterHotPeers(kind, minHotDegree, storeHotPeers[id]) {
-				hotSum += peer.GetByteRate()
+				byteSum += peer.GetByteRate()
+				keySum += peer.GetKeyRate()
 				hotPeers = append(hotPeers, peer.Clone())
 			}
 			// Use sum of hot peers to estimate leader-only byte rate.
 			if kind == core.LeaderKind && rwTy == write {
-				rate = hotSum
+				byteRate = byteSum
+				keyRate = keySum
 			}
 
 			// Metric for debug.
-			ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(hotSum)
+			{
+				ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
+				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(byteSum)
+			}
+			{
+				ty := "key-rate-" + rwTy.String() + "-" + kind.String()
+				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keySum)
+			}
 		}
 
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
-			ByteRate: rate,
+			ByteRate: byteRate,
+			KeyRate:  keyRate,
 			Count:    float64(len(hotPeers)),
 		}).ToLoadPred(pendings[id])
 
@@ -849,7 +866,11 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
 
-	infl := Influence{ByteRate: bs.cur.srcPeerStat.GetByteRate(), Count: 1}
+	infl := Influence{
+		ByteRate: bs.cur.srcPeerStat.GetByteRate(),
+		KeyRate:  bs.cur.srcPeerStat.GetKeyRate(),
+		Count:    1,
+	}
 
 	return []*operator.Operator{op}, []Influence{infl}
 }
