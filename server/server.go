@@ -50,7 +50,7 @@ import (
 	"github.com/pingcap/pd/pkg/ui"
 	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
-	configmanager "github.com/pingcap/pd/server/config_manager"
+	"github.com/pingcap/pd/server/config_manager"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
