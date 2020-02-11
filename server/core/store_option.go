@@ -45,10 +45,10 @@ func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 }
 
 // SetStoreStartTime sets the start timestamp for the store.
-func SetStoreStartTime(start_ts int64) StoreCreateOption {
+func SetStoreStartTime(startTs int64) StoreCreateOption {
 	return func(store *StoreInfo) {
 		meta := proto.Clone(store.meta).(*metapb.Store)
-		meta.StartTimestamp = start_ts
+		meta.StartTimestamp = startTs
 		store.meta = meta
 	}
 }
