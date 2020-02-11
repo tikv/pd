@@ -76,7 +76,7 @@ func (s *Server) saveTimestamp(ts time.Time) error {
 	return nil
 }
 
-func (s *Server) syncTimestamp() error {
+func (s *Server) syncTimestamp(lease *LeaderLease) error {
 	tsoCounter.WithLabelValues("sync").Inc()
 
 	last, err := s.loadTimestamp()
@@ -107,6 +107,7 @@ func (s *Server) syncTimestamp() error {
 	current := &atomicObject{
 		physical: next,
 	}
+	s.lease = lease
 	s.ts.Store(current)
 
 	return nil
@@ -204,6 +205,9 @@ func (s *Server) getRespTS(count uint32) (pdpb.Timestamp, error) {
 			tsoCounter.WithLabelValues("logical_overflow").Inc()
 			time.Sleep(updateTimestampStep)
 			continue
+		}
+		if s.lease == nil || s.lease.IsExpired() {
+			return pdpb.Timestamp{}, errors.New("alloc timestamp failed, lease expired")
 		}
 		return resp, nil
 	}

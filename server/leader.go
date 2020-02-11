@@ -31,8 +31,11 @@ import (
 	"go.uber.org/zap"
 )
 
-// The timeout to wait transfer etcd leader to complete.
-const moveLeaderTimeout = 5 * time.Second
+const (
+	// The timeout to wait transfer etcd leader to complete.
+	moveLeaderTimeout  = 5 * time.Second
+	leaderTickInterval = 50 * time.Millisecond
+)
 
 // IsLeader returns whether the server is leader or not.
 func (s *Server) IsLeader() bool {
@@ -214,30 +217,22 @@ func (s *Server) memberInfo() (member *pdpb.Member, marshalStr string) {
 func (s *Server) campaignLeader() error {
 	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
 
-	lessor := clientv3.NewLease(s.client)
+	lease := NewLeaderLease(s.client)
 	defer func() {
-		lessor.Close()
+		defer lease.Close()
 		log.Info("exit campaign leader")
 	}()
 
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(s.client.Ctx(), requestTimeout)
-	leaseResp, err := lessor.Grant(ctx, s.cfg.LeaderLease)
-	cancel()
-
-	if cost := time.Since(start); cost > slowRequestTime {
-		log.Warn("lessor grants too slow", zap.Duration("cost", cost))
-	}
-
+	err := lease.Grant(s.cfg.LeaderLease)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	leaderKey := s.getLeaderPath()
 	// The leader key must not exist, so the CreateRevision is 0.
 	resp, err := s.txn().
 		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
-		Then(clientv3.OpPut(leaderKey, s.memberValue, clientv3.WithLease(leaseResp.ID))).
+		Then(clientv3.OpPut(leaderKey, s.memberValue, clientv3.WithLease(lease.ID))).
 		Commit()
 	if err != nil {
 		return errors.WithStack(err)
@@ -246,34 +241,39 @@ func (s *Server) campaignLeader() error {
 		return errors.New("failed to campaign leader, other server may campaign ok")
 	}
 
+	// Start keepalive and enable TSO service.
+	// TSO service is strictly enabled/disabled by leader lease for 2 reasons:
+	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
+	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 	// Make the leader keepalived.
-	ctx, cancel = context.WithCancel(s.serverLoopCtx)
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
-	ch, err := lessor.KeepAlive(ctx, leaseResp.ID)
-	if err != nil {
-		return errors.WithStack(err)
-	}
+	go lease.KeepAlive(ctx)
 	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
 
+	// sync timestamp.
+	log.Debug("sync timestamp for tso")
+	if err = s.syncTimestamp(lease); err != nil {
+		return err
+	}
+
+	defer s.ts.Store(&atomicObject{
+		physical: zeroTime,
+	})
+
+	// reload config.
 	err = s.reloadConfigFromKV()
 	if err != nil {
 		return err
 	}
+
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
 		return err
 	}
 	defer s.stopRaftCluster()
-
-	log.Debug("sync timestamp for tso")
-	if err = s.syncTimestamp(); err != nil {
-		return err
-	}
-	defer s.ts.Store(&atomicObject{
-		physical: zeroTime,
-	})
 
 	s.enableLeader()
 	defer s.disableLeader()
@@ -284,11 +284,18 @@ func (s *Server) campaignLeader() error {
 	tsTicker := time.NewTicker(updateTimestampStep)
 	defer tsTicker.Stop()
 
+	leaderTicker := time.NewTicker(leaderTickInterval)
+	defer leaderTicker.Stop()
 	for {
 		select {
-		case _, ok := <-ch:
-			if !ok {
-				log.Info("keep alive channel is closed")
+		case <-leaderTicker.C:
+			if lease.IsExpired() {
+				log.Info("lease expired, leader step down")
+				return nil
+			}
+			etcdLeader := s.GetEtcdLeader()
+			if etcdLeader != s.ID() {
+				log.Info("etcd leader changed, resigns leadership", zap.String("old-leader-name", s.Name()))
 				return nil
 			}
 		case <-tsTicker.C:
@@ -296,11 +303,7 @@ func (s *Server) campaignLeader() error {
 				log.Info("failed to update timestamp")
 				return err
 			}
-			etcdLeader := s.GetEtcdLeader()
-			if etcdLeader != s.ID() {
-				log.Info("etcd leader changed, resigns leadership", zap.String("old-leader-name", s.Name()))
-				return nil
-			}
+
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("server is closed")

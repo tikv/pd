@@ -96,7 +96,9 @@ type Server struct {
 	// for raft cluster
 	cluster *RaftCluster
 	// For tso, set after pd becomes leader.
-	ts            atomic.Value
+	ts atomic.Value
+	// lease is leadership of PD server.
+	lease         *LeaderLease
 	lastSavedTime time.Time
 	// For async region heartbeat.
 	hbStreams *heartbeatStreams
