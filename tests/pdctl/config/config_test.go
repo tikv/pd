@@ -23,10 +23,10 @@ import (
 	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/tests"
-	"github.com/pingcap/pd/tests/pdctl"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/tests"
+	"github.com/pingcap/pd/v4/tests/pdctl"
 )
 
 func Test(t *testing.T) {

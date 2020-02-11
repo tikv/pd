@@ -23,9 +23,9 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
-	"github.com/pingcap/pd/server/cluster"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/member"
+	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/member"
 	"github.com/pkg/errors"
 )
 

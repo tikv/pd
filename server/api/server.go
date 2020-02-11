@@ -18,8 +18,8 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/pkg/apiutil/serverapi"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/v4/pkg/apiutil/serverapi"
+	"github.com/pingcap/pd/v4/server"
 	"github.com/urfave/negroni"
 )
 

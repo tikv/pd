@@ -21,11 +21,11 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/etcdutil"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/tests"
-	"github.com/pingcap/pd/tests/pdctl"
+	"github.com/pingcap/pd/v4/pkg/etcdutil"
+	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/tests"
+	"github.com/pingcap/pd/v4/tests/pdctl"
 )
 
 func Test(t *testing.T) {

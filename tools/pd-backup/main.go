@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/pd/tools/pd-backup/pdbackup"
+	"github.com/pingcap/pd/v4/tools/pd-backup/pdbackup"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/transport"
 )

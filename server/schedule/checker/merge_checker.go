@@ -19,12 +19,12 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/cache"
-	"github.com/pingcap/pd/pkg/codec"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/schedule/placement"
+	"github.com/pingcap/pd/v4/pkg/cache"
+	"github.com/pingcap/pd/v4/pkg/codec"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"go.uber.org/zap"
 )
 

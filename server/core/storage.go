@@ -27,7 +27,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server/kv"
+	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 )

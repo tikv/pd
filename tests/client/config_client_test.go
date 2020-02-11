@@ -23,11 +23,11 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/configpb"
-	pd "github.com/pingcap/pd/client"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/tests"
+	pd "github.com/pingcap/pd/v4/client"
+	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/tests"
 	"go.etcd.io/etcd/clientv3"
 )
 

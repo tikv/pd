@@ -19,8 +19,8 @@ import (
 	"net/http"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/logutil"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/v4/pkg/logutil"
+	"github.com/pingcap/pd/v4/server"
 	"github.com/unrolled/render"
 )
 

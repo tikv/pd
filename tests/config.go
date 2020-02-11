@@ -18,8 +18,8 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/pingcap/pd/pkg/tempurl"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v4/pkg/tempurl"
+	"github.com/pingcap/pd/v4/server/config"
 )
 
 type serverConfig struct {

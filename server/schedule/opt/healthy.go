@@ -13,7 +13,7 @@
 
 package opt
 
-import "github.com/pingcap/pd/server/core"
+import "github.com/pingcap/pd/v4/server/core"
 
 // IsRegionHealthy checks if a region is healthy for scheduling. It requires the
 // region does not have any down or pending peers. And when placement rules

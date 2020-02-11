@@ -21,12 +21,12 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/mock/mockid"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/id"
-	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/v4/pkg/mock/mockid"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/id"
+	"github.com/pingcap/pd/v4/server/kv"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
 )
 
 func Test(t *testing.T) {

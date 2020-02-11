@@ -18,7 +18,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/pingcap/pd/server/cluster"
+	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/spf13/cobra"
 )
 

@@ -1,4 +1,4 @@
-module github.com/pingcap/pd
+module github.com/pingcap/pd/v4
 
 go 1.13
 
@@ -48,5 +48,6 @@ require (
 	go.uber.org/goleak v0.10.0
 	go.uber.org/zap v1.12.0
 	google.golang.org/grpc v1.25.1
+	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )

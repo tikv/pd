@@ -21,9 +21,9 @@ import (
 	"reflect"
 
 	"github.com/pingcap/errcode"
-	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v4/pkg/apiutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )

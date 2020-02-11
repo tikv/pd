@@ -22,10 +22,10 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/kv"
+	"github.com/pingcap/pd/v4/server/schedule"
 )
 
 // ScheduleOption is a wrapper to access the configuration safely.

@@ -23,8 +23,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/simutil"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 )

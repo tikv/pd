@@ -16,7 +16,7 @@ package pdctl
 import (
 	"os"
 
-	"github.com/pingcap/pd/tools/pd-ctl/pdctl/command"
+	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
 )
 

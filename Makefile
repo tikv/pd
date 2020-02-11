@@ -1,13 +1,13 @@
-PD_PKG := github.com/pingcap/pd
+PD_PKG := github.com/pingcap/pd/v4
 
 TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
-                     sort -u | sed -e "s/^\./github.com\/pingcap\/pd/")
+                     sort -u | sed -e "s/^\./github.com\/pingcap\/pd\/v4/")
 INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
-                     sort -u | sed -e "s/^\./github.com\/pingcap\/pd/" | grep -E "tests")
+                     sort -u | sed -e "s/^\./github.com\/pingcap\/pd\/v4/" | grep -E "tests")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 
 PACKAGES := go list ./...
-PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
+PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 RETOOL := ./scripts/retool
 OVERALLS := overalls

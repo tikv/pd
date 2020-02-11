@@ -15,7 +15,7 @@
 
 package ui
 
-import "github.com/pingcap/pd/pkg/ui/dist"
+import "github.com/pingcap/pd/v4/pkg/ui/dist"
 
 func init() {
 	Asset = dist.Asset

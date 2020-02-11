@@ -19,7 +19,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pkg/errors"
 )
 

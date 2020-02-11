@@ -16,7 +16,7 @@ package statistics
 import (
 	"time"
 
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v4/server/core"
 )
 
 // ScheduleOptions is an interface to access configurations.

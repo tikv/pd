@@ -17,7 +17,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
 )
 
 // PriorityWeight is used to represent the weight of different priorities of operators.

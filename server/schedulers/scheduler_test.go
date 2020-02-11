@@ -18,16 +18,16 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/pkg/mock/mockoption"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
+	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
+	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
+	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/kv"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/statistics"
 )
 
 var _ = Suite(&testShuffleLeaderSuite{})
