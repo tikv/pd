@@ -221,6 +221,18 @@ func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	}
 }
 
+func stLdByteRate(ld *storeLoad) float64 {
+	return ld.ByteRate
+}
+
+func stLdKeyRate(ld *storeLoad) float64 {
+	return ld.KeyRate
+}
+
+func stLdCount(ld *storeLoad) float64 {
+	return ld.Count
+}
+
 type storeLoadCmp func(ld1, ld2 *storeLoad) int
 
 func negLoadCmp(cmp storeLoadCmp) storeLoadCmp {
@@ -240,9 +252,9 @@ func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
 	}
 }
 
-func byteRateRankCmp(rank func(rate float64) int64) storeLoadCmp {
+func rankCmp(dim func(ld *storeLoad) float64, rank func(value float64) int64) storeLoadCmp {
 	return func(ld1, ld2 *storeLoad) int {
-		rk1, rk2 := rank(ld1.ByteRate), rank(ld2.ByteRate)
+		rk1, rk2 := rank(dim(ld1)), rank(dim(ld2))
 		if rk1 < rk2 {
 			return -1
 		} else if rk1 > rk2 {
@@ -250,15 +262,6 @@ func byteRateRankCmp(rank func(rate float64) int64) storeLoadCmp {
 		}
 		return 0
 	}
-}
-
-func countCmp(ld1, ld2 *storeLoad) int {
-	if ld1.Count < ld2.Count {
-		return -1
-	} else if ld1.Count > ld2.Count {
-		return 1
-	}
-	return 0
 }
 
 // store load prediction
