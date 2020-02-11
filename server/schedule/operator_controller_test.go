@@ -119,7 +119,7 @@ func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 
 	oc.SetOperator(op1)
 
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/concurrentRemoveOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v3/server/schedule/concurrentRemoveOperator", "return(true)"), IsNil)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
