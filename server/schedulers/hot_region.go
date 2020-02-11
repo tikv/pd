@@ -412,8 +412,8 @@ func (bs *balanceSolver) init() {
 	}
 
 	bs.rankStep = &storeLoad{
-		ByteRate: maxCur.ByteRate / 10,
-		KeyRate:  maxCur.KeyRate / 10,
+		ByteRate: maxCur.ByteRate / 20,
+		KeyRate:  maxCur.KeyRate / 20,
 		Count:    maxCur.Count / 10,
 	}
 }
@@ -686,7 +686,7 @@ func (bs *balanceSolver) isProgressive() bool {
 	} else {
 		if srcLd.ByteRate*0.95 >= dstLd.ByteRate+peer.GetByteRate() {
 			return true
-		} else if srcLd.ByteRate >= dstLd.ByteRate+peer.GetByteRate() &&
+		} else if srcLd.ByteRate*0.99 >= dstLd.ByteRate+peer.GetByteRate() &&
 			srcLd.KeyRate*0.95 >= dstLd.KeyRate+peer.GetKeyRate() {
 			return true
 		}
@@ -758,10 +758,15 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 				)),
 			)
 		} else {
-			lpCmp = minLPCmp(negLoadCmp(sliceLoadCmp(
-				rankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
-				rankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
-			)))
+			lpCmp = sliceLPCmp(
+				minLPCmp(negLoadCmp(sliceLoadCmp(
+					rankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
+					rankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
+				))),
+				diffCmp(
+					rankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+				),
+			)
 		}
 
 		lp1 := bs.stLoadDetail[st1].LoadPred
@@ -789,10 +794,15 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 					rankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
 				)))
 		} else {
-			lpCmp = maxLPCmp(sliceLoadCmp(
-				rankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
-				rankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
-			))
+			lpCmp = sliceLPCmp(
+				maxLPCmp(sliceLoadCmp(
+					rankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
+					rankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
+				)),
+				diffCmp(
+					rankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+				),
+			)
 		}
 
 		lp1 := bs.stLoadDetail[st1].LoadPred
