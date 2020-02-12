@@ -47,7 +47,6 @@ import (
 	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/pkg/ui"
 	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/config_manager"
@@ -229,7 +228,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 
 		etcdCfg.UserHandlers = map[string]http.Handler{
 			pdAPIPrefix: apiHandler,
-			webPath:     http.StripPrefix(webPath, ui.Handler()),
 		}
 
 		if cfg.EnableDashboard {
