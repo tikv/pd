@@ -217,6 +217,7 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	c.Assert(err, IsNil)
 	addr := fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr())
 	resp, err := http.Get(addr)
+	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
