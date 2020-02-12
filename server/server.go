@@ -74,7 +74,6 @@ const (
 	// pdRootPath for all pd servers.
 	pdRootPath       = "/pd"
 	pdAPIPrefix      = "/pd/"
-	webPath          = "/web/"
 	dashboardUIPath  = "/dashboard/"
 	dashboardAPIPath = "/dashboard/api/"
 	pdClusterIDPath  = "/pd/cluster_id"
