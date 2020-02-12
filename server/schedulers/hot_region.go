@@ -679,7 +679,6 @@ func (bs *balanceSolver) isProgressive() bool {
 	peer := bs.cur.srcPeerStat
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		if srcLd.Count > dstLd.Count &&
-			srcLd.ByteRate >= dstLd.ByteRate+peer.GetByteRate() &&
 			srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
 			return true
 		}
