@@ -167,7 +167,7 @@ func NewConfig() *Config {
 
 	fs.BoolVar(&cfg.EnableConfigManager, "enable-config-manager", false, "Enable configuration manager")
 
-	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", true, "Enable Dashboard API and UI on this node")
+	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", false, "Enable Dashboard API and UI on this node")
 
 	return cfg
 }
