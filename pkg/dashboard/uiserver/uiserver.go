@@ -14,19 +14,30 @@
 package uiserver
 
 import (
+	"context"
 	"io"
 	"net/http"
+
+	"github.com/pingcap/pd/server"
 )
 
-// Handler returns an http.Handler that serves the dashboard UI.
-func Handler() http.Handler {
+var serviceGroup = server.ServiceGroup{
+	Name:       "dashboard-ui",
+	Version:    "v1",
+	IsCore:     false,
+	PathPrefix: "/dashboard",
+}
+
+// NewService returns an http.Handler that serves the dashboard UI
+func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup) {
 	fs := assetFS()
 	if fs != nil {
 		fileServer := http.FileServer(fs)
-		return fileServer
+		return fileServer, serviceGroup
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	emptyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "Dashboard UI is not built.\n")
 	})
+	return emptyHandler, serviceGroup
 }

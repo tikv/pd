@@ -22,6 +22,8 @@ import (
 
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/log"
+	dashboardAPI "github.com/pingcap/pd/pkg/dashboard/apiserver"
+	dashboardUI "github.com/pingcap/pd/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
@@ -96,7 +98,10 @@ func main() {
 	svr, err := server.CreateServer(
 		ctx,
 		cfg,
-		api.NewHandler)
+		api.NewHandler,
+		dashboardAPI.NewService,
+		dashboardUI.NewService,
+	)
 	if err != nil {
 		log.Fatal("create server failed", zap.Error(err))
 	}
