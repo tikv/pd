@@ -37,7 +37,6 @@ import (
 	dashboardConfig "github.com/pingcap-incubator/tidb-dashboard/pkg/config"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/configpb"
-	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -57,7 +56,6 @@ import (
 	syncer "github.com/pingcap/pd/server/region_syncer"
 	"github.com/pingcap/pd/server/schedule/opt"
 	"github.com/pingcap/pd/server/tso"
-	"github.com/pingcap/sysutil"
 	"github.com/pkg/errors"
 	"github.com/urfave/negroni"
 	"go.etcd.io/etcd/clientv3"
@@ -94,8 +92,6 @@ var ConfigCheckInterval = 1 * time.Second
 
 // Server is the pd server.
 type Server struct {
-	diagnosticspb.DiagnosticsServer
-
 	// Server state.
 	isServing int64
 
@@ -203,12 +199,11 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
-		cfg:               cfg,
-		scheduleOpt:       config.NewScheduleOption(cfg),
-		member:            &member.Member{},
-		ctx:               ctx,
-		startTimestamp:    time.Now().Unix(),
-		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		cfg:            cfg,
+		scheduleOpt:    config.NewScheduleOption(cfg),
+		member:         &member.Member{},
+		ctx:            ctx,
+		startTimestamp: time.Now().Unix(),
 	}
 
 	s.cfgManager = configmanager.NewConfigManager(s)
@@ -241,12 +236,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
-		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 
 		if cfg.EnableConfigManager {
 			configpb.RegisterConfigServer(gs, s.cfgManager)
 		}
 	}
+
 	s.etcdCfg = etcdCfg
 	if EnableZap {
 		// The etcd master version has removed embed.Config.SetupLogging.
