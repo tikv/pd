@@ -190,12 +190,12 @@ var _ = Suite(&testServerHandlerSuite{})
 type testServerHandlerSuite struct{}
 
 func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, APIGroup) {
+	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
 		})
-		info := APIGroup{
+		info := ServiceGroup{
 			Name:    "mok",
 			Version: "v1",
 		}

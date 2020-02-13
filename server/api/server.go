@@ -26,8 +26,8 @@ import (
 const apiPrefix = "/pd"
 
 // NewHandler creates a HTTP handler for API.
-func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, server.APIGroup) {
-	group := server.APIGroup{
+func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, server.ServiceGroup) {
+	group := server.ServiceGroup{
 		Name:   "core",
 		IsCore: true,
 	}

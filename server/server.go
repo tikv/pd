@@ -33,8 +33,6 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
-	dashboardConfig "github.com/pingcap-incubator/tidb-dashboard/pkg/config"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
@@ -42,7 +40,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	pd "github.com/pingcap/pd/client"
-	"github.com/pingcap/pd/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/pkg/logutil"
@@ -72,11 +69,9 @@ const (
 	serverMetricsInterval = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
-	pdRootPath       = "/pd"
-	pdAPIPrefix      = "/pd/"
-	dashboardUIPath  = "/dashboard/"
-	dashboardAPIPath = "/dashboard/api/"
-	pdClusterIDPath  = "/pd/cluster_id"
+	pdRootPath      = "/pd"
+	pdAPIPrefix     = "/pd/"
+	pdClusterIDPath = "/pd/cluster_id"
 )
 
 var (
@@ -145,13 +140,14 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, APIGroup)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup)
 
-// APIGroup used to register the api service.
-type APIGroup struct {
-	Name    string
-	Version string
-	IsCore  bool
+// ServiceGroup used to register the service.
+type ServiceGroup struct {
+	Name       string
+	Version    string
+	IsCore     bool
+	PathPrefix string
 }
 
 const (
@@ -170,7 +166,9 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 	for _, build := range apiBuilders {
 		handler, info := build(svr.ctx, svr)
 		var pathPrefix string
-		if info.IsCore {
+		if info.PathPrefix != "" {
+			pathPrefix = info.PathPrefix
+		} else if info.IsCore {
 			pathPrefix = CorePath
 		} else {
 			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
@@ -224,19 +222,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		if err != nil {
 			return nil, err
 		}
-
 		etcdCfg.UserHandlers = map[string]http.Handler{
 			pdAPIPrefix: apiHandler,
-		}
-
-		if cfg.EnableDashboard {
-			etcdCfg.UserHandlers[dashboardUIPath] = http.StripPrefix(dashboardUIPath, uiserver.Handler())
-			etcdCfg.UserHandlers[dashboardAPIPath] = apiserver.Handler(dashboardAPIPath, &dashboardConfig.Config{
-				DataDir:    cfg.DataDir,
-				PDEndPoint: etcdCfg.ACUrls[0].String(),
-			})
-			log.Info("Enabled Dashboard API", zap.String("path", dashboardAPIPath))
-			log.Info("Enabled Dashboard UI", zap.String("path", dashboardUIPath))
 		}
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
