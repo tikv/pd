@@ -111,7 +111,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 	server.ConfigCheckInterval = 10 * time.Millisecond
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.StrictlyMatchLabel = false
-		cfg.EnableConfigManager = true
+		cfg.EnableDynamicConfig = true
 	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -194,7 +194,7 @@ func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.LocationLabels = []string{"zone", "disk"}
 		cfg.Replication.StrictlyMatchLabel = true
-		cfg.EnableConfigManager = true
+		cfg.EnableDynamicConfig = true
 	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
