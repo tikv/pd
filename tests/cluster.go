@@ -431,7 +431,6 @@ func (c *TestCluster) WaitLeader() string {
 		}
 		for name, num := range counter {
 			if num == running && c.GetServer(name).IsLeader() {
-				time.Sleep(20 * time.Millisecond)
 				return name
 			}
 		}

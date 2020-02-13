@@ -165,10 +165,9 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
 
-	fs.BoolVar(&cfg.EnableConfigManager, "enable-config-manager", false, "Enable configuration manager")
-
 	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", false, "Enable Dashboard API and UI on this node")
 
+	cfg.EnableConfigManager = false
 	return cfg
 }
 

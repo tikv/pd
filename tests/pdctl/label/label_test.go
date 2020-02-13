@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -39,7 +38,6 @@ type labelTestSuite struct{}
 
 func (s *labelTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
-	server.ConfigCheckInterval = 10 * time.Millisecond
 }
 
 func (s *labelTestSuite) TestLabel(c *C) {

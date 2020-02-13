@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -108,10 +107,8 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 		},
 	}
 
-	server.ConfigCheckInterval = 10 * time.Millisecond
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.StrictlyMatchLabel = false
-		cfg.EnableConfigManager = true
 	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -122,8 +119,6 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 	for _, store := range s.stores {
 		mustPutStore(c, s.svr, store.Id, store.State, store.Labels)
 	}
-	// make sure the config client is initialized
-	time.Sleep(20 * time.Millisecond)
 }
 
 func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
@@ -190,11 +185,9 @@ type testStrictlyLabelsStoreSuite struct {
 }
 
 func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
-	server.ConfigCheckInterval = 10 * time.Millisecond
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.LocationLabels = []string{"zone", "disk"}
 		cfg.Replication.StrictlyMatchLabel = true
-		cfg.EnableConfigManager = true
 	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -202,8 +195,6 @@ func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
-	// make sure the config client is initialized
-	time.Sleep(20 * time.Millisecond)
 }
 
 func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
@@ -288,7 +279,6 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 
 	// enable placement rules. Report no error any more.
 	c.Assert(postJSON(fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`)), IsNil)
-	time.Sleep(20 * time.Millisecond)
 	for _, t := range cases {
 		_, err := s.svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
