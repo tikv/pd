@@ -87,6 +87,11 @@ const Component = "pd"
 // ConfigCheckInterval represents the time interval of running config check.
 var ConfigCheckInterval = 1 * time.Second
 
+type callback struct {
+	Func   func() error
+	ErrMsg string
+}
+
 // Server is the pd server.
 type Server struct {
 	diagnosticspb.DiagnosticsServer
@@ -137,6 +142,10 @@ type Server struct {
 	// component config
 	configVersion *configpb.Version
 	configClient  pd.ConfigClient
+
+	// Add callback functions at different stages
+	startCallbacks []callback
+	closeCallbacks []callback
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -324,6 +333,14 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	return nil
 }
 
+// AddStartCallback adds a callback in the startServer phase.
+func (s *Server) AddStartCallback(f func() error, errMsg string) {
+	s.startCallbacks = append(s.startCallbacks, callback{
+		Func:   f,
+		ErrMsg: errMsg,
+	})
+}
+
 func (s *Server) startServer(ctx context.Context) error {
 	var err error
 	if err = s.initClusterID(); err != nil {
@@ -354,6 +371,14 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
+
+	// Run callbacks
+	for _, cb := range s.startCallbacks {
+		if err := cb.Func(); err != nil {
+			log.Error(cb.ErrMsg, zap.Error(err))
+		}
+	}
+
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
 	return nil
@@ -373,6 +398,14 @@ func (s *Server) initClusterID() error {
 	}
 	s.clusterID, err = typeutil.BytesToUint64(resp.Kvs[0].Value)
 	return err
+}
+
+// AddCloseCallback adds a callback in the Close phase.
+func (s *Server) AddCloseCallback(f func() error, errMsg string) {
+	s.closeCallbacks = append(s.closeCallbacks, callback{
+		Func:   f,
+		ErrMsg: errMsg,
+	})
 }
 
 // Close closes the server.
@@ -399,6 +432,13 @@ func (s *Server) Close() {
 	}
 	if err := s.storage.Close(); err != nil {
 		log.Error("close storage meet error", zap.Error(err))
+	}
+
+	// Run callbacks
+	for _, cb := range s.closeCallbacks {
+		if err := cb.Func(); err != nil {
+			log.Error(cb.ErrMsg, zap.Error(err))
+		}
 	}
 
 	log.Info("close server")
