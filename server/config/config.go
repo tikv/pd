@@ -129,7 +129,7 @@ type Config struct {
 	logger   *zap.Logger
 	logProps *log.ZapProperties
 
-	EnableConfigManager bool
+	EnableDynamicConfig bool
 
 	EnableDashboard bool
 }
@@ -167,7 +167,7 @@ func NewConfig() *Config {
 
 	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", false, "Enable Dashboard API and UI on this node")
 
-	cfg.EnableConfigManager = false
+	cfg.EnableDynamicConfig = false
 	return cfg
 }
 
