@@ -20,10 +20,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/log"
-	dashboardAPI "github.com/pingcap/pd/pkg/dashboard/apiserver"
-	dashboardUI "github.com/pingcap/pd/pkg/dashboard/uiserver"
+	dashboardapi "github.com/pingcap/pd/pkg/dashboard/apiserver"
+	dashboardui "github.com/pingcap/pd/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/metricutil"
 	"github.com/pingcap/pd/server"
@@ -84,7 +84,7 @@ func main() {
 	}
 
 	// TODO: Make it configurable if it has big impact on performance.
-	grpc_prometheus.EnableHandlingTimeHistogram()
+	grpcprometheus.EnableHandlingTimeHistogram()
 
 	metricutil.Push(&cfg.Metric)
 
@@ -95,13 +95,11 @@ func main() {
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := server.CreateServer(
-		ctx,
-		cfg,
-		api.NewHandler,
-		dashboardAPI.NewService,
-		dashboardUI.NewService,
-	)
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler}
+	if cfg.EnableDashboard {
+		serviceBuilders = append(serviceBuilders, dashboardapi.NewService, dashboardui.NewService)
+	}
+	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", zap.Error(err))
 	}

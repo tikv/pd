@@ -23,8 +23,10 @@ import (
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/dbstore"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/dashboard/keyvisual/input"
 	"github.com/pingcap/pd/server"
+	"go.uber.org/zap"
 )
 
 var serviceGroup = server.ServiceGroup{
@@ -83,5 +85,6 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	}, "unreachable")
 	srv.AddCloseCallback(store.Close, "close dashboard dbstore error")
 
+	log.Info("Enabled Dashboard API", zap.String("path", serviceGroup.PathPrefix))
 	return handler, serviceGroup
 }

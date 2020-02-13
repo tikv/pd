@@ -18,7 +18,9 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
+	"go.uber.org/zap"
 )
 
 var serviceGroup = server.ServiceGroup{
@@ -33,6 +35,7 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	fs := assetFS()
 	if fs != nil {
 		fileServer := http.FileServer(fs)
+		log.Info("Enabled Dashboard UI", zap.String("path", serviceGroup.PathPrefix))
 		return fileServer, serviceGroup
 	}
 
