@@ -129,7 +129,7 @@ type Config struct {
 	logger   *zap.Logger
 	logProps *log.ZapProperties
 
-	EnableConfigManager bool
+	EnableDynamicConfig bool
 
 	EnableDashboard bool
 }
@@ -165,7 +165,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
 
-	fs.BoolVar(&cfg.EnableConfigManager, "enable-config-manager", false, "Enable configuration manager")
+	fs.BoolVar(&cfg.EnableDynamicConfig, "enable-dynamic-config", false, "Enable dynamic configuration change")
 
 	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", true, "Enable Dashboard API and UI on this node")
 

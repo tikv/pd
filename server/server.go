@@ -46,7 +46,7 @@ import (
 	"github.com/pingcap/pd/pkg/typeutil"
 	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/config_manager"
+	configmanager "github.com/pingcap/pd/server/config_manager"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
@@ -249,7 +249,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		pdpb.RegisterPDServer(gs, s)
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 
-		if cfg.EnableConfigManager {
+		if cfg.EnableDynamicConfig {
 			configpb.RegisterConfigServer(gs, s.cfgManager)
 		}
 	}
@@ -484,7 +484,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
-	if s.cfg.EnableConfigManager {
+	if s.cfg.EnableDynamicConfig {
 		s.serverLoopWg.Add(1)
 		go s.configCheckLoop()
 	}
@@ -1287,7 +1287,7 @@ func (s *Server) reloadConfigFromKV() error {
 
 	// The request only valid when there is a leader.
 	// And before the a PD becomes a leader it will firstly reload the config.
-	if s.cfg.EnableConfigManager {
+	if s.cfg.EnableDynamicConfig {
 		err = s.cfgManager.Reload(s.storage)
 		return err
 	}
