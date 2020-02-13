@@ -233,8 +233,8 @@ github.com/pelletier/go-toml v1.3.0 h1:e5+lF2E4Y2WCIxBefVowBuB0iHrUH4HZ8q+6mGF7f
 github.com/pelletier/go-toml v1.3.0/go.mod h1:PN7xzY2wHTK0K9p34ErDQMlFxa51Fk0OUruD3k1mMwo=
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d h1:U+PMnTlV2tu7RuMK5etusZG3Cf+rpow5hqQByeCzJ2g=
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d/go.mod h1:lXfE4PvvTW5xOjO6Mba8zDPyw8M93B6AQ7frTGnMlA8=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200213060919-334565d5b722 h1:kbvgy9nEBxfDLuqj21aSK1v3jHZWjPieTyR39wGq7YA=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200213060919-334565d5b722/go.mod h1:u3ep2JzyDnA1xW4NXTOK1ffXsWYxt8cJRqonFZJs+4A=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200213142943-82a71c302d48 h1:ElDSAifBnXSSM5dY81lkNe3XqCS1Y5E03+NhqsJn70c=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200213142943-82a71c302d48/go.mod h1:u3ep2JzyDnA1xW4NXTOK1ffXsWYxt8cJRqonFZJs+4A=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8 h1:USx2/E1bX46VG32FIw034Au6seQ2fY9NEILmNh/UlQg=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8/go.mod h1:B1+S9LNcuMyLH/4HMTViQOJevkGiik3wW2AN9zb2fNQ=
 github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4 h1:iRtOAQ6FXkY/BGvst3CDfTva4nTqh6CL8WXvanLdbu0=

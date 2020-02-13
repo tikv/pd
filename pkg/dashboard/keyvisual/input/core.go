@@ -14,7 +14,7 @@
 package input
 
 import (
-	regionPKG "github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
+	regionpkg "github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/cluster"
@@ -24,7 +24,7 @@ import (
 
 const limit = 1024
 
-// RegionsInfo implements the interface regionPKG.RegionsInfo for []*core.RegionInfo.
+// RegionsInfo implements the interface regionpkg.RegionsInfo for []*core.RegionInfo.
 type RegionsInfo []*core.RegionInfo
 
 // Len returns the number of regions.
@@ -35,35 +35,35 @@ func (rs RegionsInfo) Len() int {
 // GetKeys returns the sorted endpoint keys of all regions.
 func (rs RegionsInfo) GetKeys() []string {
 	keys := make([]string, len(rs)+1)
-	keys[0] = regionPKG.String(rs[0].GetStartKey())
+	keys[0] = regionpkg.String(rs[0].GetStartKey())
 	endKeys := keys[1:]
 	for i, region := range rs {
-		endKeys[i] = regionPKG.String(region.GetEndKey())
+		endKeys[i] = regionpkg.String(region.GetEndKey())
 	}
 	return keys
 }
 
 // GetValues returns the specified statistics of all regions, sorted by region start key.
-func (rs RegionsInfo) GetValues(tag regionPKG.StatTag) []uint64 {
+func (rs RegionsInfo) GetValues(tag regionpkg.StatTag) []uint64 {
 	values := make([]uint64, len(rs))
 	switch tag {
-	case regionPKG.WrittenBytes:
+	case regionpkg.WrittenBytes:
 		for i, region := range rs {
 			values[i] = region.GetBytesWritten()
 		}
-	case regionPKG.ReadBytes:
+	case regionpkg.ReadBytes:
 		for i, region := range rs {
 			values[i] = region.GetBytesRead()
 		}
-	case regionPKG.WrittenKeys:
+	case regionpkg.WrittenKeys:
 		for i, region := range rs {
 			values[i] = region.GetKeysWritten()
 		}
-	case regionPKG.ReadKeys:
+	case regionpkg.ReadKeys:
 		for i, region := range rs {
 			values[i] = region.GetKeysRead()
 		}
-	case regionPKG.Integration:
+	case regionpkg.Integration:
 		for i, region := range rs {
 			values[i] = region.GetBytesWritten() + region.GetBytesRead()
 		}
@@ -75,10 +75,10 @@ func (rs RegionsInfo) GetValues(tag regionPKG.StatTag) []uint64 {
 
 var emptyRegionsInfo RegionsInfo
 
-// NewCorePeriodicGetter returns the regionPKG.RegionsInfoGenerator interface implemented by PD.
+// NewCorePeriodicGetter returns the regionpkg.RegionsInfoGenerator interface implemented by PD.
 // It gets RegionsInfo directly from memory.
-func NewCorePeriodicGetter(srv *server.Server) regionPKG.RegionsInfoGenerator {
-	return func() (regionPKG.RegionsInfo, error) {
+func NewCorePeriodicGetter(srv *server.Server) regionpkg.RegionsInfoGenerator {
+	return func() (regionpkg.RegionsInfo, error) {
 		rc := srv.GetRaftCluster()
 		if rc == nil {
 			return emptyRegionsInfo, nil
