@@ -15,13 +15,13 @@ package apiserver
 
 import (
 	"context"
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual"
 	"net/http"
 	"sync"
 
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/dbstore"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
 	"github.com/pingcap/pd/pkg/dashboard/keyvisual/input"
 	"github.com/pingcap/pd/server"
