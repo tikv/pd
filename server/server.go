@@ -87,11 +87,6 @@ const Component = "pd"
 // ConfigCheckInterval represents the time interval of running config check.
 var ConfigCheckInterval = 1 * time.Second
 
-type callback struct {
-	Func   func() error
-	ErrMsg string
-}
-
 // Server is the pd server.
 type Server struct {
 	diagnosticspb.DiagnosticsServer
@@ -144,8 +139,8 @@ type Server struct {
 	configClient  pd.ConfigClient
 
 	// Add callback functions at different stages
-	startCallbacks []callback
-	closeCallbacks []callback
+	startCallbacks []func()
+	closeCallbacks []func()
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -170,9 +165,9 @@ func combineBuilderServerHTTPService(svr *Server, serviceBuilders ...HandlerBuil
 	userHandlers := make(map[string]http.Handler)
 	registerMap := make(map[string]struct{})
 
-	apiHandler := negroni.New()
+	apiService := negroni.New()
 	recovery := negroni.NewRecovery()
-	apiHandler.Use(recovery)
+	apiService.Use(recovery)
 	router := mux.NewRouter()
 
 	for _, build := range serviceBuilders {
@@ -198,8 +193,8 @@ func combineBuilderServerHTTPService(svr *Server, serviceBuilders ...HandlerBuil
 			// If PathPrefix is specified, register directly into userHandlers
 			userHandlers[pathPrefix] = handler
 		} else {
-			// If PathPrefix is not specified, register into apiHandler,
-			// and finally apiHandler is registered in userHandlers.
+			// If PathPrefix is not specified, register into apiService,
+			// and finally apiService is registered in userHandlers.
 			router.PathPrefix(pathPrefix).Handler(handler)
 			if info.IsCore {
 				// Deprecated
@@ -211,8 +206,8 @@ func combineBuilderServerHTTPService(svr *Server, serviceBuilders ...HandlerBuil
 			}
 		}
 	}
-	apiHandler.UseHandler(router)
-	userHandlers[pdAPIPrefix] = apiHandler
+	apiService.UseHandler(router)
+	userHandlers[pdAPIPrefix] = apiService
 	return userHandlers, nil
 }
 
@@ -334,11 +329,8 @@ func (s *Server) startEtcd(ctx context.Context) error {
 }
 
 // AddStartCallback adds a callback in the startServer phase.
-func (s *Server) AddStartCallback(f func() error, errMsg string) {
-	s.startCallbacks = append(s.startCallbacks, callback{
-		Func:   f,
-		ErrMsg: errMsg,
-	})
+func (s *Server) AddStartCallback(callbacks ...func()) {
+	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
 func (s *Server) startServer(ctx context.Context) error {
@@ -374,9 +366,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
-		if err := cb.Func(); err != nil {
-			log.Error(cb.ErrMsg, zap.Error(err))
-		}
+		cb()
 	}
 
 	// Server has started.
@@ -401,11 +391,8 @@ func (s *Server) initClusterID() error {
 }
 
 // AddCloseCallback adds a callback in the Close phase.
-func (s *Server) AddCloseCallback(f func() error, errMsg string) {
-	s.closeCallbacks = append(s.closeCallbacks, callback{
-		Func:   f,
-		ErrMsg: errMsg,
-	})
+func (s *Server) AddCloseCallback(callbacks ...func()) {
+	s.closeCallbacks = append(s.closeCallbacks, callbacks...)
 }
 
 // Close closes the server.
@@ -436,9 +423,7 @@ func (s *Server) Close() {
 
 	// Run callbacks
 	for _, cb := range s.closeCallbacks {
-		if err := cb.Func(); err != nil {
-			log.Error(cb.ErrMsg, zap.Error(err))
-		}
+		cb()
 	}
 
 	log.Info("close server")

@@ -15,14 +15,16 @@ package input
 
 import (
 	regionPKG "github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/core"
+	"go.uber.org/zap"
 )
 
 const limit = 1024
 
-// RegionsInfo implements the interface regionPKG.RegionsInfo for [] * core.RegionInfo.
+// RegionsInfo implements the interface regionPKG.RegionsInfo for []*core.RegionInfo.
 type RegionsInfo []*core.RegionInfo
 
 // Len returns the number of regions.
@@ -31,7 +33,6 @@ func (rs RegionsInfo) Len() int {
 }
 
 // GetKeys returns the sorted endpoint keys of all regions.
-// Fixme: StartKey may not be equal to the EndKey of the previous region
 func (rs RegionsInfo) GetKeys() []string {
 	keys := make([]string, len(rs)+1)
 	keys[0] = regionPKG.String(rs[0].GetStartKey())
@@ -107,6 +108,6 @@ func clusterScan(rc *cluster.RaftCluster) RegionsInfo {
 		}
 	}
 
-	// log.Info("Update key visual regions", zap.Int("total-length", len(regions)))
+	log.Debug("Update key visual regions", zap.Int("total-length", len(regions)))
 	return regions
 }

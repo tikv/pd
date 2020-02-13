@@ -71,19 +71,16 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	handler := apiserver.Handler(serviceGroup.PathPrefix, dashboardCfg, services)
 
 	// callback
-	srv.AddStartCallback(func() error {
-		keyvisualService.Start()
-		return nil
-	}, "unreachable")
-	srv.AddCloseCallback(func() error {
-		cancel()
-		return nil
-	}, "unreachable")
-	srv.AddCloseCallback(func() error {
-		wg.Wait()
-		return nil
-	}, "unreachable")
-	srv.AddCloseCallback(store.Close, "close dashboard dbstore error")
+	srv.AddStartCallback(keyvisualService.Start)
+	srv.AddCloseCallback(
+		cancel,
+		wg.Wait,
+		func() {
+			if err := store.Close(); err != nil {
+				log.Error("close dashboard dbstore error", zap.Error(err))
+			}
+		},
+	)
 
 	log.Info("Enabled Dashboard API", zap.String("path", serviceGroup.PathPrefix))
 	return handler, serviceGroup
