@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/keyvisual"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/cluster"
@@ -72,7 +71,6 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 		ctx,
 		cfg,
 		api.NewHandler,
-		keyvisual.NewKeyvisualService,
 	)
 	if err != nil {
 		return nil, err

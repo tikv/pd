@@ -47,7 +47,6 @@ import (
 	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/pkg/ui"
 	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
 	"github.com/pingcap/pd/server/config_manager"
@@ -75,7 +74,6 @@ const (
 	// pdRootPath for all pd servers.
 	pdRootPath       = "/pd"
 	pdAPIPrefix      = "/pd/"
-	webPath          = "/web/"
 	dashboardUIPath  = "/dashboard/"
 	dashboardAPIPath = "/dashboard/api/"
 	pdClusterIDPath  = "/pd/cluster_id"
@@ -100,6 +98,9 @@ type Server struct {
 
 	// Server state.
 	isServing int64
+
+	// Server start timestamp
+	startTimestamp int64
 
 	// Configs and initial fields.
 	cfg         *config.Config
@@ -206,6 +207,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		scheduleOpt:       config.NewScheduleOption(cfg),
 		member:            &member.Member{},
 		ctx:               ctx,
+		startTimestamp:    time.Now().Unix(),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 	}
 
@@ -225,7 +227,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 
 		etcdCfg.UserHandlers = map[string]http.Handler{
 			pdAPIPrefix: apiHandler,
-			webPath:     http.StripPrefix(webPath, ui.Handler()),
 		}
 
 		if cfg.EnableDashboard {
@@ -654,6 +655,11 @@ func (s *Server) Name() string {
 // ClusterID returns the cluster ID of this server.
 func (s *Server) ClusterID() uint64 {
 	return s.clusterID
+}
+
+// StartTimestamp returns the start timestamp of this server
+func (s *Server) StartTimestamp() int64 {
+	return s.startTimestamp
 }
 
 // GetConfig gets the config information.

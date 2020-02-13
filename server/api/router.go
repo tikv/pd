@@ -136,7 +136,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.HandleFunc("/regions/sibling/{id}", regionsHandler.GetRegionSiblings).Methods("GET")
 
 	apiRouter.Handle("/version", newVersionHandler(rd)).Methods("GET")
-	apiRouter.Handle("/status", newStatusHandler(rd)).Methods("GET")
+	apiRouter.Handle("/status", newStatusHandler(svr, rd)).Methods("GET")
 
 	memberHandler := newMemberHandler(svr, rd)
 	apiRouter.HandleFunc("/members", memberHandler.ListMembers).Methods("GET")
