@@ -50,7 +50,7 @@ func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
-	if h.svr.GetConfig().EnableConfigManager {
+	if h.svr.GetConfig().EnableDynamicConfig {
 		client := h.svr.GetConfigClient()
 		if client == nil {
 			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
@@ -164,7 +164,7 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
-	if h.svr.GetConfig().EnableConfigManager {
+	if h.svr.GetConfig().EnableDynamicConfig {
 		client := h.svr.GetConfigClient()
 		if client == nil {
 			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
@@ -202,7 +202,7 @@ func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
-	if h.svr.GetConfig().EnableConfigManager {
+	if h.svr.GetConfig().EnableDynamicConfig {
 		client := h.svr.GetConfigClient()
 		if client == nil {
 			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
@@ -245,7 +245,7 @@ func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.svr.GetConfig().EnableConfigManager {
+	if h.svr.GetConfig().EnableDynamicConfig {
 		client := h.svr.GetConfigClient()
 		if client == nil {
 			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
@@ -322,7 +322,7 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if h.svr.GetConfig().EnableConfigManager {
+	if h.svr.GetConfig().EnableDynamicConfig {
 		kind := &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: server.Component}}}
 		v := &configpb.Version{Global: h.svr.GetConfigManager().GlobalCfgs[server.Component].GetVersion()}
 		entry := &configpb.ConfigEntry{Name: "cluster-version", Value: version}
