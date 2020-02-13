@@ -157,16 +157,22 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder) (http.Handler, error) {
-	engine := negroni.New()
-	recovery := negroni.NewRecovery()
-	engine.Use(recovery)
-	router := mux.NewRouter()
+func combineBuilderServerHTTPService(svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
+	userHandlers := make(map[string]http.Handler)
 	registerMap := make(map[string]struct{})
-	for _, build := range apiBuilders {
+
+	apiHandler := negroni.New()
+	recovery := negroni.NewRecovery()
+	apiHandler.Use(recovery)
+	router := mux.NewRouter()
+
+	for _, build := range serviceBuilders {
 		handler, info := build(svr.ctx, svr)
+		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
+			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
+		}
 		var pathPrefix string
-		if info.PathPrefix != "" {
+		if len(info.PathPrefix) != 0 {
 			pathPrefix = info.PathPrefix
 		} else if info.IsCore {
 			pathPrefix = CorePath
@@ -176,27 +182,33 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 		if _, ok := registerMap[pathPrefix]; ok {
 			return nil, errors.Errorf("service with path [%s] already registered", pathPrefix)
 		}
-		if !info.IsCore && (len(info.Name) == 0 || len(info.Version) == 0) {
-			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
-		}
+
 		log.Info("register REST path", zap.String("path", pathPrefix))
 		registerMap[pathPrefix] = struct{}{}
-		router.PathPrefix(pathPrefix).Handler(handler)
-		if info.IsCore {
-			// Deprecated
-			router.Path("/pd/health").Handler(handler)
-			// Deprecated
-			router.Path("/pd/diagnose").Handler(handler)
-			// Deprecated
-			router.Path("/pd/ping").Handler(handler)
+		if len(info.PathPrefix) != 0 {
+			// If PathPrefix is specified, register directly into userHandlers
+			userHandlers[pathPrefix] = handler
+		} else {
+			// If PathPrefix is not specified, register into apiHandler,
+			// and finally apiHandler is registered in userHandlers.
+			router.PathPrefix(pathPrefix).Handler(handler)
+			if info.IsCore {
+				// Deprecated
+				router.Path("/pd/health").Handler(handler)
+				// Deprecated
+				router.Path("/pd/diagnose").Handler(handler)
+				// Deprecated
+				router.Path("/pd/ping").Handler(handler)
+			}
 		}
 	}
-	engine.UseHandler(router)
-	return engine, nil
+	apiHandler.UseHandler(router)
+	userHandlers[pdAPIPrefix] = apiHandler
+	return userHandlers, nil
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, error) {
+func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 
@@ -217,14 +229,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 	if err != nil {
 		return nil, err
 	}
-	if len(apiBuilders) != 0 {
-		apiHandler, err := combineBuilderServerHTTPService(s, apiBuilders...)
+	if len(serviceBuilders) != 0 {
+		userHandlers, err := combineBuilderServerHTTPService(s, serviceBuilders...)
 		if err != nil {
 			return nil, err
 		}
-		etcdCfg.UserHandlers = map[string]http.Handler{
-			pdAPIPrefix: apiHandler,
-		}
+		etcdCfg.UserHandlers = userHandlers
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
