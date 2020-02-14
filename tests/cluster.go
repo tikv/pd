@@ -23,6 +23,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	dashboardapi "github.com/pingcap/pd/pkg/dashboard/apiserver"
+	dashboardui "github.com/pingcap/pd/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/cluster"
@@ -67,11 +69,11 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	if err != nil {
 		return nil, err
 	}
-	svr, err := server.CreateServer(
-		ctx,
-		cfg,
-		api.NewHandler,
-	)
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler}
+	if cfg.EnableDashboard {
+		serviceBuilders = append(serviceBuilders, dashboardapi.NewService, dashboardui.NewService)
+	}
+	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		return nil, err
 	}
