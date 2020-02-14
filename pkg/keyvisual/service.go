@@ -30,7 +30,7 @@ import (
 )
 
 var (
-	defaultRegisterAPIGroupInfo = server.APIGroup{
+	defaultRegisterAPIGroupInfo = server.ServiceGroup{
 		IsCore:  false,
 		Name:    "keyvisual",
 		Version: "v1",
@@ -46,7 +46,7 @@ type keyvisualService struct {
 }
 
 // NewKeyvisualService creates a HTTP handler for heatmap service.
-func NewKeyvisualService(ctx context.Context, svr *server.Server) (http.Handler, server.APIGroup, func()) {
+func NewKeyvisualService(ctx context.Context, svr *server.Server) (http.Handler, server.ServiceGroup, func()) {
 	mux := http.NewServeMux()
 	k := &keyvisualService{
 		ServeMux: mux,

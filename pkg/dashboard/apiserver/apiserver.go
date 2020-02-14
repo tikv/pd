@@ -37,7 +37,7 @@ var serviceGroup = server.ServiceGroup{
 }
 
 // NewService returns an http.Handler that serves the dashboard API
-func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup) {
+func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, func()) {
 	cfg := srv.GetConfig()
 	etcdCfg, err := cfg.GenEmbedEtcdConfig()
 	if err != nil {
@@ -83,5 +83,5 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	)
 
 	log.Info("Enabled Dashboard API", zap.String("path", serviceGroup.PathPrefix))
-	return handler, serviceGroup
+	return handler, serviceGroup, nil
 }

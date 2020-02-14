@@ -183,7 +183,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 	router := mux.NewRouter()
 	registerMap := make(map[string]struct{})
 	var options []func()
-	for _, build := range apiBuilders {
+	for _, build := range serviceBuilders {
 		handler, info, f := build(ctx, svr)
 		if f != nil {
 			options = append(options, f)
@@ -223,7 +223,8 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 	userHandlers[pdAPIPrefix] = &lazyHandler{
 		engine:  apiService,
 		options: options,
-	
+	}
+
 	return userHandlers, nil
 }
 
