@@ -76,9 +76,9 @@ func (stat *HotPeerStat) GetBytesRate() float64 {
 }
 
 // Clone clones the HotPeerStat
-func (stat *HotPeerStat) Clone() HotPeerStat {
+func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
 	ret.BytesRate = stat.GetBytesRate()
 	ret.RollingBytesRate = nil
-	return ret
+	return &ret
 }

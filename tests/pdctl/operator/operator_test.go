@@ -38,6 +38,7 @@ type operatorTestSuite struct{}
 
 func (s *operatorTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
+	server.ConfigCheckInterval = 10 * time.Millisecond
 }
 
 func (s *operatorTestSuite) TestOperator(c *C) {
@@ -209,6 +210,7 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 
 	_, _, err = pdctl.ExecuteCommandC(cmd, "config", "set", "enable-placement-rules", "true")
 	c.Assert(err, IsNil)
+	time.Sleep(20 * time.Millisecond)
 	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "3")
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "not supported"), IsTrue)

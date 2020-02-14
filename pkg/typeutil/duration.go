@@ -56,3 +56,8 @@ func (d *Duration) UnmarshalText(text []byte) error {
 	d.Duration, err = time.ParseDuration(string(text))
 	return errors.WithStack(err)
 }
+
+// MarshalText returns the duration as a JSON string.
+func (d Duration) MarshalText() ([]byte, error) {
+	return []byte(d.String()), nil
+}

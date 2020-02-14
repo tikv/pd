@@ -16,7 +16,6 @@ package schedulers
 import (
 	"math"
 	"net/url"
-	"sort"
 	"strconv"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -141,165 +141,6 @@ func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
 	return maxUint64(1, uint64(limit))
 }
 
-// ScoreInfo stores storeID and score of a store.
-type ScoreInfo struct {
-	storeID uint64
-	score   float64
-}
-
-// NewScoreInfo returns a ScoreInfo.
-func NewScoreInfo(storeID uint64, score float64) *ScoreInfo {
-	return &ScoreInfo{
-		storeID: storeID,
-		score:   score,
-	}
-}
-
-// GetStoreID returns the storeID.
-func (s *ScoreInfo) GetStoreID() uint64 {
-	return s.storeID
-}
-
-// GetScore returns the score.
-func (s *ScoreInfo) GetScore() float64 {
-	return s.score
-}
-
-// SetScore sets the score.
-func (s *ScoreInfo) SetScore(score float64) {
-	s.score = score
-}
-
-// ScoreInfos is used for sorting ScoreInfo.
-type ScoreInfos struct {
-	scoreInfos []*ScoreInfo
-	isSorted   bool
-}
-
-// NewScoreInfos returns a ScoreInfos.
-func NewScoreInfos() *ScoreInfos {
-	return &ScoreInfos{
-		scoreInfos: make([]*ScoreInfo, 0),
-		isSorted:   true,
-	}
-}
-
-// Add adds a scoreInfo into the slice.
-func (s *ScoreInfos) Add(scoreInfo *ScoreInfo) {
-	infosLen := len(s.scoreInfos)
-	if s.isSorted && infosLen != 0 && s.scoreInfos[infosLen-1].score > scoreInfo.score {
-		s.isSorted = false
-	}
-	s.scoreInfos = append(s.scoreInfos, scoreInfo)
-}
-
-// Len returns length of slice.
-func (s *ScoreInfos) Len() int { return len(s.scoreInfos) }
-
-// Less returns if one number is less than another.
-func (s *ScoreInfos) Less(i, j int) bool { return s.scoreInfos[i].score < s.scoreInfos[j].score }
-
-// Swap switches out two numbers in slice.
-func (s *ScoreInfos) Swap(i, j int) {
-	s.scoreInfos[i], s.scoreInfos[j] = s.scoreInfos[j], s.scoreInfos[i]
-}
-
-// Sort sorts the slice.
-func (s *ScoreInfos) Sort() {
-	if !s.isSorted {
-		sort.Sort(s)
-		s.isSorted = true
-	}
-}
-
-// ToSlice returns the scoreInfo slice.
-func (s *ScoreInfos) ToSlice() []*ScoreInfo {
-	return s.scoreInfos
-}
-
-// Min returns the min score of the slice.
-func (s *ScoreInfos) Min() float64 {
-	if len(s.scoreInfos) == 0 {
-		return 0
-	}
-	s.Sort()
-	return s.scoreInfos[0].score
-}
-
-// Max returns the Max score of the slice.
-func (s *ScoreInfos) Max() float64 {
-	if len(s.scoreInfos) == 0 {
-		return 0
-	}
-	s.Sort()
-	return s.scoreInfos[len(s.scoreInfos)-1].score
-}
-
-// Variation uses slice's stddev/mean,which is coefficient of variation, to measure the data imbalance.
-func (s *ScoreInfos) Variation() float64 {
-	mean := s.Mean()
-	if mean == 0 {
-		return 0
-	}
-
-	return s.StdDev() / mean
-}
-
-// Mean returns the mean of the slice.
-func (s *ScoreInfos) Mean() float64 {
-	if s.Len() == 0 {
-		return 0
-	}
-
-	var sum float64
-	for _, info := range s.scoreInfos {
-		sum += info.score
-	}
-
-	return sum / float64(s.Len())
-}
-
-// StdDev returns the standard deviation of the slice.
-func (s *ScoreInfos) StdDev() float64 {
-	if s.Len() == 0 {
-		return 0
-	}
-
-	var res float64
-	mean := s.Mean()
-	for _, info := range s.ToSlice() {
-		diff := info.GetScore() - mean
-		res += diff * diff
-	}
-	res /= float64(s.Len())
-	res = math.Sqrt(res)
-
-	return res
-}
-
-// MeanStoresStats returns the mean of stores' stats.
-func MeanStoresStats(storesStats map[uint64]float64) float64 {
-	if len(storesStats) == 0 {
-		return 0.0
-	}
-
-	var sum float64
-	for _, storeStat := range storesStats {
-		sum += storeStat
-	}
-	return sum / float64(len(storesStats))
-}
-
-// ConvertStoresStats converts a map to a ScoreInfos.
-func ConvertStoresStats(storesStats map[uint64]float64) *ScoreInfos {
-	scoreInfos := NewScoreInfos()
-	for storeID, score := range storesStats {
-		scoreInfos.Add(NewScoreInfo(storeID, score))
-	}
-	scoreInfos.Sort()
-	return scoreInfos
-}
-
 func getKeyRanges(args []string) ([]core.KeyRange, error) {
 	var ranges []core.KeyRange
 	for len(args) > 1 {
@@ -357,4 +198,77 @@ func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*op
 		ret[p.from] = ret[p.from].add(&p.origin, -w)
 	}
 	return ret
+}
+
+type storeLoad struct {
+	ByteRate float64
+	Count    int
+}
+
+func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
+	future := *load
+	future.ByteRate += infl.ByteRate
+	return &storeLoadPred{
+		Current: *load,
+		Future:  future,
+	}
+}
+
+// store load prediction
+type storeLoadPred struct {
+	Current storeLoad
+	Future  storeLoad
+}
+
+func (lp *storeLoadPred) min() storeLoad {
+	return minLoad(&lp.Current, &lp.Future)
+}
+
+func (lp *storeLoadPred) max() storeLoad {
+	return maxLoad(&lp.Current, &lp.Future)
+}
+
+func minLoad(a, b *storeLoad) storeLoad {
+	return storeLoad{
+		ByteRate: math.Min(a.ByteRate, b.ByteRate),
+		Count:    minInt(a.Count, b.Count),
+	}
+}
+
+func maxLoad(a, b *storeLoad) storeLoad {
+	return storeLoad{
+		ByteRate: math.Max(a.ByteRate, b.ByteRate),
+		Count:    maxInt(a.Count, b.Count),
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a < b {
+		return b
+	}
+	return a
+}
+
+type storeLoadDetail struct {
+	LoadPred *storeLoadPred
+	HotPeers []*statistics.HotPeerStat
+}
+
+func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
+	peers := make([]statistics.HotPeerStat, 0, len(li.HotPeers))
+	for _, peer := range li.HotPeers {
+		peers = append(peers, *peer.Clone())
+	}
+	return &statistics.HotPeersStat{
+		TotalBytesRate: li.LoadPred.Current.ByteRate,
+		Count:          len(li.HotPeers),
+		Stats:          peers,
+	}
 }

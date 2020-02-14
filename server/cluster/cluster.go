@@ -811,6 +811,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
 			core.SetStoreVersion(store.GitHash, store.Version),
 			core.SetStoreLabels(labels),
+			core.SetStoreStartTime(store.StartTimestamp),
 		)
 	}
 	if err = c.checkStoreLabels(s); err != nil {
@@ -1151,7 +1152,7 @@ func (c *RaftCluster) AllocID() (uint64, error) {
 }
 
 // OnStoreVersionChange changes the version of the cluster when needed.
-func (c *RaftCluster) OnStoreVersionChange() {
+func (c *RaftCluster) OnStoreVersionChange() *semver.Version {
 	c.RLock()
 	defer c.RUnlock()
 	var (
@@ -1188,7 +1189,9 @@ func (c *RaftCluster) OnStoreVersionChange() {
 		log.Info("cluster version changed",
 			zap.Stringer("old-cluster-version", clusterVersion),
 			zap.Stringer("new-cluster-version", minVersion))
+		return minVersion
 	}
+	return nil
 }
 
 func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {

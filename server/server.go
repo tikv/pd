@@ -47,10 +47,9 @@ import (
 	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/pkg/logutil"
 	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/pkg/ui"
 	"github.com/pingcap/pd/server/cluster"
 	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/config_manager"
+	configmanager "github.com/pingcap/pd/server/config_manager"
 	"github.com/pingcap/pd/server/core"
 	"github.com/pingcap/pd/server/id"
 	"github.com/pingcap/pd/server/kv"
@@ -75,7 +74,6 @@ const (
 	// pdRootPath for all pd servers.
 	pdRootPath       = "/pd"
 	pdAPIPrefix      = "/pd/"
-	webPath          = "/web/"
 	dashboardUIPath  = "/dashboard/"
 	dashboardAPIPath = "/dashboard/api/"
 	pdClusterIDPath  = "/pd/cluster_id"
@@ -100,6 +98,9 @@ type Server struct {
 
 	// Server state.
 	isServing int64
+
+	// Server start timestamp
+	startTimestamp int64
 
 	// Configs and initial fields.
 	cfg         *config.Config
@@ -183,7 +184,6 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 		log.Info("register REST path", zap.String("path", pathPrefix))
 		registerMap[pathPrefix] = struct{}{}
 		router.PathPrefix(pathPrefix).Handler(handler)
-
 		if info.IsCore {
 			// Deprecated
 			router.Path("/pd/health").Handler(handler)
@@ -193,7 +193,6 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 			router.Path("/pd/ping").Handler(handler)
 		}
 	}
-
 	engine.UseHandler(router)
 	return engine, nil
 }
@@ -208,6 +207,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		scheduleOpt:       config.NewScheduleOption(cfg),
 		member:            &member.Member{},
 		ctx:               ctx,
+		startTimestamp:    time.Now().Unix(),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 	}
 
@@ -227,7 +227,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 
 		etcdCfg.UserHandlers = map[string]http.Handler{
 			pdAPIPrefix: apiHandler,
-			webPath:     http.StripPrefix(webPath, ui.Handler()),
 		}
 
 		if cfg.EnableDashboard {
@@ -244,7 +243,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		pdpb.RegisterPDServer(gs, s)
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 
-		if cfg.EnableConfigManager {
+		if cfg.EnableDynamicConfig {
 			configpb.RegisterConfigServer(gs, s.cfgManager)
 		}
 	}
@@ -448,7 +447,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
-	if s.cfg.EnableConfigManager {
+	if s.cfg.EnableDynamicConfig {
 		s.serverLoopWg.Add(1)
 		go s.configCheckLoop()
 	}
@@ -598,6 +597,16 @@ func (s *Server) GetClient() *clientv3.Client {
 	return s.client
 }
 
+// GetConfigManager returns the config manager of server.
+func (s *Server) GetConfigManager() *configmanager.ConfigManager {
+	return s.cfgManager
+}
+
+// GetConfigClient returns the config client of server.
+func (s *Server) GetConfigClient() pd.ConfigClient {
+	return s.configClient
+}
+
 // GetLeader returns leader of etcd.
 func (s *Server) GetLeader() *pdpb.Member {
 	return s.member.GetLeader()
@@ -648,6 +657,11 @@ func (s *Server) ClusterID() uint64 {
 	return s.clusterID
 }
 
+// StartTimestamp returns the start timestamp of this server
+func (s *Server) StartTimestamp() int64 {
+	return s.startTimestamp
+}
+
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
@@ -656,6 +670,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.LabelProperty = s.scheduleOpt.LoadLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.scheduleOpt.LoadClusterVersion()
 	cfg.PDServerCfg = *s.scheduleOpt.LoadPDServerConfig()
+	cfg.Log = *s.scheduleOpt.LoadLogConfig()
 	storage := s.GetStorage()
 	if storage == nil {
 		return cfg
@@ -815,6 +830,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 			zap.Error(err))
 		return err
 	}
+
 	log.Info("label property config is updated", zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()))
 	return nil
 }
@@ -833,8 +849,20 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 			zap.Error(err))
 		return err
 	}
+
 	log.Info("label property config is deleted", zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()))
 	return nil
+}
+
+func (s *Server) updateConfigManager(name, value string) *configpb.Status {
+	configManager := s.GetConfigManager()
+	globalVersion := configManager.GetGlobalConfigs(Component).GetVersion()
+	version := &configpb.Version{Global: globalVersion}
+	entries := []*configpb.ConfigEntry{{Name: name, Value: value}}
+	configManager.Lock()
+	defer configManager.Unlock()
+	_, status := configManager.UpdateGlobal(Component, version, entries)
+	return status
 }
 
 // GetLabelProperty returns the whole label property config.
@@ -1129,7 +1157,7 @@ func (s *Server) configCheckLoop() {
 			return
 		case <-ticker.C:
 			version := s.GetConfigVersion()
-			config, err := s.getComponentConfig(ctx, version, addr)
+			config, err := s.getComponentConfig(ctx, version, compoenntID)
 			if err != nil {
 				log.Error("failed to get config", zap.Error(err))
 			}
@@ -1222,7 +1250,7 @@ func (s *Server) reloadConfigFromKV() error {
 
 	// The request only valid when there is a leader.
 	// And before the a PD becomes a leader it will firstly reload the config.
-	if s.cfg.EnableConfigManager {
+	if s.cfg.EnableDynamicConfig {
 		err = s.cfgManager.Reload(s.storage)
 		return err
 	}

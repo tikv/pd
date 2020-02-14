@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/pd/server/schedule/filter"
 	"github.com/pingcap/pd/server/schedule/operator"
 	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -76,10 +75,10 @@ type shuffleHotRegionSchedulerConfig struct {
 // the hot peer.
 type shuffleHotRegionScheduler struct {
 	*BaseScheduler
-	stats *storeStatistics
-	r     *rand.Rand
-	conf  *shuffleHotRegionSchedulerConfig
-	types []rwType
+	stLoadInfos *storeLoadInfos
+	r           *rand.Rand
+	conf        *shuffleHotRegionSchedulerConfig
+	types       []rwType
 }
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
@@ -88,7 +87,7 @@ func newShuffleHotRegionScheduler(opController *schedule.OperatorController, con
 	return &shuffleHotRegionScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		stats:         newStoreStatistics(),
+		stLoadInfos:   newStoreLoadInfos(),
 		types:         []rwType{read, write},
 		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
@@ -120,24 +119,35 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 
 func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
 	storesStats := cluster.GetStoresStats()
+	minHotDegree := cluster.GetHotRegionCacheHitsThreshold()
 	switch typ {
 	case read:
-		s.stats.readStatAsLeader = calcScore(cluster.RegionReadStats(), storesStats.GetStoresBytesReadStat(), cluster, core.LeaderKind)
-		return s.randomSchedule(cluster, s.stats.readStatAsLeader)
+		s.stLoadInfos.ReadLeaders = summaryStoresLoad(
+			storesStats.GetStoresBytesReadStat(),
+			map[uint64]Influence{},
+			cluster.RegionReadStats(),
+			minHotDegree,
+			read, core.LeaderKind)
+		return s.randomSchedule(cluster, s.stLoadInfos.ReadLeaders)
 	case write:
-		s.stats.writeStatAsLeader = calcScore(cluster.RegionWriteStats(), storesStats.GetStoresBytesWriteStat(), cluster, core.LeaderKind)
-		return s.randomSchedule(cluster, s.stats.writeStatAsLeader)
+		s.stLoadInfos.WriteLeaders = summaryStoresLoad(
+			storesStats.GetStoresBytesWriteStat(),
+			map[uint64]Influence{},
+			cluster.RegionWriteStats(),
+			minHotDegree,
+			write, core.LeaderKind)
+		return s.randomSchedule(cluster, s.stLoadInfos.WriteLeaders)
 	}
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, storeStats statistics.StoreHotPeersStat) []*operator.Operator {
-	for _, stats := range storeStats {
-		if len(stats.Stats) < 1 {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDetail map[uint64]*storeLoadDetail) []*operator.Operator {
+	for _, detail := range loadDetail {
+		if len(detail.HotPeers) < 1 {
 			continue
 		}
-		i := s.r.Intn(len(stats.Stats))
-		r := stats.Stats[i]
+		i := s.r.Intn(len(detail.HotPeers))
+		r := detail.HotPeers[i]
 		// select src region
 		srcRegion := cluster.GetRegion(r.RegionID)
 		if srcRegion == nil || len(srcRegion.GetDownPeers()) != 0 || len(srcRegion.GetPendingPeers()) != 0 {

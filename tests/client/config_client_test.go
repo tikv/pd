@@ -48,7 +48,7 @@ func (s *configClientTestSuite) TearDownSuite(c *C) {
 }
 
 func (s *configClientTestSuite) TestUpdateWrongEntry(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config) { cfg.EnableConfigManager = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config) { cfg.EnableDynamicConfig = true })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -89,7 +89,7 @@ func (s *configClientTestSuite) TestUpdateWrongEntry(c *C) {
 		[]*configpb.ConfigEntry{{Name: "aaa.xxx-xxx", Value: "2"}},
 	)
 	c.Assert(status.GetCode(), Equals, configpb.StatusCode_UNKNOWN)
-	c.Assert(strings.Contains(status.GetMessage(), "is not existed"), IsTrue)
+	c.Assert(strings.Contains(status.GetMessage(), "cannot find the config item"), IsTrue)
 	c.Assert(version, DeepEquals, &configpb.Version{Global: 0, Local: 0})
 	c.Assert(err, IsNil)
 
@@ -105,7 +105,7 @@ func (s *configClientTestSuite) TestUpdateWrongEntry(c *C) {
 }
 
 func (s *configClientTestSuite) TestClientLeaderChange(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3, func(cfg *config.Config) { cfg.EnableConfigManager = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 3, func(cfg *config.Config) { cfg.EnableDynamicConfig = true })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
@@ -196,7 +196,7 @@ func (s *configClientTestSuite) TestClientLeaderChange(c *C) {
 }
 
 func (s *configClientTestSuite) TestLeaderTransfer(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 2, func(cfg *config.Config) { cfg.EnableConfigManager = true })
+	cluster, err := tests.NewTestCluster(s.ctx, 2, func(cfg *config.Config) { cfg.EnableDynamicConfig = true })
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 

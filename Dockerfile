@@ -3,7 +3,8 @@ MAINTAINER siddontang
 
 RUN apk add --no-cache \
     make \
-    git
+    git \
+    bash
 
 # Install jq for pd-ctl
 RUN cd / && \
