@@ -33,15 +33,12 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
-	dashboardConfig "github.com/pingcap-incubator/tidb-dashboard/pkg/config"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	pd "github.com/pingcap/pd/client"
-	"github.com/pingcap/pd/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/pkg/etcdutil"
 	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/pkg/logutil"
@@ -70,11 +67,9 @@ const (
 	serverMetricsInterval = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
-	pdRootPath       = "/pd"
-	pdAPIPrefix      = "/pd/"
-	dashboardUIPath  = "/dashboard/"
-	dashboardAPIPath = "/dashboard/api/"
-	pdClusterIDPath  = "/pd/cluster_id"
+	pdRootPath      = "/pd"
+	pdAPIPrefix     = "/pd/"
+	pdClusterIDPath = "/pd/cluster_id"
 )
 
 var (
@@ -138,16 +133,21 @@ type Server struct {
 	// component config
 	configVersion *configpb.Version
 	configClient  pd.ConfigClient
+
+	// Add callback functions at different stages
+	startCallbacks []func()
+	closeCallbacks []func()
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, APIGroup)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup)
 
-// APIGroup used to register the api service.
-type APIGroup struct {
-	Name    string
-	Version string
-	IsCore  bool
+// ServiceGroup used to register the service.
+type ServiceGroup struct {
+	Name       string
+	Version    string
+	IsCore     bool
+	PathPrefix string
 }
 
 const (
@@ -157,16 +157,24 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder) (http.Handler, error) {
-	engine := negroni.New()
-	recovery := negroni.NewRecovery()
-	engine.Use(recovery)
-	router := mux.NewRouter()
+func combineBuilderServerHTTPService(svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
+	userHandlers := make(map[string]http.Handler)
 	registerMap := make(map[string]struct{})
-	for _, build := range apiBuilders {
+
+	apiService := negroni.New()
+	recovery := negroni.NewRecovery()
+	apiService.Use(recovery)
+	router := mux.NewRouter()
+
+	for _, build := range serviceBuilders {
 		handler, info := build(svr.ctx, svr)
+		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
+			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
+		}
 		var pathPrefix string
-		if info.IsCore {
+		if len(info.PathPrefix) != 0 {
+			pathPrefix = info.PathPrefix
+		} else if info.IsCore {
 			pathPrefix = CorePath
 		} else {
 			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
@@ -174,27 +182,33 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 		if _, ok := registerMap[pathPrefix]; ok {
 			return nil, errors.Errorf("service with path [%s] already registered", pathPrefix)
 		}
-		if !info.IsCore && (len(info.Name) == 0 || len(info.Version) == 0) {
-			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
-		}
+
 		log.Info("register REST path", zap.String("path", pathPrefix))
 		registerMap[pathPrefix] = struct{}{}
-		router.PathPrefix(pathPrefix).Handler(handler)
-		if info.IsCore {
-			// Deprecated
-			router.Path("/pd/health").Handler(handler)
-			// Deprecated
-			router.Path("/pd/diagnose").Handler(handler)
-			// Deprecated
-			router.Path("/pd/ping").Handler(handler)
+		if len(info.PathPrefix) != 0 {
+			// If PathPrefix is specified, register directly into userHandlers
+			userHandlers[pathPrefix] = handler
+		} else {
+			// If PathPrefix is not specified, register into apiService,
+			// and finally apiService is registered in userHandlers.
+			router.PathPrefix(pathPrefix).Handler(handler)
+			if info.IsCore {
+				// Deprecated
+				router.Path("/pd/health").Handler(handler)
+				// Deprecated
+				router.Path("/pd/diagnose").Handler(handler)
+				// Deprecated
+				router.Path("/pd/ping").Handler(handler)
+			}
 		}
 	}
-	engine.UseHandler(router)
-	return engine, nil
+	apiService.UseHandler(router)
+	userHandlers[pdAPIPrefix] = apiService
+	return userHandlers, nil
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, error) {
+func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 
@@ -214,25 +228,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 	if err != nil {
 		return nil, err
 	}
-	if len(apiBuilders) != 0 {
-		apiHandler, err := combineBuilderServerHTTPService(s, apiBuilders...)
+	if len(serviceBuilders) != 0 {
+		userHandlers, err := combineBuilderServerHTTPService(s, serviceBuilders...)
 		if err != nil {
 			return nil, err
 		}
-
-		etcdCfg.UserHandlers = map[string]http.Handler{
-			pdAPIPrefix: apiHandler,
-		}
-
-		if cfg.EnableDashboard {
-			etcdCfg.UserHandlers[dashboardUIPath] = http.StripPrefix(dashboardUIPath, uiserver.Handler())
-			etcdCfg.UserHandlers[dashboardAPIPath] = apiserver.Handler(dashboardAPIPath, &dashboardConfig.Config{
-				DataDir:    cfg.DataDir,
-				PDEndPoint: etcdCfg.ACUrls[0].String(),
-			})
-			log.Info("Enabled Dashboard API", zap.String("path", dashboardAPIPath))
-			log.Info("Enabled Dashboard UI", zap.String("path", dashboardUIPath))
-		}
+		etcdCfg.UserHandlers = userHandlers
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
@@ -322,6 +323,11 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	return nil
 }
 
+// AddStartCallback adds a callback in the startServer phase.
+func (s *Server) AddStartCallback(callbacks ...func()) {
+	s.startCallbacks = append(s.startCallbacks, callbacks...)
+}
+
 func (s *Server) startServer(ctx context.Context) error {
 	var err error
 	if err = s.initClusterID(); err != nil {
@@ -352,6 +358,12 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
+
+	// Run callbacks
+	for _, cb := range s.startCallbacks {
+		cb()
+	}
+
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
 	return nil
@@ -371,6 +383,11 @@ func (s *Server) initClusterID() error {
 	}
 	s.clusterID, err = typeutil.BytesToUint64(resp.Kvs[0].Value)
 	return err
+}
+
+// AddCloseCallback adds a callback in the Close phase.
+func (s *Server) AddCloseCallback(callbacks ...func()) {
+	s.closeCallbacks = append(s.closeCallbacks, callbacks...)
 }
 
 // Close closes the server.
@@ -397,6 +414,11 @@ func (s *Server) Close() {
 	}
 	if err := s.storage.Close(); err != nil {
 		log.Error("close storage meet error", zap.Error(err))
+	}
+
+	// Run callbacks
+	for _, cb := range s.closeCallbacks {
+		cb()
 	}
 
 	log.Info("close server")

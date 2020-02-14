@@ -58,7 +58,7 @@ endif
 ifeq ("$(WITH_RACE)", "1")
 	CGO_ENABLED=1 go build -race -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 else
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=1 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
 
 # Tools
@@ -117,7 +117,7 @@ static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
-	CGO_ENABLED=0 ./scripts/retool do golangci-lint run --enable misspell --disable errcheck --deadline 120s $$($(PACKAGE_DIRECTORIES))
+	CGO_ENABLED=0 ./scripts/retool do golangci-lint run --no-config --enable misspell --disable errcheck --deadline 120s $$($(PACKAGE_DIRECTORIES))
 
 lint:
 	@echo "linting"
