@@ -15,6 +15,7 @@ package config
 
 import (
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 var _ = Suite(&testUtilSuite{})
@@ -44,8 +45,12 @@ func (s *testUtilSuite) TestVerifyLabels(c *C) {
 		{"a/b", false},
 		{"ab/", true},
 		{"/ab", true},
+		{"$abc", false},
+		{"$", true},
+		{"a$b", true},
+		{"$$", true},
 	}
 	for _, t := range tests {
-		c.Assert(ValidateLabelString(t.label) != nil, Equals, t.hasErr)
+		c.Assert(ValidateLabels([]*metapb.StoreLabel{{Key: t.label}}) != nil, Equals, t.hasErr)
 	}
 }

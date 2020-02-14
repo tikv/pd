@@ -25,6 +25,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/pkg/grpcutil"
 	"github.com/pingcap/pd/pkg/metricutil"
@@ -881,7 +882,7 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 // Validate is used to validate if some replication configurations are right.
 func (c *ReplicationConfig) Validate() error {
 	for _, label := range c.LocationLabels {
-		err := ValidateLabelString(label)
+		err := ValidateLabels([]*metapb.StoreLabel{{Key: label}})
 		if err != nil {
 			return err
 		}
