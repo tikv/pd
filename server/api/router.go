@@ -199,7 +199,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	// Deprecated
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
-	if svr.GetConfig().EnableConfigManager {
+	if svr.GetConfig().EnableDynamicConfig {
 		f := func() {
 			// TODO: support DELETE
 			componentRouter := apiRouter.PathPrefix("/component").Methods("POST", "GET").Subrouter()

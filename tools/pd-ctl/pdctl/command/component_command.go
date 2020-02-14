@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2020 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import (
 	"path"
 	"strconv"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -38,7 +39,7 @@ func NewComponentConfigCommand() *cobra.Command {
 	return conf
 }
 
-// NewShowComponentConfigCommand return a show subcommand of componentCmd.
+// NewShowComponentConfigCommand returns a show subcommand of componentCmd.
 func NewShowComponentConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:   "show [<component>|<componentID>]",
@@ -60,7 +61,7 @@ func NewSetComponentConfigCommand() *cobra.Command {
 
 func showComponentConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
-		cmd.Println(cmd.UsageString())
+		cmd.Usage()
 		return
 	}
 
@@ -91,7 +92,7 @@ func postComponentConfigData(cmd *cobra.Command, componentInfo, key, value strin
 	_, err = doRequest(cmd, componentConfigPrefix, http.MethodPost,
 		WithBody("application/json", bytes.NewBuffer(reqData)))
 	if err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 	return nil
 }
