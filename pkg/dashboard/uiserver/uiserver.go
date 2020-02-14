@@ -27,14 +27,14 @@ var serviceGroup = server.ServiceGroup{
 	Name:       "dashboard-ui",
 	Version:    "v1",
 	IsCore:     false,
-	PathPrefix: "/dashboard",
+	PathPrefix: "/dashboard/",
 }
 
 // NewService returns an http.Handler that serves the dashboard UI
 func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup) {
 	fs := assetFS()
 	if fs != nil {
-		fileServer := http.FileServer(fs)
+		fileServer := http.StripPrefix(serviceGroup.PathPrefix, http.FileServer(fs))
 		log.Info("Enabled Dashboard UI", zap.String("path", serviceGroup.PathPrefix))
 		return fileServer, serviceGroup
 	}
