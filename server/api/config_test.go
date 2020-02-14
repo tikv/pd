@@ -33,7 +33,7 @@ type testConfigSuite struct {
 
 func (s *testConfigSuite) SetUpSuite(c *C) {
 	server.ConfigCheckInterval = 10 * time.Millisecond
-	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.EnableConfigManager = true })
+	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.EnableDynamicConfig = true })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()

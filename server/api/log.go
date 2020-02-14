@@ -38,7 +38,7 @@ func newlogHandler(svr *server.Server, rd *render.Render) *logHandler {
 }
 
 func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	if h.svr.GetConfig().EnableConfigManager {
+	if h.svr.GetConfig().EnableDynamicConfig {
 		client := h.svr.GetConfigClient()
 		if client == nil {
 			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
