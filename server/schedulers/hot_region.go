@@ -382,6 +382,8 @@ type solution struct {
 	srcPeerStat *statistics.HotPeerStat
 	region      *core.RegionInfo
 	dstStoreID  uint64
+
+	progressiveRank int64
 }
 
 func (bs *balanceSolver) init() {
@@ -479,8 +481,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
+				bs.cur.progressiveRank = bs.calcProgressiveRank()
 
-				if bs.isProgressive() && bs.betterThan(best) {
+				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
 					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
 						ops = newOps
 						infls = newInfls
@@ -672,31 +675,45 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	return ret
 }
 
-// isProgressive checks `bs.cur` is a progressive solution.
-func (bs *balanceSolver) isProgressive() bool {
+// calcProgressiveRank checks `bs.cur` is a progressive solution.
+func (bs *balanceSolver) calcProgressiveRank() int64 {
 	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
+	rank := int64(0)
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		if srcLd.Count > dstLd.Count &&
 			srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
-			return true
+			rank -= 1
 		}
 	} else {
-		if srcLd.ByteRate*0.95 >= dstLd.ByteRate+peer.GetByteRate() {
-			return true
-		} else if srcLd.ByteRate*0.99 >= dstLd.ByteRate+peer.GetByteRate() &&
-			srcLd.KeyRate*0.95 >= dstLd.KeyRate+peer.GetKeyRate() {
-			return true
+		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / (srcLd.KeyRate + 1)
+		keyHot := peer.GetKeyRate() >= 10
+		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / (srcLd.ByteRate + 1)
+		byteHot := peer.GetByteRate() > 100
+		switch {
+		case byteHot && byteDecRatio <= 0.95 && keyHot && keyDecRatio <= 0.95:
+			rank = -3
+		case byteDecRatio <= 0.99 && keyHot && keyDecRatio <= 0.95:
+			rank = -2
+		case byteHot && byteDecRatio <= 0.95:
+			rank = -1
 		}
 	}
-	return false
+	return rank
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
 func (bs *balanceSolver) betterThan(old *solution) bool {
 	if old == nil {
 		return true
+	}
+
+	switch {
+	case bs.cur.progressiveRank < old.progressiveRank:
+		return true
+	case bs.cur.progressiveRank > old.progressiveRank:
+		return false
 	}
 
 	if r := bs.compareSrcStore(bs.cur.srcStoreID, old.srcStoreID); r < 0 {
@@ -714,23 +731,36 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 	if bs.cur.srcPeerStat != old.srcPeerStat {
 		// compare region
 
-		// prefer region with larger byte rate, to converge faster
-		curKeyRk, oldKeyRk := int64(bs.cur.srcPeerStat.GetKeyRate()/10), int64(old.srcPeerStat.GetKeyRate()/10)
-		if curKeyRk == oldKeyRk {
-			curByteRk, oldByteRk := int64(bs.cur.srcPeerStat.GetByteRate()/100), int64(old.srcPeerStat.GetByteRate()/100)
-			if curByteRk > oldByteRk {
+		if bs.rwTy == write && bs.opTy == transferLeader {
+			switch {
+			case bs.cur.srcPeerStat.GetKeyRate() > old.srcPeerStat.GetKeyRate():
 				return true
-			} else if curByteRk < oldByteRk {
+			case bs.cur.srcPeerStat.GetKeyRate() < old.srcPeerStat.GetKeyRate():
 				return false
 			}
 		} else {
-			srcKeyRate := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min().KeyRate
-			dstKeyRate := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max().KeyRate
-			srcCmpDst := int64((srcKeyRate - dstKeyRate) / (bs.rankStep.KeyRate))
-			if srcCmpDst > 0 {
-				return curKeyRk > oldKeyRk
-			} else {
-				return curKeyRk < oldKeyRk
+			byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetByteRate(), old.srcPeerStat.GetByteRate(), stepRank(0, 100))
+			keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetKeyRate(), old.srcPeerStat.GetKeyRate(), stepRank(0, 10))
+
+			switch bs.cur.progressiveRank {
+			case -2: // 0.95 < byteDecRatio <= 0.99 && keyDecRatio <= 0.95
+				if keyRkCmp != 0 {
+					return keyRkCmp > 0
+				}
+				if byteRkCmp != 0 {
+					// prefer smaller byte rate, to reduce oscillation
+					return byteRkCmp < 0
+				}
+			case -3: // byteDecRatio <= 0.95 && keyDecRatio <= 0.95
+				if keyRkCmp != 0 {
+					return keyRkCmp > 0
+				}
+				fallthrough
+			case -1: // byteDecRatio <= 0.95
+				if byteRkCmp != 0 {
+					// prefer region with larger byte rate, to converge faster
+					return byteRkCmp > 0
+				}
 			}
 		}
 	}
@@ -746,24 +776,24 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
-					rankCmp(stLdCount, stepRank(bs.maxSrc.Count, bs.rankStep.Count)),
-					rankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
-					rankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdCount, stepRank(bs.maxSrc.Count, bs.rankStep.Count)),
+					stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
 				))),
 				diffCmp(sliceLoadCmp(
-					rankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
-					rankCmp(stLdKeyRate, stepRank(0, bs.rankStep.KeyRate)),
-					rankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
+					stLdRankCmp(stLdKeyRate, stepRank(0, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
 				)),
 			)
 		} else {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
-					rankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
-					rankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
 				))),
 				diffCmp(
-					rankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
 				),
 			)
 		}
@@ -783,23 +813,23 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			lpCmp = sliceLPCmp(
 				maxLPCmp(sliceLoadCmp(
-					rankCmp(stLdCount, stepRank(bs.minDst.Count, bs.rankStep.Count)),
-					rankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
-					rankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdCount, stepRank(bs.minDst.Count, bs.rankStep.Count)),
+					stLdRankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
 				)),
 				diffCmp(sliceLoadCmp(
-					rankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
-					rankCmp(stLdKeyRate, stepRank(0, bs.rankStep.KeyRate)),
-					rankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
+					stLdRankCmp(stLdKeyRate, stepRank(0, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
 				)))
 		} else {
 			lpCmp = sliceLPCmp(
 				maxLPCmp(sliceLoadCmp(
-					rankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
-					rankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
 				)),
 				diffCmp(
-					rankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
 				),
 			)
 		}

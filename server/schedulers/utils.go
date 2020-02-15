@@ -252,16 +252,20 @@ func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
 	}
 }
 
-func rankCmp(dim func(ld *storeLoad) float64, rank func(value float64) int64) storeLoadCmp {
+func stLdRankCmp(dim func(ld *storeLoad) float64, rank func(value float64) int64) storeLoadCmp {
 	return func(ld1, ld2 *storeLoad) int {
-		rk1, rk2 := rank(dim(ld1)), rank(dim(ld2))
-		if rk1 < rk2 {
-			return -1
-		} else if rk1 > rk2 {
-			return 1
-		}
-		return 0
+		return rankCmp(dim(ld1), dim(ld2), rank)
 	}
+}
+
+func rankCmp(a, b float64, rank func(value float64) int64) int {
+	aRk, bRk := rank(a), rank(b)
+	if aRk < bRk {
+		return -1
+	} else if aRk > bRk {
+		return 1
+	}
+	return 0
 }
 
 // store load prediction
