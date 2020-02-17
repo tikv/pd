@@ -58,6 +58,11 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 		return nil, errors.WithStack(err)
 	}
 	for _, m := range members.GetMembers() {
+		binaryVersion, e := h.svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
+		if e != nil {
+			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+		}
+		m.BinaryVersion = binaryVersion
 		deployPath, e := h.svr.GetMember().GetMemberDeployPath(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), zap.Error(err))

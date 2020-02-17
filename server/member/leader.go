@@ -368,6 +368,37 @@ func (m *Member) SetMemberDeployPath(id uint64) error {
 	return nil
 }
 
+func (m *Member) getMemberBinaryVersionPath(id uint64) string {
+	return path.Join(m.rootPath, fmt.Sprintf("member/%d/binary_version", id))
+}
+
+// GetMemberBinaryVersion loads a member's binary version.
+func (m *Member) GetMemberBinaryVersion(id uint64) (string, error) {
+	key := m.getMemberBinaryVersionPath(id)
+	res, err := etcdutil.EtcdKVGet(m.client, key)
+	if err != nil {
+		return "", err
+	}
+	if len(res.Kvs) == 0 {
+		return "", errors.New("no value")
+	}
+	return string(res.Kvs[0].Value), nil
+}
+
+// SetMemberBinaryVersion saves a member's binary version.
+func (m *Member) SetMemberBinaryVersion(id uint64, releaseVersion string) error {
+	key := m.getMemberBinaryVersionPath(id)
+	txn := kv.NewSlowLogTxn(m.client)
+	res, err := txn.Then(clientv3.OpPut(key, releaseVersion)).Commit()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if !res.Succeeded {
+		return errors.New("failed to save binary version")
+	}
+	return nil
+}
+
 func (m *Member) deleteLeaderKey() error {
 	// delete leader itself and let others start a new election again.
 	leaderKey := m.GetLeaderPath()
