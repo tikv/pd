@@ -17,7 +17,9 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -328,6 +330,73 @@ func (m *Member) GetMemberLeaderPriority(id uint64) (int, error) {
 		return 0, errors.WithStack(err)
 	}
 	return int(priority), nil
+}
+
+func (m *Member) getMemberBinaryDeployPath(id uint64) string {
+	return path.Join(m.rootPath, fmt.Sprintf("member/%d/deploy_path", id))
+}
+
+// GetMemberDeployPath loads a member's binary deploy path.
+func (m *Member) GetMemberDeployPath(id uint64) (string, error) {
+	key := m.getMemberBinaryDeployPath(id)
+	res, err := etcdutil.EtcdKVGet(m.client, key)
+	if err != nil {
+		return "", err
+	}
+	if len(res.Kvs) == 0 {
+		return "", errors.New("no value")
+	}
+	return string(res.Kvs[0].Value), nil
+}
+
+// SetMemberDeployPath saves a member's binary deploy path.
+func (m *Member) SetMemberDeployPath(id uint64) error {
+	key := m.getMemberBinaryDeployPath(id)
+	txn := kv.NewSlowLogTxn(m.client)
+	execPath, err := os.Executable()
+	deployPath := filepath.Dir(execPath)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	res, err := txn.Then(clientv3.OpPut(key, deployPath)).Commit()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if !res.Succeeded {
+		return errors.New("failed to save deploy path")
+	}
+	return nil
+}
+
+func (m *Member) getMemberBinaryVersionPath(id uint64) string {
+	return path.Join(m.rootPath, fmt.Sprintf("member/%d/binary_version", id))
+}
+
+// GetMemberBinaryVersion loads a member's binary version.
+func (m *Member) GetMemberBinaryVersion(id uint64) (string, error) {
+	key := m.getMemberBinaryVersionPath(id)
+	res, err := etcdutil.EtcdKVGet(m.client, key)
+	if err != nil {
+		return "", err
+	}
+	if len(res.Kvs) == 0 {
+		return "", errors.New("no value")
+	}
+	return string(res.Kvs[0].Value), nil
+}
+
+// SetMemberBinaryVersion saves a member's binary version.
+func (m *Member) SetMemberBinaryVersion(id uint64, releaseVersion string) error {
+	key := m.getMemberBinaryVersionPath(id)
+	txn := kv.NewSlowLogTxn(m.client)
+	res, err := txn.Then(clientv3.OpPut(key, releaseVersion)).Commit()
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if !res.Succeeded {
+		return errors.New("failed to save binary version")
+	}
+	return nil
 }
 
 func (m *Member) deleteLeaderKey() error {
