@@ -201,10 +201,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
 	if svr.GetConfig().EnableDynamicConfig {
-		f := func() {
-			lazyComponentRouter(ctx, svr, apiRouter)
-		}
-		return rootRouter, f
+		return rootRouter, func() { lazyComponentRouter(ctx, svr, apiRouter) }
 	}
 	return rootRouter, nil
 }
