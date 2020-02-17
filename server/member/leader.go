@@ -17,8 +17,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -352,11 +352,11 @@ func (m *Member) GetMemberDeployPath(id uint64) (string, error) {
 func (m *Member) SetMemberDeployPath(id uint64) error {
 	key := m.getMemberBinaryDeployPath(id)
 	txn := kv.NewSlowLogTxn(m.client)
-	absPath, err := filepath.Abs("")
+	deployPath, err := os.Executable()
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	res, err := txn.Then(clientv3.OpPut(key, absPath)).Commit()
+	res, err := txn.Then(clientv3.OpPut(key, deployPath)).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}
