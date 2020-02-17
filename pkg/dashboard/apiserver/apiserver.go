@@ -33,7 +33,7 @@ var serviceGroup = server.ServiceGroup{
 	Name:       "dashboard-api",
 	Version:    "v1",
 	IsCore:     false,
-	PathPrefix: "/dashboard/api",
+	PathPrefix: "/dashboard/api/",
 }
 
 // NewService returns an http.Handler that serves the dashboard API
