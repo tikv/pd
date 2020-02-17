@@ -270,9 +270,14 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 }
 
 // AddLeaderRegionWithReadInfo adds region with specified leader, followers and read info.
-func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, reportInterval uint64, followerIds ...uint64) {
+func (mc *Cluster) AddLeaderRegionWithReadInfo(
+	regionID uint64, leaderID uint64,
+	readBytes, readKeys uint64,
+	reportInterval uint64,
+	followerIds []uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetReadBytes(readBytes))
+	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
 	items := mc.HotCache.CheckRead(r, mc.StoresStats)
 	for _, item := range items {
@@ -282,9 +287,14 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64,
 }
 
 // AddLeaderRegionWithWriteInfo adds region with specified leader, followers and write info.
-func (mc *Cluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, reportInterval uint64, followerIds ...uint64) {
+func (mc *Cluster) AddLeaderRegionWithWriteInfo(
+	regionID uint64, leaderID uint64,
+	writtenBytes, writtenKeys uint64,
+	reportInterval uint64,
+	followerIds []uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
+	r = r.Clone(core.SetWrittenKeys(writtenKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
 	items := mc.HotCache.CheckWrite(r, mc.StoresStats)
 	for _, item := range items {
@@ -396,6 +406,32 @@ func (mc *Cluster) UpdateStorageReadBytes(storeID uint64, bytesRead uint64) {
 	store := mc.GetStore(storeID)
 	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
 	newStats.BytesRead = bytesRead
+	now := time.Now().Second()
+	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
+	newStats.Interval = interval
+	newStore := store.Clone(core.SetStoreStats(newStats))
+	mc.Set(storeID, newStats)
+	mc.PutStore(newStore)
+}
+
+// UpdateStorageWrittenKeys updates store written keys.
+func (mc *Cluster) UpdateStorageWrittenKeys(storeID uint64, keysWritten uint64) {
+	store := mc.GetStore(storeID)
+	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
+	newStats.KeysWritten = keysWritten
+	now := time.Now().Second()
+	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
+	newStats.Interval = interval
+	newStore := store.Clone(core.SetStoreStats(newStats))
+	mc.Set(storeID, newStats)
+	mc.PutStore(newStore)
+}
+
+// UpdateStorageReadKeys updates store read bytes.
+func (mc *Cluster) UpdateStorageReadKeys(storeID uint64, keysRead uint64) {
+	store := mc.GetStore(storeID)
+	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
+	newStats.KeysRead = keysRead
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
