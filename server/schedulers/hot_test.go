@@ -388,12 +388,12 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	//| store_id | read_bytes_rate |
 	//|----------|-----------------|
 	//|    1     |     7.5MB       |
-	//|    2     |     4.6MB       |
+	//|    2     |     4.9MB       |
 	//|    3     |     4.5MB       |
 	//|    4     |       6MB       |
 	//|    5     |       0MB       |
 	tc.UpdateStorageReadBytes(1, 7.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(2, 4.6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 4.9*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(4, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(5, 0)
@@ -426,10 +426,6 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 		}
 	}
 
-	// Will transfer a hot region leader from store 1 to store 3.
-	// bytes_rate[store 1] * 0.9 > bytes_rate[store 3] + region_bytes_rate
-	// read_bytes_rate[store 3] < read_bytes_rate[store 2]
-	// when select dest store for hot read, we use score.
 	testutil.CheckTransferLeader(c, hb.Schedule(tc)[0], operator.OpHotRegion, 1, 3)
 	hb.(*hotScheduler).clearPendingInfluence()
 	// assume handle the operator
@@ -441,13 +437,13 @@ func (s *testHotReadRegionSchedulerSuite) TestSchedule(c *C) {
 	//|----------|-----------------|
 	//|    1     |       6MB       |
 	//|    2     |       5.5MB     |
-	//|    3     |       5.9MB     |
-	//|    4     |       3.1MB     |
+	//|    3     |       5.5MB     |
+	//|    4     |       3.4MB     |
 	//|    5     |       3MB       |
 	tc.UpdateStorageReadBytes(1, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(2, 5.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(3, 5.9*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(4, 3.1*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 5.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(4, 3.4*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(5, 3*MB*statistics.StoreHeartBeatReportInterval)
 
 	//| region_id | leader_store | follower_store | follower_store |   read_bytes_rate  |
