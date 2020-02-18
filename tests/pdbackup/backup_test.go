@@ -22,9 +22,9 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/tests"
-	"github.com/pingcap/pd/tools/pd-backup/pdbackup"
+	"github.com/pingcap/pd/v3/server"
+	"github.com/pingcap/pd/v3/tests"
+	"github.com/pingcap/pd/v3/tools/pd-backup/pdbackup"
 	"go.etcd.io/etcd/clientv3"
 )
 

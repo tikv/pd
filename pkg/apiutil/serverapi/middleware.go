@@ -22,8 +22,8 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v3/server"
+	"github.com/pingcap/pd/v3/server/config"
 	"github.com/urfave/negroni"
 	"go.uber.org/zap"
 )

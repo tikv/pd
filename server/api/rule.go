@@ -20,11 +20,11 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/pkg/codec"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/placement"
+	"github.com/pingcap/pd/v3/pkg/apiutil"
+	"github.com/pingcap/pd/v3/pkg/codec"
+	"github.com/pingcap/pd/v3/server"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/schedule/placement"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )

@@ -19,9 +19,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/cluster"
+	"github.com/pingcap/pd/v3/pkg/apiutil"
+	"github.com/pingcap/pd/v3/server"
+	"github.com/pingcap/pd/v3/server/cluster"
 	"github.com/unrolled/render"
 )
 

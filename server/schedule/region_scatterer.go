@@ -19,10 +19,10 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/filter"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/schedule/filter"
+	"github.com/pingcap/pd/v3/server/schedule/operator"
+	"github.com/pingcap/pd/v3/server/schedule/opt"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )

@@ -20,10 +20,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/cases"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/cases"
+	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/info"
+	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/simutil"
 	"github.com/pkg/errors"
 )
 

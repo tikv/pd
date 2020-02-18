@@ -20,9 +20,9 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/cluster"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v3/server"
+	"github.com/pingcap/pd/v3/server/cluster"
+	"github.com/pingcap/pd/v3/server/config"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )

@@ -24,9 +24,9 @@ import (
 	"path"
 	"strconv"
 
-	"github.com/pingcap/pd/pkg/etcdutil"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v3/pkg/etcdutil"
+	"github.com/pingcap/pd/v3/pkg/typeutil"
+	"github.com/pingcap/pd/v3/server/config"
 	"go.etcd.io/etcd/clientv3"
 )
 

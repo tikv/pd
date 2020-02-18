@@ -21,9 +21,9 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/schedule/placement"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/schedule/opt"
+	"github.com/pingcap/pd/v3/server/schedule/placement"
 	"github.com/prometheus/client_golang/prometheus"
 )
 

@@ -18,7 +18,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/v3/server/schedule"
 	"go.uber.org/zap"
 )
 

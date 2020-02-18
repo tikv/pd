@@ -18,7 +18,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/slice"
+	"github.com/pingcap/pd/v3/pkg/slice"
 	"go.uber.org/zap"
 )
 

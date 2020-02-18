@@ -17,10 +17,10 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/pkg/mock/mockoption"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/filter"
+	"github.com/pingcap/pd/v3/pkg/mock/mockcluster"
+	"github.com/pingcap/pd/v3/pkg/mock/mockoption"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/schedule/filter"
 )
 
 func Test(t *testing.T) {

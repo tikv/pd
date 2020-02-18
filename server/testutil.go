@@ -23,14 +23,14 @@ import (
 
 	"github.com/pingcap/check"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/tempurl"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v3/pkg/tempurl"
+	"github.com/pingcap/pd/v3/pkg/testutil"
+	"github.com/pingcap/pd/v3/pkg/typeutil"
+	"github.com/pingcap/pd/v3/server/config"
 	"go.etcd.io/etcd/embed"
 
 	// Register schedulers
-	_ "github.com/pingcap/pd/server/schedulers"
+	_ "github.com/pingcap/pd/v3/server/schedulers"
 )
 
 // CleanupFunc closes test pd server(s) and deletes any files left behind.

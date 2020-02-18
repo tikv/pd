@@ -24,8 +24,8 @@ import (
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/dashboard/keyvisual/input"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/v3/pkg/dashboard/keyvisual/input"
+	"github.com/pingcap/pd/v3/server"
 	"go.uber.org/zap"
 )
 
