@@ -31,19 +31,20 @@ type TopNItem interface {
 // TopN maintains the N largest items of multiple dimensions.
 type TopN struct {
 	rw     sync.RWMutex
-	n      int
 	topns  []*singleTopN
 	ttlLst *ttlList
 }
 
 // NewTopN returns a k-dimensional TopN with given TTL.
+// NOTE: panic if k <= 0 or n <= 0.
 func NewTopN(k, n int, ttl time.Duration) *TopN {
+	if k <= 0 || n <= 0 {
+		panic("invalid argument of NewTopN")
+	}
 	ret := &TopN{
-		n:      maxInt(n, 1),
 		topns:  make([]*singleTopN, k),
 		ttlLst: newTTLList(ttl),
 	}
-	k = maxInt(k, 1)
 	for i := 0; i < k; i++ {
 		ret.topns[i] = newSingleTopN(i, n)
 	}
