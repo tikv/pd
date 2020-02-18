@@ -39,7 +39,7 @@ type TopN struct {
 // NOTE: panic if k <= 0 or n <= 0.
 func NewTopN(k, n int, ttl time.Duration) *TopN {
 	if k <= 0 || n <= 0 {
-		panic("invalid argument of NewTopN")
+		panic("invalid arguments for NewTopN")
 	}
 	ret := &TopN{
 		topns:  make([]*singleTopN, k),
