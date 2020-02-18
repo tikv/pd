@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -112,7 +113,11 @@ func checkStoresInfo(c *C, ss []*StoreInfo, want []*metapb.Store) {
 		}
 	}
 	for _, s := range ss {
-		c.Assert(s.Store.Store, DeepEquals, mapWant[s.Store.Store.Id])
+		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
+		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
+		// Ignore lastHeartbeat
+		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
+		c.Assert(obtained, DeepEquals, expected)
 	}
 }
 
