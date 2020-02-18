@@ -28,7 +28,7 @@ import (
 )
 
 // Interval to save store meta (including heartbeat ts) to etcd.
-const storePersistInterval = 1 * time.Minute
+const storePersistInterval = 5 * time.Minute
 
 // StoreInfo contains information about a store.
 type StoreInfo struct {
