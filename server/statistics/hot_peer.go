@@ -59,11 +59,11 @@ func (stat *HotPeerStat) Less(k int, than TopNItem) bool {
 	rhs := than.(*HotPeerStat)
 	switch k {
 	case keyDim:
-		return stat.GetKeysRate() < rhs.GetKeysRate()
+		return stat.GetKeyRate() < rhs.GetKeyRate()
 	case byteDim:
 		fallthrough
 	default:
-		return stat.GetBytesRate() < rhs.GetBytesRate()
+		return stat.GetByteRate() < rhs.GetByteRate()
 	}
 }
 
@@ -82,16 +82,16 @@ func (stat *HotPeerStat) IsNew() bool {
 	return stat.isNew
 }
 
-// GetBytesRate returns denoised BytesRate if possible.
-func (stat *HotPeerStat) GetBytesRate() float64 {
+// GetByteRate returns denoised BytesRate if possible.
+func (stat *HotPeerStat) GetByteRate() float64 {
 	if stat.rollingByteRate == nil {
 		return stat.ByteRate
 	}
 	return stat.rollingByteRate.Get()
 }
 
-// GetKeysRate returns denoised KeysRate if possible.
-func (stat *HotPeerStat) GetKeysRate() float64 {
+// GetKeyRate returns denoised KeysRate if possible.
+func (stat *HotPeerStat) GetKeyRate() float64 {
 	if stat.rollingKeyRate == nil {
 		return stat.KeyRate
 	}
@@ -101,9 +101,9 @@ func (stat *HotPeerStat) GetKeysRate() float64 {
 // Clone clones the HotPeerStat
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
-	ret.ByteRate = stat.GetBytesRate()
+	ret.ByteRate = stat.GetByteRate()
 	ret.rollingByteRate = nil
-	ret.KeyRate = stat.GetKeysRate()
+	ret.KeyRate = stat.GetKeyRate()
 	ret.rollingKeyRate = nil
 	return &ret
 }

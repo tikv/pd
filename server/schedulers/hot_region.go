@@ -274,7 +274,7 @@ func summaryStoresLoad(
 		{
 			hotSum := 0.0
 			for _, peer := range filterHotPeers(kind, minHotDegree, storeHotPeers[id]) {
-				hotSum += peer.GetBytesRate()
+				hotSum += peer.GetByteRate()
 				hotPeers = append(hotPeers, peer.Clone())
 			}
 			// Use sum of hot peers to estimate leader-only byte rate.
@@ -628,12 +628,12 @@ func (bs *balanceSolver) selectDstStoreID(candidateIDs map[uint64]struct{}) uint
 	}
 	switch bs.opTy {
 	case movePeer:
-		return selectDstStoreByByteRate(candidateLoadDetail, bs.srcPeerStat.GetBytesRate(), bs.stLoadDetail[bs.srcStoreID])
+		return selectDstStoreByByteRate(candidateLoadDetail, bs.srcPeerStat.GetByteRate(), bs.stLoadDetail[bs.srcStoreID])
 	case transferLeader:
 		if bs.rwTy == write {
-			return selectDstStoreByCount(candidateLoadDetail, bs.srcPeerStat.GetBytesRate(), bs.stLoadDetail[bs.srcStoreID])
+			return selectDstStoreByCount(candidateLoadDetail, bs.srcPeerStat.GetByteRate(), bs.stLoadDetail[bs.srcStoreID])
 		}
-		return selectDstStoreByByteRate(candidateLoadDetail, bs.srcPeerStat.GetBytesRate(), bs.stLoadDetail[bs.srcStoreID])
+		return selectDstStoreByByteRate(candidateLoadDetail, bs.srcPeerStat.GetByteRate(), bs.stLoadDetail[bs.srcStoreID])
 	default:
 		return 0
 	}
@@ -685,7 +685,7 @@ func (bs *balanceSolver) buildOperators() []*operator.Operator {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
 
-	infl := Influence{ByteRate: bs.srcPeerStat.GetBytesRate()}
+	infl := Influence{ByteRate: bs.srcPeerStat.GetByteRate()}
 	if bs.opTy == transferLeader && bs.rwTy == write {
 		infl.ByteRate = 0
 	}
