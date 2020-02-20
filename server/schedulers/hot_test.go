@@ -296,78 +296,82 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	defer cancel()
 	statistics.Denoising = false
 	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	opt.HotRegionCacheHitsThreshold = 0
 	opt.LeaderScheduleLimit = 0
 
-	tc.AddRegionStore(1, 20)
-	tc.AddRegionStore(2, 20)
-	tc.AddRegionStore(3, 20)
-	tc.AddRegionStore(4, 20)
+	for i := 0; i < 2; i++ {
+		// 0: byte rate
+		// 1: key rate
+		tc := mockcluster.NewCluster(opt)
+		tc.AddRegionStore(1, 20)
+		tc.AddRegionStore(2, 20)
+		tc.AddRegionStore(3, 20)
+		tc.AddRegionStore(4, 20)
 
-	//| store_id | write_bytes_rate |
-	//|----------|------------------|
-	//|    1     |        8MB       |
-	//|    2     |        6MB       |
-	//|    3     |        6MB       |
-	//|    4     |        4MB       |
-	tc.UpdateStorageWrittenBytes(1, 8*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 6*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 4*MB*statistics.StoreHeartBeatReportInterval)
-
-	//| region_id | leader_store | follower_store | follower_store | written_bytes |
-	//|-----------|--------------|----------------|----------------|---------------|
-	//|     1     |       1      |        2       |       3        |      512KB    |
-	//|     2     |       1      |        2       |       3        |      512KB    |
-	//|     3     |       1      |        2       |       3        |      512KB    |
-	//|     4     |       1      |        2       |       3        |      512KB    |
-	//|     5     |       1      |        2       |       3        |      512KB    |
-	//|     6     |       1      |        2       |       3        |      512KB    |
-	// All regions are hot.
-	addRegionInfo(tc, write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 512 * KB, 0},
-		{2, []uint64{1, 2, 3}, 512 * KB, 0},
-		{3, []uint64{1, 2, 3}, 512 * KB, 0},
-		{4, []uint64{1, 2, 3}, 512 * KB, 0},
-		{5, []uint64{1, 2, 3}, 512 * KB, 0},
-		{6, []uint64{1, 2, 3}, 512 * KB, 0},
-	})
-
-	for i := 0; i < 20; i++ {
-		hb.(*hotScheduler).clearPendingInfluence()
-		cnt := 0
-	testLoop:
-		for j := 0; j < 1000; j++ {
-			c.Assert(cnt, LessEqual, 5)
-			emptyCnt := 0
-			ops := hb.Schedule(tc)
-			for len(ops) == 0 {
-				emptyCnt++
-				if emptyCnt >= 10 {
-					break testLoop
-				}
-				ops = hb.Schedule(tc)
-			}
-			op := ops[0]
-			switch op.Len() {
-			case 1:
-				// balance by leader selected
-				testutil.CheckTransferLeaderFrom(c, op, operator.OpHotRegion, 1)
-			case 4:
-				// balance by peer selected
-				testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 4)
-				cnt++
-				if cnt == 3 {
-					c.Assert(op.Cancel(), IsTrue)
-				}
-			default:
-				c.Fatalf("wrong op: %v", op)
-			}
+		updateStore := tc.UpdateStorageWrittenBytes // byte rate
+		if i == 1 {                                 // key rate
+			updateStore = tc.UpdateStorageWrittenKeys
 		}
-		c.Assert(cnt, Equals, 5)
+		updateStore(1, 8*MB*statistics.StoreHeartBeatReportInterval)
+		updateStore(2, 6*MB*statistics.StoreHeartBeatReportInterval)
+		updateStore(3, 6*MB*statistics.StoreHeartBeatReportInterval)
+		updateStore(4, 4*MB*statistics.StoreHeartBeatReportInterval)
+
+		if i == 0 { // byte rate
+			addRegionInfo(tc, write, []testRegionInfo{
+				{1, []uint64{1, 2, 3}, 512 * KB, 0},
+				{2, []uint64{1, 2, 3}, 512 * KB, 0},
+				{3, []uint64{1, 2, 3}, 512 * KB, 0},
+				{4, []uint64{1, 2, 3}, 512 * KB, 0},
+				{5, []uint64{1, 2, 3}, 512 * KB, 0},
+				{6, []uint64{1, 2, 3}, 512 * KB, 0},
+			})
+		} else if i == 1 { // key rate
+			addRegionInfo(tc, write, []testRegionInfo{
+				{1, []uint64{1, 2, 3}, 0, 512 * KB},
+				{2, []uint64{1, 2, 3}, 0, 512 * KB},
+				{3, []uint64{1, 2, 3}, 0, 512 * KB},
+				{4, []uint64{1, 2, 3}, 0, 512 * KB},
+				{5, []uint64{1, 2, 3}, 0, 512 * KB},
+				{6, []uint64{1, 2, 3}, 0, 512 * KB},
+			})
+		}
+
+		for i := 0; i < 20; i++ {
+			hb.(*hotScheduler).clearPendingInfluence()
+			cnt := 0
+		testLoop:
+			for j := 0; j < 1000; j++ {
+				c.Assert(cnt, LessEqual, 5)
+				emptyCnt := 0
+				ops := hb.Schedule(tc)
+				for len(ops) == 0 {
+					emptyCnt++
+					if emptyCnt >= 10 {
+						break testLoop
+					}
+					ops = hb.Schedule(tc)
+				}
+				op := ops[0]
+				switch op.Len() {
+				case 1:
+					// balance by leader selected
+					testutil.CheckTransferLeaderFrom(c, op, operator.OpHotRegion, 1)
+				case 4:
+					// balance by peer selected
+					testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 4)
+					cnt++
+					if cnt == 3 {
+						c.Assert(op.Cancel(), IsTrue)
+					}
+				default:
+					c.Fatalf("wrong op: %v", op)
+				}
+			}
+			c.Assert(cnt, Equals, 5)
+		}
 	}
 }
 
@@ -482,88 +486,94 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	opt.HotRegionCacheHitsThreshold = 0
 
-	tc.AddRegionStore(1, 20)
-	tc.AddRegionStore(2, 20)
-	tc.AddRegionStore(3, 20)
-	tc.AddRegionStore(4, 20)
+	for i := 0; i < 2; i++ {
+		// 0: byte rate
+		// 1: key rate
+		tc := mockcluster.NewCluster(opt)
+		tc.AddRegionStore(1, 20)
+		tc.AddRegionStore(2, 20)
+		tc.AddRegionStore(3, 20)
+		tc.AddRegionStore(4, 20)
 
-	//| store_id | write_bytes_rate |
-	//|----------|------------------|
-	//|    1     |       7.1MB      |
-	//|    2     |       6.1MB      |
-	//|    3     |        6MB       |
-	//|    4     |        5MB       |
-	tc.UpdateStorageReadBytes(1, 7.1*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(2, 6.1*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(4, 5*MB*statistics.StoreHeartBeatReportInterval)
+		updateStore := tc.UpdateStorageReadBytes // byte rate
+		if i == 1 {                              // key rate
+			updateStore = tc.UpdateStorageReadKeys
+		}
+		updateStore(1, 7.1*MB*statistics.StoreHeartBeatReportInterval)
+		updateStore(2, 6.1*MB*statistics.StoreHeartBeatReportInterval)
+		updateStore(3, 6*MB*statistics.StoreHeartBeatReportInterval)
+		updateStore(4, 5*MB*statistics.StoreHeartBeatReportInterval)
 
-	//| region_id | leader_store | follower_store | follower_store |   read_bytes_rate  |
-	//|-----------|--------------|----------------|----------------|--------------------|
-	//|     1     |       1      |        2       |       3        |        512KB       |
-	//|     2     |       1      |        2       |       3        |        512KB       |
-	//|     3     |       1      |        2       |       3        |        512KB       |
-	//|     4     |       1      |        2       |       3        |        512KB       |
-	//|     5     |       2      |        1       |       3        |        512KB       |
-	//|     6     |       2      |        1       |       3        |        512KB       |
-	//|     7     |       3      |        1       |       2        |        512KB       |
-	//|     8     |       3      |        1       |       2        |        512KB       |
-	addRegionInfo(tc, read, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 512 * KB, 0},
-		{2, []uint64{1, 2, 3}, 512 * KB, 0},
-		{3, []uint64{1, 2, 3}, 512 * KB, 0},
-		{4, []uint64{1, 2, 3}, 512 * KB, 0},
-		{5, []uint64{2, 1, 3}, 512 * KB, 0},
-		{6, []uint64{2, 1, 3}, 512 * KB, 0},
-		{7, []uint64{3, 2, 1}, 512 * KB, 0},
-		{8, []uint64{3, 2, 1}, 512 * KB, 0},
-	})
+		if i == 0 { // byte rate
+			addRegionInfo(tc, read, []testRegionInfo{
+				{1, []uint64{1, 2, 3}, 512 * KB, 0},
+				{2, []uint64{1, 2, 3}, 512 * KB, 0},
+				{3, []uint64{1, 2, 3}, 512 * KB, 0},
+				{4, []uint64{1, 2, 3}, 512 * KB, 0},
+				{5, []uint64{2, 1, 3}, 512 * KB, 0},
+				{6, []uint64{2, 1, 3}, 512 * KB, 0},
+				{7, []uint64{3, 2, 1}, 512 * KB, 0},
+				{8, []uint64{3, 2, 1}, 512 * KB, 0},
+			})
+		} else if i == 1 { // key rate
+			addRegionInfo(tc, read, []testRegionInfo{
+				{1, []uint64{1, 2, 3}, 0, 512 * KB},
+				{2, []uint64{1, 2, 3}, 0, 512 * KB},
+				{3, []uint64{1, 2, 3}, 0, 512 * KB},
+				{4, []uint64{1, 2, 3}, 0, 512 * KB},
+				{5, []uint64{2, 1, 3}, 0, 512 * KB},
+				{6, []uint64{2, 1, 3}, 0, 512 * KB},
+				{7, []uint64{3, 2, 1}, 0, 512 * KB},
+				{8, []uint64{3, 2, 1}, 0, 512 * KB},
+			})
+		}
 
-	for i := 0; i < 20; i++ {
-		hb.(*hotScheduler).clearPendingInfluence()
+		for i := 0; i < 20; i++ {
+			hb.(*hotScheduler).clearPendingInfluence()
 
-		op1 := hb.Schedule(tc)[0]
-		testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
-		// store byte rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
+			op1 := hb.Schedule(tc)[0]
+			testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
+			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
 
-		op2 := hb.Schedule(tc)[0]
-		testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
-		// store byte rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
+			op2 := hb.Schedule(tc)[0]
+			testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
 
-		ops := hb.Schedule(tc)
-		c.Assert(ops, HasLen, 0)
-	}
-	for i := 0; i < 20; i++ {
-		hb.(*hotScheduler).clearPendingInfluence()
+			ops := hb.Schedule(tc)
+			c.Logf("%v", ops)
+			c.Assert(ops, HasLen, 0)
+		}
+		for i := 0; i < 20; i++ {
+			hb.(*hotScheduler).clearPendingInfluence()
 
-		op1 := hb.Schedule(tc)[0]
-		testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
-		// store byte rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
+			op1 := hb.Schedule(tc)[0]
+			testutil.CheckTransferLeader(c, op1, operator.OpLeader, 1, 3)
+			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
 
-		op2 := hb.Schedule(tc)[0]
-		testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
-		// store byte rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
-		c.Assert(op2.Cancel(), IsTrue)
-		// store byte rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
+			op2 := hb.Schedule(tc)[0]
+			testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+			// store bytekey rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
+			c.Assert(op2.Cancel(), IsTrue)
+			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | (6, 6.5) | 5
 
-		op2 = hb.Schedule(tc)[0]
-		testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
-		// store byte rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
+			op2 = hb.Schedule(tc)[0]
+			testutil.CheckTransferPeerWithLeaderTransfer(c, op2, operator.OpHotRegion, 1, 4)
+			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
 
-		c.Assert(op1.Cancel(), IsTrue)
-		// store byte rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
+			c.Assert(op1.Cancel(), IsTrue)
+			// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
-		op3 := hb.Schedule(tc)[0]
-		testutil.CheckTransferPeerWithLeaderTransfer(c, op3, operator.OpHotRegion, 1, 4)
-		// store byte rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
+			op3 := hb.Schedule(tc)[0]
+			testutil.CheckTransferPeerWithLeaderTransfer(c, op3, operator.OpHotRegion, 1, 4)
+			// store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
 
-		ops := hb.Schedule(tc)
-		c.Assert(ops, HasLen, 0)
+			ops := hb.Schedule(tc)
+			c.Assert(ops, HasLen, 0)
+		}
 	}
 }
 
