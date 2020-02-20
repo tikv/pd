@@ -643,7 +643,7 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	stream := mockhbstream.NewHeartbeatStreams(cluster.ID, true /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 
-	addPeerOp := func(i uint64) *operator.Operator{
+	addPeerOp := func(i uint64) *operator.Operator {
 		start := fmt.Sprintf("%da", i)
 		end := fmt.Sprintf("%db", i)
 		region := newRegionInfo(i, start, end, 1, 1, []uint64{101, 1}, []uint64{101, 1})
