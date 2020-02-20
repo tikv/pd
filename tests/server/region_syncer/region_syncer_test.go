@@ -105,7 +105,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	regionLen = len(regions)
 
 	// ensure flush to region kv
-	time.Sleep(3 * time.Second)
+	time.Sleep(4 * time.Second)
 	err = leaderServer.Stop()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()

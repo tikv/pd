@@ -75,9 +75,14 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 		start := time.Now()
-		if err = s.validateRequest(request.GetHeader()); err != nil {
-			return err
+		// TSO uses leader lease to determine validity. No need to check leader here.
+		if s.isClosed() {
+			return status.Errorf(codes.Unknown, "server not started")
 		}
+		if request.GetHeader().GetClusterId() != s.clusterID {
+			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
+		}
+
 		count := request.GetCount()
 		ts, err := s.getRespTS(count)
 		if err != nil {
