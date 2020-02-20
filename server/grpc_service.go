@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -34,9 +35,13 @@ import (
 
 const slowThreshold = 5 * time.Millisecond
 
-// notLeaderError is returned when current server is not the leader and not possible to process request.
-// TODO: work as proxy.
-var notLeaderError = status.Errorf(codes.Unavailable, "not leader")
+// gRPC errors
+var (
+	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
+	// TODO: work as proxy.
+	ErrNotLeader  = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
+)
 
 // GetMembers implements gRPC PDServer.
 func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
@@ -223,7 +228,13 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	rc.OnStoreVersionChange()
+	v := rc.OnStoreVersionChange()
+	if s.GetConfig().EnableDynamicConfig && v != nil {
+		status := s.updateConfigManager("cluster-version", v.String())
+		if status.GetCode() != configpb.StatusCode_OK {
+			log.Error("failed to update the cluster version", zap.Error(errors.New(status.GetMessage())))
+		}
+	}
 	CheckPDVersion(s.scheduleOpt)
 
 	return &pdpb.PutStoreResponse{
@@ -673,11 +684,10 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 
 // SyncRegions syncs the regions.
 func (s *Server) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return cluster.ErrNotBootstrapped
+	if s.cluster == nil {
+		return ErrNotStarted
 	}
-	return rc.GetRegionSyncer().Sync(stream)
+	return s.cluster.GetRegionSyncer().Sync(stream)
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.
@@ -753,7 +763,7 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 // TODO: Call it in gRPC intercepter.
 func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
 	if s.IsClosed() || !s.member.IsLeader() {
-		return errors.WithStack(notLeaderError)
+		return errors.WithStack(ErrNotLeader)
 	}
 	if header.GetClusterId() != s.clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())

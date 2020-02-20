@@ -57,8 +57,17 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	// Fill leader priorities.
 	for _, m := range members.GetMembers() {
+		binaryVersion, e := h.svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
+		if e != nil {
+			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+		}
+		m.BinaryVersion = binaryVersion
+		deployPath, e := h.svr.GetMember().GetMemberDeployPath(m.GetMemberId())
+		if e != nil {
+			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+		}
+		m.DeployPath = deployPath
 		if h.svr.GetMember().GetEtcdLeader() == 0 {
 			log.Warn("no etcd leader, skip get leader priority", zap.Uint64("member", m.GetMemberId()))
 			continue

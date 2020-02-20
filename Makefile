@@ -6,7 +6,7 @@ INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; |
                      sort -u | sed -e "s/^\./github.com\/pingcap\/pd/" | grep -E "tests")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 
-PACKAGES := go list ./...
+PACKAGES := go list ./... | grep -v 'dashboard/uiserver'
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|github.com/pingcap/pd/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 RETOOL := ./scripts/retool
@@ -51,16 +51,14 @@ ci: build check basic-test
 build: pd-server pd-ctl
 tools: pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench
 pd-server: export GO111MODULE=on
+pd-server:
+ifneq ($(OS),Windows_NT)
+	./scripts/embed-dashboard-ui.sh
+endif
 ifeq ("$(WITH_RACE)", "1")
-pd-server:
 	CGO_ENABLED=1 go build -race -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
-else ifeq ("$(PD_WEB)", "1")
-pd-server: retool-setup
-	@./scripts/build-ui.sh
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags web -o bin/pd-server cmd/pd-server/main.go
 else
-pd-server:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=1 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-server cmd/pd-server/main.go
 endif
 
 # Tools
@@ -104,7 +102,7 @@ check-all: static lint tidy
 	@echo "checking"
 
 retool-setup: export GO111MODULE=off
-retool-setup: 
+retool-setup:
 	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
 	@./scripts/retool sync
 
@@ -119,7 +117,7 @@ static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
-	CGO_ENABLED=0 ./scripts/retool do golangci-lint run --enable misspell --disable errcheck --deadline 120s $$($(PACKAGE_DIRECTORIES))
+	CGO_ENABLED=0 ./scripts/retool do golangci-lint run --no-config --enable misspell --disable errcheck --deadline 120s $$($(PACKAGE_DIRECTORIES))
 
 lint:
 	@echo "linting"

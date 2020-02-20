@@ -23,7 +23,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/keyvisual"
+	dashboardapi "github.com/pingcap/pd/pkg/dashboard/apiserver"
+	dashboardui "github.com/pingcap/pd/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/server"
 	"github.com/pingcap/pd/server/api"
 	"github.com/pingcap/pd/server/cluster"
@@ -68,12 +69,11 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	if err != nil {
 		return nil, err
 	}
-	svr, err := server.CreateServer(
-		ctx,
-		cfg,
-		api.NewHandler,
-		keyvisual.NewKeyvisualService,
-	)
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler}
+	if cfg.EnableDashboard {
+		serviceBuilders = append(serviceBuilders, dashboardapi.NewService, dashboardui.NewService)
+	}
+	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		return nil, err
 	}
@@ -433,6 +433,7 @@ func (c *TestCluster) WaitLeader() string {
 		}
 		for name, num := range counter {
 			if num == running && c.GetServer(name).IsLeader() {
+				time.Sleep(20 * time.Millisecond)
 				return name
 			}
 		}

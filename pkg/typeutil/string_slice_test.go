@@ -37,7 +37,7 @@ func (s *testStringSliceSuite) TestJSON(c *C) {
 }
 
 func (s *testStringSliceSuite) TestEmpty(c *C) {
-	var ss StringSlice
+	ss := StringSlice([]string{})
 	b, err := json.Marshal(ss)
 	c.Assert(err, IsNil)
 	c.Assert(string(b), Equals, "\"\"")

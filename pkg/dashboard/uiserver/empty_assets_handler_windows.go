@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2020 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,14 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build web
+package uiserver
 
-package ui
+import (
+	assetfs "github.com/elazarl/go-bindata-assetfs"
+)
 
-import "github.com/pingcap/pd/pkg/ui/dist"
-
-func init() {
-	Asset = dist.Asset
-	AssetDir = dist.AssetDir
-	AssetInfo = dist.AssetInfo
+func assetFS() *assetfs.AssetFS {
+	return nil
 }
