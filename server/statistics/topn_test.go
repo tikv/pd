@@ -109,18 +109,18 @@ func (s *testTopNSuite) TestPut(c *C) {
 	}
 }
 
-func putPerm(c *C, tn *TopN, K, Total int, f func(x int) float64, isUpdate bool) {
+func putPerm(c *C, tn *TopN, dimNum, total int, f func(x int) float64, isUpdate bool) {
 	{ // insert
-		dims := make([][]int, K)
-		for k := 0; k < K; k++ {
-			dims[k] = rand.Perm(Total)
+		dims := make([][]int, dimNum)
+		for k := 0; k < dimNum; k++ {
+			dims[k] = rand.Perm(total)
 		}
-		for i := 0; i < Total; i++ {
+		for i := 0; i < total; i++ {
 			item := &item{
 				id:     uint64(dims[0][i]),
-				values: make([]float64, K),
+				values: make([]float64, dimNum),
 			}
-			for k := 0; k < K; k++ {
+			for k := 0; k < dimNum; k++ {
 				item.values[k] = f(dims[k][i])
 			}
 			c.Assert(tn.Put(item), Equals, isUpdate)
