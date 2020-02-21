@@ -39,30 +39,44 @@ pd-server --name="pd" \
 Using `curl` to see PD member:
 
 ```bash
-curl http://${HostIP}:2379/v2/members
+curl http://${HostIP}:2379/pd/api/v1/members
 
-{"members":[{"id":"f62e88a6e81c149","name":"pd","peerURLs":["http://192.168.199.105:2380"],"clientURLs":["http://192.168.199.105:2379"]}]}
+{
+    "members": [
+        {
+            "name":"pd",
+            "member_id":"f62e88a6e81c149",
+            "peer_urls": [
+                "http://192.168.199.105:2380"
+            ],
+            "client_urls": [
+                "http://192.168.199.105:2379"
+            ]
+        }
+    ]
+}
 ```
 
 A better tool [httpie](https://github.com/jkbrzt/httpie) is recommended:
 
 ```bash
-http http://${HostIP}:2379/v2/members
-HTTP/1.1 200 OK
-Content-Length: 144
-Content-Type: application/json
-Date: Thu, 21 Jul 2016 09:37:12 GMT
-X-Etcd-Cluster-Id: 33dc747581249309
+http http://${HostIP}:2379/pd/api/v1/members
+Access-Control-Allow-Headers: accept, content-type, authorization
+Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE
+Access-Control-Allow-Origin: *
+Content-Length: 673
+Content-Type: application/json; charset=UTF-8
+Date: Thu, 20 Feb 2020 09:49:42 GMT
 
 {
     "members": [
         {
-            "clientURLs": [
+            "client_urls": [
                 "http://192.168.199.105:2379"
             ],
-            "id": "f62e88a6e81c149",
+            "member_id": "f62e88a6e81c149",
             "name": "pd",
-            "peerURLs": [
+            "peer_urls": [
                 "http://192.168.199.105:2380"
             ]
         }
