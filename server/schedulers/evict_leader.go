@@ -36,8 +36,11 @@ const (
 	// EvictLeaderName is evict leader scheduler name.
 	EvictLeaderName = "evict-leader-scheduler"
 	// EvictLeaderType is evict leader scheduler type.
-	EvictLeaderType     = "evict-leader"
-	lastStoreDeleteInfo = "The last store has been deleted"
+	EvictLeaderType = "evict-leader"
+	// EvictLeaderBatchSize is the number of operators to to transfer
+	// leaders by one scheduling
+	EvictLeaderBatchSize = 3
+	lastStoreDeleteInfo  = "The last store has been deleted"
 )
 
 func init() {
@@ -217,11 +220,8 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Operator {
 	var ops []*operator.Operator
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
 	for id, ranges := range s.conf.StoreIDWithRanges {
 		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
 		if region == nil {
@@ -241,6 +241,42 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		op.SetPriorityLevel(core.HighPriority)
 		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 		ops = append(ops, op)
+	}
+	return ops
+}
+
+func (s *evictLeaderScheduler) uniqueAppend(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
+	regionIDs := make(map[uint64]struct{})
+	for i := range dst {
+		regionIDs[dst[i].RegionID()] = struct{}{}
+	}
+	for i := range src {
+		if _, ok := regionIDs[src[i].RegionID()]; ok {
+			continue
+		}
+		regionIDs[src[i].RegionID()] = struct{}{}
+		dst = append(dst, src[i])
+	}
+	return dst
+}
+
+func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	var ops []*operator.Operator
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
+
+	for i := 0; i < EvictLeaderBatchSize; i++ {
+		once := s.scheduleOnce(cluster)
+		// no more regions
+		if len(once) == 0 {
+			break
+		}
+		ops = s.uniqueAppend(ops, once...)
+		// the batch has been fulfilled
+		if len(ops) > EvictLeaderBatchSize {
+			break
+		}
 	}
 
 	return ops

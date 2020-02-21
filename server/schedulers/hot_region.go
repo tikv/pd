@@ -246,7 +246,7 @@ func summaryStoresLoad(
 		{
 			hotSum := 0.0
 			for _, peer := range filterHotPeers(kind, minHotDegree, storeHotPeers[id]) {
-				hotSum += peer.GetBytesRate()
+				hotSum += peer.GetByteRate()
 				hotPeers = append(hotPeers, peer.Clone())
 			}
 			// Use sum of hot peers to estimate leader-only byte rate.
@@ -498,7 +498,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 func (bs *balanceSolver) getHotPeers() []*statistics.HotPeerStat {
 	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
 	sort.Slice(ret, func(i, j int) bool {
-		return ret[i].GetBytesRate() > ret[j].GetBytesRate()
+		return ret[i].GetByteRate() > ret[j].GetByteRate()
 	})
 	if len(ret) > 1000 {
 		ret = ret[:1000]
@@ -616,14 +616,14 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 				if !isProgressive(
 					srcLd.ByteRate,
 					dstLd.ByteRate,
-					bs.cur.srcPeerStat.GetBytesRate(),
+					bs.cur.srcPeerStat.GetByteRate(),
 					1.0) {
 					continue
 				}
 			} else if !isProgressive(
 				srcLd.ByteRate,
 				dstLd.ByteRate,
-				bs.cur.srcPeerStat.GetBytesRate(),
+				bs.cur.srcPeerStat.GetByteRate(),
 				hotRegionScheduleFactor) {
 				continue
 			}
@@ -659,7 +659,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 		// compare region
 
 		// prefer region with larger byte rate, to converge faster
-		curByteRk, oldByteRk := int64(bs.cur.srcPeerStat.GetBytesRate()/100), int64(old.srcPeerStat.GetBytesRate()/100)
+		curByteRk, oldByteRk := int64(bs.cur.srcPeerStat.GetByteRate()/100), int64(old.srcPeerStat.GetByteRate()/100)
 		if curByteRk > oldByteRk {
 			return true
 		} else if curByteRk < oldByteRk {
@@ -788,7 +788,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
 
-	infl := Influence{ByteRate: bs.cur.srcPeerStat.GetBytesRate(), Count: 1}
+	infl := Influence{ByteRate: bs.cur.srcPeerStat.GetByteRate(), Count: 1}
 
 	return []*operator.Operator{op}, []Influence{infl}
 }

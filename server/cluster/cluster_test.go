@@ -63,12 +63,12 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 		c.Assert(cluster.putStoreLocked(store), IsNil)
 		c.Assert(cluster.GetStoreCount(), Equals, i+1)
 
-		c.Assert(store.GetLastHeartbeatTS().IsZero(), IsTrue)
+		c.Assert(store.GetLastHeartbeatTS().UnixNano(), Equals, int64(0))
 
 		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
 
 		s := cluster.GetStore(store.GetID())
-		c.Assert(s.GetLastHeartbeatTS().IsZero(), IsFalse)
+		c.Assert(s.GetLastHeartbeatTS().UnixNano(), Not(Equals), int64(0))
 		c.Assert(s.GetStoreStats(), DeepEquals, storeStats)
 	}
 

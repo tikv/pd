@@ -274,7 +274,7 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 	for i := uint64(1); i <= 5; i++ {
 		region := tc.GetRegion(i)
 		if op, _ := scatterer.Scatter(region); op != nil {
-			c.Assert(oc.AddWaitingOperator(op), IsTrue)
+			c.Assert(oc.AddWaitingOperator(op), Equals, 1)
 		}
 	}
 }

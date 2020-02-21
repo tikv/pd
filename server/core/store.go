@@ -27,6 +27,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// Interval to save store meta (including heartbeat ts) to etcd.
+const storePersistInterval = 5 * time.Minute
+
 // StoreInfo contains information about a store.
 type StoreInfo struct {
 	meta  *metapb.Store
@@ -38,7 +41,7 @@ type StoreInfo struct {
 	leaderSize       int64
 	regionSize       int64
 	pendingPeerCount int
-	lastHeartbeatTS  time.Time
+	lastPersistTime  time.Time
 	leaderWeight     float64
 	regionWeight     float64
 	available        func() bool
@@ -70,7 +73,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		leaderSize:       s.leaderSize,
 		regionSize:       s.regionSize,
 		pendingPeerCount: s.pendingPeerCount,
-		lastHeartbeatTS:  s.lastHeartbeatTS,
+		lastPersistTime:  s.lastPersistTime,
 		leaderWeight:     s.leaderWeight,
 		regionWeight:     s.regionWeight,
 		available:        s.available,
@@ -205,11 +208,6 @@ func (s *StoreInfo) GetApplyingSnapCount() uint32 {
 	return s.stats.GetApplyingSnapCount()
 }
 
-// GetStartTime returns the start time of the store.
-func (s *StoreInfo) GetStartTime() uint32 {
-	return s.stats.GetStartTime()
-}
-
 // GetLeaderCount returns the leader count of the store.
 func (s *StoreInfo) GetLeaderCount() int {
 	return s.leaderCount
@@ -247,7 +245,12 @@ func (s *StoreInfo) GetRegionWeight() float64 {
 
 // GetLastHeartbeatTS returns the last heartbeat timestamp of the store.
 func (s *StoreInfo) GetLastHeartbeatTS() time.Time {
-	return s.lastHeartbeatTS
+	return time.Unix(0, s.meta.GetLastHeartbeat())
+}
+
+// NeedPersist returns if it needs to save to etcd.
+func (s *StoreInfo) NeedPersist() bool {
+	return s.GetLastHeartbeatTS().Sub(s.lastPersistTime) > storePersistInterval
 }
 
 const minWeight = 1e-6
@@ -385,14 +388,14 @@ func (s *StoreInfo) ResourceWeight(kind ResourceKind) float64 {
 	}
 }
 
-// GetStartTS returns the start timestamp.
-func (s *StoreInfo) GetStartTS() time.Time {
-	return time.Unix(int64(s.GetStartTime()), 0)
+// GetStartTime returns the start timestamp.
+func (s *StoreInfo) GetStartTime() time.Time {
+	return time.Unix(s.meta.GetStartTimestamp(), 0)
 }
 
 // GetUptime returns the uptime.
 func (s *StoreInfo) GetUptime() time.Duration {
-	uptime := s.GetLastHeartbeatTS().Sub(s.GetStartTS())
+	uptime := s.GetLastHeartbeatTS().Sub(s.GetStartTime())
 	if uptime > 0 {
 		return uptime
 	}

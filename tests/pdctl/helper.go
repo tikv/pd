@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -85,7 +86,11 @@ func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) 
 		}
 	}
 	for _, s := range stores {
-		c.Assert(s.Store.Store, check.DeepEquals, mapWant[s.Store.Store.Id])
+		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
+		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
+		// Ignore lastHeartbeat
+		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
+		c.Assert(obtained, check.DeepEquals, expected)
 	}
 }
 

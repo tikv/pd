@@ -82,10 +82,3 @@ func (r *MedianFilter) Set(n float64) {
 	r.records[0] = n
 	r.count = 1
 }
-
-func maxInt(x int, y int) int {
-	if x > y {
-		return x
-	}
-	return y
-}
