@@ -242,40 +242,57 @@ func (oc *OperatorController) PushOperators() {
 }
 
 // AddWaitingOperator adds operators to waiting operators.
-func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) bool {
+func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int {
 	oc.Lock()
+	added := 0
 
-	if !oc.checkAddOperator(ops...) {
-		for _, op := range ops {
-			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
+	for i := 0; i < len(ops); i++ {
+		op := ops[i]
+		desc := op.Desc()
+		isMerge := false
+		if op.Kind()&operator.OpMerge != 0 {
+			if i+1 >= len(ops) {
+				// should not be here forever
+				log.Error("orphan merge operators found", zap.String("desc", desc))
+				oc.Unlock()
+				return added
+			}
+			if ops[i+1].Kind()&operator.OpMerge == 0 {
+				log.Error("merge operator should be paired", zap.String("desc",
+					ops[i+1].Desc()))
+				oc.Unlock()
+				return added
+			}
+			isMerge = true
+		}
+		if !oc.checkAddOperator(op) {
 			_ = op.Cancel()
 			oc.buryOperator(op)
+			if isMerge {
+				// Merge operation have two operators, cancel them all
+				next := ops[i+1]
+				_ = next.Cancel()
+				oc.buryOperator(next)
+			}
+			oc.Unlock()
+			return added
 		}
-		oc.Unlock()
-		return false
+		oc.wop.PutOperator(op)
+		if isMerge {
+			// count two merge operators as one, so wopStatus.ops[desc] should
+			// not be updated here
+			i++
+			added++
+			oc.wop.PutOperator(ops[i])
+		}
+		operatorWaitCounter.WithLabelValues(desc, "put").Inc()
+		oc.wopStatus.ops[desc]++
+		added++
 	}
 
-	op := ops[0]
-	desc := op.Desc()
-	if oc.wopStatus.ops[desc] >= oc.cluster.GetSchedulerMaxWaitingOperator() {
-		operatorWaitCounter.WithLabelValues(op.Desc(), "exceed_max").Inc()
-		for _, op := range ops {
-			_ = op.Cancel()
-			oc.buryOperator(op)
-		}
-		oc.Unlock()
-		return false
-	}
-	oc.wop.PutOperator(op)
-	operatorWaitCounter.WithLabelValues(op.Desc(), "put").Inc()
-	// This step is especially for the merge operation.
-	if len(ops) > 1 {
-		oc.wop.PutOperator(ops[1])
-	}
-	oc.wopStatus.ops[desc]++
 	oc.Unlock()
 	oc.PromoteWaitingOperator()
-	return true
+	return added
 }
 
 // AddOperator adds operators to the running operators.
@@ -305,6 +322,7 @@ func (oc *OperatorController) PromoteWaitingOperator() {
 	defer oc.Unlock()
 	var ops []*operator.Operator
 	for {
+		// GetOperator returns one operator or two merge operators
 		ops = oc.wop.GetOperator()
 		if ops == nil {
 			return
@@ -336,6 +354,7 @@ func (oc *OperatorController) PromoteWaitingOperator() {
 // - There is no such region in the cluster
 // - The epoch of the operator and the epoch of the corresponding region are no longer consistent.
 // - The region already has a higher priority or same priority operator.
+// - Exceed the max number of waiting operators
 // - At least one operator is expired.
 func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 	for _, op := range ops {
@@ -343,6 +362,7 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 		if region == nil {
 			log.Debug("region not found, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()))
+			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
 			return false
 		}
 		if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() ||
@@ -351,12 +371,14 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Reflect("old", region.GetRegionEpoch()),
 				zap.Reflect("new", op.RegionEpoch()))
+			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
 			return false
 		}
 		if old := oc.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
 			log.Debug("already have operator, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Reflect("old", old))
+			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
 			return false
 		}
 		if op.Status() != operator.CREATED {
@@ -367,6 +389,12 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			failpoint.Inject("unexpectedOperator", func() {
 				panic(op)
 			})
+			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
+			return false
+		}
+		if oc.wopStatus.ops[op.Desc()] >= oc.cluster.GetSchedulerMaxWaitingOperator() {
+			log.Debug("exceed_max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetSchedulerMaxWaitingOperator()))
+			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed_max").Inc()
 			return false
 		}
 	}
@@ -374,6 +402,7 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 	for _, op := range ops {
 		if op.CheckExpired() {
 			expired = true
+			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
 		}
 	}
 	return !expired
