@@ -24,11 +24,11 @@ import (
 
 	"github.com/BurntSushi/toml"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/kv"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/kv"
 
 	// Register schedulers.
-	_ "github.com/pingcap/pd/server/schedulers"
+	_ "github.com/pingcap/pd/v4/server/schedulers"
 )
 
 func Test(t *testing.T) {

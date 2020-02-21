@@ -19,8 +19,8 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/configpb"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/kv"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/kv"
 )
 
 func Test(t *testing.T) {

@@ -22,9 +22,9 @@ import (
 	"net/url"
 
 	"github.com/pingcap/kvproto/pkg/configpb"
-	pd "github.com/pingcap/pd/client"
-	"github.com/pingcap/pd/server"
-	configmanager "github.com/pingcap/pd/server/config_manager"
+	pd "github.com/pingcap/pd/v4/client"
+	"github.com/pingcap/pd/v4/server"
+	configmanager "github.com/pingcap/pd/v4/server/config_manager"
 	"github.com/pkg/errors"
 )
 

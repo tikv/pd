@@ -18,9 +18,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/placement"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/statistics"
 )
 
 // Options for schedulers.

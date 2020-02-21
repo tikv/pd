@@ -5,9 +5,9 @@ import (
 	"io/ioutil"
 	"time"
 
-	"github.com/pingcap/pd/pkg/tempurl"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v4/pkg/tempurl"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/config"
 )
 
 const (
