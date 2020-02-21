@@ -637,3 +637,43 @@ func checkRemoveOperatorSuccess(c *C, oc *OperatorController, op *operator.Opera
 	c.Assert(op.IsEnd(), IsTrue)
 	c.Assert(oc.GetOperatorStatus(op.RegionID()).Op, DeepEquals, op)
 }
+
+func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
+	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	stream := mockhbstream.NewHeartbeatStreams(cluster.ID, true /* no need to run */)
+	controller := NewOperatorController(t.ctx, cluster, stream)
+
+	addPeerOp := func(i uint64) *operator.Operator {
+		start := fmt.Sprintf("%da", i)
+		end := fmt.Sprintf("%db", i)
+		region := newRegionInfo(i, start, end, 1, 1, []uint64{101, 1}, []uint64{101, 1})
+		cluster.PutRegion(region)
+		peer := &metapb.Peer{
+			StoreId: 2,
+		}
+		op, err := operator.CreateAddPeerOperator("add-peer", cluster, region, peer, operator.OpBalance)
+		c.Assert(err, IsNil)
+		c.Assert(op, NotNil)
+		return op
+	}
+
+	// a batch of operators should be added atomiclly
+	var batch []*operator.Operator
+	for i := uint64(0); i < cluster.GetSchedulerMaxWaitingOperator()-1; i++ {
+		batch = append(batch, addPeerOp(i))
+	}
+	added := controller.AddWaitingOperator(batch...)
+	c.Assert(added, Equals, int(cluster.GetSchedulerMaxWaitingOperator()-1))
+
+	source := newRegionInfo(1, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	target := newRegionInfo(0, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	// now there is one operator being allowed to add, if it is a merge operator
+	// both of the pair are allowed
+	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
+	c.Assert(err, IsNil)
+	c.Assert(len(ops), Equals, 2)
+	c.Assert(controller.AddWaitingOperator(ops...), Equals, 2)
+
+	// no space left, new operator can not be added.
+	c.Assert(controller.AddWaitingOperator(addPeerOp(0)), Equals, 0)
+}
