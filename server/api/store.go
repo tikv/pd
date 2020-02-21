@@ -97,7 +97,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 	}
 
 	if store.GetStoreStats() != nil {
-		startTS := store.GetStartTS()
+		startTS := store.GetStartTime()
 		s.Status.StartTS = &startTS
 	}
 	if lastHeartbeat := store.GetLastHeartbeatTS(); !lastHeartbeat.IsZero() {

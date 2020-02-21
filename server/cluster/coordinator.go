@@ -547,7 +547,8 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 				continue
 			}
 			if op := s.Schedule(); op != nil {
-				c.opController.AddWaitingOperator(op...)
+				added := c.opController.AddWaitingOperator(op...)
+				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
 			}
 
 		case <-s.Ctx().Done():
