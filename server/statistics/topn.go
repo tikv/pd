@@ -16,6 +16,7 @@ package statistics
 import (
 	"container/heap"
 	"container/list"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -39,7 +40,7 @@ type TopN struct {
 // NOTE: panic if k <= 0 or n <= 0.
 func NewTopN(k, n int, ttl time.Duration) *TopN {
 	if k <= 0 || n <= 0 {
-		panic("invalid arguments for NewTopN")
+		panic(fmt.Sprintf("invalid arguments for NewTopN: k = %d, n = %d", k, n))
 	}
 	ret := &TopN{
 		topns:  make([]*singleTopN, k),
