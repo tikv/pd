@@ -684,7 +684,7 @@ func (bs *balanceSolver) calcProgressiveRank() int64 {
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		if srcLd.Count > dstLd.Count &&
 			srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
-			rank -= 1
+			rank = -1
 		}
 	} else {
 		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / (srcLd.KeyRate + 1)
