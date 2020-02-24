@@ -386,6 +386,9 @@ type solution struct {
 	region      *core.RegionInfo
 	dstStoreID  uint64
 
+	// progressiveRank measures the contribution for balance.
+	// The smaller the rank, the better this solution is.
+	// If rank < 0, this solution makes thing better.
 	progressiveRank int64
 }
 
@@ -486,7 +489,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
-				bs.cur.progressiveRank = bs.calcProgressiveRank()
+				bs.calcProgressiveRank()
 
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
 					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
@@ -680,13 +683,16 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	return ret
 }
 
-// calcProgressiveRank checks `bs.cur` is a progressive solution.
-func (bs *balanceSolver) calcProgressiveRank() int64 {
+// calcProgressiveRank calculates `bs.cur.progressiveRank`.
+// See the comments of `solution.progressiveRank` for more about progressive rank.
+func (bs *balanceSolver) calcProgressiveRank() {
 	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
 	if bs.rwTy == write && bs.opTy == transferLeader {
+		// In this condition, CPU usage is the matter.
+		// Only consider about count and key rate.
 		if srcLd.Count > dstLd.Count &&
 			srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
 			rank = -1
@@ -698,14 +704,17 @@ func (bs *balanceSolver) calcProgressiveRank() int64 {
 		byteHot := peer.GetByteRate() > minHotByteRate
 		switch {
 		case byteHot && byteDecRatio <= 0.95 && keyHot && keyDecRatio <= 0.95:
+			// Both byte rate and key rate are balanced, the best choice.
 			rank = -3
 		case byteDecRatio <= 0.99 && keyHot && keyDecRatio <= 0.95:
+			// Byte rate is not worsened, key rate is balanced.
 			rank = -2
 		case byteHot && byteDecRatio <= 0.95:
+			// Byte rate is balanced, ignore the key rate.
 			rank = -1
 		}
 	}
-	return rank
+	bs.cur.progressiveRank = rank
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
