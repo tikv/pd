@@ -68,6 +68,9 @@ const (
 	maxZombieDur time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
 
 	minRegionScheduleInterval time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
+
+	minHotByteRate = 100
+	minHotKeyRate  = 10
 )
 
 type hotScheduler struct {
@@ -690,9 +693,9 @@ func (bs *balanceSolver) calcProgressiveRank() int64 {
 		}
 	} else {
 		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / (srcLd.KeyRate + 1)
-		keyHot := peer.GetKeyRate() >= 10
+		keyHot := peer.GetKeyRate() >= minHotKeyRate
 		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / (srcLd.ByteRate + 1)
-		byteHot := peer.GetByteRate() > 100
+		byteHot := peer.GetByteRate() > minHotByteRate
 		switch {
 		case byteHot && byteDecRatio <= 0.95 && keyHot && keyDecRatio <= 0.95:
 			rank = -3
