@@ -1063,5 +1063,5 @@ func toResourceType(rwTy rwType, opTy opType) resourceType {
 	case read:
 		return readLeader
 	}
-	return resourceTypeLen
+	panic(fmt.Sprintf("invalid arguments for toResourceType: rwTy = %v, opTy = %v", rwTy, opTy))
 }
