@@ -465,9 +465,11 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 	bs.cur = &solution{}
-	var best *solution = nil
-	var ops []*operator.Operator = nil
-	var infls []Influence = nil
+	var (
+		best  *solution
+		ops   []*operator.Operator
+		infls []Influence
+	)
 
 	for srcStoreID := range bs.filterSrcStores() {
 		bs.cur.srcStoreID = srcStoreID
