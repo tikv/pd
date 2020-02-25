@@ -75,6 +75,9 @@ const (
 	byteRateRankStepRatio = 0.05
 	keyRateRankStepRatio  = 0.05
 	countRankStepRatio    = 0.1
+
+	greatDecRatio = 0.95
+	minorDecRatio = 0.99
 )
 
 type hotScheduler struct {
@@ -707,13 +710,13 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / (srcLd.ByteRate + 1)
 		byteHot := peer.GetByteRate() > minHotByteRate
 		switch {
-		case byteHot && byteDecRatio <= 0.95 && keyHot && keyDecRatio <= 0.95:
+		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
 			// Both byte rate and key rate are balanced, the best choice.
 			rank = -3
-		case byteDecRatio <= 0.99 && keyHot && keyDecRatio <= 0.95:
+		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
 			// Byte rate is not worsened, key rate is balanced.
 			rank = -2
-		case byteHot && byteDecRatio <= 0.95:
+		case byteHot && byteDecRatio <= greatDecRatio:
 			// Byte rate is balanced, ignore the key rate.
 			rank = -1
 		}
@@ -761,7 +764,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 			keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetKeyRate(), old.srcPeerStat.GetKeyRate(), stepRank(0, 10))
 
 			switch bs.cur.progressiveRank {
-			case -2: // 0.95 < byteDecRatio <= 0.99 && keyDecRatio <= 0.95
+			case -2: // greatDecRatio < byteDecRatio <= minorDecRatio && keyDecRatio <= greatDecRatio
 				if keyRkCmp != 0 {
 					return keyRkCmp > 0
 				}
@@ -769,12 +772,12 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 					// prefer smaller byte rate, to reduce oscillation
 					return byteRkCmp < 0
 				}
-			case -3: // byteDecRatio <= 0.95 && keyDecRatio <= 0.95
+			case -3: // byteDecRatio <= greatDecRatio && keyDecRatio <= greatDecRatio
 				if keyRkCmp != 0 {
 					return keyRkCmp > 0
 				}
 				fallthrough
-			case -1: // byteDecRatio <= 0.95
+			case -1: // byteDecRatio <= greatDecRatio
 				if byteRkCmp != 0 {
 					// prefer region with larger byte rate, to converge faster
 					return byteRkCmp > 0
