@@ -72,8 +72,7 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 
 	tidbForwarder := tidb.NewForwarder(tidb.NewForwarderConfig(), etcdProvider)
 	// FIXME: Handle open error
-	tidbForwarder.Open()        //nolint:errcheck
-	defer tidbForwarder.Close() //nolint:errcheck
+	tidbForwarder.Open() //nolint:errcheck
 
 	// key visual
 	dashboardCtx, cancel := context.WithCancel(ctx)
@@ -99,9 +98,8 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 		cancel,
 		wg.Wait,
 		func() {
-			if err := store.Close(); err != nil {
-				log.Error("close dashboard dbstore error", zap.Error(err))
-			}
+			_ = tidbForwarder.Close()
+			_ = store.Close()
 		},
 	)
 
