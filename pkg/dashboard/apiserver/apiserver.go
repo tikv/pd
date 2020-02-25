@@ -26,10 +26,11 @@ import (
 	dashboardpd "github.com/pingcap-incubator/tidb-dashboard/pkg/pd"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/tidb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/dashboard/keyvisual/input"
-	"github.com/pingcap/pd/v4/server"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/pd/v4/pkg/dashboard/keyvisual/input"
+	"github.com/pingcap/pd/v4/server"
 )
 
 var _ dashboardpd.EtcdProvider = (*PdEtcdProvider)(nil)
@@ -65,7 +66,7 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 		panic(err)
 	}
 
-	etcdProvider := &PdEtcdProvider{srv:srv}
+	etcdProvider := &PdEtcdProvider{srv: srv}
 
 	tidbForwarder := tidb.NewForwarder(tidb.NewForwarderConfig(), etcdProvider)
 	// FIXME: Handle open error
@@ -84,9 +85,9 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	keyvisualService := keyvisual.NewService(dashboardCtx, wg, dashboardCfg, localDataProvider)
 	// api server
 	services := &apiserver.Services{
-		Store:     store,
-		KeyVisual: keyvisualService,
-		TiDBForwarder:tidbForwarder,
+		Store:         store,
+		KeyVisual:     keyvisualService,
+		TiDBForwarder: tidbForwarder,
 	}
 	handler := apiserver.Handler(serviceGroup.PathPrefix, dashboardCfg, services)
 
