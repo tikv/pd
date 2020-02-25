@@ -14,9 +14,11 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -989,6 +991,25 @@ func (c *Config) GetZapLogger() *zap.Logger {
 // GetZapLogProperties gets properties of the zap logger.
 func (c *Config) GetZapLogProperties() *log.ZapProperties {
 	return c.logProps
+}
+
+// GetConfigFile gets the config file.
+func (c *Config) GetConfigFile() string {
+	return c.configFile
+}
+
+// RewriteFile rewrites the config file after updating the config.
+func (c *Config) RewriteFile(new *Config) error {
+	filePath := c.GetConfigFile()
+	if filePath == "" {
+		return nil
+	}
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(*new); err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(filePath, buf.Bytes(), 0644)
 }
 
 // GenEmbedEtcdConfig generates a configuration for embedded etcd.
