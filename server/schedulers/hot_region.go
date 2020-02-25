@@ -71,6 +71,10 @@ const (
 
 	minHotByteRate = 100
 	minHotKeyRate  = 10
+
+	byteRateRankStepRatio = 0.05
+	keyRateRankStepRatio  = 0.05
+	countRankStepRatio    = 0.1
 )
 
 type hotScheduler struct {
@@ -420,9 +424,9 @@ func (bs *balanceSolver) init() {
 	}
 
 	bs.rankStep = &storeLoad{
-		ByteRate: maxCur.ByteRate / 20,
-		KeyRate:  maxCur.KeyRate / 20,
-		Count:    maxCur.Count / 10,
+		ByteRate: maxCur.ByteRate * byteRateRankStepRatio,
+		KeyRate:  maxCur.KeyRate * keyRateRankStepRatio,
+		Count:    maxCur.Count * countRankStepRatio,
 	}
 }
 
