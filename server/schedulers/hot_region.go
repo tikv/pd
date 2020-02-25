@@ -487,7 +487,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for srcStoreID := range bs.filterSrcStores() {
 		bs.cur.srcStoreID = srcStoreID
 
-		for _, srcPeerStat := range bs.getHotPeers() {
+		for _, srcPeerStat := range bs.filterHotPeers() {
 			bs.cur.srcPeerStat = srcPeerStat
 			bs.cur.region = bs.getRegion()
 			if bs.cur.region == nil {
@@ -542,8 +542,9 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	return ret
 }
 
-func (bs *balanceSolver) getHotPeers() []*statistics.HotPeerStat {
+func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
+	// Return at most maxPeerNum peers, to prevent balanceSolver.solve() too slow.
 	if len(ret) <= maxPeerNum {
 		return ret
 	}
