@@ -42,10 +42,12 @@ var serviceGroup = server.ServiceGroup{
 	PathPrefix: "/dashboard/api/",
 }
 
+// PdEtcdProvider provides etcd client from PD server
 type PdEtcdProvider struct {
 	srv *server.Server
 }
 
+// GetEtcdClient gets etcd client
 func (p *PdEtcdProvider) GetEtcdClient() *clientv3.Client {
 	return p.srv.GetClient()
 }
