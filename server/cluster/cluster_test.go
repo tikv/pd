@@ -635,7 +635,7 @@ func newTestCluster(opt *config.ScheduleOption) *testCluster {
 
 func newTestRaftCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
 	rc := &RaftCluster{}
-	rc.InitCluster(id, opt, storage, basicCluster)
+	rc.InitCluster(id, opt, storage, basicCluster, func() {})
 	return rc
 }
 

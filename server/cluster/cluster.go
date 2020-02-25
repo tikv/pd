@@ -59,6 +59,7 @@ type Server interface {
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
+	GetSchedulersCallback() func()
 }
 
 // RaftCluster is used for cluster config management.
@@ -101,6 +102,8 @@ type RaftCluster struct {
 
 	ruleManager *placement.RuleManager
 	client      *clientv3.Client
+
+	schedulersCallback func()
 }
 
 // Status saves some state information.
@@ -170,7 +173,7 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster) {
+func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster, cb func()) {
 	c.core = basicCluster
 	c.opt = opt
 	c.storage = storage
@@ -180,6 +183,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
+	c.schedulersCallback = cb
 }
 
 // Start starts a cluster.
@@ -192,7 +196,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage(), s.GetBasicCluster())
+	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage(), s.GetBasicCluster(), s.GetSchedulersCallback())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
