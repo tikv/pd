@@ -49,17 +49,17 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	unhealthMembers := cluster.CheckHealth(members)
+	healthMembers := cluster.CheckHealth(members)
 	healths := []Health{}
 	for _, member := range members {
 		h := Health{
 			Name:       member.Name,
 			MemberID:   member.MemberId,
 			ClientUrls: member.ClientUrls,
-			Health:     true,
+			Health:     false,
 		}
-		if _, ok := unhealthMembers[member.GetMemberId()]; ok {
-			h.Health = false
+		if _, ok := healthMembers[member.GetMemberId()]; ok {
+			h.Health = true
 		}
 		healths = append(healths, h)
 	}
