@@ -15,6 +15,7 @@ package checker
 
 import (
 	"encoding/hex"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -177,5 +178,23 @@ func (s *testRuleCheckerSuite) TestBetterReplacement(c *C) {
 	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(4))
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 4)
 	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+}
+
+func (s *testRuleCheckerSuite) TestNoBetterReplacement(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	s.ruleManager.SetRule(&placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"host"},
+	})
+	op := s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, IsNil)
 }
