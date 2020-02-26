@@ -573,10 +573,9 @@ func getUpdateValue(item, updateItem interface{}) (interface{}, error) {
 			return nil, errors.Errorf("unexpected type: %T\n", t1)
 		}
 	case reflect.Slice:
-		// TODO: handle slice better
 		if item, ok := updateItem.(string); ok {
 			strSlice := strings.Split(item, ",")
-			slice := make([]interface{}, 0)
+			var slice []interface{}
 			for _, str := range strSlice {
 				slice = append(slice, str)
 			}

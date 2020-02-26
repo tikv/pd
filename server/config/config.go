@@ -1008,7 +1008,7 @@ func (c *Config) RewriteFile(new *Config) error {
 	if err := toml.NewEncoder(&buf).Encode(*new); err != nil {
 		return err
 	}
-
+	// 0644 represent the permission of file which is "-rw-r--r--" here.
 	return ioutil.WriteFile(filePath, buf.Bytes(), 0644)
 }
 
