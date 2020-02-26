@@ -40,17 +40,17 @@ type MetaStore struct {
 
 // StoreStatus contains status about a store.
 type StoreStatus struct {
-	Capacity           typeutil.ByteSize  `json:"capacity,omitempty"`
-	Available          typeutil.ByteSize  `json:"available,omitempty"`
-	UsedSize           typeutil.ByteSize  `json:"used_size,omitempty"`
-	LeaderCount        int                `json:"leader_count,omitempty"`
-	LeaderWeight       float64            `json:"leader_weight,omitempty"`
-	LeaderScore        float64            `json:"leader_score,omitempty"`
-	LeaderSize         int64              `json:"leader_size,omitempty"`
-	RegionCount        int                `json:"region_count,omitempty"`
-	RegionWeight       float64            `json:"region_weight,omitempty"`
-	RegionScore        float64            `json:"region_score,omitempty"`
-	RegionSize         int64              `json:"region_size,omitempty"`
+	Capacity           typeutil.ByteSize  `json:"capacity"`
+	Available          typeutil.ByteSize  `json:"available"`
+	UsedSize           typeutil.ByteSize  `json:"used_size"`
+	LeaderCount        int                `json:"leader_count"`
+	LeaderWeight       float64            `json:"leader_weight"`
+	LeaderScore        float64            `json:"leader_score"`
+	LeaderSize         int64              `json:"leader_size"`
+	RegionCount        int                `json:"region_count"`
+	RegionWeight       float64            `json:"region_weight"`
+	RegionScore        float64            `json:"region_score"`
+	RegionSize         int64              `json:"region_size"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	ApplyingSnapCount  uint32             `json:"applying_snap_count,omitempty"`

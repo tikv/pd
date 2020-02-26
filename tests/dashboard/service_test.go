@@ -89,11 +89,11 @@ func (s *serverTestSuite) TestEnable(c *C) {
 	url := fmt.Sprintf("%s/dashboard/", leader.GetAddr())
 	checkReqCode(url, 200)
 	url = fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", leader.GetAddr())
-	checkReqCode(url, 200)
+	checkReqCode(url, 401)
 	url = fmt.Sprintf("%s/dashboard/", follower.GetAddr())
 	checkReqCode(url, 200)
 	url = fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", follower.GetAddr())
-	checkReqCode(url, 200)
+	checkReqCode(url, 401)
 }
 
 func (s *serverTestSuite) TestDisable(c *C) {
