@@ -164,10 +164,14 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 // Influence records operator influence.
 type Influence struct {
 	ByteRate float64
+	KeyRate  float64
+	Count    float64
 }
 
 func (infl Influence) add(rhs *Influence, w float64) Influence {
 	infl.ByteRate += rhs.ByteRate * w
+	infl.KeyRate += rhs.KeyRate * w
+	infl.Count += rhs.Count * w
 	return infl
 }
 
@@ -202,16 +206,66 @@ func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*op
 
 type storeLoad struct {
 	ByteRate float64
-	Count    int
+	KeyRate  float64
+	Count    float64
 }
 
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	future := *load
 	future.ByteRate += infl.ByteRate
+	future.KeyRate += infl.KeyRate
+	future.Count += infl.Count
 	return &storeLoadPred{
 		Current: *load,
 		Future:  future,
 	}
+}
+
+func stLdByteRate(ld *storeLoad) float64 {
+	return ld.ByteRate
+}
+
+func stLdKeyRate(ld *storeLoad) float64 {
+	return ld.KeyRate
+}
+
+func stLdCount(ld *storeLoad) float64 {
+	return ld.Count
+}
+
+type storeLoadCmp func(ld1, ld2 *storeLoad) int
+
+func negLoadCmp(cmp storeLoadCmp) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		return -cmp(ld1, ld2)
+	}
+}
+
+func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		for _, cmp := range cmps {
+			if r := cmp(ld1, ld2); r != 0 {
+				return r
+			}
+		}
+		return 0
+	}
+}
+
+func stLdRankCmp(dim func(ld *storeLoad) float64, rank func(value float64) int64) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		return rankCmp(dim(ld1), dim(ld2), rank)
+	}
+}
+
+func rankCmp(a, b float64, rank func(value float64) int64) int {
+	aRk, bRk := rank(a), rank(b)
+	if aRk < bRk {
+		return -1
+	} else if aRk > bRk {
+		return 1
+	}
+	return 0
 }
 
 // store load prediction
@@ -220,40 +274,68 @@ type storeLoadPred struct {
 	Future  storeLoad
 }
 
-func (lp *storeLoadPred) min() storeLoad {
+func (lp *storeLoadPred) min() *storeLoad {
 	return minLoad(&lp.Current, &lp.Future)
 }
 
-func (lp *storeLoadPred) max() storeLoad {
+func (lp *storeLoadPred) max() *storeLoad {
 	return maxLoad(&lp.Current, &lp.Future)
 }
 
-func minLoad(a, b *storeLoad) storeLoad {
-	return storeLoad{
+func (lp *storeLoadPred) diff() *storeLoad {
+	mx, mn := lp.max(), lp.min()
+	return &storeLoad{
+		ByteRate: mx.ByteRate - mn.ByteRate,
+		KeyRate:  mx.KeyRate - mn.KeyRate,
+		Count:    mx.Count - mn.Count,
+	}
+}
+
+type storeLPCmp func(lp1, lp2 *storeLoadPred) int
+
+func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		for _, cmp := range cmps {
+			if r := cmp(lp1, lp2); r != 0 {
+				return r
+			}
+		}
+		return 0
+	}
+}
+
+func minLPCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.min(), lp2.min())
+	}
+}
+
+func maxLPCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.max(), lp2.max())
+	}
+}
+
+func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.diff(), lp2.diff())
+	}
+}
+
+func minLoad(a, b *storeLoad) *storeLoad {
+	return &storeLoad{
 		ByteRate: math.Min(a.ByteRate, b.ByteRate),
-		Count:    minInt(a.Count, b.Count),
+		KeyRate:  math.Min(a.KeyRate, b.KeyRate),
+		Count:    math.Min(a.Count, b.Count),
 	}
 }
 
-func maxLoad(a, b *storeLoad) storeLoad {
-	return storeLoad{
+func maxLoad(a, b *storeLoad) *storeLoad {
+	return &storeLoad{
 		ByteRate: math.Max(a.ByteRate, b.ByteRate),
-		Count:    maxInt(a.Count, b.Count),
+		KeyRate:  math.Max(a.KeyRate, b.KeyRate),
+		Count:    math.Max(a.Count, b.Count),
 	}
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
-	if a < b {
-		return b
-	}
-	return a
 }
 
 type storeLoadDetail struct {
