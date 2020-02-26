@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1008,8 +1007,21 @@ func (c *Config) RewriteFile(new *Config) error {
 	if err := toml.NewEncoder(&buf).Encode(*new); err != nil {
 		return err
 	}
-	// 0644 represent the permission of file which is "-rw-r--r--" here.
-	return ioutil.WriteFile(filePath, buf.Bytes(), 0644)
+	dir := filepath.Dir(filePath)
+	tmpfile := filepath.Join(dir, "tmp_pd.toml")
+
+	f, err := os.Create(tmpfile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Write(buf.Bytes()); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	return os.Rename(tmpfile, filePath)
 }
 
 // GenEmbedEtcdConfig generates a configuration for embedded etcd.
