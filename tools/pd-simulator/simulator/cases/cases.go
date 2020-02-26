@@ -15,9 +15,9 @@ package cases
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/info"
-	"github.com/pingcap/pd/tools/pd-simulator/simulator/simutil"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/info"
+	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/simutil"
 )
 
 // Store is used to simulate tikv.

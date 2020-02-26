@@ -16,11 +16,11 @@ package schedule
 import (
 	"context"
 
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/checker"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/checker"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
 )
 
 // CheckerController is used to manage all checkers.

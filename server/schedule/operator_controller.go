@@ -27,10 +27,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/cache"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/v4/pkg/cache"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"go.uber.org/zap"
 )
 

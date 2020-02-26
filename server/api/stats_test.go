@@ -19,10 +19,10 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v4/pkg/apiutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/statistics"
 )
 
 var _ = Suite(&testStatsSuite{})

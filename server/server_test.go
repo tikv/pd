@@ -21,9 +21,9 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/etcdutil"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v4/pkg/etcdutil"
+	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/server/config"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/goleak"

@@ -27,18 +27,18 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/etcdutil"
-	"github.com/pingcap/pd/pkg/logutil"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/id"
-	syncer "github.com/pingcap/pd/server/region_syncer"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/checker"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/schedule/placement"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v4/pkg/etcdutil"
+	"github.com/pingcap/pd/v4/pkg/logutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/id"
+	syncer "github.com/pingcap/pd/v4/server/region_syncer"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/checker"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -1596,20 +1596,21 @@ var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.
 func CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
-	unhealthMembers := make(map[uint64]*pdpb.Member)
+	healthMembers := make(map[uint64]*pdpb.Member)
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
 			resp, err := DialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
 			if resp != nil {
 				resp.Body.Close()
 			}
-			if err != nil || resp.StatusCode != http.StatusOK {
-				unhealthMembers[member.GetMemberId()] = member
+
+			if err == nil && resp.StatusCode == http.StatusOK {
+				healthMembers[member.GetMemberId()] = member
 				break
 			}
 		}
 	}
-	return unhealthMembers
+	return healthMembers
 }
 
 // GetMembers return a slice of Members.

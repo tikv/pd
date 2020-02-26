@@ -20,10 +20,10 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/cluster"
-	"github.com/pingcap/pd/server/schedulers"
+	"github.com/pingcap/pd/v4/pkg/apiutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/schedulers"
 	"github.com/unrolled/render"
 )
 

@@ -19,7 +19,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/v4/server"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )

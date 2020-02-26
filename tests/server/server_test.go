@@ -18,14 +18,14 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/tempurl"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/tests"
+	"github.com/pingcap/pd/v4/pkg/tempurl"
+	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/tests"
 	"go.uber.org/goleak"
 
 	// Register schedulers.
-	_ "github.com/pingcap/pd/server/schedulers"
+	_ "github.com/pingcap/pd/v4/server/schedulers"
 )
 
 func Test(t *testing.T) {

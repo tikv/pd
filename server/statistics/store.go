@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v4/server/core"
 )
 
 const (

@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/juju/ratelimit"
-	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
 )
 
 // StoreLimitMode indicates the strategy to set store limit

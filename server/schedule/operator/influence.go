@@ -13,7 +13,7 @@
 
 package operator
 
-import "github.com/pingcap/pd/server/core"
+import "github.com/pingcap/pd/v4/server/core"
 
 // OpInfluence records the influence of the cluster.
 type OpInfluence struct {

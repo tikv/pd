@@ -16,7 +16,7 @@ package command
 import (
 	"strconv"
 
-	"github.com/pingcap/pd/pkg/tsoutil"
+	"github.com/pingcap/pd/v4/pkg/tsoutil"
 	"github.com/spf13/cobra"
 )
 
