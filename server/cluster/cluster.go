@@ -1596,20 +1596,21 @@ var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.
 func CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
-	unhealthMembers := make(map[uint64]*pdpb.Member)
+	healthMembers := make(map[uint64]*pdpb.Member)
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
 			resp, err := DialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
 			if resp != nil {
 				resp.Body.Close()
 			}
-			if err != nil || resp.StatusCode != http.StatusOK {
-				unhealthMembers[member.GetMemberId()] = member
+
+			if err == nil && resp.StatusCode == http.StatusOK {
+				healthMembers[member.GetMemberId()] = member
 				break
 			}
 		}
 	}
-	return unhealthMembers
+	return healthMembers
 }
 
 // GetMembers return a slice of Members.
