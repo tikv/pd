@@ -72,6 +72,8 @@ const (
 	minHotByteRate = 100
 	minHotKeyRate  = 10
 
+	// rank step ratio decide the step when calculate rank
+	// step = max current * rank step ratio
 	byteRateRankStepRatio = 0.05
 	keyRateRankStepRatio  = 0.05
 	countRankStepRatio    = 0.1
