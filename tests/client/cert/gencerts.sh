@@ -1,6 +1,6 @@
 #!/bin/bash
 if ! [[ "$0" =~ "./gencerts.sh"  ]]; then
-      echo "must be run from 'cert-expired'"
+      echo "must be run from 'cert'"
         exit 255
 fi
 
