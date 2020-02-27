@@ -23,11 +23,11 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	pd "github.com/pingcap/pd/v4/client"
-	"github.com/pingcap/pd/v4/pkg/grpcutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/tests"
+	pd "github.com/pingcap/pd/v3/client"
+	"github.com/pingcap/pd/v3/pkg/grpcutil"
+	"github.com/pingcap/pd/v3/server"
+	"github.com/pingcap/pd/v3/server/config"
+	"github.com/pingcap/pd/v3/tests"
 	"go.etcd.io/etcd/pkg/transport"
 	"google.golang.org/grpc"
 )
