@@ -688,6 +688,26 @@ func (s *Server) GetAllocator() *id.AllocatorImpl {
 	return s.idAllocator
 }
 
+// GetSchedulersCallback returns a callback function to update config manager.
+func (s *Server) GetSchedulersCallback() func() {
+	return func() {
+		if s.GetConfig().EnableDynamicConfig {
+			value := s.GetScheduleConfig().Schedulers
+			tmp := map[string]interface{}{
+				"schedulers": value,
+			}
+			var buf bytes.Buffer
+			if err := toml.NewEncoder(&buf).Encode(tmp); err != nil {
+				log.Error("failed to encode config", zap.Error(err))
+			}
+
+			if err := s.updateConfigManager("schedule.schedulers", buf.String()); err != nil {
+				log.Error("failed to update the schedulers", zap.Error(err))
+			}
+		}
+	}
+}
+
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
@@ -908,15 +928,19 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	return nil
 }
 
-func (s *Server) updateConfigManager(name, value string) *configpb.Status {
+func (s *Server) updateConfigManager(name, value string) error {
 	configManager := s.GetConfigManager()
 	globalVersion := configManager.GetGlobalConfigs(Component).GetVersion()
 	version := &configpb.Version{Global: globalVersion}
 	entries := []*configpb.ConfigEntry{{Name: name, Value: value}}
 	configManager.Lock()
-	defer configManager.Unlock()
 	_, status := configManager.UpdateGlobal(Component, version, entries)
-	return status
+	configManager.Unlock()
+	if status.GetCode() != configpb.StatusCode_OK {
+		return errors.New(status.GetMessage())
+	}
+
+	return configManager.Persist(s.GetStorage())
 }
 
 // GetLabelProperty returns the whole label property config.
