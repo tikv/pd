@@ -573,12 +573,16 @@ func getUpdateValue(item, updateItem interface{}) (interface{}, error) {
 			return nil, errors.Errorf("unexpected type: %T\n", t1)
 		}
 	case reflect.Slice:
-		strSlice := strings.Split(updateItem.(string), ",")
-		slice := make([]interface{}, 0)
-		for _, str := range strSlice {
-			slice = append(slice, str)
+		if item, ok := updateItem.(string); ok {
+			strSlice := strings.Split(item, ",")
+			var slice []interface{}
+			for _, str := range strSlice {
+				slice = append(slice, str)
+			}
+			v = slice
+		} else {
+			return nil, errors.Errorf("%v cannot cast to string", updateItem)
 		}
-		v = slice
 	case reflect.Float64:
 		switch t1 := updateItem.(type) {
 		case string:

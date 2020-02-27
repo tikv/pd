@@ -1264,6 +1264,7 @@ func (s *Server) getComponentConfig(ctx context.Context, version *configpb.Versi
 // TODO: support more config item
 func (s *Server) updateComponentConfig(cfg string) error {
 	new := &config.Config{}
+	var saveFile bool
 	if _, err := toml.Decode(cfg, &new); err != nil {
 		return err
 	}
@@ -1273,6 +1274,7 @@ func (s *Server) updateComponentConfig(cfg string) error {
 			return err
 		}
 		err = s.SetScheduleConfig(new.Schedule)
+		saveFile = true
 	}
 
 	if !reflect.DeepEqual(s.GetReplicationConfig(), &new.Replication) {
@@ -1280,24 +1282,36 @@ func (s *Server) updateComponentConfig(cfg string) error {
 			return err
 		}
 		err = s.SetReplicationConfig(new.Replication)
+		saveFile = true
 	}
 
 	if !reflect.DeepEqual(s.GetPDServerConfig(), &new.PDServerCfg) {
 		err = s.SetPDServerConfig(new.PDServerCfg)
+		saveFile = true
 	}
 
 	if !reflect.DeepEqual(s.GetClusterVersion(), new.ClusterVersion) {
 		err = s.SetClusterVersion(new.ClusterVersion.String())
+		saveFile = true
 	}
 
 	if !reflect.DeepEqual(s.GetLabelProperty(), new.LabelProperty) {
 		err = s.SetLabelPropertyConfig(new.LabelProperty)
+		saveFile = true
 	}
 
 	if !reflect.DeepEqual(s.GetLogConfig(), &new.Log) {
 		err = s.SetLogConfig(new.Log)
+		saveFile = true
 	}
-	return err
+	if err != nil {
+		return err
+	}
+
+	if saveFile {
+		return s.cfg.RewriteFile(new)
+	}
+	return nil
 }
 
 func (s *Server) reloadConfigFromKV() error {

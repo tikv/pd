@@ -280,7 +280,10 @@ func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var buf bytes.Buffer
-		toml.NewEncoder(&buf).Encode(cfg)
+		if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		entries := []*entry{{key: "label-property", value: buf.String()}}
 		err := redirectUpdateReq(h.svr.Context(), client, cm, entries)
 		if err != nil {
