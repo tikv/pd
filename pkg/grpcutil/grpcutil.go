@@ -31,7 +31,8 @@ type SecurityConfig struct {
 	// CertPath is the path of file that contains X509 certificate in PEM format.
 	CertPath string `toml:"cert-path" json:"cert-path"`
 	// KeyPath is the path of file that contains X509 key in PEM format.
-	KeyPath string `toml:"key-path" json:"key-path"`
+	KeyPath        string `toml:"key-path" json:"key-path"`
+	ClientCertAuth bool   `toml:"client-cert-auth" json:"client-cert-auth"`
 }
 
 // ToTLSConfig generatres tls config.
@@ -40,9 +41,10 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 		return nil, nil
 	}
 	tlsInfo := transport.TLSInfo{
-		CertFile:      s.CertPath,
-		KeyFile:       s.KeyPath,
-		TrustedCAFile: s.CAPath,
+		CertFile:       s.CertPath,
+		KeyFile:        s.KeyPath,
+		TrustedCAFile:  s.CAPath,
+		ClientCertAuth: s.ClientCertAuth,
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
