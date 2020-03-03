@@ -15,13 +15,14 @@ package pdctl
 
 import (
 	"fmt"
+	"io"
+	"os"
+
 	"github.com/chzyer/readline"
 	"github.com/mattn/go-shellwords"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
-	"io"
-	"os"
 )
 
 // CommandFlags are flags that used in all Commands
