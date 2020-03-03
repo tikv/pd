@@ -43,7 +43,7 @@ func (s *BalanceSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo
 	filters = append(filters, s.filters...)
 	var result *core.StoreInfo
 	for _, store := range stores {
-		if filter.Source(opt, store, filters) {
+		if !filter.Source(opt, store, filters) {
 			continue
 		}
 		if result == nil ||
@@ -62,7 +62,7 @@ func (s *BalanceSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo
 	filters = append(filters, s.filters...)
 	var result *core.StoreInfo
 	for _, store := range stores {
-		if filter.Target(opt, store, filters) {
+		if !filter.Target(opt, store, filters) {
 			continue
 		}
 		if result == nil ||
@@ -110,7 +110,7 @@ func (s *ReplicaSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo
 			best, bestScore = store, score
 		}
 	}
-	if best == nil || filter.Source(opt, best, s.filters) {
+	if best == nil || !filter.Source(opt, best, s.filters) {
 		return nil
 	}
 	return best
@@ -124,7 +124,7 @@ func (s *ReplicaSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo
 		bestScore float64
 	)
 	for _, store := range stores {
-		if filter.Target(opt, store, filters) {
+		if !filter.Target(opt, store, filters) {
 			continue
 		}
 		score := core.DistinctScore(s.labels, s.regionStores, store)
@@ -132,7 +132,7 @@ func (s *ReplicaSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo
 			best, bestScore = store, score
 		}
 	}
-	if best == nil || filter.Target(opt, best, s.filters) {
+	if best == nil || !filter.Target(opt, best, s.filters) {
 		return nil
 	}
 	return best
@@ -183,7 +183,7 @@ func (s *RandomSelector) randStore(stores []*core.StoreInfo) *core.StoreInfo {
 func (s *RandomSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo) *core.StoreInfo {
 	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {
-		if filter.Source(opt, store, s.filters) {
+		if !filter.Source(opt, store, s.filters) {
 			continue
 		}
 		candidates = append(candidates, store)
@@ -197,7 +197,7 @@ func (s *RandomSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo,
 
 	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {
-		if filter.Target(opt, store, filters) {
+		if !filter.Target(opt, store, filters) {
 			continue
 		}
 		candidates = append(candidates, store)

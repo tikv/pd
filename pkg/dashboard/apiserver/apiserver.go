@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/dbstore"
+	dashboardhttp "github.com/pingcap-incubator/tidb-dashboard/pkg/http"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
 	dashboardpd "github.com/pingcap-incubator/tidb-dashboard/pkg/pd"
@@ -74,6 +75,8 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	// FIXME: Handle open error
 	tidbForwarder.Open() //nolint:errcheck
 
+	httpClient := dashboardhttp.NewHTTPClientWithConf(dashboardCfg)
+
 	// key visual
 	dashboardCtx, cancel := context.WithCancel(ctx)
 	wg := &sync.WaitGroup{}
@@ -89,6 +92,8 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 		Store:         store,
 		KeyVisual:     keyvisualService,
 		TiDBForwarder: tidbForwarder,
+		EtcdProvider:  etcdProvider,
+		HTTPClient:    httpClient,
 	}
 	handler := apiserver.Handler(serviceGroup.PathPrefix, dashboardCfg, services)
 

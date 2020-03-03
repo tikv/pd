@@ -28,14 +28,14 @@ import (
 // SelectSourceStores selects stores that be selected as source store from the list.
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt opt.Options) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
-		return slice.NoneOf(filters, func(i int) bool { return filters[i].Source(opt, s) })
+		return slice.AllOf(filters, func(i int) bool { return filters[i].Source(opt, s) })
 	})
 }
 
 // SelectTargetStores selects stores that be selected as target store from the list.
 func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt opt.Options) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
-		return slice.NoneOf(filters, func(i int) bool { return filters[i].Target(opt, s) })
+		return slice.AllOf(filters, func(i int) bool { return filters[i].Target(opt, s) })
 	})
 }
 
@@ -53,9 +53,9 @@ type Filter interface {
 	// Scope is used to indicate where the filter will act on.
 	Scope() string
 	Type() string
-	// Return true if the store should not be used as a source store.
+	// Return true if the store can be used as a source store.
 	Source(opt opt.Options, store *core.StoreInfo) bool
-	// Return true if the store should not be used as a target store.
+	// Return true if the store can be used as a target store.
 	Target(opt opt.Options, store *core.StoreInfo) bool
 }
 
@@ -64,12 +64,12 @@ func Source(opt opt.Options, store *core.StoreInfo, filters []Filter) bool {
 	storeAddress := store.GetAddress()
 	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
-		if filter.Source(opt, store) {
+		if !filter.Source(opt, store) {
 			filterCounter.WithLabelValues("filter-source", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // Target checks if store can pass all Filters as target store.
@@ -77,12 +77,12 @@ func Target(opt opt.Options, store *core.StoreInfo, filters []Filter) bool {
 	storeAddress := store.GetAddress()
 	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
-		if filter.Target(opt, store) {
+		if !filter.Target(opt, store) {
 			filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 type excludedFilter struct {
@@ -110,12 +110,12 @@ func (f *excludedFilter) Type() string {
 
 func (f *excludedFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 	_, ok := f.sources[store.GetID()]
-	return ok
+	return !ok
 }
 
 func (f *excludedFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	_, ok := f.targets[store.GetID()]
-	return ok
+	return !ok
 }
 
 type storeLimitFilter struct{ scope string }
@@ -134,11 +134,11 @@ func (f *storeLimitFilter) Type() string {
 }
 
 func (f *storeLimitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return !store.IsAvailable()
+	return store.IsAvailable()
 }
 
 func (f *storeLimitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return !store.IsAvailable()
+	return store.IsAvailable()
 }
 
 type stateFilter struct{ scope string }
@@ -157,11 +157,11 @@ func (f *stateFilter) Type() string {
 }
 
 func (f *stateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsTombstone()
+	return !store.IsTombstone()
 }
 
 func (f *stateFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return !store.IsUp()
+	return store.IsUp()
 }
 
 type healthFilter struct{ scope string }
@@ -181,9 +181,9 @@ func (f *healthFilter) Type() string {
 
 func (f *healthFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
 	if store.IsBusy() {
-		return true
+		return false
 	}
-	return store.DownTime() > opt.GetMaxStoreDownTime()
+	return store.DownTime() <= opt.GetMaxStoreDownTime()
 }
 
 func (f *healthFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
@@ -212,9 +212,9 @@ func (p *pendingPeerCountFilter) Type() string {
 
 func (p *pendingPeerCountFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
 	if opt.GetMaxPendingPeerCount() == 0 {
-		return false
+		return true
 	}
-	return store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount())
+	return store.GetPendingPeerCount() <= int(opt.GetMaxPendingPeerCount())
 }
 
 func (p *pendingPeerCountFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
@@ -242,9 +242,9 @@ func (f *snapshotCountFilter) Type() string {
 }
 
 func (f *snapshotCountFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
-	return uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount()
+	return uint64(store.GetSendingSnapCount()) <= opt.GetMaxSnapshotCount() &&
+		uint64(store.GetReceivingSnapCount()) <= opt.GetMaxSnapshotCount() &&
+		uint64(store.GetApplyingSnapCount()) <= opt.GetMaxSnapshotCount()
 }
 
 func (f *snapshotCountFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
@@ -274,11 +274,11 @@ func (f *cacheFilter) Type() string {
 }
 
 func (f *cacheFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return f.cache.Exists(store.GetID())
+	return !f.cache.Exists(store.GetID())
 }
 
 func (f *cacheFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return false
+	return true
 }
 
 type storageThresholdFilter struct{ scope string }
@@ -298,11 +298,11 @@ func (f *storageThresholdFilter) Type() string {
 }
 
 func (f *storageThresholdFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return false
+	return true
 }
 
 func (f *storageThresholdFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsLowSpace(opt.GetLowSpaceRatio())
+	return !store.IsLowSpace(opt.GetLowSpaceRatio())
 }
 
 // distinctScoreFilter ensures that distinct score will not decrease.
@@ -341,11 +341,11 @@ func (f *distinctScoreFilter) Type() string {
 }
 
 func (f *distinctScoreFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return false
+	return true
 }
 
 func (f *distinctScoreFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return core.DistinctScore(f.labels, f.stores, store) < f.safeScore
+	return core.DistinctScore(f.labels, f.stores, store) >= f.safeScore
 }
 
 // StoreStateFilter is used to determine whether a store can be selected as the
@@ -368,67 +368,67 @@ func (f StoreStateFilter) Type() string {
 	return "store-state-filter"
 }
 
-// Source returns true when the store cannot be selected as the schedule
+// Source returns true when the store can be selected as the schedule
 // source.
 func (f StoreStateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 	if store.IsTombstone() ||
 		store.DownTime() > opt.GetMaxStoreDownTime() {
-		return true
+		return false
 	}
 	if f.TransferLeader && (store.IsDisconnected() || store.IsBlocked()) {
-		return true
+		return false
 	}
 
-	if f.MoveRegion && f.filterMoveRegion(opt, store) {
-		return true
+	if f.MoveRegion && !f.filterMoveRegion(opt, store) {
+		return false
 	}
-	return false
+	return true
 }
 
-// Target returns true when the store cannot be selected as the schedule
+// Target returns true when the store can be selected as the schedule
 // target.
 func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
 	if store.IsTombstone() ||
 		store.IsOffline() ||
 		store.DownTime() > opts.GetMaxStoreDownTime() {
-		return true
+		return false
 	}
 	if f.TransferLeader &&
 		(store.IsDisconnected() ||
 			store.IsBlocked() ||
 			store.IsBusy() ||
 			opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())) {
-		return true
+		return false
 	}
 
 	if f.MoveRegion {
 		// only target consider the pending peers because pending more means the disk is slower.
 		if opts.GetMaxPendingPeerCount() > 0 && store.GetPendingPeerCount() > int(opts.GetMaxPendingPeerCount()) {
-			return true
+			return false
 		}
 
-		if f.filterMoveRegion(opts, store) {
-			return true
+		if !f.filterMoveRegion(opts, store) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func (f StoreStateFilter) filterMoveRegion(opt opt.Options, store *core.StoreInfo) bool {
 	if store.IsBusy() {
-		return true
+		return false
 	}
 
 	if !store.IsAvailable() {
-		return true
+		return false
 	}
 
 	if uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount() {
-		return true
+		return false
 	}
-	return false
+	return true
 }
 
 // BlacklistType the type of BlackListStore Filter.
@@ -471,7 +471,7 @@ func (f *BlacklistStoreFilter) Type() string {
 // Source implements the Filter.
 func (f *BlacklistStoreFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 	if f.flag&BlacklistSource != BlacklistSource {
-		return false
+		return true
 	}
 	return f.filter(store)
 }
@@ -484,14 +484,14 @@ func (f *BlacklistStoreFilter) Add(storeID uint64) {
 // Target implements the Filter.
 func (f *BlacklistStoreFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	if f.flag&BlacklistTarget != BlacklistTarget {
-		return false
+		return true
 	}
 	return f.filter(store)
 }
 
 func (f *BlacklistStoreFilter) filter(store *core.StoreInfo) bool {
 	_, ok := f.blacklist[store.GetID()]
-	return ok
+	return !ok
 }
 
 // labelConstraintFilter is a filter that selects stores satisfy the constraints.
@@ -517,12 +517,12 @@ func (f labelConstraintFilter) Type() string {
 
 // Source filters stores when select them as schedule source.
 func (f labelConstraintFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return !placement.MatchLabelConstraints(store, f.constraints)
+	return placement.MatchLabelConstraints(store, f.constraints)
 }
 
 // Target filters stores when select them as schedule target.
 func (f labelConstraintFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return !placement.MatchLabelConstraints(store, f.constraints)
+	return placement.MatchLabelConstraints(store, f.constraints)
 }
 
 // RegionFitter is the interface that can fit a region against placement rules.
@@ -560,11 +560,11 @@ func (f *ruleFitFilter) Type() string {
 }
 
 func (f *ruleFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return false
+	return true
 }
 
 func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	region := f.region.Clone(core.WithReplacePeerStore(f.oldStore, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
-	return placement.CompareRegionFit(f.oldFit, newFit) > 0
+	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }

@@ -179,7 +179,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 		stores := cluster.GetStores()
 		destStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
-			if filter.Target(cluster, store, filters) {
+			if !filter.Target(cluster, store, filters) {
 				continue
 			}
 			destStoreIDs = append(destStoreIDs, store.GetID())
