@@ -94,7 +94,7 @@ func getBasicCmd() *cobra.Command {
 	return rootCmd
 }
 
-func getRootCmd(args []string) *cobra.Command {
+func getInteractCmd(args []string) *cobra.Command {
 	rootCmd := getBasicCmd()
 
 	rootCmd.SetArgs(args)
@@ -121,22 +121,16 @@ func getMainCmd(args []string) *cobra.Command {
 
 // MainStart start main command
 func MainStart(args []string) {
-	rootCmd := getMainCmd(args)
-	if len(commandFlags.CAPath) != 0 {
-		if err := command.InitHTTPSClient(commandFlags.CAPath, commandFlags.CertPath, commandFlags.KeyPath); err != nil {
-			rootCmd.Println(err)
-			return
-		}
-	}
-
-	if err := rootCmd.Execute(); err != nil {
-		rootCmd.Println(err)
-	}
+	startCmd(getMainCmd, args)
 }
 
 // Start start interact command
 func Start(args []string) {
-	rootCmd := getRootCmd(args)
+	startCmd(getInteractCmd, args)
+}
+
+func startCmd(getCmd func([]string) *cobra.Command, args []string) {
+	rootCmd := getCmd(args)
 	if len(commandFlags.CAPath) != 0 {
 		if err := command.InitHTTPSClient(commandFlags.CAPath, commandFlags.CertPath, commandFlags.KeyPath); err != nil {
 			rootCmd.Println(err)
