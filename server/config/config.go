@@ -830,8 +830,8 @@ type SchedulerConfig struct {
 	Args        []string               `toml:"args" json:"args"`
 	Disable     bool                   `toml:"disable" json:"disable"`
 	ArgsPayload string                 `toml:"args-payload" json:"args-payload"`
-	Name        string                 `toml:"name" json:"name"`
-	Payload     map[string]interface{} `toml:"payload" json:"payload"`
+	Name        string                 `toml:"name" json:"name, omitempty"`
+	Payload     map[string]interface{} `toml:"payload" json:"payload, omitempty"`
 }
 
 var defaultSchedulers = SchedulerConfigs{
