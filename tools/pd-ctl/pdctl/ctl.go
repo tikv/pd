@@ -118,7 +118,7 @@ func getMainCmd(args []string) *cobra.Command {
 	return rootCmd
 }
 
-// Start main command
+// MainStart start main command
 func MainStart(args []string) {
 	rootCmd := getMainCmd(args)
 	if len(commandFlags.CAPath) != 0 {
@@ -133,7 +133,7 @@ func MainStart(args []string) {
 	}
 }
 
-// Start interact command
+// Start start interact command
 func Start(args []string) {
 	rootCmd := getRootCmd(args)
 	if len(commandFlags.CAPath) != 0 {
