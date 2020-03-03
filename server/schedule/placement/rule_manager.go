@@ -82,7 +82,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 		}
 		m.rules[r.Key()] = r
 	}
-	m.updateRuleList()
+	m.ruleList = buildRuleList(m.rules)
 	m.initialized = true
 	return nil
 }
@@ -148,7 +148,7 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 		}
 		return err
 	}
-	m.updateRuleList()
+	m.ruleList = buildRuleList(m.rules)
 	return nil
 }
 
@@ -167,12 +167,8 @@ func (m *RuleManager) DeleteRule(group, id string) error {
 		m.rules[key] = old
 		return err
 	}
-	m.updateRuleList()
-	return nil
-}
-
-func (m *RuleManager) updateRuleList() {
 	m.ruleList = buildRuleList(m.rules)
+	return nil
 }
 
 // GetSplitKeys returns all split keys in the range (start, end).
