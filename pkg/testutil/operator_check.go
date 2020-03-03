@@ -111,6 +111,6 @@ func CheckTransferPeerWithLeaderTransferFrom(c *check.C, op *operator.Operator, 
 	c.Assert(steps[2].(operator.RemovePeer).FromStore, check.Equals, sourceID)
 	c.Assert(lastLeader, check.Not(check.Equals), uint64(0))
 	c.Assert(lastLeader, check.Not(check.Equals), sourceID)
-	kind |= operator.OpRegion | operator.OpLeader
+	kind |= (operator.OpRegion | operator.OpLeader)
 	c.Assert(op.Kind()&kind, check.Equals, kind)
 }

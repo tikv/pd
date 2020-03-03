@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server/config"
@@ -36,7 +35,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/schedulers"
 	"github.com/pingcap/pd/v4/server/statistics"
-	"go.uber.org/zap"
 )
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
@@ -368,11 +366,10 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
-	log.Info("test checkerIsBusy", zap.Int("region num:", len(operatorKinds)*int(num)))
 	for i, operatorKind := range operatorKinds {
 		for j := uint64(0); j < num; j++ {
 			regionID := j + uint64(i+1)*num
-			c.Assert(tc.addLeaderRegion(regionID, regionID+1, regionID+2), IsNil)
+			c.Assert(tc.addLeaderRegion(regionID, 1), IsNil)
 			switch operatorKind {
 			case operator.OpReplica:
 				op := newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
@@ -742,9 +739,9 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
-	sches, _, err := storage.LoadAllScheduleConfig()
+	scheduleConfig, _, err := storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 5)
+	c.Assert(scheduleConfig, HasLen, 5)
 
 	// remove all schedulers
 	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
@@ -753,9 +750,9 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.GrantLeaderName), IsNil)
 	// all removed
-	sches, _, err = storage.LoadAllScheduleConfig()
+	scheduleConfig, _, err = storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 0)
+	c.Assert(scheduleConfig, HasLen, 0)
 	c.Assert(co.schedulers, HasLen, 0)
 	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
 	co.stop()

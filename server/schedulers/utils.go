@@ -14,6 +14,8 @@
 package schedulers
 
 import (
+	"math"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -136,4 +139,218 @@ func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
 	}
 	limit, _ := stats.StandardDeviation(counts)
 	return maxUint64(1, uint64(limit))
+}
+
+func getKeyRanges(args []string) ([]core.KeyRange, error) {
+	var ranges []core.KeyRange
+	for len(args) > 1 {
+		startKey, err := url.QueryUnescape(args[0])
+		if err != nil {
+			return nil, err
+		}
+		endKey, err := url.QueryUnescape(args[1])
+		if err != nil {
+			return nil, err
+		}
+		args = args[2:]
+		ranges = append(ranges, core.NewKeyRange(startKey, endKey))
+	}
+	if len(ranges) == 0 {
+		return []core.KeyRange{core.NewKeyRange("", "")}, nil
+	}
+	return ranges, nil
+}
+
+// Influence records operator influence.
+type Influence struct {
+	ByteRate float64
+	KeyRate  float64
+	Count    float64
+}
+
+func (infl Influence) add(rhs *Influence, w float64) Influence {
+	infl.ByteRate += rhs.ByteRate * w
+	infl.KeyRate += rhs.KeyRate * w
+	infl.Count += rhs.Count * w
+	return infl
+}
+
+// TODO: merge it into OperatorInfluence.
+type pendingInfluence struct {
+	op       *operator.Operator
+	from, to uint64
+	origin   Influence
+}
+
+func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence) *pendingInfluence {
+	return &pendingInfluence{
+		op:     op,
+		from:   from,
+		to:     to,
+		origin: infl,
+	}
+}
+
+func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]Influence {
+	ret := map[uint64]Influence{}
+	for p := range pendings {
+		w := f(p.op)
+		if w == 0 {
+			delete(pendings, p)
+		}
+		ret[p.to] = ret[p.to].add(&p.origin, w)
+		ret[p.from] = ret[p.from].add(&p.origin, -w)
+	}
+	return ret
+}
+
+type storeLoad struct {
+	ByteRate float64
+	KeyRate  float64
+	Count    float64
+}
+
+func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
+	future := *load
+	future.ByteRate += infl.ByteRate
+	future.KeyRate += infl.KeyRate
+	future.Count += infl.Count
+	return &storeLoadPred{
+		Current: *load,
+		Future:  future,
+	}
+}
+
+func stLdByteRate(ld *storeLoad) float64 {
+	return ld.ByteRate
+}
+
+func stLdKeyRate(ld *storeLoad) float64 {
+	return ld.KeyRate
+}
+
+func stLdCount(ld *storeLoad) float64 {
+	return ld.Count
+}
+
+type storeLoadCmp func(ld1, ld2 *storeLoad) int
+
+func negLoadCmp(cmp storeLoadCmp) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		return -cmp(ld1, ld2)
+	}
+}
+
+func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		for _, cmp := range cmps {
+			if r := cmp(ld1, ld2); r != 0 {
+				return r
+			}
+		}
+		return 0
+	}
+}
+
+func stLdRankCmp(dim func(ld *storeLoad) float64, rank func(value float64) int64) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		return rankCmp(dim(ld1), dim(ld2), rank)
+	}
+}
+
+func rankCmp(a, b float64, rank func(value float64) int64) int {
+	aRk, bRk := rank(a), rank(b)
+	if aRk < bRk {
+		return -1
+	} else if aRk > bRk {
+		return 1
+	}
+	return 0
+}
+
+// store load prediction
+type storeLoadPred struct {
+	Current storeLoad
+	Future  storeLoad
+}
+
+func (lp *storeLoadPred) min() *storeLoad {
+	return minLoad(&lp.Current, &lp.Future)
+}
+
+func (lp *storeLoadPred) max() *storeLoad {
+	return maxLoad(&lp.Current, &lp.Future)
+}
+
+func (lp *storeLoadPred) diff() *storeLoad {
+	mx, mn := lp.max(), lp.min()
+	return &storeLoad{
+		ByteRate: mx.ByteRate - mn.ByteRate,
+		KeyRate:  mx.KeyRate - mn.KeyRate,
+		Count:    mx.Count - mn.Count,
+	}
+}
+
+type storeLPCmp func(lp1, lp2 *storeLoadPred) int
+
+func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		for _, cmp := range cmps {
+			if r := cmp(lp1, lp2); r != 0 {
+				return r
+			}
+		}
+		return 0
+	}
+}
+
+func minLPCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.min(), lp2.min())
+	}
+}
+
+func maxLPCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.max(), lp2.max())
+	}
+}
+
+func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.diff(), lp2.diff())
+	}
+}
+
+func minLoad(a, b *storeLoad) *storeLoad {
+	return &storeLoad{
+		ByteRate: math.Min(a.ByteRate, b.ByteRate),
+		KeyRate:  math.Min(a.KeyRate, b.KeyRate),
+		Count:    math.Min(a.Count, b.Count),
+	}
+}
+
+func maxLoad(a, b *storeLoad) *storeLoad {
+	return &storeLoad{
+		ByteRate: math.Max(a.ByteRate, b.ByteRate),
+		KeyRate:  math.Max(a.KeyRate, b.KeyRate),
+		Count:    math.Max(a.Count, b.Count),
+	}
+}
+
+type storeLoadDetail struct {
+	LoadPred *storeLoadPred
+	HotPeers []*statistics.HotPeerStat
+}
+
+func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
+	peers := make([]statistics.HotPeerStat, 0, len(li.HotPeers))
+	for _, peer := range li.HotPeers {
+		peers = append(peers, *peer.Clone())
+	}
+	return &statistics.HotPeersStat{
+		TotalBytesRate: li.LoadPred.Current.ByteRate,
+		Count:          len(li.HotPeers),
+		Stats:          peers,
+	}
 }
