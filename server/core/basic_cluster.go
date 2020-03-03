@@ -44,11 +44,16 @@ func (bc *BasicCluster) GetStores() []*StoreInfo {
 	return bc.Stores.GetStores()
 }
 
-// UpdateMaxScore returns Stores with new max score.
-func (bc *BasicCluster) UpdateMaxScore(newStores ...*StoreInfo) []*StoreInfo {
-	bc.RLock()
-	defer bc.RUnlock()
-	return bc.Stores.UpdateMaxScore(newStores...)
+// UpdateStoresMaxScore updates stores with new max score.
+func (bc *BasicCluster) UpdateStoresMaxScore(flexibleScore uint64, newStores ...*StoreInfo) {
+	bc.Lock()
+	defer bc.Unlock()
+	stores := bc.Stores.GetStores()
+	stores = append(stores, newStores...)
+	maxScore := getMaxScore(flexibleScore, stores, newStores...)
+	for _, store := range stores {
+		bc.Stores.SetStore(store.Clone(SetMaxScore(maxScore)))
+	}
 }
 
 // GetMetaStores gets a complete set of metapb.Store.

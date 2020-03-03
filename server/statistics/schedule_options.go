@@ -30,6 +30,7 @@ type ScheduleOptions interface {
 	GetStoreBalanceRate() float64
 
 	GetSchedulerMaxWaitingOperator() uint64
+	GetFlexibleScore() uint64
 	GetLeaderScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
 	GetReplicaScheduleLimit() uint64

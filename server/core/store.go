@@ -404,7 +404,7 @@ func (s *StoreInfo) GetUptime() time.Duration {
 	return 0
 }
 
-// GetMaxScore return the maxScore
+// GetMaxScore returns the max score.
 func (s *StoreInfo) GetMaxScore() float64 {
 	return s.maxScore
 }
@@ -635,45 +635,25 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 	}
 }
 
-const bytesPerMB = 1024 * 1024
+const mb = 1024 * 1024
 
-func calculateMaxScore(capacity uint64) float64 {
-	return float64(capacity / bytesPerMB)
-}
-
-func getMaxScore(stores []*StoreInfo, newStores ...*StoreInfo) float64 {
+func getMaxScore(flexibleScore uint64, stores []*StoreInfo, newStores ...*StoreInfo) float64 {
 	var maxScore float64
 	var newStoreID uint64
 	if len(newStores) != 0 {
 		newStore := newStores[0]
 		newStoreID = newStore.GetID()
-		maxScore = calculateMaxScore(newStore.GetCapacity())
+		maxScore = float64(newStore.GetCapacity()/mb + flexibleScore)
 	}
 
 	for _, store := range stores {
-		capacity := store.GetCapacity()
-		curMaxScore := calculateMaxScore(capacity)
+		curMaxScore := float64(store.GetCapacity()/mb + flexibleScore)
 		if store.GetID() != newStoreID && curMaxScore > maxScore {
 			maxScore = curMaxScore
 		}
 	}
 
 	return maxScore
-}
-
-func withMaxScore(stores []*StoreInfo, maxScore float64) []*StoreInfo {
-	results := make([]*StoreInfo, 0, len(stores))
-	for _, store := range stores {
-		results = append(results, store.Clone(SetMaxScore(maxScore)))
-	}
-	return results
-}
-
-// UpdateMaxScore update maxScore when flexible score change or add a new store
-func (s *StoresInfo) UpdateMaxScore(newStores ...*StoreInfo) []*StoreInfo {
-	stores := append(s.GetStores(), newStores...)
-	maxScore := getMaxScore(s.GetStores(), newStores...)
-	return withMaxScore(stores, maxScore)
 }
 
 // UpdateStoreStatus updates the information of the store.

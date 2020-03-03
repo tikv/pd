@@ -507,11 +507,6 @@ type ScheduleConfig struct {
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
 	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
 	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
-	// FlexibleScore is the option to set max score.
-	// When start cluster, get the maximum capacity in the cluster, and then let max_score = max_capacity + flexible_score.
-	// When add new store, if capacity of the new store is lower than max_score, max_score will not be adjusted.
-	// Otherwise, we will set the max_score of all the store to the new one.
-	FlexibleScore uint64 `toml:"flexible-score" json:"flexible-score"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -542,6 +537,11 @@ type ScheduleConfig struct {
 	HighSpaceRatio float64 `toml:"high-space-ratio" json:"high-space-ratio"`
 	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
 	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator" json:"scheduler-max-waiting-operator"`
+	// FlexibleScore is the option to affect max score of stores.
+	// max score = max capacity + FlexibleScore.
+	// When adding a new store, if the capacity of the new store is smaller than the max score, the max score will not be adjusted.
+	// Otherwise, the new max score will be recalculated.
+	FlexibleScore uint64 `toml:"flexible-score" json:"flexible-score"`
 	// WARN: DisableLearner is deprecated.
 	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
 	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
@@ -620,6 +620,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
 		SchedulerMaxWaitingOperator:  c.SchedulerMaxWaitingOperator,
+		FlexibleScore:                c.FlexibleScore,
 		DisableLearner:               c.DisableLearner,
 		DisableRemoveDownReplica:     c.DisableRemoveDownReplica,
 		DisableReplaceOfflineReplica: c.DisableReplaceOfflineReplica,
@@ -633,7 +634,6 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableLocationReplacement:    c.EnableLocationReplacement,
 		EnableDebugMetrics:           c.EnableDebugMetrics,
 		StoreLimitMode:               c.StoreLimitMode,
-		FlexibleScore:                c.FlexibleScore,
 		Schedulers:                   schedulers,
 	}
 }
@@ -660,9 +660,9 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 5
+	defaultFlexibleScore               = 4 * 1024 * 1024
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
-	defaultFlexibleScore               = 4 * 1024 * 1024
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {

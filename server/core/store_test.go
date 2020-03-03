@@ -95,83 +95,64 @@ func (s *testConcurrencySuite) TestCloneStore(c *C) {
 }
 
 const (
-	MB = uint64(1024 * 1024)
-	GB = 1024 * MB
-	TB = 1024 * GB
+	_ uint64 = 1 << (10 * iota)
+	_
+	MB
+	_
+	TB
 )
 
 var _ = Suite(&testMaxScoreSuite{})
 
 type testMaxScoreSuite struct{}
 
-func putStore(stores *StoresInfo, capacity uint64, storeIDs ...uint64) {
-	storeID := uint64(len(stores.GetStores()) + 1)
-	if len(storeIDs) != 0 {
-		storeID = storeIDs[0]
+func (s *testMaxScoreSuite) TestMaxScore(c *C) {
+	bc := NewBasicCluster()
+	var flexibleScore uint64 = 4 * 1024 * 1024
+	// add 3 tikv with capacity 2TB
+	num := 3
+	oldCapacity := 2 * TB
+	oldMaxScore := float64(oldCapacity/MB + flexibleScore)
+	for i := 1; i <= num; i++ {
+		bc.PutStore(NewStoreInfo(
+			&metapb.Store{Id: uint64(i)},
+			SetStoreStats(&pdpb.StoreStats{Capacity: oldCapacity}),
+		))
 	}
-	var results []*StoreInfo
-	if storeID == 0 {
-		results = stores.UpdateMaxScore()
-	} else {
-		store := NewStoreInfo(
-			&metapb.Store{
-				Id: storeID,
-			},
-			SetStoreStats(&pdpb.StoreStats{
-				Capacity: capacity,
-			}),
-		)
-		results = stores.UpdateMaxScore(store)
-	}
-	for _, result := range results {
-		stores.SetStore(result)
-	}
+	bc.UpdateStoresMaxScore(flexibleScore)
+	checkMaxScore(c, bc, num, oldMaxScore)
+
+	// add 1 tikv with capacity 2TB
+	num = num + 1
+	bc.UpdateStoresMaxScore(flexibleScore, NewStoreInfo(
+		&metapb.Store{Id: uint64(num)},
+		SetStoreStats(&pdpb.StoreStats{Capacity: oldCapacity}),
+	))
+	checkMaxScore(c, bc, num, oldMaxScore)
+
+	// add 1 tikv with capacity 4TB
+	num = num + 1
+	newCapacity := 4 * TB
+	newMaxScore := float64(newCapacity/MB + flexibleScore)
+	bc.UpdateStoresMaxScore(flexibleScore, NewStoreInfo(
+		&metapb.Store{Id: uint64(num)},
+		SetStoreStats(&pdpb.StoreStats{Capacity: newCapacity}),
+	))
+	checkMaxScore(c, bc, num, newMaxScore)
+
+	// add 1 tikv with capacity 1TB
+	num = num + 1
+	newCapacity = 1 * TB
+	bc.UpdateStoresMaxScore(flexibleScore, NewStoreInfo(
+		&metapb.Store{Id: uint64(num)},
+		SetStoreStats(&pdpb.StoreStats{Capacity: newCapacity}),
+	))
+	checkMaxScore(c, bc, num, newMaxScore)
 }
 
-func (s *testMaxScoreSuite) TestMaxScore(c *C) {
-	stores := NewStoresInfo()
-	results := stores.UpdateMaxScore()
-	c.Assert(results, HasLen, 0)
-
-	// 6 tikv stores of 1t
-	num := 6
-	oldCapacity := 1 * TB
-	oldMaxScore := float64(1 * TB / bytesPerMB)
+func checkMaxScore(c *C, bc *BasicCluster, num int, maxscore float64) {
+	c.Assert(bc.GetStores(), HasLen, num)
 	for i := 1; i <= num; i++ {
-		putStore(stores, oldCapacity)
-		c.Assert(stores.GetStores(), HasLen, i)
-		c.Assert(stores.GetStore(uint64(i)).GetMaxScore(), Equals, oldMaxScore)
-	}
-	// Expansion
-	newCapacity := 2 * TB
-	newMaxScore := float64(2 * TB / bytesPerMB)
-	for i := 1; i <= num; i++ {
-		putStore(stores, newCapacity, uint64(i))
-		c.Assert(stores.GetStore(uint64(i)).GetMaxScore(), Equals, newMaxScore)
-	}
-	// Reduction
-	newCapacity = 1 * TB
-	for i := 1; i <= num; i++ {
-		putStore(stores, newCapacity, uint64(i))
-		if i != num {
-			c.Assert(stores.GetStore(uint64(i)).GetMaxScore(), Equals, newMaxScore)
-		}
-	}
-	newMaxScore = float64(1 * TB / bytesPerMB)
-	for i := 1; i <= num; i++ {
-		c.Assert(stores.GetStore(uint64(i)).GetMaxScore(), Equals, newMaxScore)
-	}
-	// add larger store
-	newCapacity = 2 * TB
-	newMaxScore = float64(2 * TB / bytesPerMB)
-	putStore(stores, newCapacity)
-	for _, store := range stores.GetStores() {
-		c.Assert(store.GetMaxScore(), Equals, newMaxScore)
-	}
-	// add smaller store
-	newCapacity = 1 * TB / 2
-	putStore(stores, newCapacity)
-	for _, store := range stores.GetStores() {
-		c.Assert(store.GetMaxScore(), Equals, newMaxScore)
+		c.Assert(bc.GetStore(uint64(i)).GetMaxScore(), Equals, maxscore)
 	}
 }
