@@ -92,7 +92,7 @@ func buildRuleList(rules map[[2]string]*Rule) ruleList {
 		return bytes.Compare(points[i].key, points[j].key) < 0
 	})
 
-	// deterline rules for each range.
+	// determine rules for each range.
 	var rl ruleList
 	var sr sortedRules
 	for i, p := range points {
