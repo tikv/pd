@@ -62,10 +62,10 @@ func getBasicCmd() *cobra.Command {
 		Short: "Placement Driver control",
 	}
 
-	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "http://127.0.0.1:2379", "pd address")
-	rootCmd.Flags().StringVar(&commandFlags.CAPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
-	rootCmd.Flags().StringVar(&commandFlags.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format.")
-	rootCmd.Flags().StringVar(&commandFlags.KeyPath, "key", "", "path of file that contains X509 key in PEM format.")
+	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "http://127.0.0.1:2379", "Address of pd.")
+	rootCmd.Flags().StringVar(&commandFlags.CAPath, "cacert", "", "Path of file that contains list of trusted SSL CAs.")
+	rootCmd.Flags().StringVar(&commandFlags.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format.")
+	rootCmd.Flags().StringVar(&commandFlags.KeyPath, "key", "", "Path of file that contains X509 key in PEM format.")
 	rootCmd.PersistentFlags().BoolVarP(&commandFlags.Help, "help", "h", false, "Help message.")
 
 	rootCmd.AddCommand(
