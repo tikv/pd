@@ -577,9 +577,6 @@ type ScheduleConfig struct {
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
-	// Only used to display
-	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload"`
-
 	// StoreLimitMode can be auto or manual, when set to auto,
 	// PD tries to change the store limit values according to
 	// the load state of the cluster dynamically. User can
@@ -829,10 +826,12 @@ type SchedulerConfigs []SchedulerConfig
 
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
-	Type        string   `toml:"type" json:"type"`
-	Args        []string `toml:"args" json:"args"`
-	Disable     bool     `toml:"disable" json:"disable"`
-	ArgsPayload string   `toml:"args-payload" json:"args-payload"`
+	Type        string                 `toml:"type" json:"type"`
+	Args        []string               `toml:"args" json:"args"`
+	Disable     bool                   `toml:"disable" json:"disable"`
+	ArgsPayload string                 `toml:"args-payload" json:"args-payload"`
+	Name        string                 `toml:"name" json:"name"`
+	Payload     map[string]interface{} `toml:"payload" json:"payload"`
 }
 
 var defaultSchedulers = SchedulerConfigs{

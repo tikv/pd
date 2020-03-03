@@ -16,6 +16,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -723,6 +724,23 @@ func (s *Server) StartTimestamp() int64 {
 	return s.startTimestamp
 }
 
+// saveSchedulePayload adds scheduler payload to config
+func addSchedulePayloadToConfig(configs config.SchedulerConfigs, payload map[string]string) {
+	for idx := range configs {
+		c := &(configs[idx])
+		c.Payload = make(map[string]interface{})
+		if p, ok := payload[c.Name]; ok {
+			payloadMap := make(map[string]interface{})
+			json.Unmarshal([]byte(p), &payloadMap)
+			for k, v := range payloadMap {
+				if k != "name" {
+					c.Payload[k] = v
+				}
+			}
+		}
+	}
+}
+
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
@@ -744,7 +762,7 @@ func (s *Server) GetConfig() *config.Config {
 	for i, sche := range sches {
 		payload[sche] = configs[i]
 	}
-	cfg.Schedule.SchedulersPayload = payload
+	addSchedulePayloadToConfig(cfg.Schedule.Schedulers, payload)
 	return cfg
 }
 
@@ -764,7 +782,7 @@ func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
 	for i, sche := range sches {
 		payload[sche] = configs[i]
 	}
-	cfg.SchedulersPayload = payload
+	addSchedulePayloadToConfig(cfg.Schedulers, payload)
 	return cfg
 }
 

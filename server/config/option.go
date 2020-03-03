@@ -252,25 +252,25 @@ func (o *ScheduleOption) GetSchedulers() SchedulerConfigs {
 }
 
 // AddSchedulerCfg adds the scheduler configurations.
-func (o *ScheduleOption) AddSchedulerCfg(tp string, args []string) {
+func (o *ScheduleOption) AddSchedulerCfg(tp string, name string, args []string) {
 	c := o.Load()
 	v := c.Clone()
 	for i, schedulerCfg := range v.Schedulers {
 		// comparing args is to cover the case that there are schedulers in same type but not with same name
 		// such as two schedulers of type "evict-leader",
 		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: false}) {
+		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: false, Name: name}) {
 			return
 		}
 
-		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: true}) {
+		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: true, Name: name}) {
 			schedulerCfg.Disable = false
 			v.Schedulers[i] = schedulerCfg
 			o.Store(v)
 			return
 		}
 	}
-	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args, Disable: false})
+	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args, Disable: false, Name: name})
 	o.Store(v)
 }
 
