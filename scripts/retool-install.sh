@@ -12,7 +12,6 @@ command -v retool >/dev/null || go get github.com/twitchtv/retool
 ./scripts/retool add gopkg.in/alecthomas/gometalinter.v2 v2.0.5
 # linter
 ./scripts/retool add github.com/mgechev/revive 7773f47324c2bf1c8f7a5500aff2b6c01d3ed73b
-./scripts/retool add github.com/golangci/golangci-lint/cmd/golangci-lint 4ba2155996359eabd8800d1fbf3e3a9777c80490
 # go fail
 ./scripts/retool add github.com/pingcap/failpoint/failpoint-ctl master
 # deadlock detection
