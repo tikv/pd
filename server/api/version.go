@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v3/server"
 	"github.com/unrolled/render"
 )
 
