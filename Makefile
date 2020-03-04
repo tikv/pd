@@ -72,7 +72,7 @@ static:
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	./hack/retool do govet --shadow $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
-	CGO_ENABLED=0 ./hack/retool do gometalinter.v2 --disable-all --deadline 120s \
+	CGO_ENABLED=0 ./hack/retool do gometalinter.v2 --disable-all --deadline 240s \
 	  --enable misspell \
 	  --enable staticcheck \
 	  --enable ineffassign \
