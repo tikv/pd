@@ -164,7 +164,7 @@ func (h *confHandler) mergeConfig(v interface{}, data []byte) (updated bool, fou
 
 func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 	scheduleConfig := h.svr.GetScheduleConfig()
-    // hide Schedulers field for reducing output
+	// hide Schedulers field for reducing output
 	scheduleConfig.Schedulers = nil
 	h.rd.JSON(w, http.StatusOK, scheduleConfig)
 }

@@ -829,10 +829,10 @@ type SchedulerConfigs []SchedulerConfig
 
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
-	Type        string                 `toml:"type" json:"type"`
-	Args        []string               `toml:"args" json:"args"`
-	Disable     bool                   `toml:"disable" json:"disable"`
-	ArgsPayload string                 `toml:"args-payload" json:"args-payload"`
+	Type        string   `toml:"type" json:"type"`
+	Args        []string `toml:"args" json:"args"`
+	Disable     bool     `toml:"disable" json:"disable"`
+	ArgsPayload string   `toml:"args-payload" json:"args-payload"`
 }
 
 var defaultSchedulers = SchedulerConfigs{
