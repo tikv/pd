@@ -16,7 +16,6 @@ package filter
 import (
 	"fmt"
 
-	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/pkg/slice"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
@@ -253,32 +252,6 @@ func (f *snapshotCountFilter) Source(opt opt.Options, store *core.StoreInfo) boo
 
 func (f *snapshotCountFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return f.filter(opt, store)
-}
-
-type cacheFilter struct {
-	scope string
-	cache *cache.TTLUint64
-}
-
-// NewCacheFilter creates a Filter that filters all stores that are in the cache.
-func NewCacheFilter(scope string, cache *cache.TTLUint64) Filter {
-	return &cacheFilter{scope: scope, cache: cache}
-}
-
-func (f *cacheFilter) Scope() string {
-	return f.scope
-}
-
-func (f *cacheFilter) Type() string {
-	return "cache-filter"
-}
-
-func (f *cacheFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return !f.cache.Exists(store.GetID())
-}
-
-func (f *cacheFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return true
 }
 
 type storageThresholdFilter struct{ scope string }
