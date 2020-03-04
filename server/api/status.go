@@ -27,6 +27,7 @@ type statusHandler struct {
 type status struct {
 	BuildTS string `json:"build_ts"`
 	GitHash string `json:"git_hash"`
+	Version string `json:"version"`
 }
 
 func newStatusHandler(rd *render.Render) *statusHandler {
@@ -39,6 +40,7 @@ func (h *statusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	version := status{
 		BuildTS: server.PDBuildTS,
 		GitHash: server.PDGitHash,
+		Version: server.PDReleaseVersion,
 	}
 
 	h.rd.JSON(w, http.StatusOK, version)
