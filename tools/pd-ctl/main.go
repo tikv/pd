@@ -51,7 +51,6 @@ func main() {
 	var input []string
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
-		os.Args = append(os.Args, "-d")
 		b, err := ioutil.ReadAll(os.Stdin)
 		if err != nil {
 			fmt.Println(err)
