@@ -686,7 +686,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
 	for _, store := range candidates {
-		if !filter.Target(bs.cluster, store, filters) {
+		if filter.Target(bs.cluster, store, filters) {
 			ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 		}
 	}

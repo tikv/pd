@@ -151,7 +151,7 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 
 	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {
-		if scoreGuard.Target(r.cluster, store) {
+		if !scoreGuard.Target(r.cluster, store) {
 			continue
 		}
 		candidates = append(candidates, store)
@@ -178,7 +178,7 @@ func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo) map[ui
 	stores := r.cluster.GetStores()
 	targets := make(map[uint64]*core.StoreInfo, len(stores))
 	for _, store := range stores {
-		if !filter.Target(r.cluster, store, filters) && !store.IsBusy() {
+		if filter.Target(r.cluster, store, filters) && !store.IsBusy() {
 			targets[store.GetID()] = store
 		}
 	}
