@@ -84,7 +84,9 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	cfg := config.Config{}
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
-	c.Assert(&cfg.Schedule, DeepEquals, svr.GetScheduleConfig())
+	scheduleConfig := svr.GetScheduleConfig()
+	scheduleConfig.Schedulers = nil
+	c.Assert(&cfg.Schedule, DeepEquals, scheduleConfig)
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
 
 	// config show schedule
@@ -93,7 +95,9 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	scheduleCfg := config.ScheduleConfig{}
 	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
-	c.Assert(&scheduleCfg, DeepEquals, svr.GetScheduleConfig())
+	scheduleConfig = svr.GetScheduleConfig()
+	scheduleConfig.Schedulers = nil
+	c.Assert(&scheduleCfg, DeepEquals, scheduleConfig)
 
 	// config show replication
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
