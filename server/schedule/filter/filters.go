@@ -598,13 +598,13 @@ func (f *specialUseFilter) Type() string {
 
 func (f *specialUseFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 	if store.IsLowSpace(opt.GetLowSpaceRatio()) {
-		return false
+		return true
 	}
-	return f.constraint.MatchStore(store)
+	return !f.constraint.MatchStore(store)
 }
 
 func (f *specialUseFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return f.constraint.MatchStore(store)
+	return !f.constraint.MatchStore(store)
 }
 
 const (
