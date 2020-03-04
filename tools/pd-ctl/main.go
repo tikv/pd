@@ -15,53 +15,19 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
-	"github.com/chzyer/readline"
-	shellwords "github.com/mattn/go-shellwords"
-	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl"
-	flag "github.com/spf13/pflag"
 )
-
-var (
-	url      string
-	detach   bool
-	interact bool
-	version  bool
-	help     bool
-	caPath   string
-	certPath string
-	keyPath  string
-)
-
-func init() {
-	flag.StringVarP(&url, "pd", "u", "http://127.0.0.1:2379", "The pd address.")
-	flag.BoolVarP(&detach, "detach", "d", true, "Run pdctl without readline.")
-	flag.BoolVarP(&interact, "interact", "i", false, "Run pdctl with readline.")
-	flag.BoolVarP(&version, "version", "V", false, "Print version information and exit.")
-	flag.StringVar(&caPath, "cacert", "", "The path of file that contains list of trusted SSL CAs.")
-	flag.StringVar(&certPath, "cert", "", "The path of file that contains X509 certificate in PEM format.")
-	flag.StringVar(&keyPath, "key", "", "The path of file that contains X509 key in PEM format.")
-	flag.BoolVarP(&help, "help", "h", false, "Help message.")
-}
 
 func main() {
 	pdAddr := os.Getenv("PD_ADDR")
 	if pdAddr != "" {
 		os.Args = append(os.Args, "-u", pdAddr)
-	}
-	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
-	flag.Parse()
-
-	if version {
-		server.PrintPDInfo()
-		os.Exit(0)
 	}
 
 	sc := make(chan os.Signal, 1)
@@ -81,10 +47,11 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
 	var input []string
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
-		detach = true
+		os.Args = append(os.Args, "-d")
 		b, err := ioutil.ReadAll(os.Stdin)
 		if err != nil {
 			fmt.Println(err)
@@ -92,48 +59,6 @@ func main() {
 		}
 		input = strings.Split(strings.TrimSpace(string(b[:])), " ")
 	}
-	if interact {
-		loop()
-		return
-	}
-	pdctl.Start(append(os.Args[1:], input...))
-}
 
-func loop() {
-	l, err := readline.NewEx(&readline.Config{
-		Prompt:            "\033[31m»\033[0m ",
-		HistoryFile:       "/tmp/readline.tmp",
-		InterruptPrompt:   "^C",
-		EOFPrompt:         "^D",
-		HistorySearchFold: true,
-	})
-	if err != nil {
-		panic(err)
-	}
-	defer l.Close()
-
-	for {
-		line, err := l.Readline()
-		if err != nil {
-			if err == readline.ErrInterrupt {
-				break
-			} else if err == io.EOF {
-				break
-			}
-			continue
-		}
-		if line == "exit" {
-			os.Exit(0)
-		}
-		args, err := shellwords.Parse(line)
-		if err != nil {
-			fmt.Printf("parse command err: %v\n", err)
-			continue
-		}
-		args = append(args, "-u", url)
-		if caPath != "" && certPath != "" && keyPath != "" {
-			args = append(args, "--cacert", caPath, "--cert", certPath, "--key", keyPath)
-		}
-		pdctl.Start(args)
-	}
+	pdctl.MainStart(append(os.Args[1:], input...))
 }
