@@ -27,6 +27,7 @@ type statusHandler struct {
 
 type status struct {
 	BuildTS        string `json:"build_ts"`
+	Version        string `json:"version"`
 	GitHash        string `json:"git_hash"`
 	StartTimestamp int64  `json:"start_timestamp"`
 }
@@ -42,6 +43,7 @@ func (h *statusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	version := status{
 		BuildTS:        server.PDBuildTS,
 		GitHash:        server.PDGitHash,
+		Version:        server.PDReleaseVersion,
 		StartTimestamp: h.svr.StartTimestamp(),
 	}
 
