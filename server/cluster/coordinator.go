@@ -471,7 +471,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
-	c.cluster.opt.AddSchedulerCfg(s.GetType(), s.GetName(), args)
+	c.cluster.opt.AddSchedulerCfg(s.GetType(), args)
 	c.cluster.schedulersCallback()
 
 	return nil

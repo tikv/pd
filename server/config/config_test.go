@@ -66,7 +66,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	defaultSchedulers := []string{"balance-region", "balance-leader", "hot-region", "label", "adjacent-region"}
 	newOpt, err := newTestScheduleOption()
 	c.Assert(err, IsNil)
-	newOpt.AddSchedulerCfg("adjacent-region", "balance-adjacent-region-scheduler", []string{})
+	newOpt.AddSchedulerCfg("adjacent-region", []string{})
 	c.Assert(newOpt.Reload(storage), IsNil)
 	schedulers := newOpt.GetSchedulers()
 	c.Assert(schedulers, HasLen, 5)

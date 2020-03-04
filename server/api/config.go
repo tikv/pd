@@ -46,7 +46,10 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 }
 
 func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.svr.GetConfig())
+	config := h.svr.GetConfig()
+	// Schedulers field for reducing output
+	config.Schedule.Schedulers = nil
+	h.rd.JSON(w, http.StatusOK, config)
 }
 
 func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +163,10 @@ func (h *confHandler) mergeConfig(v interface{}, data []byte) (updated bool, fou
 }
 
 func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.svr.GetScheduleConfig())
+	scheduleConfig := h.svr.GetScheduleConfig()
+    // hide Schedulers field for reducing output
+	scheduleConfig.Schedulers = nil
+	h.rd.JSON(w, http.StatusOK, scheduleConfig)
 }
 
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {

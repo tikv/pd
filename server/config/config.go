@@ -82,6 +82,9 @@ type Config struct {
 
 	Schedule ScheduleConfig `toml:"schedule" json:"schedule"`
 
+	// Only used to display
+	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload"`
+
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
@@ -575,7 +578,7 @@ type ScheduleConfig struct {
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
 
 	// Schedulers support for loading customized schedulers
-	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
+	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2,omitempty"` // json v2 is for the sake of compatible upgrade
 
 	// StoreLimitMode can be auto or manual, when set to auto,
 	// PD tries to change the store limit values according to
@@ -830,8 +833,6 @@ type SchedulerConfig struct {
 	Args        []string               `toml:"args" json:"args"`
 	Disable     bool                   `toml:"disable" json:"disable"`
 	ArgsPayload string                 `toml:"args-payload" json:"args-payload"`
-	Name        string                 `toml:"name" json:"name"`
-	Payload     map[string]interface{} `toml:"payload" json:"payload"`
 }
 
 var defaultSchedulers = SchedulerConfigs{
