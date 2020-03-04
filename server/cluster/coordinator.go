@@ -420,6 +420,8 @@ func (c *coordinator) collectHotSpotMetrics() {
 		infl := pendings[storeID]
 		// TODO: add to tidb-ansible after merging pending influence into operator influence.
 		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.ByteRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_key_rate").Set(infl.KeyRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_count").Set(infl.Count)
 	}
 
 	// Collects hot read region metrics.
@@ -440,6 +442,8 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 		infl := pendings[storeID]
 		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.ByteRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_key_rate").Set(infl.KeyRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_count").Set(infl.Count)
 	}
 }
 
@@ -468,6 +472,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
 	c.cluster.opt.AddSchedulerCfg(s.GetType(), args)
+	c.cluster.schedulersCallback()
 
 	return nil
 }
@@ -499,6 +504,8 @@ func (c *coordinator) removeScheduler(name string) error {
 			log.Error("can not remove the scheduler config", zap.Error(err))
 		}
 	}
+
+	c.cluster.schedulersCallback()
 	return err
 }
 

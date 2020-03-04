@@ -158,7 +158,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 		return false
 	}
 	stateFilter := filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
-	if stateFilter.Target(c.cluster, s) {
+	if !stateFilter.Target(c.cluster, s) {
 		return false
 	}
 	for _, rf := range fit.RuleFits {
@@ -182,6 +182,10 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.
 	}
 	oldPeer := region.GetStorePeer(oldPeerStore.GetID())
 	newPeerStore := SelectStoreToReplacePeerByRule("rule-checker", c.cluster, region, fit, rf, oldPeer)
+	if newPeerStore == nil {
+		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
+		return nil, nil
+	}
 	stores = getRuleFitStores(c.cluster, removePeerFromRuleFit(rf, oldPeer))
 	oldScore := core.DistinctScore(rf.Rule.LocationLabels, stores, oldPeerStore)
 	newScore := core.DistinctScore(rf.Rule.LocationLabels, stores, newPeerStore)
