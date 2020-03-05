@@ -12,6 +12,10 @@ GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 RETOOL := ./scripts/retool
 OVERALLS := overalls
 
+TOOL_BIN_PATH := $(shell pwd)/.tools/bin
+
+PATH := $(TOOL_BIN_PATH):$(PATH)
+
 FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl enable)
 FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl disable)
 
@@ -106,7 +110,11 @@ retool-setup:
 	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
 	@./scripts/retool sync
 
-check: retool-setup check-all check-plugin
+golangci-lint-setup:
+	@mkdir -p $(TOOL_BIN_PATH)
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(TOOL_BIN_PATH) v1.23.7
+
+check: retool-setup golangci-lint-setup check-all check-plugin
 
 check-plugin:
 	@echo "checking plugin"
@@ -117,7 +125,7 @@ static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 
-	CGO_ENABLED=0 ./scripts/retool do golangci-lint run --no-config --enable misspell --disable errcheck --deadline 120s $$($(PACKAGE_DIRECTORIES))
+	CGO_ENABLED=0 golangci-lint run $$($(PACKAGE_DIRECTORIES))
 
 lint:
 	@echo "linting"
