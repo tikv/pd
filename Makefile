@@ -12,6 +12,7 @@ GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
 TOOL_BIN_PATH := $(shell pwd)/.tools/bin
+GOBIN := $(TOOL_BIN_PATH)
 PATH := $(TOOL_BIN_PATH):$(PATH)
 
 FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
@@ -105,6 +106,7 @@ check-all: static lint tidy
 
 install-tools: export GO111MODULE=on
 install-tools: golangci-lint-setup
+	mkdir -p $(TOOL_BIN_PATH)
 	grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 golangci-lint-setup:
