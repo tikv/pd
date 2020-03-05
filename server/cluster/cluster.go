@@ -503,6 +503,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 				zap.Error(err))
 		}
 		regionEventCounter.WithLabelValues("update_kv").Inc()
+	}
+	if saveKV || saveCache {
 		select {
 		case c.changedRegions <- region:
 		default:

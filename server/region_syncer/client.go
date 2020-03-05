@@ -182,11 +182,18 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					// reset index
 					s.history.ResetWithIndex(resp.GetStartIndex())
 				}
-				for _, r := range resp.GetRegions() {
-					s.server.GetBasicCluster().CheckAndPutRegion(core.NewRegionInfo(r, nil))
+				stats := resp.GetRegionStats()
+				for i, r := range resp.GetRegions() {
+					region := core.NewRegionInfo(r, nil,
+						core.SetWrittenBytes(stats[i].BytesWritten),
+						core.SetWrittenKeys(stats[i].KeysWritten),
+						core.SetReadBytes(stats[i].BytesRead),
+						core.SetReadKeys(stats[i].KeysRead),
+					)
+					s.server.GetBasicCluster().CheckAndPutRegion(region)
 					err = s.server.GetStorage().SaveRegion(r)
 					if err == nil {
-						s.history.Record(core.NewRegionInfo(r, nil))
+						s.history.Record(region)
 					}
 				}
 			}
