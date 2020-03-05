@@ -12,8 +12,8 @@ GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
 TOOL_BIN_PATH := $(shell pwd)/.tools/bin
-GOBIN := $(TOOL_BIN_PATH)
-PATH := $(TOOL_BIN_PATH):$(PATH)
+export GOBIN := $(TOOL_BIN_PATH)
+export PATH := $(TOOL_BIN_PATH):$(PATH)
 
 FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
 FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable)
