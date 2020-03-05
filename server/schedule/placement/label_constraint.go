@@ -14,8 +14,10 @@
 package placement
 
 import (
-	"github.com/pingcap/pd/pkg/slice"
-	"github.com/pingcap/pd/server/core"
+	"strings"
+
+	"github.com/pingcap/pd/v4/pkg/slice"
+	"github.com/pingcap/pd/v4/server/core"
 )
 
 // LabelConstraintOp defines how a LabelConstraint matches a store. It can be one of
@@ -63,10 +65,16 @@ func (c *LabelConstraint) MatchStore(store *core.StoreInfo) bool {
 	return false
 }
 
+// For backward compatibility. Need to remove later.
+var legacyExclusiveLabels = []string{"engine", "exclusive"}
+
 // If a store has exclusiveLabels, it can only be selected when the label is
 // exciplitly specified in constraints.
-// TODO: move it to config.
-var exclusiveLabels = []string{"engine"}
+func isExclusiveLabel(key string) bool {
+	return strings.HasPrefix(key, "$") || slice.AnyOf(legacyExclusiveLabels, func(i int) bool {
+		return key == legacyExclusiveLabels[i]
+	})
+}
 
 // MatchLabelConstraints checks if a store matches label constraints list.
 func MatchLabelConstraints(store *core.StoreInfo, constraints []LabelConstraint) bool {
@@ -74,12 +82,11 @@ func MatchLabelConstraints(store *core.StoreInfo, constraints []LabelConstraint)
 		return false
 	}
 
-	if slice.AnyOf(exclusiveLabels, func(i int) bool { // if there is any exclusive label that
-		label := exclusiveLabels[i]
-		return store.GetLabelValue(label) != "" && // ... the store has the exclusive label
-			slice.NoneOf(constraints, func(i int) bool { return constraints[i].Key == label }) // ... but the exclusive label is not in constraints
-	}) {
-		return false // ... then the store should be ignored
+	for _, l := range store.GetLabels() {
+		if isExclusiveLabel(l.GetKey()) &&
+			slice.NoneOf(constraints, func(i int) bool { return constraints[i].Key == l.GetKey() }) {
+			return false
+		}
 	}
 
 	return slice.AllOf(constraints, func(i int) bool { return constraints[i].MatchStore(store) })

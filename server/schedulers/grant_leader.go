@@ -20,11 +20,11 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/v4/pkg/apiutil"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -219,12 +219,12 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 			continue
 		}
 
-		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 		op, err := operator.CreateTransferLeaderOperator(GrantLeaderType, cluster, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create grant leader operator", zap.Error(err))
 			continue
 		}
+		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)
 	}
@@ -295,6 +295,10 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
+			if err := handler.config.cluster.RemoveScheduler(GrantLeaderName); err != nil {
+				handler.rd.JSON(w, http.StatusInternalServerError, err)
+				return
+			}
 			resp = lastStoreDeleteInfo
 		}
 		handler.rd.JSON(w, http.StatusOK, resp)

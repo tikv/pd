@@ -21,12 +21,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/mock/mockid"
-	"github.com/pingcap/pd/pkg/mock/mockoption"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/schedule/placement"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v4/pkg/mock/mockid"
+	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/kv"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +43,8 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
-	ruleManager, _ := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()), opt.MaxReplicas, opt.GetLocationLabels())
+	ruleManager := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()))
+	ruleManager.Initialize(opt.MaxReplicas, opt.GetLocationLabels())
 	return &Cluster{
 		BasicCluster:    core.NewBasicCluster(),
 		IDAllocator:     mockid.NewIDAllocator(),
@@ -54,7 +55,8 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 	}
 }
 
-func (mc *Cluster) allocID() (uint64, error) {
+// AllocID allocs a new unique ID.
+func (mc *Cluster) AllocID() (uint64, error) {
 	return mc.Alloc()
 }
 
@@ -111,7 +113,7 @@ func (mc *Cluster) RandHotRegionFromStore(store uint64, kind statistics.FlowKind
 
 // AllocPeer allocs a new peer on a store.
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := mc.allocID()
+	peerID, err := mc.AllocID()
 	if err != nil {
 		log.Error("failed to alloc peer", zap.Error(err))
 		return nil, err
@@ -214,6 +216,19 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	mc.PutStore(store)
 }
 
+// AddRegionStoreWithLeader adds store with specified count of region and leader.
+func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, leaderCounts ...int) {
+	leaderCount := regionCount
+	if len(leaderCounts) != 0 {
+		leaderCount = leaderCounts[0]
+	}
+	mc.AddRegionStore(storeID, regionCount)
+	for i := 0; i < leaderCount; i++ {
+		id, _ := mc.AllocID()
+		mc.AddLeaderRegion(id, storeID)
+	}
+}
+
 // AddLabelsStore adds store with specified count of region and labels.
 func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
 	newLabels := make([]*metapb.StoreLabel, 0, len(labels))
@@ -237,10 +252,11 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 }
 
 // AddLeaderRegion adds region with specified leader and followers.
-func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) {
+func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {
 	origin := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
+	return region
 }
 
 // AddLeaderRegionWithRange adds region with specified leader, followers and key range.
@@ -254,9 +270,14 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 }
 
 // AddLeaderRegionWithReadInfo adds region with specified leader, followers and read info.
-func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64, readBytes uint64, reportInterval uint64, followerIds ...uint64) {
+func (mc *Cluster) AddLeaderRegionWithReadInfo(
+	regionID uint64, leaderID uint64,
+	readBytes, readKeys uint64,
+	reportInterval uint64,
+	followerIds []uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetReadBytes(readBytes))
+	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
 	items := mc.HotCache.CheckRead(r, mc.StoresStats)
 	for _, item := range items {
@@ -266,9 +287,14 @@ func (mc *Cluster) AddLeaderRegionWithReadInfo(regionID uint64, leaderID uint64,
 }
 
 // AddLeaderRegionWithWriteInfo adds region with specified leader, followers and write info.
-func (mc *Cluster) AddLeaderRegionWithWriteInfo(regionID uint64, leaderID uint64, writtenBytes uint64, reportInterval uint64, followerIds ...uint64) {
+func (mc *Cluster) AddLeaderRegionWithWriteInfo(
+	regionID uint64, leaderID uint64,
+	writtenBytes, writtenKeys uint64,
+	reportInterval uint64,
+	followerIds []uint64) {
 	r := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
+	r = r.Clone(core.SetWrittenKeys(writtenKeys))
 	r = r.Clone(core.SetReportInterval(reportInterval))
 	items := mc.HotCache.CheckWrite(r, mc.StoresStats)
 	for _, item := range items {
@@ -388,6 +414,32 @@ func (mc *Cluster) UpdateStorageReadBytes(storeID uint64, bytesRead uint64) {
 	mc.PutStore(newStore)
 }
 
+// UpdateStorageWrittenKeys updates store written keys.
+func (mc *Cluster) UpdateStorageWrittenKeys(storeID uint64, keysWritten uint64) {
+	store := mc.GetStore(storeID)
+	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
+	newStats.KeysWritten = keysWritten
+	now := time.Now().Second()
+	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
+	newStats.Interval = interval
+	newStore := store.Clone(core.SetStoreStats(newStats))
+	mc.Set(storeID, newStats)
+	mc.PutStore(newStore)
+}
+
+// UpdateStorageReadKeys updates store read bytes.
+func (mc *Cluster) UpdateStorageReadKeys(storeID uint64, keysRead uint64) {
+	store := mc.GetStore(storeID)
+	newStats := proto.Clone(store.GetStoreStats()).(*pdpb.StoreStats)
+	newStats.KeysRead = keysRead
+	now := time.Now().Second()
+	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
+	newStats.Interval = interval
+	newStore := store.Clone(core.SetStoreStats(newStats))
+	mc.Set(storeID, newStats)
+	mc.PutStore(newStore)
+}
+
 // UpdateStoreStatus updates store status.
 func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	leaderCount := mc.Regions.GetStoreLeaderCount(id)
@@ -478,6 +530,11 @@ func (mc *Cluster) PutStoreWithLabels(id uint64, labelPairs ...string) {
 		labels[labelPairs[i]] = labelPairs[i+1]
 	}
 	mc.AddLabelsStore(id, 0, labels)
+}
+
+// RemoveScheduler mocks method.
+func (mc *Cluster) RemoveScheduler(name string) error {
+	return nil
 }
 
 // MockRegionInfo returns a mock region

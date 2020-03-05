@@ -15,11 +15,16 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 
+	"github.com/pingcap/kvproto/pkg/configpb"
+	pd "github.com/pingcap/pd/v4/client"
+	"github.com/pingcap/pd/v4/server"
+	configmanager "github.com/pingcap/pd/v4/server/config_manager"
 	"github.com/pkg/errors"
 )
 
@@ -74,7 +79,6 @@ func readJSON(url string, data interface{}) error {
 	if resp.StatusCode != http.StatusOK {
 		return errors.Errorf("http get url %s return code %d", url, resp.StatusCode)
 	}
-
 	err = json.Unmarshal(b, data)
 	if err != nil {
 		return errors.WithStack(err)
@@ -104,15 +108,33 @@ func postJSON(url string, data []byte, checkOpts ...func([]byte, int)) error {
 	return nil
 }
 
-func doDelete(url string) error {
+func doDelete(url string) (*http.Response, error) {
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	res, err := dialClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	res.Body.Close()
+	return res, nil
+}
+
+func redirectUpdateReq(ctx context.Context, client pd.ConfigClient, cm *configmanager.ConfigManager, entries []*entry) error {
+	var configEntries []*configpb.ConfigEntry
+	for _, e := range entries {
+		configEntry := &configpb.ConfigEntry{Name: e.key, Value: e.value}
+		configEntries = append(configEntries, configEntry)
+	}
+	version := &configpb.Version{Global: cm.GlobalCfgs[server.Component].GetVersion()}
+	kind := &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: server.Component}}}
+	status, _, err := client.Update(ctx, version, kind, configEntries)
+	if err != nil {
+		return err
+	}
+	if status.GetCode() != configpb.StatusCode_OK {
+		return errors.New(status.GetMessage())
+	}
 	return nil
 }

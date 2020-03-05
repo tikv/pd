@@ -23,9 +23,9 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/tests"
+	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/tests"
 	"go.uber.org/goleak"
 )
 
@@ -182,8 +182,8 @@ type testTimeFallBackSuite struct {
 
 func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/fallBackSync", `return(true)`), IsNil)
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/fallBackUpdate", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/tso/fallBackSync", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/tso/fallBackUpdate", `return(true)`), IsNil)
 	var err error
 	s.cluster, err = tests.NewTestCluster(s.ctx, 1)
 	c.Assert(err, IsNil)
@@ -196,8 +196,8 @@ func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.server.GetAddr())
 	svr := s.server.GetServer()
 	svr.Close()
-	failpoint.Disable("github.com/pingcap/pd/server/tso/fallBackSync")
-	failpoint.Disable("github.com/pingcap/pd/server/tso/fallBackUpdate")
+	failpoint.Disable("github.com/pingcap/pd/v4/server/tso/fallBackSync")
+	failpoint.Disable("github.com/pingcap/pd/v4/server/tso/fallBackUpdate")
 	err = svr.Run()
 	c.Assert(err, IsNil)
 	s.cluster.WaitLeader()
@@ -277,7 +277,7 @@ func (s *testFollowerTsoSuite) TearDownSuite(c *C) {
 }
 
 func (s *testFollowerTsoSuite) TestRequest(c *C) {
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/tso/skipRetryGetTS", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/tso/skipRetryGetTS", `return(true)`), IsNil)
 	var err error
 	cluster, err := tests.NewTestCluster(s.ctx, 2)
 	defer cluster.Destroy()
@@ -309,5 +309,5 @@ func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	_, err = tsoClient.Recv()
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "can not get timestamp"), IsTrue)
-	failpoint.Disable("github.com/pingcap/pd/server/tso/skipRetryGetTS")
+	failpoint.Disable("github.com/pingcap/pd/v4/server/tso/skipRetryGetTS")
 }

@@ -23,9 +23,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
 )
 
 var _ = Suite(&testVersionSuite{})
@@ -59,7 +59,7 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 	go func(cfg *config.Config) {
 		s, err := server.CreateServer(ctx, cfg, NewHandler)
 		c.Assert(err, IsNil)
-		c.Assert(failpoint.Enable("github.com/pingcap/pd/server/memberNil", `return(true)`), IsNil)
+		c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/memberNil", `return(true)`), IsNil)
 		reqCh <- struct{}{}
 		err = s.Run()
 		c.Assert(err, IsNil)
@@ -80,5 +80,5 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 		cancel()
 		testutil.CleanServer(cfg.DataDir)
 	}()
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/memberNil"), IsNil)
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/memberNil"), IsNil)
 }

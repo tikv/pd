@@ -18,7 +18,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/typeutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
 )
 
 func Test(t *testing.T) {

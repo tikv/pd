@@ -16,19 +16,18 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/logutil"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/schedulers"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v4/pkg/logutil"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedulers"
+	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -49,9 +48,11 @@ const (
 
 var (
 	// ErrNotBootstrapped is error info for cluster not bootstrapped.
-	ErrNotBootstrapped   = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
-	errSchedulerExisted  = errors.New("scheduler existed")
-	errSchedulerNotFound = errors.New("scheduler not found")
+	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
+	// ErrSchedulerExisted is error info for scheduler has already existed.
+	ErrSchedulerExisted = errors.New("scheduler existed")
+	// ErrSchedulerNotFound is error info for scheduler is not found.
+	ErrSchedulerNotFound = errors.New("scheduler not found")
 )
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -78,7 +79,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams opt.Hea
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
-		checkers:        schedule.NewCheckerController(ctx, cluster, opController),
+		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, opController),
 		regionScatterer: schedule.NewRegionScatterer(cluster),
 		schedulers:      make(map[string]*scheduleController),
 		opController:    opController,
@@ -240,7 +241,7 @@ func (c *coordinator) run() {
 		}
 
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != errSchedulerExisted {
+		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != ErrSchedulerExisted {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		} else {
 			// Only records the valid scheduler config.
@@ -331,7 +332,6 @@ type hasHotStatus interface {
 	GetHotWriteStatus() *statistics.StoreHotPeersInfos
 	GetWritePendingInfluence() map[uint64]schedulers.Influence
 	GetReadPendingInfluence() map[uint64]schedulers.Influence
-	GetStoresScore() map[uint64]float64
 }
 
 func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
@@ -420,6 +420,8 @@ func (c *coordinator) collectHotSpotMetrics() {
 		infl := pendings[storeID]
 		// TODO: add to tidb-ansible after merging pending influence into operator influence.
 		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.ByteRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_key_rate").Set(infl.KeyRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_count").Set(infl.Count)
 	}
 
 	// Collects hot read region metrics.
@@ -440,17 +442,8 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 		infl := pendings[storeID]
 		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.ByteRate)
-	}
-
-	// Collects score of stores stats metrics.
-	scores := s.Scheduler.(hasHotStatus).GetStoresScore()
-	for _, store := range stores {
-		storeAddress := store.GetAddress()
-		storeID := store.GetID()
-		score, ok := scores[storeID]
-		if ok {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, strconv.FormatUint(storeID, 10), "store_score").Set(score)
-		}
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_key_rate").Set(infl.KeyRate)
+		hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_count").Set(infl.Count)
 	}
 }
 
@@ -467,7 +460,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	defer c.Unlock()
 
 	if _, ok := c.schedulers[scheduler.GetName()]; ok {
-		return errSchedulerExisted
+		return ErrSchedulerExisted
 	}
 
 	s := newScheduleController(c, scheduler)
@@ -479,6 +472,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
 	c.cluster.opt.AddSchedulerCfg(s.GetType(), args)
+	c.cluster.schedulersCallback()
 
 	return nil
 }
@@ -491,7 +485,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	}
 	s, ok := c.schedulers[name]
 	if !ok {
-		return errSchedulerNotFound
+		return ErrSchedulerNotFound
 	}
 
 	s.Stop()
@@ -510,6 +504,8 @@ func (c *coordinator) removeScheduler(name string) error {
 			log.Error("can not remove the scheduler config", zap.Error(err))
 		}
 	}
+
+	c.cluster.schedulersCallback()
 	return err
 }
 
@@ -523,7 +519,7 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	if name != "all" {
 		sc, ok := c.schedulers[name]
 		if !ok {
-			return errSchedulerNotFound
+			return ErrSchedulerNotFound
 		}
 		s = append(s, sc)
 	} else {
@@ -558,7 +554,8 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 				continue
 			}
 			if op := s.Schedule(); op != nil {
-				c.opController.AddWaitingOperator(op...)
+				added := c.opController.AddWaitingOperator(op...)
+				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
 			}
 
 		case <-s.Ctx().Done():

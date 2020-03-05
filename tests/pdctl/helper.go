@@ -22,17 +22,18 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/api"
-	"github.com/pingcap/pd/server/cluster"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tests"
-	"github.com/pingcap/pd/tools/pd-ctl/pdctl"
-	ctl "github.com/pingcap/pd/tools/pd-ctl/pdctl"
-	"github.com/pingcap/pd/tools/pd-ctl/pdctl/command"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/api"
+	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/tests"
+	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl"
+	ctl "github.com/pingcap/pd/v4/tools/pd-ctl/pdctl"
+	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
 )
 
@@ -85,7 +86,11 @@ func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) 
 		}
 	}
 	for _, s := range stores {
-		c.Assert(s.Store.Store, check.DeepEquals, mapWant[s.Store.Store.Id])
+		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
+		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
+		// Ignore lastHeartbeat
+		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
+		c.Assert(obtained, check.DeepEquals, expected)
 	}
 }
 

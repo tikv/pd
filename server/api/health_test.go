@@ -19,8 +19,8 @@ import (
 	"strings"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
 )
 
 var _ = Suite(&testHealthAPISuite{})

@@ -18,7 +18,7 @@ import (
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v4/server/core"
 )
 
 const (
@@ -56,7 +56,10 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 			v = unknown
 		}
 		key := fmt.Sprintf("%s:%s", k, v)
-		s.LabelCounter[key]++
+		// exclude tombstone
+		if store.GetState() != metapb.StoreState_Tombstone {
+			s.LabelCounter[key]++
+		}
 	}
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
@@ -90,7 +93,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	s.LeaderCount += store.GetLeaderCount()
 
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderScheduleStrategy(), 0))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderSchedulePolicy(), 0))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_size").Set(float64(store.GetRegionSize()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_count").Set(float64(store.GetRegionCount()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_size").Set(float64(store.GetLeaderSize()))
@@ -102,11 +105,11 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	// Store flows.
 	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
 	storeWriteRateByte, storeReadRateByte := storeFlowStats.GetBytesRate()
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_byte").Set(storeWriteRateByte)
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_byte").Set(storeReadRateByte)
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes").Set(storeWriteRateByte)
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes").Set(storeReadRateByte)
 	storeWriteRateKey, storeReadRateKey := storeFlowStats.GetKeysWriteRate(), storeFlowStats.GetKeysReadRate()
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_key").Set(storeWriteRateKey)
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_key").Set(storeReadRateKey)
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys").Set(storeWriteRateKey)
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys").Set(storeReadRateKey)
 
 	// Store's threads statistics.
 	storeCPUUsage := stats.GetStoreCPUUsage(store.GetID())
@@ -226,4 +229,5 @@ func (m *storeStatisticsMap) Collect() {
 func (m *storeStatisticsMap) Reset() {
 	storeStatusGauge.Reset()
 	clusterStatusGauge.Reset()
+	placementStatusGauge.Reset()
 }

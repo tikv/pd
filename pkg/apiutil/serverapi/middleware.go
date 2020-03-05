@@ -22,8 +22,8 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/urfave/negroni"
 	"go.uber.org/zap"
 )
@@ -51,11 +51,11 @@ var dialClient = &http.Client{
 
 type runtimeServiceValidator struct {
 	s     *server.Server
-	group server.APIGroup
+	group server.ServiceGroup
 }
 
 // NewRuntimeServiceValidator checks if the path is invalid.
-func NewRuntimeServiceValidator(s *server.Server, group server.APIGroup) negroni.Handler {
+func NewRuntimeServiceValidator(s *server.Server, group server.ServiceGroup) negroni.Handler {
 	return &runtimeServiceValidator{s: s, group: group}
 }
 
@@ -69,7 +69,7 @@ func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Reque
 }
 
 // IsServiceAllowed checks the service through the path.
-func IsServiceAllowed(s *server.Server, group server.APIGroup) bool {
+func IsServiceAllowed(s *server.Server, group server.ServiceGroup) bool {
 
 	// for core path
 	if group.IsCore {

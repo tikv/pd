@@ -56,6 +56,21 @@ var (
 			Help:      "Bucketed histogram of time spend(s) of patrol checks region.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 15),
 		})
+
+	clusterStateCPUGuage = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "cluster_state_cpu_usage",
+			Help:      "CPU usage to determine the cluster state",
+		})
+	clusterStateCurrent = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "cluster_state_current",
+			Help:      "Current state of the cluster",
+		}, []string{"state"})
 )
 
 func init() {
@@ -64,4 +79,6 @@ func init() {
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(patrolCheckRegionsHistogram)
+	prometheus.MustRegister(clusterStateCPUGuage)
+	prometheus.MustRegister(clusterStateCurrent)
 }

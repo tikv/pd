@@ -27,14 +27,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/server/cluster"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/schedulers"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedulers"
+	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -480,6 +480,11 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return err
 	}
 
+	if c.IsPlacementRulesEnabled() {
+		// Cannot determine role when placement rules enabled. Not supported now.
+		return errors.New("transfer region is not supported when placement rules enabled")
+	}
+
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return ErrRegionNotFound(regionID)
@@ -541,11 +546,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
 	}
 
-	newPeer, err := c.AllocPeer(toStoreID)
-	if err != nil {
-		return err
-	}
-
+	newPeer := &metapb.Peer{StoreId: toStoreID, IsLearner: oldPeer.GetIsLearner()}
 	op, err := operator.CreateMovePeerOperator("admin-move-peer", c, region, operator.OpAdmin, fromStoreID, newPeer)
 	if err != nil {
 		log.Debug("fail to create move peer operator", zap.Error(err))
@@ -591,11 +592,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return err
 	}
 
-	newPeer, err := c.AllocPeer(toStoreID)
-	if err != nil {
-		return err
-	}
-
+	newPeer := &metapb.Peer{StoreId: toStoreID}
 	op, err := operator.CreateAddPeerOperator("admin-add-peer", c, region, newPeer, operator.OpAdmin)
 	if err != nil {
 		log.Debug("fail to create add peer operator", zap.Error(err))
@@ -614,11 +611,10 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 		return err
 	}
 
-	newPeer, err := c.AllocPeer(toStoreID)
-	if err != nil {
-		return err
+	newPeer := &metapb.Peer{
+		StoreId:   toStoreID,
+		IsLearner: true,
 	}
-	newPeer.IsLearner = true
 
 	op, err := operator.CreateAddPeerOperator("admin-add-learner", c, region, newPeer, operator.OpAdmin)
 	if err != nil {
@@ -843,6 +839,18 @@ func (h *Handler) ResetTS(ts uint64) error {
 	return tsoServer.ResetUserTimestamp(ts)
 }
 
+// SetStoreLimitScene sets the limit values for differents scenes
+func (h *Handler) SetStoreLimitScene(scene *schedule.StoreLimitScene) {
+	cluster := h.s.GetRaftCluster()
+	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene)
+}
+
+// GetStoreLimitScene returns the limit valus for different scenes
+func (h *Handler) GetStoreLimitScene() *schedule.StoreLimitScene {
+	cluster := h.s.GetRaftCluster()
+	return cluster.GetStoreLimiter().StoreLimitScene()
+}
+
 // PluginLoad loads the plugin referenced by the pluginPath
 func (h *Handler) PluginLoad(pluginPath string) error {
 	h.pluginChMapLock.Lock()
@@ -867,4 +875,9 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 		return nil
 	}
 	return ErrPluginNotFound(pluginPath)
+}
+
+// GetAddr returns the server urls for clients.
+func (h *Handler) GetAddr() string {
+	return h.s.GetAddr()
 }

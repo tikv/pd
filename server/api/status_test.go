@@ -18,7 +18,7 @@ import (
 	"io/ioutil"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/v4/server"
 )
 
 var _ = Suite(&testStatusAPISuite{})
@@ -30,6 +30,7 @@ func checkStatusResponse(c *C, body []byte) {
 	c.Assert(json.Unmarshal(body, &got), IsNil)
 	c.Assert(got.BuildTS, Equals, server.PDBuildTS)
 	c.Assert(got.GitHash, Equals, server.PDGitHash)
+	c.Assert(got.Version, Equals, server.PDReleaseVersion)
 }
 
 func (s *testStatusAPISuite) TestStatus(c *C) {

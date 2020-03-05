@@ -16,29 +16,35 @@ package api
 import (
 	"net/http"
 
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/v4/server"
 	"github.com/unrolled/render"
 )
 
 type statusHandler struct {
-	rd *render.Render
+	svr *server.Server
+	rd  *render.Render
 }
 
 type status struct {
-	BuildTS string `json:"build_ts"`
-	GitHash string `json:"git_hash"`
+	BuildTS        string `json:"build_ts"`
+	Version        string `json:"version"`
+	GitHash        string `json:"git_hash"`
+	StartTimestamp int64  `json:"start_timestamp"`
 }
 
-func newStatusHandler(rd *render.Render) *statusHandler {
+func newStatusHandler(svr *server.Server, rd *render.Render) *statusHandler {
 	return &statusHandler{
-		rd: rd,
+		svr: svr,
+		rd:  rd,
 	}
 }
 
 func (h *statusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	version := status{
-		BuildTS: server.PDBuildTS,
-		GitHash: server.PDGitHash,
+		BuildTS:        server.PDBuildTS,
+		GitHash:        server.PDGitHash,
+		Version:        server.PDReleaseVersion,
+		StartTimestamp: h.svr.StartTimestamp(),
 	}
 
 	h.rd.JSON(w, http.StatusOK, version)

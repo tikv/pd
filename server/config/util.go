@@ -20,18 +20,19 @@ import (
 	"github.com/pkg/errors"
 )
 
-const matchRule = "^[A-Za-z0-9]([-A-Za-z0-9_./]*[A-Za-z0-9])?$"
+const (
+	// Label key consists of alphanumeric characters, '-', '_', '.' or '/', and must start and end with an
+	// alphanumeric character. If can also contain an extra '$' at the beginning.
+	keyFormat = "^[$]?[A-Za-z0-9]([-A-Za-z0-9_./]*[A-Za-z0-9])?$"
+	// Value key can be any combination of alphanumeric characters, '-', '_', '.' or '/'. It can also be empty to
+	// mark the label as deleted.
+	valueFormat = "^[-A-Za-z0-9_./]*$"
+)
 
-// ValidateLabelString checks the legality of the label string.
-// The valid label consists of alphanumeric characters, '-', '_', '.' or '/',
-// and must start and end with an alphanumeric character.
-func ValidateLabelString(s string) error {
-	if s == "" {
-		return nil
-	}
-	isValid, _ := regexp.MatchString(matchRule, s)
+func validateFormat(s, format string) error {
+	isValid, _ := regexp.MatchString(format, s)
 	if !isValid {
-		return errors.Errorf("invalid label: %s", s)
+		return errors.Errorf("%s does not match format %q", s, format)
 	}
 	return nil
 }
@@ -39,12 +40,10 @@ func ValidateLabelString(s string) error {
 // ValidateLabels checks the legality of the labels.
 func ValidateLabels(labels []*metapb.StoreLabel) error {
 	for _, label := range labels {
-		err := ValidateLabelString(label.Key)
-		if err != nil {
+		if err := validateFormat(label.Key, keyFormat); err != nil {
 			return err
 		}
-		err = ValidateLabelString(label.Value)
-		if err != nil {
+		if err := validateFormat(label.Value, valueFormat); err != nil {
 			return err
 		}
 	}

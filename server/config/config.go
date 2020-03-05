@@ -14,7 +14,7 @@
 package config
 
 import (
-	"crypto/tls"
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -26,20 +26,21 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/metricutil"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/schedule"
+	"github.com/pingcap/pd/v4/pkg/grpcutil"
+	"github.com/pingcap/pd/v4/pkg/metricutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
 // Config is the pd server configuration.
 type Config struct {
-	*flag.FlagSet `json:"-"`
+	flagSet *flag.FlagSet
 
 	Version bool `json:"-"`
 
@@ -85,7 +86,7 @@ type Config struct {
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
-	ClusterVersion semver.Version `json:"cluster-version"`
+	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
 	// the default size is 2GB, the maximum is 8GB.
@@ -110,7 +111,7 @@ type Config struct {
 	// an election, thus minimizing disruptions.
 	PreVote bool `toml:"enable-prevote"`
 
-	Security SecurityConfig `toml:"security" json:"security"`
+	Security grpcutil.SecurityConfig `toml:"security" json:"security"`
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
@@ -129,13 +130,17 @@ type Config struct {
 
 	logger   *zap.Logger
 	logProps *log.ZapProperties
+
+	EnableDynamicConfig bool
+
+	EnableDashboard bool
 }
 
 // NewConfig creates a new config.
 func NewConfig() *Config {
 	cfg := &Config{}
-	cfg.FlagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
-	fs := cfg.FlagSet
+	cfg.flagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
+	fs := cfg.flagSet
 
 	fs.BoolVar(&cfg.Version, "V", false, "print version information and exit")
 	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
@@ -162,6 +167,10 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
 
+	fs.BoolVar(&cfg.EnableDynamicConfig, "enable-dynamic-config", false, "Enable dynamic configuration change")
+
+	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", true, "Enable Dashboard API and UI on this node")
+
 	return cfg
 }
 
@@ -170,6 +179,7 @@ const (
 	defaultNextRetryDelay          = time.Second
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
+	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -199,7 +209,10 @@ const (
 	defaultDisableErrorVerbose = true
 )
 
-var defaultRuntimeServices = []string{}
+var (
+	defaultRuntimeServices = []string{}
+	defaultLocationLabels  = []string{}
+)
 
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {
@@ -240,7 +253,7 @@ func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 // Parse parses flag definitions from the argument list.
 func (c *Config) Parse(arguments []string) error {
 	// Parse first to get config file.
-	err := c.FlagSet.Parse(arguments)
+	err := c.flagSet.Parse(arguments)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -271,13 +284,13 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	// Parse again to replace with command line options.
-	err = c.FlagSet.Parse(arguments)
+	err = c.flagSet.Parse(arguments)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	if len(c.FlagSet.Args()) != 0 {
-		return errors.Errorf("'%s' is an invalid flag", c.FlagSet.Arg(0))
+	if len(c.flagSet.Args()) != 0 {
+		return errors.Errorf("'%s' is an invalid flag", c.flagSet.Arg(0))
 	}
 
 	err = c.Adjust(meta)
@@ -407,6 +420,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	adjustString(&c.AutoCompactionMode, defaultCompactionMode)
 	adjustString(&c.AutoCompactionRetention, defaultAutoCompactionRetention)
+	if !configMetaData.IsDefined("quota-backend-bytes") {
+		c.QuotaBackendBytes = defaultQuotaBackendBytes
+	}
 	adjustDuration(&c.TickInterval, defaultTickInterval)
 	adjustDuration(&c.ElectionInterval, defaultElectionInterval)
 
@@ -468,45 +484,45 @@ func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
 type ScheduleConfig struct {
 	// If the snapshot count of one store is greater than this value,
 	// it will never be used as a source or target store.
-	MaxSnapshotCount    uint64 `toml:"max-snapshot-count,omitempty" json:"max-snapshot-count"`
-	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count,omitempty" json:"max-pending-peer-count"`
+	MaxSnapshotCount    uint64 `toml:"max-snapshot-count" json:"max-snapshot-count"`
+	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count" json:"max-pending-peer-count"`
 	// If both the size of region is smaller than MaxMergeRegionSize
 	// and the number of rows in region is smaller than MaxMergeRegionKeys,
 	// it will try to merge with adjacent regions.
-	MaxMergeRegionSize uint64 `toml:"max-merge-region-size,omitempty" json:"max-merge-region-size"`
-	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys,omitempty" json:"max-merge-region-keys"`
+	MaxMergeRegionSize uint64 `toml:"max-merge-region-size" json:"max-merge-region-size"`
+	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
-	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval,omitempty" json:"split-merge-interval"`
+	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
-	EnableOneWayMerge bool `toml:"enable-one-way-merge,omitempty" json:"enable-one-way-merge,string"`
+	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
 	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
 	// This option only works when key type is "table".
-	EnableCrossTableMerge bool `toml:"enable-cross-table-merge,omitempty" json:"enable-cross-table-merge,string"`
+	EnableCrossTableMerge bool `toml:"enable-cross-table-merge" json:"enable-cross-table-merge,string"`
 	// PatrolRegionInterval is the interval for scanning region during patrol.
-	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval,omitempty" json:"patrol-region-interval"`
+	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval" json:"patrol-region-interval"`
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
+	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
-	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
-	// LeaderScheduleStrategy is the option to balance leader, there are some strategics supported: ["count", "size"], default: "count"
-	LeaderScheduleStrategy string `toml:"leader-schedule-strategy,omitempty" json:"leader-schedule-strategy,string"`
+	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
+	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
+	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
 	// RegionScheduleLimit is the max coexist region schedules.
-	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
+	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
-	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit,omitempty" json:"replica-schedule-limit"`
+	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
 	// MergeScheduleLimit is the max coexist merge schedules.
-	MergeScheduleLimit uint64 `toml:"merge-schedule-limit,omitempty" json:"merge-schedule-limit"`
+	MergeScheduleLimit uint64 `toml:"merge-schedule-limit" json:"merge-schedule-limit"`
 	// HotRegionScheduleLimit is the max coexist hot region schedules.
-	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit,omitempty" json:"hot-region-schedule-limit"`
+	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit" json:"hot-region-schedule-limit"`
 	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
 	// If the number of times a region hits the hot cache is greater than this
 	// threshold, it is considered a hot region.
-	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold,omitempty" json:"hot-region-cache-hits-threshold"`
+	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
 	// StoreBalanceRate is the maximum of balance rate for each store.
-	StoreBalanceRate float64 `toml:"store-balance-rate,omitempty" json:"store-balance-rate"`
+	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
-	TolerantSizeRatio float64 `toml:"tolerant-size-ratio,omitempty" json:"tolerant-size-ratio"`
+	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
 	//
 	//      high space stage         transition stage           low space stage
 	//   |--------------------|-----------------------------|-------------------------|
@@ -515,12 +531,12 @@ type ScheduleConfig struct {
 	//
 	// LowSpaceRatio is the lowest usage ratio of store which regraded as low space.
 	// When in low space, store region score increases to very large and varies inversely with available size.
-	LowSpaceRatio float64 `toml:"low-space-ratio,omitempty" json:"low-space-ratio"`
+	LowSpaceRatio float64 `toml:"low-space-ratio" json:"low-space-ratio"`
 	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
 	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
-	HighSpaceRatio float64 `toml:"high-space-ratio,omitempty" json:"high-space-ratio"`
+	HighSpaceRatio float64 `toml:"high-space-ratio" json:"high-space-ratio"`
 	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
-	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator,omitempty" json:"scheduler-max-waiting-operator"`
+	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator" json:"scheduler-max-waiting-operator"`
 	// WARN: DisableLearner is deprecated.
 	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
 	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
@@ -559,10 +575,18 @@ type ScheduleConfig struct {
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
 
 	// Schedulers support for loading customized schedulers
-	Schedulers SchedulerConfigs `toml:"schedulers,omitempty" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
+	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
 	// Only used to display
-	SchedulersPayload map[string]string `json:"schedulers,omitempty"`
+	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload"`
+
+	// StoreLimitMode can be auto or manual, when set to auto,
+	// PD tries to change the store limit values according to
+	// the load state of the cluster dynamically. User can
+	// overwrite the auto-tuned value by pd-ctl, when the value
+	// is overwritten, the value is fixed until it is deleted.
+	// Default: manual
+	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -578,7 +602,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
-		LeaderScheduleStrategy:       c.LeaderScheduleStrategy,
+		LeaderSchedulePolicy:         c.LeaderSchedulePolicy,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
@@ -603,6 +627,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
 		EnableLocationReplacement:    c.EnableLocationReplacement,
 		EnableDebugMetrics:           c.EnableDebugMetrics,
+		StoreLimitMode:               c.StoreLimitMode,
 		Schedulers:                   schedulers,
 	}
 }
@@ -628,8 +653,9 @@ const (
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
-	defaultSchedulerMaxWaitingOperator = 3
-	defaultLeaderScheduleStrategy      = "count"
+	defaultSchedulerMaxWaitingOperator = 5
+	defaultLeaderSchedulePolicy        = "count"
+	defaultStoreLimitMode              = "manual"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -672,8 +698,11 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
-	if !meta.IsDefined("leader-schedule-strategy") {
-		adjustString(&c.LeaderScheduleStrategy, defaultLeaderScheduleStrategy)
+	if !meta.IsDefined("leader-schedule-policy") {
+		adjustString(&c.LeaderSchedulePolicy, defaultLeaderSchedulePolicy)
+	}
+	if !meta.IsDefined("store-limit-mode") {
+		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
@@ -777,15 +806,33 @@ func (c *ScheduleConfig) Deprecated() error {
 	return nil
 }
 
+var deprecateConfigs = []string{
+	"disable-remove-down-replica",
+	"disable-replace-offline-replica",
+	"disable-make-up-replica",
+	"disable-remove-extra-replica",
+	"disable-location-replacement",
+}
+
+// IsDeprecated returns if a config is deprecated.
+func IsDeprecated(config string) bool {
+	for _, t := range deprecateConfigs {
+		if t == config {
+			return true
+		}
+	}
+	return false
+}
+
 // SchedulerConfigs is a slice of customized scheduler configuration.
 type SchedulerConfigs []SchedulerConfig
 
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
 	Type        string   `toml:"type" json:"type"`
-	Args        []string `toml:"args,omitempty" json:"args"`
+	Args        []string `toml:"args" json:"args"`
 	Disable     bool     `toml:"disable" json:"disable"`
-	ArgsPayload string   `toml:"args-payload,omitempty" json:"args-payload"`
+	ArgsPayload string   `toml:"args-payload" json:"args-payload"`
 }
 
 var defaultSchedulers = SchedulerConfigs{
@@ -808,18 +855,18 @@ func IsDefaultScheduler(typ string) bool {
 // ReplicationConfig is the replication configuration.
 type ReplicationConfig struct {
 	// MaxReplicas is the number of replicas for each region.
-	MaxReplicas uint64 `toml:"max-replicas,omitempty" json:"max-replicas"`
+	MaxReplicas uint64 `toml:"max-replicas" json:"max-replicas"`
 
 	// The label keys specified the location of a store.
 	// The placement priorities is implied by the order of label keys.
 	// For example, ["zone", "rack"] means that we should place replicas to
 	// different zones first, then to different racks if we don't have enough zones.
-	LocationLabels typeutil.StringSlice `toml:"location-labels,omitempty" json:"location-labels"`
+	LocationLabels typeutil.StringSlice `toml:"location-labels" json:"location-labels"`
 	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
-	StrictlyMatchLabel bool `toml:"strictly-match-label,omitempty" json:"strictly-match-label,string"`
+	StrictlyMatchLabel bool `toml:"strictly-match-label" json:"strictly-match-label,string"`
 
 	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not uesd any more.
-	EnablePlacementRules bool // Keep it false before full feature get merged. `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
+	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
@@ -836,7 +883,7 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 // Validate is used to validate if some replication configurations are right.
 func (c *ReplicationConfig) Validate() error {
 	for _, label := range c.LocationLabels {
-		err := ValidateLabelString(label)
+		err := ValidateLabels([]*metapb.StoreLabel{{Key: label}})
 		if err != nil {
 			return err
 		}
@@ -849,34 +896,10 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("strictly-match-label") {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
 	}
+	if !meta.IsDefined("location-labels") {
+		c.LocationLabels = defaultLocationLabels
+	}
 	return c.Validate()
-}
-
-// SecurityConfig is the configuration for supporting tls.
-type SecurityConfig struct {
-	// CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
-	CAPath string `toml:"cacert-path" json:"cacert-path"`
-	// CertPath is the path of file that contains X509 certificate in PEM format.
-	CertPath string `toml:"cert-path" json:"cert-path"`
-	// KeyPath is the path of file that contains X509 key in PEM format.
-	KeyPath string `toml:"key-path" json:"key-path"`
-}
-
-// ToTLSConfig generatres tls config.
-func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
-	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
-		return nil, nil
-	}
-	tlsInfo := transport.TLSInfo{
-		CertFile:      s.CertPath,
-		KeyFile:       s.KeyPath,
-		TrustedCAFile: s.CAPath,
-	}
-	tlsConfig, err := tlsInfo.ClientConfig()
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	return tlsConfig, nil
 }
 
 // PDServerConfig is the configuration for pd server.
@@ -888,7 +911,7 @@ type PDServerConfig struct {
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
-	// RuntimeSercives is the running the running extension services.
+	// RuntimeServices is the running the running extension services.
 	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.
 	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
@@ -969,6 +992,38 @@ func (c *Config) GetZapLogProperties() *log.ZapProperties {
 	return c.logProps
 }
 
+// GetConfigFile gets the config file.
+func (c *Config) GetConfigFile() string {
+	return c.configFile
+}
+
+// RewriteFile rewrites the config file after updating the config.
+func (c *Config) RewriteFile(new *Config) error {
+	filePath := c.GetConfigFile()
+	if filePath == "" {
+		return nil
+	}
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(*new); err != nil {
+		return err
+	}
+	dir := filepath.Dir(filePath)
+	tmpfile := filepath.Join(dir, "tmp_pd.toml")
+
+	f, err := os.Create(tmpfile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Write(buf.Bytes()); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	return os.Rename(tmpfile, filePath)
+}
+
 // GenEmbedEtcdConfig generates a configuration for embedded etcd.
 func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg := embed.NewConfig()
@@ -996,6 +1051,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
+	cfg.EnableV2 = true
 	cfg.Logger = "zap"
 	var err error
 

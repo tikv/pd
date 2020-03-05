@@ -24,11 +24,11 @@ import (
 
 	"github.com/BurntSushi/toml"
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/kv"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/kv"
 
 	// Register schedulers.
-	_ "github.com/pingcap/pd/server/schedulers"
+	_ "github.com/pingcap/pd/v4/server/schedulers"
 )
 
 func Test(t *testing.T) {
@@ -99,6 +99,8 @@ func (s *testConfigSuite) TestValidation(c *C) {
 	c.Assert(cfg.Schedule.Validate(), IsNil)
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	c.Assert(cfg.Schedule.Validate(), NotNil)
+	// check quota
+	c.Assert(cfg.QuotaBackendBytes, Equals, defaultQuotaBackendBytes)
 }
 
 func (s *testConfigSuite) TestAdjust(c *C) {

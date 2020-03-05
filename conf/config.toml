@@ -70,8 +70,8 @@ region-schedule-limit = 2048
 replica-schedule-limit = 64
 merge-schedule-limit = 8
 hot-region-schedule-limit = 4
-## There are some strategics supported: ["count", "size"], default: "count"
-# leader-schedule-strategy = "count" 
+## There are some policies supported: ["count", "size"], default: "count"
+# leader-schedule-policy = "count"
 ## When the score difference between the leader or Region of the two stores is 
 ## less than specified multiple times of the Region size, it is considered in balance by PD.
 ## If it equals 0.0, PD will automatically adjust it.

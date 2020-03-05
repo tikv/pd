@@ -18,9 +18,9 @@ import (
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/filter"
-	"github.com/pingcap/pd/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/filter"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pkg/errors"
 )
 
@@ -201,7 +201,7 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.steps...), nil
 }
 
-// Initilize intermediate states.
+// Initialize intermediate states.
 func (b *Builder) prepareBuild() (string, error) {
 	var voterCount int
 	for _, p := range b.targetPeers.m {
@@ -232,11 +232,11 @@ func (b *Builder) prepareBuild() (string, error) {
 			// old peer not exists, or target is learner while old one is voter.
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
-				t, err := b.cluster.AllocPeer(0)
+				id, err := b.cluster.AllocID()
 				if err != nil {
 					return "", err
 				}
-				n.Id = t.Id
+				n.Id = id
 			}
 			b.toAdd.Set(n)
 		}
@@ -352,7 +352,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 		return false
 	}
 	stateFilter := filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
-	if stateFilter.Target(b.cluster, store) {
+	if !stateFilter.Target(b.cluster, store) {
 		return false
 	}
 	if len(b.rules) == 0 {

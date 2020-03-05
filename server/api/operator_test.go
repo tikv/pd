@@ -23,10 +23,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/cluster"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/core"
 )
 
 var _ = Suite(&testOperatorSuite{})
@@ -38,7 +38,7 @@ type testOperatorSuite struct {
 }
 
 func (s *testOperatorSuite) SetUpSuite(c *C) {
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 1 })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -80,7 +80,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	c.Assert(strings.Contains(operator, "add learner peer 1 on store 3"), IsTrue)
 	c.Assert(strings.Contains(operator, "RUNNING"), IsTrue)
 
-	err = doDelete(regionURL)
+	_, err = doDelete(regionURL)
 	c.Assert(err, IsNil)
 
 	err = postJSON(fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`))
@@ -89,7 +89,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	c.Assert(strings.Contains(operator, "RUNNING"), IsTrue)
 	c.Assert(strings.Contains(operator, "remove peer on store 2"), IsTrue)
 
-	err = doDelete(regionURL)
+	_, err = doDelete(regionURL)
 	c.Assert(err, IsNil)
 
 	mustPutStore(c, s.svr, 4, metapb.StoreState_Up, nil)

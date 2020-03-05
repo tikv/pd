@@ -19,11 +19,11 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/v4/pkg/apiutil"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -205,14 +205,19 @@ func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operat
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-leader-%s", l.config.RangeName))
 		ops[0].AttachKind(operator.OpRange)
-		schedulerCounter.WithLabelValues(l.GetName(), "new-leader-operator").Inc()
+		ops[0].Counters = append(ops[0].Counters,
+			schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
+			schedulerCounter.WithLabelValues(l.GetName(), "new-leader-operator"))
 		return ops
 	}
 	ops = l.balanceRegion.Schedule(c)
 	if len(ops) > 0 {
 		ops[0].SetDesc(fmt.Sprintf("scatter-range-region-%s", l.config.RangeName))
 		ops[0].AttachKind(operator.OpRange)
-		schedulerCounter.WithLabelValues(l.GetName(), "new-region-operator").Inc()
+		ops[0].Counters = append(ops[0].Counters,
+			schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
+			schedulerCounter.WithLabelValues(l.GetName(), "new-region-operator"),
+		)
 		return ops
 	}
 	schedulerCounter.WithLabelValues(l.GetName(), "no-need").Inc()

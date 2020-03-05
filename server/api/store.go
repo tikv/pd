@@ -22,13 +22,12 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/v4/pkg/apiutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -41,17 +40,17 @@ type MetaStore struct {
 
 // StoreStatus contains status about a store.
 type StoreStatus struct {
-	Capacity           typeutil.ByteSize  `json:"capacity,omitempty"`
-	Available          typeutil.ByteSize  `json:"available,omitempty"`
-	UsedSize           typeutil.ByteSize  `json:"used_size,omitempty"`
-	LeaderCount        int                `json:"leader_count,omitempty"`
-	LeaderWeight       float64            `json:"leader_weight,omitempty"`
-	LeaderScore        float64            `json:"leader_score,omitempty"`
-	LeaderSize         int64              `json:"leader_size,omitempty"`
-	RegionCount        int                `json:"region_count,omitempty"`
-	RegionWeight       float64            `json:"region_weight,omitempty"`
-	RegionScore        float64            `json:"region_score,omitempty"`
-	RegionSize         int64              `json:"region_size,omitempty"`
+	Capacity           typeutil.ByteSize  `json:"capacity"`
+	Available          typeutil.ByteSize  `json:"available"`
+	UsedSize           typeutil.ByteSize  `json:"used_size"`
+	LeaderCount        int                `json:"leader_count"`
+	LeaderWeight       float64            `json:"leader_weight"`
+	LeaderScore        float64            `json:"leader_score"`
+	LeaderSize         int64              `json:"leader_size"`
+	RegionCount        int                `json:"region_count"`
+	RegionWeight       float64            `json:"region_weight"`
+	RegionScore        float64            `json:"region_score"`
+	RegionSize         int64              `json:"region_size"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	ApplyingSnapCount  uint32             `json:"applying_snap_count,omitempty"`
@@ -84,7 +83,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			UsedSize:           typeutil.ByteSize(store.GetUsedSize()),
 			LeaderCount:        store.GetLeaderCount(),
 			LeaderWeight:       store.GetLeaderWeight(),
-			LeaderScore:        store.LeaderScore(core.StringToScheduleStrategy(opt.LeaderScheduleStrategy), 0),
+			LeaderScore:        store.LeaderScore(core.StringToSchedulePolicy(opt.LeaderSchedulePolicy), 0),
 			LeaderSize:         store.GetLeaderSize(),
 			RegionCount:        store.GetRegionCount(),
 			RegionWeight:       store.GetRegionWeight(),
@@ -98,7 +97,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 	}
 
 	if store.GetStoreStats() != nil {
-		startTS := store.GetStartTS()
+		startTS := store.GetStartTime()
 		s.Status.StartTS = &startTS
 	}
 	if lastHeartbeat := store.GetLastHeartbeatTS(); !lastHeartbeat.IsZero() {
@@ -377,12 +376,26 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	resp := make(map[uint64]*LimitResp)
 	for s, l := range limits {
 		resp[s] = &LimitResp{
-			Rate: l.Rate() / float64(operator.RegionInfluence) * schedule.StoreBalanceBaseTime,
+			Rate: l.Rate() * schedule.StoreBalanceBaseTime,
 			Mode: l.Mode().String(),
 		}
 	}
 
 	h.rd.JSON(w, http.StatusOK, resp)
+}
+
+func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
+	scene := h.Handler.GetStoreLimitScene()
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &scene); err != nil {
+		return
+	}
+	h.Handler.SetStoreLimitScene(scene)
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
+	scene := h.Handler.GetStoreLimitScene()
+	h.rd.JSON(w, http.StatusOK, scene)
 }
 
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

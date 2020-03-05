@@ -21,12 +21,12 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/mock/mockid"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/id"
-	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/v4/pkg/mock/mockid"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/id"
+	"github.com/pingcap/pd/v4/server/kv"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
 )
 
 func Test(t *testing.T) {
@@ -63,12 +63,12 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 		c.Assert(cluster.putStoreLocked(store), IsNil)
 		c.Assert(cluster.GetStoreCount(), Equals, i+1)
 
-		c.Assert(store.GetLastHeartbeatTS().IsZero(), IsTrue)
+		c.Assert(store.GetLastHeartbeatTS().UnixNano(), Equals, int64(0))
 
 		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
 
 		s := cluster.GetStore(store.GetID())
-		c.Assert(s.GetLastHeartbeatTS().IsZero(), IsFalse)
+		c.Assert(s.GetLastHeartbeatTS().UnixNano(), Not(Equals), int64(0))
 		c.Assert(s.GetStoreStats(), DeepEquals, storeStats)
 	}
 
@@ -635,7 +635,7 @@ func newTestCluster(opt *config.ScheduleOption) *testCluster {
 
 func newTestRaftCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
 	rc := &RaftCluster{}
-	rc.InitCluster(id, opt, storage, basicCluster)
+	rc.InitCluster(id, opt, storage, basicCluster, func() {})
 	return rc
 }
 

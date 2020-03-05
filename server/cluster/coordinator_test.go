@@ -25,20 +25,28 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/schedulers"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
+	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/kv"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedulers"
+	"github.com/pingcap/pd/v4/server/statistics"
 )
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
 	return operator.NewOperator("test", "test", regionID, regionEpoch, kind, steps...)
+}
+
+func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
+	id, err := c.AllocID()
+	if err != nil {
+		return nil, err
+	}
+	return &metapb.Peer{Id: id, StoreId: storeID}, nil
 }
 
 func (c *testCluster) addRegionStore(storeID uint64, regionCount int, regionSizes ...uint64) error {
@@ -138,7 +146,7 @@ type testCoordinatorSuite struct {
 
 func (s *testCoordinatorSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testCoordinatorSuite) TearDownSuite(c *C) {
@@ -290,11 +298,11 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	}
 }
 
-func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy, expectAddOperator bool) {
+func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectCheckerIsBusy bool, expectAddOperator int) {
 	checkerIsBusy, ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
 	c.Assert(checkerIsBusy, Equals, expectCheckerIsBusy)
 	if ops == nil {
-		c.Assert(expectAddOperator, IsFalse)
+		c.Assert(expectAddOperator, Equals, 0)
 	} else {
 		c.Assert(co.opController.AddWaitingOperator(ops...), Equals, expectAddOperator)
 	}
@@ -310,10 +318,10 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
-	s.checkRegion(c, tc, co, 1, false, true)
+	s.checkRegion(c, tc, co, 1, false, 1)
 	waitOperator(c, co, 1)
 	testutil.CheckAddPeer(c, co.opController.GetOperator(1), operator.OpReplica, 1)
-	s.checkRegion(c, tc, co, 1, false, false)
+	s.checkRegion(c, tc, co, 1, false, 0)
 
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
@@ -322,7 +330,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
 	)
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, false)
+	s.checkRegion(c, tc, co, 1, false, 0)
 	co.stop()
 	co.wg.Wait()
 
@@ -335,15 +343,15 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(tc.addRegionStore(2, 2), IsNil)
 	c.Assert(tc.addRegionStore(1, 1), IsNil)
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, false)
+	s.checkRegion(c, tc, co, 1, false, 0)
 	r = r.Clone(core.WithPendingPeers(nil))
 	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, false, true)
+	s.checkRegion(c, tc, co, 1, false, 1)
 	waitOperator(c, co, 1)
 	op := co.opController.GetOperator(1)
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
-	s.checkRegion(c, tc, co, 1, false, false)
+	s.checkRegion(c, tc, co, 1, false, 0)
 }
 
 func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
@@ -365,18 +373,18 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 			switch operatorKind {
 			case operator.OpReplica:
 				op := newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
-				c.Assert(co.opController.AddWaitingOperator(op), IsTrue)
+				c.Assert(co.opController.AddWaitingOperator(op), Equals, 1)
 			case operator.OpRegion | operator.OpMerge:
 				if regionID%2 == 1 {
 					ops, err := operator.CreateMergeRegionOperator("merge-region", co.cluster, tc.GetRegion(regionID), tc.GetRegion(regionID-1), operator.OpMerge)
 					c.Assert(err, IsNil)
-					c.Assert(co.opController.AddWaitingOperator(ops...), IsTrue)
+					c.Assert(co.opController.AddWaitingOperator(ops...), Equals, len(ops))
 				}
 			}
 
 		}
 	}
-	s.checkRegion(c, tc, co, num, true, false)
+	s.checkRegion(c, tc, co, num, true, 0)
 }
 
 func (s *testCoordinatorSuite) TestReplica(c *C) {
@@ -855,7 +863,7 @@ type testOperatorControllerSuite struct {
 
 func (s *testOperatorControllerSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testOperatorControllerSuite) TearDownSuite(c *C) {
@@ -980,7 +988,7 @@ type testScheduleControllerSuite struct {
 
 func (s *testScheduleControllerSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testScheduleControllerSuite) TearDownSuite(c *C) {
@@ -1026,11 +1034,11 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	{
 		c.Assert(sc.AllowSchedule(), IsTrue)
 		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
-		c.Assert(oc.AddWaitingOperator(op1), IsTrue)
+		c.Assert(oc.AddWaitingOperator(op1), Equals, 1)
 		// count = 1
 		c.Assert(sc.AllowSchedule(), IsTrue)
 		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
-		c.Assert(oc.AddWaitingOperator(op2), IsTrue)
+		c.Assert(oc.AddWaitingOperator(op2), Equals, 1)
 		// count = 2
 		c.Assert(sc.AllowSchedule(), IsFalse)
 		c.Assert(oc.RemoveOperator(op1), IsTrue)
@@ -1043,9 +1051,9 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	{
 		op3 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpHotRegion)
 		op3.SetPriorityLevel(core.HighPriority)
-		c.Assert(oc.AddWaitingOperator(op11), IsTrue)
+		c.Assert(oc.AddWaitingOperator(op11), Equals, 1)
 		c.Assert(sc.AllowSchedule(), IsFalse)
-		c.Assert(oc.AddWaitingOperator(op3), IsTrue)
+		c.Assert(oc.AddWaitingOperator(op3), Equals, 1)
 		c.Assert(sc.AllowSchedule(), IsTrue)
 		c.Assert(oc.RemoveOperator(op3), IsTrue)
 	}
@@ -1053,11 +1061,11 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	// add a admin operator will remove old operator
 	{
 		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
-		c.Assert(oc.AddWaitingOperator(op2), IsTrue)
+		c.Assert(oc.AddWaitingOperator(op2), Equals, 1)
 		c.Assert(sc.AllowSchedule(), IsFalse)
 		op4 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpAdmin)
 		op4.SetPriorityLevel(core.HighPriority)
-		c.Assert(oc.AddWaitingOperator(op4), IsTrue)
+		c.Assert(oc.AddWaitingOperator(op4), Equals, 1)
 		c.Assert(sc.AllowSchedule(), IsTrue)
 		c.Assert(oc.RemoveOperator(op4), IsTrue)
 	}
@@ -1065,7 +1073,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	// test wrong region id.
 	{
 		op5 := newTestOperator(3, &metapb.RegionEpoch{}, operator.OpHotRegion)
-		c.Assert(oc.AddWaitingOperator(op5), IsFalse)
+		c.Assert(oc.AddWaitingOperator(op5), Equals, 0)
 	}
 
 	// test wrong region epoch.
@@ -1076,12 +1084,12 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	}
 	{
 		op6 := newTestOperator(1, epoch, operator.OpLeader)
-		c.Assert(oc.AddWaitingOperator(op6), IsFalse)
+		c.Assert(oc.AddWaitingOperator(op6), Equals, 0)
 	}
 	epoch.Version--
 	{
 		op6 := newTestOperator(1, epoch, operator.OpLeader)
-		c.Assert(oc.AddWaitingOperator(op6), IsTrue)
+		c.Assert(oc.AddWaitingOperator(op6), Equals, 1)
 		c.Assert(oc.RemoveOperator(op6), IsTrue)
 	}
 }

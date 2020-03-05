@@ -25,12 +25,12 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/pkg/mock/mockoption"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/checker"
-	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
+	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
+	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/checker"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
 )
 
 func Test(t *testing.T) {
@@ -46,7 +46,7 @@ type testOperatorControllerSuite struct {
 
 func (t *testOperatorControllerSuite) SetUpSuite(c *C) {
 	t.ctx, t.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (t *testOperatorControllerSuite) TearDownSuite(c *C) {
@@ -130,7 +130,7 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 }
 
 func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/schedule/unexpectedOperator"), IsNil)
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator"), IsNil)
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
@@ -213,7 +213,7 @@ func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 	c.Assert(op1.Start(), IsTrue)
 	oc.SetOperator(op1)
 
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/schedule/concurrentRemoveOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/concurrentRemoveOperator", "return(true)"), IsNil)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -522,7 +522,7 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 		tc.PutRegion(region)
 	}
 
-	mc := checker.NewMergeChecker(t.ctx, tc)
+	mc := checker.NewMergeChecker(t.ctx, tc, tc.RuleManager)
 	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
 
 	cfg.StoreBalanceRate = 60
@@ -636,4 +636,44 @@ func checkRemoveOperatorSuccess(c *C, oc *OperatorController, op *operator.Opera
 	c.Assert(oc.RemoveOperator(op), IsTrue)
 	c.Assert(op.IsEnd(), IsTrue)
 	c.Assert(oc.GetOperatorStatus(op.RegionID()).Op, DeepEquals, op)
+}
+
+func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
+	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	stream := mockhbstream.NewHeartbeatStreams(cluster.ID, true /* no need to run */)
+	controller := NewOperatorController(t.ctx, cluster, stream)
+
+	addPeerOp := func(i uint64) *operator.Operator {
+		start := fmt.Sprintf("%da", i)
+		end := fmt.Sprintf("%db", i)
+		region := newRegionInfo(i, start, end, 1, 1, []uint64{101, 1}, []uint64{101, 1})
+		cluster.PutRegion(region)
+		peer := &metapb.Peer{
+			StoreId: 2,
+		}
+		op, err := operator.CreateAddPeerOperator("add-peer", cluster, region, peer, operator.OpBalance)
+		c.Assert(err, IsNil)
+		c.Assert(op, NotNil)
+		return op
+	}
+
+	// a batch of operators should be added atomiclly
+	var batch []*operator.Operator
+	for i := uint64(0); i < cluster.GetSchedulerMaxWaitingOperator()-1; i++ {
+		batch = append(batch, addPeerOp(i))
+	}
+	added := controller.AddWaitingOperator(batch...)
+	c.Assert(added, Equals, int(cluster.GetSchedulerMaxWaitingOperator()-1))
+
+	source := newRegionInfo(1, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	target := newRegionInfo(0, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	// now there is one operator being allowed to add, if it is a merge operator
+	// both of the pair are allowed
+	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
+	c.Assert(err, IsNil)
+	c.Assert(len(ops), Equals, 2)
+	c.Assert(controller.AddWaitingOperator(ops...), Equals, 2)
+
+	// no space left, new operator can not be added.
+	c.Assert(controller.AddWaitingOperator(addPeerOp(0)), Equals, 0)
 }

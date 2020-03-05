@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/juju/ratelimit"
-	"github.com/pingcap/pd/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
 )
 
 // StoreLimitMode indicates the strategy to set store limit
@@ -69,7 +69,7 @@ func (l *StoreLimit) Available() int64 {
 
 // Rate returns the fill rate of the bucket, in tokens per second.
 func (l *StoreLimit) Rate() float64 {
-	return l.bucket.Rate()
+	return l.bucket.Rate() / float64(operator.RegionInfluence)
 }
 
 // Take takes count tokens from the bucket without blocking.

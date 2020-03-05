@@ -20,8 +20,8 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server"
-	_ "github.com/pingcap/pd/server/schedulers"
+	"github.com/pingcap/pd/v4/server"
+	_ "github.com/pingcap/pd/v4/server/schedulers"
 )
 
 var _ = Suite(&testScheduleSuite{})
@@ -46,6 +46,44 @@ func (s *testScheduleSuite) SetUpSuite(c *C) {
 
 func (s *testScheduleSuite) TearDownSuite(c *C) {
 	s.cleanup()
+}
+
+func (s *testScheduleSuite) TestOriginAPI(c *C) {
+	addURL := s.urlPrefix
+	input := make(map[string]interface{})
+	input["name"] = "evict-leader-scheduler"
+	input["store_id"] = 1
+	body, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(addURL, body), IsNil)
+	input1 := make(map[string]interface{})
+	input1["name"] = "evict-leader-scheduler"
+	input1["store_id"] = 2
+	body, err = json.Marshal(input1)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(addURL, body), IsNil)
+	rc := s.svr.GetRaftCluster()
+	c.Assert(rc.GetSchedulers(), HasLen, 1)
+	resp := make(map[string]interface{})
+	listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
+	c.Assert(readJSON(listURL, &resp), IsNil)
+	c.Assert(resp["store-id-ranges"], HasLen, 2)
+	deleteURL := fmt.Sprintf("%s/%s", s.urlPrefix, "evict-leader-scheduler-1")
+	_, err = doDelete(deleteURL)
+	c.Assert(err, IsNil)
+	c.Assert(rc.GetSchedulers(), HasLen, 1)
+	resp1 := make(map[string]interface{})
+	c.Assert(readJSON(listURL, &resp1), IsNil)
+	c.Assert(resp1["store-id-ranges"], HasLen, 1)
+	deleteURL = fmt.Sprintf("%s/%s", s.urlPrefix, "evict-leader-scheduler-2")
+	_, err = doDelete(deleteURL)
+	c.Assert(err, IsNil)
+	c.Assert(rc.GetSchedulers(), HasLen, 0)
+	resp2 := make(map[string]interface{})
+	c.Assert(readJSON(listURL, &resp2), NotNil)
+
+	r, _ := doDelete(deleteURL)
+	c.Assert(r.StatusCode, Equals, 500)
 }
 
 func (s *testScheduleSuite) TestAPI(c *C) {
@@ -91,7 +129,8 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 
 				// using /pd/v1/schedule-config/grant-leader-scheduler/config to delete exists store from grant-leader-scheduler
 				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name, "2")
-				c.Assert(doDelete(deleteURL), IsNil)
+				_, err = doDelete(deleteURL)
+				c.Assert(err, IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				delete(exceptMap, "2")
@@ -151,7 +190,8 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 
 				// using /pd/v1/schedule-config/evict-leader-scheduler/config to delete exist store from evict-leader-scheduler
 				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name, "2")
-				c.Assert(doDelete(deleteURL), IsNil)
+				_, err = doDelete(deleteURL)
+				c.Assert(err, IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				delete(exceptMap, "2")
@@ -264,7 +304,7 @@ func (s *testScheduleSuite) addScheduler(name, createdName string, body []byte, 
 
 func (s *testScheduleSuite) deleteScheduler(createdName string, c *C) {
 	deleteURL := fmt.Sprintf("%s/%s", s.urlPrefix, createdName)
-	err := doDelete(deleteURL)
+	_, err := doDelete(deleteURL)
 	c.Assert(err, IsNil)
 }
 
