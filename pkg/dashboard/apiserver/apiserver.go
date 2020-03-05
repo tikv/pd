@@ -92,11 +92,11 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 
 	// callback
 	srv.AddStartCallback(
-		keyvisualService.Start,
 		func() {
 			// FIXME: Handle open error
 			_ = tidbForwarder.Open()
 		},
+		keyvisualService.Start,
 	)
 	srv.AddCloseCallback(
 		keyvisualService.Close,
