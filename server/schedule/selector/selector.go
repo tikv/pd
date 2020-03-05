@@ -180,10 +180,12 @@ func (s *RandomSelector) randStore(stores []*core.StoreInfo) *core.StoreInfo {
 }
 
 // SelectSource randomly selects a source store from those can pass all filters.
-func (s *RandomSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo) *core.StoreInfo {
+func (s *RandomSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo, filters ...filter.Filter) *core.StoreInfo {
+	filters = append(filters, s.filters...)
+
 	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {
-		if !filter.Source(opt, store, s.filters) {
+		if !filter.Source(opt, store, filters) {
 			continue
 		}
 		candidates = append(candidates, store)
