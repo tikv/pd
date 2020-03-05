@@ -87,8 +87,7 @@ func sortRules(rules []*Rule) {
 
 // Sort Rules, trim concealed rules.
 func prepareRulesForApply(rules []*Rule) []*Rule {
-	sortRules(rules)
-	res := rules[:0]
+	var res []*Rule
 	var i, j int
 	for i = 1; i < len(rules); i++ {
 		if rules[j].GroupID != rules[i].GroupID {

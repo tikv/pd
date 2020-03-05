@@ -51,6 +51,7 @@ func (s *testRuleSuite) TestPrepareRulesForApply(c *C) {
 	}
 
 	rand.Shuffle(len(rules), func(i, j int) { rules[i], rules[j] = rules[j], rules[i] })
+	sortRules(rules)
 	rules = prepareRulesForApply(rules)
 
 	c.Assert(len(rules), Equals, len(expected))
