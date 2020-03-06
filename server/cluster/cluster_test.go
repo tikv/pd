@@ -337,7 +337,7 @@ func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
 		defer wg.Done()
 		cluster.processRegionHeartbeat(source)
 	}()
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/cluster/concurrentRegionHeartbeat"), IsNil)
 	c.Assert(cluster.processRegionHeartbeat(target), IsNil)
 	wg.Wait()
