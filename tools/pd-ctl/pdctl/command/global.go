@@ -56,6 +56,7 @@ func InitHTTPSClient(CAPath, CertPath, KeyPath string) error {
 
 type bodyOption struct {
 	contentType string
+	accept      string
 	body        io.Reader
 }
 
@@ -69,6 +70,14 @@ func WithBody(contentType string, body io.Reader) BodyOption {
 		bo.body = body
 	}
 }
+
+// WithAccept returns a BodyOption
+func WithAccept(accept string) BodyOption {
+	return func(bo *bodyOption) {
+		bo.accept = accept
+	}
+}
+
 func doRequest(cmd *cobra.Command, prefix string, method string,
 	opts ...BodyOption) (string, error) {
 	b := &bodyOption{}
@@ -85,12 +94,17 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 			method = http.MethodGet
 		}
 		var req *http.Request
+
 		req, err = http.NewRequest(method, url, b.body)
 		if err != nil {
 			return err
 		}
 		if b.contentType != "" {
 			req.Header.Set("Content-Type", b.contentType)
+		}
+
+		if b.accept != "" {
+			req.Header.Set("Accept", b.accept)
 		}
 		// the resp would be returned by the outer function
 		resp, err = dial(req)

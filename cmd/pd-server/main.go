@@ -20,20 +20,21 @@ import (
 	"os/signal"
 	"syscall"
 
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/keyvisual"
-	"github.com/pingcap/pd/pkg/logutil"
-	"github.com/pingcap/pd/pkg/metricutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/api"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/join"
+	dashboardapi "github.com/pingcap/pd/v4/pkg/dashboard/apiserver"
+	dashboardui "github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
+	"github.com/pingcap/pd/v4/pkg/logutil"
+	"github.com/pingcap/pd/v4/pkg/metricutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/api"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/join"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	// Register schedulers.
-	_ "github.com/pingcap/pd/server/schedulers"
+	_ "github.com/pingcap/pd/v4/server/schedulers"
 )
 
 func main() {
@@ -83,7 +84,7 @@ func main() {
 	}
 
 	// TODO: Make it configurable if it has big impact on performance.
-	grpc_prometheus.EnableHandlingTimeHistogram()
+	grpcprometheus.EnableHandlingTimeHistogram()
 
 	metricutil.Push(&cfg.Metric)
 
@@ -94,11 +95,11 @@ func main() {
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := server.CreateServer(
-		ctx,
-		cfg,
-		api.NewHandler,
-		keyvisual.NewKeyvisualService)
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler}
+	if cfg.EnableDashboard {
+		serviceBuilders = append(serviceBuilders, dashboardapi.NewService, dashboardui.NewService)
+	}
+	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", zap.Error(err))
 	}

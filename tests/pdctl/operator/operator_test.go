@@ -21,11 +21,11 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/tests"
-	"github.com/pingcap/pd/tests/pdctl"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/tests"
+	"github.com/pingcap/pd/v4/tests/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -38,6 +38,7 @@ type operatorTestSuite struct{}
 
 func (s *operatorTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
+	server.ConfigCheckInterval = 10 * time.Millisecond
 }
 
 func (s *operatorTestSuite) TestOperator(c *C) {
@@ -206,4 +207,11 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 	echo = pdctl.GetEcho([]string{"-u", pdAddr, "operator", "remove", "1"})
 	c.Assert(strings.Contains(echo, "Success!"), IsFalse)
+
+	_, _, err = pdctl.ExecuteCommandC(cmd, "config", "set", "enable-placement-rules", "true")
+	c.Assert(err, IsNil)
+	time.Sleep(20 * time.Millisecond)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "operator", "add", "transfer-region", "1", "2", "3")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "not supported"), IsTrue)
 }

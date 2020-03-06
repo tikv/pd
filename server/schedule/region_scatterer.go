@@ -19,10 +19,10 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/filter"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/filter"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -151,7 +151,7 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 
 	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {
-		if scoreGuard.Target(r.cluster, store) {
+		if !scoreGuard.Target(r.cluster, store) {
 			continue
 		}
 		candidates = append(candidates, store)
@@ -162,12 +162,10 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 	}
 
 	target := candidates[rand.Intn(len(candidates))]
-	newPeer, err := r.cluster.AllocPeer(target.GetID())
-	if err != nil {
-		return nil
+	return &metapb.Peer{
+		StoreId:   target.GetID(),
+		IsLearner: oldPeer.GetIsLearner(),
 	}
-	newPeer.IsLearner = oldPeer.GetIsLearner()
-	return newPeer
 }
 
 func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo) map[uint64]*core.StoreInfo {
@@ -180,7 +178,7 @@ func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo) map[ui
 	stores := r.cluster.GetStores()
 	targets := make(map[uint64]*core.StoreInfo, len(stores))
 	for _, store := range stores {
-		if !filter.Target(r.cluster, store, filters) && !store.IsBusy() {
+		if filter.Target(r.cluster, store, filters) && !store.IsBusy() {
 			targets[store.GetID()] = store
 		}
 	}

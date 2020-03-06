@@ -27,18 +27,18 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/etcdutil"
-	"github.com/pingcap/pd/pkg/logutil"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/id"
-	syncer "github.com/pingcap/pd/server/region_syncer"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/checker"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/schedule/placement"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v4/pkg/etcdutil"
+	"github.com/pingcap/pd/v4/pkg/logutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/id"
+	syncer "github.com/pingcap/pd/v4/server/region_syncer"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/checker"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -59,6 +59,7 @@ type Server interface {
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
+	GetSchedulersCallback() func()
 }
 
 // RaftCluster is used for cluster config management.
@@ -83,6 +84,7 @@ type RaftCluster struct {
 	opt     *config.ScheduleOption
 	storage *core.Storage
 	id      id.Allocator
+	limiter *StoreLimiter
 
 	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
@@ -100,6 +102,8 @@ type RaftCluster struct {
 
 	ruleManager *placement.RuleManager
 	client      *clientv3.Client
+
+	schedulersCallback func()
 }
 
 // Status saves some state information.
@@ -169,7 +173,7 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster) {
+func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster, cb func()) {
 	c.core = basicCluster
 	c.opt = opt
 	c.storage = storage
@@ -179,6 +183,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
+	c.schedulersCallback = cb
 }
 
 // Start starts a cluster.
@@ -191,7 +196,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage(), s.GetBasicCluster())
+	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage(), s.GetBasicCluster(), s.GetSchedulersCallback())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -200,8 +205,17 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
+	c.ruleManager = placement.NewRuleManager(c.storage)
+	if c.IsPlacementRulesEnabled() {
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		if err != nil {
+			return err
+		}
+	}
+
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt)
+	c.limiter = NewStoreLimiter(c.coordinator.opController)
 	c.quit = make(chan struct{})
 
 	c.wg.Add(3)
@@ -382,9 +396,22 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
+	if newStore.NeedPersist() && c.storage != nil {
+		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
+			log.Error("failed to persist store", zap.Uint64("store-id", newStore.GetID()))
+		} else {
+			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
+		}
+	}
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
+
+	// c.limiter is nil before "start" is called
+	if c.limiter != nil && c.opt.Load().StoreLimitMode == "auto" {
+		c.limiter.Collect(newStore.GetStoreStats())
+	}
+
 	return nil
 }
 
@@ -811,9 +838,19 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
 			core.SetStoreVersion(store.GitHash, store.Version),
 			core.SetStoreLabels(labels),
+			core.SetStoreStartTime(store.StartTimestamp),
 		)
 	}
-	// Check location labels.
+	if err = c.checkStoreLabels(s); err != nil {
+		return err
+	}
+	return c.putStoreLocked(s)
+}
+
+func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
+	if c.opt.IsPlacementRulesEnabled() {
+		return nil
+	}
 	keysSet := make(map[string]struct{})
 	for _, k := range c.GetLocationLabels() {
 		keysSet[k] = struct{}{}
@@ -837,7 +874,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 			}
 		}
 	}
-	return c.putStoreLocked(s)
+	return nil
 }
 
 // RemoveStore marks a store as offline in cluster.
@@ -1004,7 +1041,8 @@ func (c *RaftCluster) checkStores() {
 		return
 	}
 
-	if upStoreCount < c.GetMaxReplicas() {
+	// When placement rules feature is enabled. It is hard to determine required replica count precisely.
+	if !c.IsPlacementRulesEnabled() && upStoreCount < c.GetMaxReplicas() {
 		for _, offlineStore := range offlineStores {
 			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
@@ -1140,22 +1178,8 @@ func (c *RaftCluster) AllocID() (uint64, error) {
 	return c.id.Alloc()
 }
 
-// AllocPeer allocs a new peer on a store.
-func (c *RaftCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := c.AllocID()
-	if err != nil {
-		log.Error("failed to alloc peer", zap.Error(err))
-		return nil, err
-	}
-	peer := &metapb.Peer{
-		Id:      peerID,
-		StoreId: storeID,
-	}
-	return peer, nil
-}
-
 // OnStoreVersionChange changes the version of the cluster when needed.
-func (c *RaftCluster) OnStoreVersionChange() {
+func (c *RaftCluster) OnStoreVersionChange() *semver.Version {
 	c.RLock()
 	defer c.RUnlock()
 	var (
@@ -1192,7 +1216,9 @@ func (c *RaftCluster) OnStoreVersionChange() {
 		log.Info("cluster version changed",
 			zap.Stringer("old-cluster-version", clusterVersion),
 			zap.Stringer("new-cluster-version", minVersion))
+		return minVersion
 	}
+	return nil
 }
 
 func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
@@ -1362,9 +1388,9 @@ func (c *RaftCluster) IsRemoveDownReplicaEnabled() bool {
 	return c.opt.IsRemoveDownReplicaEnabled()
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule strategy.
-func (c *RaftCluster) GetLeaderScheduleStrategy() core.ScheduleStrategy {
-	return c.opt.GetLeaderScheduleStrategy()
+// GetLeaderSchedulePolicy is to get leader schedule policy.
+func (c *RaftCluster) GetLeaderSchedulePolicy() core.SchedulePolicy {
+	return c.opt.GetLeaderSchedulePolicy()
 }
 
 // GetKeyType is to get key type.
@@ -1573,6 +1599,11 @@ func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 	return c.coordinator.pauseOrResumeScheduler(name, t)
 }
 
+// GetStoreLimiter returns the dynamic adjusting limiter
+func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
+	return c.limiter
+}
+
 // DialClient used to dial http request.
 var DialClient = &http.Client{
 	Timeout: clientTimeout,
@@ -1585,20 +1616,21 @@ var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.
 func CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
-	unhealthMembers := make(map[uint64]*pdpb.Member)
+	healthMembers := make(map[uint64]*pdpb.Member)
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
 			resp, err := DialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
 			if resp != nil {
 				resp.Body.Close()
 			}
-			if err != nil || resp.StatusCode != http.StatusOK {
-				unhealthMembers[member.GetMemberId()] = member
+
+			if err == nil && resp.StatusCode == http.StatusOK {
+				healthMembers[member.GetMemberId()] = member
 				break
 			}
 		}
 	}
-	return unhealthMembers
+	return healthMembers
 }
 
 // GetMembers return a slice of Members.

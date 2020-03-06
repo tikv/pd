@@ -18,14 +18,15 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/api"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/tests"
-	"github.com/pingcap/pd/tests/pdctl"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/api"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/tests"
+	"github.com/pingcap/pd/v4/tests/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -38,6 +39,7 @@ type labelTestSuite struct{}
 
 func (s *labelTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
+	server.ConfigCheckInterval = 10 * time.Millisecond
 }
 
 func (s *labelTestSuite) TestLabel(c *C) {

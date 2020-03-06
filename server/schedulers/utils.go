@@ -16,15 +16,15 @@ package schedulers
 import (
 	"math"
 	"net/url"
-	"sort"
 	"strconv"
 	"time"
 
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -93,7 +93,7 @@ func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *
 }
 
 func getTolerantResource(cluster opt.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
-	if kind.Resource == core.LeaderKind && kind.Strategy == core.ByCount {
+	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
 		tolerantSizeRatio := cluster.GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
 			tolerantSizeRatio = leaderTolerantSizeRatio
@@ -141,179 +141,6 @@ func adjustBalanceLimit(cluster opt.Cluster, kind core.ResourceKind) uint64 {
 	return maxUint64(1, uint64(limit))
 }
 
-// ScoreInfo stores storeID and score of a store.
-type ScoreInfo struct {
-	storeID uint64
-	score   float64
-}
-
-// NewScoreInfo returns a ScoreInfo.
-func NewScoreInfo(storeID uint64, score float64) *ScoreInfo {
-	return &ScoreInfo{
-		storeID: storeID,
-		score:   score,
-	}
-}
-
-// GetStoreID returns the storeID.
-func (s *ScoreInfo) GetStoreID() uint64 {
-	return s.storeID
-}
-
-// GetScore returns the score.
-func (s *ScoreInfo) GetScore() float64 {
-	return s.score
-}
-
-// SetScore sets the score.
-func (s *ScoreInfo) SetScore(score float64) {
-	s.score = score
-}
-
-// ScoreInfos is used for sorting ScoreInfo.
-type ScoreInfos struct {
-	scoreInfos []*ScoreInfo
-	isSorted   bool
-}
-
-// NewScoreInfos returns a ScoreInfos.
-func NewScoreInfos() *ScoreInfos {
-	return &ScoreInfos{
-		scoreInfos: make([]*ScoreInfo, 0),
-		isSorted:   true,
-	}
-}
-
-// Add adds a scoreInfo into the slice.
-func (s *ScoreInfos) Add(scoreInfo *ScoreInfo) {
-	infosLen := len(s.scoreInfos)
-	if s.isSorted && infosLen != 0 && s.scoreInfos[infosLen-1].score > scoreInfo.score {
-		s.isSorted = false
-	}
-	s.scoreInfos = append(s.scoreInfos, scoreInfo)
-}
-
-// Len returns length of slice.
-func (s *ScoreInfos) Len() int { return len(s.scoreInfos) }
-
-// Less returns if one number is less than another.
-func (s *ScoreInfos) Less(i, j int) bool { return s.scoreInfos[i].score < s.scoreInfos[j].score }
-
-// Swap switches out two numbers in slice.
-func (s *ScoreInfos) Swap(i, j int) {
-	s.scoreInfos[i], s.scoreInfos[j] = s.scoreInfos[j], s.scoreInfos[i]
-}
-
-// Sort sorts the slice.
-func (s *ScoreInfos) Sort() {
-	if !s.isSorted {
-		sort.Sort(s)
-		s.isSorted = true
-	}
-}
-
-// ToSlice returns the scoreInfo slice.
-func (s *ScoreInfos) ToSlice() []*ScoreInfo {
-	return s.scoreInfos
-}
-
-// Min returns the min of the slice.
-func (s *ScoreInfos) Min() *ScoreInfo {
-	s.Sort()
-	return s.scoreInfos[0]
-}
-
-// Mean returns the mean of the slice.
-func (s *ScoreInfos) Mean() float64 {
-	if s.Len() == 0 {
-		return 0
-	}
-
-	var sum float64
-	for _, info := range s.scoreInfos {
-		sum += info.score
-	}
-
-	return sum / float64(s.Len())
-}
-
-// StdDev returns the standard deviation of the slice.
-func (s *ScoreInfos) StdDev() float64 {
-	if s.Len() == 0 {
-		return 0
-	}
-
-	var res float64
-	mean := s.Mean()
-	for _, info := range s.ToSlice() {
-		diff := info.GetScore() - mean
-		res += diff * diff
-	}
-	res /= float64(s.Len())
-	res = math.Sqrt(res)
-
-	return res
-}
-
-// MeanStoresStats returns the mean of stores' stats.
-func MeanStoresStats(storesStats map[uint64]float64) float64 {
-	if len(storesStats) == 0 {
-		return 0.0
-	}
-
-	var sum float64
-	for _, storeStat := range storesStats {
-		sum += storeStat
-	}
-	return sum / float64(len(storesStats))
-}
-
-// NormalizeStoresStats returns the normalized score scoreInfos. Normalize: x_i => (x_i - x_min)/x_avg.
-func NormalizeStoresStats(storesStats map[uint64]float64) *ScoreInfos {
-	scoreInfos := NewScoreInfos()
-
-	for storeID, score := range storesStats {
-		scoreInfos.Add(NewScoreInfo(storeID, score))
-	}
-
-	mean := scoreInfos.Mean()
-	if mean == 0 {
-		return scoreInfos
-	}
-
-	minScore := scoreInfos.Min().GetScore()
-
-	for _, info := range scoreInfos.ToSlice() {
-		info.SetScore((info.GetScore() - minScore) / mean)
-	}
-
-	return scoreInfos
-}
-
-// AggregateScores aggregates stores' scores by using their weights.
-func AggregateScores(storesStats []*ScoreInfos, weights []float64) *ScoreInfos {
-	num := len(storesStats)
-	if num > len(weights) {
-		num = len(weights)
-	}
-
-	scoreMap := make(map[uint64]float64)
-	for i := 0; i < num; i++ {
-		scoreInfos := storesStats[i]
-		for _, info := range scoreInfos.ToSlice() {
-			scoreMap[info.GetStoreID()] += info.GetScore() * weights[i]
-		}
-	}
-
-	res := NewScoreInfos()
-	for storeID, score := range scoreMap {
-		res.Add(NewScoreInfo(storeID, score))
-	}
-
-	res.Sort()
-	return res
-}
-
 func getKeyRanges(args []string) ([]core.KeyRange, error) {
 	var ranges []core.KeyRange
 	for len(args) > 1 {
@@ -337,10 +164,14 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 // Influence records operator influence.
 type Influence struct {
 	ByteRate float64
+	KeyRate  float64
+	Count    float64
 }
 
 func (infl Influence) add(rhs *Influence, w float64) Influence {
 	infl.ByteRate += rhs.ByteRate * w
+	infl.KeyRate += rhs.KeyRate * w
+	infl.Count += rhs.Count * w
 	return infl
 }
 
@@ -353,7 +184,10 @@ type pendingInfluence struct {
 
 func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence) *pendingInfluence {
 	return &pendingInfluence{
-		op, from, to, infl,
+		op:     op,
+		from:   from,
+		to:     to,
+		origin: infl,
 	}
 }
 
@@ -368,4 +202,155 @@ func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*op
 		ret[p.from] = ret[p.from].add(&p.origin, -w)
 	}
 	return ret
+}
+
+type storeLoad struct {
+	ByteRate float64
+	KeyRate  float64
+	Count    float64
+}
+
+func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
+	future := *load
+	future.ByteRate += infl.ByteRate
+	future.KeyRate += infl.KeyRate
+	future.Count += infl.Count
+	return &storeLoadPred{
+		Current: *load,
+		Future:  future,
+	}
+}
+
+func stLdByteRate(ld *storeLoad) float64 {
+	return ld.ByteRate
+}
+
+func stLdKeyRate(ld *storeLoad) float64 {
+	return ld.KeyRate
+}
+
+func stLdCount(ld *storeLoad) float64 {
+	return ld.Count
+}
+
+type storeLoadCmp func(ld1, ld2 *storeLoad) int
+
+func negLoadCmp(cmp storeLoadCmp) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		return -cmp(ld1, ld2)
+	}
+}
+
+func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		for _, cmp := range cmps {
+			if r := cmp(ld1, ld2); r != 0 {
+				return r
+			}
+		}
+		return 0
+	}
+}
+
+func stLdRankCmp(dim func(ld *storeLoad) float64, rank func(value float64) int64) storeLoadCmp {
+	return func(ld1, ld2 *storeLoad) int {
+		return rankCmp(dim(ld1), dim(ld2), rank)
+	}
+}
+
+func rankCmp(a, b float64, rank func(value float64) int64) int {
+	aRk, bRk := rank(a), rank(b)
+	if aRk < bRk {
+		return -1
+	} else if aRk > bRk {
+		return 1
+	}
+	return 0
+}
+
+// store load prediction
+type storeLoadPred struct {
+	Current storeLoad
+	Future  storeLoad
+}
+
+func (lp *storeLoadPred) min() *storeLoad {
+	return minLoad(&lp.Current, &lp.Future)
+}
+
+func (lp *storeLoadPred) max() *storeLoad {
+	return maxLoad(&lp.Current, &lp.Future)
+}
+
+func (lp *storeLoadPred) diff() *storeLoad {
+	mx, mn := lp.max(), lp.min()
+	return &storeLoad{
+		ByteRate: mx.ByteRate - mn.ByteRate,
+		KeyRate:  mx.KeyRate - mn.KeyRate,
+		Count:    mx.Count - mn.Count,
+	}
+}
+
+type storeLPCmp func(lp1, lp2 *storeLoadPred) int
+
+func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		for _, cmp := range cmps {
+			if r := cmp(lp1, lp2); r != 0 {
+				return r
+			}
+		}
+		return 0
+	}
+}
+
+func minLPCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.min(), lp2.min())
+	}
+}
+
+func maxLPCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.max(), lp2.max())
+	}
+}
+
+func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
+	return func(lp1, lp2 *storeLoadPred) int {
+		return ldCmp(lp1.diff(), lp2.diff())
+	}
+}
+
+func minLoad(a, b *storeLoad) *storeLoad {
+	return &storeLoad{
+		ByteRate: math.Min(a.ByteRate, b.ByteRate),
+		KeyRate:  math.Min(a.KeyRate, b.KeyRate),
+		Count:    math.Min(a.Count, b.Count),
+	}
+}
+
+func maxLoad(a, b *storeLoad) *storeLoad {
+	return &storeLoad{
+		ByteRate: math.Max(a.ByteRate, b.ByteRate),
+		KeyRate:  math.Max(a.KeyRate, b.KeyRate),
+		Count:    math.Max(a.Count, b.Count),
+	}
+}
+
+type storeLoadDetail struct {
+	LoadPred *storeLoadPred
+	HotPeers []*statistics.HotPeerStat
+}
+
+func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
+	peers := make([]statistics.HotPeerStat, 0, len(li.HotPeers))
+	for _, peer := range li.HotPeers {
+		peers = append(peers, *peer.Clone())
+	}
+	return &statistics.HotPeersStat{
+		TotalBytesRate: li.LoadPred.Current.ByteRate,
+		Count:          len(li.HotPeers),
+		Stats:          peers,
+	}
 }

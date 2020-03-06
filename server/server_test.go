@@ -21,9 +21,9 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/etcdutil"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server/config"
+	"github.com/pingcap/pd/v4/pkg/etcdutil"
+	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/server/config"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/goleak"
@@ -190,18 +190,17 @@ var _ = Suite(&testServerHandlerSuite{})
 type testServerHandlerSuite struct{}
 
 func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, APIGroup) {
+	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, func()) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
 		})
-		info := APIGroup{
+		info := ServiceGroup{
 			Name:    "mok",
 			Version: "v1",
 		}
-		return mux, info
+		return mux, info, nil
 	}
-
 	cfg := NewTestSingleConfig(c)
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
@@ -218,6 +217,7 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	c.Assert(err, IsNil)
 	addr := fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr())
 	resp, err := http.Get(addr)
+	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()

@@ -19,11 +19,11 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/api"
-	"github.com/pingcap/pd/server/cluster"
-	"github.com/pingcap/pd/tests"
-	"github.com/pingcap/pd/tests/pdctl"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/api"
+	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/tests"
+	"github.com/pingcap/pd/v4/tests/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -55,17 +55,17 @@ func (s *healthTestSuite) TestHealth(c *C) {
 	client := tc.GetEtcdClient()
 	members, err := cluster.GetMembers(client)
 	c.Assert(err, IsNil)
-	unhealthMembers := cluster.CheckHealth(members)
+	healthMembers := cluster.CheckHealth(members)
 	healths := []api.Health{}
 	for _, member := range members {
 		h := api.Health{
 			Name:       member.Name,
 			MemberID:   member.MemberId,
 			ClientUrls: member.ClientUrls,
-			Health:     true,
+			Health:     false,
 		}
-		if _, ok := unhealthMembers[member.GetMemberId()]; ok {
-			h.Health = false
+		if _, ok := healthMembers[member.GetMemberId()]; ok {
+			h.Health = true
 		}
 		healths = append(healths, h)
 	}

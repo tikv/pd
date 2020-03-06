@@ -20,9 +20,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/pd/pkg/testutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/tests"
+	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/tests"
 	"go.uber.org/goleak"
 )
 
@@ -54,9 +54,9 @@ func (s *joinTestSuite) TestFailedPDJoinInStep1(c *C) {
 	cluster.WaitLeader()
 
 	// Join the second PD.
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/join/add-member-failed", `return`), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/join/add-member-failed", `return`), IsNil)
 	_, err = cluster.Join(ctx)
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "join failed"), IsTrue)
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/join/add-member-failed"), IsNil)
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/join/add-member-failed"), IsNil)
 }

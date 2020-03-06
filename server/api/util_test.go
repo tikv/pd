@@ -19,7 +19,7 @@ import (
 	"net/http/httptest"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/apiutil"
+	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/unrolled/render"
 )
 

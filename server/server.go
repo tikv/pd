@@ -14,39 +14,46 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/etcdutil"
-	"github.com/pingcap/pd/pkg/logutil"
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/pkg/ui"
-	"github.com/pingcap/pd/server/cluster"
-	"github.com/pingcap/pd/server/config"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/id"
-	"github.com/pingcap/pd/server/kv"
-	"github.com/pingcap/pd/server/member"
-	syncer "github.com/pingcap/pd/server/region_syncer"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/tso"
+	pd "github.com/pingcap/pd/v4/client"
+	"github.com/pingcap/pd/v4/pkg/etcdutil"
+	"github.com/pingcap/pd/v4/pkg/grpcutil"
+	"github.com/pingcap/pd/v4/pkg/logutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/config"
+	configmanager "github.com/pingcap/pd/v4/server/config_manager"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/id"
+	"github.com/pingcap/pd/v4/server/kv"
+	"github.com/pingcap/pd/v4/server/member"
+	syncer "github.com/pingcap/pd/v4/server/region_syncer"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/tso"
 	"github.com/pingcap/sysutil"
 	"github.com/pkg/errors"
 	"github.com/urfave/negroni"
@@ -64,7 +71,6 @@ const (
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
-	webPath         = "/web/"
 	pdClusterIDPath = "/pd/cluster_id"
 )
 
@@ -75,12 +81,21 @@ var (
 	EtcdStartTimeout = time.Minute * 5
 )
 
+// Component is used to represent the kind of component in config manager.
+const Component = "pd"
+
+// ConfigCheckInterval represents the time interval of running config check.
+var ConfigCheckInterval = 1 * time.Second
+
 // Server is the pd server.
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
 	// Server state.
 	isServing int64
+
+	// Server start timestamp
+	startTimestamp int64
 
 	// Configs and initial fields.
 	cfg         *config.Config
@@ -116,16 +131,27 @@ type Server struct {
 	// Zap logger
 	lg       *zap.Logger
 	logProps *log.ZapProperties
+
+	// components' configuration management
+	cfgManager *configmanager.ConfigManager
+	// component config
+	configVersion *configpb.Version
+	configClient  pd.ConfigClient
+
+	// Add callback functions at different stages
+	startCallbacks []func()
+	closeCallbacks []func()
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, APIGroup)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup, func())
 
-// APIGroup used to register the api service.
-type APIGroup struct {
-	Name    string
-	Version string
-	IsCore  bool
+// ServiceGroup used to register the service.
+type ServiceGroup struct {
+	Name       string
+	Version    string
+	IsCore     bool
+	PathPrefix string
 }
 
 const (
@@ -135,16 +161,37 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder) (http.Handler, error) {
-	engine := negroni.New()
+type lazyHandler struct {
+	options []func()
+	engine  *negroni.Negroni
+}
+
+func (lazy *lazyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	for _, f := range lazy.options {
+		f()
+	}
+
+	lazy.engine.ServeHTTP(w, r)
+}
+
+func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
+	userHandlers := make(map[string]http.Handler)
+
+	apiService := negroni.New()
 	recovery := negroni.NewRecovery()
-	engine.Use(recovery)
+	apiService.Use(recovery)
 	router := mux.NewRouter()
 	registerMap := make(map[string]struct{})
-	for _, build := range apiBuilders {
-		handler, info := build(svr.ctx, svr)
+	var options []func()
+	for _, build := range serviceBuilders {
+		handler, info, f := build(ctx, svr)
+		if f != nil {
+			options = append(options, f)
+		}
 		var pathPrefix string
-		if info.IsCore {
+		if len(info.PathPrefix) != 0 {
+			pathPrefix = info.PathPrefix
+		} else if info.IsCore {
 			pathPrefix = CorePath
 		} else {
 			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
@@ -152,29 +199,37 @@ func combineBuilderServerHTTPService(svr *Server, apiBuilders ...HandlerBuilder)
 		if _, ok := registerMap[pathPrefix]; ok {
 			return nil, errors.Errorf("service with path [%s] already registered", pathPrefix)
 		}
-		if !info.IsCore && (len(info.Name) == 0 || len(info.Version) == 0) {
-			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
-		}
+
 		log.Info("register REST path", zap.String("path", pathPrefix))
 		registerMap[pathPrefix] = struct{}{}
-		router.PathPrefix(pathPrefix).Handler(handler)
-
-		if info.IsCore {
-			// Deprecated
-			router.Path("/pd/health").Handler(handler)
-			// Deprecated
-			router.Path("/pd/diagnose").Handler(handler)
-			// Deprecated
-			router.Path("/pd/ping").Handler(handler)
+		if len(info.PathPrefix) != 0 {
+			// If PathPrefix is specified, register directly into userHandlers
+			userHandlers[pathPrefix] = handler
+		} else {
+			// If PathPrefix is not specified, register into apiService,
+			// and finally apiService is registered in userHandlers.
+			router.PathPrefix(pathPrefix).Handler(handler)
+			if info.IsCore {
+				// Deprecated
+				router.Path("/pd/health").Handler(handler)
+				// Deprecated
+				router.Path("/pd/diagnose").Handler(handler)
+				// Deprecated
+				router.Path("/pd/ping").Handler(handler)
+			}
 		}
 	}
+	apiService.UseHandler(router)
+	userHandlers[pdAPIPrefix] = &lazyHandler{
+		engine:  apiService,
+		options: options,
+	}
 
-	engine.UseHandler(router)
-	return engine, nil
+	return userHandlers, nil
 }
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...HandlerBuilder) (*Server, error) {
+func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 
@@ -183,8 +238,11 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 		scheduleOpt:       config.NewScheduleOption(cfg),
 		member:            &member.Member{},
 		ctx:               ctx,
+		startTimestamp:    time.Now().Unix(),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 	}
+
+	s.cfgManager = configmanager.NewConfigManager(s)
 	s.handler = newHandler(s)
 
 	// Adjust etcd config.
@@ -192,20 +250,20 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiBuilders ...Handle
 	if err != nil {
 		return nil, err
 	}
-	if len(apiBuilders) != 0 {
-		apiHandler, err := combineBuilderServerHTTPService(s, apiBuilders...)
+	if len(serviceBuilders) != 0 {
+		userHandlers, err := combineBuilderServerHTTPService(ctx, s, serviceBuilders...)
 		if err != nil {
 			return nil, err
 		}
-
-		etcdCfg.UserHandlers = map[string]http.Handler{
-			pdAPIPrefix: apiHandler,
-			webPath:     http.StripPrefix(webPath, ui.Handler()),
-		}
+		etcdCfg.UserHandlers = userHandlers
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
+
+		if cfg.EnableDynamicConfig {
+			configpb.RegisterConfigServer(gs, s.cfgManager)
+		}
 	}
 	s.etcdCfg = etcdCfg
 	if EnableZap {
@@ -287,6 +345,11 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	return nil
 }
 
+// AddStartCallback adds a callback in the startServer phase.
+func (s *Server) AddStartCallback(callbacks ...func()) {
+	s.startCallbacks = append(s.startCallbacks, callbacks...)
+}
+
 func (s *Server) startServer(ctx context.Context) error {
 	var err error
 	if err = s.initClusterID(); err != nil {
@@ -299,6 +362,8 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
+	s.member.SetMemberDeployPath(s.member.ID())
+	s.member.SetMemberBinaryVersion(s.member.ID(), PDReleaseVersion)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tso = tso.NewTimestampOracle(
 		s.client,
@@ -317,6 +382,12 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
+
+	// Run callbacks
+	for _, cb := range s.startCallbacks {
+		cb()
+	}
+
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
 	return nil
@@ -336,6 +407,11 @@ func (s *Server) initClusterID() error {
 	}
 	s.clusterID, err = typeutil.BytesToUint64(resp.Kvs[0].Value)
 	return err
+}
+
+// AddCloseCallback adds a callback in the Close phase.
+func (s *Server) AddCloseCallback(callbacks ...func()) {
+	s.closeCallbacks = append(s.closeCallbacks, callbacks...)
 }
 
 // Close closes the server.
@@ -362,6 +438,11 @@ func (s *Server) Close() {
 	}
 	if err := s.storage.Close(); err != nil {
 		log.Error("close storage meet error", zap.Error(err))
+	}
+
+	// Run callbacks
+	for _, cb := range s.closeCallbacks {
+		cb()
 	}
 
 	log.Info("close server")
@@ -407,7 +488,10 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
-
+	if s.cfg.EnableDynamicConfig {
+		s.serverLoopWg.Add(1)
+		go s.configCheckLoop()
+	}
 }
 
 func (s *Server) stopServerLoop() {
@@ -554,6 +638,16 @@ func (s *Server) GetClient() *clientv3.Client {
 	return s.client
 }
 
+// GetConfigManager returns the config manager of server.
+func (s *Server) GetConfigManager() *configmanager.ConfigManager {
+	return s.cfgManager
+}
+
+// GetConfigClient returns the config client of server.
+func (s *Server) GetConfigClient() pd.ConfigClient {
+	return s.configClient
+}
+
 // GetLeader returns leader of etcd.
 func (s *Server) GetLeader() *pdpb.Member {
 	return s.member.GetLeader()
@@ -594,6 +688,26 @@ func (s *Server) GetAllocator() *id.AllocatorImpl {
 	return s.idAllocator
 }
 
+// GetSchedulersCallback returns a callback function to update config manager.
+func (s *Server) GetSchedulersCallback() func() {
+	return func() {
+		if s.GetConfig().EnableDynamicConfig {
+			value := s.GetScheduleConfig().Schedulers
+			tmp := map[string]interface{}{
+				"schedulers": value,
+			}
+			var buf bytes.Buffer
+			if err := toml.NewEncoder(&buf).Encode(tmp); err != nil {
+				log.Error("failed to encode config", zap.Error(err))
+			}
+
+			if err := s.updateConfigManager("schedule.schedulers", buf.String()); err != nil {
+				log.Error("failed to update the schedulers", zap.Error(err))
+			}
+		}
+	}
+}
+
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
@@ -604,6 +718,11 @@ func (s *Server) ClusterID() uint64 {
 	return s.clusterID
 }
 
+// StartTimestamp returns the start timestamp of this server
+func (s *Server) StartTimestamp() int64 {
+	return s.startTimestamp
+}
+
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
@@ -612,6 +731,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.LabelProperty = s.scheduleOpt.LoadLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.scheduleOpt.LoadClusterVersion()
 	cfg.PDServerCfg = *s.scheduleOpt.LoadPDServerConfig()
+	cfg.Log = *s.scheduleOpt.LoadLogConfig()
 	storage := s.GetStorage()
 	if storage == nil {
 		return cfg
@@ -632,6 +752,19 @@ func (s *Server) GetConfig() *config.Config {
 func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
 	cfg := &config.ScheduleConfig{}
 	*cfg = *s.scheduleOpt.Load()
+	storage := s.GetStorage()
+	if storage == nil {
+		return cfg
+	}
+	sches, configs, err := storage.LoadAllScheduleConfig()
+	if err != nil {
+		return cfg
+	}
+	payload := make(map[string]string)
+	for i, sche := range sches {
+		payload[sche] = configs[i]
+	}
+	cfg.SchedulersPayload = payload
 	return cfg
 }
 
@@ -669,6 +802,16 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if cfg.EnablePlacementRules {
+		raftCluster := s.GetRaftCluster()
+		if raftCluster == nil {
+			return errors.WithStack(cluster.ErrNotBootstrapped)
+		}
+		// initialize rule manager.
+		if err := raftCluster.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
+			return err
+		}
+	}
 	old := s.scheduleOpt.GetReplication().Load()
 	s.scheduleOpt.GetReplication().Store(&cfg)
 	if err := s.scheduleOpt.Persist(s.storage); err != nil {
@@ -681,6 +824,13 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	}
 	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
+}
+
+// GetPDServerConfig gets the balance config information.
+func (s *Server) GetPDServerConfig() *config.PDServerConfig {
+	cfg := &config.PDServerConfig{}
+	*cfg = *s.scheduleOpt.GetPDServerConfig()
+	return cfg
 }
 
 // SetPDServerConfig sets the server config.
@@ -699,6 +849,47 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 	return nil
 }
 
+// SetLabelPropertyConfig sets the label property config.
+func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
+	old := s.scheduleOpt.LoadLabelPropertyConfig()
+	s.scheduleOpt.SetLabelPropertyConfig(cfg)
+	if err := s.scheduleOpt.Persist(s.storage); err != nil {
+		s.scheduleOpt.SetLabelPropertyConfig(old)
+		log.Error("failed to update label property config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", &old),
+			zap.Error(err))
+		return err
+	}
+	log.Info("label property config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// GetLogConfig gets the log config.
+func (s *Server) GetLogConfig() *log.Config {
+	cfg := &log.Config{}
+	*cfg = *s.scheduleOpt.GetLogConfig()
+	return cfg
+}
+
+// SetLogConfig sets the log config.
+func (s *Server) SetLogConfig(cfg log.Config) error {
+	old := s.scheduleOpt.LoadLogConfig()
+	s.scheduleOpt.SetLogConfig(&cfg)
+	log.SetLevel(logutil.StringToZapLogLevel(cfg.Level))
+	if err := s.scheduleOpt.Persist(s.storage); err != nil {
+		s.scheduleOpt.SetLogConfig(old)
+		log.SetLevel(logutil.StringToZapLogLevel(old.Level))
+		log.Error("failed to update log config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			zap.Error(err))
+		return err
+	}
+	log.Info("log config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
 // SetLabelProperty inserts a label property config.
 func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
@@ -713,6 +904,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 			zap.Error(err))
 		return err
 	}
+
 	log.Info("label property config is updated", zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()))
 	return nil
 }
@@ -731,8 +923,24 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 			zap.Error(err))
 		return err
 	}
+
 	log.Info("label property config is deleted", zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()))
 	return nil
+}
+
+func (s *Server) updateConfigManager(name, value string) error {
+	configManager := s.GetConfigManager()
+	globalVersion := configManager.GetGlobalConfigs(Component).GetVersion()
+	version := &configpb.Version{Global: globalVersion}
+	entries := []*configpb.ConfigEntry{{Name: name, Value: value}}
+	configManager.Lock()
+	_, status := configManager.UpdateGlobal(Component, version, entries)
+	configManager.Unlock()
+	if status.GetCode() != configpb.StatusCode_OK {
+		return errors.New(status.GetMessage())
+	}
+
+	return configManager.Persist(s.GetStorage())
 }
 
 // GetLabelProperty returns the whole label property config.
@@ -767,7 +975,7 @@ func (s *Server) GetClusterVersion() semver.Version {
 }
 
 // GetSecurityConfig get the security config.
-func (s *Server) GetSecurityConfig() *config.SecurityConfig {
+func (s *Server) GetSecurityConfig() *grpcutil.SecurityConfig {
 	return &s.cfg.Security
 }
 
@@ -819,6 +1027,18 @@ func (s *Server) SetLogLevel(level string) {
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
+}
+
+// GetConfigVersion returns the config version.
+func (s *Server) GetConfigVersion() *configpb.Version {
+	if s.configVersion == nil {
+		return &configpb.Version{Local: 0, Global: 0}
+	}
+	return s.configVersion
+}
+
+func (s *Server) setConfigVersion(version *configpb.Version) {
+	s.configVersion = version
 }
 
 func (s *Server) leaderLoop() {
@@ -956,6 +1176,168 @@ func (s *Server) etcdLeaderLoop() {
 	}
 }
 
+func (s *Server) configCheckLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+
+	ticker := time.NewTicker(ConfigCheckInterval)
+	defer ticker.Stop()
+	for {
+		// wait leader
+		leader := s.GetLeader()
+		if leader != nil {
+			var err error
+			securityConfig := s.GetSecurityConfig()
+			s.configClient, err = pd.NewConfigClientWithContext(ctx, s.GetEndpoints(), pd.SecurityOption{
+				CAPath:   securityConfig.CAPath,
+				CertPath: securityConfig.CertPath,
+				KeyPath:  securityConfig.KeyPath,
+			})
+			if err != nil {
+				log.Error("failed to create config client", zap.Error(err))
+				return
+			}
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			log.Info("config check stop running")
+			return
+		}
+	}
+
+	addr := s.GetAddr()
+	u, err := url.Parse(addr)
+	if err != nil {
+		log.Error("failed to parse url", zap.Error(err))
+		return
+	}
+	compoenntID := u.Host + u.Path
+	version := s.GetConfigVersion()
+	var config bytes.Buffer
+	if err := toml.NewEncoder(&config).Encode(*s.GetConfig()); err != nil {
+		log.Error("failed to encode config", zap.Error(err))
+		return
+	}
+	if err := s.createComponentConfig(ctx, version, compoenntID, config.String()); err != nil {
+		log.Error("failed to create config", zap.Error(err))
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("config check has been stopped")
+			return
+		case <-ticker.C:
+			version := s.GetConfigVersion()
+			config, err := s.getComponentConfig(ctx, version, compoenntID)
+			if err != nil {
+				log.Error("failed to get config", zap.Error(err))
+			}
+			if config == "" {
+				continue
+			}
+			if err := s.updateComponentConfig(config); err != nil {
+				log.Error("failed to update config", zap.Error(err))
+			}
+		}
+	}
+}
+
+func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Version, componentID, config string) error {
+	status, v, config, err := s.configClient.Create(ctx, version, Component, componentID, config)
+	if err != nil {
+		return err
+	}
+	switch status.GetCode() {
+	case configpb.StatusCode_OK, configpb.StatusCode_WRONG_VERSION:
+		s.setConfigVersion(v)
+		s.updateComponentConfig(config)
+	case configpb.StatusCode_UNKNOWN:
+		return errors.Errorf("unknown error: %v", status.GetMessage())
+	}
+	return nil
+}
+
+func (s *Server) getComponentConfig(ctx context.Context, version *configpb.Version, componentID string) (string, error) {
+	status, v, cfg, err := s.configClient.Get(ctx, version, Component, componentID)
+	if err != nil {
+		return "", err
+	}
+	var config string
+	switch status.GetCode() {
+	case configpb.StatusCode_OK:
+	case configpb.StatusCode_WRONG_VERSION:
+		config = cfg
+		s.setConfigVersion(v)
+	case configpb.StatusCode_COMPONENT_ID_NOT_FOUND:
+		return "", errors.Errorf("component ID not found: %v", componentID)
+	case configpb.StatusCode_COMPONENT_NOT_FOUND:
+		return "", errors.Errorf("component not found: %v", Component)
+	case configpb.StatusCode_UNKNOWN:
+		return "", errors.Errorf("unknown error: %v", status.GetMessage())
+	}
+	return config, nil
+}
+
+// TODO: support more config item
+func (s *Server) updateComponentConfig(cfg string) error {
+	new := &config.Config{}
+	var saveFile bool
+	if _, err := toml.Decode(cfg, &new); err != nil {
+		return err
+	}
+	var err error
+	if !reflect.DeepEqual(s.GetScheduleConfig(), &new.Schedule) {
+		if err = new.Schedule.Validate(); err != nil {
+			return err
+		}
+		err = s.SetScheduleConfig(new.Schedule)
+		saveFile = true
+	}
+
+	if !reflect.DeepEqual(s.GetReplicationConfig(), &new.Replication) {
+		if err = new.Replication.Validate(); err != nil {
+			return err
+		}
+		err = s.SetReplicationConfig(new.Replication)
+		saveFile = true
+	}
+
+	if !reflect.DeepEqual(s.GetPDServerConfig(), &new.PDServerCfg) {
+		err = s.SetPDServerConfig(new.PDServerCfg)
+		saveFile = true
+	}
+
+	if !reflect.DeepEqual(s.GetClusterVersion(), new.ClusterVersion) {
+		err = s.SetClusterVersion(new.ClusterVersion.String())
+		saveFile = true
+	}
+
+	if !reflect.DeepEqual(s.GetLabelProperty(), new.LabelProperty) {
+		err = s.SetLabelPropertyConfig(new.LabelProperty)
+		saveFile = true
+	}
+
+	if !reflect.DeepEqual(s.GetLogConfig(), &new.Log) {
+		err = s.SetLogConfig(new.Log)
+		saveFile = true
+	}
+	if err != nil {
+		return err
+	}
+
+	if saveFile {
+		return s.cfg.RewriteFile(new)
+	}
+	return nil
+}
+
 func (s *Server) reloadConfigFromKV() error {
 	err := s.scheduleOpt.Reload(s.storage)
 	if err != nil {
@@ -968,5 +1350,13 @@ func (s *Server) reloadConfigFromKV() error {
 		s.storage.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
 	}
+
+	// The request only valid when there is a leader.
+	// And before the a PD becomes a leader it will firstly reload the config.
+	if s.cfg.EnableDynamicConfig {
+		err = s.cfgManager.Reload(s.storage)
+		return err
+	}
+
 	return nil
 }

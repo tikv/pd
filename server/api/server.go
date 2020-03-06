@@ -18,25 +18,26 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/pkg/apiutil/serverapi"
-	"github.com/pingcap/pd/server"
+	"github.com/pingcap/pd/v4/pkg/apiutil/serverapi"
+	"github.com/pingcap/pd/v4/server"
 	"github.com/urfave/negroni"
 )
 
 const apiPrefix = "/pd"
 
 // NewHandler creates a HTTP handler for API.
-func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, server.APIGroup) {
-	group := server.APIGroup{
+func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, server.ServiceGroup, func()) {
+	group := server.ServiceGroup{
 		Name:   "core",
 		IsCore: true,
 	}
 	router := mux.NewRouter()
+	r, f := createRouter(ctx, apiPrefix, svr)
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		serverapi.NewRuntimeServiceValidator(svr, group),
 		serverapi.NewRedirector(svr),
-		negroni.Wrap(createRouter(apiPrefix, svr)),
-	))
+		negroni.Wrap(r)),
+	)
 
-	return router, group
+	return router, group, f
 }

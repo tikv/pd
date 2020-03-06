@@ -17,8 +17,8 @@ import (
 	"fmt"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/server"
-	_ "github.com/pingcap/pd/server/schedulers"
+	"github.com/pingcap/pd/v4/server"
+	_ "github.com/pingcap/pd/v4/server/schedulers"
 )
 
 var _ = Suite(&testHotStatusSuite{})

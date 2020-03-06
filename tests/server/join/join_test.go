@@ -21,10 +21,10 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/pkg/etcdutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/join"
-	"github.com/pingcap/pd/tests"
+	"github.com/pingcap/pd/v4/pkg/etcdutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/join"
+	"github.com/pingcap/pd/v4/tests"
 )
 
 func Test(t *testing.T) {
@@ -46,7 +46,7 @@ type joinTestSuite struct {
 func (s *joinTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
-	server.EtcdStartTimeout = 5 * time.Second
+	server.EtcdStartTimeout = 10 * time.Second
 }
 
 func (s *joinTestSuite) TearDownSuite(c *C) {

@@ -17,8 +17,8 @@ import (
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/pkg/slice"
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v4/pkg/slice"
+	"github.com/pingcap/pd/v4/server/core"
 )
 
 // RegionFit is the result of fitting a region's peers to rule list.

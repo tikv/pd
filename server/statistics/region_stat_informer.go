@@ -13,7 +13,7 @@
 
 package statistics
 
-import "github.com/pingcap/pd/server/core"
+import "github.com/pingcap/pd/v4/server/core"
 
 // RegionStatInformer provides access to a shared informer of statistics.
 type RegionStatInformer interface {

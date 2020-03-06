@@ -14,7 +14,7 @@
 package statistics
 
 import (
-	"github.com/pingcap/pd/server/core"
+	"github.com/pingcap/pd/v4/server/core"
 )
 
 // RegionStatisticType represents the type of the region's status.

@@ -20,13 +20,13 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/pkg/apiutil"
-	"github.com/pingcap/pd/server/core"
-	"github.com/pingcap/pd/server/schedule"
-	"github.com/pingcap/pd/server/schedule/filter"
-	"github.com/pingcap/pd/server/schedule/operator"
-	"github.com/pingcap/pd/server/schedule/opt"
-	"github.com/pingcap/pd/server/schedule/selector"
+	"github.com/pingcap/pd/v4/pkg/apiutil"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/filter"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -36,8 +36,11 @@ const (
 	// EvictLeaderName is evict leader scheduler name.
 	EvictLeaderName = "evict-leader-scheduler"
 	// EvictLeaderType is evict leader scheduler type.
-	EvictLeaderType     = "evict-leader"
-	lastStoreDeleteInfo = "The last store has been deleted"
+	EvictLeaderType = "evict-leader"
+	// EvictLeaderBatchSize is the number of operators to to transfer
+	// leaders by one scheduling
+	EvictLeaderBatchSize = 3
+	lastStoreDeleteInfo  = "The last store has been deleted"
 )
 
 func init() {
@@ -217,11 +220,8 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Operator {
 	var ops []*operator.Operator
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
 	for id, ranges := range s.conf.StoreIDWithRanges {
 		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
 		if region == nil {
@@ -233,14 +233,50 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 			schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 			continue
 		}
-		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", zap.Error(err))
 			continue
 		}
 		op.SetPriorityLevel(core.HighPriority)
+		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 		ops = append(ops, op)
+	}
+	return ops
+}
+
+func (s *evictLeaderScheduler) uniqueAppend(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
+	regionIDs := make(map[uint64]struct{})
+	for i := range dst {
+		regionIDs[dst[i].RegionID()] = struct{}{}
+	}
+	for i := range src {
+		if _, ok := regionIDs[src[i].RegionID()]; ok {
+			continue
+		}
+		regionIDs[src[i].RegionID()] = struct{}{}
+		dst = append(dst, src[i])
+	}
+	return dst
+}
+
+func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	var ops []*operator.Operator
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
+
+	for i := 0; i < EvictLeaderBatchSize; i++ {
+		once := s.scheduleOnce(cluster)
+		// no more regions
+		if len(once) == 0 {
+			break
+		}
+		ops = s.uniqueAppend(ops, once...)
+		// the batch has been fulfilled
+		if len(ops) > EvictLeaderBatchSize {
+			break
+		}
 	}
 
 	return ops
@@ -309,6 +345,10 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
+			if err := handler.config.cluster.RemoveScheduler(EvictLeaderName); err != nil {
+				handler.rd.JSON(w, http.StatusInternalServerError, err)
+				return
+			}
 			resp = lastStoreDeleteInfo
 		}
 		handler.rd.JSON(w, http.StatusOK, resp)

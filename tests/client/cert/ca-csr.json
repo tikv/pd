@@ -1,0 +1,18 @@
+{
+    "CN": "My own CA",
+    "key": {
+        "algo": "rsa",
+        "size": 2048
+    },
+    "names": [
+        {
+            "C": "CN",
+            "L": "Beijing",
+            "O": "Pingcap",
+            "ST": "Beijing"
+        }
+    ],
+    "ca":{
+      "expiry": "87600h"
+    }
+}

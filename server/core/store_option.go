@@ -44,6 +44,15 @@ func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 	}
 }
 
+// SetStoreStartTime sets the start timestamp for the store.
+func SetStoreStartTime(startTs int64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.StartTimestamp = startTs
+		store.meta = meta
+	}
+}
+
 // SetStoreVersion sets the version for the store.
 func SetStoreVersion(githash, version string) StoreCreateOption {
 	return func(store *StoreInfo) {
@@ -129,7 +138,14 @@ func SetRegionWeight(regionWeight float64) StoreCreateOption {
 // SetLastHeartbeatTS sets the time of last heartbeat for the store.
 func SetLastHeartbeatTS(lastHeartbeatTS time.Time) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.lastHeartbeatTS = lastHeartbeatTS
+		store.meta.LastHeartbeat = lastHeartbeatTS.UnixNano()
+	}
+}
+
+// SetLastPersistTime updates the time of last persistent.
+func SetLastPersistTime(lastPersist time.Time) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.lastPersistTime = lastPersist
 	}
 }
 

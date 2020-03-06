@@ -18,9 +18,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pingcap/pd/pkg/typeutil"
-	"github.com/pingcap/pd/server"
-	"github.com/pingcap/pd/server/statistics"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/unrolled/render"
 )
 
@@ -147,7 +147,7 @@ func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, storeID 
 	if stat, ok := stats[storeID]; ok {
 		storeFlow = stat.TotalBytesRate
 		for _, flow := range stat.Stats {
-			regionFlows = append(regionFlows, flow.GetBytesRate())
+			regionFlows = append(regionFlows, flow.GetByteRate())
 		}
 	}
 	return
