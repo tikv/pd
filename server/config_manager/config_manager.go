@@ -75,10 +75,25 @@ func NewConfigManager(svr Server) *ConfigManager {
 
 // GetGlobalConfigs returns the global config for a given component.
 func (c *ConfigManager) GetGlobalConfigs(component string) *GlobalConfig {
+	c.RLock()
+	defer c.RUnlock()
 	if _, ok := c.GlobalCfgs[component]; ok {
 		return c.GlobalCfgs[component]
 	}
 	return nil
+}
+
+// GetComponentIDs returns component IDs for a given component.
+func (c *ConfigManager) GetComponentIDs(component string) []string {
+	c.RLock()
+	defer c.RUnlock()
+	var addresses []string
+	if _, ok := c.LocalCfgs[component]; ok {
+		for address := range c.LocalCfgs[component] {
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses
 }
 
 // Persist saves the configuration to the storage.
@@ -118,11 +133,11 @@ func (c *ConfigManager) GetConfig(version *configpb.Version, component, componen
 	var ok bool
 
 	if localCfgs, ok = c.LocalCfgs[component]; !ok {
-		return c.getLatestVersion(component, componentID), config, &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
+		return c.GetLatestVersion(component, componentID), config, &configpb.Status{Code: configpb.StatusCode_COMPONENT_NOT_FOUND}
 	}
 
 	if cfg, ok = localCfgs[componentID]; !ok {
-		return c.getLatestVersion(component, componentID), config, &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
+		return c.GetLatestVersion(component, componentID), config, &configpb.Status{Code: configpb.StatusCode_COMPONENT_ID_NOT_FOUND}
 	}
 
 	config, err = c.getComponentCfg(component, componentID)
@@ -138,7 +153,7 @@ func (c *ConfigManager) GetConfig(version *configpb.Version, component, componen
 		status = &configpb.Status{Code: configpb.StatusCode_WRONG_VERSION}
 	}
 
-	return c.getLatestVersion(component, componentID), config, status
+	return c.GetLatestVersion(component, componentID), config, status
 }
 
 // CreateConfig is used for registering a component to PD.
@@ -146,7 +161,7 @@ func (c *ConfigManager) CreateConfig(version *configpb.Version, component, compo
 	c.Lock()
 	defer c.Unlock()
 	var status *configpb.Status
-	latestVersion := c.getLatestVersion(component, componentID)
+	latestVersion := c.GetLatestVersion(component, componentID)
 	initVersion := &configpb.Version{Local: 0, Global: 0}
 	if localCfgs, ok := c.LocalCfgs[component]; ok {
 		if _, ok := localCfgs[componentID]; ok {
@@ -196,7 +211,8 @@ func (c *ConfigManager) CreateConfig(version *configpb.Version, component, compo
 	return latestVersion, config, status
 }
 
-func (c *ConfigManager) getLatestVersion(component, componentID string) *configpb.Version {
+// GetLatestVersion returns the latest version of config for a given a component ID.
+func (c *ConfigManager) GetLatestVersion(component, componentID string) *configpb.Version {
 	v := &configpb.Version{
 		Global: c.GlobalCfgs[component].GetVersion(),
 		Local:  c.LocalCfgs[component][componentID].GetVersion().GetLocal(),
