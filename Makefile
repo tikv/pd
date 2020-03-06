@@ -9,27 +9,26 @@ BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 PACKAGES := go list ./... | grep -v 'dashboard/uiserver'
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
-RETOOL := ./scripts/retool
 OVERALLS := overalls
 
 TOOL_BIN_PATH := $(shell pwd)/.tools/bin
+export GOBIN := $(TOOL_BIN_PATH)
+export PATH := $(TOOL_BIN_PATH):$(PATH)
 
-PATH := $(TOOL_BIN_PATH):$(PATH)
-
-FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl enable)
-FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "(\.git|\.retools)" | xargs ./scripts/retool do failpoint-ctl disable)
+FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
+FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable)
 
 DEADLOCK_ENABLE := $$(\
-						find . -name "*.go" | grep -vE "(vendor|\.retools)" \
+						find . -name "*.go" \
 						| xargs -n 1 sed -i.bak 's/sync\.RWMutex/deadlock.RWMutex/;s/sync\.Mutex/deadlock.Mutex/' && \
-						find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs grep -lE "(deadlock\.RWMutex|deadlock\.Mutex)" \
-						| xargs ./scripts/retool do goimports -w)
+						find . -name "*.go" | xargs grep -lE "(deadlock\.RWMutex|deadlock\.Mutex)" \
+						| xargs goimports -w)
 DEADLOCK_DISABLE := $$(\
-						find . -name "*.go" | grep -vE "(vendor|\.retools)" \
+						find . -name "*.go" \
 						| xargs -n 1 sed -i.bak 's/deadlock\.RWMutex/sync.RWMutex/;s/deadlock\.Mutex/sync.Mutex/' && \
-						find . -name "*.go" | grep -vE "(vendor|\.retools)" | xargs grep -lE "(sync\.RWMutex|sync\.Mutex)" \
-						| xargs ./scripts/retool do goimports -w && \
-						find . -name "*.bak" | grep -vE "(vendor|\.retools)" | xargs rm && \
+						find . -name "*.go" | xargs grep -lE "(sync\.RWMutex|sync\.Mutex)" \
+						| xargs goimports -w && \
+						find . -name "*.bak" | xargs rm && \
 						go mod tidy)
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
@@ -82,7 +81,7 @@ pd-heartbeat-bench: export GO111MODULE=on
 pd-heartbeat-bench:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
-test: retool-setup deadlock-setup
+test: install-tools deadlock-setup
 	# testing...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
@@ -97,24 +96,24 @@ basic-test:
 
 # These need to be fixed before they can be ran regularly
 check-fail:
-	CGO_ENABLED=0 ./scripts/retool do gometalinter.v2 --disable-all \
+	CGO_ENABLED=0 golangci-lint run --disable-all \
 	  --enable errcheck \
 	  $$($(PACKAGE_DIRECTORIES))
-	CGO_ENABLED=0 ./scripts/retool do gosec $$($(PACKAGE_DIRECTORIES))
+	CGO_ENABLED=0 gosec $$($(PACKAGE_DIRECTORIES))
 
 check-all: static lint tidy
 	@echo "checking"
 
-retool-setup: export GO111MODULE=off
-retool-setup:
-	@which retool >/dev/null 2>&1 || go get github.com/twitchtv/retool
-	@./scripts/retool sync
+install-tools: export GO111MODULE=on
+install-tools: golangci-lint-setup
+	mkdir -p $(TOOL_BIN_PATH)
+	grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 golangci-lint-setup:
 	@mkdir -p $(TOOL_BIN_PATH)
 	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(TOOL_BIN_PATH) v1.23.7
 
-check: retool-setup golangci-lint-setup check-all check-plugin
+check: install-tools check-all check-plugin
 
 check-plugin:
 	@echo "checking plugin"
@@ -129,7 +128,7 @@ static:
 
 lint:
 	@echo "linting"
-	CGO_ENABLED=0 ./scripts/retool do revive -formatter friendly -config revive.toml $$($(PACKAGES))
+	CGO_ENABLED=0 revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
 tidy:
 	@echo "go mod tidy"
@@ -140,7 +139,7 @@ travis_coverage: export GO111MODULE=on
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 ./scripts/retool do $(OVERALLS) -concurrency=8 -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
+	CGO_ENABLED=1 $(OVERALLS) -concurrency=8 -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 else
 	@echo "coverage only runs in travis."
@@ -169,7 +168,7 @@ deadlock-enable: deadlock-setup
 deadlock-disable:
 	@$(DEADLOCK_DISABLE)
 
-failpoint-enable: retool-setup
+failpoint-enable: install-tools
 	# Converting failpoints...
 	@$(FAILPOINT_ENABLE)
 

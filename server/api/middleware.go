@@ -82,69 +82,27 @@ func newComponentMiddleware(s *server.Server) componentMiddleware {
 
 func (m componentMiddleware) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var component, componentID string
-		// TODO: support DELETE
+		var statusCode int
+		var err error
 		switch r.Method {
 		case "POST":
-			var kind string
-			req := make(map[string]interface{})
-			json.NewDecoder(r.Body).Decode(&req)
-			cm := m.s.GetConfigManager()
-			componentInfo := getComponentInfo(req)
-			component = cm.GetComponent(componentInfo)
-			if component == "" {
-				component = componentInfo
-				kind = globalKind
-			} else {
-				componentID = componentInfo
-				kind = localKind
-			}
-			mapKeys := reflect.ValueOf(req).MapKeys()
-			var entries []*entry
-			for _, k := range mapKeys {
-				var value string
-				switch req[k.String()].(type) {
-				case float64, float32:
-					value = fmt.Sprintf("%f", req[k.String()])
-				default:
-					value = fmt.Sprintf("%v", req[k.String()])
-				}
-				entries = append(entries, &entry{k.String(), value})
-			}
-			s, err := updateBody(m.s, component, componentID, kind, entries)
+			r, statusCode, err = handleComponentPost(m.s, r)
 			if err != nil {
-				m.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				m.rd.JSON(w, statusCode, err.Error())
 				return
 			}
-			u, err := url.ParseRequestURI("/component")
-			if err != nil {
-				m.rd.JSON(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			r.URL = u
-			r.Body = ioutil.NopCloser(strings.NewReader(s))
 		case "GET":
-			vars := mux.Vars(r)
-			varName := "component_id"
-			componentID, ok := vars[varName]
-			if !ok {
-				m.rd.JSON(w, http.StatusBadRequest, errors.Errorf("field %s not present", varName))
-				return
-			}
-			cm := m.s.GetConfigManager()
-			component = cm.GetComponent(componentID)
-			if component == "" {
-				m.rd.JSON(w, http.StatusBadRequest, errors.Errorf("cannot find component with component ID: %s", componentID))
-				return
-			}
-			clusterID := m.s.ClusterID()
-			getURI := fmt.Sprintf("/component?header.cluster_id=%d&component=%s&component_id=%s", clusterID, component, componentID)
-			u, err := url.ParseRequestURI(getURI)
+			r, statusCode, err = handleComponentGet(m.s, r)
 			if err != nil {
-				m.rd.JSON(w, http.StatusBadRequest, err.Error())
+				m.rd.JSON(w, statusCode, err.Error())
 				return
 			}
-			r.URL = u
+		case "DELETE":
+			r, statusCode, err = handleComponentDelete(m.s, r)
+			if err != nil {
+				m.rd.JSON(w, statusCode, err.Error())
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -215,6 +173,8 @@ func updateBody(s *server.Server, component, componentID string, kind string, en
 	var version *configpb.Version
 	var k *configpb.ConfigKind
 	cm := s.GetConfigManager()
+	cm.RLock()
+	defer cm.RUnlock()
 	switch kind {
 	case localKind:
 		version = cm.LocalCfgs[component][componentID].GetVersion()
@@ -237,4 +197,93 @@ func updateBody(s *server.Server, component, componentID string, kind string, en
 
 	m := jsonpb.Marshaler{}
 	return m.MarshalToString(req)
+}
+
+func handleComponentPost(s *server.Server, r *http.Request) (*http.Request, int, error) {
+	var component, componentID, kind string
+	req := make(map[string]interface{})
+	json.NewDecoder(r.Body).Decode(&req)
+	cm := s.GetConfigManager()
+	componentInfo := getComponentInfo(req)
+	cm.RLock()
+	component = cm.GetComponent(componentInfo)
+	cm.RUnlock()
+	if component == "" {
+		component = componentInfo
+		kind = globalKind
+	} else {
+		componentID = componentInfo
+		kind = localKind
+	}
+	mapKeys := reflect.ValueOf(req).MapKeys()
+	var entries []*entry
+	for _, k := range mapKeys {
+		var value string
+		switch req[k.String()].(type) {
+		case float64, float32:
+			value = fmt.Sprintf("%f", req[k.String()])
+		default:
+			value = fmt.Sprintf("%v", req[k.String()])
+		}
+		entries = append(entries, &entry{k.String(), value})
+	}
+	str, err := updateBody(s, component, componentID, kind, entries)
+	if err != nil {
+		return nil, http.StatusInternalServerError, err
+	}
+	u, err := url.ParseRequestURI("/component")
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	r.URL = u
+	r.Body = ioutil.NopCloser(strings.NewReader(str))
+	return r, http.StatusOK, nil
+}
+
+func handleComponentGet(s *server.Server, r *http.Request) (*http.Request, int, error) {
+	var component string
+	vars := mux.Vars(r)
+	varName := "component_id"
+	componentID, ok := vars[varName]
+	if !ok {
+		return nil, http.StatusBadRequest, errors.Errorf("field %s is not present", varName)
+	}
+	cm := s.GetConfigManager()
+	cm.RLock()
+	component = cm.GetComponent(componentID)
+	cm.RUnlock()
+	if component == "" {
+		return nil, http.StatusBadRequest, errors.Errorf("cannot find component with component ID: %s", componentID)
+	}
+	clusterID := s.ClusterID()
+	getURI := fmt.Sprintf("/component?header.cluster_id=%d&component=%s&component_id=%s", clusterID, component, componentID)
+	u, err := url.ParseRequestURI(getURI)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	r.URL = u
+	return r, http.StatusOK, nil
+}
+
+func handleComponentDelete(s *server.Server, r *http.Request) (*http.Request, int, error) {
+	var component string
+	vars := mux.Vars(r)
+	varName := "component_id"
+	componentID, ok := vars[varName]
+	if !ok {
+		return nil, http.StatusBadRequest, errors.Errorf("field %s is not present", varName)
+	}
+	cm := s.GetConfigManager()
+	cm.RLock()
+	component = cm.GetComponent(componentID)
+	version := cm.GetLatestVersion(component, componentID)
+	cm.RUnlock()
+	clusterID := s.ClusterID()
+	getURI := fmt.Sprintf("/component?header.cluster_id=%d&kind.local.component_id=%s&version.local=%d&version.global=%d", clusterID, componentID, version.GetLocal(), version.GetGlobal())
+	u, err := url.ParseRequestURI(getURI)
+	if err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	r.URL = u
+	return r, http.StatusOK, nil
 }
