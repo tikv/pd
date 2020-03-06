@@ -14,6 +14,7 @@ require (
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
 	github.com/elazarl/go-bindata-assetfs v1.0.0
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32
+	github.com/go-playground/overalls v0.0.0-20180201144345-22ec1a223b7c
 	github.com/go-playground/universal-translator v0.17.0 // indirect
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/groupcache v0.0.0-20181024230925-c65c006176ff // indirect
@@ -26,14 +27,15 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway v1.12.1
 	github.com/json-iterator/go v1.1.9 // indirect
 	github.com/juju/ratelimit v1.0.1
+	github.com/kevinburke/go-bindata v3.18.0+incompatible
 	github.com/leodido/go-urn v1.2.0 // indirect
-	github.com/mattn/go-isatty v0.0.11 // indirect
 	github.com/mattn/go-shellwords v1.0.3
+	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.0.0-20151014174947-eeaced052adb
 	github.com/onsi/gomega v1.4.2 // indirect
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
-	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200302022638-35a6e979dca9
+	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200305090415-1fe6004bba3b
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
@@ -54,7 +56,7 @@ require (
 	go.uber.org/zap v1.13.0
 	golang.org/x/net v0.0.0-20200301022130-244492dfa37a // indirect
 	golang.org/x/sys v0.0.0-20200113162924-86b910548bc1 // indirect
-	golang.org/x/tools v0.0.0-20200301222351-066e0c02454c // indirect
+	golang.org/x/tools v0.0.0-20200301222351-066e0c02454c
 	google.golang.org/grpc v1.25.1
 	gopkg.in/go-playground/validator.v9 v9.31.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
