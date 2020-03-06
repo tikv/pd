@@ -470,6 +470,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		return nil
 	}
 
+	failpoint.Inject("concurrentRegionHeartbeat", func() {
+		time.Sleep(500 * time.Millisecond)
+	})
+
 	c.Lock()
 	if saveCache {
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
