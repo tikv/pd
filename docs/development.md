@@ -15,8 +15,8 @@ Official lints are ran with:
 
     make check
 
-This will use `go get` to install `retool` which then vendors the linter tools local to the project.
-Linter versions are changed with [scripts/retool-install.sh](../scripts/retool-install.sh).
+This will install linter tools local to the project.
+Linter versions are changed with [tools.go](../tools.go).
 
 ## Testing
 
