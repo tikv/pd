@@ -129,7 +129,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 		s.cluster.PutRegion(region)
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.mc = NewMergeChecker(s.ctx, s.cluster, s.cluster.RuleManager)
+	s.mc = NewMergeChecker(s.ctx, s.cluster)
 }
 
 func (s *testMergeCheckerSuite) TearDownTest(c *C) {
@@ -168,7 +168,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 
 	// merge cannot across rule key.
 	s.cluster.EnablePlacementRules = true
-	s.mc.ruleManager.SetRule(&placement.Rule{
+	s.cluster.RuleManager.SetRule(&placement.Rule{
 		GroupID:     "pd",
 		ID:          "test",
 		Index:       1,
@@ -183,7 +183,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops, NotNil)
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
-	s.mc.ruleManager.DeleteRule("test", "test")
+	s.cluster.RuleManager.DeleteRule("test", "test")
 
 	// Skip recently split regions.
 	s.cluster.ScheduleOptions.SplitMergeInterval = time.Hour
@@ -463,7 +463,7 @@ func (s *testMergeCheckerSuite) TestCache(c *C) {
 		s.cluster.PutRegion(region)
 	}
 
-	s.mc = NewMergeChecker(s.ctx, s.cluster, s.cluster.RuleManager)
+	s.mc = NewMergeChecker(s.ctx, s.cluster)
 
 	ops := s.mc.Check(s.regions[1])
 	c.Assert(ops, IsNil)

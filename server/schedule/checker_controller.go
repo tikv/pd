@@ -42,7 +42,7 @@ func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager 
 		learnerChecker: checker.NewLearnerChecker(cluster),
 		replicaChecker: checker.NewReplicaChecker(cluster),
 		ruleChecker:    checker.NewRuleChecker(cluster, ruleManager),
-		mergeChecker:   checker.NewMergeChecker(ctx, cluster, ruleManager),
+		mergeChecker:   checker.NewMergeChecker(ctx, cluster),
 	}
 }
 

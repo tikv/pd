@@ -30,20 +30,18 @@ import (
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
-	cluster     opt.Cluster
-	splitCache  *cache.TTLUint64
-	ruleManager *placement.RuleManager
-	startTime   time.Time // it's used to judge whether server recently start.
+	cluster    opt.Cluster
+	splitCache *cache.TTLUint64
+	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager) *MergeChecker {
+func NewMergeChecker(ctx context.Context, cluster opt.Cluster) *MergeChecker {
 	splitCache := cache.NewIDTTL(ctx, time.Minute, cluster.GetSplitMergeInterval())
 	return &MergeChecker{
-		cluster:     cluster,
-		splitCache:  splitCache,
-		ruleManager: ruleManager,
-		startTime:   time.Now(),
+		cluster:    cluster,
+		splitCache: splitCache,
+		startTime:  time.Now(),
 	}
 }
 
@@ -135,12 +133,12 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 }
 
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
-	return adjacent != nil && !m.cluster.IsRegionHot(adjacent) && m.allowMerge(region, adjacent) &&
+	return adjacent != nil && !m.cluster.IsRegionHot(adjacent) && AllowMerge(m.cluster, region, adjacent) &&
 		opt.IsRegionHealthy(m.cluster, adjacent) && opt.IsRegionReplicated(m.cluster, adjacent)
 }
 
-// allowMerge returns true if two regions can be merged according to the key type.
-func (m *MergeChecker) allowMerge(region *core.RegionInfo, adjacent *core.RegionInfo) bool {
+// AllowMerge returns true if two regions can be merged according to the key type.
+func AllowMerge(cluster opt.Cluster, region *core.RegionInfo, adjacent *core.RegionInfo) bool {
 	var start, end []byte
 	if bytes.Equal(region.GetEndKey(), adjacent.GetStartKey()) && len(region.GetEndKey()) != 0 {
 		start, end = region.GetStartKey(), adjacent.GetEndKey()
@@ -149,13 +147,19 @@ func (m *MergeChecker) allowMerge(region *core.RegionInfo, adjacent *core.Region
 	} else {
 		return false
 	}
-	if m.cluster.IsPlacementRulesEnabled() && len(m.ruleManager.GetSplitKeys(start, end)) > 0 {
-		return false
+	if cluster.IsPlacementRulesEnabled() {
+		type withRuleManager interface {
+			GetRuleManager() *placement.RuleManager
+		}
+		cl, ok := cluster.(withRuleManager)
+		if !ok || len(cl.GetRuleManager().GetSplitKeys(start, end)) > 0 {
+			return false
+		}
 	}
-	policy := m.cluster.GetKeyType()
+	policy := cluster.GetKeyType()
 	switch policy {
 	case core.Table:
-		if m.cluster.IsCrossTableMergeEnabled() {
+		if cluster.IsCrossTableMergeEnabled() {
 			return true
 		}
 		return isTableIDSame(region, adjacent)
