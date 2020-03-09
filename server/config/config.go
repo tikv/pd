@@ -578,7 +578,7 @@ type ScheduleConfig struct {
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
 
 	// Schedulers support for loading customized schedulers
-	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2,omitempty"` // json v2 is for the sake of compatible upgrade
+	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
 	// StoreLimitMode can be auto or manual, when set to auto,
 	// PD tries to change the store limit values according to
