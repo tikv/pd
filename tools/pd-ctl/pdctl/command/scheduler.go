@@ -181,7 +181,7 @@ func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 		if exist {
-			updateConfigSchedulerForStoreCommandFunc(cmd, args)
+			addStoreToSchedulerConfig(cmd, cmd.Name(), args)
 			return
 		}
 		fallthrough
@@ -383,10 +383,6 @@ func NewRemoveSchedulerCommand() *cobra.Command {
 	return c
 }
 
-func convertReomveSchedulerToRemoveConfig(cmd *cobra.Command, schedulerName string) {
-	setCommandUse(cmd, schedulerName)
-}
-
 func setCommandUse(cmd *cobra.Command, targetUse string) {
 	cmd.Use = targetUse + " "
 }
@@ -398,10 +394,7 @@ func restoreCommandUse(cmd *cobra.Command, origionCommandUse string) {
 func redirectReomveSchedulerToDeleteConfig(cmd *cobra.Command, schedulerName string, args []string) {
 	args = strings.Split(args[0], "-")
 	args = args[len(args)-1:]
-	cmdStore := cmd.Use
-	convertReomveSchedulerToRemoveConfig(cmd, schedulerName)
-	defer restoreCommandUse(cmd, cmdStore)
-	deleteConfigSchedulerForStoreCommandFunc(cmd, args)
+	deleteStoreFromSchedulerConfig(cmd, schedulerName, args)
 }
 
 func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
@@ -433,106 +426,50 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		Use:   "config",
 		Short: "config a scheduler",
 	}
-	c.AddCommand(NewConfigUpdateCommand())
-	c.AddCommand(NewConfigShowCommand())
-	c.AddCommand(NewConfigDeleteCommand())
+	c.AddCommand(
+		newConfigEvictLeaderCommand(),
+		newConfigGrantLeaderCommand(),
+	)
 	return c
 }
 
-// NewConfigUpdateCommand return a command to update config
-func NewConfigUpdateCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "update <scheduler>",
-		Short: "update a scheduler",
-	}
-	c.AddCommand(NewConfigUpdateEvictLeaderSchedulerCommand())
-	c.AddCommand(NewConfigUpdateGrantLeaderSchedulerCommand())
-	return c
-}
-
-// NewConfigShowCommand return a command to show config of scheduler
-func NewConfigShowCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "show <scheduler>",
-		Short: "show a scheduler's config",
-	}
-	c.AddCommand(NewConfigShowEvictLeaderSchedulerCommand())
-	c.AddCommand(NewConfigShowGrantLeaderSchedulerCommand())
-	return c
-}
-
-// NewConfigDeleteCommand return a command to delete config
-func NewConfigDeleteCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "delete <scheduler>",
-		Short: "delete a scheduler's config",
-	}
-	c.AddCommand(NewConfigDeleteEvictLeaderSchedulerCommand())
-	c.AddCommand(NewConfigDeleteGrantLeaderSchedulerCommand())
-	return c
-}
-
-// NewConfigUpdateEvictLeaderSchedulerCommand return a command to config evict-leader-scheduler
-func NewConfigUpdateEvictLeaderSchedulerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "evict-leader-scheduler <store_id>",
-		Short: "make the scheduler to evict leader from a store",
-		Run:   updateConfigSchedulerForStoreCommandFunc,
-	}
-	return c
-}
-
-// NewConfigShowEvictLeaderSchedulerCommand return a command to config evict-leader-scheduler
-func NewConfigShowEvictLeaderSchedulerCommand() *cobra.Command {
+func newConfigEvictLeaderCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "evict-leader-scheduler",
-		Short: "show the config of evict-leader-scheduler",
-		Run:   showConfigSchedulerForStoreCommandFunc,
+		Short: "show evict-leader-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
 	}
+	c.AddCommand(&cobra.Command{
+		Use:   "add-store <store-id>",
+		Short: "add a store to evict leader list",
+		Run:   func(cmd *cobra.Command, args []string) { addStoreToSchedulerConfig(cmd, c.Name(), args) },
+	}, &cobra.Command{
+		Use:   "delete-store <store-id>",
+		Short: "delete a store from evict leader list",
+		Run:   func(cmd *cobra.Command, args []string) { deleteStoreFromSchedulerConfig(cmd, c.Name(), args) },
+	})
 	return c
 }
 
-// NewConfigDeleteEvictLeaderSchedulerCommand delete a config for store_id
-func NewConfigDeleteEvictLeaderSchedulerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "evict-leader-scheduler <store_id>",
-		Short: "delete the config of evict-leader-scheduler",
-		Run:   deleteConfigSchedulerForStoreCommandFunc,
-	}
-	return c
-}
-
-// NewConfigUpdateGrantLeaderSchedulerCommand return a command to config evict-leader-scheduler
-func NewConfigUpdateGrantLeaderSchedulerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "grant-leader-scheduler <store_id>",
-		Short: "make the scheduler to grant leader to a store",
-		Run:   updateConfigSchedulerForStoreCommandFunc,
-	}
-	return c
-}
-
-// NewConfigShowGrantLeaderSchedulerCommand return a command to config evict-leader-scheduler
-func NewConfigShowGrantLeaderSchedulerCommand() *cobra.Command {
+func newConfigGrantLeaderCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "grant-leader-scheduler",
-		Short: "show the config of grant-leader-scheduler",
-		Run:   showConfigSchedulerForStoreCommandFunc,
+		Short: "show grant-leader-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
 	}
+	c.AddCommand(&cobra.Command{
+		Use:   "add-store <store-id>",
+		Short: "add a store to grant leader list",
+		Run:   func(cmd *cobra.Command, args []string) { addStoreToSchedulerConfig(cmd, c.Name(), args) },
+	}, &cobra.Command{
+		Use:   "delete-store <store-id>",
+		Short: "delete a store from grant leader list",
+		Run:   func(cmd *cobra.Command, args []string) { deleteStoreFromSchedulerConfig(cmd, c.Name(), args) },
+	})
 	return c
 }
 
-// NewConfigDeleteGrantLeaderSchedulerCommand delete a config for store_id
-func NewConfigDeleteGrantLeaderSchedulerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "grant-leader-scheduler <store_id>",
-		Short: "delete the config of grant-leader-scheduler",
-		Run:   deleteConfigSchedulerForStoreCommandFunc,
-	}
-	return c
-}
-
-func updateConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
+func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
 		return
@@ -543,13 +480,13 @@ func updateConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string)
 		return
 	}
 	input := make(map[string]interface{})
-	input["name"] = cmd.Name()
+	input["name"] = schedulerName
 	input["store_id"] = storeID
 
-	postJSON(cmd, path.Join(schedulerConfigPrefix, cmd.Name(), "config"), input)
+	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 
-func showConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
+func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
 		cmd.Println(cmd.UsageString())
 		return
@@ -576,12 +513,12 @@ func redirectDeleteConfigToRemoveScheduler(cmd *cobra.Command, schedulerName str
 	removeSchedulerCommandFunc(cmd, args)
 }
 
-func deleteConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
+func deleteStoreFromSchedulerConfig(cmd *cobra.Command, schedulerName string, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.Usage())
 		return
 	}
-	path := path.Join(schedulerConfigPrefix, "/", cmd.Name(), "delete", args[0])
+	path := path.Join(schedulerConfigPrefix, "/", schedulerName, "delete", args[0])
 	resp, err := doRequest(cmd, path, http.MethodDelete)
 	if err != nil {
 		cmd.Println(err)
@@ -589,7 +526,7 @@ func deleteConfigSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string)
 	}
 	// FIXME: remove the judge when the new command replace old command
 	if strings.Contains(resp, lastStoreDeleteInfo) {
-		redirectDeleteConfigToRemoveScheduler(cmd, cmd.Name(), args)
+		redirectDeleteConfigToRemoveScheduler(cmd, schedulerName, args)
 		return
 	}
 	cmd.Println("Success!")

@@ -430,7 +430,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
-	var saveKV, saveCache, isNew bool
+	var saveKV, saveCache, isNew, statsChange bool
 	if origin == nil {
 		log.Debug("insert new region",
 			zap.Uint64("region-id", region.GetID()),
@@ -489,7 +489,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
 			region.GetKeysRead() != origin.GetKeysRead() {
-			saveCache = true
+			saveCache, statsChange = true, true
 		}
 	}
 
@@ -503,6 +503,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 				zap.Error(err))
 		}
 		regionEventCounter.WithLabelValues("update_kv").Inc()
+	}
+	if saveKV || statsChange {
 		select {
 		case c.changedRegions <- region:
 		default:

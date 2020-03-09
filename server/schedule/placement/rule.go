@@ -13,7 +13,10 @@
 
 package placement
 
-import "sort"
+import (
+	"encoding/hex"
+	"sort"
+)
 
 // PeerRoleType is the expected peer type of the placement rule.
 type PeerRoleType string
@@ -58,7 +61,7 @@ func (r Rule) Key() [2]string {
 
 // StoreKey returns the rule's key for persistent store.
 func (r Rule) StoreKey() string {
-	return r.StartKeyHex + "-" + r.EndKeyHex
+	return hex.EncodeToString([]byte(r.GroupID)) + "-" + hex.EncodeToString([]byte(r.ID))
 }
 
 // Rules are ordered by (GroupID, Index, ID).
