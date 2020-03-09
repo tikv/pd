@@ -90,7 +90,10 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 	for _, setOption := range opts {
 		setOption(scheduler)
 	}
-	scheduler.filters = []filter.Filter{filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true}}
+	scheduler.filters = []filter.Filter{
+		filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true},
+		filter.NewSpecialUseFilter(scheduler.GetName()),
+	}
 	return scheduler
 }
 

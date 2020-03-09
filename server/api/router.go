@@ -201,14 +201,19 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
 	if svr.GetConfig().EnableDynamicConfig {
+		apiRouter.HandleFunc("/component/ids/{component}", func(w http.ResponseWriter, r *http.Request) {
+			vars := mux.Vars(r)
+			varName := vars["component"]
+			componentIDs := svr.GetConfigManager().GetComponentIDs(varName)
+			rd.JSON(w, http.StatusOK, componentIDs)
+		}).Methods("GET")
 		return rootRouter, func() { lazyComponentRouter(ctx, svr, apiRouter) }
 	}
 	return rootRouter, nil
 }
 
 func lazyComponentRouter(ctx context.Context, svr *server.Server, apiRouter *mux.Router) {
-	// TODO: support DELETE
-	componentRouter := apiRouter.PathPrefix("/component").Methods("POST", "GET").Subrouter()
+	componentRouter := apiRouter.PathPrefix("/component").Methods("POST", "GET", "DELETE").Subrouter()
 	CustomForwardResponseOption := func(ctx context.Context, w http.ResponseWriter, pm proto.Message) error {
 		if _, ok := pm.(*configpb.GetResponse); ok {
 			str := pm.(*configpb.GetResponse).GetConfig()
@@ -229,6 +234,8 @@ func lazyComponentRouter(ctx context.Context, svr *server.Server, apiRouter *mux
 			errMsg = reply.(*configpb.UpdateResponse).GetStatus().GetMessage()
 		case "/configpb.Config/Get":
 			errMsg = reply.(*configpb.GetResponse).GetStatus().GetMessage()
+		case "/configpb.Config/Delete":
+			errMsg = reply.(*configpb.DeleteResponse).GetStatus().GetMessage()
 		}
 		if errMsg != "" {
 			return errors.New(errMsg)
@@ -259,6 +266,7 @@ func lazyComponentRouter(ctx context.Context, svr *server.Server, apiRouter *mux
 
 	componentRouter.Handle("", gwmux).Methods("POST")
 	componentRouter.Handle("/{component_id}", gwmux).Methods("GET")
+	componentRouter.Handle("/{component_id}", gwmux).Methods("DELETE")
 	componentRouter.Use(newComponentMiddleware(svr).Middleware)
 }
 

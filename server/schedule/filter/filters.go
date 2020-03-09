@@ -541,3 +541,48 @@ func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
+
+type specialUseFilter struct {
+	scope      string
+	constraint placement.LabelConstraint
+}
+
+// NewSpecialUseFilter creates a filter that filters stores for special use.
+func NewSpecialUseFilter(scope string, allowUses ...string) Filter {
+	var values []string
+	for _, v := range allSpecialUses {
+		if slice.NoneOf(allowUses, func(i int) bool { return allowUses[i] == v }) {
+			values = append(values, v)
+		}
+	}
+	return &specialUseFilter{
+		scope:      scope,
+		constraint: placement.LabelConstraint{Key: specialUseKey, Op: "in", Values: values},
+	}
+}
+
+func (f *specialUseFilter) Scope() string {
+	return f.scope
+}
+
+func (f *specialUseFilter) Type() string {
+	return "special-use-filter"
+}
+
+func (f *specialUseFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	if store.IsLowSpace(opt.GetLowSpaceRatio()) {
+		return true
+	}
+	return !f.constraint.MatchStore(store)
+}
+
+func (f *specialUseFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.constraint.MatchStore(store)
+}
+
+const (
+	specialUseKey       = "specialUse"
+	specialUseHotRegion = "hotRegion"
+)
+
+var allSpecialUses = []string{specialUseHotRegion}
