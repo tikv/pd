@@ -95,9 +95,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	scheduleCfg := config.ScheduleConfig{}
 	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
-	scheduleConfig = svr.GetScheduleConfig()
-	scheduleConfig.Schedulers = nil
-	c.Assert(&scheduleCfg, DeepEquals, scheduleConfig)
+	c.Assert(&scheduleCfg, DeepEquals, 	svr.GetScheduleConfig())
 
 	// config show replication
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
