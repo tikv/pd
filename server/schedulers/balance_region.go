@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -71,10 +72,11 @@ type balanceRegionSchedulerConfig struct {
 
 type balanceRegionScheduler struct {
 	*BaseScheduler
-	conf         *balanceRegionSchedulerConfig
-	opController *schedule.OperatorController
-	filters      []filter.Filter
-	counter      *prometheus.CounterVec
+	conf          *balanceRegionSchedulerConfig
+	opController  *schedule.OperatorController
+	filters       []filter.Filter
+	targetFilters []filter.Filter
+	counter       *prometheus.CounterVec
 }
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
@@ -93,6 +95,9 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 	scheduler.filters = []filter.Filter{
 		filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true},
 		filter.NewSpecialUseFilter(scheduler.GetName()),
+	}
+	scheduler.targetFilters = []filter.Filter{
+		filter.NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: "store-do-not-balance-to", Op: placement.NotExists}}),
 	}
 	return scheduler
 }
@@ -220,6 +225,10 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			return nil
 		}
 		exclude[target.GetID()] = struct{}{} // exclude next round.
+
+		if len(filter.SelectTargetStores([]*core.StoreInfo{target}, s.targetFilters, cluster)) == 0 {
+			continue
+		}
 
 		regionID := region.GetID()
 		sourceID := source.GetID()
