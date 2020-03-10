@@ -17,7 +17,6 @@ import (
 	regionpkg "github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/core"
 	"go.uber.org/zap"
 )
@@ -79,7 +78,7 @@ var emptyRegionsInfo RegionsInfo
 // It gets RegionsInfo directly from memory.
 func NewCorePeriodicGetter(srv *server.Server) regionpkg.RegionsInfoGenerator {
 	return func() (regionpkg.RegionsInfo, error) {
-		rc := srv.GetRaftCluster()
+		rc := srv.GetBasicCluster()
 		if rc == nil {
 			return emptyRegionsInfo, nil
 		}
@@ -87,14 +86,14 @@ func NewCorePeriodicGetter(srv *server.Server) regionpkg.RegionsInfoGenerator {
 	}
 }
 
-func clusterScan(rc *cluster.RaftCluster) RegionsInfo {
+func clusterScan(rc *core.BasicCluster) RegionsInfo {
 	var startKey []byte
 	endKey := []byte("")
 
 	regions := make([]*core.RegionInfo, 0, limit)
 
 	for {
-		rs := rc.ScanRegions(startKey, endKey, limit)
+		rs := rc.ScanRange(startKey, endKey, limit)
 		length := len(rs)
 		if length == 0 {
 			break

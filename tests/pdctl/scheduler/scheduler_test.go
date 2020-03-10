@@ -89,7 +89,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 			_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 			c.Assert(err, IsNil)
 		}
-		args = []string{"-u", pdAddr, "scheduler", "config", "show", schedulerName}
+		args = []string{"-u", pdAddr, "scheduler", "config", schedulerName}
 		_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 		c.Assert(err, IsNil)
 		configInfo := make(map[string]interface{})
@@ -147,7 +147,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		checkSchedulerConfigCommand(nil, expectedConfig, schedulers[idx])
 
 		// scheduler config update command
-		args = []string{"-u", pdAddr, "scheduler", "config", "update", schedulers[idx], "3"}
+		args = []string{"-u", pdAddr, "scheduler", "config", schedulers[idx], "add-store", "3"}
 		expected = map[string]bool{
 			"balance-leader-scheduler":     true,
 			"balance-hot-region-scheduler": true,
