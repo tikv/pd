@@ -175,8 +175,20 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 
 	data := make(map[string]interface{})
 	data["replication"] = allData["replication"]
-	data["schedule"] = allData["schedule"]
+	scheduleConfig := make(map[string]interface{})
+	scheduleConfigData, err := json.Marshal(allData["schedule"])
+	if err != nil {
+		cmd.Printf("Failed to marshal schedule config: %s\n", err)
+		return
+	}
+	err = json.Unmarshal(scheduleConfigData, &scheduleConfig)
+	if err != nil {
+		cmd.Printf("Failed to unmarshal schedule config: %s\n", err)
+		return
+	}
 
+	delete(scheduleConfig, "schedulers-v2")
+	data["schedule"] = scheduleConfig
 	r, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		cmd.Printf("Failed to marshal config: %s\n", err)

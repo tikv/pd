@@ -744,7 +744,7 @@ func (s *Server) GetConfig() *config.Config {
 	for i, sche := range sches {
 		payload[sche] = configs[i]
 	}
-	cfg.Schedule.SchedulersPayload = payload
+	cfg.SchedulersPayload = payload
 	return cfg
 }
 
@@ -752,19 +752,6 @@ func (s *Server) GetConfig() *config.Config {
 func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
 	cfg := &config.ScheduleConfig{}
 	*cfg = *s.scheduleOpt.Load()
-	storage := s.GetStorage()
-	if storage == nil {
-		return cfg
-	}
-	sches, configs, err := storage.LoadAllScheduleConfig()
-	if err != nil {
-		return cfg
-	}
-	payload := make(map[string]string)
-	for i, sche := range sches {
-		payload[sche] = configs[i]
-	}
-	cfg.SchedulersPayload = payload
 	return cfg
 }
 
