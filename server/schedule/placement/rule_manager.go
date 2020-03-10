@@ -19,8 +19,10 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 // RuleManager is responsible for the lifecycle of all placement Rules.
@@ -50,19 +52,10 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 		return nil
 	}
 
-	var rules []*Rule
-	ok, err := m.store.LoadRules(func(v string) error {
-		var r Rule
-		if err := json.Unmarshal([]byte(v), &r); err != nil {
-			return err
-		}
-		rules = append(rules, &r)
-		return nil
-	})
-	if err != nil {
+	if err := m.loadRules(); err != nil {
 		return err
 	}
-	if !ok {
+	if len(m.rules) == 0 {
 		// migrate from old config.
 		defaultRule := &Rule{
 			GroupID:        "pd",
@@ -74,16 +67,53 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 		if err := m.store.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
 			return err
 		}
-		rules = append(rules, defaultRule)
-	}
-	for _, r := range rules {
-		if err = m.adjustRule(r); err != nil {
-			return err
-		}
-		m.rules[r.Key()] = r
+		m.rules[defaultRule.Key()] = defaultRule
 	}
 	m.ruleList = buildRuleList(m.rules)
 	m.initialized = true
+	return nil
+}
+
+func (m *RuleManager) loadRules() error {
+	var toSave []*Rule
+	var toDelete []string
+	_, err := m.store.LoadRules(func(k, v string) {
+		var r Rule
+		if err := json.Unmarshal([]byte(v), &r); err != nil {
+			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v))
+			toDelete = append(toDelete, k)
+			return
+		}
+		if err := m.adjustRule(&r); err != nil {
+			log.Error("rule is in bad format", zap.Error(err), zap.String("rule-key", k), zap.String("rule-value", v))
+			toDelete = append(toDelete, k)
+			return
+		}
+		if _, ok := m.rules[r.Key()]; ok {
+			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v))
+			toDelete = append(toDelete, k)
+			return
+		}
+		if k != r.StoreKey() {
+			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v))
+			toDelete = append(toDelete, k)
+			toSave = append(toSave, &r)
+		}
+		m.rules[r.Key()] = &r
+	})
+	if err != nil {
+		return err
+	}
+	for _, s := range toSave {
+		if err = m.store.SaveRule(s.StoreKey(), s); err != nil {
+			return err
+		}
+	}
+	for _, d := range toDelete {
+		if err = m.store.DeleteRule(d); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

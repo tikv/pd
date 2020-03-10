@@ -245,6 +245,7 @@ func SelectStoreToAddPeerByRule(scope string, cluster opt.Cluster, region *core.
 		filter.NewStorageThresholdFilter(scope),
 		filter.NewLabelConstaintFilter(scope, rf.Rule.LabelConstraints),
 		filter.NewExcludedFilter(scope, nil, region.GetStoreIds()),
+		filter.NewSpecialUseFilter(scope),
 	}
 	fs = append(fs, filters...)
 	store := selector.NewReplicaSelector(getRuleFitStores(cluster, rf), rf.Rule.LocationLabels).

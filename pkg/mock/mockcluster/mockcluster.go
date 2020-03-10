@@ -130,6 +130,11 @@ func (mc *Cluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
 	return mc.RuleManager.FitRegion(mc.BasicCluster, region)
 }
 
+// GetRuleManager returns the ruleManager of the cluster.
+func (mc *Cluster) GetRuleManager() *placement.RuleManager {
+	return mc.RuleManager
+}
+
 // SetStoreUp sets store state to be up.
 func (mc *Cluster) SetStoreUp(storeID uint64) {
 	store := mc.GetStore(storeID)
