@@ -166,10 +166,14 @@ type lazyHandler struct {
 	engine  *negroni.Negroni
 }
 
+var once sync.Once
+
 func (lazy *lazyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	for _, f := range lazy.options {
-		f()
-	}
+	once.Do(func() {
+		for _, f := range lazy.options {
+			f()
+		}
+	})
 
 	lazy.engine.ServeHTTP(w, r)
 }
