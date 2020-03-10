@@ -493,34 +493,24 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	if saveKV && c.storage != nil {
-		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
-			// Not successfully saved to storage is not fatal, it only leads to longer warm-up
-			// after restart. Here we only log the error then go on updating cache.
-			log.Error("failed to save region to storage",
-				zap.Uint64("region-id", region.GetID()),
-				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
-				zap.Error(err))
-		}
-		regionEventCounter.WithLabelValues("update_kv").Inc()
-	}
-	if saveKV || statsChange {
-		select {
-		case c.changedRegions <- region:
-		default:
-		}
-	}
-	if len(writeItems) == 0 && len(readItems) == 0 && !saveCache && !isNew {
+	if len(writeItems) == 0 && len(readItems) == 0 && !saveKV && !saveCache && !isNew {
 		return nil
 	}
 
-	c.Lock()
-	defer c.Unlock()
-	if isNew {
-		c.prepareChecker.collect(region)
-	}
+	failpoint.Inject("concurrentRegionHeartbeat", func() {
+		time.Sleep(500 * time.Millisecond)
+	})
 
+	c.Lock()
 	if saveCache {
+		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
+		// check its validation again here.
+		//
+		// However it can't solve the race condition of concurrent heartbeats from the same region.
+		if _, err := c.core.PreCheckPutRegion(region); err != nil {
+			c.Unlock()
+			return err
+		}
 		overlaps := c.core.PutRegion(region)
 		if c.storage != nil {
 			for _, item := range overlaps {
@@ -551,6 +541,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
+	if isNew {
+		c.prepareChecker.collect(region)
+	}
+
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
 	}
@@ -561,6 +555,28 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	for _, readItem := range readItems {
 		c.hotSpotCache.Update(readItem)
 	}
+	c.Unlock()
+
+	// If there are concurrent heartbeats from the same region, the last write will win even if
+	// writes to storage in the critical area. So don't use mutex to protect it.
+	if saveKV && c.storage != nil {
+		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
+			// Not successfully saved to storage is not fatal, it only leads to longer warm-up
+			// after restart. Here we only log the error then go on updating cache.
+			log.Error("failed to save region to storage",
+				zap.Uint64("region-id", region.GetID()),
+				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
+				zap.Error(err))
+		}
+		regionEventCounter.WithLabelValues("update_kv").Inc()
+	}
+	if saveKV || statsChange {
+		select {
+		case c.changedRegions <- region:
+		default:
+		}
+	}
+
 	return nil
 }
 
