@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/checker"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
@@ -124,6 +125,11 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		return nil
 	}
 
+	if !s.allowMerge(cluster, region, target) {
+		schedulerCounter.WithLabelValues(s.GetName(), "not-allowed").Inc()
+		return nil
+	}
+
 	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpAdmin)
 	if err != nil {
 		log.Debug("fail to create merge region operator", zap.Error(err))
@@ -131,4 +137,17 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 	}
 	ops[0].Counters = append(ops[0].Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 	return ops
+}
+
+func (s *randomMergeScheduler) allowMerge(cluster opt.Cluster, region, target *core.RegionInfo) bool {
+	if !opt.IsRegionHealthy(cluster, region) || !opt.IsRegionHealthy(cluster, target) {
+		return false
+	}
+	if !opt.IsRegionReplicated(cluster, region) || !opt.IsRegionReplicated(cluster, target) {
+		return false
+	}
+	if cluster.IsRegionHot(region) || cluster.IsRegionHot(target) {
+		return false
+	}
+	return checker.AllowMerge(cluster, region, target)
 }

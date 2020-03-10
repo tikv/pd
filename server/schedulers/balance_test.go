@@ -1152,6 +1152,10 @@ func (s *testRandomMergeSchedulerSuite) TestMerge(c *C) {
 
 	c.Assert(mb.IsScheduleAllowed(tc), IsTrue)
 	ops := mb.Schedule(tc)
+	c.Assert(ops, HasLen, 0) // regions are not fully replicated
+
+	opt.MaxReplicas = 1
+	ops = mb.Schedule(tc)
 	c.Assert(ops, HasLen, 2)
 	c.Assert(ops[0].Kind()&operator.OpMerge, Not(Equals), 0)
 	c.Assert(ops[1].Kind()&operator.OpMerge, Not(Equals), 0)

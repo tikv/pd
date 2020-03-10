@@ -237,7 +237,7 @@ func (s *Storage) DeleteRule(ruleKey string) error {
 }
 
 // LoadRules loads placement rules from storage.
-func (s *Storage) LoadRules(f func(v string) error) (bool, error) {
+func (s *Storage) LoadRules(f func(k, v string)) (bool, error) {
 	// Range is ['rule/\x00', 'rule0'). 'rule0' is the upper bound of all rules because '0' is next char of '/' in
 	// ascii order.
 	nextKey := path.Join(rulesPath, "\x00")
@@ -247,15 +247,13 @@ func (s *Storage) LoadRules(f func(v string) error) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if len(values) == 0 {
+		if len(keys) == 0 {
 			return false, nil
 		}
-		for _, v := range values {
-			if err := f(v); err != nil {
-				return true, err
-			}
+		for i := range keys {
+			f(strings.TrimPrefix(keys[i], rulesPath+"/"), values[i])
 		}
-		if len(values) < minKVRangeLimit {
+		if len(keys) < minKVRangeLimit {
 			return true, nil
 		}
 		nextKey = keys[len(keys)-1] + "\x00"
