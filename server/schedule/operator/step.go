@@ -211,8 +211,14 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
-	from.RegionSize -= region.GetApproximateSize()
+	regionSize := region.GetApproximateSize()
+	from.RegionSize -= regionSize
 	from.RegionCount--
+	if regionSize > smallRegionThreshold {
+		from.StepCost += RegionInfluence
+	} else if regionSize <= smallRegionThreshold && regionSize > core.EmptyRegionApproximateSize {
+		from.StepCost += smallRegionInfluence
+	}
 }
 
 // MergeRegion is an OpStep that merge two regions.
