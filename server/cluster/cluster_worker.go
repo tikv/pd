@@ -75,6 +75,8 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		NewPeerIds:  peerIDs,
 	}
 
+	log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
+
 	return split, nil
 }
 
@@ -124,6 +126,8 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 			NewRegionId: newRegionID,
 			NewPeerIds:  peerIDs,
 		})
+
+		log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
 	}
 
 	recordRegions = append(recordRegions, reqRegion.GetId())
