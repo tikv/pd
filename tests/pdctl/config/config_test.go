@@ -84,7 +84,9 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	cfg := config.Config{}
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
-	c.Assert(&cfg.Schedule, DeepEquals, svr.GetScheduleConfig())
+	scheduleConfig := svr.GetScheduleConfig()
+	scheduleConfig.Schedulers = nil
+	c.Assert(&cfg.Schedule, DeepEquals, scheduleConfig)
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
 
 	// config show schedule

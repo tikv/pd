@@ -117,6 +117,18 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	regions = regions[4:]
 	regionLen = len(regions)
 
+	// change the statistics of regions
+	for i := 0; i < len(regions); i++ {
+		idx := uint64(i)
+		regions[i] = regions[i].Clone(
+			core.SetWrittenBytes(idx+10),
+			core.SetWrittenKeys(idx+20),
+			core.SetReadBytes(idx+30),
+			core.SetReadKeys(idx+40))
+		err = rc.HandleRegionHeartbeat(regions[i])
+		c.Assert(err, IsNil)
+	}
+
 	// ensure flush to region storage, we use a duration larger than the
 	// region storage flush rate limit (3s).
 	time.Sleep(4 * time.Second)
@@ -127,7 +139,9 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	cacheRegions := followerServer.GetServer().GetBasicCluster().GetRegions()
 	c.Assert(cacheRegions, HasLen, regionLen)
 	for _, region := range cacheRegions {
-		c.Assert(followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID()).GetMeta(), DeepEquals, region.GetMeta())
+		r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
+		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
+		c.Assert(r.GetStat(), DeepEquals, region.GetStat())
 	}
 
 	err = leaderServer.Stop()
@@ -138,7 +152,9 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
 	c.Assert(len(loadRegions), Equals, regionLen)
 	for _, region := range regions {
-		c.Assert(leaderServer.GetRegionInfoByID(region.GetID()).GetMeta(), DeepEquals, region.GetMeta())
+		r := leaderServer.GetRegionInfoByID(region.GetID())
+		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
+		c.Assert(r.GetStat(), DeepEquals, region.GetStat())
 	}
 }
 
