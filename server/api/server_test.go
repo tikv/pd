@@ -22,6 +22,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	dashboardapi "github.com/pingcap/pd/v4/pkg/dashboard/apiserver"
+	dashboardui "github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
@@ -83,7 +85,10 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 			for _, opt := range opts {
 				opt(cfg)
 			}
-			s, err := server.CreateServer(ctx, cfg, NewHandler)
+
+			serviceBuilders := []server.HandlerBuilder{NewHandler}
+			serviceBuilders = append(serviceBuilders, dashboardapi.NewService, dashboardui.NewService)
+			s, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 			c.Assert(err, IsNil)
 			err = s.Run()
 			c.Assert(err, IsNil)

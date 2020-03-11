@@ -23,6 +23,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,6 +68,7 @@ import (
 const (
 	etcdTimeout           = time.Second * 3
 	serverMetricsInterval = time.Minute
+	dashboardInterval     = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
@@ -141,6 +143,8 @@ type Server struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
+
+	isDashboardServe bool
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -370,11 +374,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
-	// Run callbacks
-	for _, cb := range s.startCallbacks {
-		cb()
-	}
-
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
 	return nil
@@ -427,11 +426,6 @@ func (s *Server) Close() {
 		log.Error("close storage meet error", zap.Error(err))
 	}
 
-	// Run callbacks
-	for _, cb := range s.closeCallbacks {
-		cb()
-	}
-
 	log.Info("close server")
 }
 
@@ -471,10 +465,11 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(3)
+	s.serverLoopWg.Add(4)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
+	go s.dashboardLoop()
 	if s.cfg.EnableDynamicConfig {
 		s.serverLoopWg.Add(1)
 		go s.configCheckLoop()
@@ -484,6 +479,34 @@ func (s *Server) startServerLoop(ctx context.Context) {
 func (s *Server) stopServerLoop() {
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
+}
+
+func (s *Server) dashboardLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+
+	dashboardTicker := time.NewTicker(dashboardInterval)
+	defer dashboardTicker.Stop()
+	for {
+		select {
+		case <-dashboardTicker.C:
+			s.checkDashboardAddress()
+		case <-ctx.Done():
+			if s.isDashboardServe {
+				log.Info("dashboard services are closed")
+				for _, cb := range s.closeCallbacks {
+					cb()
+				}
+			} else if len(s.closeCallbacks) != 0 {
+				s.closeCallbacks[len(s.closeCallbacks)-1]()
+			}
+			log.Info("server is closed, exit dashboard loop")
+			return
+		}
+	}
 }
 
 func (s *Server) serverMetricsLoop() {
@@ -594,6 +617,21 @@ func (s *Server) createRaftCluster() error {
 	}
 
 	return s.cluster.Start(s)
+}
+
+// GetMemberIDs return all Members' IDs.
+func GetMemberIDs(etcdClient *clientv3.Client) ([]uint64, error) {
+	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
+	if err != nil {
+		return nil, err
+	}
+
+	memberIDs := make([]uint64, 0, len(listResp.Members))
+	for _, m := range listResp.Members {
+		memberIDs = append(memberIDs, m.ID)
+	}
+
+	return memberIDs, nil
 }
 
 func (s *Server) stopRaftCluster() {
@@ -1149,6 +1187,65 @@ func (s *Server) campaignLeader() {
 			log.Info("server is closed")
 			return
 		}
+	}
+}
+
+func (s *Server) checkDashboardAddress() {
+	dashboardAddress := s.GetScheduleOption().GetDashboardAddress()
+	switch dashboardAddress {
+	case "auto":
+		if s.GetMember().IsLeader() {
+			rc := s.GetRaftCluster()
+			if rc == nil || !rc.IsRunning() {
+				return
+			}
+			members, err := cluster.GetMembers(s.GetClient())
+			if err != nil || len(members) == 0 {
+				log.Error("failed to get members")
+			}
+			sort.Slice(members, func(i, j int) bool { return members[i].GetMemberId() < members[j].GetMemberId() })
+			for i := range members {
+				if len(members[i].GetClientUrls()) != 0 {
+					rc.SetDashboardAddress(members[i].GetClientUrls()[0])
+					break
+				}
+			}
+		}
+		return
+	case "none":
+		if s.isDashboardServe {
+			log.Info("dashboard services are stopped")
+			for _, cb := range s.closeCallbacks {
+				cb()
+			}
+		}
+		return
+	default:
+	}
+	_, err := url.Parse(dashboardAddress)
+	if err != nil {
+		log.Error("illegal dashboard address", zap.String("address", dashboardAddress))
+		return
+	}
+
+	var addr string
+	if len(s.GetMemberInfo().GetClientUrls()) != 0 {
+		addr = s.GetMemberInfo().GetClientUrls()[0]
+	}
+	if addr != dashboardAddress && s.isDashboardServe {
+		for _, cb := range s.closeCallbacks {
+			cb()
+		}
+		s.isDashboardServe = false
+		log.Info("dashboard services are stopped")
+	}
+
+	if addr == dashboardAddress && !s.isDashboardServe {
+		for _, cb := range s.startCallbacks {
+			cb()
+		}
+		s.isDashboardServe = true
+		log.Info("dashboard services are started")
 	}
 }
 
