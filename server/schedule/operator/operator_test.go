@@ -180,7 +180,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: -1,
 		RegionSize:  -50,
 		RegionCount: -1,
-		StepCost:    0,
+		StepCost:    1000,
 	})
 	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
 		LeaderSize:  50,
@@ -196,7 +196,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: -1,
 		RegionSize:  -50,
 		RegionCount: -1,
-		StepCost:    0,
+		StepCost:    1000,
 	})
 	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
 		LeaderSize:  50,
@@ -212,7 +212,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: -2,
 		RegionSize:  -50,
 		RegionCount: -2,
-		StepCost:    0,
+		StepCost:    1000,
 	})
 	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
 		LeaderSize:  50,
