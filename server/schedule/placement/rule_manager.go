@@ -178,6 +178,8 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 		}
 		return err
 	}
+
+	log.Info("placement rule updated", zap.Stringer("rule", rule))
 	m.ruleList = buildRuleList(m.rules)
 	return nil
 }
@@ -197,6 +199,7 @@ func (m *RuleManager) DeleteRule(group, id string) error {
 		m.rules[key] = old
 		return err
 	}
+	log.Info("placement rule removed", zap.Stringer("rule", old))
 	m.ruleList = buildRuleList(m.rules)
 	return nil
 }
