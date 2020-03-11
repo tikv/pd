@@ -70,6 +70,7 @@ func (c *ConfigManager) Update(ctx context.Context, request *configpb.UpdateRequ
 
 	version, status := c.UpdateConfig(request.GetKind(), request.GetVersion(), request.GetEntries())
 	if status.GetCode() == configpb.StatusCode_OK {
+		log.Info("config has updated in config manager", zap.Reflect("entries", request.GetEntries()))
 		c.Persist(c.svr.GetStorage())
 	}
 

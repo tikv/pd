@@ -51,16 +51,17 @@ func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 	if h.svr.GetConfig().EnableDynamicConfig {
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-		}
 		cm := h.svr.GetConfigManager()
 		m := make(map[string]interface{})
 		json.NewDecoder(r.Body).Decode(&m)
 		entries, err := transToEntries(m)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		client := h.svr.GetConfigClient()
+		if client == nil {
+			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
 			return
 		}
 		err = redirectUpdateReq(h.svr.Context(), client, cm, entries)
@@ -165,16 +166,17 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 	if h.svr.GetConfig().EnableDynamicConfig {
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-		}
 		cm := h.svr.GetConfigManager()
 		m := make(map[string]interface{})
 		json.NewDecoder(r.Body).Decode(&m)
 		entries, err := transToEntries(m)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		client := h.svr.GetConfigClient()
+		if client == nil {
+			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
 			return
 		}
 		err = redirectUpdateReq(h.svr.Context(), client, cm, entries)
@@ -203,10 +205,6 @@ func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
 
 func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 	if h.svr.GetConfig().EnableDynamicConfig {
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-		}
 		cm := h.svr.GetConfigManager()
 		m := make(map[string]interface{})
 		json.NewDecoder(r.Body).Decode(&m)
@@ -215,6 +213,12 @@ func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		client := h.svr.GetConfigClient()
+		if client == nil {
+			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
+			return
+		}
+
 		err = redirectUpdateReq(h.svr.Context(), client, cm, entries)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -246,10 +250,6 @@ func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.svr.GetConfig().EnableDynamicConfig {
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-		}
 		cm := h.svr.GetConfigManager()
 		typ := input["type"]
 		labelKey, labelValue := input["label-key"], input["label-value"]
@@ -285,6 +285,11 @@ func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		entries := []*entry{{key: "label-property", value: buf.String()}}
+		client := h.svr.GetConfigClient()
+		if client == nil {
+			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
+			return
+		}
 		err := redirectUpdateReq(h.svr.Context(), client, cm, entries)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
