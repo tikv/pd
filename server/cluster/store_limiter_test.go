@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
 	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 )
 
 var _ = Suite(&testStoreLimiterSuite{})
@@ -52,13 +53,13 @@ func (s *testStoreLimiterSuite) TestCollect(c *C) {
 
 func (s *testStoreLimiterSuite) TestStoreLimitScene(c *C) {
 	limiter := NewStoreLimiter(s.oc)
-	c.Assert(limiter.scene, DeepEquals, schedule.DefaultStoreLimitScene())
+	c.Assert(limiter.scene, DeepEquals, storelimit.DefaultStoreLimitScene())
 }
 
 func (s *testStoreLimiterSuite) TestReplaceStoreLimitScene(c *C) {
 	limiter := NewStoreLimiter(s.oc)
 
-	scene := &schedule.StoreLimitScene{Idle: 4, Low: 3, Normal: 2, High: 1}
+	scene := &storelimit.StoreLimitScene{Idle: 4, Low: 3, Normal: 2, High: 1}
 	limiter.ReplaceStoreLimitScene(scene)
 
 	c.Assert(limiter.scene, DeepEquals, scene)

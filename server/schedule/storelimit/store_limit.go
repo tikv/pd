@@ -11,51 +11,82 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package storelimit
 
 import (
 	"time"
 
 	"github.com/juju/ratelimit"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
+)
+
+const (
+	// RegionInfluence represents the influence of a operator step, which is used by store limit.
+	RegionInfluence int64 = 1000
+	// SmallRegionInfluence represents the influence of a operator step
+	// when the region size is smaller than smallRegionThreshold, which is used by store limit.
+	SmallRegionInfluence int64 = 200
+	// SmallRegionThreshold is used to represent a region which can be regarded as a small region once the size is small than it.
+	SmallRegionThreshold int64 = 20
 )
 
 // StoreLimitMode indicates the strategy to set store limit
-type StoreLimitMode int
+type Mode int
 
 // There are two modes supported now, "auto" indicates the value
 // is set by PD itself. "manual" means it is set by the user.
 // An auto set value can be overwrite by a manual set value.
 const (
-	StoreLimitAuto StoreLimitMode = iota
-	StoreLimitManual
+	Auto Mode = iota
+	Manual
 )
 
+type Type int
+
+const (
+	RegionAdd Type = iota
+	RegionRemove
+)
+
+var TypeValue = map[string]Type{
+	"RegionAdd":    RegionAdd,
+	"RegionRemove": RegionRemove,
+}
+
 // String returns the representation of the StoreLimitMode
-func (m StoreLimitMode) String() string {
+func (m Mode) String() string {
 	switch m {
-	case StoreLimitAuto:
+	case Auto:
 		return "auto"
-	case StoreLimitManual:
+	case Manual:
 		return "manual"
 	}
 	// default to be auto
 	return "auto"
 }
 
+// String returns the representation of the StoreLimitType
+func (t Type) String() string {
+	for n, v :=range TypeValue {
+		if v == t {
+			return n
+		}
+	}
+	return ""
+}
+
 // StoreLimit limits the operators of a store
 type StoreLimit struct {
 	bucket *ratelimit.Bucket
-	mode   StoreLimitMode
+	mode   Mode
 }
 
 // NewStoreLimit returns a StoreLimit object
-func NewStoreLimit(rate float64, mode StoreLimitMode) *StoreLimit {
-	capacity := operator.RegionInfluence
+func NewStoreLimit(rate float64, mode Mode) *StoreLimit {
+	capacity := RegionInfluence
 	if rate > 1 {
-		capacity = int64(rate * float64(operator.RegionInfluence))
+		capacity = int64(rate * float64(RegionInfluence))
 	}
-	rate *= float64(operator.RegionInfluence)
+	rate *= float64(RegionInfluence)
 	return &StoreLimit{
 		bucket: ratelimit.NewBucketWithRate(rate, capacity),
 		mode:   mode,
@@ -69,7 +100,7 @@ func (l *StoreLimit) Available() int64 {
 
 // Rate returns the fill rate of the bucket, in tokens per second.
 func (l *StoreLimit) Rate() float64 {
-	return l.bucket.Rate() / float64(operator.RegionInfluence)
+	return l.bucket.Rate() / float64(RegionInfluence)
 }
 
 // Take takes count tokens from the bucket without blocking.
@@ -78,6 +109,6 @@ func (l *StoreLimit) Take(count int64) time.Duration {
 }
 
 // Mode returns the store limit mode
-func (l *StoreLimit) Mode() StoreLimitMode {
+func (l *StoreLimit) Mode() Mode {
 	return l.mode
 }

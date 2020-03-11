@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/schedulers"
 	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
@@ -417,17 +418,17 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
-func (h *Handler) SetAllStoresLimit(rate float64) error {
+func (h *Handler) SetAllStoresLimit(rate float64, limitType storelimit.StoreLimitType) error {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return err
 	}
-	c.SetAllStoresLimit(rate, schedule.StoreLimitManual)
+	c.SetAllStoresLimit(rate, storelimit.StoreLimitManual, limitType)
 	return nil
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetAllStoresLimit() (map[uint64]*schedule.StoreLimit, error) {
+func (h *Handler) GetAllStoresLimit() (map[uint64]map[storelimit.StoreLimitType]*storelimit.StoreLimit, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
@@ -436,12 +437,12 @@ func (h *Handler) GetAllStoresLimit() (map[uint64]*schedule.StoreLimit, error) {
 }
 
 // SetStoreLimit is used to set the limit of a store.
-func (h *Handler) SetStoreLimit(storeID uint64, rate float64) error {
+func (h *Handler) SetStoreLimit(storeID uint64, rate float64, limitType storelimit.StoreLimitType) error {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return err
 	}
-	c.SetStoreLimit(storeID, rate, schedule.StoreLimitManual)
+	c.SetStoreLimit(storeID, rate, storelimit.StoreLimitManual, limitType)
 	return nil
 }
 
@@ -840,15 +841,15 @@ func (h *Handler) ResetTS(ts uint64) error {
 }
 
 // SetStoreLimitScene sets the limit values for differents scenes
-func (h *Handler) SetStoreLimitScene(scene *schedule.StoreLimitScene) {
+func (h *Handler) SetStoreLimitScene(scene *storelimit.StoreLimitScene, limitType storelimit.StoreLimitType) {
 	cluster := h.s.GetRaftCluster()
-	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene)
+	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
 }
 
 // GetStoreLimitScene returns the limit valus for different scenes
-func (h *Handler) GetStoreLimitScene() *schedule.StoreLimitScene {
+func (h *Handler) GetStoreLimitScene(limitType storelimit.StoreLimitType) *storelimit.StoreLimitScene {
 	cluster := h.s.GetRaftCluster()
-	return cluster.GetStoreLimiter().StoreLimitScene()
+	return cluster.GetStoreLimiter().StoreLimitScene(limitType)
 }
 
 // PluginLoad loads the plugin referenced by the pluginPath

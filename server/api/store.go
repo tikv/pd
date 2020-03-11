@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -307,7 +308,26 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.SetStoreLimit(storeID, rate/schedule.StoreBalanceBaseTime); err != nil {
+	typeNameIface, ok := input["type"]
+
+	var typeValue storelimit.StoreLimitType
+	if !ok {
+		typeValue = storelimit.StoreLimitRegionAdd
+	} else {
+		typeName, ok := typeNameIface.(string)
+		if !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "badformat type")
+			return
+		}
+		if value, ok:= storelimit.StoreLimitTypeValue[typeName]; ok {
+			typeValue = value
+		} else {
+			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
+			return
+		}
+	}
+
+	if err := h.SetStoreLimit(storeID, rate/schedule.StoreBalanceBaseTime, typeValue); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -355,7 +375,26 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.SetAllStoresLimit(rate / schedule.StoreBalanceBaseTime); err != nil {
+	typeNameIface, ok := input["type"]
+
+	var typeValue storelimit.StoreLimitType
+	if !ok {
+		typeValue = storelimit.StoreLimitRegionAdd
+	} else {
+		typeName, ok := typeNameIface.(string)
+		if !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "badformat type")
+			return
+		}
+		if value, ok:= storelimit.StoreLimitTypeValue[typeName]; ok {
+			typeValue = value
+		} else {
+			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
+			return
+		}
+	}
+
+	if err := h.SetAllStoresLimit(rate / schedule.StoreBalanceBaseTime, typeValue); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -372,12 +411,16 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	type LimitResp struct {
 		Rate float64 `json:"rate"`
 		Mode string  `json:"mode"`
+		Type string  `json:"type"`
 	}
 	resp := make(map[uint64]*LimitResp)
-	for s, l := range limits {
-		resp[s] = &LimitResp{
-			Rate: l.Rate() * schedule.StoreBalanceBaseTime,
-			Mode: l.Mode().String(),
+	for s, tl := range limits {
+		for t, l := range tl {
+			resp[s] = &LimitResp{
+				Rate: l.Rate() * schedule.StoreBalanceBaseTime,
+				Mode: l.Mode().String(),
+				Type: t.String(),
+			}
 		}
 	}
 
@@ -385,16 +428,40 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
-	scene := h.Handler.GetStoreLimitScene()
+	typeName := r.URL.Query().Get("type")
+	var typeValue storelimit.StoreLimitType
+	if typeName == "" {
+		typeValue = storelimit.StoreLimitRegionAdd
+	} else {
+		if value, ok:= storelimit.StoreLimitTypeValue[typeName]; ok {
+			typeValue = value
+		} else {
+			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
+			return
+		}
+	}
+	scene := h.Handler.GetStoreLimitScene(typeValue)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &scene); err != nil {
 		return
 	}
-	h.Handler.SetStoreLimitScene(scene)
+	h.Handler.SetStoreLimitScene(scene, typeValue)
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
 func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
-	scene := h.Handler.GetStoreLimitScene()
+	typeName := r.URL.Query().Get("type")
+	var typeValue storelimit.StoreLimitType
+	if typeName == "" {
+		typeValue = storelimit.StoreLimitRegionAdd
+	} else {
+		if value, ok:= storelimit.StoreLimitTypeValue[typeName]; ok {
+			typeValue = value
+		} else {
+			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
+			return
+		}
+	}
+	scene := h.Handler.GetStoreLimitScene(typeValue)
 	h.rd.JSON(w, http.StatusOK, scene)
 }
 

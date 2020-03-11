@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package storelimit
 
 // StoreLimitScene defines the store limitation on difference
 // scenes
@@ -29,11 +29,21 @@ type StoreLimitScene struct {
 }
 
 // DefaultStoreLimitScene returns StoreLimitScene object with default values
-func DefaultStoreLimitScene() *StoreLimitScene {
-	return &StoreLimitScene{
+func DefaultStoreLimitScene(limitType Type) *StoreLimitScene {
+	defaultScene := &StoreLimitScene{
 		Idle:   100,
 		Low:    50,
 		Normal: 32,
 		High:   12,
+	}
+
+	// change this if different type rate limit has different default scene
+	switch limitType {
+	case RegionAdd:
+		return defaultScene
+	case RegionRemove:
+		return defaultScene
+	default:
+		return nil
 	}
 }

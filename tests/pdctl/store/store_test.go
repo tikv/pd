@@ -16,6 +16,7 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/pingcap/pd/v4/server/schedule/ratelimit"
 	"strings"
 	"testing"
 
@@ -23,7 +24,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/api"
-	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tests/pdctl"
 )
@@ -190,17 +190,17 @@ func (s *storeTestSuite) TestStore(c *C) {
 	args = []string{"-u", pdAddr, "store", "limit-scene"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	scene := &schedule.StoreLimitScene{}
+	scene := &storelimit.StoreLimitScene{}
 	err = json.Unmarshal(output, scene)
 	c.Assert(err, IsNil)
-	c.Assert(scene, DeepEquals, schedule.DefaultStoreLimitScene())
+	c.Assert(scene, DeepEquals, storelimit.DefaultStoreLimitScene())
 
 	// store limit-scene <scene> <rate>
 	args = []string{"-u", pdAddr, "store", "limit-scene", "idle", "200"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "limit-scene"}
-	scene = &schedule.StoreLimitScene{}
+	scene = &storelimit.StoreLimitScene{}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	err = json.Unmarshal(output, scene)
