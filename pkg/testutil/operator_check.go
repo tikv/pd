@@ -82,6 +82,18 @@ func CheckTransferPeer(c *check.C, op *operator.Operator, kind operator.OpKind, 
 	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
 
+// CheckTransferLearner checks if the operator is to transfer learner between the specified source and target stores.
+func CheckTransferLearner(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
+	c.Assert(op, check.NotNil)
+
+	steps, _ := trimTransferLeaders(op)
+	c.Assert(steps, check.HasLen, 2)
+	c.Assert(steps[0].(operator.AddLearner).ToStore, check.Equals, targetID)
+	c.Assert(steps[1].(operator.RemovePeer).FromStore, check.Equals, sourceID)
+	kind |= operator.OpRegion
+	c.Assert(op.Kind()&kind, check.Equals, kind)
+}
+
 // CheckTransferPeerWithLeaderTransfer checks if the operator is to transfer
 // peer between the specified source and target stores and it meanwhile
 // transfers the leader out of source store.
