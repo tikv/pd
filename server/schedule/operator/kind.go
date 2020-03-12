@@ -26,6 +26,7 @@ type OpKind uint32
 const (
 	OpLeader    OpKind = 1 << iota // Include leader transfer.
 	OpRegion                       // Include peer movement.
+	OpSplit                        // Include region split.
 	OpAdmin                        // Initiated by admin.
 	OpHotRegion                    // Initiated by hot region scheduler.
 	OpAdjacent                     // Initiated by adjacent region scheduler.
@@ -39,6 +40,7 @@ const (
 var flagToName = map[OpKind]string{
 	OpLeader:    "leader",
 	OpRegion:    "region",
+	OpSplit:     "split",
 	OpAdmin:     "admin",
 	OpHotRegion: "hot-region",
 	OpAdjacent:  "adjacent",
@@ -51,6 +53,7 @@ var flagToName = map[OpKind]string{
 var nameToFlag = map[string]OpKind{
 	"leader":     OpLeader,
 	"region":     OpRegion,
+	"split":      OpSplit,
 	"admin":      OpAdmin,
 	"hot-region": OpHotRegion,
 	"adjacent":   OpAdjacent,

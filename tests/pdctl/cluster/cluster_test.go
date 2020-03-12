@@ -46,7 +46,7 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURL()
 	i := strings.Index(pdAddr, "//")
 	pdAddr = pdAddr[i+2:]
 	cmd := pdctl.InitCommand()

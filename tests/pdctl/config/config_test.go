@@ -65,7 +65,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
 	store := metapb.Store{
