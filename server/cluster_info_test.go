@@ -15,8 +15,11 @@ package server
 
 import (
 	"math/rand"
+	"sync"
+	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/v3/pkg/mock/mockid"
@@ -555,6 +558,40 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(region, DeepEquals, overlapRegion.GetMeta())
 	}
+}
+
+func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newClusterInfo(mockid.NewIDAllocator(), opt, core.NewKV(core.NewMemoryKV()))
+
+	region := core.NewRegion([]byte{}, []byte{})
+	regions := core.SplitRegions([]*metapb.Region{region})
+	heartbeatRegions(c, cluster, regions)
+
+	// Merge regions manually
+	source, target := regions[0], regions[1]
+	target.StartKey = []byte{}
+	target.EndKey = []byte{}
+	source.GetRegionEpoch().Version++
+	if source.GetRegionEpoch().GetVersion() > target.GetRegionEpoch().GetVersion() {
+		target.GetRegionEpoch().Version = source.GetRegionEpoch().GetVersion()
+	}
+	target.GetRegionEpoch().Version++
+	sourceRegionInfo, targetRegionInfo := core.NewRegionInfo(source, nil), core.NewRegionInfo(target, nil)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/concurrentRegionHeartbeat", "return(true)"), IsNil)
+	go func() {
+		defer wg.Done()
+		cluster.handleRegionHeartbeat(sourceRegionInfo)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/concurrentRegionHeartbeat"), IsNil)
+	c.Assert(cluster.handleRegionHeartbeat(targetRegionInfo), IsNil)
+	wg.Wait()
+	checkRegion(c, cluster.searchRegion([]byte{}), targetRegionInfo)
 }
 
 func heartbeatRegions(c *C, cluster *clusterInfo, regions []*metapb.Region) {

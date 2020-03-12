@@ -19,6 +19,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
@@ -600,32 +601,24 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	if saveKV && c.kv != nil {
-		if err := c.kv.SaveRegion(region.GetMeta()); err != nil {
-			// Not successfully saved to kv is not fatal, it only leads to longer warm-up
-			// after restart. Here we only log the error then go on updating cache.
-			log.Error("fail to save region to kv",
-				zap.Uint64("region-id", region.GetID()),
-				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
-				zap.Error(err))
-		}
-		regionEventCounter.WithLabelValues("update_kv").Inc()
-		select {
-		case c.changedRegions <- region:
-		default:
-		}
-	}
-	if !isWriteUpdate && !isReadUpdate && !saveCache && !isNew {
+	if !isWriteUpdate && !isReadUpdate && !saveKV && !saveCache && !isNew {
 		return nil
 	}
 
-	c.Lock()
-	defer c.Unlock()
-	if isNew {
-		c.prepareChecker.collect(region)
-	}
+	failpoint.Inject("concurrentRegionHeartbeat", func() {
+		time.Sleep(500 * time.Millisecond)
+	})
 
+	c.Lock()
 	if saveCache {
+		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
+		// check its validation again here.
+		//
+		// However it can't solve the race condition of concurrent heartbeats from the same region.
+		if _, err := c.core.PreCheckPutRegion(region); err != nil {
+			c.Unlock()
+			return err
+		}
 		overlaps := c.core.Regions.SetRegion(region)
 		if c.kv != nil {
 			for _, item := range overlaps {
@@ -656,6 +649,10 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
+	if isNew {
+		c.prepareChecker.collect(region)
+	}
+
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
 	}
@@ -667,6 +664,26 @@ func (c *clusterInfo) handleRegionHeartbeat(region *core.RegionInfo) error {
 	if isReadUpdate {
 		c.hotSpotCache.Update(key, readItem, statistics.ReadFlow)
 	}
+	c.Unlock()
+
+	// If there are concurrent heartbeats from the same region, the last write will win even if
+	// writes to storage in the critical area. So don't use mutex to protect it.
+	if saveKV && c.kv != nil {
+		if err := c.kv.SaveRegion(region.GetMeta()); err != nil {
+			// Not successfully saved to kv is not fatal, it only leads to longer warm-up
+			// after restart. Here we only log the error then go on updating cache.
+			log.Error("fail to save region to kv",
+				zap.Uint64("region-id", region.GetID()),
+				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
+				zap.Error(err))
+		}
+		regionEventCounter.WithLabelValues("update_kv").Inc()
+		select {
+		case c.changedRegions <- region:
+		default:
+		}
+	}
+
 	return nil
 }
 
