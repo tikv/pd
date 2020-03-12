@@ -1214,19 +1214,30 @@ func (s *Server) configCheckLoop() {
 			log.Info("config check has been stopped")
 			return
 		case <-ticker.C:
-			version := s.GetConfigVersion()
-			config, err := s.getComponentConfig(ctx, version, compoenntID)
-			if err != nil {
-				log.Error("failed to get config", zap.Error(err))
-			}
-			if config == "" {
-				continue
-			}
-			if err := s.updateComponentConfig(config); err != nil {
+			if err := s.updateConfig(ctx, compoenntID); err != nil {
 				log.Error("failed to update config", zap.Error(err))
+			}
+
+			rc := s.GetRaftCluster()
+			if s.GetMember().IsLeader() && rc != nil {
+				if !rc.GetConfigCheck() {
+					rc.SetConfigCheck()
+				}
 			}
 		}
 	}
+}
+
+func (s *Server) updateConfig(ctx context.Context, compoenntID string) error {
+	version := s.GetConfigVersion()
+	config, err := s.getComponentConfig(ctx, version, compoenntID)
+	if err != nil {
+		return err
+	}
+	if config == "" {
+		return nil
+	}
+	return s.updateComponentConfig(config)
 }
 
 func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Version, componentID, config string) error {

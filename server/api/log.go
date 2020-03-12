@@ -39,14 +39,15 @@ func newlogHandler(svr *server.Server, rd *render.Render) *logHandler {
 
 func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if h.svr.GetConfig().EnableDynamicConfig {
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-		}
 		cm := h.svr.GetConfigManager()
 		var str string
 		json.NewDecoder(r.Body).Decode(&str)
 		entries := []*entry{{key: "log.level", value: fmt.Sprintf("level = \"%v\"", str)}}
+		client := h.svr.GetConfigClient()
+		if client == nil {
+			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
+			return
+		}
 		err := redirectUpdateReq(h.svr.Context(), client, cm, entries)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())

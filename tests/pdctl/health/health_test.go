@@ -48,7 +48,7 @@ func (s *healthTestSuite) TestHealth(c *C) {
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	pdAddr := tc.GetConfig().GetClientURLs()
+	pdAddr := tc.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 	defer tc.Destroy()
 

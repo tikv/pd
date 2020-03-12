@@ -35,6 +35,7 @@ import (
 	syncer "github.com/pingcap/pd/v4/server/region_syncer"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/tests"
+	"github.com/pingcap/pd/v4/tests/pdctl"
 	"github.com/pkg/errors"
 )
 
@@ -57,6 +58,7 @@ type clusterTestSuite struct {
 func (s *clusterTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
+	server.ConfigCheckInterval = 1 * time.Second
 }
 
 func (s *clusterTestSuite) TearDownSuite(c *C) {
@@ -159,6 +161,57 @@ func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 }
 
+func (s *clusterTestSuite) TestReloadConfig(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	rc := leaderServer.GetServer().GetRaftCluster()
+	c.Assert(rc, NotNil)
+
+	// wait for creating config client
+	time.Sleep(2 * time.Second)
+	cmd := pdctl.InitCommand()
+	pdAddr := leaderServer.GetAddr()
+	args := []string{"-u", pdAddr, "config", "set", "enable-placement-rules", "true"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+
+	// transfer leader
+	tc.ResignLeader()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	c.Assert(leaderServer.GetServer().GetScheduleOption().GetReplication().IsPlacementRulesEnabled(), IsFalse)
+	rc = leaderServer.GetServer().GetRaftCluster()
+	r := &metapb.Region{
+		Id: 3,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		StartKey: []byte{byte(1)},
+		EndKey:   []byte{byte(2)},
+		Peers:    []*metapb.Peer{{Id: 4, StoreId: uint64(1), IsLearner: true}},
+	}
+	region := core.NewRegionInfo(r, r.Peers[0])
+	c.Assert(rc.HandleRegionHeartbeat(region), IsNil)
+
+	// wait for checking region
+	time.Sleep(300 * time.Millisecond)
+	c.Assert(leaderServer.GetServer().GetScheduleOption().GetReplication().IsPlacementRulesEnabled(), IsFalse)
+	c.Assert(rc.GetOperatorController().GetOperator(3), IsNil)
+
+	// wait for configuration valid
+	time.Sleep(1 * time.Second)
+	c.Assert(leaderServer.GetServer().GetScheduleOption().GetReplication().IsPlacementRulesEnabled(), IsTrue)
+	c.Assert(rc.GetOperatorController().GetOperator(3), IsNil)
+}
+
 func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient pdpb.PDClient, store *metapb.Store) {
 	// Update store.
 	_, err := putStore(c, grpcPDClient, clusterID, store)
@@ -186,11 +239,9 @@ func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient 
 
 	id, err = rc.AllocID()
 	c.Assert(err, IsNil)
-	fmt.Println(store.GetId())
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Tombstone)
-	ss := rc.GetStore(store.GetId())
-	fmt.Println("XX", ss.GetState())
+	rc.GetStore(store.GetId())
 	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up))
 	c.Assert(err, IsNil)
 
