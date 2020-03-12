@@ -38,6 +38,7 @@ func checkStatusResponse(c *C, body []byte, cfgs []*server.Config) {
 
 	c.Assert(got.BuildTS, Equals, server.PDBuildTS)
 	c.Assert(got.GitHash, Equals, server.PDGitHash)
+	c.Assert(got.Version, Equals, server.PDReleaseVersion)
 }
 
 func (s *testStatusAPISuite) TestStatus(c *C) {
