@@ -62,7 +62,7 @@ type OperatorController struct {
 	histories       *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
-	storesLimit     map[uint64]map[storelimit.StoreLimitType]*storelimit.StoreLimit
+	storesLimit     map[uint64]map[storelimit.Type]*storelimit.StoreLimit
 	wop             WaitingOperator
 	wopStatus       *WaitingOperatorStatus
 	opNotifierQueue operatorQueue
@@ -78,7 +78,7 @@ func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams o
 		histories:       list.New(),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
-		storesLimit:     make(map[uint64]map[storelimit.StoreLimitType]*storelimit.StoreLimit),
+		storesLimit:     make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit),
 		wop:             NewRandBuckets(),
 		wopStatus:       NewWaitingOperatorStatus(),
 		opNotifierQueue: make(operatorQueue, 0),
@@ -444,12 +444,18 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	operatorWaitDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
-		for n, v := range storelimit.StoreLimitTypeValue {
+		if oc.storesLimit[storeID] == nil {
+			continue
+		}
+		for n, v := range storelimit.TypeValue {
+			if oc.storesLimit[storeID][v] == nil {
+				continue
+			}
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
 			if stepCost == 0 {
 				continue
 			}
-			storeLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), "take", n).Set(float64(stepCost) / float64(storelimit.RegionInfluence))
+			storeLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), "take", n).Set(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 			oc.storesLimit[storeID][v].Take(stepCost)
 		}
 	}
@@ -858,14 +864,14 @@ func (o *OperatorRecords) Put(op *operator.Operator) {
 func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
-		for n, v := range storelimit.StoreLimitTypeValue {
+		for n, v := range storelimit.TypeValue {
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
 			if stepCost == 0 {
 				continue
 			}
 
 			available := oc.getOrCreateStoreLimit(storeID, v).Available()
-			storeLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), "available", n).Set(float64(available) / float64(storelimit.RegionInfluence))
+			storeLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), "available", n).Set(float64(available) / float64(storelimit.RegionInfluence[v]))
 			if available < stepCost {
 				return true
 			}
@@ -875,7 +881,7 @@ func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
-func (oc *OperatorController) SetAllStoresLimit(rate float64, mode storelimit.StoreLimitMode, limitType storelimit.StoreLimitType) {
+func (oc *OperatorController) SetAllStoresLimit(rate float64, mode storelimit.Mode, limitType storelimit.Type) {
 	oc.Lock()
 	defer oc.Unlock()
 	stores := oc.cluster.GetStores()
@@ -884,59 +890,62 @@ func (oc *OperatorController) SetAllStoresLimit(rate float64, mode storelimit.St
 	}
 }
 
-// SetAllStoresLimitAuto updates the store limit in StoreLimitAuto mode
-func (oc *OperatorController) SetAllStoresLimitAuto(rate float64, limitType storelimit.StoreLimitType) {
+// SetAllStoresLimitAuto updates the store limit in Auto mode
+func (oc *OperatorController) SetAllStoresLimitAuto(rate float64, limitType storelimit.Type) {
 	oc.Lock()
 	defer oc.Unlock()
 	stores := oc.cluster.GetStores()
 	for _, s := range stores {
 		sid := s.GetID()
 		if old, ok := oc.storesLimit[sid]; ok {
-			if old[limitType].Mode() == storelimit.StoreLimitManual {
+			if old[limitType].Mode() == storelimit.Manual {
 				continue
 			}
 		}
 		if oc.storesLimit[sid] == nil {
-			oc.storesLimit[sid] = make(map[storelimit.StoreLimitType]*storelimit.StoreLimit)
+			oc.storesLimit[sid] = make(map[storelimit.Type]*storelimit.StoreLimit)
 		}
-		oc.storesLimit[sid][limitType] = storelimit.NewStoreLimit(rate, storelimit.StoreLimitAuto)
+		oc.storesLimit[sid][limitType] = storelimit.NewStoreLimit(rate, storelimit.Auto, storelimit.RegionInfluence[limitType])
 	}
 }
 
 // SetStoreLimit is used to set the limit of a store.
-func (oc *OperatorController) SetStoreLimit(storeID uint64, rate float64, mode storelimit.StoreLimitMode, limitType storelimit.StoreLimitType) {
+func (oc *OperatorController) SetStoreLimit(storeID uint64, rate float64, mode storelimit.Mode, limitType storelimit.Type) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.newStoreLimit(storeID, rate, mode, limitType)
 }
 
 // newStoreLimit is used to create the limit of a store.
-func (oc *OperatorController) newStoreLimit(storeID uint64, rate float64, mode storelimit.StoreLimitMode, limitType storelimit.StoreLimitType) {
+func (oc *OperatorController) newStoreLimit(storeID uint64, rate float64, mode storelimit.Mode, limitType storelimit.Type) {
 	if oc.storesLimit[storeID][limitType] == nil {
-		oc.storesLimit[storeID] = make(map[storelimit.StoreLimitType]*storelimit.StoreLimit)
+		oc.storesLimit[storeID] = make(map[storelimit.Type]*storelimit.StoreLimit)
 	}
-	oc.storesLimit[storeID][limitType] = storelimit.NewStoreLimit(rate, mode)
+	oc.storesLimit[storeID][limitType] = storelimit.NewStoreLimit(rate, mode, storelimit.RegionInfluence[limitType])
 }
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
-func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.StoreLimitType) *storelimit.StoreLimit {
+func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
 	if oc.storesLimit[storeID][limitType] == nil {
 		rate := oc.cluster.GetStoreBalanceRate() / StoreBalanceBaseTime
-		oc.newStoreLimit(storeID, rate, storelimit.StoreLimitAuto, limitType)
+		oc.newStoreLimit(storeID, rate, storelimit.Auto, limitType)
 		oc.cluster.AttachAvailableFunc(storeID, func() bool {
 			oc.RLock()
 			defer oc.RUnlock()
-			return oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence
+			if oc.storesLimit[storeID][limitType] == nil {
+				return true
+			}
+			return oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
 		})
 	}
 	return oc.storesLimit[storeID][limitType]
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (oc *OperatorController) GetAllStoresLimit() map[uint64]map[storelimit.StoreLimitType]*storelimit.StoreLimit {
+func (oc *OperatorController) GetAllStoresLimit() map[uint64]map[storelimit.Type]*storelimit.StoreLimit {
 	oc.RLock()
 	defer oc.RUnlock()
-	limits := make(map[uint64]map[storelimit.StoreLimitType]*storelimit.StoreLimit)
+	limits := make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit)
 	for storeID, limit := range oc.storesLimit {
 		store := oc.cluster.GetStore(storeID)
 		if !store.IsTombstone() {

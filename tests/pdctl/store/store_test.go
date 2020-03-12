@@ -16,7 +16,6 @@ package store_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/pingcap/pd/v4/server/schedule/ratelimit"
 	"strings"
 	"testing"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/api"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tests/pdctl"
 )
@@ -127,15 +127,15 @@ func (s *storeTestSuite) TestStore(c *C) {
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	limits := leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
-	c.Assert(limits[1].Rate()*60, Equals, float64(10))
+	c.Assert(limits[1][storelimit.RegionAdd].Rate()*60, Equals, float64(10))
 
 	// store limit all <rate>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "20"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
-	c.Assert(limits[1].Rate()*60, Equals, float64(20))
-	c.Assert(limits[3].Rate()*60, Equals, float64(20))
+	c.Assert(limits[1][storelimit.RegionAdd].Rate()*60, Equals, float64(20))
+	c.Assert(limits[3][storelimit.RegionAdd].Rate()*60, Equals, float64(20))
 	_, ok := limits[2]
 	c.Assert(ok, IsFalse)
 
@@ -144,8 +144,8 @@ func (s *storeTestSuite) TestStore(c *C) {
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
-	c.Assert(limits[1].Rate()*60, Equals, float64(20))
-	c.Assert(limits[3].Rate()*60, Equals, float64(20))
+	c.Assert(limits[1][storelimit.RegionAdd].Rate()*60, Equals, float64(20))
+	c.Assert(limits[3][storelimit.RegionAdd].Rate()*60, Equals, float64(20))
 	_, ok = limits[2]
 	c.Assert(ok, IsFalse)
 
@@ -190,17 +190,17 @@ func (s *storeTestSuite) TestStore(c *C) {
 	args = []string{"-u", pdAddr, "store", "limit-scene"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	scene := &storelimit.StoreLimitScene{}
+	scene := &storelimit.Scene{}
 	err = json.Unmarshal(output, scene)
 	c.Assert(err, IsNil)
-	c.Assert(scene, DeepEquals, storelimit.DefaultStoreLimitScene())
+	c.Assert(scene, DeepEquals, storelimit.DefaultScene(storelimit.RegionAdd))
 
 	// store limit-scene <scene> <rate>
 	args = []string{"-u", pdAddr, "store", "limit-scene", "idle", "200"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "limit-scene"}
-	scene = &storelimit.StoreLimitScene{}
+	scene = &storelimit.Scene{}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	err = json.Unmarshal(output, scene)

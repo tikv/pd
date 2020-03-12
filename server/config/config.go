@@ -584,13 +584,13 @@ type ScheduleConfig struct {
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
-	// StoreLimitMode can be auto or manual, when set to auto,
+	// Mode can be auto or manual, when set to auto,
 	// PD tries to change the store limit values according to
 	// the load state of the cluster dynamically. User can
 	// overwrite the auto-tuned value by pd-ctl, when the value
 	// is overwritten, the value is fixed until it is deleted.
 	// Default: manual
-	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
+	Mode string `toml:"store-limit-mode" json:"store-limit-mode"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -631,7 +631,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableRemoveExtraReplica:     c.EnableRemoveExtraReplica,
 		EnableLocationReplacement:    c.EnableLocationReplacement,
 		EnableDebugMetrics:           c.EnableDebugMetrics,
-		StoreLimitMode:               c.StoreLimitMode,
+		Mode:                         c.Mode,
 		Schedulers:                   schedulers,
 	}
 }
@@ -659,7 +659,7 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
-	defaultStoreLimitMode              = "manual"
+	defaultMode                        = "manual"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -706,7 +706,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 		adjustString(&c.LeaderSchedulePolicy, defaultLeaderSchedulePolicy)
 	}
 	if !meta.IsDefined("store-limit-mode") {
-		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
+		adjustString(&c.Mode, defaultMode)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)

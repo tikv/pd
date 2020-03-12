@@ -27,16 +27,16 @@ import (
 type StoreLimiter struct {
 	m       sync.RWMutex
 	oc      *schedule.OperatorController
-	scene   map[storelimit.Type]*storelimit.StoreLimitScene
+	scene   map[storelimit.Type]*storelimit.Scene
 	state   *State
 	current LoadState
 }
 
 // NewStoreLimiter builds a store limiter object using the operator controller
 func NewStoreLimiter(c *schedule.OperatorController) *StoreLimiter {
-	defaultScene := map[storelimit.Type]*storelimit.StoreLimitScene{
-		storelimit.RegionAdd:    storelimit.DefaultStoreLimitScene(storelimit.RegionAdd),
-		storelimit.RegionRemove: storelimit.DefaultStoreLimitScene(storelimit.RegionRemove),
+	defaultScene := map[storelimit.Type]*storelimit.Scene{
+		storelimit.RegionAdd:    storelimit.DefaultScene(storelimit.RegionAdd),
+		storelimit.RegionRemove: storelimit.DefaultScene(storelimit.RegionRemove),
 	}
 
 	return &StoreLimiter{
@@ -99,17 +99,17 @@ func (s *StoreLimiter) calculateRate(limitType storelimit.Type, state LoadState)
 }
 
 // ReplaceStoreLimitScene replaces the store limit values for different scenes
-func (s *StoreLimiter) ReplaceStoreLimitScene(scene *storelimit.StoreLimitScene, limitType storelimit.Type) {
+func (s *StoreLimiter) ReplaceStoreLimitScene(scene *storelimit.Scene, limitType storelimit.Type) {
 	s.m.Lock()
 	defer s.m.Unlock()
 	if s.scene == nil {
-		s.scene = make(map[storelimit.Type]*storelimit.StoreLimitScene)
+		s.scene = make(map[storelimit.Type]*storelimit.Scene)
 	}
 	s.scene[limitType] = scene
 }
 
 // StoreLimitScene returns the current limit for different scenes
-func (s *StoreLimiter) StoreLimitScene(limitType storelimit.Type) *storelimit.StoreLimitScene {
+func (s *StoreLimiter) StoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
 	s.m.RLock()
 	defer s.m.RUnlock()
 	return s.scene[limitType]

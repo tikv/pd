@@ -310,16 +310,16 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 
 	typeNameIface, ok := input["type"]
 
-	var typeValue storelimit.StoreLimitType
+	var typeValue storelimit.Type
 	if !ok {
-		typeValue = storelimit.StoreLimitRegionAdd
+		typeValue = storelimit.RegionAdd
 	} else {
 		typeName, ok := typeNameIface.(string)
 		if !ok {
 			h.rd.JSON(w, http.StatusBadRequest, "badformat type")
 			return
 		}
-		if value, ok:= storelimit.StoreLimitTypeValue[typeName]; ok {
+		if value, ok := storelimit.TypeValue[typeName]; ok {
 			typeValue = value
 		} else {
 			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
@@ -377,16 +377,16 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 
 	typeNameIface, ok := input["type"]
 
-	var typeValue storelimit.StoreLimitType
+	var typeValue storelimit.Type
 	if !ok {
-		typeValue = storelimit.StoreLimitRegionAdd
+		typeValue = storelimit.RegionAdd
 	} else {
 		typeName, ok := typeNameIface.(string)
 		if !ok {
 			h.rd.JSON(w, http.StatusBadRequest, "badformat type")
 			return
 		}
-		if value, ok:= storelimit.StoreLimitTypeValue[typeName]; ok {
+		if value, ok := storelimit.TypeValue[typeName]; ok {
 			typeValue = value
 		} else {
 			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
@@ -394,7 +394,7 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.SetAllStoresLimit(rate / schedule.StoreBalanceBaseTime, typeValue); err != nil {
+	if err := h.SetAllStoresLimit(rate/schedule.StoreBalanceBaseTime, typeValue); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -429,11 +429,11 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 
 func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
 	typeName := r.URL.Query().Get("type")
-	var typeValue storelimit.StoreLimitType
+	var typeValue storelimit.Type
 	if typeName == "" {
-		typeValue = storelimit.StoreLimitRegionAdd
+		typeValue = storelimit.RegionAdd
 	} else {
-		if value, ok:= storelimit.StoreLimitTypeValue[typeName]; ok {
+		if value, ok := storelimit.TypeValue[typeName]; ok {
 			typeValue = value
 		} else {
 			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
@@ -450,11 +450,11 @@ func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 
 func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
 	typeName := r.URL.Query().Get("type")
-	var typeValue storelimit.StoreLimitType
+	var typeValue storelimit.Type
 	if typeName == "" {
-		typeValue = storelimit.StoreLimitRegionAdd
+		typeValue = storelimit.RegionAdd
 	} else {
-		if value, ok:= storelimit.StoreLimitTypeValue[typeName]; ok {
+		if value, ok := storelimit.TypeValue[typeName]; ok {
 			typeValue = value
 		} else {
 			h.rd.JSON(w, http.StatusBadRequest, "unknown type")

@@ -61,12 +61,12 @@ func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
 	}
 }
 
+// GetStepCost returns the specific type step cost
 func (s StoreInfluence) GetStepCost(limitType storelimit.Type) int64 {
 	if s.StepCost == nil {
 		return 0
-	} else {
-		return s.StepCost[limitType]
 	}
+	return s.StepCost[limitType]
 }
 
 func (s *StoreInfluence) addStepCost(limitType storelimit.Type, cost int64) {
@@ -76,10 +76,11 @@ func (s *StoreInfluence) addStepCost(limitType storelimit.Type, cost int64) {
 	s.StepCost[limitType] += cost
 }
 
+// AdjustStepCost adjusts the step cost of specific type store limit according to region size
 func (s *StoreInfluence) AdjustStepCost(limitType storelimit.Type, regionSize int64) {
 	if regionSize > storelimit.SmallRegionThreshold {
-		s.addStepCost(limitType, storelimit.RegionInfluence)
+		s.addStepCost(limitType, storelimit.RegionInfluence[limitType])
 	} else if regionSize <= storelimit.SmallRegionThreshold && regionSize > core.EmptyRegionApproximateSize {
-		s.addStepCost(limitType, storelimit.SmallRegionInfluence)
+		s.addStepCost(limitType, storelimit.SmallRegionInfluence[limitType])
 	}
 }

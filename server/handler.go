@@ -418,17 +418,17 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
-func (h *Handler) SetAllStoresLimit(rate float64, limitType storelimit.StoreLimitType) error {
+func (h *Handler) SetAllStoresLimit(rate float64, limitType storelimit.Type) error {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return err
 	}
-	c.SetAllStoresLimit(rate, storelimit.StoreLimitManual, limitType)
+	c.SetAllStoresLimit(rate, storelimit.Manual, limitType)
 	return nil
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetAllStoresLimit() (map[uint64]map[storelimit.StoreLimitType]*storelimit.StoreLimit, error) {
+func (h *Handler) GetAllStoresLimit() (map[uint64]map[storelimit.Type]*storelimit.StoreLimit, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
@@ -437,12 +437,12 @@ func (h *Handler) GetAllStoresLimit() (map[uint64]map[storelimit.StoreLimitType]
 }
 
 // SetStoreLimit is used to set the limit of a store.
-func (h *Handler) SetStoreLimit(storeID uint64, rate float64, limitType storelimit.StoreLimitType) error {
+func (h *Handler) SetStoreLimit(storeID uint64, rate float64, limitType storelimit.Type) error {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return err
 	}
-	c.SetStoreLimit(storeID, rate, storelimit.StoreLimitManual, limitType)
+	c.SetStoreLimit(storeID, rate, storelimit.Manual, limitType)
 	return nil
 }
 
@@ -841,13 +841,13 @@ func (h *Handler) ResetTS(ts uint64) error {
 }
 
 // SetStoreLimitScene sets the limit values for differents scenes
-func (h *Handler) SetStoreLimitScene(scene *storelimit.StoreLimitScene, limitType storelimit.StoreLimitType) {
+func (h *Handler) SetStoreLimitScene(scene *storelimit.Scene, limitType storelimit.Type) {
 	cluster := h.s.GetRaftCluster()
 	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
 }
 
 // GetStoreLimitScene returns the limit valus for different scenes
-func (h *Handler) GetStoreLimitScene(limitType storelimit.StoreLimitType) *storelimit.StoreLimitScene {
+func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
 	cluster := h.s.GetRaftCluster()
 	return cluster.GetStoreLimiter().StoreLimitScene(limitType)
 }

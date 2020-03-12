@@ -156,9 +156,9 @@ func SetStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	}
 }
 
-// SetAvailableFunc sets a customize function for the store. The function f returns true if the store limit is not exceeded.
-func SetAvailableFunc(f func() bool) StoreCreateOption {
+// AttachAvailableFunc attaches a customize function for the store. The function f returns true if the store limit is not exceeded.
+func AttachAvailableFunc(f func() bool) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.available = f
+		store.available = append(store.available, f)
 	}
 }

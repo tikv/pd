@@ -16,7 +16,6 @@ package cluster_test
 import (
 	"context"
 	"fmt"
-	"github.com/pingcap/pd/v4/server/schedule/ratelimit"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +33,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
 	syncer "github.com/pingcap/pd/v4/server/region_syncer"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pkg/errors"
 )
@@ -217,7 +217,7 @@ func testStateAndLimit(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDCl
 	// prepare
 	storeID := store.GetId()
 	oc := rc.GetOperatorController()
-	oc.SetAllStoresLimit(1.0, storelimit.StoreLimitManual)
+	oc.SetAllStoresLimit(1.0, storelimit.Manual, storelimit.RegionAdd)
 	resetStoreState(c, rc, store.GetId(), beforeState)
 	_, isOKBefore := oc.GetAllStoresLimit()[storeID]
 	// run

@@ -20,16 +20,24 @@ import (
 )
 
 const (
-	// RegionInfluence represents the influence of a operator step, which is used by store limit.
-	RegionInfluence int64 = 1000
-	// SmallRegionInfluence represents the influence of a operator step
-	// when the region size is smaller than smallRegionThreshold, which is used by store limit.
-	SmallRegionInfluence int64 = 200
 	// SmallRegionThreshold is used to represent a region which can be regarded as a small region once the size is small than it.
 	SmallRegionThreshold int64 = 20
 )
 
-// StoreLimitMode indicates the strategy to set store limit
+// RegionInfluence represents the influence of a operator step, which is used by store limit.
+var RegionInfluence = map[Type]int64{
+	RegionAdd:    1000,
+	RegionRemove: 1000,
+}
+
+// SmallRegionInfluence represents the influence of a operator step
+// when the region size is smaller than smallRegionThreshold, which is used by store limit.
+var SmallRegionInfluence = map[Type]int64{
+	RegionAdd:    200,
+	RegionRemove: 200,
+}
+
+// Mode indicates the strategy to set store limit
 type Mode int
 
 // There are two modes supported now, "auto" indicates the value
@@ -40,19 +48,23 @@ const (
 	Manual
 )
 
+// Type indicates the type of store limit
 type Type int
 
 const (
+	// RegionAdd indicates the type of store limit that limits the adding region rate
 	RegionAdd Type = iota
+	// RegionRemove indicates the type of store limit that limits the removing region rate
 	RegionRemove
 )
 
+// TypeValue indicates the name of store limit type and the enum value
 var TypeValue = map[string]Type{
 	"RegionAdd":    RegionAdd,
 	"RegionRemove": RegionRemove,
 }
 
-// String returns the representation of the StoreLimitMode
+// String returns the representation of the Mode
 func (m Mode) String() string {
 	switch m {
 	case Auto:
@@ -64,9 +76,9 @@ func (m Mode) String() string {
 	return "auto"
 }
 
-// String returns the representation of the StoreLimitType
+// String returns the representation of the Type
 func (t Type) String() string {
-	for n, v :=range TypeValue {
+	for n, v := range TypeValue {
 		if v == t {
 			return n
 		}
@@ -76,20 +88,22 @@ func (t Type) String() string {
 
 // StoreLimit limits the operators of a store
 type StoreLimit struct {
-	bucket *ratelimit.Bucket
-	mode   Mode
+	bucket          *ratelimit.Bucket
+	mode            Mode
+	regionInfluence int64
 }
 
 // NewStoreLimit returns a StoreLimit object
-func NewStoreLimit(rate float64, mode Mode) *StoreLimit {
-	capacity := RegionInfluence
+func NewStoreLimit(rate float64, mode Mode, regionInfluence int64) *StoreLimit {
+	capacity := regionInfluence
 	if rate > 1 {
-		capacity = int64(rate * float64(RegionInfluence))
+		capacity = int64(rate * float64(regionInfluence))
 	}
-	rate *= float64(RegionInfluence)
+	rate *= float64(regionInfluence)
 	return &StoreLimit{
-		bucket: ratelimit.NewBucketWithRate(rate, capacity),
-		mode:   mode,
+		bucket:          ratelimit.NewBucketWithRate(rate, capacity),
+		mode:            mode,
+		regionInfluence: regionInfluence,
 	}
 }
 
@@ -100,7 +114,7 @@ func (l *StoreLimit) Available() int64 {
 
 // Rate returns the fill rate of the bucket, in tokens per second.
 func (l *StoreLimit) Rate() float64 {
-	return l.bucket.Rate() / float64(RegionInfluence)
+	return l.bucket.Rate() / float64(l.regionInfluence)
 }
 
 // Take takes count tokens from the bucket without blocking.

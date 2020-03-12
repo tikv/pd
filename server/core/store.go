@@ -44,7 +44,7 @@ type StoreInfo struct {
 	lastPersistTime  time.Time
 	leaderWeight     float64
 	regionWeight     float64
-	available        func() bool
+	available        []func() bool
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -92,10 +92,12 @@ func (s *StoreInfo) IsBlocked() bool {
 
 // IsAvailable returns if the store bucket of limitation is available
 func (s *StoreInfo) IsAvailable() bool {
-	if s.available == nil {
-		return true
+	for _, sa := range s.available {
+		if sa != nil && !sa() {
+			return false
+		}
 	}
-	return s.available()
+	return true
 }
 
 // IsUp checks if the store's state is Up.
@@ -561,7 +563,7 @@ func (s *StoresInfo) UnblockStore(storeID uint64) {
 // AttachAvailableFunc attaches f to a specific store.
 func (s *StoresInfo) AttachAvailableFunc(storeID uint64, f func() bool) {
 	if store, ok := s.stores[storeID]; ok {
-		s.stores[storeID] = store.Clone(SetAvailableFunc(f))
+		s.stores[storeID] = store.Clone(AttachAvailableFunc(f))
 	}
 }
 
