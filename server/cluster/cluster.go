@@ -104,6 +104,7 @@ type RaftCluster struct {
 	client      *clientv3.Client
 
 	schedulersCallback func()
+	configCheck        bool
 }
 
 // Status saves some state information.
@@ -316,7 +317,7 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.running = false
-
+	c.configCheck = false
 	close(c.quit)
 	c.coordinator.stop()
 	c.Unlock()
@@ -958,6 +959,20 @@ func (c *RaftCluster) AttachAvailableFunc(storeID uint64, f func() bool) {
 	c.core.AttachAvailableFunc(storeID, f)
 }
 
+// SetConfigCheck sets a flag for preventing outdated config.
+func (c *RaftCluster) SetConfigCheck() {
+	c.Lock()
+	defer c.Unlock()
+	c.configCheck = true
+}
+
+// GetConfigCheck returns a configCheck flag.
+func (c *RaftCluster) GetConfigCheck() bool {
+	c.Lock()
+	defer c.Unlock()
+	return c.configCheck
+}
+
 // SetStoreState sets up a store's state.
 func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) error {
 	c.Lock()
@@ -1434,7 +1449,7 @@ func (c *RaftCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel
 func (c *RaftCluster) isPrepared() bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.prepareChecker.check(c)
+	return c.prepareChecker.check(c) && c.configCheck
 }
 
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.

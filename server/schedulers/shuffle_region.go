@@ -14,6 +14,8 @@
 package schedulers
 
 import (
+	"net/http"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
@@ -43,22 +45,17 @@ func init() {
 				return errors.WithStack(err)
 			}
 			conf.Ranges = ranges
-			conf.Name = ShuffleRegionName
+			conf.Roles = allRoles
 			return nil
 		}
 	})
 	schedule.RegisterScheduler(ShuffleRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &shuffleRegionSchedulerConfig{}
+		conf := &shuffleRegionSchedulerConfig{storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
 		return newShuffleRegionScheduler(opController, conf), nil
 	})
-}
-
-type shuffleRegionSchedulerConfig struct {
-	Name   string          `json:"name"`
-	Ranges []core.KeyRange `json:"ranges"`
 }
 
 type shuffleRegionScheduler struct {
@@ -71,8 +68,8 @@ type shuffleRegionScheduler struct {
 // between stores.
 func newShuffleRegionScheduler(opController *schedule.OperatorController, conf *shuffleRegionSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: conf.Name, MoveRegion: true},
-		filter.NewSpecialUseFilter(conf.Name),
+		filter.StoreStateFilter{ActionScope: ShuffleRegionName, MoveRegion: true},
+		filter.NewSpecialUseFilter(ShuffleRegionName),
 	}
 	base := NewBaseScheduler(opController)
 	return &shuffleRegionScheduler{
@@ -82,8 +79,12 @@ func newShuffleRegionScheduler(opController *schedule.OperatorController, conf *
 	}
 }
 
+func (s *shuffleRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.conf.ServeHTTP(w, r)
+}
+
 func (s *shuffleRegionScheduler) GetName() string {
-	return s.conf.Name
+	return ShuffleRegionName
 }
 
 func (s *shuffleRegionScheduler) GetType() string {
@@ -91,7 +92,7 @@ func (s *shuffleRegionScheduler) GetType() string {
 }
 
 func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return s.conf.EncodeConfig()
 }
 
 func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -106,8 +107,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		return nil
 	}
 
-	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds())
-	newPeer := s.scheduleAddPeer(cluster, excludedFilter)
+	newPeer := s.scheduleAddPeer(cluster, region, oldPeer)
 	if newPeer == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-new-peer").Inc()
 		return nil
@@ -125,31 +125,48 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 
 func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.RegionInfo, *metapb.Peer) {
 	stores := cluster.GetStores()
+	exclude := make(map[uint64]struct{})
+	excludeFilter := filter.NewExcludedFilter(s.GetType(), exclude, nil)
 
-	source := s.selector.SelectSource(cluster, stores)
-	if source == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
-		return nil, nil
-	}
+	for {
+		source := s.selector.SelectSource(cluster, stores, excludeFilter)
+		if source == nil {
+			schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
+			return nil, nil
+		}
 
-	region := cluster.RandFollowerRegion(source.GetID(), s.conf.Ranges, opt.HealthRegion(cluster))
-	if region == nil {
-		region = cluster.RandLeaderRegion(source.GetID(), s.conf.Ranges, opt.HealthRegion(cluster))
-	}
-	if region == nil {
+		var region *core.RegionInfo
+		if s.conf.IsRoleAllow(roleFollower) {
+			region = cluster.RandFollowerRegion(source.GetID(), s.conf.GetRanges(), opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+		}
+		if region == nil && s.conf.IsRoleAllow(roleLeader) {
+			region = cluster.RandLeaderRegion(source.GetID(), s.conf.GetRanges(), opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+		}
+		if region == nil && s.conf.IsRoleAllow(roleLearner) {
+			region = cluster.RandLearnerRegion(source.GetID(), s.conf.GetRanges(), opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+		}
+		if region != nil {
+			return region, region.GetStorePeer(source.GetID())
+		}
+
+		exclude[source.GetID()] = struct{}{}
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
-		return nil, nil
 	}
-
-	return region, region.GetStorePeer(source.GetID())
 }
 
-func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, filter filter.Filter) *metapb.Peer {
-	stores := cluster.GetStores()
+func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
+	var scoreGuard filter.Filter
+	if cluster.IsPlacementRulesEnabled() {
+		scoreGuard = filter.NewRuleFitFilter(s.GetName(), cluster, region, oldPeer.GetStoreId())
+	} else {
+		scoreGuard = filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(region), cluster.GetStore(oldPeer.GetStoreId()))
+	}
+	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds())
 
-	target := s.selector.SelectTarget(cluster, stores, filter)
+	stores := cluster.GetStores()
+	target := s.selector.SelectTarget(cluster, stores, scoreGuard, excludedFilter)
 	if target == nil {
 		return nil
 	}
-	return &metapb.Peer{StoreId: target.GetID()}
+	return &metapb.Peer{StoreId: target.GetID(), IsLearner: oldPeer.GetIsLearner()}
 }

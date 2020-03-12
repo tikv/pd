@@ -14,6 +14,7 @@
 package command
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -429,6 +430,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 	c.AddCommand(
 		newConfigEvictLeaderCommand(),
 		newConfigGrantLeaderCommand(),
+		newConfigShuffleRegionCommand(),
 	)
 	return c
 }
@@ -465,6 +467,23 @@ func newConfigGrantLeaderCommand() *cobra.Command {
 		Use:   "delete-store <store-id>",
 		Short: "delete a store from grant leader list",
 		Run:   func(cmd *cobra.Command, args []string) { deleteStoreFromSchedulerConfig(cmd, c.Name(), args) },
+	})
+	return c
+}
+
+func newConfigShuffleRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "shuffle-region-scheduler",
+		Short: "shuffle-region-scheduler config",
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "show-roles",
+		Short: "show affected roles (leader,follower,learner)",
+		Run:   showShuffleRegionSchedulerRolesCommandFunc,
+	}, &cobra.Command{
+		Use:   "set-roles [leader,][follower,][learner]",
+		Short: "set affected roles",
+		Run:   setSuffleRegionSchedulerRolesCommandFunc,
 	})
 	return c
 }
@@ -527,6 +546,43 @@ func deleteStoreFromSchedulerConfig(cmd *cobra.Command, schedulerName string, ar
 	// FIXME: remove the judge when the new command replace old command
 	if strings.Contains(resp, lastStoreDeleteInfo) {
 		redirectDeleteConfigToRemoveScheduler(cmd, schedulerName, args)
+		return
+	}
+	cmd.Println("Success!")
+}
+
+func showShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 0 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	path := path.Join(schedulerConfigPrefix, cmd.Parent().Name(), "roles")
+	r, err := doRequest(cmd, path, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func setSuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	var roles []string
+	fields := strings.Split(strings.ToLower(args[0]), ",")
+	for _, f := range fields {
+		if f != "" {
+			roles = append(roles, f)
+		}
+	}
+	b, _ := json.Marshal(roles)
+	path := path.Join(schedulerConfigPrefix, cmd.Parent().Name(), "roles")
+	_, err := doRequest(cmd, path, http.MethodPost,
+		WithBody("application/json", bytes.NewBuffer(b)))
+	if err != nil {
+		cmd.Println(err)
 		return
 	}
 	cmd.Println("Success!")
