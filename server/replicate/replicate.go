@@ -245,7 +245,7 @@ func (m *ModeManager) recoverProgress() (current, total int) {
 		total += len(regions)
 		for _, r := range regions {
 			if !bytes.Equal(key, r.GetStartKey()) {
-				log.Warn("found region gap", zap.ByteString("key", key), zap.ByteString("region-start-key", r.GetStartKey()))
+				log.Warn("found region gap", zap.ByteString("key", key), zap.ByteString("region-start-key", r.GetStartKey()), zap.Uint64("region-id", r.GetID()))
 				total++
 			}
 			if r.GetReplicateStatus().GetRecoverId() == m.drAutosync.RecoverID &&
