@@ -221,6 +221,23 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	mc.PutStore(store)
 }
 
+// AddRegionStoreWithWeight adds store with specified count of region and regionWeight，leaderWeight.
+func (mc *Cluster) AddRegionStoreWithWeight(storeID uint64, regionCount int, regionWeight float64, leaderWeight float64) {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = 1000 * (1 << 20)
+	stats.Available = stats.Capacity - uint64(regionCount)*10
+	store := core.NewStoreInfo(
+		&metapb.Store{Id: storeID},
+		core.SetStoreStats(stats),
+		core.SetRegionCount(regionCount),
+		core.SetRegionSize(int64(regionCount)*10),
+		core.SetLastHeartbeatTS(time.Now()),
+		core.SetRegionWeight(regionWeight),
+		core.SetLeaderWeight(leaderWeight),
+	)
+	mc.PutStore(store)
+}
+
 // AddRegionStoreWithLeader adds store with specified count of region and leader.
 func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, leaderCounts ...int) {
 	leaderCount := regionCount

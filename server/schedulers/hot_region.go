@@ -80,6 +80,8 @@ const (
 
 	greatDecRatio = 0.95
 	minorDecRatio = 0.99
+
+	minWeight = 1e-6
 )
 
 type hotScheduler struct {
@@ -190,7 +192,9 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			h.pendingSums[readLeader],
 			regionRead,
 			minHotDegree,
-			read, core.LeaderKind)
+			read,
+			core.LeaderKind,
+			cluster)
 	}
 
 	{ // update write statistics
@@ -204,7 +208,9 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			h.pendingSums[writeLeader],
 			regionWrite,
 			minHotDegree,
-			write, core.LeaderKind)
+			write,
+			core.LeaderKind,
+			cluster)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storeByte,
@@ -212,7 +218,9 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			h.pendingSums[writePeer],
 			regionWrite,
 			minHotDegree,
-			write, core.RegionKind)
+			write,
+			core.RegionKind,
+			cluster)
 	}
 }
 
@@ -254,6 +262,7 @@ func summaryStoresLoad(
 	minHotDegree int,
 	rwTy rwType,
 	kind core.ResourceKind,
+	cluster opt.Cluster,
 ) map[uint64]*storeLoadDetail {
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
 
@@ -288,12 +297,17 @@ func summaryStoresLoad(
 			}
 		}
 
+		//calculate the storeWeight
+		storeWeight := calcStoreWeight(
+			cluster.GetStore(id).GetRegionWeight(),
+			cluster.GetStore(id).GetLeaderWeight())
+
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
-			ByteRate: byteRate,
-			KeyRate:  keyRate,
+			ByteRate: byteRate / storeWeight,
+			KeyRate:  keyRate / storeWeight,
 			Count:    float64(len(hotPeers)),
-		}).ToLoadPred(pendings[id])
+		}).ToLoadPred(pendings[id], storeWeight)
 
 		// Construct store load info.
 		loadDetail[id] = &storeLoadDetail{
@@ -700,17 +714,21 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
+	dstStoreWeight := calcStoreWeight(
+		bs.cluster.GetStore(bs.cur.dstStoreID).GetRegionWeight(),
+		bs.cluster.GetStore(bs.cur.dstStoreID).GetLeaderWeight())
+
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
 		// Only consider about count and key rate.
 		if srcLd.Count > dstLd.Count &&
-			srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
+			srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate()/dstStoreWeight {
 			rank = -1
 		}
 	} else {
-		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / (srcLd.KeyRate + 1)
+		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()/dstStoreWeight) / (srcLd.KeyRate + 1)
 		keyHot := peer.GetKeyRate() >= minHotKeyRate
-		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / (srcLd.ByteRate + 1)
+		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()/dstStoreWeight) / (srcLd.ByteRate + 1)
 		byteHot := peer.GetByteRate() > minHotByteRate
 		switch {
 		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
@@ -755,16 +773,24 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 	if bs.cur.srcPeerStat != old.srcPeerStat {
 		// compare region
 
+		storeWeight := calcStoreWeight(
+			bs.cluster.GetStore(bs.cur.srcStoreID).GetRegionWeight(),
+			bs.cluster.GetStore(bs.cur.srcStoreID).GetLeaderWeight())
+
+		oldStoreWeight := calcStoreWeight(
+			bs.cluster.GetStore(old.srcStoreID).GetRegionWeight(),
+			bs.cluster.GetStore(old.srcStoreID).GetLeaderWeight())
+
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			switch {
-			case bs.cur.srcPeerStat.GetKeyRate() > old.srcPeerStat.GetKeyRate():
+			case bs.cur.srcPeerStat.GetKeyRate()/storeWeight > old.srcPeerStat.GetKeyRate()/oldStoreWeight:
 				return true
-			case bs.cur.srcPeerStat.GetKeyRate() < old.srcPeerStat.GetKeyRate():
+			case bs.cur.srcPeerStat.GetKeyRate()/storeWeight < old.srcPeerStat.GetKeyRate()/oldStoreWeight:
 				return false
 			}
 		} else {
-			byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetByteRate(), old.srcPeerStat.GetByteRate(), stepRank(0, 100))
-			keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetKeyRate(), old.srcPeerStat.GetKeyRate(), stepRank(0, 10))
+			byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetByteRate()/storeWeight, old.srcPeerStat.GetByteRate()/oldStoreWeight, stepRank(0, 100))
+			keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetKeyRate()/storeWeight, old.srcPeerStat.GetKeyRate()/oldStoreWeight, stepRank(0, 10))
 
 			switch bs.cur.progressiveRank {
 			case -2: // greatDecRatio < byteDecRatio <= minorDecRatio && keyDecRatio <= greatDecRatio
@@ -998,6 +1024,11 @@ func (h *hotScheduler) copyPendingInfluence(ty resourceType) map[uint64]Influenc
 		ret[id] = infl
 	}
 	return ret
+}
+
+func calcStoreWeight(regionWeight, leaderWeight float64) float64 {
+	storeWeight := (regionWeight + leaderWeight) / 2
+	return math.Max(storeWeight, minWeight)
 }
 
 func calcPendingWeight(op *operator.Operator) float64 {
