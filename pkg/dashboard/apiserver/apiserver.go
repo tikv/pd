@@ -70,7 +70,7 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	}
 
 	etcdProvider := &PdEtcdProvider{srv: srv}
-	tidbForwarder := tidb.NewForwarder(tidb.NewForwarderConfig(), etcdProvider)
+	tidbForwarder := tidb.NewForwarder(tidb.NewForwarderConfig(dashboardCfg.TLSConfig), etcdProvider)
 	httpClient := dashboardhttp.NewHTTPClientWithConf(dashboardCfg)
 	store := dbstore.MustOpenDBStore(dashboardCfg)
 	// key visual
@@ -79,7 +79,7 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 		EtcdProvider:   etcdProvider,
 		Store:          store,
 	}
-	keyvisualService := keyvisual.NewService(ctx, dashboardCfg, localDataProvider)
+	keyvisualService := keyvisual.NewService(ctx, dashboardCfg, localDataProvider, httpClient)
 	// api server
 	services := &apiserver.Services{
 		Store:         store,
