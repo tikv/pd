@@ -64,7 +64,7 @@ var TypeValue = map[string]Type{
 	"RegionRemove": RegionRemove,
 }
 
-// String returns the representation of the Mode
+// String returns the representation of the store limit mode
 func (m Mode) String() string {
 	switch m {
 	case Auto:

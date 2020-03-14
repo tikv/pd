@@ -934,6 +934,8 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	// reset all stores' limit
 	// scheduling one time needs 1/10 seconds
 	oc.SetAllStoresLimit(10, storelimit.Manual, storelimit.RegionAdd)
+	oc.SetAllStoresLimit(10, storelimit.Manual, storelimit.RegionRemove)
+
 	for i := 0; i < 10; i++ {
 		op1 := lb.Schedule(tc)[0]
 		c.Assert(op1, NotNil)

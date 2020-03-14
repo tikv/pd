@@ -918,7 +918,7 @@ func (oc *OperatorController) SetStoreLimit(storeID uint64, rate float64, mode s
 
 // newStoreLimit is used to create the limit of a store.
 func (oc *OperatorController) newStoreLimit(storeID uint64, rate float64, mode storelimit.Mode, limitType storelimit.Type) {
-	if oc.storesLimit[storeID][limitType] == nil {
+	if oc.storesLimit[storeID] == nil {
 		oc.storesLimit[storeID] = make(map[storelimit.Type]*storelimit.StoreLimit)
 	}
 	oc.storesLimit[storeID][limitType] = storelimit.NewStoreLimit(rate, mode, storelimit.RegionInfluence[limitType])
