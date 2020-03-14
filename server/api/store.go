@@ -231,7 +231,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
-
+	println(r.URL)
 	_, force := r.URL.Query()["force"]
 	var err error
 	if force {
