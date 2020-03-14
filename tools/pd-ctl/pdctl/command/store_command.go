@@ -69,10 +69,11 @@ func NewDeleteStoreCommand() *cobra.Command {
 // NewLabelStoreCommand returns a label subcommand of storeCmd.
 func NewLabelStoreCommand() *cobra.Command {
 	l := &cobra.Command{
-		Use:   "label <store_id> <key> <value>",
+		Use:   "label <store_id> <key> <value> [<key> <value>]...",
 		Short: "set a store's label value",
 		Run:   labelStoreCommandFunc,
 	}
+	l.Flags().BoolP( "force", "f", false, "overwrite the label forcely")
 	return l
 }
 
@@ -308,7 +309,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 }
 
 func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 3 {
+	if len(args) < 3 || len(args) % 2 != 1 {
 		cmd.Usage()
 		return
 	}
@@ -317,7 +318,9 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := fmt.Sprintf(path.Join(storePrefix, "label"), args[0])
-	postJSON(cmd, prefix, map[string]interface{}{args[1]: args[2]})
+	for iter := 1; iter < len(args); iter += 2 {
+		postJSON(cmd, prefix, map[string]interface{}{args[iter]: args[iter+1]})
+	}
 }
 
 func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {

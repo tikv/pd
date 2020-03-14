@@ -799,6 +799,19 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	return err
 }
 
+// UpdateStoreLabelsForce updates a store's location labels forcely.
+func (c *RaftCluster) UpdateStoreLabelsForce(storeID uint64, labels []*metapb.StoreLabel) error {
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errors.Errorf("invalid store ID %d, not found", storeID)
+	}
+	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
+	newStore.Labels = labels
+	// PutStore will perform label merge.
+	err := c.PutStoreForce(newStore)
+	return err
+}
+
 // PutStore puts a store.
 func (c *RaftCluster) PutStore(store *metapb.Store) error {
 	c.Lock()
@@ -835,6 +848,56 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 	} else {
 		// Update an existed store.
 		labels := s.MergeLabels(store.GetLabels())
+
+		s = s.Clone(
+			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
+			core.SetStoreVersion(store.GitHash, store.Version),
+			core.SetStoreLabels(labels),
+			core.SetStoreStartTime(store.StartTimestamp),
+		)
+	}
+	if err = c.checkStoreLabels(s); err != nil {
+		return err
+	}
+	return c.putStoreLocked(s)
+}
+
+// PutStore puts a store.
+func (c *RaftCluster) PutStoreForce(store *metapb.Store) error {
+	c.Lock()
+	defer c.Unlock()
+
+	if store.GetId() == 0 {
+		return errors.Errorf("invalid put store %v", store)
+	}
+
+	v, err := ParseVersion(store.GetVersion())
+	if err != nil {
+		return errors.Errorf("invalid put store %v, error: %s", store, err)
+	}
+	clusterVersion := *c.opt.LoadClusterVersion()
+	if !IsCompatible(clusterVersion, *v) {
+		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
+	}
+
+	// Store address can not be the same as other stores.
+	for _, s := range c.GetStores() {
+		// It's OK to start a new store on the same address if the old store has been removed.
+		if s.IsTombstone() {
+			continue
+		}
+		if s.GetID() != store.GetId() && s.GetAddress() == store.GetAddress() {
+			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.GetMeta())
+		}
+	}
+
+	s := c.GetStore(store.GetId())
+	if s == nil {
+		// Add a new store.
+		s = core.NewStoreInfo(store)
+	} else {
+		// Update an existed store.
+		labels := s.OverwriteLabels(store.GetLabels())
 
 		s = s.Clone(
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),

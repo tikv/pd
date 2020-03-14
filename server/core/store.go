@@ -486,6 +486,17 @@ L:
 	return res
 }
 
+// OverwriteLabels overwrites the original labels in store.
+func (s *StoreInfo) OverwriteLabels(labels []*metapb.StoreLabel) []*metapb.StoreLabel {
+	var res []*metapb.StoreLabel
+	for _, l := range labels {
+		if l.Value != "" {
+			res = append(res, l)
+		}
+	}
+	return res
+}
+
 type storeNotFoundErr struct {
 	storeID uint64
 }
