@@ -324,7 +324,7 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 		postJSON(cmd, prefix, map[string]interface{}{args[iter]: args[iter+1]})
 	}
 	if force {
-		print("xxx")
+
 	}
 }
 
