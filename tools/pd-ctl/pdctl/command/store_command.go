@@ -26,6 +26,8 @@ import (
 var (
 	storesPrefix = "pd/api/v1/stores"
 	storePrefix  = "pd/api/v1/store/%v"
+
+	force bool
 )
 
 // NewStoreCommand return a stores subcommand of rootCmd
@@ -73,7 +75,7 @@ func NewLabelStoreCommand() *cobra.Command {
 		Short: "set a store's label value",
 		Run:   labelStoreCommandFunc,
 	}
-	l.Flags().BoolP( "force", "f", false, "overwrite the label forcely")
+	l.Flags().BoolVarP(&force, "force", "f", false, "overwrite the label forcely")
 	return l
 }
 
@@ -320,6 +322,9 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := fmt.Sprintf(path.Join(storePrefix, "label"), args[0])
 	for iter := 1; iter < len(args); iter += 2 {
 		postJSON(cmd, prefix, map[string]interface{}{args[iter]: args[iter+1]})
+	}
+	if force {
+		print("xxx")
 	}
 }
 
