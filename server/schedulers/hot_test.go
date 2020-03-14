@@ -690,6 +690,62 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	}
 }
 
+func (s *testHotReadRegionSchedulerSuite) TestWithKeyRateAndStoreWeight(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := mockoption.NewScheduleOptions()
+	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	opt.HotRegionCacheHitsThreshold = 0
+
+	tc := mockcluster.NewCluster(opt)
+	tc.AddRegionStoreWithWeight(1, 20, 2.0, 2.0)
+	tc.AddRegionStoreWithWeight(2, 20, 1.0, 1.0)
+	tc.AddRegionStoreWithWeight(3, 20, 2.0, 2.0)
+	tc.AddRegionStoreWithWeight(4, 20, 2.0, 2.0)
+	tc.AddRegionStoreWithWeight(5, 20, 2.0, 2.0)
+
+	tc.UpdateStorageReadBytes(1, 21*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 9.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 19*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(4, 18*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(5, 17.8*MB*statistics.StoreHeartBeatReportInterval)
+
+	tc.UpdateStorageReadKeys(1, 20*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadKeys(2, 9.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadKeys(3, 19.6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadKeys(4, 18*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadKeys(5, 18.4*MB*statistics.StoreHeartBeatReportInterval)
+
+	addRegionInfo(tc, read, []testRegionInfo{
+		{1, []uint64{1, 2, 4}, 1.0 * MB, 1.0 * MB},
+		{2, []uint64{1, 2, 4}, 1.0 * MB, 1.0 * MB},
+		{3, []uint64{3, 4, 5}, 0.1 * MB, 0.2 * MB},
+	})
+
+	for i := 0; i < 100; i++ {
+		hb.(*hotScheduler).clearPendingInfluence()
+		op := hb.Schedule(tc)[0]
+		// byteDecRatio <= 0.95 && keyDecRatio <= 0.95
+		testutil.CheckTransferLeader(c, op, operator.OpHotRegion, 1, 4)
+		// store byte rate (min, max): (10, 10.5) | 9.5 | 9.5 | (9, 9.5) | 8.9
+		// store key rate (min, max):  (9.5, 10) | 9.5 | 9.8 | (9, 9.5) | 9.2
+
+		op = hb.Schedule(tc)[0]
+		// byteDecRatio <= 0.99 && keyDecRatio <= 0.95
+		testutil.CheckTransferLeader(c, op, operator.OpHotRegion, 3, 5)
+		// store byte rate (min, max): (10, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 8.95)
+		// store key rate (min, max):  (9.5, 10) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.3)
+
+		op = hb.Schedule(tc)[0]
+		// byteDecRatio <= 0.95
+		testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 5)
+		// store byte rate (min, max): (9.5, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 9.45)
+		// store key rate (min, max):  (9, 10) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.8)
+	}
+}
+
 func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
