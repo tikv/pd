@@ -447,7 +447,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 		if oc.storesLimit[storeID] == nil {
 			continue
 		}
-		for n, v := range storelimit.TypeValue {
+		for n, v := range storelimit.TypeNameValue {
 			if oc.storesLimit[storeID][v] == nil {
 				continue
 			}
@@ -864,7 +864,7 @@ func (o *OperatorRecords) Put(op *operator.Operator) {
 func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
-		for n, v := range storelimit.TypeValue {
+		for n, v := range storelimit.TypeNameValue {
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
 			if stepCost == 0 {
 				continue
@@ -942,14 +942,16 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (oc *OperatorController) GetAllStoresLimit() map[uint64]map[storelimit.Type]*storelimit.StoreLimit {
+func (oc *OperatorController) GetAllStoresLimit(limitType storelimit.Type) map[uint64]*storelimit.StoreLimit {
 	oc.RLock()
 	defer oc.RUnlock()
-	limits := make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit)
+	limits := make(map[uint64]*storelimit.StoreLimit)
 	for storeID, limit := range oc.storesLimit {
 		store := oc.cluster.GetStore(storeID)
 		if !store.IsTombstone() {
-			limits[storeID] = limit
+			if limit[limitType] != nil {
+				limits[storeID] = limit[limitType]
+			}
 		}
 	}
 	return limits

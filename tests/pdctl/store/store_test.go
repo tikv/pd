@@ -126,16 +126,16 @@ func (s *storeTestSuite) TestStore(c *C) {
 	args = []string{"-u", pdAddr, "store", "limit", "1", "10"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	limits := leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
-	c.Assert(limits[1][storelimit.RegionAdd].Rate()*60, Equals, float64(10))
+	limits := leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit(storelimit.RegionAdd)
+	c.Assert(limits[1].Rate()*60, Equals, float64(10))
 
 	// store limit all <rate>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "20"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
-	c.Assert(limits[1][storelimit.RegionAdd].Rate()*60, Equals, float64(20))
-	c.Assert(limits[3][storelimit.RegionAdd].Rate()*60, Equals, float64(20))
+	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit(storelimit.RegionAdd)
+	c.Assert(limits[3].Rate()*60, Equals, float64(20))
+	c.Assert(limits[1].Rate()*60, Equals, float64(20))
 	_, ok := limits[2]
 	c.Assert(ok, IsFalse)
 
@@ -143,9 +143,9 @@ func (s *storeTestSuite) TestStore(c *C) {
 	args = []string{"-u", pdAddr, "store", "limit"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
-	c.Assert(limits[1][storelimit.RegionAdd].Rate()*60, Equals, float64(20))
-	c.Assert(limits[3][storelimit.RegionAdd].Rate()*60, Equals, float64(20))
+	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit(storelimit.RegionAdd)
+	c.Assert(limits[1].Rate()*60, Equals, float64(20))
+	c.Assert(limits[3].Rate()*60, Equals, float64(20))
 	_, ok = limits[2]
 	c.Assert(ok, IsFalse)
 

@@ -219,11 +219,11 @@ func testStateAndLimit(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDCl
 	oc := rc.GetOperatorController()
 	oc.SetAllStoresLimit(1.0, storelimit.Manual, storelimit.RegionAdd)
 	resetStoreState(c, rc, store.GetId(), beforeState)
-	_, isOKBefore := oc.GetAllStoresLimit()[storeID]
+	_, isOKBefore := oc.GetAllStoresLimit(storelimit.RegionAdd)[storeID]
 	// run
 	err := run(rc)
 	// judge
-	_, isOKAfter := oc.GetAllStoresLimit()[storeID]
+	_, isOKAfter := oc.GetAllStoresLimit(storelimit.RegionAdd)[storeID]
 	if len(expectStates) != 0 {
 		c.Assert(err, IsNil)
 		expectState := expectStates[0]

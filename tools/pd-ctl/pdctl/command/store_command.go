@@ -87,11 +87,12 @@ func NewSetStoreWeightCommand() *cobra.Command {
 
 // NewStoreLimitCommand returns a limit subcommand of storeCmd.
 func NewStoreLimitCommand() *cobra.Command {
-	return &cobra.Command{
+	c := &cobra.Command{
 		Use:   "limit [<store_id>|<all> <rate>]",
 		Short: "set a store's rate limit",
 		Run:   storeLimitCommandFunc,
 	}
+	return c
 }
 
 // NewStoresCommand returns a store subcommand of rootCmd
@@ -135,17 +136,17 @@ func NewShowStoresCommand() *cobra.Command {
 		Run:        showStoresCommandFunc,
 		Deprecated: "use store [limit] instead",
 	}
-	sc.AddCommand(NewShowAllLimitCommand())
+	sc.AddCommand(NewShowAllStoresLimitCommand())
 	return sc
 }
 
-// NewShowAllLimitCommand return a show limit subcommand of show command
-func NewShowAllLimitCommand() *cobra.Command {
+// NewShowAllStoresLimitCommand return a show limit subcommand of show command
+func NewShowAllStoresLimitCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:        "limit",
-		Short:      "show all stores' limit",
+		Use:        "limit <type>",
+		Short:      "show all stores' limit, <type> is region-add by default",
 		Deprecated: "use store limit instead",
-		Run:        showAllLimitCommandFunc,
+		Run:        showAllStoresLimitCommandFunc,
 	}
 	return sc
 }
@@ -344,7 +345,7 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 
 func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 0 {
-		showAllLimitCommandFunc(cmd, args)
+		showAllStoresLimitCommandFunc(cmd, args)
 		return
 	}
 	if len(args) != 2 {
@@ -384,11 +385,18 @@ func showStoresCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showAllLimitCommandFunc(cmd *cobra.Command, args []string) {
+func showAllStoresLimitCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) > 1 {
+		cmd.Usage()
+		return
+	}
 	prefix := path.Join(storesPrefix, "limit")
+	if len(args) == 1 {
+		prefix += fmt.Sprintf("?type=%s", args[0])
+	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
-		cmd.Printf("Failed to get all limit: %s\n", err)
+		cmd.Printf("Failed to get all stores' limit: %s\n", err)
 		return
 	}
 	cmd.Println(r)

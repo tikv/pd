@@ -58,10 +58,10 @@ const (
 	RegionRemove
 )
 
-// TypeValue indicates the name of store limit type and the enum value
-var TypeValue = map[string]Type{
-	"RegionAdd":    RegionAdd,
-	"RegionRemove": RegionRemove,
+// TypeNameValue indicates the name of store limit type and the enum value
+var TypeNameValue = map[string]Type{
+	"region-add":    RegionAdd,
+	"region-remove": RegionRemove,
 }
 
 // String returns the representation of the store limit mode
@@ -78,7 +78,7 @@ func (m Mode) String() string {
 
 // String returns the representation of the Type
 func (t Type) String() string {
-	for n, v := range TypeValue {
+	for n, v := range TypeNameValue {
 		if v == t {
 			return n
 		}

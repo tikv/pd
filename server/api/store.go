@@ -319,7 +319,7 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 			h.rd.JSON(w, http.StatusBadRequest, "badformat type")
 			return
 		}
-		if value, ok := storelimit.TypeValue[typeName]; ok {
+		if value, ok := storelimit.TypeNameValue[typeName]; ok {
 			typeValue = value
 		} else {
 			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
@@ -386,7 +386,7 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 			h.rd.JSON(w, http.StatusBadRequest, "badformat type")
 			return
 		}
-		if value, ok := storelimit.TypeValue[typeName]; ok {
+		if value, ok := storelimit.TypeNameValue[typeName]; ok {
 			typeValue = value
 		} else {
 			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
@@ -403,7 +403,19 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
-	limits, err := h.GetAllStoresLimit()
+	typeName := r.URL.Query().Get("type")
+	var typeValue storelimit.Type
+	if typeName == "" {
+		typeValue = storelimit.RegionAdd
+	} else {
+		if value, ok := storelimit.TypeNameValue[typeName]; ok {
+			typeValue = value
+		} else {
+			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
+			return
+		}
+	}
+	limits, err := h.GetAllStoresLimit(typeValue)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -411,16 +423,12 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	type LimitResp struct {
 		Rate float64 `json:"rate"`
 		Mode string  `json:"mode"`
-		Type string  `json:"type"`
 	}
 	resp := make(map[uint64]*LimitResp)
-	for s, tl := range limits {
-		for t, l := range tl {
-			resp[s] = &LimitResp{
-				Rate: l.Rate() * schedule.StoreBalanceBaseTime,
-				Mode: l.Mode().String(),
-				Type: t.String(),
-			}
+	for s, l := range limits {
+		resp[s] = &LimitResp{
+			Rate: l.Rate() * schedule.StoreBalanceBaseTime,
+			Mode: l.Mode().String(),
 		}
 	}
 
@@ -433,7 +441,7 @@ func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 	if typeName == "" {
 		typeValue = storelimit.RegionAdd
 	} else {
-		if value, ok := storelimit.TypeValue[typeName]; ok {
+		if value, ok := storelimit.TypeNameValue[typeName]; ok {
 			typeValue = value
 		} else {
 			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
@@ -454,7 +462,7 @@ func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 	if typeName == "" {
 		typeValue = storelimit.RegionAdd
 	} else {
-		if value, ok := storelimit.TypeValue[typeName]; ok {
+		if value, ok := storelimit.TypeNameValue[typeName]; ok {
 			typeValue = value
 		} else {
 			h.rd.JSON(w, http.StatusBadRequest, "unknown type")

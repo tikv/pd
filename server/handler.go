@@ -428,12 +428,12 @@ func (h *Handler) SetAllStoresLimit(rate float64, limitType storelimit.Type) err
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetAllStoresLimit() (map[uint64]map[storelimit.Type]*storelimit.StoreLimit, error) {
+func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]*storelimit.StoreLimit, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
-	return c.GetAllStoresLimit(), nil
+	return c.GetAllStoresLimit(limitType), nil
 }
 
 // SetStoreLimit is used to set the limit of a store.
