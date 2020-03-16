@@ -507,7 +507,6 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
 				bs.calcProgressiveRank()
-				//	bs.cur.attachInfo = fmt.Sprintf("start:{[%d]->[%d], rank: %d, region: %d}\t", bs.cur.srcStoreID, bs.cur.dstStoreID, bs.cur.progressiveRank, bs.cur.region.GetID())
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
 					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
 						ops = newOps
@@ -559,7 +558,15 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
 	// Return at most maxPeerNum peers, to prevent balanceSolver.solve() too slow.
 	if len(ret) <= maxPeerNum {
-		return ret
+		nret := make([]*statistics.HotPeerStat, 0, len(ret))
+		for _, peer := range ret {
+			// filter pending region
+			if _, ok := bs.sche.regionPendings[peer.ID()]; ok {
+				continue
+			}
+			nret = append(nret, peer)
+		}
+		return nret
 	}
 
 	byteSort := make([]*statistics.HotPeerStat, len(ret))
@@ -578,6 +585,10 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		for len(byteSort) > 0 {
 			peer := byteSort[0]
 			byteSort = byteSort[1:]
+			// filter pending region
+			if _, ok := bs.sche.regionPendings[peer.ID()]; ok {
+				continue
+			}
 			if _, ok := union[peer]; !ok {
 				union[peer] = struct{}{}
 				break
@@ -586,6 +597,10 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		for len(keySort) > 0 {
 			peer := keySort[0]
 			keySort = keySort[1:]
+			// filter pending region
+			if _, ok := bs.sche.regionPendings[peer.ID()]; ok {
+				continue
+			}
 			if _, ok := union[peer]; !ok {
 				union[peer] = struct{}{}
 				break
@@ -749,21 +764,18 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 	case bs.cur.progressiveRank < old.progressiveRank:
 		return true
 	case bs.cur.progressiveRank > old.progressiveRank:
-		//old.attachInfo += fmt.Sprintf("ko-rank:{[%d]->[%d], rank: %d, region: %d}\t", bs.cur.srcStoreID, bs.cur.dstStoreID, bs.cur.progressiveRank, bs.cur.region.GetID())
 		return false
 	}
 
 	if r := bs.compareSrcStore(bs.cur.srcStoreID, old.srcStoreID); r < 0 {
 		return true
 	} else if r > 0 {
-		//old.attachInfo += fmt.Sprintf("ko-src:{[%d] other-lood[:%+v], me-lood[:%+v]}", bs.cur.srcStoreID, *bs.stLoadDetail[bs.cur.srcStoreID].LoadPred, *bs.stLoadDetail[old.srcStoreID].LoadPred)
 		return false
 	}
 
 	if r := bs.compareDstStore(bs.cur.dstStoreID, old.dstStoreID); r < 0 {
 		return true
 	} else if r > 0 {
-		//old.attachInfo += fmt.Sprintf("ko-dst:{[%d] other-lood[:%+v], me-lood[:%+v]}", bs.cur.dstStoreID, *bs.stLoadDetail[bs.cur.dstStoreID].LoadPred, *bs.stLoadDetail[old.dstStoreID].LoadPred)
 		return false
 	}
 
