@@ -14,6 +14,7 @@
 package configmanager
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -431,6 +432,33 @@ log-level = "debug"
 	v, status = cfg.UpdateConfig(nil, nil, nil)
 	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
 	c.Assert(status.GetCode(), Equals, configpb.StatusCode_UNKNOWN)
+}
+
+func (s *testComponentsConfigSuite) TestGetAll(c *C) {
+	cfgData := `
+log-level = "debug"
+`
+	cfg := NewConfigManager(nil)
+	v, config, status := cfg.CreateConfig(&configpb.Version{Global: 0, Local: 0}, "tikv", "tikv1", cfgData)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.StatusCode_OK)
+	expect := `log-level = "debug"
+`
+	c.Assert(config, Equals, expect)
+
+	_, status = cfg.UpdateGlobal("tidb", &configpb.Version{Global: 0, Local: 0}, []*configpb.ConfigEntry{{Name: "log-level", Value: "info"}})
+	c.Assert(status.GetCode(), Equals, configpb.StatusCode_OK)
+	
+	local, global, status := cfg.GetAllConfig(context.Background())
+	c.Assert(status.GetCode(), Equals, configpb.StatusCode_OK)
+	c.Assert(len(local), Equals, 1)
+	c.Assert(local[0].Component, Equals, "tikv")
+	c.Assert(local[0].ComponentId, Equals, "tikv1")
+	c.Assert(local[0].Config, Equals, expect)
+	c.Assert(len(global), Equals, 1)
+	c.Assert(global[0].Component, Equals, "tidb")
+	c.Assert(global[0].Name, Equals, "log-level")
+	c.Assert(global[0].Value, Equals, "info")
 }
 
 func (s *testComponentsConfigSuite) TestGet(c *C) {
