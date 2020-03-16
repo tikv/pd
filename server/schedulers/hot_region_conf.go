@@ -31,15 +31,17 @@ import (
 )
 
 // params about hot region.
-var defaultHotRegionScheduleConfig = hotRegionSchedulerConfig{
-	MinHotByteRate:        100,
-	MinHotKeyRate:         10,
-	MaxZombieRounds:       3,
-	ByteRateRankStepRatio: 0.05,
-	KeyRateRankStepRatio:  0.05,
-	CountRankStepRatio:    0.01,
-	GreatDecRatio:         0.95,
-	MinorDecRatio:         0.99,
+var initHotRegionScheduleConfig = func() *hotRegionSchedulerConfig {
+	return &hotRegionSchedulerConfig{
+		MinHotByteRate:        100,
+		MinHotKeyRate:         10,
+		MaxZombieRounds:       3,
+		ByteRateRankStepRatio: 0.05,
+		KeyRateRankStepRatio:  0.05,
+		CountRankStepRatio:    0.01,
+		GreatDecRatio:         0.95,
+		MinorDecRatio:         0.99,
+	}
 }
 
 type hotRegionSchedulerConfig struct {

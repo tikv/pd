@@ -30,7 +30,6 @@ var (
 	schedulerConfigPrefix    = "pd/api/v1/scheduler-config"
 	evictLeaderSchedulerName = "evict-leader-scheduler"
 	grantLeaderSchedulerName = "grant-leader-scheduler"
-	hotRegionSchedulerName   = "balance-hot-region-scheduler"
 	lastStoreDeleteInfo      = "The last store has been deleted"
 )
 
@@ -443,6 +442,10 @@ func newConfigHotRegionCommand() *cobra.Command {
 		Short: "show evict-leader-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
+	c.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc})
 	c.AddCommand(&cobra.Command{
 		Use:   "set",
 		Short: "set the config item",

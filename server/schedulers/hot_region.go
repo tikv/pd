@@ -40,21 +40,21 @@ func init() {
 		}
 	})
 	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := defaultHotRegionScheduleConfig
-		if err := decoder(&conf); err != nil {
+		conf := initHotRegionScheduleConfig()
+		if err := decoder(conf); err != nil {
 			return nil, err
 		}
 		conf.storage = storage
-		return newHotScheduler(opController, &conf), nil
+		return newHotScheduler(opController, conf), nil
 	})
 
 	// FIXME: remove this two schedule after the balance test move in schedulers package
 	{
 		schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-			return newHotWriteScheduler(opController, &defaultHotRegionScheduleConfig), nil
+			return newHotWriteScheduler(opController, initHotRegionScheduleConfig()), nil
 		})
 		schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-			return newHotReadScheduler(opController, &defaultHotRegionScheduleConfig), nil
+			return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
 		})
 
 	}
@@ -406,7 +406,6 @@ type solution struct {
 	// The smaller the rank, the better this solution is.
 	// If rank < 0, this solution makes thing better.
 	progressiveRank int64
-	attachInfo      string
 }
 
 func (bs *balanceSolver) init() {
