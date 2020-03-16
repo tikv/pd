@@ -33,7 +33,7 @@ type SecurityConfig struct {
 	// KeyPath is the path of file that contains X509 key in PEM format.
 	KeyPath        string `toml:"key-path" json:"key-path"`
 	ClientCertAuth bool   `toml:"client-cert-auth" json:"client-cert-auth"`
-	AllowedCN      string `toml:"allowed-cn" json:"allowed-cn"`
+	CertAllowedCN  string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
 }
 
 // ToTLSConfig generatres tls config.
@@ -46,7 +46,7 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 		KeyFile:        s.KeyPath,
 		TrustedCAFile:  s.CAPath,
 		ClientCertAuth: s.ClientCertAuth,
-		AllowedCN:      s.AllowedCN,
+		AllowedCN:      s.CertAllowedCN,
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
