@@ -1010,9 +1010,12 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
+	cfg.ClientTLSInfo.AllowedCN = c.Security.AllowedCN
+	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
+	cfg.PeerTLSInfo.AllowedCN = c.Security.AllowedCN
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
