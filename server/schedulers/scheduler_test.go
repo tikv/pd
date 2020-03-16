@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pingcap/pd/v4/server/statistics"
 )
 
@@ -486,6 +487,60 @@ func (s *testShuffleRegionSuite) TestShuffle(c *C) {
 		c.Assert(op, NotNil)
 		c.Assert(op[0].Kind(), Equals, operator.OpRegion|operator.OpAdmin)
 	}
+}
+
+func (s *testShuffleRegionSuite) TestRole(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+
+	// update rule to 1leader+1follower+1learner
+	opt.EnablePlacementRules = true
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   2,
+	})
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+	})
+
+	// Add stores 1, 2, 3, 4
+	tc.AddRegionStore(1, 6)
+	tc.AddRegionStore(2, 7)
+	tc.AddRegionStore(3, 8)
+	tc.AddRegionStore(4, 9)
+
+	// Put a region with 1leader + 1follower + 1learner
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1},
+		{Id: 2, StoreId: 2},
+		{Id: 3, StoreId: 3, IsLearner: true},
+	}
+	region := core.NewRegionInfo(&metapb.Region{
+		Id:          1,
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Peers:       peers,
+	}, peers[0])
+	tc.PutRegion(region)
+
+	sl, err := schedule.CreateScheduler(ShuffleRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
+	c.Assert(err, IsNil)
+
+	conf := sl.(*shuffleRegionScheduler).conf
+	conf.Roles = []string{"follower"}
+	ops := sl.Schedule(tc)
+	c.Assert(ops, HasLen, 1)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpRegion, 2, 4) // transfer follower
+	conf.Roles = []string{"learner"}
+	ops = sl.Schedule(tc)
+	c.Assert(ops, HasLen, 1)
+	testutil.CheckTransferLearner(c, ops[0], operator.OpRegion, 3, 4) // transfer learner
 }
 
 var _ = Suite(&testSpecialUseSuite{})
