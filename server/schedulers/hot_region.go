@@ -72,8 +72,7 @@ const (
 	HotWriteRegionType = "hot-write-region"
 
 	hotRegionLimitFactor = 0.75
-
-	maxPeerNum = 1000
+	maxPeerNum           = 1000
 
 	minRegionScheduleInterval time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
 )
@@ -556,14 +555,18 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
 	// Return at most maxPeerNum peers, to prevent balanceSolver.solve() too slow.
+
+	// filter pending region
+	appendItem := func(items []*statistics.HotPeerStat, item *statistics.HotPeerStat) []*statistics.HotPeerStat {
+		if _, ok := bs.sche.regionPendings[item.ID()]; !ok {
+			items = append(items, item)
+		}
+		return items
+	}
 	if len(ret) <= maxPeerNum {
 		nret := make([]*statistics.HotPeerStat, 0, len(ret))
 		for _, peer := range ret {
-			// filter pending region
-			if _, ok := bs.sche.regionPendings[peer.ID()]; ok {
-				continue
-			}
-			nret = append(nret, peer)
+			nret = appendItem(nret, peer)
 		}
 		return nret
 	}
@@ -584,10 +587,6 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		for len(byteSort) > 0 {
 			peer := byteSort[0]
 			byteSort = byteSort[1:]
-			// filter pending region
-			if _, ok := bs.sche.regionPendings[peer.ID()]; ok {
-				continue
-			}
 			if _, ok := union[peer]; !ok {
 				union[peer] = struct{}{}
 				break
@@ -596,10 +595,6 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		for len(keySort) > 0 {
 			peer := keySort[0]
 			keySort = keySort[1:]
-			// filter pending region
-			if _, ok := bs.sche.regionPendings[peer.ID()]; ok {
-				continue
-			}
 			if _, ok := union[peer]; !ok {
 				union[peer] = struct{}{}
 				break
@@ -608,7 +603,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	}
 	ret = make([]*statistics.HotPeerStat, 0, len(union))
 	for peer := range union {
-		ret = append(ret, peer)
+		ret = appendItem(ret, peer)
 	}
 	return ret
 }

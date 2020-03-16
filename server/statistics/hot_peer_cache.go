@@ -18,9 +18,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
-	"go.uber.org/zap"
 )
 
 const (
@@ -88,7 +86,6 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 		if stores, ok := f.storesOfRegion[item.RegionID]; ok {
 			delete(stores, item.StoreID)
 		}
-		log.Info("update hot stats", zap.Uint64("reigon-id", item.ID()), zap.Int("hot-degree", item.HotDegree), zap.Int("anti-cnt", item.AntiCount), zap.Float64("key-rate", item.KeyRate), zap.Float64("bytes-rate", item.ByteRate), zap.Uint64("leader-store", item.StoreID))
 	} else {
 		peers, ok := f.peersOfStore[item.StoreID]
 		if !ok {
@@ -103,7 +100,6 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 			f.storesOfRegion[item.RegionID] = stores
 		}
 		stores[item.StoreID] = struct{}{}
-		log.Info("update hot stats", zap.Uint64("reigon-id", item.ID()), zap.Int("hot-degree", item.HotDegree), zap.Int("anti-cnt", item.AntiCount), zap.Float64("key-rate", item.KeyRate), zap.Float64("bytes-rate", item.ByteRate), zap.Uint64("leader-store", item.StoreID))
 	}
 }
 
