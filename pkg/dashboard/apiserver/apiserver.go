@@ -64,13 +64,18 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 		DataDir:    cfg.DataDir,
 		PDEndPoint: etcdCfg.ACUrls[0].String(),
 	}
-	dashboardCfg.TLSConfig, err = cfg.Security.ToTLSConfig()
+	dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToTLSConfig()
+	if err != nil {
+		panic(err)
+	}
+
+	dashboardCfg.TiDBTLSConfig, err = cfg.Security.ToTiDBTLSConfig()
 	if err != nil {
 		panic(err)
 	}
 
 	etcdProvider := &PdEtcdProvider{srv: srv}
-	tidbForwarder := tidb.NewForwarder(tidb.NewForwarderConfig(dashboardCfg.TLSConfig), etcdProvider)
+	tidbForwarder := tidb.NewForwarder(tidb.NewForwarderConfig(dashboardCfg.TiDBTLSConfig), etcdProvider)
 	httpClient := dashboardhttp.NewHTTPClientWithConf(dashboardCfg)
 	store := dbstore.MustOpenDBStore(dashboardCfg)
 	// key visual

@@ -62,3 +62,5 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	gopkg.in/yaml.v2 v2.2.8 // indirect
 )
+
+replace github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200312155252-b741b1239146 => github.com/niedhui/tidb-dashboard v0.0.0-20200316143504-08cccde869aa
