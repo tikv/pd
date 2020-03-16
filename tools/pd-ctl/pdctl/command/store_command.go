@@ -320,12 +320,14 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := fmt.Sprintf(path.Join(storePrefix, "label"), args[0])
+	labels := make(map[string]interface{})
 	for iter := 1; iter < len(args); iter += 2 {
-		postJSON(cmd, prefix, map[string]interface{}{args[iter]: args[iter+1]})
+		labels[args[iter]] = args[iter+1]
 	}
 	if force {
-
+		prefix = path.Join(prefix, "force")
 	}
+	postJSON(cmd, prefix, labels)
 }
 
 func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {

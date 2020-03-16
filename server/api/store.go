@@ -231,14 +231,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
-	println(r.URL)
-	_, force := r.URL.Query()["force"]
-	var err error
-	if force {
-		err = rc.UpdateStoreLabelsForce(storeID, labels)
-	} else {
-		err = rc.UpdateStoreLabels(storeID, labels)
-	}
+	err := rc.UpdateStoreLabels(storeID, labels)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -246,6 +239,42 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 
 	h.rd.JSON(w, http.StatusOK, nil)
 }
+
+func (h *storeHandler) SetLabelsForce(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
+	vars := mux.Vars(r)
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		return
+	}
+
+	var input map[string]string
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+
+	labels := make([]*metapb.StoreLabel, 0, len(input))
+	for k, v := range input {
+		labels = append(labels, &metapb.StoreLabel{
+			Key:   k,
+			Value: v,
+		})
+	}
+
+	if err := config.ValidateLabels(labels); err != nil {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+		return
+	}
+	err := rc.UpdateStoreLabelsForce(storeID, labels)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
 
 func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
