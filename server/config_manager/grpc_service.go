@@ -54,9 +54,9 @@ func (c *ConfigManager) GetAll(ctx context.Context, request *configpb.GetAllRequ
 
 	localConfigs, status := c.GetAllConfig(ctx)
 	return &configpb.GetAllResponse{
-		Header:        c.componentHeader(),
-		Status:        status,
-		LocalConfigs:  localConfigs,
+		Header:       c.componentHeader(),
+		Status:       status,
+		LocalConfigs: localConfigs,
 	}, nil
 }
 
