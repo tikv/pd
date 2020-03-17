@@ -91,7 +91,7 @@ type hotScheduler struct {
 	// temporary states but exported to API or metrics
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
 	pendingSums [resourceTypeLen]map[uint64]Influence
-	// config of hot scheudler
+	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
 }
 

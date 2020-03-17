@@ -67,7 +67,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	}
 	shouldRemoveOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
 		op := doneOp(region, ty)
-		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-3*minRegionScheduleInterval))
+		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
 		return op
 	}
 	opCreaters := [4]func(region *core.RegionInfo, ty opType) *operator.Operator{nilOp, shouldRemoveOp, notDoneOp, doneOp}
