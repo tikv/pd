@@ -565,6 +565,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	tc.AddRegionStore(2, 4)
 	tc.AddRegionStore(3, 2)
 	tc.AddRegionStore(4, 0)
+	tc.AddRegionStore(5, 0)
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	tc.AddLeaderRegion(2, 1, 2, 3)
 	tc.AddLeaderRegion(3, 1, 2, 3)
@@ -576,15 +577,18 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	c.Assert(ops, HasLen, 1)
 	testutil.CheckTransferPeer(c, ops[0], operator.OpBalance, 1, 4)
 
-	// cannot balance to store 4 with label
+	// cannot balance to store 4 and 5 with label
 	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "hotRegion"})
+	tc.AddLabelsStore(5, 0, map[string]string{"specialUse": "reserved"})
 	ops = bs.Schedule(tc)
 	c.Assert(ops, HasLen, 0)
 
+	// can only move peer to 4
 	tc.UpdateStorageWrittenBytes(1, 60*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(2, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(4, 0)
+	tc.UpdateStorageWrittenBytes(5, 0)
 	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
 	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
