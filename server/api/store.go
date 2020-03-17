@@ -231,8 +231,8 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
-	err := rc.UpdateStoreLabels(storeID, labels)
-	if err != nil {
+
+	if err := rc.UpdateStoreLabels(storeID, labels); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -266,15 +266,14 @@ func (h *storeHandler) SetLabelsForce(w http.ResponseWriter, r *http.Request) {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
-	err := rc.UpdateStoreLabelsForce(storeID, labels)
-	if err != nil {
+
+	if err := rc.UpdateStoreLabelsForce(storeID, labels); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	h.rd.JSON(w, http.StatusOK, nil)
 }
-
 
 func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
