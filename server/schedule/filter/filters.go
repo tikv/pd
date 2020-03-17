@@ -583,6 +583,7 @@ func (f *specialUseFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 const (
 	specialUseKey       = "specialUse"
 	specialUseHotRegion = "hotRegion"
+	specialUseReserved  = "reserved"
 )
 
-var allSpecialUses = []string{specialUseHotRegion}
+var allSpecialUses = []string{specialUseHotRegion, specialUseReserved}
