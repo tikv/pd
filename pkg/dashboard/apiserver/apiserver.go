@@ -69,7 +69,7 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 		panic(err)
 	}
 
-	dashboardCfg.TiDBTLSConfig, err = cfg.Security.ToTiDBTLSConfig()
+	dashboardCfg.TiDBTLSConfig, err = cfg.Dashboard.ToTiDBTLSConfig()
 	if err != nil {
 		panic(err)
 	}

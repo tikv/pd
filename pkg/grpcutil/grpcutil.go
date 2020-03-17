@@ -34,11 +34,6 @@ type SecurityConfig struct {
 	KeyPath        string `toml:"key-path" json:"key-path"`
 	ClientCertAuth bool   `toml:"client-cert-auth" json:"client-cert-auth"`
 	CertAllowedCN  string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
-
-	// certs for connecting to TiDB, used by embedded tidb-dashboard
-	TiDBCAPath   string `toml:"tidb-cacert-path" json:"tidb_cacert_path"`
-	TiDBCertPath string `toml:"tidb-cert-path" json:"tidb_cert_path"`
-	TiDBKeyPath  string `toml:"tidb-key-path" json:"tidb_key_path"`
 }
 
 // ToTLSConfig generates tls config.
@@ -58,23 +53,6 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 		return nil, errors.WithStack(err)
 	}
 	return tlsConfig, nil
-}
-
-// ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
-func (s SecurityConfig) ToTiDBTLSConfig() (*tls.Config, error) {
-	if (len(s.TiDBCertPath) != 0 && len(s.TiDBKeyPath) != 0) || len(s.TiDBCAPath) != 0 {
-		tlsInfo := transport.TLSInfo{
-			CertFile:      s.TiDBCertPath,
-			KeyFile:       s.TiDBKeyPath,
-			TrustedCAFile: s.TiDBCAPath,
-		}
-		tlsConfig, err := tlsInfo.ClientConfig()
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		return tlsConfig, nil
-	}
-	return nil, nil
 }
 
 // GetClientConn returns a gRPC client connection.
