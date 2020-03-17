@@ -104,33 +104,31 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				resp := make(map[string]interface{})
 				listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				c.Assert(readJSON(listURL, &resp), IsNil)
-				exceptKV := []struct {
-					key   string
-					value float64
-				}{
-					{"min-hot-byte-rate", 100},
-					{"min-hot-key-rate", 10},
-					{"max-zombie-rounds", 3},
-					{"byte-rate-rank-step-ratio", 0.05},
-					{"key-rate-rank-step-ratio", 0.05},
-					{"count-rank-step-ratio", 0.01},
-					{"great-dec-ratio", 0.95},
-					{"minor-dec-ratio", 0.99},
+				expectMap := map[string]float64{
+					"min-hot-byte-rate":         100,
+					"min-hot-key-rate":          10,
+					"max-zombie-rounds":         3,
+					"max-peer-number":           100,
+					"byte-rate-rank-step-ratio": 0.05,
+					"key-rate-rank-step-ratio":  0.05,
+					"count-rank-step-ratio":     0.01,
+					"great-dec-ratio":           0.95,
+					"minor-dec-ratio":           0.99,
 				}
-				exceptMap := make(map[string]interface{})
-				for _, e := range exceptKV {
-					exceptMap[e.key] = e.value
-					c.Assert(resp[e.key], DeepEquals, exceptMap[e.key])
+				for key := range expectMap {
+					c.Assert(resp[key], DeepEquals, expectMap[key])
 				}
-				exceptMap["max-zombie-rounds"] = 5.0
+				dataMap := make(map[string]interface{})
+				dataMap["max-zombie-rounds"] = 5.0
+				expectMap["max-zombie-rounds"] = 5.0
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
-				body, err := json.Marshal(exceptMap)
+				body, err := json.Marshal(dataMap)
 				c.Assert(err, IsNil)
 				c.Assert(postJSON(updateURL, body), IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(listURL, &resp), IsNil)
-				for key := range exceptMap {
-					c.Assert(resp[key], DeepEquals, exceptMap[key])
+				for key := range expectMap {
+					c.Assert(resp[key], DeepEquals, expectMap[key])
 				}
 				// update again
 				err = postJSON(updateURL, body, func(res []byte, code int) {

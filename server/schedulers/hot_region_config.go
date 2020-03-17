@@ -31,7 +31,7 @@ import (
 )
 
 // params about hot region.
-var initHotRegionScheduleConfig = func() *hotRegionSchedulerConfig {
+func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	return &hotRegionSchedulerConfig{
 		MinHotByteRate:        100,
 		MinHotKeyRate:         10,
@@ -41,6 +41,7 @@ var initHotRegionScheduleConfig = func() *hotRegionSchedulerConfig {
 		CountRankStepRatio:    0.01,
 		GreatDecRatio:         0.95,
 		MinorDecRatio:         0.99,
+		MaxPeerNum:            100,
 	}
 }
 
@@ -51,6 +52,7 @@ type hotRegionSchedulerConfig struct {
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
 	MaxZombieRounds int     `json:"max-zombie-rounds"`
+	MaxPeerNum      int     `json:"max-peer-number"`
 
 	// rank step ratio decide the step when calculate rank
 	// step = max current * rank step ratio
@@ -65,13 +67,18 @@ func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
 	conf.RLock()
 	defer conf.RUnlock()
 	return schedule.EncodeConfig(conf)
-
 }
 
 func (conf *hotRegionSchedulerConfig) GetMaxZombieDuration() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return time.Duration(conf.MaxZombieRounds) * statistics.StoreHeartBeatReportInterval * time.Second
+}
+
+func (conf *hotRegionSchedulerConfig) GetMaxPeerNumber() int {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.MaxPeerNum
 }
 
 func (conf *hotRegionSchedulerConfig) GetByteRankStepRatio() float64 {
@@ -121,7 +128,6 @@ func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.R
 	router.HandleFunc("/list", conf.handleGetConfig).Methods("GET")
 	router.HandleFunc("/config", conf.handleSetConfig).Methods("POST")
 	router.ServeHTTP(w, r)
-
 }
 
 func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, r *http.Request) {

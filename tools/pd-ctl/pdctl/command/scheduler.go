@@ -447,7 +447,7 @@ func newConfigHotRegionCommand() *cobra.Command {
 		Short: "list the config item",
 		Run:   listSchedulerConfigCommandFunc})
 	c.AddCommand(&cobra.Command{
-		Use:   "set",
+		Use:   "set <key> <value>",
 		Short: "set the config item",
 		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) }})
 	return c

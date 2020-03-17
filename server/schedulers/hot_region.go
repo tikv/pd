@@ -63,7 +63,6 @@ func init() {
 const (
 	// HotRegionName is balance hot region scheduler name.
 	HotRegionName = "balance-hot-region-scheduler"
-
 	// HotRegionType is balance hot region scheduler type.
 	HotRegionType = "hot-region"
 	// HotReadRegionType is hot read region scheduler type.
@@ -72,7 +71,6 @@ const (
 	HotWriteRegionType = "hot-write-region"
 
 	hotRegionLimitFactor = 0.75
-	maxPeerNum           = 1000
 
 	minRegionScheduleInterval time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
 )
@@ -554,7 +552,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
-	// Return at most maxPeerNum peers, to prevent balanceSolver.solve() too slow.
+	// Return at most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
+	maxPeerNum := bs.sche.conf.GetMaxPeerNumber()
 
 	// filter pending region
 	appendItem := func(items []*statistics.HotPeerStat, item *statistics.HotPeerStat) []*statistics.HotPeerStat {
