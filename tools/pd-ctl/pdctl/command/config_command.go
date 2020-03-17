@@ -188,6 +188,7 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	delete(scheduleConfig, "schedulers-v2")
+	delete(scheduleConfig, "schedulers-payload")
 	data["schedule"] = scheduleConfig
 	r, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {

@@ -728,7 +728,7 @@ func (s *Server) GetConfig() *config.Config {
 	for i, sche := range sches {
 		payload[sche] = configs[i]
 	}
-	cfg.SchedulersPayload = payload
+	cfg.Schedule.SchedulersPayload = payload
 	return cfg
 }
 
