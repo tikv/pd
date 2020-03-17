@@ -29,7 +29,7 @@ type HotPeerStat struct {
 	// HotDegree records the hot region update times
 	HotDegree int `json:"hot_degree"`
 	// AntiCount used to eliminate some noise when remove region in cache
-	AntiCount int `json:"anti-count"`
+	AntiCount int `json:"anti_count"`
 
 	Kind     FlowKind `json:"kind"`
 	ByteRate float64  `json:"flow_bytes"`
