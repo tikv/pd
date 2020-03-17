@@ -46,6 +46,20 @@ func (c *ConfigManager) Create(ctx context.Context, request *configpb.CreateRequ
 	}, nil
 }
 
+// GetAll implements gRPC PDServer.
+func (c *ConfigManager) GetAll(ctx context.Context, request *configpb.GetAllRequest) (*configpb.GetAllResponse, error) {
+	if err := c.validateComponentRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	localConfigs, status := c.GetAllConfig(ctx)
+	return &configpb.GetAllResponse{
+		Header:       c.componentHeader(),
+		Status:       status,
+		LocalConfigs: localConfigs,
+	}, nil
+}
+
 // Get implements gRPC PDServer.
 func (c *ConfigManager) Get(ctx context.Context, request *configpb.GetRequest) (*configpb.GetResponse, error) {
 	if err := c.validateComponentRequest(request.GetHeader()); err != nil {
