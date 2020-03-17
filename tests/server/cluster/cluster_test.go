@@ -749,6 +749,45 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	c.Assert(raftCluster.GetRegionCount(), Equals, n)
 }
 
+func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
+
+	tiflashStore := &metapb.Store{
+		Id:      11,
+		Address: "127.0.0.1:1",
+		Labels:  []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}},
+		Version: "v4.1.0",
+	}
+
+	// cannot put TiFlash node without placement rules
+	_, err = putStore(c, grpcPDClient, clusterID, tiflashStore)
+	c.Assert(err, NotNil)
+	rep := leaderServer.GetConfig().Replication
+	rep.EnablePlacementRules = true
+	err = leaderServer.GetServer().SetReplicationConfig(rep)
+	c.Assert(err, IsNil)
+	_, err = putStore(c, grpcPDClient, clusterID, tiflashStore)
+	c.Assert(err, IsNil)
+
+	// cannot disable placement rules with TiFlash nodes
+	rep.EnablePlacementRules = false
+	err = leaderServer.GetServer().SetReplicationConfig(rep)
+	c.Assert(err, NotNil)
+	err = leaderServer.GetServer().GetRaftCluster().BuryStore(11, true)
+	c.Assert(err, IsNil)
+	err = leaderServer.GetServer().SetReplicationConfig(rep)
+	c.Assert(err, IsNil)
+}
+
 func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
 	req := &pdpb.IsBootstrappedRequest{
 		Header: testutil.NewRequestHeader(clusterID),
