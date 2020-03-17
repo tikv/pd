@@ -29,7 +29,7 @@ import (
 type ConfigClient interface {
 	GetClusterID(ctx context.Context) uint64
 	Create(ctx context.Context, v *configpb.Version, component, componentID, config string) (*configpb.Status, *configpb.Version, string, error)
-	GetAll(ctx context.Context) (*configpb.Status, []*configpb.LocalConfig, []*configpb.GlobalConfigEntry, error)
+	GetAll(ctx context.Context) (*configpb.Status, []*configpb.LocalConfig, error)
 	Get(ctx context.Context, v *configpb.Version, component, componentID string) (*configpb.Status, *configpb.Version, string, error)
 	Update(ctx context.Context, v *configpb.Version, kind *configpb.ConfigKind, entries []*configpb.ConfigEntry) (*configpb.Status, *configpb.Version, error)
 	Delete(ctx context.Context, v *configpb.Version, kind *configpb.ConfigKind) (*configpb.Status, error)
@@ -105,7 +105,7 @@ func (c *configClient) Create(ctx context.Context, v *configpb.Version, componen
 	return resp.GetStatus(), resp.GetVersion(), resp.GetConfig(), nil
 }
 
-func (c *configClient) GetAll(ctx context.Context) (*configpb.Status, []*configpb.LocalConfig, []*configpb.GlobalConfigEntry, error) {
+func (c *configClient) GetAll(ctx context.Context) (*configpb.Status, []*configpb.LocalConfig, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("configclient.GetAll", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -123,10 +123,10 @@ func (c *configClient) GetAll(ctx context.Context) (*configpb.Status, []*configp
 	if err != nil {
 		configCmdFailDurationGetAll.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, nil, errors.WithStack(err)
+		return nil, nil, errors.WithStack(err)
 	}
 
-	return resp.GetStatus(), resp.GetLocalConfigs(), resp.GetGlobalEntries(), nil
+	return resp.GetStatus(), resp.GetLocalConfigs(), nil
 }
 
 func (c *configClient) Get(ctx context.Context, v *configpb.Version, component, componentID string) (*configpb.Status, *configpb.Version, string, error) {
