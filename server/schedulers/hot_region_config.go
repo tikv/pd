@@ -50,7 +50,7 @@ type hotRegionSchedulerConfig struct {
 
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
-	MaxZombieRounds int     `json:"max-zombie-round"`
+	MaxZombieRounds int     `json:"max-zombie-rounds"`
 
 	// rank step ratio decide the step when calculate rank
 	// step = max current * rank step ratio

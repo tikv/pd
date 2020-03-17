@@ -98,7 +98,48 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		extraTestFunc func(name string, c *C)
 	}{
 		{name: "balance-leader-scheduler"},
-		{name: "balance-hot-region-scheduler"},
+		{
+			name: "balance-hot-region-scheduler",
+			extraTestFunc: func(name string, c *C) {
+				resp := make(map[string]interface{})
+				listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
+				c.Assert(readJSON(listURL, &resp), IsNil)
+				exceptKV := []struct {
+					key   string
+					value float64
+				}{
+					{"min-hot-byte-rate", 100},
+					{"min-hot-key-rate", 10},
+					{"max-zombie-rounds", 3},
+					{"byte-rate-rank-step-ratio", 0.05},
+					{"key-rate-rank-step-ratio", 0.05},
+					{"count-rank-step-ratio", 0.01},
+					{"great-dec-ratio", 0.95},
+					{"minor-dec-ratio", 0.99},
+				}
+				exceptMap := make(map[string]interface{})
+				for _, e := range exceptKV {
+					exceptMap[e.key] = e.value
+					c.Assert(resp[e.key], DeepEquals, exceptMap[e.key])
+				}
+				exceptMap["max-zombie-rounds"] = 5.0
+				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
+				body, err := json.Marshal(exceptMap)
+				c.Assert(err, IsNil)
+				c.Assert(postJSON(updateURL, body), IsNil)
+				resp = make(map[string]interface{})
+				c.Assert(readJSON(listURL, &resp), IsNil)
+				for key := range exceptMap {
+					c.Assert(resp[key], DeepEquals, exceptMap[key])
+				}
+				// update again
+				err = postJSON(updateURL, body, func(res []byte, code int) {
+					c.Assert(string(res), Equals, "no changed")
+					c.Assert(code, Equals, 200)
+				})
+				c.Assert(err, IsNil)
+			},
+		},
 		{name: "balance-region-scheduler"},
 		{name: "shuffle-leader-scheduler"},
 		{name: "shuffle-region-scheduler"},

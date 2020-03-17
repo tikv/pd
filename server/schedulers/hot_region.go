@@ -518,7 +518,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	}
 
 	for i := 0; i < len(ops); i++ {
-		// TODO: multiple operator should as txn.
+		// TODO: multiple operators need to be atomic.
 		if !bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i], bs.rwTy, bs.opTy) {
 			return nil
 		}
