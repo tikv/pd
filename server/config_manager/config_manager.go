@@ -123,7 +123,7 @@ func (c *ConfigManager) GetComponent(id string) string {
 }
 
 // GetAllConfig returns all configs in the config manager.
-func (c *ConfigManager) GetAllConfig(ctx context.Context) ([]*configpb.LocalConfig, []*configpb.GlobalConfigEntry, *configpb.Status) {
+func (c *ConfigManager) GetAllConfig(ctx context.Context) ([]*configpb.LocalConfig, *configpb.Status) {
 	c.RLock()
 	defer c.RUnlock()
 	localConfigs := make([]*configpb.LocalConfig, 0, 8)
@@ -131,7 +131,7 @@ func (c *ConfigManager) GetAllConfig(ctx context.Context) ([]*configpb.LocalConf
 		for componentID, cfg := range localCfg {
 			config, err := encodeConfigs(cfg.getConfigs())
 			if err != nil {
-				return nil, nil, &configpb.Status{
+				return nil, &configpb.Status{
 					Code:    configpb.StatusCode_UNKNOWN,
 					Message: errEncode(err),
 				}
@@ -145,19 +145,7 @@ func (c *ConfigManager) GetAllConfig(ctx context.Context) ([]*configpb.LocalConf
 		}
 	}
 
-	globalEntries := make([]*configpb.GlobalConfigEntry, 0, len(c.GlobalCfgs))
-	for component, cfg := range c.GlobalCfgs {
-		for _, v := range cfg.GetConfigEntries() {
-			globalEntries = append(globalEntries, &configpb.GlobalConfigEntry{
-				Version:   cfg.GetVersion(),
-				Component: component,
-				Name:      v.GetName(),
-				Value:     v.GetValue(),
-			})
-		}
-	}
-
-	return localConfigs, globalEntries, &configpb.Status{Code: configpb.StatusCode_OK}
+	return localConfigs, &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
 // GetConfig returns config and the latest version.

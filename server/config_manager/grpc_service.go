@@ -52,12 +52,11 @@ func (c *ConfigManager) GetAll(ctx context.Context, request *configpb.GetAllRequ
 		return nil, err
 	}
 
-	localConfigs, globalEntries, status := c.GetAllConfig(ctx)
+	localConfigs, status := c.GetAllConfig(ctx)
 	return &configpb.GetAllResponse{
 		Header:        c.componentHeader(),
 		Status:        status,
 		LocalConfigs:  localConfigs,
-		GlobalEntries: globalEntries,
 	}, nil
 }
 
