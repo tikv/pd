@@ -60,6 +60,7 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
+// GetOneAllowedCN only gets the first one CN.
 func (s SecurityConfig) GetOneAllowedCN() (string, error) {
 	allowedCN := ""
 	i := len(s.CertAllowedCN)
