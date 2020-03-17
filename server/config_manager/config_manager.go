@@ -122,6 +122,7 @@ func (c *ConfigManager) GetComponent(id string) string {
 	return ""
 }
 
+// GetAllConfig returns all configs in the config manager.
 func (c *ConfigManager) GetAllConfig(ctx context.Context) ([]*configpb.LocalConfig, []*configpb.GlobalConfigEntry, *configpb.Status) {
 	c.RLock()
 	defer c.RUnlock()
