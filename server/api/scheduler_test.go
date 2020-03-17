@@ -108,7 +108,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 					"min-hot-byte-rate":         100,
 					"min-hot-key-rate":          10,
 					"max-zombie-rounds":         3,
-					"max-peer-number":           100,
+					"max-peer-number":           1000,
 					"byte-rate-rank-step-ratio": 0.05,
 					"key-rate-rank-step-ratio":  0.05,
 					"count-rank-step-ratio":     0.01,

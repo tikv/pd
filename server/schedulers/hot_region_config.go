@@ -41,7 +41,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		CountRankStepRatio:    0.01,
 		GreatDecRatio:         0.95,
 		MinorDecRatio:         0.99,
-		MaxPeerNum:            100,
+		MaxPeerNum:            1000,
 	}
 }
 
