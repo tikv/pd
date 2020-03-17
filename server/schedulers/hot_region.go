@@ -71,8 +71,6 @@ const (
 	HotWriteRegionType = "hot-write-region"
 
 	hotRegionLimitFactor = 0.75
-
-	minRegionScheduleInterval time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
 )
 
 type hotScheduler struct {
