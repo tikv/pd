@@ -15,6 +15,7 @@ package configmanager
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -119,6 +120,32 @@ func (c *ConfigManager) GetComponent(id string) string {
 		}
 	}
 	return ""
+}
+
+// GetAllConfig returns all configs in the config manager.
+func (c *ConfigManager) GetAllConfig(ctx context.Context) ([]*configpb.LocalConfig, *configpb.Status) {
+	c.RLock()
+	defer c.RUnlock()
+	localConfigs := make([]*configpb.LocalConfig, 0, 8)
+	for component, localCfg := range c.LocalCfgs {
+		for componentID, cfg := range localCfg {
+			config, err := encodeConfigs(cfg.getConfigs())
+			if err != nil {
+				return nil, &configpb.Status{
+					Code:    configpb.StatusCode_UNKNOWN,
+					Message: errEncode(err),
+				}
+			}
+			localConfigs = append(localConfigs, &configpb.LocalConfig{
+				Version:     cfg.GetVersion(),
+				Component:   component,
+				ComponentId: componentID,
+				Config:      config,
+			})
+		}
+	}
+
+	return localConfigs, &configpb.Status{Code: configpb.StatusCode_OK}
 }
 
 // GetConfig returns config and the latest version.

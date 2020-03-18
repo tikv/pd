@@ -773,17 +773,27 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if cfg.EnablePlacementRules {
+	old := s.scheduleOpt.GetReplication().Load()
+	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
 			return errors.WithStack(cluster.ErrNotBootstrapped)
 		}
-		// initialize rule manager.
-		if err := raftCluster.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
-			return err
+		if cfg.EnablePlacementRules {
+			// initialize rule manager.
+			if err := raftCluster.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
+				return err
+			}
+		} else {
+			// NOTE: can be removed after placement rules feature is enabled by default.
+			for _, s := range raftCluster.GetStores() {
+				if !s.IsTombstone() && isTiFlashStore(s.GetMeta()) {
+					return errors.New("cannot disable placement rules with TiFlash nodes")
+				}
+			}
 		}
 	}
-	old := s.scheduleOpt.GetReplication().Load()
+
 	s.scheduleOpt.GetReplication().Store(&cfg)
 	if err := s.scheduleOpt.Persist(s.storage); err != nil {
 		s.scheduleOpt.GetReplication().Store(old)
