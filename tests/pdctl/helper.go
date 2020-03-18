@@ -37,6 +37,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var force bool
 // InitCommand is used to initialize command.
 func InitCommand() *cobra.Command {
 	commandFlags := pdctl.CommandFlags{}
