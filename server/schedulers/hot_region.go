@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -39,21 +40,29 @@ func init() {
 		}
 	})
 	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newHotScheduler(opController), nil
+		conf := initHotRegionScheduleConfig()
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		conf.storage = storage
+		return newHotScheduler(opController, conf), nil
 	})
+
 	// FIXME: remove this two schedule after the balance test move in schedulers package
-	schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newHotWriteScheduler(opController), nil
-	})
-	schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newHotReadScheduler(opController), nil
-	})
+	{
+		schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+			return newHotWriteScheduler(opController, initHotRegionScheduleConfig()), nil
+		})
+		schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+			return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
+		})
+
+	}
 }
 
 const (
 	// HotRegionName is balance hot region scheduler name.
 	HotRegionName = "balance-hot-region-scheduler"
-
 	// HotRegionType is balance hot region scheduler type.
 	HotRegionType = "hot-region"
 	// HotReadRegionType is hot read region scheduler type.
@@ -62,24 +71,6 @@ const (
 	HotWriteRegionType = "hot-write-region"
 
 	hotRegionLimitFactor = 0.75
-
-	maxPeerNum = 1000
-
-	maxZombieDur time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
-
-	minRegionScheduleInterval time.Duration = statistics.StoreHeartBeatReportInterval * time.Second
-
-	minHotByteRate = 100
-	minHotKeyRate  = 10
-
-	// rank step ratio decide the step when calculate rank
-	// step = max current * rank step ratio
-	byteRateRankStepRatio = 0.05
-	keyRateRankStepRatio  = 0.05
-	countRankStepRatio    = 0.1
-
-	greatDecRatio = 0.95
-	minorDecRatio = 0.99
 
 	minWeight = 1e-6
 )
@@ -100,9 +91,11 @@ type hotScheduler struct {
 	// temporary states but exported to API or metrics
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
 	pendingSums [resourceTypeLen]map[uint64]Influence
+	// config of hot scheduler
+	conf *hotRegionSchedulerConfig
 }
 
-func newHotScheduler(opController *schedule.OperatorController) *hotScheduler {
+func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
 	base := NewBaseScheduler(opController)
 	ret := &hotScheduler{
 		name:           HotRegionName,
@@ -112,6 +105,7 @@ func newHotScheduler(opController *schedule.OperatorController) *hotScheduler {
 		types:          []rwType{write, read},
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 		regionPendings: make(map[uint64][2]*operator.Operator),
+		conf:           conf,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.pendings[ty] = map[*pendingInfluence]struct{}{}
@@ -120,15 +114,15 @@ func newHotScheduler(opController *schedule.OperatorController) *hotScheduler {
 	return ret
 }
 
-func newHotReadScheduler(opController *schedule.OperatorController) *hotScheduler {
-	ret := newHotScheduler(opController)
+func newHotReadScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
+	ret := newHotScheduler(opController, conf)
 	ret.name = ""
 	ret.types = []rwType{read}
 	return ret
 }
 
-func newHotWriteScheduler(opController *schedule.OperatorController) *hotScheduler {
-	ret := newHotScheduler(opController)
+func newHotWriteScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
+	ret := newHotScheduler(opController, conf)
 	ret.name = ""
 	ret.types = []rwType{write}
 	return ret
@@ -140,6 +134,10 @@ func (h *hotScheduler) GetName() string {
 
 func (h *hotScheduler) GetType() string {
 	return HotRegionType
+}
+
+func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.conf.ServeHTTP(w, r)
 }
 
 func (h *hotScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -226,7 +224,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 
 func (h *hotScheduler) summaryPendingInfluence() {
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
-		h.pendingSums[ty] = summaryPendingInfluence(h.pendings[ty], calcPendingWeight)
+		h.pendingSums[ty] = summaryPendingInfluence(h.pendings[ty], h.calcPendingWeight)
 	}
 	h.gcRegionPendings()
 }
@@ -236,7 +234,7 @@ func (h *hotScheduler) gcRegionPendings() {
 		empty := true
 		for ty, op := range pendings {
 			if op != nil && op.IsEnd() {
-				if time.Now().After(op.GetCreateTime().Add(minRegionScheduleInterval)) {
+				if time.Now().After(op.GetCreateTime().Add(h.conf.GetMaxZombieDuration())) {
 					schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
 					pendings[ty] = nil
 				}
@@ -334,23 +332,27 @@ func filterHotPeers(
 	return ret
 }
 
-func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, rwTy rwType, opTy opType) {
-	influence := newPendingInfluence(op, srcStore, dstStore, infl)
+func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, rwTy rwType, opTy opType) bool {
 	regionID := op.RegionID()
+	_, ok := h.regionPendings[regionID]
+	if ok {
+		schedulerStatus.WithLabelValues(h.GetName(), "pending_op_fails").Inc()
+		return false
+	}
 
+	influence := newPendingInfluence(op, srcStore, dstStore, infl)
 	rcTy := toResourceType(rwTy, opTy)
 	h.pendings[rcTy][influence] = struct{}{}
 
-	if _, ok := h.regionPendings[regionID]; !ok {
-		h.regionPendings[regionID] = [2]*operator.Operator{nil, nil}
-	}
+	h.regionPendings[regionID] = [2]*operator.Operator{nil, nil}
 	{ // h.pendingOpInfos[regionID][ty] = influence
 		tmp := h.regionPendings[regionID]
 		tmp[opTy] = op
 		h.regionPendings[regionID] = tmp
 	}
 
-	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
+	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_create").Inc()
+	return true
 }
 
 func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
@@ -443,9 +445,9 @@ func (bs *balanceSolver) init() {
 	}
 
 	bs.rankStep = &storeLoad{
-		ByteRate: maxCur.ByteRate * byteRateRankStepRatio,
-		KeyRate:  maxCur.KeyRate * keyRateRankStepRatio,
-		Count:    maxCur.Count * countRankStepRatio,
+		ByteRate: maxCur.ByteRate * bs.sche.conf.GetByteRankStepRatio(),
+		KeyRate:  maxCur.KeyRate * bs.sche.conf.GetKeyRankStepRatio(),
+		Count:    maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
 }
 
@@ -513,7 +515,6 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
 				bs.calcProgressiveRank()
-
 				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
 					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
 						ops = newOps
@@ -527,7 +528,10 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	}
 
 	for i := 0; i < len(ops); i++ {
-		bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i], bs.rwTy, bs.opTy)
+		// TODO: multiple operators need to be atomic.
+		if !bs.sche.addPendingInfluence(ops[i], best.srcStoreID, best.dstStoreID, infls[i], bs.rwTy, bs.opTy) {
+			return nil
+		}
 	}
 	return ops
 }
@@ -560,9 +564,22 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
-	// Return at most maxPeerNum peers, to prevent balanceSolver.solve() too slow.
+	// Return at most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
+	maxPeerNum := bs.sche.conf.GetMaxPeerNumber()
+
+	// filter pending region
+	appendItem := func(items []*statistics.HotPeerStat, item *statistics.HotPeerStat) []*statistics.HotPeerStat {
+		if _, ok := bs.sche.regionPendings[item.ID()]; !ok {
+			items = append(items, item)
+		}
+		return items
+	}
 	if len(ret) <= maxPeerNum {
-		return ret
+		nret := make([]*statistics.HotPeerStat, 0, len(ret))
+		for _, peer := range ret {
+			nret = appendItem(nret, peer)
+		}
+		return nret
 	}
 
 	byteSort := make([]*statistics.HotPeerStat, len(ret))
@@ -597,7 +614,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	}
 	ret = make([]*statistics.HotPeerStat, 0, len(union))
 	for peer := range union {
-		ret = append(ret, peer)
+		ret = appendItem(ret, peer)
 	}
 	return ret
 }
@@ -726,9 +743,10 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		}
 	} else {
 		keyDecRatio := (dstLd.KeyRate + peerKeyRate) / (srcLd.KeyRate + 1)
-		keyHot := peer.GetKeyRate() >= minHotKeyRate
+		keyHot := peer.GetKeyRate() >= bs.sche.conf.GetMinHotKeyRate()
 		byteDecRatio := (dstLd.ByteRate + peerByteRate) / (srcLd.ByteRate + 1)
-		byteHot := peer.GetByteRate() > minHotByteRate
+		byteHot := peer.GetByteRate() > bs.sche.conf.GetMinHotByteRate()
+		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
 		switch {
 		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
 			// Both byte rate and key rate are balanced, the best choice.
@@ -1032,7 +1050,7 @@ func calcStoreWeight(regionWeight, leaderWeight float64) float64 {
 	return math.Max(storeWeight, minWeight)
 }
 
-func calcPendingWeight(op *operator.Operator) float64 {
+func (h *hotScheduler) calcPendingWeight(op *operator.Operator) float64 {
 	if op.CheckExpired() || op.CheckTimeout() {
 		return 0
 	}
@@ -1043,6 +1061,7 @@ func calcPendingWeight(op *operator.Operator) float64 {
 	switch status {
 	case operator.SUCCESS:
 		zombieDur := time.Since(op.GetReachTimeOf(status))
+		maxZombieDur := h.conf.GetMaxZombieDuration()
 		if zombieDur >= maxZombieDur {
 			return 0
 		}

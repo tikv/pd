@@ -33,7 +33,8 @@ type SecurityConfig struct {
 	// KeyPath is the path of file that contains X509 key in PEM format.
 	KeyPath        string `toml:"key-path" json:"key-path"`
 	ClientCertAuth bool   `toml:"client-cert-auth" json:"client-cert-auth"`
-	CertAllowedCN  string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
+	// CertAllowedCN is a CN which must be provided by a client
+	CertAllowedCN []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
 }
 
 // ToTLSConfig generatres tls config.
@@ -41,18 +42,34 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
 		return nil, nil
 	}
+	allowedCN, err := s.GetOneAllowedCN()
+	if err != nil {
+		return nil, err
+	}
 	tlsInfo := transport.TLSInfo{
 		CertFile:       s.CertPath,
 		KeyFile:        s.KeyPath,
 		TrustedCAFile:  s.CAPath,
 		ClientCertAuth: s.ClientCertAuth,
-		AllowedCN:      s.CertAllowedCN,
+		AllowedCN:      allowedCN,
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 	return tlsConfig, nil
+}
+
+// GetOneAllowedCN only gets the first one CN.
+func (s SecurityConfig) GetOneAllowedCN() (string, error) {
+	switch len(s.CertAllowedCN) {
+	case 1:
+		return s.CertAllowedCN[0], nil
+	case 0:
+		return "", nil
+	default:
+		return "", errors.New("Currently only supports one CN")
+	}
 }
 
 // GetClientConn returns a gRPC client connection.
