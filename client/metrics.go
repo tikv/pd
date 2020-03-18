@@ -98,11 +98,13 @@ var (
 
 	// config
 	configCmdDurationCreate = configCmdDuration.WithLabelValues("create")
+	configCmdDurationGetAll = configCmdDuration.WithLabelValues("get_all")
 	configCmdDurationGet    = configCmdDuration.WithLabelValues("get")
 	configCmdDurationUpdate = configCmdDuration.WithLabelValues("update")
 	configCmdDurationDelete = configCmdDuration.WithLabelValues("delete")
 
 	configCmdFailDurationCreate = configCmdFailedDuration.WithLabelValues("create")
+	configCmdFailDurationGetAll = configCmdFailedDuration.WithLabelValues("get_all")
 	configCmdFailDurationGet    = configCmdFailedDuration.WithLabelValues("get")
 	configCmdFailDurationUpdate = configCmdFailedDuration.WithLabelValues("update")
 	configCmdFailDurationDelete = configCmdFailedDuration.WithLabelValues("delete")

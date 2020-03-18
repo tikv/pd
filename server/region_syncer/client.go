@@ -91,7 +91,9 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 		return nil, errors.WithStack(err)
 	}
 
+	s.Lock()
 	s.regionSyncerCtx, s.regionSyncerCancel = ctx, cancel
+	s.Unlock()
 	return cc, nil
 }
 
