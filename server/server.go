@@ -144,7 +144,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup, func())
+type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup)
 
 // ServiceGroup used to register the service.
 type ServiceGroup struct {
@@ -161,32 +161,19 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-type lazyHandler struct {
-	options []func()
-	engine  *negroni.Negroni
-}
-
-func (lazy *lazyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	for _, f := range lazy.options {
-		f()
-	}
-
-	lazy.engine.ServeHTTP(w, r)
-}
-
 func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
 	userHandlers := make(map[string]http.Handler)
+	registerMap := make(map[string]struct{})
 
 	apiService := negroni.New()
 	recovery := negroni.NewRecovery()
 	apiService.Use(recovery)
 	router := mux.NewRouter()
-	registerMap := make(map[string]struct{})
-	var options []func()
+
 	for _, build := range serviceBuilders {
-		handler, info, f := build(ctx, svr)
-		if f != nil {
-			options = append(options, f)
+		handler, info := build(ctx, svr)
+		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
+			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
 		}
 		var pathPrefix string
 		if len(info.PathPrefix) != 0 {
@@ -220,10 +207,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 		}
 	}
 	apiService.UseHandler(router)
-	userHandlers[pdAPIPrefix] = &lazyHandler{
-		engine:  apiService,
-		options: options,
-	}
+	userHandlers[pdAPIPrefix] = apiService
 
 	return userHandlers, nil
 }
@@ -752,19 +736,6 @@ func (s *Server) GetConfig() *config.Config {
 func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
 	cfg := &config.ScheduleConfig{}
 	*cfg = *s.scheduleOpt.Load()
-	storage := s.GetStorage()
-	if storage == nil {
-		return cfg
-	}
-	sches, configs, err := storage.LoadAllScheduleConfig()
-	if err != nil {
-		return cfg
-	}
-	payload := make(map[string]string)
-	for i, sche := range sches {
-		payload[sche] = configs[i]
-	}
-	cfg.SchedulersPayload = payload
 	return cfg
 }
 
@@ -805,17 +776,27 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if cfg.EnablePlacementRules {
+	old := s.scheduleOpt.GetReplication().Load()
+	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
 			return errors.WithStack(cluster.ErrNotBootstrapped)
 		}
-		// initialize rule manager.
-		if err := raftCluster.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
-			return err
+		if cfg.EnablePlacementRules {
+			// initialize rule manager.
+			if err := raftCluster.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
+				return err
+			}
+		} else {
+			// NOTE: can be removed after placement rules feature is enabled by default.
+			for _, s := range raftCluster.GetStores() {
+				if !s.IsTombstone() && isTiFlashStore(s.GetMeta()) {
+					return errors.New("cannot disable placement rules with TiFlash nodes")
+				}
+			}
 		}
 	}
-	old := s.scheduleOpt.GetReplication().Load()
+
 	s.scheduleOpt.GetReplication().Store(&cfg)
 	if err := s.scheduleOpt.Persist(s.storage); err != nil {
 		s.scheduleOpt.GetReplication().Store(old)
@@ -1014,6 +995,15 @@ func (s *Server) GetMetaRegions() []*metapb.Region {
 	cluster := s.GetRaftCluster()
 	if cluster != nil {
 		return cluster.GetMetaRegions()
+	}
+	return nil
+}
+
+// GetRegions gets regions from cluster.
+func (s *Server) GetRegions() []*core.RegionInfo {
+	cluster := s.GetRaftCluster()
+	if cluster != nil {
+		return cluster.GetRegions()
 	}
 	return nil
 }
@@ -1237,19 +1227,30 @@ func (s *Server) configCheckLoop() {
 			log.Info("config check has been stopped")
 			return
 		case <-ticker.C:
-			version := s.GetConfigVersion()
-			config, err := s.getComponentConfig(ctx, version, compoenntID)
-			if err != nil {
-				log.Error("failed to get config", zap.Error(err))
-			}
-			if config == "" {
-				continue
-			}
-			if err := s.updateComponentConfig(config); err != nil {
+			if err := s.updateConfig(ctx, compoenntID); err != nil {
 				log.Error("failed to update config", zap.Error(err))
+			}
+
+			rc := s.GetRaftCluster()
+			if s.GetMember().IsLeader() && rc != nil {
+				if !rc.GetConfigCheck() {
+					rc.SetConfigCheck()
+				}
 			}
 		}
 	}
+}
+
+func (s *Server) updateConfig(ctx context.Context, compoenntID string) error {
+	version := s.GetConfigVersion()
+	config, err := s.getComponentConfig(ctx, version, compoenntID)
+	if err != nil {
+		return err
+	}
+	if config == "" {
+		return nil
+	}
+	return s.updateComponentConfig(config)
 }
 
 func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Version, componentID, config string) error {

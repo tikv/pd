@@ -104,6 +104,7 @@ type RaftCluster struct {
 	client      *clientv3.Client
 
 	schedulersCallback func()
+	configCheck        bool
 }
 
 // Status saves some state information.
@@ -319,7 +320,7 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.running = false
-
+	c.configCheck = false
 	close(c.quit)
 	c.coordinator.stop()
 	c.Unlock()
@@ -434,7 +435,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
-	var saveKV, saveCache, isNew bool
+	var saveKV, saveCache, isNew, statsChange bool
 	if origin == nil {
 		log.Debug("insert new region",
 			zap.Uint64("region-id", region.GetID()),
@@ -493,36 +494,28 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
 			region.GetKeysRead() != origin.GetKeysRead() {
-			saveCache = true
+			saveCache, statsChange = true, true
 		}
 	}
 
-	if saveKV && c.storage != nil {
-		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
-			// Not successfully saved to storage is not fatal, it only leads to longer warm-up
-			// after restart. Here we only log the error then go on updating cache.
-			log.Error("failed to save region to storage",
-				zap.Uint64("region-id", region.GetID()),
-				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
-				zap.Error(err))
-		}
-		regionEventCounter.WithLabelValues("update_kv").Inc()
-		select {
-		case c.changedRegions <- region:
-		default:
-		}
-	}
-	if len(writeItems) == 0 && len(readItems) == 0 && !saveCache && !isNew {
+	if len(writeItems) == 0 && len(readItems) == 0 && !saveKV && !saveCache && !isNew {
 		return nil
 	}
 
-	c.Lock()
-	defer c.Unlock()
-	if isNew {
-		c.prepareChecker.collect(region)
-	}
+	failpoint.Inject("concurrentRegionHeartbeat", func() {
+		time.Sleep(500 * time.Millisecond)
+	})
 
+	c.Lock()
 	if saveCache {
+		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
+		// check its validation again here.
+		//
+		// However it can't solve the race condition of concurrent heartbeats from the same region.
+		if _, err := c.core.PreCheckPutRegion(region); err != nil {
+			c.Unlock()
+			return err
+		}
 		overlaps := c.core.PutRegion(region)
 		if c.storage != nil {
 			for _, item := range overlaps {
@@ -553,6 +546,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
+	if isNew {
+		c.prepareChecker.collect(region)
+	}
+
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.takeRegionStoresLocked(region))
 	}
@@ -563,6 +560,28 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	for _, readItem := range readItems {
 		c.hotSpotCache.Update(readItem)
 	}
+	c.Unlock()
+
+	// If there are concurrent heartbeats from the same region, the last write will win even if
+	// writes to storage in the critical area. So don't use mutex to protect it.
+	if saveKV && c.storage != nil {
+		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
+			// Not successfully saved to storage is not fatal, it only leads to longer warm-up
+			// after restart. Here we only log the error then go on updating cache.
+			log.Error("failed to save region to storage",
+				zap.Uint64("region-id", region.GetID()),
+				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
+				zap.Error(err))
+		}
+		regionEventCounter.WithLabelValues("update_kv").Inc()
+	}
+	if saveKV || statsChange {
+		select {
+		case c.changedRegions <- region:
+		default:
+		}
+	}
+
 	return nil
 }
 
@@ -949,6 +968,20 @@ func (c *RaftCluster) UnblockStore(storeID uint64) {
 // AttachAvailableFunc attaches an available function to a specific store.
 func (c *RaftCluster) AttachAvailableFunc(storeID uint64, f func() bool) {
 	c.core.AttachAvailableFunc(storeID, f)
+}
+
+// SetConfigCheck sets a flag for preventing outdated config.
+func (c *RaftCluster) SetConfigCheck() {
+	c.Lock()
+	defer c.Unlock()
+	c.configCheck = true
+}
+
+// GetConfigCheck returns a configCheck flag.
+func (c *RaftCluster) GetConfigCheck() bool {
+	c.Lock()
+	defer c.Unlock()
+	return c.configCheck
 }
 
 // SetStoreState sets up a store's state.
@@ -1432,7 +1465,7 @@ func (c *RaftCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel
 func (c *RaftCluster) isPrepared() bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.prepareChecker.check(c)
+	return c.prepareChecker.check(c) && c.configCheck
 }
 
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.

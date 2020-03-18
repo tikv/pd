@@ -188,10 +188,9 @@ func (s *Server) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*
 	}, nil
 }
 
-// checkStore2 returns an error response if the store exists and is in tombstone state.
+// checkStore returns an error response if the store exists and is in tombstone state.
 // It returns nil if it can't get the store.
-// Copied from server/command.go
-func checkStore2(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
+func checkStore(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
 	store := rc.GetStore(storeID)
 	if store != nil {
 		if store.GetState() == metapb.StoreState_Tombstone {
@@ -216,10 +215,15 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	store := request.GetStore()
-	if pberr := checkStore2(rc, store.GetId()); pberr != nil {
+	if pberr := checkStore(rc, store.GetId()); pberr != nil {
 		return &pdpb.PutStoreResponse{
 			Header: s.errorHeader(pberr),
 		}, nil
+	}
+
+	// NOTE: can be removed when placement rules feature is enabled by default.
+	if !s.GetConfig().Replication.EnablePlacementRules && isTiFlashStore(store) {
+		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 
 	if err := rc.PutStore(store); err != nil {
@@ -284,7 +288,7 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if pberr := checkStore2(rc, request.GetStats().GetStoreId()); pberr != nil {
+	if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
 		return &pdpb.StoreHeartbeatResponse{
 			Header: s.errorHeader(pberr),
 		}, nil

@@ -13,7 +13,11 @@
 
 package placement
 
-import "sort"
+import (
+	"encoding/hex"
+	"encoding/json"
+	"sort"
+)
 
 // PeerRoleType is the expected peer type of the placement rule.
 type PeerRoleType string
@@ -51,6 +55,11 @@ type Rule struct {
 	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically
 }
 
+func (r Rule) String() string {
+	b, _ := json.Marshal(r)
+	return string(b)
+}
+
 // Key returns (groupID, ID) as the global unique key of a rule.
 func (r Rule) Key() [2]string {
 	return [2]string{r.GroupID, r.ID}
@@ -58,7 +67,7 @@ func (r Rule) Key() [2]string {
 
 // StoreKey returns the rule's key for persistent store.
 func (r Rule) StoreKey() string {
-	return r.StartKeyHex + "-" + r.EndKeyHex
+	return hex.EncodeToString([]byte(r.GroupID)) + "-" + hex.EncodeToString([]byte(r.ID))
 }
 
 // Rules are ordered by (GroupID, Index, ID).
@@ -87,8 +96,7 @@ func sortRules(rules []*Rule) {
 
 // Sort Rules, trim concealed rules.
 func prepareRulesForApply(rules []*Rule) []*Rule {
-	sortRules(rules)
-	res := rules[:0]
+	var res []*Rule
 	var i, j int
 	for i = 1; i < len(rules); i++ {
 		if rules[j].GroupID != rules[i].GroupID {

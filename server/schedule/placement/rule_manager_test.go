@@ -74,6 +74,7 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 	rules := []*Rule{
 		{GroupID: "pd", ID: "default", Role: "voter", Count: 5},
 		{GroupID: "foo", ID: "bar", StartKeyHex: "", EndKeyHex: "abcd", Role: "learner", Count: 1},
+		{GroupID: "foo", ID: "baz", Role: "voter", Count: 1},
 	}
 	for _, r := range rules {
 		s.manager.SetRule(r)
@@ -81,9 +82,10 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 	m2 := NewRuleManager(s.store)
 	err := m2.Initialize(3, []string{"no", "labels"})
 	c.Assert(err, IsNil)
-	c.Assert(m2.GetAllRules(), HasLen, 2)
+	c.Assert(m2.GetAllRules(), HasLen, 3)
 	c.Assert(m2.GetRule("pd", "default"), DeepEquals, rules[0])
 	c.Assert(m2.GetRule("foo", "bar"), DeepEquals, rules[1])
+	c.Assert(m2.GetRule("foo", "baz"), DeepEquals, rules[2])
 }
 
 func (s *testManagerSuite) TestKeys(c *C) {

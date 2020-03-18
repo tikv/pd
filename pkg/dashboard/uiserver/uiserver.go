@@ -31,16 +31,16 @@ var serviceGroup = server.ServiceGroup{
 }
 
 // NewService returns an http.Handler that serves the dashboard UI
-func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, func()) {
+func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup) {
 	fs := assetFS()
 	if fs != nil {
 		fileServer := http.StripPrefix(serviceGroup.PathPrefix, http.FileServer(fs))
 		log.Info("Enabled Dashboard UI", zap.String("path", serviceGroup.PathPrefix))
-		return fileServer, serviceGroup, nil
+		return fileServer, serviceGroup
 	}
 
 	emptyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "Dashboard UI is not built.\n")
 	})
-	return emptyHandler, serviceGroup, nil
+	return emptyHandler, serviceGroup
 }

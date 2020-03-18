@@ -17,11 +17,12 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"sort"
 	"sync"
 
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 // RuleManager is responsible for the lifecycle of all placement Rules.
@@ -31,7 +32,7 @@ type RuleManager struct {
 	sync.RWMutex
 	initialized bool
 	rules       map[[2]string]*Rule
-	splitKeys   [][]byte
+	ruleList    ruleList
 }
 
 // NewRuleManager creates a RuleManager instance.
@@ -51,19 +52,10 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 		return nil
 	}
 
-	var rules []*Rule
-	ok, err := m.store.LoadRules(func(v string) error {
-		var r Rule
-		if err := json.Unmarshal([]byte(v), &r); err != nil {
-			return err
-		}
-		rules = append(rules, &r)
-		return nil
-	})
-	if err != nil {
+	if err := m.loadRules(); err != nil {
 		return err
 	}
-	if !ok {
+	if len(m.rules) == 0 {
 		// migrate from old config.
 		defaultRule := &Rule{
 			GroupID:        "pd",
@@ -75,16 +67,53 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 		if err := m.store.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
 			return err
 		}
-		rules = append(rules, defaultRule)
+		m.rules[defaultRule.Key()] = defaultRule
 	}
-	for _, r := range rules {
-		if err = m.adjustRule(r); err != nil {
+	m.ruleList = buildRuleList(m.rules)
+	m.initialized = true
+	return nil
+}
+
+func (m *RuleManager) loadRules() error {
+	var toSave []*Rule
+	var toDelete []string
+	_, err := m.store.LoadRules(func(k, v string) {
+		var r Rule
+		if err := json.Unmarshal([]byte(v), &r); err != nil {
+			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v))
+			toDelete = append(toDelete, k)
+			return
+		}
+		if err := m.adjustRule(&r); err != nil {
+			log.Error("rule is in bad format", zap.Error(err), zap.String("rule-key", k), zap.String("rule-value", v))
+			toDelete = append(toDelete, k)
+			return
+		}
+		if _, ok := m.rules[r.Key()]; ok {
+			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v))
+			toDelete = append(toDelete, k)
+			return
+		}
+		if k != r.StoreKey() {
+			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v))
+			toDelete = append(toDelete, k)
+			toSave = append(toSave, &r)
+		}
+		m.rules[r.Key()] = &r
+	})
+	if err != nil {
+		return err
+	}
+	for _, s := range toSave {
+		if err = m.store.SaveRule(s.StoreKey(), s); err != nil {
 			return err
 		}
-		m.rules[r.Key()] = r
 	}
-	m.updateSplitKeys()
-	m.initialized = true
+	for _, d := range toDelete {
+		if err = m.store.DeleteRule(d); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -149,7 +178,9 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 		}
 		return err
 	}
-	m.updateSplitKeys()
+
+	log.Info("placement rule updated", zap.Stringer("rule", rule))
+	m.ruleList = buildRuleList(m.rules)
 	return nil
 }
 
@@ -168,41 +199,16 @@ func (m *RuleManager) DeleteRule(group, id string) error {
 		m.rules[key] = old
 		return err
 	}
-	m.updateSplitKeys()
+	log.Info("placement rule removed", zap.Stringer("rule", old))
+	m.ruleList = buildRuleList(m.rules)
 	return nil
-}
-
-func (m *RuleManager) updateSplitKeys() {
-	keys := m.splitKeys[:0]
-	m.splitKeys = m.splitKeys[:0]
-	for _, r := range m.rules {
-		if len(r.StartKey) > 0 {
-			keys = append(keys, r.StartKey)
-		}
-		if len(r.EndKey) > 0 {
-			keys = append(keys, r.EndKey)
-		}
-	}
-	sort.Slice(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })
-	for _, k := range keys {
-		if len(m.splitKeys) == 0 || !bytes.Equal(m.splitKeys[len(m.splitKeys)-1], k) {
-			m.splitKeys = append(m.splitKeys, k)
-		}
-	}
 }
 
 // GetSplitKeys returns all split keys in the range (start, end).
 func (m *RuleManager) GetSplitKeys(start, end []byte) [][]byte {
 	m.RLock()
 	defer m.RUnlock()
-	var keys [][]byte
-	i := sort.Search(len(m.splitKeys), func(i int) bool {
-		return bytes.Compare(m.splitKeys[i], start) > 0
-	})
-	for ; i < len(m.splitKeys) && (len(end) == 0 || bytes.Compare(m.splitKeys[i], end) < 0); i++ {
-		keys = append(keys, m.splitKeys[i])
-	}
-	return keys
+	return m.ruleList.getSplitKeys(start, end)
 }
 
 // GetAllRules returns sorted all rules.
@@ -235,53 +241,14 @@ func (m *RuleManager) GetRulesByGroup(group string) []*Rule {
 func (m *RuleManager) GetRulesByKey(key []byte) []*Rule {
 	m.RLock()
 	defer m.RUnlock()
-	var rules []*Rule
-	for _, r := range m.rules {
-		// rule.start <= key < rule.end
-		if bytes.Compare(r.StartKey, key) <= 0 &&
-			(len(r.EndKey) == 0 || bytes.Compare(key, r.EndKey) < 0) {
-			rules = append(rules, r)
-		}
-	}
-	sortRules(rules)
-	return rules
+	return m.ruleList.getRulesByKey(key)
 }
 
 // GetRulesForApplyRegion returns the rules list that should be applied to a region.
 func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 	m.RLock()
 	defer m.RUnlock()
-	var rules []*Rule
-	for _, r := range m.rules {
-		// no intersection
-		//                  |<-- rule -->|
-		// |<-- region -->|
-		// or
-		// |<-- rule -->|
-		//                 |<-- region -->|
-		if (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), r.StartKey) <= 0) ||
-			len(r.EndKey) > 0 && bytes.Compare(region.GetStartKey(), r.EndKey) >= 0 {
-			continue
-		}
-		// in range
-		//   |<----- rule ----->|
-		//     |<-- region -->|
-		if bytes.Compare(region.GetStartKey(), r.StartKey) >= 0 && (len(r.EndKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), r.EndKey) <= 0)) {
-			rules = append(rules, r)
-			continue
-		}
-		// region spans multiple rule ranges.
-		// |<-- rule -->|
-		//       |<-- region -->|
-		// or
-		//         |<-- rule -->|
-		// |<-- region -->|
-		// or
-		//   |<-- rule -->|
-		// |<--- region --->|
-		return nil // It will considered abnormal when a region is not covered by any rule. Then Rule checker will try to split the region.
-	}
-	return prepareRulesForApply(rules)
+	return m.ruleList.getRulesForApplyRegion(region.GetStartKey(), region.GetEndKey())
 }
 
 // FitRegion fits a region to the rules it matches.

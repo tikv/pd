@@ -16,7 +16,6 @@ package apiserver
 import (
 	"context"
 	"net/http"
-	"sync"
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
@@ -54,12 +53,13 @@ func (p *PdEtcdProvider) GetEtcdClient() *clientv3.Client {
 }
 
 // NewService returns an http.Handler that serves the dashboard API
-func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, func()) {
+func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup) {
 	cfg := srv.GetConfig()
 	etcdCfg, err := cfg.GenEmbedEtcdConfig()
 	if err != nil {
 		panic(err)
 	}
+
 	dashboardCfg := &config.Config{
 		DataDir:    cfg.DataDir,
 		PDEndPoint: etcdCfg.ACUrls[0].String(),
@@ -70,23 +70,16 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	}
 
 	etcdProvider := &PdEtcdProvider{srv: srv}
-
-	tidbForwarder := tidb.NewForwarder(tidb.NewForwarderConfig(), etcdProvider)
-	// FIXME: Handle open error
-	tidbForwarder.Open() //nolint:errcheck
-
+	tidbForwarder := tidb.NewForwarder(tidb.NewForwarderConfig(dashboardCfg.TLSConfig), etcdProvider)
 	httpClient := dashboardhttp.NewHTTPClientWithConf(dashboardCfg)
-
-	// key visual
-	dashboardCtx, cancel := context.WithCancel(ctx)
-	wg := &sync.WaitGroup{}
 	store := dbstore.MustOpenDBStore(dashboardCfg)
+	// key visual
 	localDataProvider := &region.PDDataProvider{
 		PeriodicGetter: input.NewCorePeriodicGetter(srv),
 		EtcdProvider:   etcdProvider,
 		Store:          store,
 	}
-	keyvisualService := keyvisual.NewService(dashboardCtx, wg, dashboardCfg, localDataProvider)
+	keyvisualService := keyvisual.NewService(ctx, dashboardCfg, localDataProvider, httpClient)
 	// api server
 	services := &apiserver.Services{
 		Store:         store,
@@ -98,10 +91,15 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	handler := apiserver.Handler(serviceGroup.PathPrefix, dashboardCfg, services)
 
 	// callback
-	srv.AddStartCallback(keyvisualService.Start)
+	srv.AddStartCallback(
+		func() {
+			// FIXME: Handle open error
+			_ = tidbForwarder.Open()
+		},
+		keyvisualService.Start,
+	)
 	srv.AddCloseCallback(
-		cancel,
-		wg.Wait,
+		keyvisualService.Close,
 		func() {
 			_ = tidbForwarder.Close()
 			_ = store.Close()
@@ -109,5 +107,5 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	)
 
 	log.Info("Enabled Dashboard API", zap.String("path", serviceGroup.PathPrefix))
-	return handler, serviceGroup, nil
+	return handler, serviceGroup
 }

@@ -27,6 +27,8 @@ cert-path = ""
 ## Path of file that contains X509 key in PEM format.
 key-path = ""
 
+cert-allowed-cn = ["example.com"]
+
 [log]
 level = "info"
 

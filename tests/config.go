@@ -107,6 +107,14 @@ func (c *clusterConfig) GetJoinAddr() string {
 	return c.InitialServers[0].PeerURLs
 }
 
-func (c *clusterConfig) GetClientURLs() string {
+func (c *clusterConfig) GetClientURL() string {
 	return c.InitialServers[0].ClientURLs
+}
+
+func (c *clusterConfig) GetClientURLs() []string {
+	var urls []string
+	for _, svr := range c.InitialServers {
+		urls = append(urls, svr.ClientURLs)
+	}
+	return urls
 }

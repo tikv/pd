@@ -91,7 +91,9 @@ func (s *RegionSyncer) establish(addr string) (*grpc.ClientConn, error) {
 		return nil, errors.WithStack(err)
 	}
 
+	s.Lock()
 	s.regionSyncerCtx, s.regionSyncerCancel = ctx, cancel
+	s.Unlock()
 	return cc, nil
 }
 
@@ -182,11 +184,26 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					// reset index
 					s.history.ResetWithIndex(resp.GetStartIndex())
 				}
-				for _, r := range resp.GetRegions() {
-					s.server.GetBasicCluster().CheckAndPutRegion(core.NewRegionInfo(r, nil))
+				stats := resp.GetRegionStats()
+				regions := resp.GetRegions()
+				hasStats := len(stats) == len(regions)
+				for i, r := range regions {
+					var region *core.RegionInfo
+					if hasStats {
+						region = core.NewRegionInfo(r, nil,
+							core.SetWrittenBytes(stats[i].BytesWritten),
+							core.SetWrittenKeys(stats[i].KeysWritten),
+							core.SetReadBytes(stats[i].BytesRead),
+							core.SetReadKeys(stats[i].KeysRead),
+						)
+					} else {
+						region = core.NewRegionInfo(r, nil)
+					}
+
+					s.server.GetBasicCluster().CheckAndPutRegion(region)
 					err = s.server.GetStorage().SaveRegion(r)
 					if err == nil {
-						s.history.Record(core.NewRegionInfo(r, nil))
+						s.history.Record(region)
 					}
 				}
 			}

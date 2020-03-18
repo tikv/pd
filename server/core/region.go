@@ -310,6 +310,19 @@ func (r *RegionInfo) GetMeta() *metapb.Region {
 	return r.meta
 }
 
+// GetStat returns the statistics of the region.
+func (r *RegionInfo) GetStat() *pdpb.RegionStat {
+	if r == nil {
+		return nil
+	}
+	return &pdpb.RegionStat{
+		BytesWritten: r.writtenBytes,
+		BytesRead:    r.readBytes,
+		KeysWritten:  r.writtenKeys,
+		KeysRead:     r.readKeys,
+	}
+}
+
 // GetApproximateSize returns the approximate size of the region.
 func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize

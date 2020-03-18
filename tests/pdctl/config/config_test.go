@@ -65,7 +65,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
 	store := metapb.Store{
@@ -84,7 +84,10 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	cfg := config.Config{}
 	c.Assert(json.Unmarshal(output, &cfg), IsNil)
-	c.Assert(&cfg.Schedule, DeepEquals, svr.GetScheduleConfig())
+	scheduleConfig := svr.GetScheduleConfig()
+	scheduleConfig.Schedulers = nil
+	scheduleConfig.SchedulersPayload = nil
+	c.Assert(&cfg.Schedule, DeepEquals, scheduleConfig)
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
 
 	// config show schedule

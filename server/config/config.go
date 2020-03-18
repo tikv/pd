@@ -131,7 +131,7 @@ type Config struct {
 	logger   *zap.Logger
 	logProps *log.ZapProperties
 
-	EnableDynamicConfig bool
+	EnableDynamicConfig bool `toml:"enable-dynamic-config" json:"enable-dynamic-config"`
 
 	EnableDashboard bool
 }
@@ -166,8 +166,6 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
-
-	fs.BoolVar(&cfg.EnableDynamicConfig, "enable-dynamic-config", false, "Enable dynamic configuration change")
 
 	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", true, "Enable Dashboard API and UI on this node")
 
@@ -207,6 +205,8 @@ const (
 	defaultStrictlyMatchLabel  = false
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
+
+	defaultEnableDynamicConfig = true
 )
 
 var (
@@ -449,6 +449,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
+	}
+
+	if !configMetaData.IsDefined("enable-dynamic-config") {
+		c.EnableDynamicConfig = defaultEnableDynamicConfig
 	}
 	return nil
 }
@@ -1051,13 +1055,20 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 
+	allowedCN, serr := c.Security.GetOneAllowedCN()
+	if serr != nil {
+		return nil, serr
+	}
 	cfg.ClientTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
+	cfg.ClientTLSInfo.AllowedCN = allowedCN
+	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
+	cfg.PeerTLSInfo.AllowedCN = allowedCN
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway

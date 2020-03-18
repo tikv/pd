@@ -47,7 +47,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
 	stores := []*metapb.Store{
@@ -69,16 +69,21 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		},
 	}
 
-	checkSchedulerCommand := func(args []string, expected map[string]bool) {
-		if args != nil {
-			_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-			c.Assert(err, IsNil)
-		}
-		var schedulers []string
-		args = []string{"-u", pdAddr, "scheduler", "show"}
+	mustExec := func(args []string, v interface{}) {
 		_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 		c.Assert(err, IsNil)
-		c.Assert(json.Unmarshal(output, &schedulers), IsNil)
+		if v == nil {
+			return
+		}
+		c.Assert(json.Unmarshal(output, v), IsNil)
+	}
+
+	checkSchedulerCommand := func(args []string, expected map[string]bool) {
+		if args != nil {
+			mustExec(args, nil)
+		}
+		var schedulers []string
+		mustExec([]string{"-u", pdAddr, "scheduler", "show"}, &schedulers)
 		for _, scheduler := range schedulers {
 			c.Assert(expected[scheduler], Equals, true)
 		}
@@ -86,14 +91,10 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 
 	checkSchedulerConfigCommand := func(args []string, expectedConfig map[string]interface{}, schedulerName string) {
 		if args != nil {
-			_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-			c.Assert(err, IsNil)
+			mustExec(args, nil)
 		}
-		args = []string{"-u", pdAddr, "scheduler", "config", "show", schedulerName}
-		_, output, err := pdctl.ExecuteCommandC(cmd, args...)
-		c.Assert(err, IsNil)
 		configInfo := make(map[string]interface{})
-		c.Assert(json.Unmarshal(output, &configInfo), IsNil)
+		mustExec([]string{"-u", pdAddr, "scheduler", "config", schedulerName}, &configInfo)
 		c.Assert(expectedConfig, DeepEquals, configInfo)
 	}
 
@@ -126,9 +127,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	}
 	checkSchedulerCommand(args, expected)
 
-	schedulers := make([]string, 2)
-	schedulers[0] = "evict-leader-scheduler"
-	schedulers[1] = "grant-leader-scheduler"
+	schedulers := []string{"evict-leader-scheduler", "grant-leader-scheduler"}
 
 	for idx := range schedulers {
 		// scheduler add command
@@ -147,7 +146,7 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		checkSchedulerConfigCommand(nil, expectedConfig, schedulers[idx])
 
 		// scheduler config update command
-		args = []string{"-u", pdAddr, "scheduler", "config", "update", schedulers[idx], "3"}
+		args = []string{"-u", pdAddr, "scheduler", "config", schedulers[idx], "add-store", "3"}
 		expected = map[string]bool{
 			"balance-leader-scheduler":     true,
 			"balance-hot-region-scheduler": true,
@@ -218,6 +217,20 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		checkSchedulerCommand(args, expected)
 
 	}
+
+	// test shuffle region config
+	checkSchedulerCommand([]string{"-u", pdAddr, "scheduler", "add", "shuffle-region-scheduler"}, map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"label-scheduler":              true,
+		"shuffle-region-scheduler":     true,
+	})
+	var roles []string
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
+	c.Assert(roles, DeepEquals, []string{"leader", "follower", "learner"})
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "set-roles", "learner"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
+	c.Assert(roles, DeepEquals, []string{"learner"})
 
 	// test echo
 	echo := pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"})
