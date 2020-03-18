@@ -190,7 +190,7 @@ func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := fmt.Sprintf("%s/limit/scene", storesPrefix)
 
 	switch len(args) {
-	case 0,1:
+	case 0, 1:
 		// show all limit values
 		if len(args) == 1 {
 			prefix += fmt.Sprintf("?type=%v", args[0])
@@ -218,7 +218,7 @@ func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 		if len(args) == 3 {
-			prefix =  path.Join(prefix, fmt.Sprintf("?type=%s", args[2]))
+			prefix = path.Join(prefix, fmt.Sprintf("?type=%s", args[2]))
 		}
 		postJSON(cmd, prefix, map[string]interface{}{scene: rate})
 	}
@@ -352,7 +352,7 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 	argsCount := len(args)
 	switch argsCount {
-	case 0,1:
+	case 0, 1:
 		prefix := path.Join(storesPrefix, "limit")
 		if argsCount == 1 {
 			prefix += fmt.Sprintf("?type=%s", args[0])
@@ -363,7 +363,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 		cmd.Println(r)
-	case 2,3:
+	case 2, 3:
 		rate, err := strconv.ParseFloat(args[1], 64)
 		if err != nil || rate < 0 {
 			cmd.Println("rate should be a number that >= 0.")
@@ -432,7 +432,7 @@ func removeTombStoneCommandFunc(cmd *cobra.Command, args []string) {
 
 func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 	argsCount := len(args)
-	if argsCount != 1 && argsCount != 2{
+	if argsCount != 1 && argsCount != 2 {
 		cmd.Usage()
 		return
 	}

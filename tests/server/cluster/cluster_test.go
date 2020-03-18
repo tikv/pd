@@ -232,9 +232,9 @@ func testStateAndLimit(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDCl
 		expectState := expectStates[0]
 		c.Assert(getStore(c, clusterID, grpcPDClient, storeID).GetState(), Equals, expectState)
 		if expectState == metapb.StoreState_Offline {
-			c.Assert(isRegionAddLimitOKAfter&&isRegionRemoveLimitOKAfter, IsTrue)
+			c.Assert(isRegionAddLimitOKAfter && isRegionRemoveLimitOKAfter, IsTrue)
 		} else if expectState == metapb.StoreState_Tombstone {
-			c.Assert(isRegionAddLimitOKAfter||isRegionRemoveLimitOKAfter, IsFalse)
+			c.Assert(isRegionAddLimitOKAfter || isRegionRemoveLimitOKAfter, IsFalse)
 		}
 	} else {
 		c.Assert(err, NotNil)

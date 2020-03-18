@@ -129,7 +129,6 @@ func (s *storeTestSuite) TestStore(c *C) {
 	limits := leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit(storelimit.RegionAdd)
 	c.Assert(limits[1].Rate()*60, Equals, float64(10))
 
-
 	// store limit <store_id> <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "1", "5", "region-remove"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
