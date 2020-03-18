@@ -340,6 +340,32 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
+
+	oc.SetStoreLimit(2, 1, storelimit.Manual, storelimit.RegionRemove)
+	for i := uint64(1); i <= 5; i++ {
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		checkRemoveOperatorSuccess(c, oc, op)
+	}
+	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
+
+	oc.SetStoreLimit(2, 2, storelimit.Manual, storelimit.RegionRemove)
+	for i := uint64(1); i <= 10; i++ {
+		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		checkRemoveOperatorSuccess(c, oc, op)
+	}
+	oc.SetAllStoresLimit(1, storelimit.Manual, storelimit.RegionRemove)
+	for i := uint64(1); i <= 5; i++ {
+		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		checkRemoveOperatorSuccess(c, oc, op)
+	}
+	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
 }
 
 // #1652
