@@ -62,16 +62,14 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 
 // GetOneAllowedCN only gets the first one CN.
 func (s SecurityConfig) GetOneAllowedCN() (string, error) {
-	allowedCN := ""
-	i := len(s.CertAllowedCN)
-	switch {
-	case i > 1:
-		return "", errors.New("Currently only supports one CN")
-	case i == 1:
-		allowedCN = s.CertAllowedCN[0]
+	switch len(s.CertAllowedCN) {
+	case 1:
+		return s.CertAllowedCN[0], nil
+	case 0:
+		return "", nil
 	default:
+		return "", errors.New("Currently only supports one CN")
 	}
-	return allowedCN, nil
 }
 
 // GetClientConn returns a gRPC client connection.
