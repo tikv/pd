@@ -137,7 +137,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(label0.Value, Equals, "Russia")
 	c.Assert(len(storeInfo.Store.Labels), Equals, 1)
 
-	// store weight <store_id> <leader_weight> <region_weight> command
+	// store weight <store_id>s <leader_weight> <region_weight> command
 	c.Assert(storeInfo.Status.LeaderWeight, Equals, float64(1))
 	c.Assert(storeInfo.Status.RegionWeight, Equals, float64(1))
 	args = []string{"-u", pdAddr, "store", "weight", "1", "5", "10"}

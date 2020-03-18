@@ -311,7 +311,10 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 }
 
 func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) < 3 || len(args) % 2 != 1 {
+	// The least args' numbers is 1, which means users can set empty key and value
+	// In this way, if force flag is set then it means clear all labels,
+	// if force flag isn't set then it means do nothing
+	if len(args) < 1 || len(args) % 2 != 1 {
 		cmd.Usage()
 		return
 	}
@@ -321,8 +324,8 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	prefix := fmt.Sprintf(path.Join(storePrefix, "label"), args[0])
 	labels := make(map[string]interface{})
-	for iter := 1; iter < len(args); iter += 2 {
-		labels[args[iter]] = args[iter+1]
+	for i := 1; i < len(args); i += 2 {
+		labels[args[i]] = args[i+1]
 	}
 	if force {
 		prefix = path.Join(prefix, "force")
