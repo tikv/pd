@@ -581,9 +581,11 @@ func (f *specialUseFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 const (
-	specialUseKey       = "specialUse"
+	specialUseKey = "specialUse"
+	// SpecialUseHotRegion is the hot region value of special use label
 	SpecialUseHotRegion = "hotRegion"
-	SpecialUseReserved  = "reserved"
+	// SpecialUseReserved is the reserved value of special use label
+	SpecialUseReserved = "reserved"
 )
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
