@@ -714,21 +714,20 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
-	dstStoreWeight := calcStoreWeight(
-		bs.cluster.GetStore(bs.cur.dstStoreID).GetRegionWeight(),
-		bs.cluster.GetStore(bs.cur.dstStoreID).GetLeaderWeight())
+	peerKeyRate := bs.getRateWithStoreWeight(peer.GetKeyRate(), bs.cur.dstStoreID)
+	peerByteRate := bs.getRateWithStoreWeight(peer.GetByteRate(), bs.cur.dstStoreID)
 
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
 		// Only consider about count and key rate.
 		if srcLd.Count > dstLd.Count &&
-			srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate()/dstStoreWeight {
+			srcLd.KeyRate >= dstLd.KeyRate+peerKeyRate {
 			rank = -1
 		}
 	} else {
-		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()/dstStoreWeight) / (srcLd.KeyRate + 1)
+		keyDecRatio := (dstLd.KeyRate + peerKeyRate) / (srcLd.KeyRate + 1)
 		keyHot := peer.GetKeyRate() >= minHotKeyRate
-		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()/dstStoreWeight) / (srcLd.ByteRate + 1)
+		byteDecRatio := (dstLd.ByteRate + peerByteRate) / (srcLd.ByteRate + 1)
 		byteHot := peer.GetByteRate() > minHotByteRate
 		switch {
 		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
@@ -772,26 +771,20 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 
 	if bs.cur.srcPeerStat != old.srcPeerStat {
 		// compare region
-
-		storeWeight := calcStoreWeight(
-			bs.cluster.GetStore(bs.cur.srcStoreID).GetRegionWeight(),
-			bs.cluster.GetStore(bs.cur.srcStoreID).GetLeaderWeight())
-
-		oldStoreWeight := calcStoreWeight(
-			bs.cluster.GetStore(old.srcStoreID).GetRegionWeight(),
-			bs.cluster.GetStore(old.srcStoreID).GetLeaderWeight())
-
+		srcPeerKeyRate := bs.getRateWithStoreWeight(bs.cur.srcPeerStat.GetKeyRate(), bs.cur.srcStoreID)
+		oldSrcPeerKeyRate := bs.getRateWithStoreWeight(old.srcPeerStat.GetKeyRate(), old.srcStoreID)
+		srcPeerByteRate := bs.getRateWithStoreWeight(bs.cur.srcPeerStat.GetByteRate(), bs.cur.srcStoreID)
+		oldSrcPeerByteRate := bs.getRateWithStoreWeight(old.srcPeerStat.GetByteRate(), old.srcStoreID)
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			switch {
-			case bs.cur.srcPeerStat.GetKeyRate()/storeWeight > old.srcPeerStat.GetKeyRate()/oldStoreWeight:
+			case srcPeerKeyRate > oldSrcPeerKeyRate:
 				return true
-			case bs.cur.srcPeerStat.GetKeyRate()/storeWeight < old.srcPeerStat.GetKeyRate()/oldStoreWeight:
+			case srcPeerKeyRate < oldSrcPeerKeyRate:
 				return false
 			}
 		} else {
-			byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetByteRate()/storeWeight, old.srcPeerStat.GetByteRate()/oldStoreWeight, stepRank(0, 100))
-			keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetKeyRate()/storeWeight, old.srcPeerStat.GetKeyRate()/oldStoreWeight, stepRank(0, 10))
-
+			byteRkCmp := rankCmp(srcPeerByteRate, oldSrcPeerByteRate, stepRank(0, 100))
+			keyRkCmp := rankCmp(srcPeerKeyRate, oldSrcPeerKeyRate, stepRank(0, 10))
 			switch bs.cur.progressiveRank {
 			case -2: // greatDecRatio < byteDecRatio <= minorDecRatio && keyDecRatio <= greatDecRatio
 				if keyRkCmp != 0 {
@@ -889,6 +882,14 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 		return lpCmp(lp1, lp2)
 	}
 	return 0
+}
+
+// get the keyRate byteRate divide by storeweight.
+func (bs *balanceSolver) getRateWithStoreWeight(realRate float64, storeId uint64) float64 {
+	regionWeight := bs.cluster.GetStore(storeId).GetRegionWeight()
+	leaderWeight := bs.cluster.GetStore(storeId).GetLeaderWeight()
+	storeWeight := calcStoreWeight(regionWeight, leaderWeight)
+	return realRate / storeWeight
 }
 
 func stepRank(rk0 float64, step float64) func(float64) int64 {
