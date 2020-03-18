@@ -40,7 +40,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
-	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
 
@@ -67,7 +67,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 	}
 	shouldRemoveOp := func(region *core.RegionInfo, ty opType) *operator.Operator {
 		op := doneOp(region, ty)
-		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-minRegionScheduleInterval))
+		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
 		return op
 	}
 	opCreaters := [4]func(region *core.RegionInfo, ty opType) *operator.Operator{nilOp, shouldRemoveOp, notDoneOp, doneOp}

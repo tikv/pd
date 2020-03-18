@@ -116,9 +116,13 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 	byteRate := totalBytes / float64(interval)
 	keyRate := totalKeys / float64(interval)
 
-	for storeID := range storeIDs {
+	var tmpItem *HotPeerStat
+	for _, storeID := range storeIDs {
 		isExpired := f.isRegionExpired(region, storeID)
 		oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
+		if isExpired && oldItem != nil {
+			tmpItem = oldItem
+		}
 
 		// This is used for the simulator. Ignore if report too fast.
 		if !isExpired && Denoising && interval < hotRegionReportMinInterval {
@@ -135,6 +139,11 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 			Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
 			needDelete:     isExpired,
 			isLeader:       region.GetLeader().GetStoreId() == storeID,
+		}
+
+		// use the tmpItem cached from other store
+		if oldItem == nil && tmpItem != nil {
+			oldItem = tmpItem
 		}
 
 		newItem = f.updateHotPeerStat(newItem, oldItem, storesStats)
@@ -224,13 +233,15 @@ func (f *hotPeerCache) calcHotThresholds(stats *StoresStats, storeID uint64) [di
 }
 
 // gets the storeIDs, including old region and new region
-func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) map[uint64]struct{} {
+func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 	storeIDs := make(map[uint64]struct{})
+	ret := make([]uint64, 0, len(region.GetPeers()))
 	// old stores
 	ids, ok := f.storesOfRegion[region.GetID()]
 	if ok {
 		for storeID := range ids {
 			storeIDs[storeID] = struct{}{}
+			ret = append(ret, storeID)
 		}
 	}
 
@@ -242,10 +253,11 @@ func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) map[uint64]struct
 		}
 		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
 			storeIDs[peer.GetStoreId()] = struct{}{}
+			ret = append(ret, peer.GetStoreId())
 		}
 	}
 
-	return storeIDs
+	return ret
 }
 
 func (f *hotPeerCache) isRegionHotWithAnyPeers(region *core.RegionInfo, hotDegree int) bool {

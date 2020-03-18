@@ -430,8 +430,26 @@ func NewConfigSchedulerCommand() *cobra.Command {
 	c.AddCommand(
 		newConfigEvictLeaderCommand(),
 		newConfigGrantLeaderCommand(),
+		newConfigHotRegionCommand(),
 		newConfigShuffleRegionCommand(),
 	)
+	return c
+}
+
+func newConfigHotRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-hot-region-scheduler",
+		Short: "show evict-leader-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc})
+	c.AddCommand(&cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) }})
 	return c
 }
 
@@ -517,6 +535,22 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
+}
+
+func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, args []string) {
+	if len(args) != 2 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	var val interface{}
+	input := make(map[string]interface{})
+	key, value := args[0], args[1]
+	val, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		val = value
+	}
+	input[key] = val
+	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 
 // convertReomveConfigToReomveScheduler make cmd can be used at removeCommandFunc

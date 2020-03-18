@@ -29,7 +29,7 @@ type HotPeerStat struct {
 	// HotDegree records the hot region update times
 	HotDegree int `json:"hot_degree"`
 	// AntiCount used to eliminate some noise when remove region in cache
-	AntiCount int
+	AntiCount int `json:"anti_count"`
 
 	Kind     FlowKind `json:"kind"`
 	ByteRate float64  `json:"flow_bytes"`
@@ -42,7 +42,7 @@ type HotPeerStat struct {
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
 	// Version used to check the region split times
-	Version uint64
+	Version uint64 `json:"version"`
 
 	needDelete bool
 	isLeader   bool
