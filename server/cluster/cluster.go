@@ -862,7 +862,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 	return c.putStoreLocked(s)
 }
 
-// PutStore puts a store.
+// PutStoreForce puts a store.
 func (c *RaftCluster) PutStoreForce(store *metapb.Store) error {
 	c.Lock()
 	defer c.Unlock()

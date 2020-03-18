@@ -124,19 +124,6 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(label1.Key, Equals, "language")
 	c.Assert(label1.Value, Equals, "English")
 
-	// store label <store_id> <key> <value> <key> <value>... -f command
-	args = []string{"-u", pdAddr, "store", "label", "1", "zone", "Russia", "-f"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	args = []string{"-u", pdAddr, "store", "1"}
-	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
-	label0 = storeInfo.Store.Labels[0]
-	c.Assert(label0.Key, Equals, "zone")
-	c.Assert(label0.Value, Equals, "Russia")
-	c.Assert(len(storeInfo.Store.Labels), Equals, 1)
-
 	// store weight <store_id>s <leader_weight> <region_weight> command
 	c.Assert(storeInfo.Status.LeaderWeight, Equals, float64(1))
 	c.Assert(storeInfo.Status.RegionWeight, Equals, float64(1))
