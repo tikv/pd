@@ -905,9 +905,9 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 }
 
 // get the keyRate byteRate divide by storeweight.
-func (bs *balanceSolver) getRateWithStoreWeight(realRate float64, storeId uint64) float64 {
-	regionWeight := bs.cluster.GetStore(storeId).GetRegionWeight()
-	leaderWeight := bs.cluster.GetStore(storeId).GetLeaderWeight()
+func (bs *balanceSolver) getRateWithStoreWeight(realRate float64, storeID uint64) float64 {
+	regionWeight := bs.cluster.GetStore(storeID).GetRegionWeight()
+	leaderWeight := bs.cluster.GetStore(storeID).GetLeaderWeight()
 	storeWeight := calcStoreWeight(regionWeight, leaderWeight)
 	return realRate / storeWeight
 }
