@@ -184,12 +184,18 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				}
 				stats := resp.GetRegionStats()
 				for i, r := range resp.GetRegions() {
-					region := core.NewRegionInfo(r, nil,
-						core.SetWrittenBytes(stats[i].BytesWritten),
-						core.SetWrittenKeys(stats[i].KeysWritten),
-						core.SetReadBytes(stats[i].BytesRead),
-						core.SetReadKeys(stats[i].KeysRead),
-					)
+					var region *core.RegionInfo
+					if stats == nil || len(stats) == 0 {
+						region = core.NewRegionInfo(r, nil)
+					} else {
+						region = core.NewRegionInfo(r, nil,
+							core.SetWrittenBytes(stats[i].BytesWritten),
+							core.SetWrittenKeys(stats[i].KeysWritten),
+							core.SetReadBytes(stats[i].BytesRead),
+							core.SetReadKeys(stats[i].KeysRead),
+						)
+					}
+
 					s.server.GetBasicCluster().CheckAndPutRegion(region)
 					err = s.server.GetStorage().SaveRegion(r)
 					if err == nil {
