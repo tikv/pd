@@ -799,7 +799,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	return err
 }
 
-// UpdateStoreLabels updates a store's location labels.
+// UpdateStoreLabelsForce updates a store's location labels.
 func (c *RaftCluster) UpdateStoreLabelsForce(storeID uint64, labels []*metapb.StoreLabel) error {
 	store := c.GetStore(storeID)
 	if store == nil {
