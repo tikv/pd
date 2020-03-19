@@ -73,7 +73,7 @@ func NewLabelStoreCommand() *cobra.Command {
 		Short: "set a store's label value",
 		Run:   labelStoreCommandFunc,
 	}
-	l.Flags().BoolP("force", "f", false, "overwrite the label forcely")
+	l.Flags().BoolP("force", "f", false, "overwrite the label forcibly")
 	return l
 }
 
