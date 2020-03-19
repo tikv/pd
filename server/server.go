@@ -144,7 +144,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup, func())
+type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup)
 
 // ServiceGroup used to register the service.
 type ServiceGroup struct {
@@ -161,32 +161,19 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-type lazyHandler struct {
-	options []func()
-	engine  *negroni.Negroni
-}
-
-func (lazy *lazyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	for _, f := range lazy.options {
-		f()
-	}
-
-	lazy.engine.ServeHTTP(w, r)
-}
-
 func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
 	userHandlers := make(map[string]http.Handler)
+	registerMap := make(map[string]struct{})
 
 	apiService := negroni.New()
 	recovery := negroni.NewRecovery()
 	apiService.Use(recovery)
 	router := mux.NewRouter()
-	registerMap := make(map[string]struct{})
-	var options []func()
+
 	for _, build := range serviceBuilders {
-		handler, info, f := build(ctx, svr)
-		if f != nil {
-			options = append(options, f)
+		handler, info := build(ctx, svr)
+		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
+			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
 		}
 		var pathPrefix string
 		if len(info.PathPrefix) != 0 {
@@ -220,10 +207,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 		}
 	}
 	apiService.UseHandler(router)
-	userHandlers[pdAPIPrefix] = &lazyHandler{
-		engine:  apiService,
-		options: options,
-	}
+	userHandlers[pdAPIPrefix] = apiService
 
 	return userHandlers, nil
 }

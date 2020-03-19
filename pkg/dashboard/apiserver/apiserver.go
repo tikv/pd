@@ -53,7 +53,7 @@ func (p *PdEtcdProvider) GetEtcdClient() *clientv3.Client {
 }
 
 // NewService returns an http.Handler that serves the dashboard API
-func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, func()) {
+func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup) {
 	cfg := srv.GetConfig()
 	etcdCfg, err := cfg.GenEmbedEtcdConfig()
 	if err != nil {
@@ -107,5 +107,5 @@ func NewService(ctx context.Context, srv *server.Server) (http.Handler, server.S
 	)
 
 	log.Info("Enabled Dashboard API", zap.String("path", serviceGroup.PathPrefix))
-	return handler, serviceGroup, nil
+	return handler, serviceGroup
 }
