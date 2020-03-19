@@ -327,6 +327,9 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 	for i := 1; i < len(args); i += 2 {
 		labels[args[i]] = args[i+1]
 	}
+	if force {
+		prefix += "?force=true"
+	}
 	postJSON(cmd, prefix, labels)
 }
 
