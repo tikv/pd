@@ -22,8 +22,7 @@ import (
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/log"
-	dashboardapi "github.com/pingcap/pd/v4/pkg/dashboard/apiserver"
-	dashboardui "github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
+	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/pkg/metricutil"
 	"github.com/pingcap/pd/v4/server"
@@ -97,7 +96,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler}
 	if cfg.EnableDashboard {
-		serviceBuilders = append(serviceBuilders, dashboardapi.NewService, dashboardui.NewService)
+		serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	}
 	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
