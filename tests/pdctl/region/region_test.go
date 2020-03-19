@@ -49,7 +49,7 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	url := cluster.GetConfig().GetClientURLs()
+	url := cluster.GetConfig().GetClientURL()
 	store := metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
@@ -70,7 +70,7 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
 	store := metapb.Store{
