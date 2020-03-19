@@ -413,6 +413,8 @@ types:
       type:
         type: string
         enum: [ region-add, region-remove ]
+        default: region-add
+        required: false
       rate: number
 
 /cluster/status:
@@ -787,6 +789,7 @@ types:
           description: rate limit type.
           type: string
           enum: [ region-add, region-remove ]
+          default: region-add
       responses:
         200:
           body:
@@ -801,6 +804,7 @@ types:
           description: rate limit type.
           type: string
           enum: [ region-add, region-remove ]
+          default: region-add
       body:
         application/json:
         type: StoreLimitScene
@@ -819,6 +823,7 @@ types:
           description: rate limit type.
           type: string
           enum: [ region-add, region-remove ]
+          default: region-add
       responses:
         200:
           body:
