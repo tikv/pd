@@ -42,7 +42,7 @@ var (
 )
 
 // GetServiceBuilders returns all ServiceBuilders required by Dashboard
-func GetServiceBuilders() (builders []server.HandlerBuilder) {
+func GetServiceBuilders() []server.HandlerBuilder {
 	var s *apiserver.Service
 	return []server.HandlerBuilder{
 		// Dashboard API Service
@@ -55,11 +55,15 @@ func GetServiceBuilders() (builders []server.HandlerBuilder) {
 			srv.AddStartCallback(func() {
 				if err := s.Start(ctx); err != nil {
 					log.Error("Can not start dashboard server", zap.Error(err))
+				} else {
+					log.Info("Dashboard server is started", zap.String("path", uiServiceGroup.PathPrefix))
 				}
 			})
 			srv.AddCloseCallback(func() {
 				if err := s.Stop(context.Background()); err != nil {
 					log.Error("Stop dashboard server error", zap.Error(err))
+				} else {
+					log.Info("Dashboard server is stopped")
 				}
 			})
 
@@ -68,7 +72,6 @@ func GetServiceBuilders() (builders []server.HandlerBuilder) {
 		// Dashboard UI
 		func(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
 			handler := s.NewStatusAwareHandler(http.StripPrefix(uiServiceGroup.PathPrefix, uiserver.Handler()))
-			log.Info("Enabled Dashboard", zap.String("path", uiServiceGroup.PathPrefix))
 			return handler, uiServiceGroup, nil
 		},
 	}
