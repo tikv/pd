@@ -112,6 +112,7 @@ func (s *serverTestSuite) TestDashboard(c *C) {
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	leaderAddr := leaderServer.GetAddr()
 
 	cmd := pdctl.InitCommand()
 	// auto select node
@@ -124,13 +125,13 @@ func (s *serverTestSuite) TestDashboard(c *C) {
 			break
 		}
 	}
-	args := []string{"-u", "config", "set", "dashboard-address", dashboardAddress}
+	args := []string{"-u", leaderAddr, "config", "set", "dashboard-address", dashboardAddress}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(s.CheckRespCode(c, cluster, true), Equals, dashboardAddress)
 
 	// pd-ctl set stop
-	args = []string{"-u", "config", "set", "dashboard-address", "none"}
+	args = []string{"-u", leaderAddr, "config", "set", "dashboard-address", "none"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	s.CheckRespCode(c, cluster, false)
