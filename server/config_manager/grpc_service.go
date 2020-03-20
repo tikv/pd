@@ -28,6 +28,15 @@ var notLeaderError = status.Errorf(codes.Unavailable, "not leader")
 
 // Create implements gRPC PDServer.
 func (c *ConfigManager) Create(ctx context.Context, request *configpb.CreateRequest) (*configpb.CreateResponse, error) {
+	if !c.svr.GetConfig().EnableDynamicConfig {
+		return &configpb.CreateResponse{
+			Header:  c.componentHeader(),
+			Status:  &configpb.Status{Code: configpb.StatusCode_OK},
+			Version: request.Version,
+			Config:  request.Config,
+		}, nil
+	}
+
 	if err := c.validateComponentRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -48,6 +57,13 @@ func (c *ConfigManager) Create(ctx context.Context, request *configpb.CreateRequ
 
 // GetAll implements gRPC PDServer.
 func (c *ConfigManager) GetAll(ctx context.Context, request *configpb.GetAllRequest) (*configpb.GetAllResponse, error) {
+	if !c.svr.GetConfig().EnableDynamicConfig {
+		return &configpb.GetAllResponse{
+			Header: c.componentHeader(),
+			Status: &configpb.Status{Code: configpb.StatusCode_OK},
+		}, nil
+	}
+
 	if err := c.validateComponentRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -62,6 +78,13 @@ func (c *ConfigManager) GetAll(ctx context.Context, request *configpb.GetAllRequ
 
 // Get implements gRPC PDServer.
 func (c *ConfigManager) Get(ctx context.Context, request *configpb.GetRequest) (*configpb.GetResponse, error) {
+	if !c.svr.GetConfig().EnableDynamicConfig {
+		return &configpb.GetResponse{
+			Header: c.componentHeader(),
+			Status: &configpb.Status{Code: configpb.StatusCode_OK},
+		}, nil
+	}
+
 	if err := c.validateComponentRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -78,6 +101,13 @@ func (c *ConfigManager) Get(ctx context.Context, request *configpb.GetRequest) (
 
 // Update implements gRPC PDServer.
 func (c *ConfigManager) Update(ctx context.Context, request *configpb.UpdateRequest) (*configpb.UpdateResponse, error) {
+	if !c.svr.GetConfig().EnableDynamicConfig {
+		return &configpb.UpdateResponse{
+			Header: c.componentHeader(),
+			Status: &configpb.Status{Code: configpb.StatusCode_OK},
+		}, nil
+	}
+
 	if err := c.validateComponentRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -97,6 +127,13 @@ func (c *ConfigManager) Update(ctx context.Context, request *configpb.UpdateRequ
 
 // Delete implements gRPC PDServer.
 func (c *ConfigManager) Delete(ctx context.Context, request *configpb.DeleteRequest) (*configpb.DeleteResponse, error) {
+	if !c.svr.GetConfig().EnableDynamicConfig {
+		return &configpb.DeleteResponse{
+			Header: c.componentHeader(),
+			Status: &configpb.Status{Code: configpb.StatusCode_OK},
+		}, nil
+	}
+
 	if err := c.validateComponentRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}

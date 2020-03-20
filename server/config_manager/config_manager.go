@@ -25,6 +25,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/member"
 	"github.com/pkg/errors"
@@ -50,6 +51,7 @@ var (
 type Server interface {
 	IsClosed() bool
 	ClusterID() uint64
+	GetConfig() *config.Config
 	GetRaftCluster() *cluster.RaftCluster
 	GetStorage() *core.Storage
 	GetMember() *member.Member

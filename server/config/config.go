@@ -210,7 +210,7 @@ const (
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 
-	defaultEnableDynamicConfig = true
+	defaultEnableDynamicConfig = false
 )
 
 var (
