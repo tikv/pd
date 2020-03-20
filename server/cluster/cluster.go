@@ -803,7 +803,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 
 // PutStore puts a store.
 // If 'force' is true, then overwrite the store's labels.
-func (c *RaftCluster) PutStore(store *metapb.Store, putByForce bool) error {
+func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -836,25 +836,19 @@ func (c *RaftCluster) PutStore(store *metapb.Store, putByForce bool) error {
 		// Add a new store.
 		s = core.NewStoreInfo(store)
 	} else {
-		if !putByForce {
-			// Update an existed store.
-			labels := s.MergeLabels(store.GetLabels())
-
-			s = s.Clone(
-				core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
-				core.SetStoreVersion(store.GitHash, store.Version),
-				core.SetStoreLabels(labels),
-				core.SetStoreStartTime(store.StartTimestamp),
-			)
-		} else {
-			// Overwrite an existed store.
-			s = s.Clone(
-				core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
-				core.SetStoreVersion(store.GitHash, store.Version),
-				core.SetStoreLabels(store.GetLabels()),
-				core.SetStoreStartTime(store.StartTimestamp),
-			)
+		// Use the given labels to update the store.
+		labels := store.GetLabels()
+		if !force {
+			// If 'force' isn't set, the given labels will merge into those labels which already existed in the store.
+			labels = s.MergeLabels(labels)
 		}
+		// Update an existed store.
+		s = s.Clone(
+			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
+			core.SetStoreVersion(store.GitHash, store.Version),
+			core.SetStoreLabels(labels),
+			core.SetStoreStartTime(store.StartTimestamp),
+		)
 	}
 	if err = c.checkStoreLabels(s); err != nil {
 		return err
