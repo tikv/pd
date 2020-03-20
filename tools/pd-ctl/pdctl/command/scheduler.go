@@ -14,6 +14,7 @@
 package command
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -429,7 +430,26 @@ func NewConfigSchedulerCommand() *cobra.Command {
 	c.AddCommand(
 		newConfigEvictLeaderCommand(),
 		newConfigGrantLeaderCommand(),
+		newConfigHotRegionCommand(),
+		newConfigShuffleRegionCommand(),
 	)
+	return c
+}
+
+func newConfigHotRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-hot-region-scheduler",
+		Short: "show evict-leader-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc})
+	c.AddCommand(&cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) }})
 	return c
 }
 
@@ -469,6 +489,23 @@ func newConfigGrantLeaderCommand() *cobra.Command {
 	return c
 }
 
+func newConfigShuffleRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "shuffle-region-scheduler",
+		Short: "shuffle-region-scheduler config",
+	}
+	c.AddCommand(&cobra.Command{
+		Use:   "show-roles",
+		Short: "show affected roles (leader,follower,learner)",
+		Run:   showShuffleRegionSchedulerRolesCommandFunc,
+	}, &cobra.Command{
+		Use:   "set-roles [leader,][follower,][learner]",
+		Short: "set affected roles",
+		Run:   setSuffleRegionSchedulerRolesCommandFunc,
+	})
+	return c
+}
+
 func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
@@ -500,6 +537,22 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
+func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, args []string) {
+	if len(args) != 2 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	var val interface{}
+	input := make(map[string]interface{})
+	key, value := args[0], args[1]
+	val, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		val = value
+	}
+	input[key] = val
+	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
+}
+
 // convertReomveConfigToReomveScheduler make cmd can be used at removeCommandFunc
 func convertReomveConfigToReomveScheduler(cmd *cobra.Command) {
 	setCommandUse(cmd, "remove")
@@ -527,6 +580,43 @@ func deleteStoreFromSchedulerConfig(cmd *cobra.Command, schedulerName string, ar
 	// FIXME: remove the judge when the new command replace old command
 	if strings.Contains(resp, lastStoreDeleteInfo) {
 		redirectDeleteConfigToRemoveScheduler(cmd, schedulerName, args)
+		return
+	}
+	cmd.Println("Success!")
+}
+
+func showShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 0 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	path := path.Join(schedulerConfigPrefix, cmd.Parent().Name(), "roles")
+	r, err := doRequest(cmd, path, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func setSuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	var roles []string
+	fields := strings.Split(strings.ToLower(args[0]), ",")
+	for _, f := range fields {
+		if f != "" {
+			roles = append(roles, f)
+		}
+	}
+	b, _ := json.Marshal(roles)
+	path := path.Join(schedulerConfigPrefix, cmd.Parent().Name(), "roles")
+	_, err := doRequest(cmd, path, http.MethodPost,
+		WithBody("application/json", bytes.NewBuffer(b)))
+	if err != nil {
+		cmd.Println(err)
 		return
 	}
 	cmd.Println("Success!")

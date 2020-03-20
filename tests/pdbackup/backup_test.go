@@ -48,7 +48,7 @@ func (s *backupTestSuite) TestBackup(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURL()
 	urls := strings.Split(pdAddr, ",")
 	defer cluster.Destroy()
 	client, err := clientv3.New(clientv3.Config{
