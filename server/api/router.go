@@ -78,6 +78,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	confHandler := newConfHandler(svr, rd)
 	apiRouter.HandleFunc("/config", confHandler.Get).Methods("GET")
 	apiRouter.HandleFunc("/config", confHandler.Post).Methods("POST")
+	apiRouter.HandleFunc("/config/default", confHandler.GetDefault).Methods("GET")
 	apiRouter.HandleFunc("/config/schedule", confHandler.GetSchedule).Methods("GET")
 	apiRouter.HandleFunc("/config/schedule", confHandler.SetSchedule).Methods("POST")
 	apiRouter.HandleFunc("/config/replicate", confHandler.GetReplication).Methods("GET")
