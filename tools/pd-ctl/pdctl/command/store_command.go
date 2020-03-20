@@ -41,6 +41,7 @@ func NewStoreCommand() *cobra.Command {
 	s.AddCommand(NewStoreLimitCommand())
 	s.AddCommand(NewRemoveTombStoneCommand())
 	s.AddCommand(NewStoreLimitSceneCommand())
+	s.AddCommand(NewSetHotWeightCommand())
 	s.Flags().String("jq", "", "jq query")
 	return s
 }
@@ -82,6 +83,15 @@ func NewSetStoreWeightCommand() *cobra.Command {
 		Use:   "weight <store_id> <leader_weight> <region_weight>",
 		Short: "set a store's leader and region balance weight",
 		Run:   setStoreWeightCommandFunc,
+	}
+}
+
+// NewSetHotWeightCommand returns a hot region weight subcommand of storeCmd.
+func NewSetHotWeightCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "hot-weight <store_id> <hot_region_weight>",
+		Short: "set a store's hot region weight",
+		Run:   setHotWeightCommandFunc,
 	}
 }
 
@@ -339,6 +349,22 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, prefix, map[string]interface{}{
 		"leader": leader,
 		"region": region,
+	})
+}
+
+func setHotWeightCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		cmd.Usage()
+		return
+	}
+	hot, err := strconv.ParseFloat(args[1], 64)
+	if err != nil || hot < 0 {
+		cmd.Println("hot_region_weight should be a number that >= 0.")
+		return
+	}
+	prefix := fmt.Sprintf(path.Join(storePrefix, "hot-weight"), args[0])
+	postJSON(cmd, prefix, map[string]interface{}{
+		"hot-weight": hot,
 	})
 }
 

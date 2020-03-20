@@ -58,6 +58,7 @@ type StoreStatus struct {
 	StartTS            *time.Time         `json:"start_ts,omitempty"`
 	LastHeartbeatTS    *time.Time         `json:"last_heartbeat_ts,omitempty"`
 	Uptime             *typeutil.Duration `json:"uptime,omitempty"`
+	HotRegionWeight    float64            `json:"hot_region_weight"`
 }
 
 // StoreInfo contains information about a store.
@@ -93,6 +94,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
 			ApplyingSnapCount:  store.GetApplyingSnapCount(),
 			IsBusy:             store.IsBusy(),
+			HotRegionWeight:    store.GetHotRegionWeight(),
 		},
 	}
 
@@ -276,6 +278,39 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := rc.SetStoreWeight(storeID, leader, region); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (h *storeHandler) SetHotRegionWeight(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
+	vars := mux.Vars(r)
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		return
+	}
+
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+
+	hotVal, ok := input["hot-weight"]
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "hot region weight unset")
+		return
+	}
+	hot, ok := hotVal.(float64)
+	if !ok || hot < 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "badformat hot region weight")
+		return
+	}
+
+	if err := rc.SetHotRegionWeight(storeID, hot); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

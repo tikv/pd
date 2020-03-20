@@ -1012,6 +1012,27 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 	return c.putStoreLocked(newStore)
 }
 
+// SetHotRegionWeight sets up a store's hot region weight.
+func (c *RaftCluster) SetHotRegionWeight(storeID uint64, hotRegionWeight float64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		return core.NewStoreNotFoundErr(storeID)
+	}
+
+	if err := c.storage.SaveHotRegionWeight(storeID, hotRegionWeight); err != nil {
+		return err
+	}
+
+	newStore := store.Clone(
+		core.SetHotRegionWeight(hotRegionWeight),
+	)
+
+	return c.putStoreLocked(newStore)
+}
+
 func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 	if c.storage != nil {
 		if err := c.storage.SaveStore(store.GetMeta()); err != nil {

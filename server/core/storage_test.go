@@ -109,12 +109,16 @@ func (s *testKVSuite) TestStoreWeight(c *C) {
 	mustSaveStores(c, storage, n)
 	c.Assert(storage.SaveStoreWeight(1, 2.0, 3.0), IsNil)
 	c.Assert(storage.SaveStoreWeight(2, 0.2, 0.3), IsNil)
+	c.Assert(storage.SaveHotRegionWeight(1, 2.0), IsNil)
+	c.Assert(storage.SaveHotRegionWeight(2, 0.4), IsNil)
 	c.Assert(storage.LoadStores(cache.SetStore), IsNil)
 	leaderWeights := []float64{1.0, 2.0, 0.2}
 	regionWeights := []float64{1.0, 3.0, 0.3}
+	hotRegionWeights := []float64{1.0, 2.0, 0.4}
 	for i := 0; i < n; i++ {
 		c.Assert(cache.GetStore(uint64(i)).GetLeaderWeight(), Equals, leaderWeights[i])
 		c.Assert(cache.GetStore(uint64(i)).GetRegionWeight(), Equals, regionWeights[i])
+		c.Assert(cache.GetStore(uint64(i)).GetHotRegionWeight(), Equals, hotRegionWeights[i])
 	}
 }
 

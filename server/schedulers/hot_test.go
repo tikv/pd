@@ -357,11 +357,11 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRateAndStoreWeight(c *C) {
 	opt.HotRegionCacheHitsThreshold = 0
 
 	tc := mockcluster.NewCluster(opt)
-	tc.AddRegionStoreWithWeight(1, 20, 2.0, 2.0)
-	tc.AddRegionStoreWithWeight(2, 20, 1.0, 1.0)
-	tc.AddRegionStoreWithWeight(3, 20, 2.0, 2.0)
-	tc.AddRegionStoreWithWeight(4, 20, 2.0, 2.0)
-	tc.AddRegionStoreWithWeight(5, 20, 2.0, 2.0)
+	tc.AddRegionStoreWithWeight(1, 20, 2.0)
+	tc.AddRegionStoreWithWeight(2, 20, 1.0)
+	tc.AddRegionStoreWithWeight(3, 20, 2.0)
+	tc.AddRegionStoreWithWeight(4, 20, 2.0)
+	tc.AddRegionStoreWithWeight(5, 20, 2.0)
 
 	tc.UpdateStorageWrittenBytes(1, 21*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(2, 9.5*MB*statistics.StoreHeartBeatReportInterval)
@@ -644,11 +644,11 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateAndStoreWeight(c *C) {
 	opt.HotRegionCacheHitsThreshold = 0
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
-	tc.AddRegionStoreWithWeight(1, 3, 1.0, 1.0)
-	tc.AddRegionStoreWithWeight(2, 2, 2.0, 2.0)
-	tc.AddRegionStoreWithWeight(3, 2, 2.0, 2.0)
-	tc.AddRegionStoreWithWeight(4, 2, 0.5, 0.5)
-	tc.AddRegionStoreWithWeight(5, 0, 1.0, 1.0)
+	tc.AddRegionStoreWithWeight(1, 3, 1.0)
+	tc.AddRegionStoreWithWeight(2, 2, 2.0)
+	tc.AddRegionStoreWithWeight(3, 2, 2.0)
+	tc.AddRegionStoreWithWeight(4, 2, 0.5)
+	tc.AddRegionStoreWithWeight(5, 0, 1.0)
 
 	//| store_id | read_bytes_rate |
 	//|----------|-----------------|
@@ -803,11 +803,11 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRateAndStoreWeight(c *C) {
 	opt.HotRegionCacheHitsThreshold = 0
 
 	tc := mockcluster.NewCluster(opt)
-	tc.AddRegionStoreWithWeight(1, 20, 2.0, 2.0)
-	tc.AddRegionStoreWithWeight(2, 20, 1.0, 1.0)
-	tc.AddRegionStoreWithWeight(3, 20, 2.0, 2.0)
-	tc.AddRegionStoreWithWeight(4, 20, 2.0, 2.0)
-	tc.AddRegionStoreWithWeight(5, 20, 2.0, 2.0)
+	tc.AddRegionStoreWithWeight(1, 20, 2.0)
+	tc.AddRegionStoreWithWeight(2, 20, 1.0)
+	tc.AddRegionStoreWithWeight(3, 20, 2.0)
+	tc.AddRegionStoreWithWeight(4, 20, 2.0)
+	tc.AddRegionStoreWithWeight(5, 20, 2.0)
 
 	tc.UpdateStorageReadBytes(1, 21*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(2, 9.5*MB*statistics.StoreHeartBeatReportInterval)

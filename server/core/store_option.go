@@ -135,6 +135,13 @@ func SetRegionWeight(regionWeight float64) StoreCreateOption {
 	}
 }
 
+// SetHotRegionWeight sets the hot-region-weight for the store.
+func SetHotRegionWeight(hotRegionWeight float64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.hotRegionWeight = hotRegionWeight
+	}
+}
+
 // SetLastHeartbeatTS sets the time of last heartbeat for the store.
 func SetLastHeartbeatTS(lastHeartbeatTS time.Time) StoreCreateOption {
 	return func(store *StoreInfo) {

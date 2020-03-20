@@ -106,6 +106,10 @@ func (s *Storage) storeRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
 }
 
+func (s *Storage) storeHotRegionWeightPath(storeID uint64) string {
+	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "hot")
+}
+
 // SaveScheduleConfig saves the config of scheduler.
 func (s *Storage) SaveScheduleConfig(scheduleName string, data []byte) error {
 	configPath := path.Join(customScheduleConfigPath, scheduleName)
@@ -283,7 +287,11 @@ func (s *Storage) LoadStores(f func(store *StoreInfo)) error {
 			if err != nil {
 				return err
 			}
-			newStoreInfo := NewStoreInfo(store, SetLeaderWeight(leaderWeight), SetRegionWeight(regionWeight))
+			hotRegionWeight, err := s.loadFloatWithDefaultValue(s.storeHotRegionWeightPath(store.GetId()), 1.0)
+			if err != nil {
+				return err
+			}
+			newStoreInfo := NewStoreInfo(store, SetLeaderWeight(leaderWeight), SetRegionWeight(regionWeight), SetHotRegionWeight(hotRegionWeight))
 
 			nextID = store.GetId() + 1
 			f(newStoreInfo)
@@ -302,6 +310,12 @@ func (s *Storage) SaveStoreWeight(storeID uint64, leader, region float64) error 
 	}
 	regionValue := strconv.FormatFloat(region, 'f', -1, 64)
 	return s.Save(s.storeRegionWeightPath(storeID), regionValue)
+}
+
+// SaveHotRegionWeight saves a store's hot region weight to storage.
+func (s *Storage) SaveHotRegionWeight(storeID uint64, hot float64) error {
+	leaderValue := strconv.FormatFloat(hot, 'f', -1, 64)
+	return s.Save(s.storeHotRegionWeightPath(storeID), leaderValue)
 }
 
 func (s *Storage) loadFloatWithDefaultValue(path string, def float64) (float64, error) {

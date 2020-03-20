@@ -112,7 +112,11 @@ func (s *storeTestSuite) TestStore(c *C) {
 	// store weight <store_id> <leader_weight> <region_weight> command
 	c.Assert(storeInfo.Status.LeaderWeight, Equals, float64(1))
 	c.Assert(storeInfo.Status.RegionWeight, Equals, float64(1))
+	c.Assert(storeInfo.Status.HotRegionWeight, Equals, float64(1))
 	args = []string{"-u", pdAddr, "store", "weight", "1", "5", "10"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "store", "hot-weight", "1", "2.0"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "1"}
@@ -121,7 +125,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	c.Assert(storeInfo.Status.LeaderWeight, Equals, float64(5))
 	c.Assert(storeInfo.Status.RegionWeight, Equals, float64(10))
-
+	c.Assert(storeInfo.Status.HotRegionWeight, Equals, 2.0)
 	// store limit <store_id> <rate>
 	args = []string{"-u", pdAddr, "store", "limit", "1", "10"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)

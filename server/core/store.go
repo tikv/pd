@@ -45,15 +45,17 @@ type StoreInfo struct {
 	leaderWeight     float64
 	regionWeight     float64
 	available        func() bool
+	hotRegionWeight  float64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{
-		meta:         store,
-		stats:        &pdpb.StoreStats{},
-		leaderWeight: 1.0,
-		regionWeight: 1.0,
+		meta:            store,
+		stats:           &pdpb.StoreStats{},
+		leaderWeight:    1.0,
+		regionWeight:    1.0,
+		hotRegionWeight: 1.0,
 	}
 	for _, opt := range opts {
 		opt(storeInfo)
@@ -77,6 +79,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		leaderWeight:     s.leaderWeight,
 		regionWeight:     s.regionWeight,
 		available:        s.available,
+		hotRegionWeight:  s.hotRegionWeight,
 	}
 
 	for _, opt := range opts {
@@ -241,6 +244,11 @@ func (s *StoreInfo) GetLeaderWeight() float64 {
 // GetRegionWeight returns the Region weight of the store.
 func (s *StoreInfo) GetRegionWeight() float64 {
 	return s.regionWeight
+}
+
+// GetHotRegionWeight returns the hot-region-weight of the store.
+func (s *StoreInfo) GetHotRegionWeight() float64 {
+	return s.hotRegionWeight
 }
 
 // GetLastHeartbeatTS returns the last heartbeat timestamp of the store.

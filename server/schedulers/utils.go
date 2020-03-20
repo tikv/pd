@@ -210,10 +210,10 @@ type storeLoad struct {
 	Count    float64
 }
 
-func (load *storeLoad) ToLoadPred(infl Influence, storeWeight float64) *storeLoadPred {
+func (load *storeLoad) ToLoadPred(infl Influence, hotWeight float64) *storeLoadPred {
 	future := *load
-	future.ByteRate += infl.ByteRate / storeWeight
-	future.KeyRate += infl.KeyRate / storeWeight
+	future.ByteRate += infl.ByteRate / hotWeight
+	future.KeyRate += infl.KeyRate / hotWeight
 	future.Count += infl.Count
 	return &storeLoadPred{
 		Current: *load,

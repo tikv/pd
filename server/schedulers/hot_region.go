@@ -179,6 +179,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	storesStat := cluster.GetStoresStats()
 
 	minHotDegree := cluster.GetHotRegionCacheHitsThreshold()
+	storesHotWeight := getStoresHotWeight(cluster)
 	{ // update read statistics
 		regionRead := cluster.RegionReadStats()
 		storeByte := storesStat.GetStoresBytesReadStat()
@@ -192,7 +193,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			minHotDegree,
 			read,
 			core.LeaderKind,
-			cluster)
+			storesHotWeight)
 	}
 
 	{ // update write statistics
@@ -208,7 +209,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			minHotDegree,
 			write,
 			core.LeaderKind,
-			cluster)
+			storesHotWeight)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storeByte,
@@ -218,7 +219,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			minHotDegree,
 			write,
 			core.RegionKind,
-			cluster)
+			storesHotWeight)
 	}
 }
 
@@ -260,7 +261,7 @@ func summaryStoresLoad(
 	minHotDegree int,
 	rwTy rwType,
 	kind core.ResourceKind,
-	cluster opt.Cluster,
+	storesHotWeight map[uint64]float64,
 ) map[uint64]*storeLoadDetail {
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
 
@@ -295,17 +296,13 @@ func summaryStoresLoad(
 			}
 		}
 
-		//calculate the storeWeight
-		storeWeight := calcStoreWeight(
-			cluster.GetStore(id).GetRegionWeight(),
-			cluster.GetStore(id).GetLeaderWeight())
-
+		hotWeight := storesHotWeight[id]
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
-			ByteRate: byteRate / storeWeight,
-			KeyRate:  keyRate / storeWeight,
+			ByteRate: byteRate / hotWeight,
+			KeyRate:  keyRate / hotWeight,
 			Count:    float64(len(hotPeers)),
-		}).ToLoadPred(pendings[id], storeWeight)
+		}).ToLoadPred(pendings[id], hotWeight)
 
 		// Construct store load info.
 		loadDetail[id] = &storeLoadDetail{
@@ -733,8 +730,8 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
 	rank := int64(0)
-	peerKeyRate := bs.getRateWithStoreWeight(peer.GetKeyRate(), bs.cur.dstStoreID)
-	peerByteRate := bs.getRateWithStoreWeight(peer.GetByteRate(), bs.cur.dstStoreID)
+	peerKeyRate := bs.getRateWithHotRegionWeight(peer.GetKeyRate(), bs.cur.dstStoreID)
+	peerByteRate := bs.getRateWithHotRegionWeight(peer.GetByteRate(), bs.cur.dstStoreID)
 
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
@@ -791,10 +788,10 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 
 	if bs.cur.srcPeerStat != old.srcPeerStat {
 		// compare region
-		srcPeerKeyRate := bs.getRateWithStoreWeight(bs.cur.srcPeerStat.GetKeyRate(), bs.cur.srcStoreID)
-		oldSrcPeerKeyRate := bs.getRateWithStoreWeight(old.srcPeerStat.GetKeyRate(), old.srcStoreID)
-		srcPeerByteRate := bs.getRateWithStoreWeight(bs.cur.srcPeerStat.GetByteRate(), bs.cur.srcStoreID)
-		oldSrcPeerByteRate := bs.getRateWithStoreWeight(old.srcPeerStat.GetByteRate(), old.srcStoreID)
+		srcPeerKeyRate := bs.getRateWithHotRegionWeight(bs.cur.srcPeerStat.GetKeyRate(), bs.cur.srcStoreID)
+		oldSrcPeerKeyRate := bs.getRateWithHotRegionWeight(old.srcPeerStat.GetKeyRate(), old.srcStoreID)
+		srcPeerByteRate := bs.getRateWithHotRegionWeight(bs.cur.srcPeerStat.GetByteRate(), bs.cur.srcStoreID)
+		oldSrcPeerByteRate := bs.getRateWithHotRegionWeight(old.srcPeerStat.GetByteRate(), old.srcStoreID)
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			switch {
 			case srcPeerKeyRate > oldSrcPeerKeyRate:
@@ -904,12 +901,10 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 	return 0
 }
 
-// get the keyRate byteRate divide by storeweight.
-func (bs *balanceSolver) getRateWithStoreWeight(realRate float64, storeID uint64) float64 {
-	regionWeight := bs.cluster.GetStore(storeID).GetRegionWeight()
-	leaderWeight := bs.cluster.GetStore(storeID).GetLeaderWeight()
-	storeWeight := calcStoreWeight(regionWeight, leaderWeight)
-	return realRate / storeWeight
+// get the keyRate byteRate divide by hotRegionWeight.
+func (bs *balanceSolver) getRateWithHotRegionWeight(realRate float64, storeID uint64) float64 {
+	hotRegionWeight := bs.cluster.GetStore(storeID).GetHotRegionWeight()
+	return realRate / math.Max(hotRegionWeight, minWeight)
 }
 
 func stepRank(rk0 float64, step float64) func(float64) int64 {
@@ -1047,11 +1042,6 @@ func (h *hotScheduler) copyPendingInfluence(ty resourceType) map[uint64]Influenc
 	return ret
 }
 
-func calcStoreWeight(regionWeight, leaderWeight float64) float64 {
-	storeWeight := (regionWeight + leaderWeight) / 2
-	return math.Max(storeWeight, minWeight)
-}
-
 func (h *hotScheduler) calcPendingWeight(op *operator.Operator) float64 {
 	if op.CheckExpired() || op.CheckTimeout() {
 		return 0
@@ -1141,4 +1131,12 @@ func toResourceType(rwTy rwType, opTy opType) resourceType {
 		return readLeader
 	}
 	panic(fmt.Sprintf("invalid arguments for toResourceType: rwTy = %v, opTy = %v", rwTy, opTy))
+}
+
+func getStoresHotWeight(cluster opt.Cluster) map[uint64]float64 {
+	res := make(map[uint64]float64, len(cluster.GetStores()))
+	for _, store := range cluster.GetStores() {
+		res[store.GetID()] = math.Max(store.GetHotRegionWeight(), minWeight)
+	}
+	return res
 }
