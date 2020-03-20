@@ -19,6 +19,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
 )
@@ -176,4 +177,41 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 	cfg = loadProperties()
 	c.Assert(cfg, HasLen, 1)
 	c.Assert(cfg["foo"], DeepEquals, []config.StoreLabel{{Key: "zone", Value: "cn2"}})
+}
+
+func (s *testConfigSuite) TestConfigDefault(c *C) {
+	addr := fmt.Sprintf("%s/config", s.urlPrefix)
+
+	r := map[string]int{"max-replicas": 5}
+	postData, err := json.Marshal(r)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(err, IsNil)
+	l := map[string]interface{}{
+		"location-labels":       "zone,rack",
+		"region-schedule-limit": 10,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(err, IsNil)
+
+	l = map[string]interface{}{
+		"metric-storage": "http://127.0.0.1:9090",
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(err, IsNil)
+
+	time.Sleep(20 * time.Millisecond)
+	addr = fmt.Sprintf("%s/config/default", s.urlPrefix)
+	defaultCfg := &config.Config{}
+	err = readJSON(addr, defaultCfg)
+	c.Assert(err, IsNil)
+
+	c.Assert(defaultCfg.Replication.MaxReplicas, Equals, uint64(3))
+	c.Assert(defaultCfg.Replication.LocationLabels, DeepEquals, typeutil.StringSlice([]string{}))
+	c.Assert(defaultCfg.Schedule.RegionScheduleLimit, Equals, uint64(2048))
+	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
 }
