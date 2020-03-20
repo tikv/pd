@@ -49,6 +49,16 @@ func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetConfig())
 }
 
+func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
+	config := config.NewConfig()
+	err := config.Adjust(nil)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+
+	h.rd.JSON(w, http.StatusOK, config)
+}
+
 func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 	if h.svr.GetConfig().EnableDynamicConfig {
 		cm := h.svr.GetConfigManager()
