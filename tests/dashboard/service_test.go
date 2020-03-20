@@ -81,10 +81,10 @@ func (s *serverTestSuite) CheckRespCode(c *C, cluster *tests.TestCluster, hasSer
 	checkRespCode := func(url string, target int) {
 		resp, err := s.httpClient.Get(url) //nolint:gosec
 		c.Assert(err, IsNil)
-		resp.Body.Close()
 		c.Assert(len(resp.Header.Get("PD-Follower-handle")), Equals, 0)
 		_, err = ioutil.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
+		resp.Body.Close()
 		c.Assert(resp.StatusCode, Equals, target)
 	}
 

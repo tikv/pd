@@ -38,8 +38,9 @@ const (
 )
 
 var (
-	//
+	// FastCheckInterval is the interval to check dashboard address when it is unknown.
 	FastCheckInterval = time.Second
+	// SlowCheckInterval is the interval to check dashboard address when it is known.
 	SlowCheckInterval = time.Minute
 )
 
@@ -186,10 +187,10 @@ func (m *Manager) setNewDashboardAddress() {
 		addr = members[0].GetClientUrls()[0]
 	default:
 		addr = members[0].GetClientUrls()[0]
-		leaderId := m.srv.GetMemberInfo().MemberId
+		leaderID := m.srv.GetMemberInfo().MemberId
 		sort.Slice(members, func(i, j int) bool { return members[i].GetMemberId() < members[j].GetMemberId() })
 		for _, member := range members {
-			if member.MemberId != leaderId {
+			if member.MemberId != leaderID {
 				addr = member.GetClientUrls()[0]
 				break
 			}
