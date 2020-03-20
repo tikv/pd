@@ -247,10 +247,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-
-		if cfg.EnableDynamicConfig {
-			configpb.RegisterConfigServer(gs, s.cfgManager)
-		}
+		configpb.RegisterConfigServer(gs, s.cfgManager)
 	}
 	s.etcdCfg = etcdCfg
 	if EnableZap {
