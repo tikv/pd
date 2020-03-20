@@ -189,6 +189,7 @@ func (c *ConfigManager) GetConfig(version *configpb.Version, component, componen
 func (c *ConfigManager) CreateConfig(version *configpb.Version, component, componentID, cfg string) (*configpb.Version, string, *configpb.Status) {
 	c.Lock()
 	defer c.Unlock()
+
 	var status *configpb.Status
 	latestVersion := c.GetLatestVersion(component, componentID)
 	initVersion := &configpb.Version{Local: 0, Global: 0}
