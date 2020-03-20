@@ -66,6 +66,8 @@ func (m *Manager) serviceLoop() {
 
 	ticker := time.NewTicker(CheckInterval)
 	defer ticker.Stop()
+
+	m.checkAddress()
 	for {
 		select {
 		case <-ticker.C:

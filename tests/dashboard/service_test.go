@@ -50,7 +50,7 @@ type serverTestSuite struct {
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	dashboard.CheckInterval = time.Second * 3
+	dashboard.CheckInterval = time.Second * 2
 	server.EnableZap = true
 }
 
@@ -82,16 +82,14 @@ func (s *serverTestSuite) CheckRespCode(c *C, cluster *tests.TestCluster, hasSer
 		c.Assert(srv.GetScheduleOption().GetDashboardAddress(), Equals, dashboardAddress)
 		addr := srv.GetAddr()
 		if addr == dashboardAddress {
+			countServiceNode++
+		}
+		if hasServiceNode {
 			checkRespCode(fmt.Sprintf("%s/dashboard/", addr), 200)
 			checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), 401)
-			countServiceNode++
 		} else {
-			target := 302
-			if !hasServiceNode {
-				target = 404
-			}
-			checkRespCode(fmt.Sprintf("%s/dashboard/", addr), target)
-			checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), target)
+			checkRespCode(fmt.Sprintf("%s/dashboard/", addr), 404)
+			checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), 404)
 		}
 	}
 
@@ -110,8 +108,12 @@ func (s *serverTestSuite) TestDashboard(c *C) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
-	cmd := pdctl.InitCommand()
 
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+
+	cmd := pdctl.InitCommand()
 	// auto select node
 	dashboardAddress := s.CheckRespCode(c, cluster, true)
 
