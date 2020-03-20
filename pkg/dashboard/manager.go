@@ -34,8 +34,6 @@ var CheckInterval = time.Minute
 
 // Manager is used to control dashboard.
 type Manager struct {
-	autoSetAddress bool
-
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -49,12 +47,11 @@ type Manager struct {
 func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector) *Manager {
 	ctx, cancel := context.WithCancel(srv.Context())
 	return &Manager{
-		autoSetAddress: srv.GetConfig().EnableDynamicConfig,
-		ctx:            ctx,
-		cancel:         cancel,
-		srv:            srv,
-		service:        s,
-		redirector:     redirector,
+		ctx:        ctx,
+		cancel:     cancel,
+		srv:        srv,
+		service:    s,
+		redirector: redirector,
 	}
 }
 
@@ -91,7 +88,7 @@ func (m *Manager) checkAddress() {
 	dashboardAddress := m.srv.GetScheduleOption().GetDashboardAddress()
 	switch dashboardAddress {
 	case "auto":
-		if m.autoSetAddress && m.srv.GetMember().IsLeader() {
+		if m.srv.GetMember().IsLeader() {
 			rc := m.srv.GetRaftCluster()
 			if rc == nil || !rc.IsRunning() {
 				return
@@ -105,10 +102,11 @@ func (m *Manager) checkAddress() {
 			for i := range members {
 				if len(members[i].GetClientUrls()) != 0 {
 					addr := members[i].GetClientUrls()[0]
-					if err := m.srv.UpdateConfigManager("pd-server.dashboard-address", addr); err != nil {
-						log.Error("failed to update the dashboard address in config manager", zap.Error(err))
-					} else {
-						rc.SetDashboardAddress(addr)
+					rc.SetDashboardAddress(addr)
+					if m.srv.GetConfig().EnableDynamicConfig {
+						if err := m.srv.UpdateConfigManager("pd-server.dashboard-address", addr); err != nil {
+							log.Error("failed to update the dashboard address in config manager", zap.Error(err))
+						}
 					}
 					break
 				}
