@@ -912,7 +912,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 // State transition:
 // Case 1: Up -> Tombstone (if force is true);
 // Case 2: Offline -> Tombstone.
-func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:disable-line:flag-parameter
+func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	c.Lock()
 	defer c.Unlock()
 

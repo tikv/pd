@@ -738,7 +738,6 @@ func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
 	}
 }
 
-// revive:disable-next-line:flag-parameter
 func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new bool) (bool, error) {
 	oldName, newName := "disable-"+name, "enable-"+name
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
