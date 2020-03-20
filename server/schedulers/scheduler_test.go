@@ -565,6 +565,56 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	tc.AddRegionStore(2, 4)
 	tc.AddRegionStore(3, 2)
 	tc.AddRegionStore(4, 0)
+	tc.AddRegionStore(5, 0)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 1, 2, 3)
+	tc.AddLeaderRegion(3, 1, 2, 3)
+	tc.AddLeaderRegion(4, 1, 2, 3)
+	tc.AddLeaderRegion(5, 1, 2, 3)
+
+	// balance region without label
+	ops := bs.Schedule(tc)
+	c.Assert(ops, HasLen, 1)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpBalance, 1, 4)
+
+	// cannot balance to store 4 and 5 with label
+	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "hotRegion"})
+	tc.AddLabelsStore(5, 0, map[string]string{"specialUse": "reserved"})
+	ops = bs.Schedule(tc)
+	c.Assert(ops, HasLen, 0)
+
+	// can only move peer to 4
+	tc.UpdateStorageWrittenBytes(1, 60*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(4, 0)
+	tc.UpdateStorageWrittenBytes(5, 0)
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(4, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3})
+	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 2})
+	ops = hs.Schedule(tc)
+	c.Assert(ops, HasLen, 1)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 1, 4)
+}
+
+func (s *testSpecialUseSuite) TestSpecialUseReserved(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	storage := core.NewStorage(kv.NewMemoryKV())
+	cd := schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
+	bs, err := schedule.CreateScheduler(BalanceRegionType, oc, storage, cd)
+	c.Assert(err, IsNil)
+
+	opt := mockoption.NewScheduleOptions()
+	opt.HotRegionCacheHitsThreshold = 0
+	tc := mockcluster.NewCluster(opt)
+	tc.AddRegionStore(1, 10)
+	tc.AddRegionStore(2, 4)
+	tc.AddRegionStore(3, 2)
+	tc.AddRegionStore(4, 0)
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	tc.AddLeaderRegion(2, 1, 2, 3)
 	tc.AddLeaderRegion(3, 1, 2, 3)
@@ -577,20 +627,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	testutil.CheckTransferPeer(c, ops[0], operator.OpBalance, 1, 4)
 
 	// cannot balance to store 4 with label
-	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "hotRegion"})
+	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "reserved"})
 	ops = bs.Schedule(tc)
 	c.Assert(ops, HasLen, 0)
-
-	tc.UpdateStorageWrittenBytes(1, 60*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 6*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 0)
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(4, 2, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 3})
-	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*KB*statistics.RegionHeartBeatReportInterval, 0, statistics.RegionHeartBeatReportInterval, []uint64{1, 2})
-	ops = hs.Schedule(tc)
-	c.Assert(ops, HasLen, 1)
-	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 1, 4)
 }

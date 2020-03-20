@@ -84,9 +84,6 @@ type Config struct {
 
 	Schedule ScheduleConfig `toml:"schedule" json:"schedule"`
 
-	// Only used to display
-	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload"`
-
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
@@ -588,6 +585,9 @@ type ScheduleConfig struct {
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
+	// Only used to display
+	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload"`
+
 	// StoreLimitMode can be auto or manual, when set to auto,
 	// PD tries to change the store limit values according to
 	// the load state of the cluster dynamically. User can
@@ -1049,16 +1049,20 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 
+	allowedCN, serr := c.Security.GetOneAllowedCN()
+	if serr != nil {
+		return nil, serr
+	}
 	cfg.ClientTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
-	cfg.ClientTLSInfo.AllowedCN = c.Security.CertAllowedCN
+	cfg.ClientTLSInfo.AllowedCN = allowedCN
 	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
-	cfg.PeerTLSInfo.AllowedCN = c.Security.CertAllowedCN
+	cfg.PeerTLSInfo.AllowedCN = allowedCN
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
