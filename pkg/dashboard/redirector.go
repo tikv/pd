@@ -27,24 +27,22 @@ type Redirector struct {
 
 // NewRedirector creates a new Redirector.
 func NewRedirector() *Redirector {
-	return &Redirector{}
+	h := new(Redirector)
+	h.address.Store("")
+	return h
 }
 
 // SetAddress is used to set a new address to be redirected.
 func (h *Redirector) SetAddress(addr string) {
-	if addr == "" {
-		h.address.Store(nil)
-		return
-	}
 	h.address.Store(addr)
 }
 
 // ServeHTTP implements http.Handler.
 func (h *Redirector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	addr := h.address.Load()
-	if addr == nil {
+	addr := h.address.Load().(string)
+	if addr == "" {
 		apiserver.StoppedHandler.ServeHTTP(w, r)
 		return
 	}
-	http.Redirect(w, r, addr.(string)+r.RequestURI, 302)
+	http.Redirect(w, r, addr+r.RequestURI, 302)
 }
