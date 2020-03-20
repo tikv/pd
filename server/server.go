@@ -23,7 +23,6 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,7 +67,6 @@ import (
 const (
 	etcdTimeout           = time.Second * 3
 	serverMetricsInterval = time.Minute
-	dashboardInterval     = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
@@ -141,10 +139,8 @@ type Server struct {
 	configClient  pd.ConfigClient
 
 	// Add callback functions at different stages
-	startCallbacks map[CallbackType][]func()
-	closeCallbacks map[CallbackType][]func()
-
-	isDashboardServe bool
+	startCallbacks []func()
+	closeCallbacks []func()
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -231,8 +227,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		ctx:               ctx,
 		startTimestamp:    time.Now().Unix(),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		startCallbacks:    make(map[CallbackType][]func()),
-		closeCallbacks:    make(map[CallbackType][]func()),
 	}
 
 	s.cfgManager = configmanager.NewConfigManager(s)
@@ -338,18 +332,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	return nil
 }
 
-// CallbackType is the type of callback.
-type CallbackType int
-
-// Built-in callback type.
-const (
-	Dashboard CallbackType = iota
-	DynamicConfig
-)
-
 // AddStartCallback adds a callback in the startServer phase.
-func (s *Server) AddStartCallback(t CallbackType, callbacks ...func()) {
-	s.startCallbacks[t] = append(s.startCallbacks[t], callbacks...)
+func (s *Server) AddStartCallback(callbacks ...func()) {
+	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
 func (s *Server) startServer(ctx context.Context) error {
@@ -386,7 +371,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
 	// Run callbacks
-	for _, cb := range s.startCallbacks[DynamicConfig] {
+	for _, cb := range s.startCallbacks {
 		cb()
 	}
 
@@ -412,8 +397,8 @@ func (s *Server) initClusterID() error {
 }
 
 // AddCloseCallback adds a callback in the Close phase.
-func (s *Server) AddCloseCallback(t CallbackType, callbacks ...func()) {
-	s.closeCallbacks[t] = append(s.closeCallbacks[t], callbacks...)
+func (s *Server) AddCloseCallback(callbacks ...func()) {
+	s.closeCallbacks = append(s.closeCallbacks, callbacks...)
 }
 
 // Close closes the server.
@@ -440,6 +425,11 @@ func (s *Server) Close() {
 	}
 	if err := s.storage.Close(); err != nil {
 		log.Error("close storage meet error", zap.Error(err))
+	}
+
+	// Run callbacks
+	for _, cb := range s.closeCallbacks {
+		cb()
 	}
 
 	log.Info("close server")
@@ -481,11 +471,10 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(3)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
-	go s.dashboardLoop()
 	if s.cfg.EnableDynamicConfig {
 		s.serverLoopWg.Add(1)
 		go s.configCheckLoop()
@@ -495,99 +484,6 @@ func (s *Server) startServerLoop(ctx context.Context) {
 func (s *Server) stopServerLoop() {
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
-}
-
-func (s *Server) dashboardLoop() {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-
-	dashboardTicker := time.NewTicker(dashboardInterval)
-	defer dashboardTicker.Stop()
-	for {
-		select {
-		case <-dashboardTicker.C:
-			s.checkDashboardAddress()
-		case <-ctx.Done():
-			if s.isDashboardServe {
-				log.Info("Dashboard services are closed")
-				for _, cb := range s.closeCallbacks[Dashboard] {
-					cb()
-				}
-			}
-			log.Info("server is closed, exit dashboard loop")
-			return
-		}
-	}
-}
-
-// checkDashboardAddress checks if the dashboard service needs to change due to dashboard address is changed.
-func (s *Server) checkDashboardAddress() {
-	dashboardAddress := s.GetScheduleOption().GetDashboardAddress()
-	switch dashboardAddress {
-	case "auto":
-		if s.GetMember().IsLeader() {
-			rc := s.GetRaftCluster()
-			if rc == nil || !rc.IsRunning() {
-				return
-			}
-			members, err := cluster.GetMembers(s.GetClient())
-			if err != nil || len(members) == 0 {
-				log.Error("failed to get members")
-			}
-			sort.Slice(members, func(i, j int) bool { return members[i].GetMemberId() < members[j].GetMemberId() })
-			for i := range members {
-				if len(members[i].GetClientUrls()) != 0 {
-					addr := members[i].GetClientUrls()[0]
-					if s.GetConfig().EnableDynamicConfig {
-						err := s.updateConfigManager("pd-server.dashboard-address", addr)
-						if err != nil {
-							log.Error("failed to update the dashboard address in config manager", zap.Error(err))
-						}
-					}
-					rc.SetDashboardAddress(addr)
-					break
-				}
-			}
-		}
-		return
-	case "none":
-		if s.isDashboardServe {
-			log.Info("Dashboard services are stopped")
-			for _, cb := range s.closeCallbacks[Dashboard] {
-				cb()
-			}
-		}
-		return
-	default:
-	}
-	_, err := url.Parse(dashboardAddress)
-	if err != nil {
-		log.Error("illegal dashboard address", zap.String("address", dashboardAddress))
-		return
-	}
-
-	var addr string
-	if len(s.GetMemberInfo().GetClientUrls()) != 0 {
-		addr = s.GetMemberInfo().GetClientUrls()[0]
-	}
-	if addr != dashboardAddress && s.isDashboardServe {
-		for _, cb := range s.closeCallbacks[Dashboard] {
-			cb()
-		}
-		s.isDashboardServe = false
-		log.Info("Dashboard services are stopped")
-	}
-
-	if addr == dashboardAddress && !s.isDashboardServe {
-		for _, cb := range s.startCallbacks[Dashboard] {
-			cb()
-		}
-		s.isDashboardServe = true
-		log.Info("Dashboard services are started")
-	}
 }
 
 func (s *Server) serverMetricsLoop() {
@@ -792,7 +688,7 @@ func (s *Server) GetSchedulersCallback() func() {
 				log.Error("failed to encode config", zap.Error(err))
 			}
 
-			if err := s.updateConfigManager("schedule.schedulers", buf.String()); err != nil {
+			if err := s.UpdateConfigManager("schedule.schedulers", buf.String()); err != nil {
 				log.Error("failed to update the schedulers in config manager", zap.Error(err))
 			}
 		}
@@ -1016,7 +912,8 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	return nil
 }
 
-func (s *Server) updateConfigManager(name, value string) error {
+// UpdateConfigManager is used to update config manager directly.
+func (s *Server) UpdateConfigManager(name, value string) error {
 	configManager := s.GetConfigManager()
 	globalVersion := configManager.GetGlobalConfigs(Component).GetVersion()
 	version := &configpb.Version{Global: globalVersion}

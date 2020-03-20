@@ -18,8 +18,6 @@ import (
 	"net/http"
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/v4/server"
@@ -52,20 +50,9 @@ func GetServiceBuilders() []server.HandlerBuilder {
 				return nil, apiServiceGroup, err
 			}
 
-			srv.AddStartCallback(server.Dashboard, func() {
-				if err := s.Start(ctx); err != nil {
-					log.Error("Can not start dashboard server", zap.Error(err))
-				} else {
-					log.Info("Dashboard server is started", zap.String("path", uiServiceGroup.PathPrefix))
-				}
-			})
-			srv.AddCloseCallback(server.Dashboard, func() {
-				if err := s.Stop(context.Background()); err != nil {
-					log.Error("Stop dashboard server error", zap.Error(err))
-				} else {
-					log.Info("Dashboard server is stopped")
-				}
-			})
+			m := NewManager(srv, s)
+			srv.AddStartCallback(m.start)
+			srv.AddCloseCallback(m.stop)
 
 			return apiserver.Handler(s), apiServiceGroup, nil
 		},

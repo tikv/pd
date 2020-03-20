@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/pd/v4/server"
 )
 
-func newAPIService(srv *server.Server) (*apiserver.Service, error) {
+func newAPIService(srv *server.Server, redirector http.Handler) (*apiserver.Service, error) {
 	cfg := srv.GetConfig()
 
 	etcdCfg, err := cfg.GenEmbedEtcdConfig()
@@ -44,6 +44,7 @@ func newAPIService(srv *server.Server) (*apiserver.Service, error) {
 
 	s := apiserver.NewService(
 		dashboardCfg,
+		redirector,
 		apiserver.StoppedHandler,
 		func(c *config.Config, httpClient *http.Client, etcdClient *clientv3.Client) *region.PDDataProvider {
 			return &region.PDDataProvider{
