@@ -102,6 +102,7 @@ func (m *Manager) serviceLoop(lastStatus electionStatus) (nextStatus electionSta
 	for nextStatus == lastStatus {
 		select {
 		case <-m.ctx.Done():
+			m.stopService()
 			return stopped
 		case <-ticker.C:
 			nextStatus = m.checkAddress()
