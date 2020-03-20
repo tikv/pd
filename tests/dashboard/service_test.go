@@ -22,7 +22,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/tests"
@@ -44,19 +43,28 @@ func TestMain(m *testing.M) {
 var _ = Suite(&serverTestSuite{})
 
 type serverTestSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx        context.Context
+	cancel     context.CancelFunc
+	httpClient *http.Client
 }
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	dashboard.CheckInterval = time.Second * 2
 	server.EnableZap = true
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.httpClient = &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// ErrUseLastResponse can be returned by Client.CheckRedirect hooks to
+			// control how redirects are processed. If returned, the next request
+			// is not sent and the most recent response is returned with its body
+			// unclosed.
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func (s *serverTestSuite) TearDownSuite(c *C) {
 	s.cancel()
-	dashboard.CheckInterval = time.Minute
+	s.httpClient.CloseIdleConnections()
 }
 
 func (s *serverTestSuite) CheckRespCode(c *C, cluster *tests.TestCluster, hasServiceNode bool) (dashboardAddress string) {
@@ -68,7 +76,7 @@ func (s *serverTestSuite) CheckRespCode(c *C, cluster *tests.TestCluster, hasSer
 	dashboardAddress = leader.GetServer().GetScheduleOption().GetDashboardAddress()
 
 	checkRespCode := func(url string, target int) {
-		resp, err := http.Get(url) //nolint:gosec
+		resp, err := s.httpClient.Get(url) //nolint:gosec
 		c.Assert(err, IsNil)
 		c.Assert(len(resp.Header.Get("PD-Follower-handle")), Equals, 0)
 		_, err = ioutil.ReadAll(resp.Body)
@@ -82,14 +90,17 @@ func (s *serverTestSuite) CheckRespCode(c *C, cluster *tests.TestCluster, hasSer
 		c.Assert(srv.GetScheduleOption().GetDashboardAddress(), Equals, dashboardAddress)
 		addr := srv.GetAddr()
 		if addr == dashboardAddress {
-			countServiceNode++
-		}
-		if hasServiceNode {
 			checkRespCode(fmt.Sprintf("%s/dashboard/", addr), 200)
 			checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), 401)
+			countServiceNode++
 		} else {
-			checkRespCode(fmt.Sprintf("%s/dashboard/", addr), 404)
-			checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), 404)
+			if hasServiceNode {
+				checkRespCode(fmt.Sprintf("%s/dashboard/", addr), 302)
+				checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), 302)
+			} else {
+				checkRespCode(fmt.Sprintf("%s/dashboard/", addr), 404)
+				checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), 404)
+			}
 		}
 	}
 
@@ -115,10 +126,11 @@ func (s *serverTestSuite) TestDashboard(c *C) {
 	leaderAddr := leaderServer.GetAddr()
 
 	cmd := pdctl.InitCommand()
+
 	// auto select node
 	dashboardAddress := s.CheckRespCode(c, cluster, true)
 
-	// pd-ctl set addr
+	// pd-ctl set another addr
 	for _, srv := range cluster.GetServers() {
 		if srv.GetAddr() != dashboardAddress {
 			dashboardAddress = srv.GetAddr()
