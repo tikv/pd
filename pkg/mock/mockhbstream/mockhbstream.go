@@ -79,7 +79,7 @@ type HeartbeatStreams struct {
 }
 
 // NewHeartbeatStreams creates a new HeartbeatStreams.
-func NewHeartbeatStreams(clusterID uint64, noNeedRun bool) *HeartbeatStreams { // revive:disable-line:flag-parameter
+func NewHeartbeatStreams(clusterID uint64, noNeedRun bool) *HeartbeatStreams {
 	ctx, cancel := context.WithCancel(context.Background())
 	hs := &HeartbeatStreams{
 		ctx:       ctx,
