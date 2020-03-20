@@ -15,6 +15,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -34,6 +35,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -134,6 +136,8 @@ type Config struct {
 	EnableDynamicConfig bool `toml:"enable-dynamic-config" json:"enable-dynamic-config"`
 
 	EnableDashboard bool
+
+	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 }
 
 // NewConfig creates a new config.
@@ -1087,4 +1091,28 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// DashboardConfig is the configuration for tidb-dashboard.
+type DashboardConfig struct {
+	TiDBCAPath   string `toml:"tidb-cacert-path" json:"tidb_cacert_path"`
+	TiDBCertPath string `toml:"tidb-cert-path" json:"tidb_cert_path"`
+	TiDBKeyPath  string `toml:"tidb-key-path" json:"tidb_key_path"`
+}
+
+// ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
+func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
+	if (len(c.TiDBCertPath) != 0 && len(c.TiDBKeyPath) != 0) || len(c.TiDBCAPath) != 0 {
+		tlsInfo := transport.TLSInfo{
+			CertFile:      c.TiDBCertPath,
+			KeyFile:       c.TiDBKeyPath,
+			TrustedCAFile: c.TiDBCAPath,
+		}
+		tlsConfig, err := tlsInfo.ClientConfig()
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		return tlsConfig, nil
+	}
+	return nil, nil
 }
