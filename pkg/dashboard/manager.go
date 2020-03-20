@@ -35,9 +35,12 @@ const (
 	stopped electionStatus = iota
 	unknown
 	known
+)
 
-	fastCheckInterval = time.Second
-	slowCheckInterval = time.Minute
+var (
+	//
+	FastCheckInterval = time.Second
+	SlowCheckInterval = time.Minute
 )
 
 // Manager is used to control dashboard.
@@ -86,9 +89,9 @@ func (m *Manager) serviceLoop(lastStatus electionStatus) (nextStatus electionSta
 	var ticker *time.Ticker
 	switch lastStatus {
 	case unknown:
-		ticker = time.NewTicker(fastCheckInterval)
+		ticker = time.NewTicker(FastCheckInterval)
 	case known:
-		ticker = time.NewTicker(slowCheckInterval)
+		ticker = time.NewTicker(SlowCheckInterval)
 	default:
 		panic("unreachable")
 	}
@@ -181,7 +184,7 @@ func (m *Manager) setNewDashboardAddress() {
 		return
 	case 1:
 		addr = members[0].GetClientUrls()[0]
-	case 2:
+	default:
 		addr = members[0].GetClientUrls()[0]
 		leaderId := m.srv.GetMemberInfo().MemberId
 		sort.Slice(members, func(i, j int) bool { return members[i].GetMemberId() < members[j].GetMemberId() })

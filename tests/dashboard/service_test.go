@@ -22,6 +22,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/tests"
@@ -50,6 +51,7 @@ type serverTestSuite struct {
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
+	dashboard.SlowCheckInterval = time.Second * 2
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.httpClient = &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -65,6 +67,7 @@ func (s *serverTestSuite) SetUpSuite(c *C) {
 func (s *serverTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 	s.httpClient.CloseIdleConnections()
+	dashboard.SlowCheckInterval = time.Minute
 }
 
 func (s *serverTestSuite) CheckRespCode(c *C, cluster *tests.TestCluster, hasServiceNode bool) (dashboardAddress string) {
@@ -78,9 +81,9 @@ func (s *serverTestSuite) CheckRespCode(c *C, cluster *tests.TestCluster, hasSer
 	checkRespCode := func(url string, target int) {
 		resp, err := s.httpClient.Get(url) //nolint:gosec
 		c.Assert(err, IsNil)
+		resp.Body.Close()
 		c.Assert(len(resp.Header.Get("PD-Follower-handle")), Equals, 0)
 		_, err = ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, target)
 	}
