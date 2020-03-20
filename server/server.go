@@ -141,8 +141,8 @@ type Server struct {
 	configClient  pd.ConfigClient
 
 	// Add callback functions at different stages
-	startCallbacks []func()
-	closeCallbacks []func()
+	startCallbacks map[CallbackType][]func()
+	closeCallbacks map[CallbackType][]func()
 
 	isDashboardServe bool
 }
@@ -231,6 +231,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		ctx:               ctx,
 		startTimestamp:    time.Now().Unix(),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		startCallbacks:    make(map[CallbackType][]func()),
+		closeCallbacks:    make(map[CallbackType][]func()),
 	}
 
 	s.cfgManager = configmanager.NewConfigManager(s)
@@ -336,9 +338,18 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	return nil
 }
 
+// CallbackType is the type of callback.
+type CallbackType int
+
+// Built-in callback type.
+const (
+	Dashboard CallbackType = iota
+	DynamicConfig
+)
+
 // AddStartCallback adds a callback in the startServer phase.
-func (s *Server) AddStartCallback(callbacks ...func()) {
-	s.startCallbacks = append(s.startCallbacks, callbacks...)
+func (s *Server) AddStartCallback(t CallbackType, callbacks ...func()) {
+	s.startCallbacks[t] = append(s.startCallbacks[t], callbacks...)
 }
 
 func (s *Server) startServer(ctx context.Context) error {
@@ -374,6 +385,11 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
+	// Run callbacks
+	for _, cb := range s.startCallbacks[DynamicConfig] {
+		cb()
+	}
+
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
 	return nil
@@ -396,8 +412,8 @@ func (s *Server) initClusterID() error {
 }
 
 // AddCloseCallback adds a callback in the Close phase.
-func (s *Server) AddCloseCallback(callbacks ...func()) {
-	s.closeCallbacks = append(s.closeCallbacks, callbacks...)
+func (s *Server) AddCloseCallback(t CallbackType, callbacks ...func()) {
+	s.closeCallbacks[t] = append(s.closeCallbacks[t], callbacks...)
 }
 
 // Close closes the server.
@@ -496,16 +512,81 @@ func (s *Server) dashboardLoop() {
 			s.checkDashboardAddress()
 		case <-ctx.Done():
 			if s.isDashboardServe {
-				log.Info("dashboard services are closed")
-				for _, cb := range s.closeCallbacks {
+				log.Info("Dashboard services are closed")
+				for _, cb := range s.closeCallbacks[Dashboard] {
 					cb()
 				}
-			} else if len(s.closeCallbacks) != 0 {
-				s.closeCallbacks[len(s.closeCallbacks)-1]()
 			}
 			log.Info("server is closed, exit dashboard loop")
 			return
 		}
+	}
+}
+
+// checkDashboardAddress checks if the dashboard service needs to change due to dashboard address is changed.
+func (s *Server) checkDashboardAddress() {
+	dashboardAddress := s.GetScheduleOption().GetDashboardAddress()
+	switch dashboardAddress {
+	case "auto":
+		if s.GetMember().IsLeader() {
+			rc := s.GetRaftCluster()
+			if rc == nil || !rc.IsRunning() {
+				return
+			}
+			members, err := cluster.GetMembers(s.GetClient())
+			if err != nil || len(members) == 0 {
+				log.Error("failed to get members")
+			}
+			sort.Slice(members, func(i, j int) bool { return members[i].GetMemberId() < members[j].GetMemberId() })
+			for i := range members {
+				if len(members[i].GetClientUrls()) != 0 {
+					addr := members[i].GetClientUrls()[0]
+					if s.GetConfig().EnableDynamicConfig {
+						err := s.updateConfigManager("pd-server.dashboard-address", addr)
+						if err != nil {
+							log.Error("failed to update the dashboard address in config manager", zap.Error(err))
+						}
+					}
+					rc.SetDashboardAddress(addr)
+					break
+				}
+			}
+		}
+		return
+	case "none":
+		if s.isDashboardServe {
+			log.Info("Dashboard services are stopped")
+			for _, cb := range s.closeCallbacks[Dashboard] {
+				cb()
+			}
+		}
+		return
+	default:
+	}
+	_, err := url.Parse(dashboardAddress)
+	if err != nil {
+		log.Error("illegal dashboard address", zap.String("address", dashboardAddress))
+		return
+	}
+
+	var addr string
+	if len(s.GetMemberInfo().GetClientUrls()) != 0 {
+		addr = s.GetMemberInfo().GetClientUrls()[0]
+	}
+	if addr != dashboardAddress && s.isDashboardServe {
+		for _, cb := range s.closeCallbacks[Dashboard] {
+			cb()
+		}
+		s.isDashboardServe = false
+		log.Info("Dashboard services are stopped")
+	}
+
+	if addr == dashboardAddress && !s.isDashboardServe {
+		for _, cb := range s.startCallbacks[Dashboard] {
+			cb()
+		}
+		s.isDashboardServe = true
+		log.Info("Dashboard services are started")
 	}
 }
 
@@ -619,21 +700,6 @@ func (s *Server) createRaftCluster() error {
 	return s.cluster.Start(s)
 }
 
-// GetMemberIDs return all Members' IDs.
-func GetMemberIDs(etcdClient *clientv3.Client) ([]uint64, error) {
-	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
-	if err != nil {
-		return nil, err
-	}
-
-	memberIDs := make([]uint64, 0, len(listResp.Members))
-	for _, m := range listResp.Members {
-		memberIDs = append(memberIDs, m.ID)
-	}
-
-	return memberIDs, nil
-}
-
 func (s *Server) stopRaftCluster() {
 	s.cluster.Stop()
 }
@@ -727,7 +793,7 @@ func (s *Server) GetSchedulersCallback() func() {
 			}
 
 			if err := s.updateConfigManager("schedule.schedulers", buf.String()); err != nil {
-				log.Error("failed to update the schedulers", zap.Error(err))
+				log.Error("failed to update the schedulers in config manager", zap.Error(err))
 			}
 		}
 	}
@@ -1187,65 +1253,6 @@ func (s *Server) campaignLeader() {
 			log.Info("server is closed")
 			return
 		}
-	}
-}
-
-func (s *Server) checkDashboardAddress() {
-	dashboardAddress := s.GetScheduleOption().GetDashboardAddress()
-	switch dashboardAddress {
-	case "auto":
-		if s.GetMember().IsLeader() {
-			rc := s.GetRaftCluster()
-			if rc == nil || !rc.IsRunning() {
-				return
-			}
-			members, err := cluster.GetMembers(s.GetClient())
-			if err != nil || len(members) == 0 {
-				log.Error("failed to get members")
-			}
-			sort.Slice(members, func(i, j int) bool { return members[i].GetMemberId() < members[j].GetMemberId() })
-			for i := range members {
-				if len(members[i].GetClientUrls()) != 0 {
-					rc.SetDashboardAddress(members[i].GetClientUrls()[0])
-					break
-				}
-			}
-		}
-		return
-	case "none":
-		if s.isDashboardServe {
-			log.Info("dashboard services are stopped")
-			for _, cb := range s.closeCallbacks {
-				cb()
-			}
-		}
-		return
-	default:
-	}
-	_, err := url.Parse(dashboardAddress)
-	if err != nil {
-		log.Error("illegal dashboard address", zap.String("address", dashboardAddress))
-		return
-	}
-
-	var addr string
-	if len(s.GetMemberInfo().GetClientUrls()) != 0 {
-		addr = s.GetMemberInfo().GetClientUrls()[0]
-	}
-	if addr != dashboardAddress && s.isDashboardServe {
-		for _, cb := range s.closeCallbacks {
-			cb()
-		}
-		s.isDashboardServe = false
-		log.Info("dashboard services are stopped")
-	}
-
-	if addr == dashboardAddress && !s.isDashboardServe {
-		for _, cb := range s.startCallbacks {
-			cb()
-		}
-		s.isDashboardServe = true
-		log.Info("dashboard services are started")
 	}
 }
 

@@ -95,8 +95,9 @@ func main() {
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler}
-	serviceBuilders = append(serviceBuilders, dashboardapi.NewService, dashboardui.NewService)
-
+	if cfg.EnableDashboard {
+		serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
+	}
 	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", zap.Error(err))

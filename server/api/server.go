@@ -38,7 +38,7 @@ func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, server.S
 		serverapi.NewRedirector(svr),
 		negroni.Wrap(r)),
 	)
-	svr.AddStartCallback(f)
+	svr.AddStartCallback(server.DynamicConfig, f)
 
 	return router, group, nil
 }

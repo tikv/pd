@@ -52,14 +52,14 @@ func GetServiceBuilders() []server.HandlerBuilder {
 				return nil, apiServiceGroup, err
 			}
 
-			srv.AddStartCallback(func() {
+			srv.AddStartCallback(server.Dashboard, func() {
 				if err := s.Start(ctx); err != nil {
 					log.Error("Can not start dashboard server", zap.Error(err))
 				} else {
 					log.Info("Dashboard server is started", zap.String("path", uiServiceGroup.PathPrefix))
 				}
 			})
-			srv.AddCloseCallback(func() {
+			srv.AddCloseCallback(server.Dashboard, func() {
 				if err := s.Stop(context.Background()); err != nil {
 					log.Error("Stop dashboard server error", zap.Error(err))
 				} else {
