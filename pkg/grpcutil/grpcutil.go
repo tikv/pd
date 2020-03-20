@@ -37,7 +37,7 @@ type SecurityConfig struct {
 	CertAllowedCN []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
 }
 
-// ToTLSConfig generatres tls config.
+// ToTLSConfig generates tls config.
 func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
 		return nil, nil

@@ -236,3 +236,20 @@ func newTestScheduleOption() (*ScheduleOption, error) {
 	opt := NewScheduleOption(cfg)
 	return opt, nil
 }
+
+func (s *testConfigSuite) TestDashboardConfig(c *C) {
+	cfgData := `
+[dashboard]
+tidb-cacert-path = "/path/ca.pem"
+tidb-key-path = "/path/client-key.pem"
+tidb-cert-path = "/path/client.pem"
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Dashboard.TiDBCAPath, Equals, "/path/ca.pem")
+	c.Assert(cfg.Dashboard.TiDBKeyPath, Equals, "/path/client-key.pem")
+	c.Assert(cfg.Dashboard.TiDBCertPath, Equals, "/path/client.pem")
+}
