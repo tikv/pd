@@ -251,17 +251,20 @@ func handleComponentGet(s *server.Server, r *http.Request) (*http.Request, int, 
 	cm := s.GetConfigManager()
 	cm.RLock()
 	component = cm.GetComponent(componentID)
+	version := cm.GetLatestVersion(component, componentID)
 	cm.RUnlock()
 	if component == "" {
 		return nil, http.StatusBadRequest, errors.Errorf("cannot find component with component ID: %s", componentID)
 	}
 	clusterID := s.ClusterID()
-	getURI := fmt.Sprintf("/component?header.cluster_id=%d&component=%s&component_id=%s", clusterID, component, componentID)
+	getURI := fmt.Sprintf("/component?header.cluster_id=%d&component=%s&component_id=%s&version.local=%d&version.global=%d",
+		clusterID, component, componentID, version.GetLocal(), version.GetGlobal())
 	u, err := url.ParseRequestURI(getURI)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}
 	r.URL = u
+	r.Header.Set("Accept", "application/toml")
 	return r, http.StatusOK, nil
 }
 
@@ -279,7 +282,8 @@ func handleComponentDelete(s *server.Server, r *http.Request) (*http.Request, in
 	version := cm.GetLatestVersion(component, componentID)
 	cm.RUnlock()
 	clusterID := s.ClusterID()
-	getURI := fmt.Sprintf("/component?header.cluster_id=%d&kind.local.component_id=%s&version.local=%d&version.global=%d", clusterID, componentID, version.GetLocal(), version.GetGlobal())
+	getURI := fmt.Sprintf("/component?header.cluster_id=%d&kind.local.component_id=%s&version.local=%d&version.global=%d",
+		clusterID, componentID, version.GetLocal(), version.GetGlobal())
 	u, err := url.ParseRequestURI(getURI)
 	if err != nil {
 		return nil, http.StatusBadRequest, err

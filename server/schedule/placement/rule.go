@@ -15,6 +15,7 @@ package placement
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"sort"
 )
 
@@ -52,6 +53,11 @@ type Rule struct {
 	Count            int               `json:"count"`                       // expected count of the peers
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers
 	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically
+}
+
+func (r Rule) String() string {
+	b, _ := json.Marshal(r)
+	return string(b)
 }
 
 // Key returns (groupID, ID) as the global unique key of a rule.

@@ -144,7 +144,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup, error)
 
 // ServiceGroup used to register the service.
 type ServiceGroup struct {
@@ -171,7 +171,10 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 	router := mux.NewRouter()
 
 	for _, build := range serviceBuilders {
-		handler, info := build(ctx, svr)
+		handler, info, err := build(ctx, svr)
+		if err != nil {
+			return nil, err
+		}
 		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
 			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
 		}
@@ -728,7 +731,7 @@ func (s *Server) GetConfig() *config.Config {
 	for i, sche := range sches {
 		payload[sche] = configs[i]
 	}
-	cfg.SchedulersPayload = payload
+	cfg.Schedule.SchedulersPayload = payload
 	return cfg
 }
 
@@ -773,17 +776,27 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if cfg.EnablePlacementRules {
+	old := s.scheduleOpt.GetReplication().Load()
+	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
 			return errors.WithStack(cluster.ErrNotBootstrapped)
 		}
-		// initialize rule manager.
-		if err := raftCluster.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
-			return err
+		if cfg.EnablePlacementRules {
+			// initialize rule manager.
+			if err := raftCluster.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
+				return err
+			}
+		} else {
+			// NOTE: can be removed after placement rules feature is enabled by default.
+			for _, s := range raftCluster.GetStores() {
+				if !s.IsTombstone() && isTiFlashStore(s.GetMeta()) {
+					return errors.New("cannot disable placement rules with TiFlash nodes")
+				}
+			}
 		}
 	}
-	old := s.scheduleOpt.GetReplication().Load()
+
 	s.scheduleOpt.GetReplication().Store(&cfg)
 	if err := s.scheduleOpt.Persist(s.storage); err != nil {
 		s.scheduleOpt.GetReplication().Store(old)
@@ -1214,19 +1227,30 @@ func (s *Server) configCheckLoop() {
 			log.Info("config check has been stopped")
 			return
 		case <-ticker.C:
-			version := s.GetConfigVersion()
-			config, err := s.getComponentConfig(ctx, version, compoenntID)
-			if err != nil {
-				log.Error("failed to get config", zap.Error(err))
-			}
-			if config == "" {
-				continue
-			}
-			if err := s.updateComponentConfig(config); err != nil {
+			if err := s.updateConfig(ctx, compoenntID); err != nil {
 				log.Error("failed to update config", zap.Error(err))
+			}
+
+			rc := s.GetRaftCluster()
+			if s.GetMember().IsLeader() && rc != nil {
+				if !rc.GetConfigCheck() {
+					rc.SetConfigCheck()
+				}
 			}
 		}
 	}
+}
+
+func (s *Server) updateConfig(ctx context.Context, compoenntID string) error {
+	version := s.GetConfigVersion()
+	config, err := s.getComponentConfig(ctx, version, compoenntID)
+	if err != nil {
+		return err
+	}
+	if config == "" {
+		return nil
+	}
+	return s.updateComponentConfig(config)
 }
 
 func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Version, componentID, config string) error {
