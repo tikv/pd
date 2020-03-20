@@ -226,7 +226,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 
-	if err := rc.PutStore(store); err != nil {
+	if err := rc.PutStore(store, false); err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 

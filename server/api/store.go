@@ -232,7 +232,8 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := rc.UpdateStoreLabels(storeID, labels); err != nil {
+	_, force := r.URL.Query()["force"]
+	if err := rc.UpdateStoreLabels(storeID, labels, force); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
