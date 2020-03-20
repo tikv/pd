@@ -132,7 +132,6 @@ type Config struct {
 	logProps *log.ZapProperties
 
 	EnableDynamicConfig bool `toml:"enable-dynamic-config" json:"enable-dynamic-config"`
-	EnableDashboard     bool `toml:"enable-dashboard" json:"enable-dashboard"`
 }
 
 // NewConfig creates a new config.
@@ -204,7 +203,6 @@ const (
 	defaultDisableErrorVerbose = true
 
 	defaultEnableDynamicConfig = true
-	defaultEnableDashboard     = true
 	defaultDashboardAddress    = "auto"
 )
 
@@ -452,9 +450,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	if !configMetaData.IsDefined("enable-dynamic-config") {
 		c.EnableDynamicConfig = defaultEnableDynamicConfig
-	}
-	if !configMetaData.IsDefined("enable-dashboard") {
-		c.EnableDashboard = defaultEnableDashboard
 	}
 	return nil
 }

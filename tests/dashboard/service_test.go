@@ -23,7 +23,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/tests"
 	"go.uber.org/goleak"
 
@@ -56,9 +55,7 @@ func (s *serverTestSuite) TearDownSuite(c *C) {
 }
 
 func (s *serverTestSuite) TestEnable(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) {
-		conf.EnableDashboard = true
-	})
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
@@ -97,9 +94,7 @@ func (s *serverTestSuite) TestEnable(c *C) {
 }
 
 func (s *serverTestSuite) TestDisable(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) {
-		conf.EnableDashboard = false
-	})
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()

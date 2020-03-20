@@ -21,57 +21,61 @@ import (
 	"time"
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/cluster"
-	"go.uber.org/zap"
 )
 
-// CheckInterval is the interval to check dashbaord address.
+// CheckInterval is the interval to check dashboard address.
 const CheckInterval = time.Minute
 
 // Manager is used to control dashboard.
 type Manager struct {
-	ctx              context.Context
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
-	s                *server.Server
-	service          *apiserver.Service
-	isDashboardServe bool
+	autoSetAddress bool
+
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	srv        *server.Server
+	service    *apiserver.Service
+	redirector *Redirector
 }
 
 // NewManager creates a new Manager.
-func NewManager(s *server.Server, service *apiserver.Service) *Manager {
-	ctx, cancel := context.WithCancel(s.Context())
+func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector) *Manager {
+	ctx, cancel := context.WithCancel(srv.Context())
 	return &Manager{
-		ctx:     ctx,
-		cancel:  cancel,
-		s:       s,
-		service: service,
+		autoSetAddress: srv.GetConfig().EnableDynamicConfig,
+		ctx:            ctx,
+		cancel:         cancel,
+		srv:            srv,
+		service:        s,
+		redirector:     redirector,
 	}
 }
 
 func (m *Manager) start() {
 	m.wg.Add(1)
-	go m.dashboardLoop()
+	go m.serviceLoop()
 }
 
-func (m *Manager) dashboardLoop() {
+func (m *Manager) serviceLoop() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 
-	dashboardTicker := time.NewTicker(CheckInterval)
-	defer dashboardTicker.Stop()
+	ticker := time.NewTicker(CheckInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-dashboardTicker.C:
-			m.checkDashboardAddress()
+		case <-ticker.C:
+			m.checkAddress()
 		case <-m.ctx.Done():
-			if m.isDashboardServe {
-				m.stopDashboard()
-			}
-			log.Info("server is closed, exit dashboard loop")
+			m.stopService()
+			log.Info("dashboard is closed, exit dashboard loop")
 			return
 		}
 	}
@@ -83,65 +87,62 @@ func (m *Manager) stop() {
 }
 
 // checkDashboardAddress checks if the dashboard service needs to change due to dashboard address is changed.
-func (m *Manager) checkDashboardAddress() {
-	dashboardAddress := m.s.GetScheduleOption().GetDashboardAddress()
+func (m *Manager) checkAddress() {
+	dashboardAddress := m.srv.GetScheduleOption().GetDashboardAddress()
 	switch dashboardAddress {
 	case "auto":
-		if m.s.GetMember().IsLeader() {
-			rc := m.s.GetRaftCluster()
+		if m.autoSetAddress && m.srv.GetMember().IsLeader() {
+			rc := m.srv.GetRaftCluster()
 			if rc == nil || !rc.IsRunning() {
 				return
 			}
-			members, err := cluster.GetMembers(m.s.GetClient())
+			members, err := cluster.GetMembers(m.srv.GetClient())
 			if err != nil || len(members) == 0 {
 				log.Error("failed to get members")
+				return
 			}
 			sort.Slice(members, func(i, j int) bool { return members[i].GetMemberId() < members[j].GetMemberId() })
 			for i := range members {
 				if len(members[i].GetClientUrls()) != 0 {
 					addr := members[i].GetClientUrls()[0]
-					if m.s.GetConfig().EnableDynamicConfig {
-						err := m.s.UpdateConfigManager("pd-server.dashboard-address", addr)
-						if err != nil {
-							log.Error("failed to update the dashboard address in config manager", zap.Error(err))
-						}
+					if err := m.srv.UpdateConfigManager("pd-server.dashboard-address", addr); err != nil {
+						log.Error("failed to update the dashboard address in config manager", zap.Error(err))
+					} else {
+						rc.SetDashboardAddress(addr)
 					}
-					rc.SetDashboardAddress(addr)
 					break
 				}
 			}
 		}
 		return
 	case "none":
-		if m.isDashboardServe {
-			m.stopDashboard()
-			m.isDashboardServe = false
-		}
+		m.stopService()
 		return
 	default:
+		_, err := url.Parse(dashboardAddress)
+		if err != nil {
+			log.Error("illegal dashboard address", zap.String("address", dashboardAddress))
+			return
+		}
 	}
-	_, err := url.Parse(dashboardAddress)
-	if err != nil {
-		log.Error("illegal dashboard address", zap.String("address", dashboardAddress))
-		return
-	}
+
+	m.redirector.SetAddress(dashboardAddress)
 
 	var addr string
-	if len(m.s.GetMemberInfo().GetClientUrls()) != 0 {
-		addr = m.s.GetMemberInfo().GetClientUrls()[0]
+	if len(m.srv.GetMemberInfo().GetClientUrls()) != 0 {
+		addr = m.srv.GetMemberInfo().GetClientUrls()[0]
 	}
-	if addr != dashboardAddress && m.isDashboardServe {
-		m.stopDashboard()
-		m.isDashboardServe = false
-	}
-
-	if addr == dashboardAddress && !m.isDashboardServe {
-		m.startDashboard()
-		m.isDashboardServe = true
+	if addr == dashboardAddress {
+		m.startService()
+	} else {
+		m.stopService()
 	}
 }
 
-func (m *Manager) startDashboard() {
+func (m *Manager) startService() {
+	if m.service.IsRunning() {
+		return
+	}
 	if err := m.service.Start(m.ctx); err != nil {
 		log.Error("Can not start dashboard server", zap.Error(err))
 	} else {
@@ -149,7 +150,10 @@ func (m *Manager) startDashboard() {
 	}
 }
 
-func (m *Manager) stopDashboard() {
+func (m *Manager) stopService() {
+	if !m.service.IsRunning() {
+		return
+	}
 	if err := m.service.Stop(context.Background()); err != nil {
 		log.Error("Stop dashboard server error", zap.Error(err))
 	} else {

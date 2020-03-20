@@ -45,7 +45,6 @@ func newAPIService(srv *server.Server, redirector http.Handler) (*apiserver.Serv
 	s := apiserver.NewService(
 		dashboardCfg,
 		redirector,
-		apiserver.StoppedHandler,
 		func(c *config.Config, httpClient *http.Client, etcdClient *clientv3.Client) *region.PDDataProvider {
 			return &region.PDDataProvider{
 				EtcdClient:     etcdClient,

@@ -42,15 +42,17 @@ var (
 // GetServiceBuilders returns all ServiceBuilders required by Dashboard
 func GetServiceBuilders() []server.HandlerBuilder {
 	var s *apiserver.Service
+	redirector := NewRedirector()
+
 	return []server.HandlerBuilder{
 		// Dashboard API Service
 		func(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, error) {
 			var err error
-			if s, err = newAPIService(srv); err != nil {
+			if s, err = newAPIService(srv, redirector); err != nil {
 				return nil, apiServiceGroup, err
 			}
 
-			m := NewManager(srv, s)
+			m := NewManager(srv, s, redirector)
 			srv.AddStartCallback(m.start)
 			srv.AddCloseCallback(m.stop)
 
