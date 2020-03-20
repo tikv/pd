@@ -19,11 +19,14 @@ import (
 	"io/ioutil"
 	"net/http"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/tests"
+	"github.com/pingcap/pd/v4/tests/pdctl"
 	"go.uber.org/goleak"
 
 	// Register schedulers.
@@ -47,33 +50,24 @@ type serverTestSuite struct {
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	dashboard.CheckInterval = time.Second * 3
 	server.EnableZap = true
 }
 
 func (s *serverTestSuite) TearDownSuite(c *C) {
 	s.cancel()
+	dashboard.CheckInterval = time.Minute
 }
 
-func (s *serverTestSuite) TestEnable(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3)
-	c.Assert(err, IsNil)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+func (s *serverTestSuite) CheckRespCode(c *C, cluster *tests.TestCluster, hasServiceNode bool) (dashboardAddress string) {
+	time.Sleep(time.Second * 5)
+	leaderName := cluster.GetLeader()
+	servers := cluster.GetServers()
+	leader := servers[leaderName]
 
-	leaderName := cluster.WaitLeader()
-	leader := cluster.GetServer(leaderName)
-	c.Assert(leaderName, Not(Equals), "")
-	var follower *tests.TestServer
-	for name, svr := range cluster.GetServers() {
-		if name != leaderName {
-			follower = svr
-			break
-		}
-	}
-	c.Assert(follower, NotNil)
+	dashboardAddress = leader.GetServer().GetScheduleOption().GetDashboardAddress()
 
-	checkReqCode := func(url string, target int) {
+	checkRespCode := func(url string, target int) {
 		resp, err := http.Get(url) //nolint:gosec
 		c.Assert(err, IsNil)
 		c.Assert(len(resp.Header.Get("PD-Follower-handle")), Equals, 0)
@@ -83,51 +77,59 @@ func (s *serverTestSuite) TestEnable(c *C) {
 		c.Assert(resp.StatusCode, Equals, target)
 	}
 
-	url := fmt.Sprintf("%s/dashboard/", leader.GetAddr())
-	checkReqCode(url, 200)
-	url = fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", leader.GetAddr())
-	checkReqCode(url, 401)
-	url = fmt.Sprintf("%s/dashboard/", follower.GetAddr())
-	checkReqCode(url, 200)
-	url = fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", follower.GetAddr())
-	checkReqCode(url, 401)
+	countServiceNode := 0
+	for _, srv := range servers {
+		c.Assert(srv.GetScheduleOption().GetDashboardAddress(), Equals, dashboardAddress)
+		addr := srv.GetAddr()
+		if addr == dashboardAddress {
+			checkRespCode(fmt.Sprintf("%s/dashboard/", addr), 200)
+			checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), 401)
+			countServiceNode++
+		} else {
+			target := 302
+			if !hasServiceNode {
+				target = 404
+			}
+			checkRespCode(fmt.Sprintf("%s/dashboard/", addr), target)
+			checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), target)
+		}
+	}
+
+	if hasServiceNode {
+		c.Assert(countServiceNode, Equals, 1)
+	} else {
+		c.Assert(countServiceNode, Equals, 0)
+	}
+
+	return dashboardAddress
 }
 
-func (s *serverTestSuite) TestDisable(c *C) {
+func (s *serverTestSuite) TestDashboard(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
+	cmd := pdctl.InitCommand()
 
-	leaderName := cluster.WaitLeader()
-	leader := cluster.GetServer(leaderName)
-	c.Assert(leaderName, Not(Equals), "")
-	var follower *tests.TestServer
-	for name, svr := range cluster.GetServers() {
-		if name != leaderName {
-			follower = svr
+	// auto select node
+	dashboardAddress := s.CheckRespCode(c, cluster, true)
+
+	// pd-ctl set addr
+	for _, srv := range cluster.GetServers() {
+		if srv.GetAddr() != dashboardAddress {
+			dashboardAddress = srv.GetAddr()
 			break
 		}
 	}
-	c.Assert(follower, NotNil)
+	args := []string{"-u", "config", "set", "dashboard-address", dashboardAddress}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(s.CheckRespCode(c, cluster, true), Equals, dashboardAddress)
 
-	checkReqCode := func(url string, target int) {
-		resp, err := http.Get(url) //nolint:gosec
-		c.Assert(err, IsNil)
-		c.Assert(len(resp.Header.Get("PD-Follower-handle")), Equals, 0)
-		_, err = ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
-		c.Assert(err, IsNil)
-		c.Assert(resp.StatusCode, Equals, target)
-	}
-
-	url := fmt.Sprintf("%s/dashboard/", leader.GetAddr())
-	checkReqCode(url, 404)
-	url = fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", leader.GetAddr())
-	checkReqCode(url, 404)
-	url = fmt.Sprintf("%s/dashboard/", follower.GetAddr())
-	checkReqCode(url, 404)
-	url = fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", follower.GetAddr())
-	checkReqCode(url, 404)
+	// pd-ctl set stop
+	args = []string{"-u", "config", "set", "dashboard-address", "none"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	s.CheckRespCode(c, cluster, false)
 }

@@ -30,7 +30,7 @@ import (
 )
 
 // CheckInterval is the interval to check dashboard address.
-const CheckInterval = time.Minute
+var CheckInterval = time.Minute
 
 // Manager is used to control dashboard.
 type Manager struct {
@@ -116,6 +116,7 @@ func (m *Manager) checkAddress() {
 		}
 		return
 	case "none":
+		m.redirector.SetAddress("")
 		m.stopService()
 		return
 	default:
