@@ -803,7 +803,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 
 // PutStore puts a store.
 // If 'force' is true, then overwrite the store's labels.
-func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
+func (c *RaftCluster) PutStore(store *metapb.Store, putByForce bool) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -836,7 +836,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 		// Add a new store.
 		s = core.NewStoreInfo(store)
 	} else {
-		if !force {
+		if !putByForce {
 			// Update an existed store.
 			labels := s.MergeLabels(store.GetLabels())
 
