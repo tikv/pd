@@ -27,9 +27,7 @@ type Redirector struct {
 
 // NewRedirector creates a new Redirector.
 func NewRedirector() *Redirector {
-	return &Redirector{
-		address: nil,
-	}
+	return &Redirector{}
 }
 
 // SetAddress is used to set a new address to be redirected.
