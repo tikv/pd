@@ -100,6 +100,7 @@ func getInteractCmd(args []string) *cobra.Command {
 	rootCmd.SetArgs(args)
 	rootCmd.ParseFlags(args)
 	rootCmd.SetOutput(os.Stdout)
+	hiddenFlag(rootCmd)
 
 	return rootCmd
 }
@@ -117,6 +118,14 @@ func getMainCmd(args []string) *cobra.Command {
 	rootCmd.SetOutput(os.Stdout)
 
 	return rootCmd
+}
+
+// Hide the flag in help and usage messages.
+func hiddenFlag(cmd *cobra.Command) {
+	err := cmd.Flags().MarkHidden("pd")
+	if err != nil {
+		cmd.Printf("Failed to hidden flags: %s\n", err)
+	}
 }
 
 // MainStart start main command
