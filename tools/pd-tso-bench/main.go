@@ -17,6 +17,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/signal"
 	"sync"
@@ -26,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	pd "github.com/pingcap/pd/v4/client"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
@@ -39,7 +43,18 @@ var (
 	wg          sync.WaitGroup
 )
 
+var promServer *httptest.Server
+
+func collectMetrics(server *httptest.Server) string {
+	time.Sleep(1100 * time.Millisecond)
+	res, _ := http.Get(server.URL)
+	body, _ := ioutil.ReadAll(res.Body)
+	res.Body.Close()
+	return string(body)
+}
+
 func main() {
+	promServer = httptest.NewServer(promhttp.Handler())
 	flag.Parse()
 
 	pdCli, err := pd.NewClient([]string{*pdAddrs}, pd.SecurityOption{
@@ -101,6 +116,7 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
+			//runtime.GC()
 			println(s.String())
 			total.merge(s)
 			s = newStats()
@@ -109,6 +125,7 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 		case <-statCtx.Done():
 			println("\nTotal:")
 			println(total.String())
+			println(collectMetrics(promServer))
 			return
 		}
 	}
