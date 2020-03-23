@@ -75,7 +75,7 @@ func NewSetComponentConfigCommand() *cobra.Command {
 func NewGetComponentIDCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:   "ids [component]",
-		Short: "get all component IDs or given component names (e.g. tikv)",
+		Short: "get component IDs for all components or with a given component name (e.g. tikv)",
 		Run:   getComponentIDCommandFunc,
 	}
 	return sc
@@ -118,9 +118,7 @@ func getComponentIDCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
-	var (
-		ids = "all"
-	)
+	ids := "all"
 	if argsLen == 1 {
 		ids = args[0]
 	}
@@ -131,7 +129,7 @@ func getComponentIDCommandFunc(cmd *cobra.Command, args []string) {
 		if argsLen > 0 {
 			cmd.Printf("Failed to get component %s's id: %s\n", args[0], err)
 		} else {
-			cmd.Printf("Failed to get all components: %s\n", err)
+			cmd.Println("Failed to get all components: %s", err)
 		}
 		return
 	}
