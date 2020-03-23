@@ -1,4 +1,10 @@
 basePath: /pd/api/v1
+definitions:
+  api.version:
+    properties:
+      version:
+        type: string
+    type: object
 host: http://localhost:2379
 info:
   contact:
@@ -12,5 +18,17 @@ info:
   termsOfService: https://pingcap.com
   title: PingCAP Placement Driver API
   version: "1.0"
-paths: {}
+paths:
+  /version:
+    get:
+      description: Get the version of PD server
+      operationId: get-version
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.version'
+      summary: Get the version of PD server
 swagger: "2.0"
