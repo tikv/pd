@@ -26,7 +26,9 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/log"
+	_ "github.com/pingcap/pd/v4/docs"
 	"github.com/pingcap/pd/v4/server"
+	httpSwagger "github.com/swaggo/http-swagger"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -45,6 +47,20 @@ func createIndentRender() *render.Render {
 	})
 }
 
+// @title PingCAP Placement Driver API
+// @version 1.0
+// @description This is placement driver.
+// @termsOfService https://pingcap.com
+
+// @contact.name Placement Driver Support
+// @contact.url https://github.com/pingcap/pd/issues
+// @contact.email info@pingcap.com
+
+// @license.name Apache 2.0
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @host http://localhost:2379
+// @BasePath /pd/api/v1
 // The returned function is used as a lazy router to avoid the data race problem.
 func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.Router, func()) {
 	rd := createIndentRender()
@@ -193,6 +209,10 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	apiRouter.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
 	apiRouter.Handle("/debug/pprof/block", pprof.Handler("block"))
 	apiRouter.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+
+	// swagger docs
+	swaggerHandler := httpSwagger.Handler()
+	apiRouter.PathPrefix("/swagger").Handler(swaggerHandler).Methods("GET")
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
