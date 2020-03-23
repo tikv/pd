@@ -50,7 +50,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	pdAddr := cluster.GetConfig().GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURL()
 	c.Assert(err, IsNil)
 	cmd := pdctl.InitCommand()
 	svr := cluster.GetServer("pd2")

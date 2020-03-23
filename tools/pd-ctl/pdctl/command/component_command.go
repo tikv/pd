@@ -28,8 +28,8 @@ var (
 	componentConfigPrefix = "pd/api/v1/component"
 )
 
-// NewComponentConfigCommand returns a component subcommand of rootCmd
-func NewComponentConfigCommand() *cobra.Command {
+// NewComponentCommand returns a component subcommand of rootCmd
+func NewComponentCommand() *cobra.Command {
 	conf := &cobra.Command{
 		Use:   "component <subcommand>",
 		Short: "manipulate components' configs",
@@ -88,7 +88,7 @@ func showComponentConfigCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	prefix := path.Join(componentConfigPrefix, args[0])
-	r, err := doRequest(cmd, prefix, http.MethodGet, WithAccept("application/toml"))
+	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get component config: %s\n", err)
 		return

@@ -15,6 +15,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -34,6 +35,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -81,9 +83,6 @@ type Config struct {
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
 	Schedule ScheduleConfig `toml:"schedule" json:"schedule"`
-
-	// Only used to display
-	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload"`
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
@@ -137,6 +136,8 @@ type Config struct {
 	EnableDynamicConfig bool `toml:"enable-dynamic-config" json:"enable-dynamic-config"`
 
 	EnableDashboard bool
+
+	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 }
 
 // NewConfig creates a new config.
@@ -584,6 +585,9 @@ type ScheduleConfig struct {
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
+	// Only used to display
+	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload"`
+
 	// StoreLimitMode can be auto or manual, when set to auto,
 	// PD tries to change the store limit values according to
 	// the load state of the cluster dynamically. User can
@@ -734,7 +738,6 @@ func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
 	}
 }
 
-// revive:disable-next-line:flag-parameter
 func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new bool) (bool, error) {
 	oldName, newName := "disable-"+name, "enable-"+name
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
@@ -1045,13 +1048,20 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.AutoCompactionRetention = c.AutoCompactionRetention
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 
+	allowedCN, serr := c.Security.GetOneAllowedCN()
+	if serr != nil {
+		return nil, serr
+	}
 	cfg.ClientTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
+	cfg.ClientTLSInfo.AllowedCN = allowedCN
+	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
+	cfg.PeerTLSInfo.AllowedCN = allowedCN
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
@@ -1080,4 +1090,28 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// DashboardConfig is the configuration for tidb-dashboard.
+type DashboardConfig struct {
+	TiDBCAPath   string `toml:"tidb-cacert-path" json:"tidb_cacert_path"`
+	TiDBCertPath string `toml:"tidb-cert-path" json:"tidb_cert_path"`
+	TiDBKeyPath  string `toml:"tidb-key-path" json:"tidb_key_path"`
+}
+
+// ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
+func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
+	if (len(c.TiDBCertPath) != 0 && len(c.TiDBKeyPath) != 0) || len(c.TiDBCAPath) != 0 {
+		tlsInfo := transport.TLSInfo{
+			CertFile:      c.TiDBCertPath,
+			KeyFile:       c.TiDBKeyPath,
+			TrustedCAFile: c.TiDBCAPath,
+		}
+		tlsConfig, err := tlsInfo.ClientConfig()
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		return tlsConfig, nil
+	}
+	return nil, nil
 }

@@ -48,7 +48,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURLs()
+	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctl.InitCommand()
 
 	stores := []*metapb.Store{
@@ -96,7 +96,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	pdctl.CheckStoresInfo(c, []*api.StoreInfo{storeInfo}, stores[:1])
 
-	// store label <store_id> <key> <value> command
+	// store label <store_id> <key> <value> [<key> <value>]... [flags] command
 	c.Assert(storeInfo.Store.Labels, IsNil)
 	args = []string{"-u", pdAddr, "store", "label", "1", "zone", "cn"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
@@ -108,6 +108,34 @@ func (s *storeTestSuite) TestStore(c *C) {
 	label := storeInfo.Store.Labels[0]
 	c.Assert(label.Key, Equals, "zone")
 	c.Assert(label.Value, Equals, "cn")
+
+	// store label <store_id> <key> <value> <key> <value>... command
+	args = []string{"-u", pdAddr, "store", "label", "1", "zone", "us", "language", "English"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "store", "1"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
+	label0 := storeInfo.Store.Labels[0]
+	c.Assert(label0.Key, Equals, "zone")
+	c.Assert(label0.Value, Equals, "us")
+	label1 := storeInfo.Store.Labels[1]
+	c.Assert(label1.Key, Equals, "language")
+	c.Assert(label1.Value, Equals, "English")
+
+	// store label <store_id> <key> <value> <key> <value>... -f command
+	args = []string{"-u", pdAddr, "store", "label", "1", "zone", "uk", "-f"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "store", "1"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
+	label0 = storeInfo.Store.Labels[0]
+	c.Assert(label0.Key, Equals, "zone")
+	c.Assert(label0.Value, Equals, "uk")
+	c.Assert(len(storeInfo.Store.Labels), Equals, 1)
 
 	// store weight <store_id> <leader_weight> <region_weight> command
 	c.Assert(storeInfo.Status.LeaderWeight, Equals, float64(1))

@@ -15,6 +15,7 @@ package configmanager
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/member"
 	"github.com/pkg/errors"
@@ -49,6 +51,7 @@ var (
 type Server interface {
 	IsClosed() bool
 	ClusterID() uint64
+	GetConfig() *config.Config
 	GetRaftCluster() *cluster.RaftCluster
 	GetStorage() *core.Storage
 	GetMember() *member.Member
@@ -121,6 +124,32 @@ func (c *ConfigManager) GetComponent(id string) string {
 	return ""
 }
 
+// GetAllConfig returns all configs in the config manager.
+func (c *ConfigManager) GetAllConfig(ctx context.Context) ([]*configpb.LocalConfig, *configpb.Status) {
+	c.RLock()
+	defer c.RUnlock()
+	localConfigs := make([]*configpb.LocalConfig, 0, 8)
+	for component, localCfg := range c.LocalCfgs {
+		for componentID, cfg := range localCfg {
+			config, err := encodeConfigs(cfg.getConfigs())
+			if err != nil {
+				return nil, &configpb.Status{
+					Code:    configpb.StatusCode_UNKNOWN,
+					Message: errEncode(err),
+				}
+			}
+			localConfigs = append(localConfigs, &configpb.LocalConfig{
+				Version:     cfg.GetVersion(),
+				Component:   component,
+				ComponentId: componentID,
+				Config:      config,
+			})
+		}
+	}
+
+	return localConfigs, &configpb.Status{Code: configpb.StatusCode_OK}
+}
+
 // GetConfig returns config and the latest version.
 func (c *ConfigManager) GetConfig(version *configpb.Version, component, componentID string) (*configpb.Version, string, *configpb.Status) {
 	c.RLock()
@@ -160,6 +189,7 @@ func (c *ConfigManager) GetConfig(version *configpb.Version, component, componen
 func (c *ConfigManager) CreateConfig(version *configpb.Version, component, componentID, cfg string) (*configpb.Version, string, *configpb.Status) {
 	c.Lock()
 	defer c.Unlock()
+
 	var status *configpb.Status
 	latestVersion := c.GetLatestVersion(component, componentID)
 	initVersion := &configpb.Version{Local: 0, Global: 0}
