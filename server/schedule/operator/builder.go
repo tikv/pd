@@ -537,7 +537,7 @@ func (b *Builder) labelMatch(x, y uint64) int {
 	return len(labels)
 }
 
-func b2i(b bool) int { // revive:disable-line:flag-parameter
+func b2i(b bool) int {
 	if b {
 		return 1
 	}

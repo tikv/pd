@@ -41,6 +41,10 @@ func newAPIService(srv *server.Server) (*apiserver.Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	dashboardCfg.TiDBTLSConfig, err = cfg.Dashboard.ToTiDBTLSConfig()
+	if err != nil {
+		return nil, err
+	}
 
 	s := apiserver.NewService(
 		dashboardCfg,

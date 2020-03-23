@@ -25,6 +25,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/member"
 	"github.com/pkg/errors"
@@ -50,6 +51,7 @@ var (
 type Server interface {
 	IsClosed() bool
 	ClusterID() uint64
+	GetConfig() *config.Config
 	GetRaftCluster() *cluster.RaftCluster
 	GetStorage() *core.Storage
 	GetMember() *member.Member
@@ -92,6 +94,19 @@ func (c *ConfigManager) GetComponentIDs(component string) []string {
 	if _, ok := c.LocalCfgs[component]; ok {
 		for address := range c.LocalCfgs[component] {
 			addresses = append(addresses, address)
+		}
+	}
+	return addresses
+}
+
+// GetAllComponentIDs returns all components.
+func (c *ConfigManager) GetAllComponentIDs() map[string][]string {
+	c.RLock()
+	defer c.RUnlock()
+	var addresses = make(map[string][]string)
+	for component := range c.LocalCfgs {
+		for address := range c.LocalCfgs[component] {
+			addresses[component] = append(addresses[component], address)
 		}
 	}
 	return addresses
@@ -187,6 +202,7 @@ func (c *ConfigManager) GetConfig(version *configpb.Version, component, componen
 func (c *ConfigManager) CreateConfig(version *configpb.Version, component, componentID, cfg string) (*configpb.Version, string, *configpb.Status) {
 	c.Lock()
 	defer c.Unlock()
+
 	var status *configpb.Status
 	latestVersion := c.GetLatestVersion(component, componentID)
 	initVersion := &configpb.Version{Local: 0, Global: 0}
