@@ -38,6 +38,8 @@ jobs:
           DASHBOARD_UI_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/ui/.github_release_version")
           DASHBOARD_WORKSPACE=$GITHUB_WORKSPACE/_dashboard_workspace
           cp -r $DASHBOARD_DIR $DASHBOARD_WORKSPACE
+          chmod -R +w $DASHBOARD_WORKSPACE
+          chmod +x $DASHBOARD_WORKSPACE/scripts/*
           echo ::set-env name=DASHBOARD_WORKSPACE::"$DASHBOARD_WORKSPACE"
           echo ::set-env name=DASHBOARD_UI_VERSION::"$DASHBOARD_UI_VERSION"
       - name: Lookup yarn cache
@@ -49,6 +51,21 @@ jobs:
           key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
           restore-keys: |
             ${{ runner.os }}-yarn-
-      - name: Install Dashboard npm packages
+      - name: Install Dashboard dependencies
         run: make yarn_dependencies
+        working-directory: ${{ env.DASHBOARD_WORKSPACE }}
+      - name: Build Dashboard UI
+        run: |
+          make ui
+        working-directory: ${{ env.DASHBOARD_WORKSPACE }}
+      - name: Checkout Dashboard UI carried by Go module
+        run: |
+          DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/releases/download/ui_release_${DASHBOARD_UI_VERSION}/static-assets.zip"
+          curl -L "${DOWNLOAD_URL}" > static-assets.zip
+          unzip static-assets.zip
+          rm static-assets.zip
+        working-directory: ${{ env.DASHBOARD_WORKSPACE }}/gomod_ui_build
+      - name: Check diff
+        run: |
+          diff -qr gomod_ui_build/ ui/build/
         working-directory: ${{ env.DASHBOARD_WORKSPACE }}
