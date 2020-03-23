@@ -1,0 +1,50 @@
+on:
+  push:
+    branches:
+      - master
+    # paths:
+    #   - "go.mod"
+  pull_request:
+    branches:
+      - master
+    # paths:
+    #   - "go.mod"
+
+name: Check TiDB Dashboard UI Up-to-date
+
+jobs:
+  build:
+    name: Build Dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@master
+      - uses: actions/setup-node@v1
+        with:
+          node-version: "12.x"
+      - uses: actions/setup-go@v1
+        with:
+          go-version: "1.13.5"
+      - name: Lookup yarn cache
+        id: yarn_cache
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+      - uses: actions/cache@v1
+        with:
+          path: ${{ steps.yarn_cache.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+      - uses: actions/cache@v1
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Fetch Dashboard Go module
+        run: |
+          go mod download
+          export DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap-incubator/tidb-dashboard)
+          export DASHBOARD_UI_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/ui/.github_release_version")
+      - name: Install Dashboard npm packages
+        run: make yarn_dependencies
+        working-directory: ${{ env.DASHBOARD_DIR }}
