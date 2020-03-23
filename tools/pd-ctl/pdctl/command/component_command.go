@@ -129,7 +129,7 @@ func getComponentIDCommandFunc(cmd *cobra.Command, args []string) {
 		if argsLen > 0 {
 			cmd.Printf("Failed to get component %s's id: %s\n", args[0], err)
 		} else {
-			cmd.Println("Failed to get all components: %s", err)
+			cmd.Println("Failed to get all components", err)
 		}
 		return
 	}
