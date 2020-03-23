@@ -26,7 +26,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/log"
-	_ "github.com/pingcap/pd/v4/docs"
+	_ "github.com/pingcap/pd/v4/docs" // for swagger docs
 	"github.com/pingcap/pd/v4/server"
 	httpSwagger "github.com/swaggo/http-swagger"
 	"github.com/unrolled/render"
