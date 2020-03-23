@@ -15,6 +15,7 @@ package pdctl
 
 import (
 	"fmt"
+	"github.com/spf13/pflag"
 	"io"
 	"os"
 
@@ -120,12 +121,13 @@ func getMainCmd(args []string) *cobra.Command {
 	return rootCmd
 }
 
-// Hide the flag in help and usage messages.
+// Hide the flags in help and usage messages.
 func hiddenFlag(cmd *cobra.Command) {
-	err := cmd.Flags().MarkHidden("pd")
-	if err != nil {
-		cmd.Printf("Failed to hidden flags: %s\n", err)
-	}
+	cmd.LocalFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Name != "help" {
+			flag.Hidden = true
+		}
+	})
 }
 
 // MainStart start main command
