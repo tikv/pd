@@ -1,0 +1,16 @@
+basePath: /pd/api/v1
+host: http://localhost:2379
+info:
+  contact:
+    email: info@pingcap.com
+    name: Placement Driver Support
+    url: https://github.com/pingcap/pd/issues
+  description: This is placement driver.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: https://pingcap.com
+  title: PingCAP Placement Driver API
+  version: "1.0"
+paths: {}
+swagger: "2.0"

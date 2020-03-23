@@ -1,0 +1,21 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "This is placement driver.",
+        "title": "PingCAP Placement Driver API",
+        "termsOfService": "https://pingcap.com",
+        "contact": {
+            "name": "Placement Driver Support",
+            "url": "https://github.com/pingcap/pd/issues",
+            "email": "info@pingcap.com"
+        },
+        "license": {
+            "name": "Apache 2.0",
+            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+        },
+        "version": "1.0"
+    },
+    "host": "http://localhost:2379",
+    "basePath": "/pd/api/v1",
+    "paths": {}
+}
