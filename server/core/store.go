@@ -45,7 +45,7 @@ type StoreInfo struct {
 	lastPersistTime  time.Time
 	leaderWeight     float64
 	regionWeight     float64
-	available        []func() bool
+	available        map[storelimit.Type]func() bool
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
