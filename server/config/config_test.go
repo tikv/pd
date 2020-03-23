@@ -253,3 +253,38 @@ tidb-cert-path = "/path/client.pem"
 	c.Assert(cfg.Dashboard.TiDBKeyPath, Equals, "/path/client-key.pem")
 	c.Assert(cfg.Dashboard.TiDBCertPath, Equals, "/path/client.pem")
 }
+
+func (s *testConfigSuite) TestReplicateMode(c *C) {
+	cfgData := `
+[replicate-mode]
+replicate-mode = "ms-autosync"
+[replicate-mode.ms-autosync]
+location-label = "zone"
+master = "zone1"
+slave = "zone2"
+master-replicas = 2
+slave-replicas = 1
+wait-store-timeout = "120s"
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+
+	c.Assert(cfg.ReplicateMode.ReplicateMode, Equals, "ms-autosync")
+	c.Assert(cfg.ReplicateMode.MSAutoSync.LocationLabel, Equals, "zone")
+	c.Assert(cfg.ReplicateMode.MSAutoSync.Master, Equals, "zone1")
+	c.Assert(cfg.ReplicateMode.MSAutoSync.Slave, Equals, "zone2")
+	c.Assert(cfg.ReplicateMode.MSAutoSync.MasterReplicas, Equals, 2)
+	c.Assert(cfg.ReplicateMode.MSAutoSync.SlaveReplicas, Equals, 1)
+	c.Assert(cfg.ReplicateMode.MSAutoSync.WaitStoreTimeout.Duration, Equals, 2*time.Minute)
+	c.Assert(cfg.ReplicateMode.MSAutoSync.WaitSyncTimeout.Duration, Equals, time.Minute)
+
+	cfg = NewConfig()
+	meta, err = toml.Decode("", &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.ReplicateMode.ReplicateMode, Equals, "majority")
+}

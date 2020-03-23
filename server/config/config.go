@@ -138,6 +138,8 @@ type Config struct {
 	EnableDashboard bool
 
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
+
+	ReplicateMode ReplicateModeConfig `toml:"replicate-mode" json:"replicate-mode"`
 }
 
 // NewConfig creates a new config.
@@ -458,6 +460,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if !configMetaData.IsDefined("enable-dynamic-config") {
 		c.EnableDynamicConfig = defaultEnableDynamicConfig
 	}
+
+	c.ReplicateMode.adjust(configMetaData.Child("replicate-mode"))
+
 	return nil
 }
 
@@ -1114,4 +1119,37 @@ func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 		return tlsConfig, nil
 	}
 	return nil, nil
+}
+
+// ReplicateModeConfig is the configuration for the replicate policy.
+type ReplicateModeConfig struct {
+	ReplicateMode string                    `toml:"replicate-mode" json:"replicate-mode"` // can be 'ms-autosync' or 'majority', default value is 'majority'
+	MSAutoSync    MSAutoSyncReplicateConfig `toml:"ms-autosync" json:"ms-autosync"`       // used when ReplicateMode is 'ms-autosync'
+}
+
+func (c *ReplicateModeConfig) adjust(meta *configMetaData) {
+	if !meta.IsDefined("replicate-mode") {
+		c.ReplicateMode = "majority"
+	}
+	c.MSAutoSync.adjust(meta.Child("ms-autosync"))
+}
+
+// MSAutoSyncReplicateConfig is the configuration for auto sync mode between 2 data centers.
+type MSAutoSyncReplicateConfig struct {
+	LocationLabel    string            `toml:"location-label" json:"location-label"`
+	Master           string            `toml:"master" json:"master"`
+	Slave            string            `toml:"slave" json:"slave"`
+	MasterReplicas   int               `toml:"master-replicas" json:"master-replicas"`
+	SlaveReplicas    int               `toml:"slave-replicas" json:"slave-replicas"`
+	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
+	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
+}
+
+func (c *MSAutoSyncReplicateConfig) adjust(meta *configMetaData) {
+	if !meta.IsDefined("wait-store-timeout") {
+		c.WaitStoreTimeout = typeutil.Duration{time.Minute}
+	}
+	if !meta.IsDefined("wait-sync-timeout") {
+		c.WaitSyncTimeout = typeutil.Duration{time.Minute}
+	}
 }
