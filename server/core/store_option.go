@@ -19,6 +19,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 )
 
 // StoreCreateOption is used to create store.
@@ -157,8 +158,11 @@ func SetStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 }
 
 // AttachAvailableFunc attaches a customize function for the store. The function f returns true if the store limit is not exceeded.
-func AttachAvailableFunc(f func() bool) StoreCreateOption {
+func AttachAvailableFunc(limitType storelimit.Type, f func() bool) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.available = append(store.available, f)
+		if store.available == nil {
+			store.available = make(map[storelimit.Type]func() bool)
+		}
+		store.available[limitType] = f
 	}
 }

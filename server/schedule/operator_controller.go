@@ -929,7 +929,7 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 	if oc.storesLimit[storeID][limitType] == nil {
 		rate := oc.cluster.GetStoreBalanceRate() / StoreBalanceBaseTime
 		oc.newStoreLimit(storeID, rate, storelimit.Auto, limitType)
-		oc.cluster.AttachAvailableFunc(storeID, func() bool {
+		oc.cluster.AttachAvailableFunc(storeID, limitType, func() bool {
 			oc.RLock()
 			defer oc.RUnlock()
 			if oc.storesLimit[storeID][limitType] == nil {
@@ -969,6 +969,8 @@ func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
 func (oc *OperatorController) RemoveStoreLimit(storeID uint64) {
 	oc.Lock()
 	defer oc.Unlock()
-	oc.cluster.AttachAvailableFunc(storeID, nil)
+	for _, limitType := range storelimit.TypeNameValue {
+		oc.cluster.AttachAvailableFunc(storeID, limitType, nil)
+	}
 	delete(oc.storesLimit, storeID)
 }
