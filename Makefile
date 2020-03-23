@@ -131,6 +131,9 @@ lint:
 	@echo "linting"
 	CGO_ENABLED=0 revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
+gen_swagger_doc:
+	swag init -g server/api/router.go -o docs
+
 tidy:
 	@echo "go mod tidy"
 	GO111MODULE=on go mod tidy
