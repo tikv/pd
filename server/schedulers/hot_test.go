@@ -654,7 +654,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateAndStoreWeight(c *C) {
 	//|----------|-----------------|
 	//|    1     |     7.5MB       |
 	//|    2     |     9.8MB       |
-	//|    3     |       9MB      |
+	//|    3     |       9MB       |
 	//|    4     |       3MB       |
 	//|    5     |       0MB       |
 	tc.UpdateStorageReadBytes(1, 7.5*MB*statistics.StoreHeartBeatReportInterval)
