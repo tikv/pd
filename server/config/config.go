@@ -1147,9 +1147,9 @@ type MSAutoSyncReplicateConfig struct {
 
 func (c *MSAutoSyncReplicateConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
-		c.WaitStoreTimeout = typeutil.Duration{time.Minute}
+		c.WaitStoreTimeout = typeutil.Duration{Duration: time.Minute}
 	}
 	if !meta.IsDefined("wait-sync-timeout") {
-		c.WaitSyncTimeout = typeutil.Duration{time.Minute}
+		c.WaitSyncTimeout = typeutil.Duration{Duration: time.Minute}
 	}
 }
