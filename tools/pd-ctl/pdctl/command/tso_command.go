@@ -20,16 +20,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewTSOCommand return a ping subcommand of rootCmd
-func NewTSOCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "tso <timestamp>",
-		Short: "parse TSO to the system and logic time",
-		Run:   showTSOCommandFunc,
-	}
-	return cmd
-}
-
 func showTSOCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Println("Usage: tso <timestamp>")

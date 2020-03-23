@@ -26,37 +26,6 @@ var (
 	pluginPrefix = "pd/api/v1/plugin"
 )
 
-// NewPluginCommand a set subcommand of plugin command
-func NewPluginCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   "plugin <subcommand>",
-		Short: "plugin commands",
-	}
-	r.AddCommand(NewLoadPluginCommand())
-	r.AddCommand(NewUnloadPluginCommand())
-	return r
-}
-
-// NewLoadPluginCommand return a load subcommand of plugin command
-func NewLoadPluginCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   "load <plugin_path>",
-		Short: "load a plugin, path must begin with ./pd/plugin/",
-		Run:   loadPluginCommandFunc,
-	}
-	return r
-}
-
-// NewUnloadPluginCommand return a unload subcommand of plugin command
-func NewUnloadPluginCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   "unload <plugin_path>",
-		Short: "unload a plugin, path must begin with ./pd/plugin/",
-		Run:   unloadPluginCommandFunc,
-	}
-	return r
-}
-
 func loadPluginCommandFunc(cmd *cobra.Command, args []string) {
 	sendPluginCommand(cmd, cluster.PluginLoad, args)
 }

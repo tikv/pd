@@ -19,16 +19,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewExitCommand New a exit subcommand of the rootCmd
-func NewExitCommand() *cobra.Command {
-	conf := &cobra.Command{
-		Use:   "exit",
-		Short: "exit pdctl",
-		Run:   exitCommandFunc,
-	}
-	return conf
-}
-
 func exitCommandFunc(cmd *cobra.Command, args []string) {
 	os.Exit(0)
 }

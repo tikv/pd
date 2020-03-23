@@ -21,16 +21,6 @@ import (
 
 const clusterPrefix = "pd/api/v1/cluster"
 
-// NewClusterCommand return a cluster subcommand of rootCmd
-func NewClusterCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "cluster",
-		Short: "show the cluster information",
-		Run:   showClusterCommandFunc,
-	}
-	return cmd
-}
-
 func showClusterCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, clusterPrefix, http.MethodGet)
 	if err != nil {

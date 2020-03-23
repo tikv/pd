@@ -45,70 +45,8 @@ var (
 	regionKeyPrefix        = "pd/api/v1/region/key"
 )
 
-// NewRegionCommand returns a region subcommand of rootCmd
-func NewRegionCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   `region <region_id> [-jq="<query string>"]`,
-		Short: "show the region status",
-		Run:   showRegionCommandFunc,
-	}
-	r.AddCommand(NewRegionWithKeyCommand())
-	r.AddCommand(NewRegionWithCheckCommand())
-	r.AddCommand(NewRegionWithSiblingCommand())
-	r.AddCommand(NewRegionWithStoreCommand())
-	r.AddCommand(NewRegionsWithStartKeyCommand())
-
-	topRead := &cobra.Command{
-		Use:   `topread <limit> [--jq="<query string>"]`,
-		Short: "show regions with top read flow",
-		Run:   showRegionTopReadCommandFunc,
-	}
-	topRead.Flags().String("jq", "", "jq query")
-	r.AddCommand(topRead)
-
-	topWrite := &cobra.Command{
-		Use:   `topwrite <limit> [--jq="<query string>"]`,
-		Short: "show regions with top write flow",
-		Run:   showRegionTopWriteCommandFunc,
-	}
-	topWrite.Flags().String("jq", "", "jq query")
-	r.AddCommand(topWrite)
-
-	topConfVer := &cobra.Command{
-		Use:   `topconfver <limit> [--jq="<query string>"]`,
-		Short: "show regions with top conf version",
-		Run:   showRegionTopConfVerCommandFunc,
-	}
-	topConfVer.Flags().String("jq", "", "jq query")
-	r.AddCommand(topConfVer)
-
-	topVersion := &cobra.Command{
-		Use:   `topversion <limit> [--jq="<query string>"]`,
-		Short: "show regions with top version",
-		Run:   showRegionTopVersionCommandFunc,
-	}
-	topVersion.Flags().String("jq", "", "jq query")
-	r.AddCommand(topVersion)
-
-	topSize := &cobra.Command{
-		Use:   `topsize <limit> [--jq="<query string>"]`,
-		Short: "show regions with top size",
-		Run:   showRegionTopSizeCommandFunc,
-	}
-	topSize.Flags().String("jq", "", "jq query")
-	r.AddCommand(topSize)
-
-	scanRegion := &cobra.Command{
-		Use:   `scan [--jq="<query string>"]`,
-		Short: "scan all regions",
-		Run:   scanRegionCommandFunc,
-	}
-	scanRegion.Flags().String("jq", "", "jq query")
-	r.AddCommand(scanRegion)
-
-	r.Flags().String("jq", "", "jq query")
-
-	return r
+func withJQFlag(flag *pflag.FlagSet) {
+	flag.String("jq", "", "jq query")
 }
 
 func showRegionCommandFunc(cmd *cobra.Command, args []string) {
@@ -284,17 +222,6 @@ func showRegionTopSizeCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-// NewRegionWithKeyCommand return a region with key subcommand of regionCmd
-func NewRegionWithKeyCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   "key [--format=raw|encode|hex] <key>",
-		Short: "show the region with key",
-		Run:   showRegionWithTableCommandFunc,
-	}
-	r.Flags().String("format", "hex", "the key format")
-	return r
-}
-
 func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
@@ -313,6 +240,10 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
+}
+
+func withKeyFormatFlag(flag *pflag.FlagSet) {
+	flag.String("format", "hex", "the key format")
 }
 
 func parseKey(flags *pflag.FlagSet, key string) (string, error) {
@@ -372,18 +303,6 @@ func decodeKey(text string) (string, error) {
 	return string(buf), nil
 }
 
-// NewRegionsWithStartKeyCommand returns regions from startkey subcommand of regionCmd.
-func NewRegionsWithStartKeyCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   "startkey [--format=raw|encode|hex] <key> <limit>",
-		Short: "show regions from start key",
-		Run:   showRegionsFromStartKeyCommandFunc,
-	}
-
-	r.Flags().String("format", "hex", "the key format")
-	return r
-}
-
 func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) < 1 || len(args) > 2 {
 		cmd.Println(cmd.UsageString())
@@ -409,16 +328,6 @@ func showRegionsFromStartKeyCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
-}
-
-// NewRegionWithCheckCommand returns a region with check subcommand of regionCmd
-func NewRegionWithCheckCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   "check [miss-peer|extra-peer|down-peer|pending-peer|offline-peer|empty-region|hist-size|hist-keys]",
-		Short: "show the region with check specific status",
-		Run:   showRegionWithCheckCommandFunc,
-	}
-	return r
 }
 
 func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
@@ -457,16 +366,6 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-// NewRegionWithSiblingCommand returns a region with sibling subcommand of regionCmd
-func NewRegionWithSiblingCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   "sibling <region_id>",
-		Short: "show the sibling regions of specific region",
-		Run:   showRegionWithSiblingCommandFunc,
-	}
-	return r
-}
-
 func showRegionWithSiblingCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
@@ -480,16 +379,6 @@ func showRegionWithSiblingCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
-}
-
-// NewRegionWithStoreCommand returns regions with store subcommand of regionCmd
-func NewRegionWithStoreCommand() *cobra.Command {
-	r := &cobra.Command{
-		Use:   "store <store_id>",
-		Short: "show the regions of a specific store",
-		Run:   showRegionWithStoreCommandFunc,
-	}
-	return r
 }
 
 func showRegionWithStoreCommandFunc(cmd *cobra.Command, args []string) {

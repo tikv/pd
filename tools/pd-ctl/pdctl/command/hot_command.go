@@ -25,28 +25,6 @@ const (
 	hotStoresPrefix       = "pd/api/v1/hotspot/stores"
 )
 
-// NewHotSpotCommand return a hot subcommand of rootCmd
-func NewHotSpotCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "hot",
-		Short: "show the hotspot status of the cluster",
-	}
-	cmd.AddCommand(NewHotWriteRegionCommand())
-	cmd.AddCommand(NewHotReadRegionCommand())
-	cmd.AddCommand(NewHotStoreCommand())
-	return cmd
-}
-
-// NewHotWriteRegionCommand return a hot regions subcommand of hotSpotCmd
-func NewHotWriteRegionCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "write",
-		Short: "show the hot write regions",
-		Run:   showHotWriteRegionsCommandFunc,
-	}
-	return cmd
-}
-
 func showHotWriteRegionsCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, hotWriteRegionsPrefix, http.MethodGet)
 	if err != nil {
@@ -56,16 +34,6 @@ func showHotWriteRegionsCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-// NewHotReadRegionCommand return a hot read regions subcommand of hotSpotCmd
-func NewHotReadRegionCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "read",
-		Short: "show the hot read regions",
-		Run:   showHotReadRegionsCommandFunc,
-	}
-	return cmd
-}
-
 func showHotReadRegionsCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, hotReadRegionsPrefix, http.MethodGet)
 	if err != nil {
@@ -73,16 +41,6 @@ func showHotReadRegionsCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
-}
-
-// NewHotStoreCommand return a hot stores subcommand of hotSpotCmd
-func NewHotStoreCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "store",
-		Short: "show the hot stores",
-		Run:   showHotStoresCommandFunc,
-	}
-	return cmd
 }
 
 func showHotStoresCommandFunc(cmd *cobra.Command, args []string) {

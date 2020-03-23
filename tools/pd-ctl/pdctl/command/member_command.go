@@ -27,67 +27,6 @@ var (
 	leaderMemberPrefix = "pd/api/v1/leader"
 )
 
-// NewMemberCommand return a member subcommand of rootCmd
-func NewMemberCommand() *cobra.Command {
-	m := &cobra.Command{
-		Use:   "member [leader|delete|leader_priority]",
-		Short: "show the pd member status",
-		Run:   showMemberCommandFunc,
-	}
-	m.AddCommand(NewLeaderMemberCommand())
-	m.AddCommand(NewDeleteMemberCommand())
-
-	m.AddCommand(&cobra.Command{
-		Use:   "leader_priority <member_name> <priority>",
-		Short: "set the member's priority to be elected as etcd leader",
-		Run:   setLeaderPriorityFunc,
-	})
-	return m
-}
-
-// NewDeleteMemberCommand return a delete subcommand of memberCmd
-func NewDeleteMemberCommand() *cobra.Command {
-	d := &cobra.Command{
-		Use:   "delete <subcommand>",
-		Short: "delete a member",
-	}
-	d.AddCommand(&cobra.Command{
-		Use:   "name <member_name>",
-		Short: "delete a member by name",
-		Run:   deleteMemberByNameCommandFunc,
-	})
-	d.AddCommand(&cobra.Command{
-		Use:   "id <member_id>",
-		Short: "delete a member by id",
-		Run:   deleteMemberByIDCommandFunc,
-	})
-	return d
-}
-
-// NewLeaderMemberCommand return a leader subcommand of memberCmd
-func NewLeaderMemberCommand() *cobra.Command {
-	d := &cobra.Command{
-		Use:   "leader <subcommand>",
-		Short: "leader commands",
-	}
-	d.AddCommand(&cobra.Command{
-		Use:   "show",
-		Short: "show the leader member status",
-		Run:   getLeaderMemberCommandFunc,
-	})
-	d.AddCommand(&cobra.Command{
-		Use:   "resign",
-		Short: "resign current leader pd's leadership",
-		Run:   resignLeaderCommandFunc,
-	})
-	d.AddCommand(&cobra.Command{
-		Use:   "transfer <member_name>",
-		Short: "transfer leadership to another pd",
-		Run:   transferPDLeaderCommandFunc,
-	})
-	return d
-}
-
 func showMemberCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, membersPrefix, http.MethodGet)
 	if err != nil {

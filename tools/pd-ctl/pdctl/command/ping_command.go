@@ -20,16 +20,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewPingCommand return a ping subcommand of rootCmd
-func NewPingCommand() *cobra.Command {
-	m := &cobra.Command{
-		Use:   "ping",
-		Short: "show the total time spend ping the pd",
-		Run:   showPingCommandFunc,
-	}
-	return m
-}
-
 func showPingCommandFunc(cmd *cobra.Command, args []string) {
 	start := time.Now()
 	_, err := doRequest(cmd, pingPrefix, http.MethodGet)

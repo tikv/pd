@@ -20,44 +20,12 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
 	operatorsPrefix = "pd/api/v1/operators"
 )
-
-// NewOperatorCommand returns a operator command.
-func NewOperatorCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "operator",
-		Short: "operator commands",
-	}
-	c.AddCommand(NewShowOperatorCommand())
-	c.AddCommand(NewCheckOperatorCommand())
-	c.AddCommand(NewAddOperatorCommand())
-	c.AddCommand(NewRemoveOperatorCommand())
-	return c
-}
-
-// NewCheckOperatorCommand returns a command to show status of the operator.
-func NewCheckOperatorCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "check [region_id]",
-		Short: "checks the status of operator",
-		Run:   checkOperatorCommandFunc,
-	}
-	return c
-}
-
-// NewShowOperatorCommand returns a command to show operators.
-func NewShowOperatorCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "show [kind]",
-		Short: "show operators",
-		Run:   showOperatorCommandFunc,
-	}
-	return c
-}
 
 func showOperatorCommandFunc(cmd *cobra.Command, args []string) {
 	var path string
@@ -97,34 +65,6 @@ func checkOperatorCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-// NewAddOperatorCommand returns a command to add operators.
-func NewAddOperatorCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "add <operator>",
-		Short: "add an operator",
-	}
-	c.AddCommand(NewTransferLeaderCommand())
-	c.AddCommand(NewTransferRegionCommand())
-	c.AddCommand(NewTransferPeerCommand())
-	c.AddCommand(NewAddPeerCommand())
-	c.AddCommand(NewAddLearnerCommand())
-	c.AddCommand(NewRemovePeerCommand())
-	c.AddCommand(NewMergeRegionCommand())
-	c.AddCommand(NewSplitRegionCommand())
-	c.AddCommand(NewScatterRegionCommand())
-	return c
-}
-
-// NewTransferLeaderCommand returns a command to transfer leader.
-func NewTransferLeaderCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "transfer-leader <region_id> <to_store_id>",
-		Short: "transfer a region's leader to the specified store",
-		Run:   transferLeaderCommandFunc,
-	}
-	return c
-}
-
 func transferLeaderCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
 		cmd.Println(cmd.UsageString())
@@ -144,16 +84,6 @@ func transferLeaderCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, operatorsPrefix, input)
 }
 
-// NewTransferRegionCommand returns a command to transfer region.
-func NewTransferRegionCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "transfer-region <region_id> <to_store_id>...",
-		Short: "transfer a region's peers to the specified stores",
-		Run:   transferRegionCommandFunc,
-	}
-	return c
-}
-
 func transferRegionCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) <= 2 {
 		cmd.Println(cmd.UsageString())
@@ -171,16 +101,6 @@ func transferRegionCommandFunc(cmd *cobra.Command, args []string) {
 	input["region_id"] = ids[0]
 	input["to_store_ids"] = ids[1:]
 	postJSON(cmd, operatorsPrefix, input)
-}
-
-// NewTransferPeerCommand returns a command to transfer region.
-func NewTransferPeerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "transfer-peer <region_id> <from_store_id> <to_store_id>",
-		Short: "transfer a region's peer from the specified store to another store",
-		Run:   transferPeerCommandFunc,
-	}
-	return c
 }
 
 func transferPeerCommandFunc(cmd *cobra.Command, args []string) {
@@ -203,16 +123,6 @@ func transferPeerCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, operatorsPrefix, input)
 }
 
-// NewAddPeerCommand returns a command to add region peer.
-func NewAddPeerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "add-peer <region_id> <to_store_id>",
-		Short: "add a region peer on specified store",
-		Run:   addPeerCommandFunc,
-	}
-	return c
-}
-
 func addPeerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
 		cmd.Println(cmd.UsageString())
@@ -230,16 +140,6 @@ func addPeerCommandFunc(cmd *cobra.Command, args []string) {
 	input["region_id"] = ids[0]
 	input["store_id"] = ids[1]
 	postJSON(cmd, operatorsPrefix, input)
-}
-
-// NewAddLearnerCommand returns a command to add region learner.
-func NewAddLearnerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "add-learner <region_id> <to_store_id>",
-		Short: "add a region learner on specified store",
-		Run:   addLearnerCommandFunc,
-	}
-	return c
 }
 
 func addLearnerCommandFunc(cmd *cobra.Command, args []string) {
@@ -261,16 +161,6 @@ func addLearnerCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, operatorsPrefix, input)
 }
 
-// NewMergeRegionCommand returns a command to merge two regions.
-func NewMergeRegionCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "merge-region <source_region_id> <target_region_id>",
-		Short: "merge source region into target reigon",
-		Run:   mergeRegionCommandFunc,
-	}
-	return c
-}
-
 func mergeRegionCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
 		cmd.Println(cmd.UsageString())
@@ -288,16 +178,6 @@ func mergeRegionCommandFunc(cmd *cobra.Command, args []string) {
 	input["source_region_id"] = ids[0]
 	input["target_region_id"] = ids[1]
 	postJSON(cmd, operatorsPrefix, input)
-}
-
-// NewRemovePeerCommand returns a command to add region peer.
-func NewRemovePeerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "remove-peer <region_id> <from_store_id>",
-		Short: "remove a region peer on specified store",
-		Run:   removePeerCommandFunc,
-	}
-	return c
 }
 
 func removePeerCommandFunc(cmd *cobra.Command, args []string) {
@@ -319,15 +199,8 @@ func removePeerCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, operatorsPrefix, input)
 }
 
-// NewSplitRegionCommand returns a command to split a region.
-func NewSplitRegionCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "split-region <region_id> [--policy=scan|approximate]",
-		Short: "split a region",
-		Run:   splitRegionCommandFunc,
-	}
-	c.Flags().String("policy", "scan", "the policy to get region split key")
-	return c
+func withSplitPolicyFlag(flag *pflag.FlagSet) {
+	flag.String("policy", "scan", "the policy to get region split key")
 }
 
 func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
@@ -358,17 +231,6 @@ func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, operatorsPrefix, input)
 }
 
-// NewScatterRegionCommand returns a command to scatter a region.
-func NewScatterRegionCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "scatter-region <region_id>",
-		Short: "usually used for a batch of adjacent regions",
-		Long:  "usually used for a batch of adjacent regions, for example, scatter the regions for 1 to 100, need to use the following commands in order: \"scatter-region 1; scatter-region 2; ...; scatter-region 100;\"",
-		Run:   scatterRegionCommandFunc,
-	}
-	return c
-}
-
 func scatterRegionCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
@@ -385,16 +247,6 @@ func scatterRegionCommandFunc(cmd *cobra.Command, args []string) {
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	postJSON(cmd, operatorsPrefix, input)
-}
-
-// NewRemoveOperatorCommand returns a command to remove operators.
-func NewRemoveOperatorCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "remove <region_id>",
-		Short: "remove the region operator",
-		Run:   removeOperatorCommandFunc,
-	}
-	return c
 }
 
 func removeOperatorCommandFunc(cmd *cobra.Command, args []string) {

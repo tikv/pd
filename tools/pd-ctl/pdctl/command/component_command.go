@@ -28,59 +28,6 @@ var (
 	componentConfigPrefix = "pd/api/v1/component"
 )
 
-// NewComponentCommand returns a component subcommand of rootCmd
-func NewComponentCommand() *cobra.Command {
-	conf := &cobra.Command{
-		Use:   "component <subcommand>",
-		Short: "manipulate components' configs",
-	}
-	conf.AddCommand(NewShowComponentConfigCommand())
-	conf.AddCommand(NewSetComponentConfigCommand())
-	conf.AddCommand(NewDeleteComponentConfigCommand())
-	conf.AddCommand(NewGetComponentIDCommand())
-	return conf
-}
-
-// NewShowComponentConfigCommand returns a show subcommand of componentCmd.
-func NewShowComponentConfigCommand() *cobra.Command {
-	sc := &cobra.Command{
-		Use:   "show <component ID>",
-		Short: "show component config with a given component ID (e.g. 127.0.0.1:20160)",
-		Run:   showComponentConfigCommandFunc,
-	}
-	return sc
-}
-
-// NewDeleteComponentConfigCommand returns a delete subcommand of componentCmd.
-func NewDeleteComponentConfigCommand() *cobra.Command {
-	sc := &cobra.Command{
-		Use:   "delete <component ID>",
-		Short: "delete component config with a given component ID (e.g. 127.0.0.1:20160)",
-		Run:   deleteComponentConfigCommandFunc,
-	}
-	return sc
-}
-
-// NewSetComponentConfigCommand return a set subcommand of componentCmd.
-func NewSetComponentConfigCommand() *cobra.Command {
-	sc := &cobra.Command{
-		Use:   "set [<component>|<component ID>] <option> <value>",
-		Short: "set the component config (set option with value)",
-		Run:   setComponentConfigCommandFunc,
-	}
-	return sc
-}
-
-// NewGetComponentIDCommand returns a id subcommand of componentCmd.
-func NewGetComponentIDCommand() *cobra.Command {
-	sc := &cobra.Command{
-		Use:   "ids <component>",
-		Short: "get all component IDs with a given component (e.g. tikv)",
-		Run:   getComponentIDCommandFunc,
-	}
-	return sc
-}
-
 func showComponentConfigCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Usage()

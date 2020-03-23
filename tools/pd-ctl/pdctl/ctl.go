@@ -67,27 +67,7 @@ func getBasicCmd() *cobra.Command {
 	rootCmd.Flags().StringVar(&commandFlags.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format.")
 	rootCmd.Flags().StringVar(&commandFlags.KeyPath, "key", "", "Path of file that contains X509 key in PEM format.")
 	rootCmd.PersistentFlags().BoolVarP(&commandFlags.Help, "help", "h", false, "Help message.")
-
-	rootCmd.AddCommand(
-		command.NewConfigCommand(),
-		command.NewRegionCommand(),
-		command.NewStoreCommand(),
-		command.NewStoresCommand(),
-		command.NewMemberCommand(),
-		command.NewExitCommand(),
-		command.NewLabelCommand(),
-		command.NewPingCommand(),
-		command.NewOperatorCommand(),
-		command.NewSchedulerCommand(),
-		command.NewTSOCommand(),
-		command.NewHotSpotCommand(),
-		command.NewClusterCommand(),
-		command.NewHealthCommand(),
-		command.NewLogCommand(),
-		command.NewPluginCommand(),
-		command.NewComponentCommand(),
-	)
-
+	command.SetupCommands(rootCmd)
 	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true
 	rootCmd.SilenceErrors = true
 

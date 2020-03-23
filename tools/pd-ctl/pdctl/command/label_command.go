@@ -25,27 +25,6 @@ var (
 	labelsStorePrefix = "pd/api/v1/labels/stores"
 )
 
-// NewLabelCommand return a member subcommand of rootCmd
-func NewLabelCommand() *cobra.Command {
-	l := &cobra.Command{
-		Use:   "label [store]",
-		Short: "show the labels",
-		Run:   showLabelsCommandFunc,
-	}
-	l.AddCommand(NewLabelListStoresCommand())
-	return l
-}
-
-// NewLabelListStoresCommand return a label subcommand of labelCmd
-func NewLabelListStoresCommand() *cobra.Command {
-	l := &cobra.Command{
-		Use:   "store <name> [value]",
-		Short: "show the stores with specify label",
-		Run:   showLabelListStoresCommandFunc,
-	}
-	return l
-}
-
 func showLabelsCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, labelsPrefix, http.MethodGet)
 	if err != nil {

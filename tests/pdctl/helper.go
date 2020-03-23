@@ -45,25 +45,7 @@ func InitCommand() *cobra.Command {
 	rootCmd.Flags().StringVar(&commandFlags.CAPath, "cacert", "", "")
 	rootCmd.Flags().StringVar(&commandFlags.CertPath, "cert", "", "")
 	rootCmd.Flags().StringVar(&commandFlags.KeyPath, "key", "", "")
-	rootCmd.AddCommand(
-		command.NewConfigCommand(),
-		command.NewRegionCommand(),
-		command.NewStoreCommand(),
-		command.NewStoresCommand(),
-		command.NewMemberCommand(),
-		command.NewExitCommand(),
-		command.NewLabelCommand(),
-		command.NewPingCommand(),
-		command.NewOperatorCommand(),
-		command.NewSchedulerCommand(),
-		command.NewTSOCommand(),
-		command.NewHotSpotCommand(),
-		command.NewClusterCommand(),
-		command.NewHealthCommand(),
-		command.NewLogCommand(),
-		command.NewPluginCommand(),
-		command.NewComponentCommand(),
-	)
+	command.SetupCommands(rootCmd)
 	return rootCmd
 }
 

@@ -25,16 +25,6 @@ var (
 	logPrefix = "pd/api/v1/admin/log"
 )
 
-// NewLogCommand New a log subcommand of the rootCmd
-func NewLogCommand() *cobra.Command {
-	conf := &cobra.Command{
-		Use:   "log [fatal|error|warn|info|debug]",
-		Short: "set log level",
-		Run:   logCommandFunc,
-	}
-	return conf
-}
-
 func logCommandFunc(cmd *cobra.Command, args []string) {
 	var err error
 	if len(args) != 1 {

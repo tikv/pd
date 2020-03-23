@@ -23,16 +23,6 @@ var (
 	healthPrefix = "pd/api/v1/health"
 )
 
-// NewHealthCommand return a health subcommand of rootCmd
-func NewHealthCommand() *cobra.Command {
-	m := &cobra.Command{
-		Use:   "health",
-		Short: "show all node's health information of the pd cluster",
-		Run:   showHealthCommandFunc,
-	}
-	return m
-}
-
 func showHealthCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, healthPrefix, http.MethodGet)
 	if err != nil {
