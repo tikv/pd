@@ -15,12 +15,12 @@ package filter
 
 import (
 	"fmt"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 
 	"github.com/pingcap/pd/v4/pkg/slice"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 )
 
 // revive:disable:unused-parameter

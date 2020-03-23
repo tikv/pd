@@ -16,11 +16,10 @@ package core
 import (
 	"sync"
 
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/slice"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
 

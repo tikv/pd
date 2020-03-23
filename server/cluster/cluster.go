@@ -20,8 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
-
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errcode"
@@ -40,6 +38,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/checker"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
