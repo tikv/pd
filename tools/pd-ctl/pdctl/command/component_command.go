@@ -119,18 +119,16 @@ func getComponentIDCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	var (
-		hasIdsVal = false
-		ids       = "all"
+		ids = "all"
 	)
 	if argsLen == 1 {
-		hasIdsVal = true
 		ids = args[0]
 	}
 	prefix := path.Join(componentConfigPrefix, "ids", ids)
 
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
-		if hasIdsVal {
+		if argsLen > 0 {
 			cmd.Printf("Failed to get component %s's id: %s\n", args[0], err)
 		} else {
 			cmd.Printf("Failed to get all components: %s\n", err)
