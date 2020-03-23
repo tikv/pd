@@ -15,6 +15,7 @@ package filter
 
 import (
 	"fmt"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 
 	"github.com/pingcap/pd/v4/pkg/slice"
 	"github.com/pingcap/pd/v4/server/core"
@@ -133,11 +134,11 @@ func (f *storeLimitFilter) Type() string {
 }
 
 func (f *storeLimitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsAvailable()
+	return store.IsAvailable(storelimit.RegionRemove)
 }
 
 func (f *storeLimitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsAvailable()
+	return store.IsAvailable(storelimit.RegionAdd)
 }
 
 type stateFilter struct{ scope string }
@@ -352,7 +353,7 @@ func (f StoreStateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 		return false
 	}
 
-	if f.MoveRegion && !f.filterMoveRegion(opt, store) {
+	if f.MoveRegion && !f.filterMoveRegion(opt, true, store) {
 		return false
 	}
 	return true
@@ -380,20 +381,26 @@ func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
 			return false
 		}
 
-		if !f.filterMoveRegion(opts, store) {
+		if !f.filterMoveRegion(opts, false, store) {
 			return false
 		}
 	}
 	return true
 }
 
-func (f StoreStateFilter) filterMoveRegion(opt opt.Options, store *core.StoreInfo) bool {
+func (f StoreStateFilter) filterMoveRegion(opt opt.Options, isSource bool, store *core.StoreInfo) bool {
 	if store.IsBusy() {
 		return false
 	}
 
-	if !store.IsAvailable() {
-		return false
+	if isSource {
+		if !store.IsAvailable(storelimit.RegionRemove) {
+			return false
+		}
+	} else {
+		if !store.IsAvailable(storelimit.RegionAdd) {
+			return false
+		}
 	}
 
 	if uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
