@@ -21,6 +21,7 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
+// Handler return http swagger handler
 func Handler() http.Handler {
 	return httpSwagger.Handler()
 }
