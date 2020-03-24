@@ -26,9 +26,8 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/log"
-	_ "github.com/pingcap/pd/v4/docs" // for swagger docs
+	"github.com/pingcap/pd/v4/pkg/swaggerserver"
 	"github.com/pingcap/pd/v4/server"
-	httpSwagger "github.com/swaggo/http-swagger"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -206,7 +205,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	apiRouter.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
 
 	// swagger docs
-	swaggerHandler := httpSwagger.Handler()
+	swaggerHandler := swaggerserver.Handler()
 	apiRouter.PathPrefix("/swagger").Handler(swaggerHandler).Methods("GET")
 
 	// Deprecated
