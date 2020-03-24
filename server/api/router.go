@@ -47,21 +47,16 @@ func createIndentRender() *render.Render {
 	})
 }
 
-// @title PingCAP Placement Driver API
+// The returned function is used as a lazy router to avoid the data race problem.
+// @title Placement Driver Core API
 // @version 1.0
 // @description This is placement driver.
-// @termsOfService https://pingcap.com
-
 // @contact.name Placement Driver Support
 // @contact.url https://github.com/pingcap/pd/issues
 // @contact.email info@pingcap.com
-
 // @license.name Apache 2.0
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
-
-// @host http://localhost:2379
 // @BasePath /pd/api/v1
-// The returned function is used as a lazy router to avoid the data race problem.
 func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.Router, func()) {
 	rd := createIndentRender()
 
