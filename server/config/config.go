@@ -213,6 +213,9 @@ const (
 	defaultDisableErrorVerbose = true
 
 	defaultEnableDynamicConfig = true
+
+	defaultDRWaitStoreTimeout = time.Minute
+	defaultDRWaitSyncTimeout  = time.Minute
 )
 
 var (
@@ -1139,7 +1142,7 @@ type DRAutoSyncReplicateConfig struct {
 	LabelKey         string            `toml:"label-key" json:"label-key"`
 	Primary          string            `toml:"primary" json:"primary"`
 	DR               string            `toml:"dr" json:"dr"`
-	MasterReplicas   int               `toml:"primary-replicas" json:"primary-replicas"`
+	PrimaryReplicas  int               `toml:"primary-replicas" json:"primary-replicas"`
 	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
 	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
 	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
@@ -1147,9 +1150,9 @@ type DRAutoSyncReplicateConfig struct {
 
 func (c *DRAutoSyncReplicateConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
-		c.WaitStoreTimeout = typeutil.Duration{Duration: time.Minute}
+		c.WaitStoreTimeout = typeutil.Duration{Duration: defaultDRWaitStoreTimeout}
 	}
 	if !meta.IsDefined("wait-sync-timeout") {
-		c.WaitSyncTimeout = typeutil.Duration{Duration: time.Minute}
+		c.WaitSyncTimeout = typeutil.Duration{Duration: defaultDRWaitSyncTimeout}
 	}
 }

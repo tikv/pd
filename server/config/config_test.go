@@ -276,7 +276,7 @@ wait-store-timeout = "120s"
 	c.Assert(cfg.ReplicateMode.DRAutoSync.LabelKey, Equals, "zone")
 	c.Assert(cfg.ReplicateMode.DRAutoSync.Primary, Equals, "zone1")
 	c.Assert(cfg.ReplicateMode.DRAutoSync.DR, Equals, "zone2")
-	c.Assert(cfg.ReplicateMode.DRAutoSync.MasterReplicas, Equals, 2)
+	c.Assert(cfg.ReplicateMode.DRAutoSync.PrimaryReplicas, Equals, 2)
 	c.Assert(cfg.ReplicateMode.DRAutoSync.DRReplicas, Equals, 1)
 	c.Assert(cfg.ReplicateMode.DRAutoSync.WaitStoreTimeout.Duration, Equals, 2*time.Minute)
 	c.Assert(cfg.ReplicateMode.DRAutoSync.WaitSyncTimeout.Duration, Equals, time.Minute)
