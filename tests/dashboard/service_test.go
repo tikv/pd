@@ -22,7 +22,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/tests"
@@ -51,7 +50,6 @@ type serverTestSuite struct {
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
-	dashboard.SlowCheckInterval = time.Second * 2
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.httpClient = &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -67,7 +65,6 @@ func (s *serverTestSuite) SetUpSuite(c *C) {
 func (s *serverTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 	s.httpClient.CloseIdleConnections()
-	dashboard.SlowCheckInterval = time.Minute
 }
 
 func (s *serverTestSuite) CheckRespCode(c *C, cluster *tests.TestCluster, hasServiceNode bool) (dashboardAddress string) {

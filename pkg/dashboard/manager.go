@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -29,19 +30,8 @@ import (
 	"github.com/pingcap/pd/v4/server/cluster"
 )
 
-type electionStatus int
-
 const (
-	stopped electionStatus = iota
-	unknown
-	known
-)
-
-var (
-	// FastCheckInterval is the interval to check dashboard address when it is unknown.
-	FastCheckInterval = time.Second
-	// SlowCheckInterval is the interval to check dashboard address when it is known.
-	SlowCheckInterval = time.Minute
+	checkInterval = time.Second
 )
 
 // Manager is used to control dashboard.
@@ -53,31 +43,30 @@ type Manager struct {
 	srv        *server.Server
 	service    *apiserver.Service
 	redirector *Redirector
+
+	enableDynamic bool
+
+	isLeader bool
+	rc       *cluster.RaftCluster
+	members  []*pdpb.Member
 }
 
 // NewManager creates a new Manager.
 func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector) *Manager {
 	ctx, cancel := context.WithCancel(srv.Context())
 	return &Manager{
-		ctx:        ctx,
-		cancel:     cancel,
-		srv:        srv,
-		service:    s,
-		redirector: redirector,
+		ctx:           ctx,
+		cancel:        cancel,
+		srv:           srv,
+		service:       s,
+		redirector:    redirector,
+		enableDynamic: srv.GetConfig().EnableDynamicConfig,
 	}
 }
 
 func (m *Manager) start() {
 	m.wg.Add(1)
-	go func() {
-		defer logutil.LogPanic()
-		defer m.wg.Done()
-
-		status := unknown
-		for status != stopped {
-			status = m.serviceLoop(status)
-		}
-	}()
+	go m.serviceLoop()
 }
 
 func (m *Manager) stop() {
@@ -86,53 +75,69 @@ func (m *Manager) stop() {
 	log.Info("exit dashboard loop")
 }
 
-func (m *Manager) serviceLoop(lastStatus electionStatus) (nextStatus electionStatus) {
-	var ticker *time.Ticker
-	switch lastStatus {
-	case unknown:
-		ticker = time.NewTicker(FastCheckInterval)
-	case known:
-		ticker = time.NewTicker(SlowCheckInterval)
-	default:
-		panic("unreachable")
-	}
+func (m *Manager) serviceLoop() {
+	defer logutil.LogPanic()
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
-	nextStatus = lastStatus
-	for nextStatus == lastStatus {
+	for {
 		select {
 		case <-m.ctx.Done():
 			m.stopService()
-			return stopped
+			return
 		case <-ticker.C:
-			nextStatus = m.checkAddress()
+			m.updateInfo()
+			m.checkAddress()
 		}
 	}
+}
 
-	return
+// updateInfo updates information from the server.
+func (m *Manager) updateInfo() {
+	if !m.srv.GetMember().IsLeader() {
+		m.isLeader = false
+		m.rc = nil
+		m.members = nil
+		return
+	}
+
+	m.isLeader = true
+	m.rc = m.srv.GetRaftCluster()
+	if m.rc == nil || !m.rc.IsRunning() {
+		m.members = nil
+		return
+	}
+
+	var err error
+	if m.members, err = cluster.GetMembers(m.srv.GetClient()); err != nil {
+		log.Error("failed to get members")
+	}
 }
 
 // checkDashboardAddress checks if the dashboard service needs to change due to dashboard address is changed.
-func (m *Manager) checkAddress() electionStatus {
+func (m *Manager) checkAddress() {
 	dashboardAddress := m.srv.GetScheduleOption().GetDashboardAddress()
 	switch dashboardAddress {
 	case "auto":
-		if m.srv.GetMember().IsLeader() {
-			m.setNewDashboardAddress()
+		if m.isLeader && len(m.members) > 0 {
+			m.setNewAddress()
 		}
-		return unknown
+		return
 	case "none":
 		m.redirector.SetAddress("")
 		m.stopService()
-		return known
+		return
 	default:
 		if _, err := url.Parse(dashboardAddress); err != nil {
 			log.Error("illegal dashboard address", zap.String("address", dashboardAddress))
-			return unknown
+			return
 		}
-		if m.srv.GetMember().IsLeader() && !m.isOnline(dashboardAddress) {
-			m.setNewDashboardAddress()
-			return unknown
+
+		if m.isLeader && m.needResetAddress(dashboardAddress) {
+			m.setNewAddress()
+			return
 		}
 	}
 
@@ -144,46 +149,27 @@ func (m *Manager) checkAddress() electionStatus {
 	} else {
 		m.stopService()
 	}
-
-	return known
 }
 
-func (m *Manager) isOnline(addr string) bool {
-	rc := m.srv.GetRaftCluster()
-	if rc == nil || !rc.IsRunning() {
-		return true
-	}
-	members, err := cluster.GetMembers(m.srv.GetClient())
-	if err != nil {
-		log.Error("failed to get members")
-		return true
+func (m *Manager) needResetAddress(addr string) bool {
+	if len(m.members) == 0 {
+		return false
 	}
 
-	for _, member := range members {
+	for _, member := range m.members {
 		if member.GetClientUrls()[0] == addr {
-			return true
+			return false
 		}
 	}
 
-	return false
+	return true
 }
 
-func (m *Manager) setNewDashboardAddress() {
-	rc := m.srv.GetRaftCluster()
-	if rc == nil || !rc.IsRunning() {
-		return
-	}
-	members, err := cluster.GetMembers(m.srv.GetClient())
-	if err != nil || len(members) == 0 {
-		log.Error("failed to get members")
-		return
-	}
-
+func (m *Manager) setNewAddress() {
 	// get new dashboard address
+	members := m.members
 	var addr string
 	switch len(members) {
-	case 0:
-		return
 	case 1:
 		addr = members[0].GetClientUrls()[0]
 	default:
@@ -197,10 +183,9 @@ func (m *Manager) setNewDashboardAddress() {
 			}
 		}
 	}
-
 	// set new dashboard address
-	rc.SetDashboardAddress(addr)
-	if m.srv.GetConfig().EnableDynamicConfig {
+	m.rc.SetDashboardAddress(addr)
+	if m.enableDynamic {
 		if err := m.srv.UpdateConfigManager("pd-server.dashboard-address", addr); err != nil {
 			log.Error("failed to update the dashboard address in config manager", zap.Error(err))
 		}
