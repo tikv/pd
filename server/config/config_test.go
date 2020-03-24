@@ -257,13 +257,13 @@ tidb-cert-path = "/path/client.pem"
 func (s *testConfigSuite) TestReplicateMode(c *C) {
 	cfgData := `
 [replicate-mode]
-replicate-mode = "ms-autosync"
-[replicate-mode.ms-autosync]
-location-label = "zone"
-master = "zone1"
-slave = "zone2"
-master-replicas = 2
-slave-replicas = 1
+replicate-mode = "dr-autosync"
+[replicate-mode.dr-autosync]
+label-key = "zone"
+primary = "zone1"
+dr = "zone2"
+primary-replicas = 2
+dr-replicas = 1
 wait-store-timeout = "120s"
 `
 	cfg := NewConfig()
@@ -272,14 +272,14 @@ wait-store-timeout = "120s"
 	err = cfg.Adjust(&meta)
 	c.Assert(err, IsNil)
 
-	c.Assert(cfg.ReplicateMode.ReplicateMode, Equals, "ms-autosync")
-	c.Assert(cfg.ReplicateMode.MSAutoSync.LocationLabel, Equals, "zone")
-	c.Assert(cfg.ReplicateMode.MSAutoSync.Master, Equals, "zone1")
-	c.Assert(cfg.ReplicateMode.MSAutoSync.Slave, Equals, "zone2")
-	c.Assert(cfg.ReplicateMode.MSAutoSync.MasterReplicas, Equals, 2)
-	c.Assert(cfg.ReplicateMode.MSAutoSync.SlaveReplicas, Equals, 1)
-	c.Assert(cfg.ReplicateMode.MSAutoSync.WaitStoreTimeout.Duration, Equals, 2*time.Minute)
-	c.Assert(cfg.ReplicateMode.MSAutoSync.WaitSyncTimeout.Duration, Equals, time.Minute)
+	c.Assert(cfg.ReplicateMode.ReplicateMode, Equals, "dr-autosync")
+	c.Assert(cfg.ReplicateMode.DRAutoSync.LabelKey, Equals, "zone")
+	c.Assert(cfg.ReplicateMode.DRAutoSync.Primary, Equals, "zone1")
+	c.Assert(cfg.ReplicateMode.DRAutoSync.DR, Equals, "zone2")
+	c.Assert(cfg.ReplicateMode.DRAutoSync.MasterReplicas, Equals, 2)
+	c.Assert(cfg.ReplicateMode.DRAutoSync.DRReplicas, Equals, 1)
+	c.Assert(cfg.ReplicateMode.DRAutoSync.WaitStoreTimeout.Duration, Equals, 2*time.Minute)
+	c.Assert(cfg.ReplicateMode.DRAutoSync.WaitSyncTimeout.Duration, Equals, time.Minute)
 
 	cfg = NewConfig()
 	meta, err = toml.Decode("", &cfg)
