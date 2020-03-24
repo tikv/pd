@@ -1,11 +1,17 @@
 <!--
 Thank you for working on PD! Please read PD's [CONTRIBUTING](https://github.com/pingcap/pd/blob/master/CONTRIBUTING.md) document **BEFORE** filing this PR.
+PR Title Format:
+1. pkg [, pkg2, pkg3]: what's changed
+2. *: what's changed
 -->
 
 ### What problem does this PR solve? <!--add the issue link with summary if it exists-->
 
 
 ### What is changed and how it works?
+
+
+### Release note <!-- bugfixes or new feature need a release note -->
 
 
 ### Check List <!--REMOVE the items that are not applicable-->
@@ -31,7 +37,6 @@ Side effects
 
 Related changes
 
- - Need to cherry-pick to the release branch
- - Need to update the documentation
- - Need to update the `tidb-ansible` repository
- - Need to be included in the release notes
+- PR to update `pingcap/docs`/`pingcap/docs-cn`:
+- PR to update `pingcap/tidb-ansible`:
+- Need to cherry-pick to the release branch

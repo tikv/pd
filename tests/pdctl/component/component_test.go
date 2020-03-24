@@ -67,6 +67,13 @@ func (s *componentTestSuite) TestComponent(c *C) {
 	obtain := string(output)
 	c.Assert(strings.Contains(obtain, pdAddrs[0][7:]), IsTrue)
 	c.Assert(strings.Contains(obtain, pdAddrs[1][7:]), IsTrue)
+	// component ids no parameter
+	args = []string{"-u", pdAddrs[0], "component", "ids"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	obtain = string(output)
+	c.Assert(strings.Contains(obtain, pdAddrs[0][7:]), IsTrue)
+	c.Assert(strings.Contains(obtain, pdAddrs[1][7:]), IsTrue)
 
 	// component show
 	for i := 0; i < len(pdAddrs); i++ {

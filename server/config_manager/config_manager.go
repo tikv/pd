@@ -99,6 +99,19 @@ func (c *ConfigManager) GetComponentIDs(component string) []string {
 	return addresses
 }
 
+// GetAllComponentIDs returns all components.
+func (c *ConfigManager) GetAllComponentIDs() map[string][]string {
+	c.RLock()
+	defer c.RUnlock()
+	var addresses = make(map[string][]string)
+	for component := range c.LocalCfgs {
+		for address := range c.LocalCfgs[component] {
+			addresses[component] = append(addresses[component], address)
+		}
+	}
+	return addresses
+}
+
 // Persist saves the configuration to the storage.
 func (c *ConfigManager) Persist(storage *core.Storage) error {
 	c.Lock()

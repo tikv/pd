@@ -74,8 +74,8 @@ func NewSetComponentConfigCommand() *cobra.Command {
 // NewGetComponentIDCommand returns a id subcommand of componentCmd.
 func NewGetComponentIDCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "ids <component>",
-		Short: "get all component IDs with a given component (e.g. tikv)",
+		Use:   "ids [component]",
+		Short: "get component IDs for all components or with a given component name (e.g. tikv)",
 		Run:   getComponentIDCommandFunc,
 	}
 	return sc
@@ -112,15 +112,25 @@ func deleteComponentConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func getComponentIDCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
+	argsLen := len(args)
+	// args too long
+	if argsLen > 1 {
 		cmd.Usage()
 		return
 	}
+	ids := "all"
+	if argsLen == 1 {
+		ids = args[0]
+	}
+	prefix := path.Join(componentConfigPrefix, "ids", ids)
 
-	prefix := path.Join(componentConfigPrefix, "ids", args[0])
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
-		cmd.Printf("Failed to get component %s's id: %s\n", args[0], err)
+		if argsLen > 0 {
+			cmd.Printf("Failed to get component %s's id: %s\n", args[0], err)
+		} else {
+			cmd.Println("Failed to get all components", err)
+		}
 		return
 	}
 	cmd.Println(r)
