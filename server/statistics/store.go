@@ -383,7 +383,7 @@ func (r *RollingStoreStats) GetDiskWriteRate() float64 {
 	return r.totalBytesDiskWriteRate.Get()
 }
 
-const defaultInterval = time.Minute /2
+const defaultInterval = time.Minute / 2
 const defaultSize = 2
 
 type trendNode struct {
