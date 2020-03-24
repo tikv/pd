@@ -60,11 +60,13 @@ jobs:
         working-directory: ${{ env.DASHBOARD_WORKSPACE }}
       - name: Checkout Dashboard UI carried by Go module
         run: |
+          mkdir gomod_ui_build
+          cd gomod_ui_build
           DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/releases/download/ui_release_${DASHBOARD_UI_VERSION}/static-assets.zip"
           curl -L "${DOWNLOAD_URL}" > static-assets.zip
           unzip static-assets.zip
           rm static-assets.zip
-        working-directory: ${{ env.DASHBOARD_WORKSPACE }}/gomod_ui_build
+        working-directory: ${{ env.DASHBOARD_WORKSPACE }}
       - name: Check diff
         run: |
           diff -qr gomod_ui_build/ ui/build/
