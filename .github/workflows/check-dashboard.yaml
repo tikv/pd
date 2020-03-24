@@ -2,13 +2,13 @@ on:
   push:
     branches:
       - master
-    # paths:
-    #   - "go.mod"
+    paths:
+      - "go.mod"
   pull_request:
     branches:
       - master
-    # paths:
-    #   - "go.mod"
+    paths:
+      - "go.mod"
 
 name: TiDB Dashboard
 
