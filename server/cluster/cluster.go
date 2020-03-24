@@ -93,6 +93,7 @@ type RaftCluster struct {
 	regionStats     *statistics.RegionStatistics
 	storesStats     *statistics.StoresStats
 	hotSpotCache    *statistics.HotCache
+	trendMonitorHub *statistics.TrendMonitorHub
 
 	coordinator *coordinator
 
@@ -184,6 +185,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
+	c.trendMonitorHub = statistics.NewTrendMonitorHub()
 	c.schedulersCallback = cb
 }
 
@@ -411,6 +413,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	}
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
+
+	c.trendMonitorHub.Put(statistics.UsedSize, storeID, newStore.GetUsedSize())
+	c.trendMonitorHub.Put(statistics.RegionSize, storeID, uint64(newStore.GetRegionSize()))
 
 	// c.limiter is nil before "start" is called
 	if c.limiter != nil && c.opt.Load().StoreLimitMode == "auto" {
@@ -746,6 +751,11 @@ func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storesStats
+}
+
+// GetTrend returns stores' trend from cluster.
+func (c *RaftCluster) GetTrend(kind statistics.MonitorKind, storeID uint64) statistics.CompareKind {
+	return c.trendMonitorHub.GetStatus(kind, storeID)
 }
 
 // DropCacheRegion removes a region from the cache.

@@ -16,4 +16,5 @@ package statistics
 // StoreStatInformer provides access to a shared informer of statistics.
 type StoreStatInformer interface {
 	GetStoresStats() *StoresStats
+	GetTrend(kind MonitorKind, storeID uint64) CompareKind
 }

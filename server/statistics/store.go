@@ -14,6 +14,7 @@
 package statistics
 
 import (
+	"container/list"
 	"sync"
 	"time"
 
@@ -380,4 +381,132 @@ func (r *RollingStoreStats) GetDiskWriteRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
 	return r.totalBytesDiskWriteRate.Get()
+}
+
+const defaultInterval = time.Minute /2
+const defaultSize = 2
+
+type trendNode struct {
+	num        uint64
+	createTime time.Time
+}
+
+func newTrendNode(num uint64) *trendNode {
+	return &trendNode{
+		num:        num,
+		createTime: time.Now(),
+	}
+}
+
+// CompareKind is the compare result
+type CompareKind int
+
+const (
+	// IsLess means that current one is less than previous one
+	IsLess CompareKind = iota
+	// Equal means that current one is equal with previous one
+	Equal
+	// IsGreater means that current one is greater than previous one
+	IsGreater
+	// Unsure means that trend is unsure
+	Unsure
+)
+
+type trendMonitor struct {
+	l        *list.List
+	interval time.Duration
+	capacity int
+}
+
+func newTrendMonitor() *trendMonitor {
+	return &trendMonitor{
+		l:        list.New(),
+		interval: defaultInterval,
+		capacity: defaultSize,
+	}
+}
+
+func (m *trendMonitor) put(num uint64) {
+	if m.l.Len() > 0 {
+		lastTime := m.l.Back().Value.(*trendNode).createTime
+		if time.Since(lastTime) < m.interval {
+			return
+		}
+	}
+	m.l.PushBack(newTrendNode(num))
+	var next *list.Element
+	for e := m.l.Front(); e != nil; e = next {
+		next = e.Next()
+		curNode := e.Value.(*trendNode)
+		if time.Since(curNode.createTime) > m.interval*time.Duration(m.capacity+1) {
+			m.l.Remove(e)
+		} else {
+			break
+		}
+	}
+}
+
+const factor = 0.975
+
+// It was observed that  the slowly decreasing store used size, while the region size continues to decrease due to
+// move out of the region.So we need to ensure the bigger one is big enough to avoid the trend monitor cannot work
+// properly in such a situation.
+func isRealGreater(a, b uint64) bool {
+	if a > b && float64(a)*factor > float64(b) {
+		return true
+	}
+	return false
+}
+
+func (m *trendMonitor) getStatus() CompareKind {
+	if m.l.Len() < m.capacity {
+		return Unsure
+	}
+	head := m.l.Front().Value.(*trendNode)
+	tail := m.l.Back().Value.(*trendNode)
+	if isRealGreater(tail.num, head.num) {
+		return IsGreater
+	} else if isRealGreater(head.num, tail.num) {
+		return IsLess
+	} else {
+		return Equal
+	}
+}
+
+// MonitorKind is the monitor kind
+type MonitorKind int
+
+const (
+	// RegionSize indicates the RegionSize Monitor
+	RegionSize MonitorKind = iota
+	// UsedSize indicates the UsedSize Monitor
+	UsedSize
+)
+
+// TrendMonitorHub is used to monitor the change of region size and used size .
+type TrendMonitorHub struct {
+	monitors map[uint64][2]*trendMonitor
+}
+
+// NewTrendMonitorHub creates a TrendMonitorHub
+func NewTrendMonitorHub() *TrendMonitorHub {
+	return &TrendMonitorHub{
+		monitors: make(map[uint64][2]*trendMonitor),
+	}
+}
+
+// Put is used to update info.
+func (h *TrendMonitorHub) Put(kind MonitorKind, storeID, num uint64) {
+	if _, ok := h.monitors[storeID]; !ok {
+		h.monitors[storeID] = [2]*trendMonitor{newTrendMonitor(), newTrendMonitor()}
+	}
+	h.monitors[storeID][kind].put(num)
+}
+
+// GetStatus is used to get trend status.
+func (h *TrendMonitorHub) GetStatus(kind MonitorKind, storeID uint64) CompareKind {
+	if _, ok := h.monitors[storeID]; !ok {
+		return Unsure
+	}
+	return h.monitors[storeID][kind].getStatus()
 }

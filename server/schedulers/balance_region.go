@@ -228,8 +228,13 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 
 		opInfluence := s.opController.GetOpInfluence(cluster)
 		kind := core.NewScheduleKind(core.RegionKind, core.BySize)
-		if !shouldBalance(cluster, source, target, region, kind, opInfluence, s.GetName()) {
+		scheduleName := s.GetName()
+		if !shouldBalance(cluster, source, target, region, kind, opInfluence, scheduleName) {
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+			continue
+		}
+
+		if isTrendDiff(cluster, scheduleName, sourceID) || isTrendDiff(cluster, scheduleName, targetID) {
 			continue
 		}
 
