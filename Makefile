@@ -141,7 +141,7 @@ lint:
 	CGO_ENABLED=0 revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
 swagger_spec:
-	swag init -g server/api/router.go -o docs
+	swag init -g server/api/router.go -o docs/swagger
 
 tidy:
 	@echo "go mod tidy"
