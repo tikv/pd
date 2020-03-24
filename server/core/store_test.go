@@ -19,6 +19,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 var _ = Suite(&testDistinctScoreSuite{})
@@ -91,4 +92,67 @@ func (s *testConcurrencySuite) TestCloneStore(c *C) {
 		}
 	}()
 	wg.Wait()
+}
+
+const (
+	_ uint64 = 1 << (10 * iota)
+	_
+	MB
+	_
+	TB
+)
+
+var _ = Suite(&testMaxScoreSuite{})
+
+type testMaxScoreSuite struct{}
+
+func (s *testMaxScoreSuite) TestMaxScore(c *C) {
+	bc := NewBasicCluster()
+	var flexibleScore uint64 = 4 * 1024 * 1024
+	// add 3 tikv with capacity 2TB
+	num := 3
+	oldCapacity := 2 * TB
+	oldMaxScore := float64(oldCapacity/MB + flexibleScore)
+	for i := 1; i <= num; i++ {
+		bc.PutStore(NewStoreInfo(
+			&metapb.Store{Id: uint64(i)},
+			SetStoreStats(&pdpb.StoreStats{Capacity: oldCapacity}),
+		))
+	}
+	bc.UpdateStoresMaxScore(flexibleScore)
+	checkMaxScore(c, bc, num, oldMaxScore)
+
+	// add 1 tikv with capacity 2TB
+	num = num + 1
+	bc.UpdateStoresMaxScore(flexibleScore, NewStoreInfo(
+		&metapb.Store{Id: uint64(num)},
+		SetStoreStats(&pdpb.StoreStats{Capacity: oldCapacity}),
+	))
+	checkMaxScore(c, bc, num, oldMaxScore)
+
+	// add 1 tikv with capacity 4TB
+	num = num + 1
+	newCapacity := 4 * TB
+	newMaxScore := float64(newCapacity/MB + flexibleScore)
+	bc.UpdateStoresMaxScore(flexibleScore, NewStoreInfo(
+		&metapb.Store{Id: uint64(num)},
+		SetStoreStats(&pdpb.StoreStats{Capacity: newCapacity}),
+	))
+	checkMaxScore(c, bc, num, newMaxScore)
+
+	// add 1 tikv with capacity 1TB
+	num = num + 1
+	newCapacity = 1 * TB
+	bc.UpdateStoresMaxScore(flexibleScore, NewStoreInfo(
+		&metapb.Store{Id: uint64(num)},
+		SetStoreStats(&pdpb.StoreStats{Capacity: newCapacity}),
+	))
+	checkMaxScore(c, bc, num, newMaxScore)
+}
+
+func checkMaxScore(c *C, bc *BasicCluster, num int, maxscore float64) {
+	c.Assert(bc.GetStores(), HasLen, num)
+	for i := 1; i <= num; i++ {
+		c.Assert(bc.GetStore(uint64(i)).GetMaxScore(), Equals, maxscore)
+	}
 }

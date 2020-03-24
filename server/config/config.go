@@ -545,6 +545,11 @@ type ScheduleConfig struct {
 	HighSpaceRatio float64 `toml:"high-space-ratio" json:"high-space-ratio"`
 	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
 	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator" json:"scheduler-max-waiting-operator"`
+	// FlexibleScore is the option to affect max score of stores.
+	// max score = max capacity + FlexibleScore.
+	// When adding a new store, if the capacity of the new store is smaller than the max score, the max score will not be adjusted.
+	// Otherwise, the new max score will be recalculated.
+	FlexibleScore uint64 `toml:"flexible-score" json:"flexible-score"`
 	// WARN: DisableLearner is deprecated.
 	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
 	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
@@ -623,6 +628,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
 		SchedulerMaxWaitingOperator:  c.SchedulerMaxWaitingOperator,
+		FlexibleScore:                c.FlexibleScore,
 		DisableLearner:               c.DisableLearner,
 		DisableRemoveDownReplica:     c.DisableRemoveDownReplica,
 		DisableReplaceOfflineReplica: c.DisableReplaceOfflineReplica,
@@ -662,6 +668,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 5
+	defaultFlexibleScore               = 4 * 1024 * 1024
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
 )
@@ -711,6 +718,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("store-limit-mode") {
 		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
+	}
+	if !meta.IsDefined("flexible-score") {
+		adjustUint64(&c.FlexibleScore, defaultFlexibleScore)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)

@@ -44,6 +44,7 @@ type StoreInfo struct {
 	lastPersistTime  time.Time
 	leaderWeight     float64
 	regionWeight     float64
+	maxScore         float64
 	available        func() bool
 }
 
@@ -77,6 +78,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		leaderWeight:     s.leaderWeight,
 		regionWeight:     s.regionWeight,
 		available:        s.available,
+		maxScore:         s.maxScore,
 	}
 
 	for _, opt := range opts {
@@ -254,7 +256,6 @@ func (s *StoreInfo) NeedPersist() bool {
 }
 
 const minWeight = 1e-6
-const maxScore = 1024 * 1024 * 1024
 
 // LeaderScore returns the store's leader score.
 func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
@@ -290,7 +291,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	if available-float64(delta)/amplification >= highSpaceBound {
 		score = float64(s.GetRegionSize() + delta)
 	} else if available-float64(delta)/amplification <= lowSpaceBound {
-		score = maxScore - (available - float64(delta)/amplification)
+		score = s.maxScore - (available - float64(delta)/amplification)
 	} else {
 		// to make the score function continuous, we use linear function y = k * x + b as transition period
 		// from above we know that there are two points must on the function image
@@ -304,10 +305,11 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 		// we can conclude that size = (capacity - irrelative - lowSpaceBound) * amp = (used + available - lowSpaceBound) * amp
 		// These are the two fixed points' x-coordinates, and y-coordinates which can be easily obtained from the above two functions.
 		x1, y1 := (used+available-highSpaceBound)*amplification, (used+available-highSpaceBound)*amplification
-		x2, y2 := (used+available-lowSpaceBound)*amplification, maxScore-lowSpaceBound
+		x2, y2 := (used+available-lowSpaceBound)*amplification, s.maxScore-lowSpaceBound
 
 		k := (y2 - y1) / (x2 - x1)
 		b := y1 - k*x1
+
 		score = k*float64(s.GetRegionSize()+delta) + b
 	}
 
@@ -400,6 +402,11 @@ func (s *StoreInfo) GetUptime() time.Duration {
 		return uptime
 	}
 	return 0
+}
+
+// GetMaxScore returns the max score.
+func (s *StoreInfo) GetMaxScore() float64 {
+	return s.maxScore
 }
 
 var (
@@ -626,6 +633,27 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		s.stores[storeID] = store.Clone(SetRegionSize(regionSize))
 	}
+}
+
+const mb = 1024 * 1024
+
+func getMaxScore(flexibleScore uint64, stores []*StoreInfo, newStores ...*StoreInfo) float64 {
+	var maxScore float64
+	var newStoreID uint64
+	if len(newStores) != 0 {
+		newStore := newStores[0]
+		newStoreID = newStore.GetID()
+		maxScore = float64(newStore.GetCapacity()/mb + flexibleScore)
+	}
+
+	for _, store := range stores {
+		curMaxScore := float64(store.GetCapacity()/mb + flexibleScore)
+		if store.GetID() != newStoreID && curMaxScore > maxScore {
+			maxScore = curMaxScore
+		}
+	}
+
+	return maxScore
 }
 
 // UpdateStoreStatus updates the information of the store.

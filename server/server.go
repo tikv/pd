@@ -757,6 +757,9 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 			zap.Error(err))
 		return err
 	}
+	if old.FlexibleScore != cfg.FlexibleScore {
+		s.cluster.UpdateStoresMaxScore(cfg.FlexibleScore)
+	}
 	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }

@@ -53,6 +53,7 @@ type Options interface {
 	GetLowSpaceRatio() float64
 	GetHighSpaceRatio() float64
 	GetSchedulerMaxWaitingOperator() uint64
+	GetFlexibleScore() uint64
 
 	IsRemoveDownReplicaEnabled() bool
 	IsReplaceOfflineReplicaEnabled() bool

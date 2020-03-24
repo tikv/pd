@@ -647,9 +647,9 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(evict, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 6)
-	sches, _, err := storage.LoadAllScheduleConfig()
+	scheduleConfig, _, err := storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 6)
+	c.Assert(scheduleConfig, HasLen, 6)
 	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
@@ -669,9 +669,9 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
 	c.Assert(newOpt.Reload(storage), IsNil)
 	// only remains 3 items with independent config.
-	sches, _, err = storage.LoadAllScheduleConfig()
+	scheduleConfig, _, err = storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 3)
+	c.Assert(scheduleConfig, HasLen, 3)
 
 	// option have 7 items because the default scheduler do not remove.
 	c.Assert(newOpt.GetSchedulers(), HasLen, 7)
@@ -741,9 +741,9 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
-	sches, _, err := storage.LoadAllScheduleConfig()
+	scheduleConfig, _, err := storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 5)
+	c.Assert(scheduleConfig, HasLen, 5)
 
 	// remove all schedulers
 	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
@@ -752,9 +752,9 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	c.Assert(co.removeScheduler(schedulers.LabelName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.GrantLeaderName), IsNil)
 	// all removed
-	sches, _, err = storage.LoadAllScheduleConfig()
+	scheduleConfig, _, err = storage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 0)
+	c.Assert(scheduleConfig, HasLen, 0)
 	c.Assert(co.schedulers, HasLen, 0)
 	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
 	co.stop()

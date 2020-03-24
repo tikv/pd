@@ -206,6 +206,11 @@ func (o *ScheduleOption) GetSchedulerMaxWaitingOperator() uint64 {
 	return o.Load().SchedulerMaxWaitingOperator
 }
 
+// GetFlexibleScore returns flexible score to calculate the max score of stores.
+func (o *ScheduleOption) GetFlexibleScore() uint64 {
+	return o.Load().FlexibleScore
+}
+
 // GetLeaderSchedulePolicy is to get leader schedule policy.
 func (o *ScheduleOption) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	return core.StringToSchedulePolicy(o.Load().LeaderSchedulePolicy)

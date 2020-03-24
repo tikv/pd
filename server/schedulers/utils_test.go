@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	KB = 1024
-	MB = 1024 * KB
+	_ = 1 << (10 * iota)
+	KB
+	MB
 )
 
 func TestSchedulers(t *testing.T) {

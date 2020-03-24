@@ -51,6 +51,7 @@ type StoreStatus struct {
 	RegionWeight       float64            `json:"region_weight"`
 	RegionScore        float64            `json:"region_score"`
 	RegionSize         int64              `json:"region_size"`
+	MaxScore           float64            `json:"max_score,omitempty"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	ApplyingSnapCount  uint32             `json:"applying_snap_count,omitempty"`
@@ -85,6 +86,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			LeaderWeight:       store.GetLeaderWeight(),
 			LeaderScore:        store.LeaderScore(core.StringToSchedulePolicy(opt.LeaderSchedulePolicy), 0),
 			LeaderSize:         store.GetLeaderSize(),
+			MaxScore:           store.GetMaxScore(),
 			RegionCount:        store.GetRegionCount(),
 			RegionWeight:       store.GetRegionWeight(),
 			RegionScore:        store.RegionScore(opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
