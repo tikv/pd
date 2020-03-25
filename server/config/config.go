@@ -136,6 +136,8 @@ type Config struct {
 	EnableDynamicConfig bool `toml:"enable-dynamic-config" json:"enable-dynamic-config"`
 
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
+
+	ReplicateMode ReplicateModeConfig `toml:"replicate-mode" json:"replicate-mode"`
 }
 
 // NewConfig creates a new config.
@@ -208,6 +210,9 @@ const (
 
 	defaultEnableDynamicConfig = true
 	defaultDashboardAddress    = "auto"
+
+	defaultDRWaitStoreTimeout = time.Minute
+	defaultDRWaitSyncTimeout  = time.Minute
 )
 
 var (
@@ -455,6 +460,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if !configMetaData.IsDefined("enable-dynamic-config") {
 		c.EnableDynamicConfig = defaultEnableDynamicConfig
 	}
+
+	c.ReplicateMode.adjust(configMetaData.Child("replicate-mode"))
+
 	return nil
 }
 
@@ -1129,4 +1137,37 @@ func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 		return tlsConfig, nil
 	}
 	return nil, nil
+}
+
+// ReplicateModeConfig is the configuration for the replicate policy.
+type ReplicateModeConfig struct {
+	ReplicateMode string                    `toml:"replicate-mode" json:"replicate-mode"` // can be 'dr-autosync' or 'majority', default value is 'majority'
+	DRAutoSync    DRAutoSyncReplicateConfig `toml:"dr-autosync" json:"dr-autosync"`       // used when ReplicateMode is 'dr-autosync'
+}
+
+func (c *ReplicateModeConfig) adjust(meta *configMetaData) {
+	if !meta.IsDefined("replicate-mode") {
+		c.ReplicateMode = "majority"
+	}
+	c.DRAutoSync.adjust(meta.Child("dr-autosync"))
+}
+
+// DRAutoSyncReplicateConfig is the configuration for auto sync mode between 2 data centers.
+type DRAutoSyncReplicateConfig struct {
+	LabelKey         string            `toml:"label-key" json:"label-key"`
+	Primary          string            `toml:"primary" json:"primary"`
+	DR               string            `toml:"dr" json:"dr"`
+	PrimaryReplicas  int               `toml:"primary-replicas" json:"primary-replicas"`
+	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
+	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
+	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
+}
+
+func (c *DRAutoSyncReplicateConfig) adjust(meta *configMetaData) {
+	if !meta.IsDefined("wait-store-timeout") {
+		c.WaitStoreTimeout = typeutil.Duration{Duration: defaultDRWaitStoreTimeout}
+	}
+	if !meta.IsDefined("wait-sync-timeout") {
+		c.WaitSyncTimeout = typeutil.Duration{Duration: defaultDRWaitSyncTimeout}
+	}
 }
