@@ -24,11 +24,6 @@ import (
 	"github.com/unrolled/render"
 )
 
-// only used for json param representation
-type name struct {
-	Name string `json:"name"`
-}
-
 type operatorHandler struct {
 	*server.Handler
 	r *render.Render
@@ -115,7 +110,7 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 // @Tags operator
 // @Summary Create an operator.
 // @Accept json
-// @Param message body name true "The name of operator."
+// @Param name body string true "The name of operator."
 // @Produce json
 // @Success 200 {string} string "The operator is created."
 // @Failure 400 {string} string "The input is invalid."
