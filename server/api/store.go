@@ -522,11 +522,7 @@ func getStoreLimitType(input map[string]interface{}) (storelimit.Type, error) {
 		if !ok {
 			err = errors.New("bad format type")
 		} else {
-			if value, ok := storelimit.TypeNameValue[typeName]; ok {
-				typeValue = value
-			} else {
-				err = errors.New("unknown type")
-			}
+			return parseStoreLimitType(typeName)
 		}
 	}
 	return typeValue, err
