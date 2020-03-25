@@ -69,7 +69,7 @@ func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, config)
 }
 
-// TODO: body param is json, which is not represented correctly in swag
+// FIXME: details of input json body params
 // @Tags config
 // @Summary Update a config item.
 // @Accept json

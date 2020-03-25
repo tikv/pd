@@ -106,11 +106,11 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, results)
 }
 
-// TODO: add api details
+// FIXME: details of input json body params
 // @Tags operator
 // @Summary Create an operator.
 // @Accept json
-// @Param name body string true "The name of operator."
+// @Param body body object true "json params"
 // @Produce json
 // @Success 200 {string} string "The operator is created."
 // @Failure 400 {string} string "The input is invalid."
