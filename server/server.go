@@ -144,7 +144,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup, error)
 
 // ServiceGroup used to register the service.
 type ServiceGroup struct {
@@ -171,7 +171,10 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 	router := mux.NewRouter()
 
 	for _, build := range serviceBuilders {
-		handler, info := build(ctx, svr)
+		handler, info, err := build(ctx, svr)
+		if err != nil {
+			return nil, err
+		}
 		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
 			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
 		}
@@ -244,10 +247,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-
-		if cfg.EnableDynamicConfig {
-			configpb.RegisterConfigServer(gs, s.cfgManager)
-		}
+		configpb.RegisterConfigServer(gs, s.cfgManager)
 	}
 	s.etcdCfg = etcdCfg
 	if EnableZap {

@@ -882,6 +882,9 @@ types:
     description: The label for the specific store.
     post:
       description: Set the store's label.
+      queryParameters:
+        force?:
+          description: Overwrite the labels.
       body:
         application/json:
           description: key-value pair. Delete a label when value is empty.

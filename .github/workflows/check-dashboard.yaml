@@ -1,0 +1,48 @@
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "go.mod"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "go.mod"
+
+name: TiDB Dashboard
+
+jobs:
+  build:
+    name: Check UI up-to-date
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@master
+      - uses: actions/setup-go@v1
+        with:
+          go-version: "1.13.5"
+      - uses: actions/cache@v1
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: Fetch Dashboard Go module
+        run: |
+          go mod download
+          DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap-incubator/tidb-dashboard)
+          DASHBOARD_UI_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/ui/.github_release_version")
+          echo ::set-env name=DASHBOARD_DIR::"$DASHBOARD_DIR"
+          echo ::set-env name=DASHBOARD_UI_VERSION::"$DASHBOARD_UI_VERSION"
+      - name: Fetch UI source specified by version
+        run: |
+          rm -rf /tmp/dashboard
+          mkdir -p /tmp/dashboard
+          cd /tmp/dashboard
+          DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/archive/ui_release_${DASHBOARD_UI_VERSION}.zip"
+          curl -L "${DOWNLOAD_URL}" > source.zip
+          unzip source.zip
+      - name: Check diff
+        run: |
+          diff -qr ${DASHBOARD_DIR}/ui/ /tmp/dashboard/tidb-dashboard-ui_release_${DASHBOARD_UI_VERSION}/ui/

@@ -22,7 +22,9 @@ warningCode = 0
 [rule.modifies-parameter]
 [rule.confusing-naming]
 [rule.confusing-results]
-[rule.flag-parameter]
+
+# It generates unnecessary reports
+#[rule.flag-parameter]
 
 # Currently this makes too much noise, but should add it in
 # and perhaps ignore it in a few files

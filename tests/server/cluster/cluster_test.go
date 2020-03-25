@@ -393,7 +393,7 @@ func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
 	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Offline)
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	err = rc.PutStore(store)
+	err = rc.PutStore(store, false)
 	c.Assert(err, IsNil)
 	c.Assert(tc, NotNil)
 

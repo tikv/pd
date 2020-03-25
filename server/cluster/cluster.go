@@ -791,8 +791,9 @@ func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionI
 	return c.core.GetAdjacentRegions(region)
 }
 
-// UpdateStoreLabels updates a store's location labels.
-func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel) error {
+// UpdateStoreLabels updates a store's location labels
+// If 'force' is true, then update the store's labels forcibly.
+func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errors.Errorf("invalid store ID %d, not found", storeID)
@@ -800,7 +801,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
 	newStore.Labels = labels
 	// PutStore will perform label merge.
-	err := c.PutStore(newStore)
+	err := c.PutStore(newStore, force)
 	return err
 }
 
@@ -812,7 +813,8 @@ func (c *RaftCluster) UpdateStoresMaxScore(flexibleScore uint64) {
 }
 
 // PutStore puts a store.
-func (c *RaftCluster) PutStore(store *metapb.Store) error {
+// If 'force' is true, then overwrite the store's labels.
+func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -845,9 +847,13 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 		// Add a new store.
 		s = core.NewStoreInfo(store)
 	} else {
+		// Use the given labels to update the store.
+		labels := store.GetLabels()
+		if !force {
+			// If 'force' isn't set, the given labels will merge into those labels which already existed in the store.
+			labels = s.MergeLabels(labels)
+		}
 		// Update an existed store.
-		labels := s.MergeLabels(store.GetLabels())
-
 		s = s.Clone(
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
 			core.SetStoreVersion(store.GitHash, store.Version),
@@ -923,7 +929,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 // State transition:
 // Case 1: Up -> Tombstone (if force is true);
 // Case 2: Offline -> Tombstone.
-func (c *RaftCluster) BuryStore(storeID uint64, force bool) error { // revive:disable-line:flag-parameter
+func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	c.Lock()
 	defer c.Unlock()
 

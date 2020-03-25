@@ -236,3 +236,55 @@ func newTestScheduleOption() (*ScheduleOption, error) {
 	opt := NewScheduleOption(cfg)
 	return opt, nil
 }
+
+func (s *testConfigSuite) TestDashboardConfig(c *C) {
+	cfgData := `
+[dashboard]
+tidb-cacert-path = "/path/ca.pem"
+tidb-key-path = "/path/client-key.pem"
+tidb-cert-path = "/path/client.pem"
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Dashboard.TiDBCAPath, Equals, "/path/ca.pem")
+	c.Assert(cfg.Dashboard.TiDBKeyPath, Equals, "/path/client-key.pem")
+	c.Assert(cfg.Dashboard.TiDBCertPath, Equals, "/path/client.pem")
+}
+
+func (s *testConfigSuite) TestReplicateMode(c *C) {
+	cfgData := `
+[replicate-mode]
+replicate-mode = "dr-autosync"
+[replicate-mode.dr-autosync]
+label-key = "zone"
+primary = "zone1"
+dr = "zone2"
+primary-replicas = 2
+dr-replicas = 1
+wait-store-timeout = "120s"
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+
+	c.Assert(cfg.ReplicateMode.ReplicateMode, Equals, "dr-autosync")
+	c.Assert(cfg.ReplicateMode.DRAutoSync.LabelKey, Equals, "zone")
+	c.Assert(cfg.ReplicateMode.DRAutoSync.Primary, Equals, "zone1")
+	c.Assert(cfg.ReplicateMode.DRAutoSync.DR, Equals, "zone2")
+	c.Assert(cfg.ReplicateMode.DRAutoSync.PrimaryReplicas, Equals, 2)
+	c.Assert(cfg.ReplicateMode.DRAutoSync.DRReplicas, Equals, 1)
+	c.Assert(cfg.ReplicateMode.DRAutoSync.WaitStoreTimeout.Duration, Equals, 2*time.Minute)
+	c.Assert(cfg.ReplicateMode.DRAutoSync.WaitSyncTimeout.Duration, Equals, time.Minute)
+
+	cfg = NewConfig()
+	meta, err = toml.Decode("", &cfg)
+	c.Assert(err, IsNil)
+	err = cfg.Adjust(&meta)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.ReplicateMode.ReplicateMode, Equals, "majority")
+}

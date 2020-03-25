@@ -63,9 +63,9 @@ func getBasicCmd() *cobra.Command {
 	}
 
 	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "http://127.0.0.1:2379", "Address of pd.")
-	rootCmd.Flags().StringVar(&commandFlags.CAPath, "cacert", "", "Path of file that contains list of trusted SSL CAs.")
-	rootCmd.Flags().StringVar(&commandFlags.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format.")
-	rootCmd.Flags().StringVar(&commandFlags.KeyPath, "key", "", "Path of file that contains X509 key in PEM format.")
+	rootCmd.PersistentFlags().StringVar(&commandFlags.CAPath, "cacert", "", "Path of file that contains list of trusted SSL CAs.")
+	rootCmd.PersistentFlags().StringVar(&commandFlags.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format.")
+	rootCmd.PersistentFlags().StringVar(&commandFlags.KeyPath, "key", "", "Path of file that contains X509 key in PEM format.")
 	rootCmd.PersistentFlags().BoolVarP(&commandFlags.Help, "help", "h", false, "Help message.")
 
 	rootCmd.AddCommand(
@@ -100,6 +100,7 @@ func getInteractCmd(args []string) *cobra.Command {
 	rootCmd.SetArgs(args)
 	rootCmd.ParseFlags(args)
 	rootCmd.SetOutput(os.Stdout)
+	hiddenFlag(rootCmd)
 
 	return rootCmd
 }
@@ -117,6 +118,14 @@ func getMainCmd(args []string) *cobra.Command {
 	rootCmd.SetOutput(os.Stdout)
 
 	return rootCmd
+}
+
+// Hide the flags in help and usage messages.
+func hiddenFlag(cmd *cobra.Command) {
+	cmd.LocalFlags().MarkHidden("pd")
+	cmd.LocalFlags().MarkHidden("cacert")
+	cmd.LocalFlags().MarkHidden("cert")
+	cmd.LocalFlags().MarkHidden("key")
 }
 
 // MainStart start main command
