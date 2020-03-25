@@ -167,12 +167,12 @@ func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %v", id))
 }
 
-// TODO: swag cannot handle map[string]interface{} in param, use string instead
+// FIXME: details of input json body params
 // @Tags member
 // @Summary Set leader priority of a PD member.
 // @Accept json
 // @Param name path string true "PD server name"
-// @Param "leader-priority" body integer true "leader priority"
+// @Param body body object true "json params"
 // @Produce json
 // @Success 200 {string} string "The leader priority is updated."
 // @Failure 400 {string} string "The input is invalid."
