@@ -1,0 +1,3171 @@
+basePath: /pd/api/v1
+definitions:
+  api.Health:
+    properties:
+      client_urls:
+        items:
+          type: string
+        type: array
+      health:
+        type: boolean
+      member_id:
+        type: integer
+      name:
+        type: string
+    type: object
+  api.HotStoreStats:
+    properties:
+      bytes-read-rate:
+        additionalProperties:
+          type: number
+        type: object
+      bytes-write-rate:
+        additionalProperties:
+          type: number
+        type: object
+      keys-read-rate:
+        additionalProperties:
+          type: number
+        type: object
+      keys-write-rate:
+        additionalProperties:
+          type: number
+        type: object
+    type: object
+  api.MetaStore:
+    properties:
+      address:
+        description: Address to handle client requests (kv, cop, etc.)
+        type: string
+      binary_path:
+        type: string
+      git_hash:
+        type: string
+      id:
+        type: integer
+      labels:
+        items:
+          $ref: '#/definitions/metapb.StoreLabel'
+        type: array
+      last_heartbeat:
+        description: The last heartbeat timestamp of the store.
+        type: integer
+      peer_address:
+        description: |-
+          Address to handle peer requests (raft messages from other store).
+          Empty means same as address.
+        type: string
+      start_timestamp:
+        description: The start timestamp of the current store
+        type: integer
+      state:
+        type: integer
+      state_name:
+        type: string
+      status_address:
+        description: Status address provides the HTTP service for external components
+        type: string
+      version:
+        type: string
+    type: object
+  api.Recommendation:
+    properties:
+      description:
+        type: string
+      instruction:
+        type: string
+      level:
+        type: string
+      module:
+        type: string
+    type: object
+  api.RegionInfo:
+    properties:
+      approximate_keys:
+        type: integer
+      approximate_size:
+        type: integer
+      down_peers:
+        items:
+          $ref: '#/definitions/pdpb.PeerStats'
+        type: array
+      end_key:
+        type: string
+      epoch:
+        $ref: '#/definitions/metapb.RegionEpoch'
+        type: object
+      id:
+        type: integer
+      leader:
+        $ref: '#/definitions/metapb.Peer'
+        type: object
+      peers:
+        items:
+          $ref: '#/definitions/metapb.Peer'
+        type: array
+      pending_peers:
+        items:
+          $ref: '#/definitions/metapb.Peer'
+        type: array
+      read_bytes:
+        type: integer
+      read_keys:
+        type: integer
+      start_key:
+        type: string
+      written_bytes:
+        type: integer
+      written_keys:
+        type: integer
+    type: object
+  api.RegionsInfo:
+    properties:
+      count:
+        type: integer
+      regions:
+        items:
+          $ref: '#/definitions/api.RegionInfo'
+        type: array
+    type: object
+  api.StoreInfo:
+    properties:
+      status:
+        $ref: '#/definitions/api.StoreStatus'
+        type: object
+      store:
+        $ref: '#/definitions/api.MetaStore'
+        type: object
+    type: object
+  api.StoreStatus:
+    properties:
+      applying_snap_count:
+        type: integer
+      available:
+        type: integer
+      capacity:
+        type: integer
+      is_busy:
+        type: boolean
+      last_heartbeat_ts:
+        type: string
+      leader_count:
+        type: integer
+      leader_score:
+        type: number
+      leader_size:
+        type: integer
+      leader_weight:
+        type: number
+      receiving_snap_count:
+        type: integer
+      region_count:
+        type: integer
+      region_score:
+        type: number
+      region_size:
+        type: integer
+      region_weight:
+        type: number
+      sending_snap_count:
+        type: integer
+      start_ts:
+        type: string
+      uptime:
+        $ref: '#/definitions/typeutil.Duration'
+        type: object
+      used_size:
+        type: integer
+    type: object
+  api.StoresInfo:
+    properties:
+      count:
+        type: integer
+      stores:
+        items:
+          $ref: '#/definitions/api.StoreInfo'
+        type: array
+    type: object
+  api.Trend:
+    properties:
+      history:
+        $ref: '#/definitions/api.trendHistory'
+        type: object
+      stores:
+        items:
+          $ref: '#/definitions/api.trendStore'
+        type: array
+    type: object
+  api.histItem:
+    properties:
+      count:
+        type: integer
+      end:
+        type: integer
+      start:
+        type: integer
+    type: object
+  api.status:
+    properties:
+      build_ts:
+        type: string
+      git_hash:
+        type: string
+      start_timestamp:
+        type: integer
+      version:
+        type: string
+    type: object
+  api.trendHistory:
+    properties:
+      end:
+        type: integer
+      entries:
+        items:
+          $ref: '#/definitions/api.trendHistoryEntry'
+        type: array
+      start:
+        type: integer
+    type: object
+  api.trendHistoryEntry:
+    properties:
+      count:
+        type: integer
+      from:
+        type: integer
+      kind:
+        type: string
+      to:
+        type: integer
+    type: object
+  api.trendStore:
+    properties:
+      address:
+        type: string
+      available:
+        type: integer
+      capacity:
+        type: integer
+      hot_read_flow:
+        type: number
+      hot_read_region_flows:
+        items:
+          type: number
+        type: array
+      hot_write_flow:
+        type: number
+      hot_write_region_flows:
+        items:
+          type: number
+        type: array
+      id:
+        type: integer
+      last_heartbeat_ts:
+        type: string
+      leader_count:
+        type: integer
+      region_count:
+        type: integer
+      start_ts:
+        type: string
+      state_name:
+        type: string
+      uptime:
+        $ref: '#/definitions/typeutil.Duration'
+        type: object
+    type: object
+  api.version:
+    properties:
+      version:
+        type: string
+    type: object
+  atomic.Int32:
+    properties:
+      v:
+        type: integer
+    type: object
+  cluster.Status:
+    properties:
+      is_initialized:
+        type: boolean
+      raft_bootstrap_time:
+        type: string
+    type: object
+  config.Config:
+    properties:
+      advertise-client-urls:
+        type: string
+      advertise-peer-urls:
+        type: string
+      auto-compaction-mode:
+        description: AutoCompactionMode is either 'periodic' or 'revision'. The default
+          value is 'periodic'.
+        type: string
+      auto-compaction-retention-v2:
+        description: |-
+          AutoCompactionRetention is either duration string with time unit
+          (e.g. '5m' for 5-minute), or revision unit (e.g. '5000').
+          If no time unit is provided and compaction mode is 'periodic',
+          the unit defaults to hour. For example, '5' translates into 5-hour.
+          The default retention is 1 hour.
+          Before etcd v3.3.x, the type of retention is int. We add 'v2' suffix to make it backward compatible.
+        type: string
+      client-urls:
+        type: string
+      cluster-version:
+        $ref: '#/definitions/semver.Version'
+        type: object
+      configFile:
+        type: string
+      dashboard:
+        $ref: '#/definitions/config.DashboardConfig'
+        type: object
+      data-dir:
+        type: string
+      disableStrictReconfigCheck:
+        type: boolean
+      electionInterval:
+        $ref: '#/definitions/typeutil.Duration'
+        description: ElectionInterval is the interval for etcd Raft election.
+        type: object
+      enable-dynamic-config:
+        type: boolean
+      enable-grpc-gateway:
+        type: boolean
+      enableDashboard:
+        type: boolean
+      flagSet:
+        $ref: '#/definitions/pflag.FlagSet'
+        type: object
+      force-new-cluster:
+        type: boolean
+      heartbeatStreamBindInterval:
+        $ref: '#/definitions/typeutil.Duration'
+        type: object
+      initial-cluster:
+        type: string
+      initial-cluster-state:
+        type: string
+      join:
+        description: Join to an existing pd cluster, a string of endpoints.
+        type: string
+      label-property:
+        $ref: '#/definitions/config.LabelPropertyConfig'
+        type: object
+      leaderPriorityCheckInterval:
+        $ref: '#/definitions/typeutil.Duration'
+        type: object
+      lease:
+        description: |-
+          LeaderLease time, if leader doesn't update its TTL
+          in etcd after lease time, etcd will expire the leader key
+          and other servers can campaign the leader again.
+          Etcd only supports seconds TTL, so here is second too.
+        type: integer
+      log:
+        $ref: '#/definitions/log.Config'
+        description: Log related config.
+        type: object
+      log-file:
+        description: Backward compatibility.
+        type: string
+      log-level:
+        type: string
+      logProps:
+        $ref: '#/definitions/log.ZapProperties'
+        type: object
+      logger:
+        $ref: '#/definitions/zap.Logger'
+        type: object
+      metric:
+        $ref: '#/definitions/metricutil.MetricConfig'
+        type: object
+      name:
+        type: string
+      nextRetryDelay:
+        description: Only test can change them.
+        type: string
+      pd-server:
+        $ref: '#/definitions/config.PDServerConfig'
+        type: object
+      peer-urls:
+        type: string
+      preVote:
+        description: |-
+          Prevote is true to enable Raft Pre-Vote.
+          If enabled, Raft runs an additional election phase
+          to check whether it would get enough votes to win
+          an election, thus minimizing disruptions.
+        type: boolean
+      quota-backend-bytes:
+        description: |-
+          QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
+          the default size is 2GB, the maximum is 8GB.
+        type: integer
+      replication:
+        $ref: '#/definitions/config.ReplicationConfig'
+        type: object
+      schedule:
+        $ref: '#/definitions/config.ScheduleConfig'
+        type: object
+      security:
+        $ref: '#/definitions/grpcutil.SecurityConfig'
+        type: object
+      tickInterval:
+        $ref: '#/definitions/typeutil.Duration'
+        description: TickInterval is the interval for etcd Raft tick.
+        type: object
+      tso-save-interval:
+        $ref: '#/definitions/typeutil.Duration'
+        description: TsoSaveInterval is the interval to save timestamp.
+        type: object
+      warningMsgs:
+        description: For all warnings during parsing.
+        items:
+          type: string
+        type: array
+    type: object
+  config.DashboardConfig:
+    properties:
+      tidb_cacert_path:
+        type: string
+      tidb_cert_path:
+        type: string
+      tidb_key_path:
+        type: string
+    type: object
+  config.LabelPropertyConfig:
+    additionalProperties:
+      items:
+        $ref: '#/definitions/config.StoreLabel'
+      type: array
+    type: object
+  config.PDServerConfig:
+    properties:
+      key-type:
+        description: |-
+          KeyType is option to specify the type of keys.
+          There are some types supported: ["table", "raw", "txn"], default: "table"
+        type: string
+      max-reset-ts-gap:
+        description: MaxResetTSGap is the max gap to reset the tso.
+        type: string
+      metric-storage:
+        description: |-
+          MetricStorage is the cluster metric storage.
+          Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
+        type: string
+      runtime-services:
+        $ref: '#/definitions/typeutil.StringSlice'
+        description: RuntimeServices is the running the running extension services.
+        type: object
+      use-region-storage:
+        description: UseRegionStorage enables the independent region storage.
+        type: boolean
+    type: object
+  config.ReplicationConfig:
+    properties:
+      enable-placement-rules:
+        description: When PlacementRules feature is enabled. MaxReplicas and LocationLabels
+          are not uesd any more.
+        type: boolean
+      location-labels:
+        $ref: '#/definitions/typeutil.StringSlice'
+        description: |-
+          The label keys specified the location of a store.
+          The placement priorities is implied by the order of label keys.
+          For example, ["zone", "rack"] means that we should place replicas to
+          different zones first, then to different racks if we don't have enough zones.
+        type: object
+      max-replicas:
+        description: MaxReplicas is the number of replicas for each region.
+        type: integer
+      strictly-match-label:
+        description: StrictlyMatchLabel strictly checks if the label of TiKV is matched
+          with LocationLabels.
+        type: boolean
+    type: object
+  config.ScheduleConfig:
+    properties:
+      disable-location-replacement:
+        description: |-
+          DisableLocationReplacement is the option to prevent replica checker from
+          moving replica to a better location.
+          WARN: DisableLocationReplacement is deprecated.
+        type: boolean
+      disable-make-up-replica:
+        description: |-
+          DisableMakeUpReplica is the option to prevent replica checker from making up
+          replicas when replica count is less than expected.
+          WARN: DisableMakeUpReplica is deprecated.
+        type: boolean
+      disable-raft-learner:
+        description: |-
+          WARN: DisableLearner is deprecated.
+          DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
+        type: boolean
+      disable-remove-down-replica:
+        description: |-
+          DisableRemoveDownReplica is the option to prevent replica checker from
+          removing down replicas.
+          WARN: DisableRemoveDownReplica is deprecated.
+        type: boolean
+      disable-remove-extra-replica:
+        description: |-
+          DisableRemoveExtraReplica is the option to prevent replica checker from
+          removing extra replicas.
+          WARN: DisableRemoveExtraReplica is deprecated.
+        type: boolean
+      disable-replace-offline-replica:
+        description: |-
+          DisableReplaceOfflineReplica is the option to prevent replica checker from
+          replacing offline replicas.
+          WARN: DisableReplaceOfflineReplica is deprecated.
+        type: boolean
+      enable-cross-table-merge:
+        description: |-
+          EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
+          This option only works when key type is "table".
+        type: boolean
+      enable-debug-metrics:
+        description: EnableDebugMetrics is the option to enable debug metrics.
+        type: boolean
+      enable-location-replacement:
+        description: EnableLocationReplacement is the option to enable replica checker
+          to move replica to a better location.
+        type: boolean
+      enable-make-up-replica:
+        description: EnableMakeUpReplica is the option to enable replica checker to
+          make up replica.
+        type: boolean
+      enable-one-way-merge:
+        description: EnableOneWayMerge is the option to enable one way merge. This
+          means a Region can only be merged into the next region of it.
+        type: boolean
+      enable-remove-down-replica:
+        description: EnableRemoveDownReplica is the option to enable replica checker
+          to remove down replica.
+        type: boolean
+      enable-remove-extra-replica:
+        description: EnableRemoveExtraReplica is the option to enable replica checker
+          to remove extra replica.
+        type: boolean
+      enable-replace-offline-replica:
+        description: EnableReplaceOfflineReplica is the option to enable replica checker
+          to replace offline replica.
+        type: boolean
+      high-space-ratio:
+        description: |-
+          HighSpaceRatio is the highest usage ratio of store which regraded as high space.
+          High space means there is a lot of spare capacity, and store region score varies directly with used size.
+        type: number
+      hot-region-cache-hits-threshold:
+        description: |-
+          HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
+          If the number of times a region hits the hot cache is greater than this
+          threshold, it is considered a hot region.
+        type: integer
+      hot-region-schedule-limit:
+        description: HotRegionScheduleLimit is the max coexist hot region schedules.
+        type: integer
+      leader-schedule-limit:
+        description: LeaderScheduleLimit is the max coexist leader schedules.
+        type: integer
+      leader-schedule-policy:
+        description: 'LeaderSchedulePolicy is the option to balance leader, there
+          are some policies supported: ["count", "size"], default: "count"'
+        type: string
+      low-space-ratio:
+        description: |-
+          high space stage         transition stage           low space stage
+            |--------------------|-----------------------------|-------------------------|
+            ^                    ^                             ^                         ^
+            0       HighSpaceRatio * capacity       LowSpaceRatio * capacity          capacity
+
+          LowSpaceRatio is the lowest usage ratio of store which regraded as low space.
+          When in low space, store region score increases to very large and varies inversely with available size.
+        type: number
+      max-merge-region-keys:
+        type: integer
+      max-merge-region-size:
+        description: |-
+          If both the size of region is smaller than MaxMergeRegionSize
+          and the number of rows in region is smaller than MaxMergeRegionKeys,
+          it will try to merge with adjacent regions.
+        type: integer
+      max-pending-peer-count:
+        type: integer
+      max-snapshot-count:
+        description: |-
+          If the snapshot count of one store is greater than this value,
+          it will never be used as a source or target store.
+        type: integer
+      max-store-down-time:
+        $ref: '#/definitions/typeutil.Duration'
+        description: |-
+          MaxStoreDownTime is the max duration after which
+          a store will be considered to be down if it hasn't reported heartbeats.
+        type: object
+      merge-schedule-limit:
+        description: MergeScheduleLimit is the max coexist merge schedules.
+        type: integer
+      patrol-region-interval:
+        $ref: '#/definitions/typeutil.Duration'
+        description: PatrolRegionInterval is the interval for scanning region during
+          patrol.
+        type: object
+      region-schedule-limit:
+        description: RegionScheduleLimit is the max coexist region schedules.
+        type: integer
+      replica-schedule-limit:
+        description: ReplicaScheduleLimit is the max coexist replica schedules.
+        type: integer
+      scheduler-max-waiting-operator:
+        description: SchedulerMaxWaitingOperator is the max coexist operators for
+          each scheduler.
+        type: integer
+      schedulers-payload:
+        additionalProperties:
+          type: string
+        description: Only used to display
+        type: object
+      schedulers-v2:
+        $ref: '#/definitions/config.SchedulerConfigs'
+        description: Schedulers support for loading customized schedulers
+        type: object
+      split-merge-interval:
+        $ref: '#/definitions/typeutil.Duration'
+        description: SplitMergeInterval is the minimum interval time to permit merge
+          after split.
+        type: object
+      store-balance-rate:
+        description: StoreBalanceRate is the maximum of balance rate for each store.
+        type: number
+      store-limit-mode:
+        description: |-
+          StoreLimitMode can be auto or manual, when set to auto,
+          PD tries to change the store limit values according to
+          the load state of the cluster dynamically. User can
+          overwrite the auto-tuned value by pd-ctl, when the value
+          is overwritten, the value is fixed until it is deleted.
+          Default: manual
+        type: string
+      tolerant-size-ratio:
+        description: TolerantSizeRatio is the ratio of buffer size for balance scheduler.
+        type: number
+    type: object
+  config.SchedulerConfig:
+    properties:
+      args:
+        items:
+          type: string
+        type: array
+      args-payload:
+        type: string
+      disable:
+        type: boolean
+      type:
+        type: string
+    type: object
+  config.SchedulerConfigs:
+    items:
+      $ref: '#/definitions/config.SchedulerConfig'
+    type: array
+  config.StoreLabel:
+    properties:
+      key:
+        type: string
+      value:
+        type: string
+    type: object
+  grpcutil.SecurityConfig:
+    properties:
+      cacert-path:
+        description: CAPath is the path of file that contains list of trusted SSL
+          CAs. if set, following four settings shouldn't be empty
+        type: string
+      cert-allowed-cn:
+        description: CertAllowedCN is a CN which must be provided by a client
+        items:
+          type: string
+        type: array
+      cert-path:
+        description: CertPath is the path of file that contains X509 certificate in
+          PEM format.
+        type: string
+      client-cert-auth:
+        type: boolean
+      key-path:
+        description: KeyPath is the path of file that contains X509 key in PEM format.
+        type: string
+    type: object
+  log.Config:
+    properties:
+      development:
+        description: |-
+          Development puts the logger in development mode, which changes the
+          behavior of DPanicLevel and takes stacktraces more liberally.
+        type: boolean
+      disable-caller:
+        description: |-
+          DisableCaller stops annotating logs with the calling function's file
+          name and line number. By default, all logs are annotated.
+        type: boolean
+      disable-error-verbose:
+        description: |-
+          DisableErrorVerbose stops annotating logs with the full verbose error
+          message.
+        type: boolean
+      disable-stacktrace:
+        description: |-
+          DisableStacktrace completely disables automatic stacktrace capturing. By
+          default, stacktraces are captured for WarnLevel and above logs in
+          development and ErrorLevel and above in production.
+        type: boolean
+      disable-timestamp:
+        description: Disable automatic timestamps in output.
+        type: boolean
+      file:
+        $ref: '#/definitions/log.FileLogConfig'
+        description: File log config.
+        type: object
+      format:
+        description: Log format. one of json, text, or console.
+        type: string
+      level:
+        description: Log level.
+        type: string
+      sampling:
+        $ref: '#/definitions/zap.SamplingConfig'
+        description: |-
+          SamplingConfig sets a sampling strategy for the logger. Sampling caps the
+          global CPU and I/O load that logging puts on your process while attempting
+          to preserve a representative subset of your logs.
+
+          Values configured here are per-second. See zapcore.NewSampler for details.
+        type: object
+    type: object
+  log.FileLogConfig:
+    properties:
+      filename:
+        description: Log filename, leave empty to disable file log.
+        type: string
+      max-backups:
+        description: Maximum number of old log files to retain.
+        type: integer
+      max-days:
+        description: Max log keep days, default is never deleting.
+        type: integer
+      max-size:
+        description: Max size for a single file, in MB.
+        type: integer
+    type: object
+  log.ZapProperties:
+    properties:
+      core:
+        $ref: '#/definitions/zapcore.Core'
+        type: object
+      level:
+        $ref: '#/definitions/zap.AtomicLevel'
+        type: object
+      syncer:
+        $ref: '#/definitions/zapcore.WriteSyncer'
+        type: object
+    type: object
+  metapb.Cluster:
+    properties:
+      id:
+        type: integer
+      max_peer_count:
+        description: |-
+          max peer count for a region.
+          pd will do the auto-balance if region peer count mismatches.
+        type: integer
+    type: object
+  metapb.Peer:
+    properties:
+      id:
+        type: integer
+      is_learner:
+        type: boolean
+      store_id:
+        type: integer
+    type: object
+  metapb.RegionEpoch:
+    properties:
+      conf_ver:
+        description: Conf change version, auto increment when add or remove peer
+        type: integer
+      version:
+        description: Region version, auto increment when split or merge
+        type: integer
+    type: object
+  metapb.StoreLabel:
+    properties:
+      key:
+        type: string
+      value:
+        type: string
+    type: object
+  metricutil.MetricConfig:
+    properties:
+      address:
+        type: string
+      interval:
+        $ref: '#/definitions/typeutil.Duration'
+        type: object
+      job:
+        type: string
+    type: object
+  operator.OpStatusTracker:
+    properties:
+      current:
+        description: Current status
+        type: integer
+      reachTimes:
+        $ref: '#/definitions/operator.statusTimes'
+        description: Time when reach the current status
+        type: object
+      rw:
+        type: string
+    type: object
+  operator.OpStep:
+    type: object
+  operator.Operator:
+    properties:
+      brief:
+        type: string
+      counters:
+        items:
+          $ref: '#/definitions/prometheus.Counter'
+        type: array
+      currentStep:
+        type: integer
+      desc:
+        type: string
+      kind:
+        type: integer
+      level:
+        type: integer
+      regionEpoch:
+        $ref: '#/definitions/metapb.RegionEpoch'
+        type: object
+      regionID:
+        type: integer
+      status:
+        $ref: '#/definitions/operator.OpStatusTracker'
+        type: object
+      stepTime:
+        type: integer
+      steps:
+        items:
+          $ref: '#/definitions/operator.OpStep'
+        type: array
+    type: object
+  operator.statusTimes:
+    items:
+      $ref: '#/definitions/time.Time'
+    type: array
+  pdpb.Error:
+    properties:
+      message:
+        type: string
+      type:
+        type: integer
+    type: object
+  pdpb.GetMembersResponse:
+    properties:
+      etcd_leader:
+        $ref: '#/definitions/pdpb.Member'
+        type: object
+      header:
+        $ref: '#/definitions/pdpb.ResponseHeader'
+        type: object
+      leader:
+        $ref: '#/definitions/pdpb.Member'
+        type: object
+      members:
+        items:
+          $ref: '#/definitions/pdpb.Member'
+        type: array
+    type: object
+  pdpb.Member:
+    properties:
+      binary_version:
+        type: string
+      client_urls:
+        items:
+          type: string
+        type: array
+      deploy_path:
+        type: string
+      leader_priority:
+        type: integer
+      member_id:
+        description: member_id is the unique id of the PD member.
+        type: integer
+      name:
+        description: name is the name of the PD member.
+        type: string
+      peer_urls:
+        items:
+          type: string
+        type: array
+    type: object
+  pdpb.PeerStats:
+    properties:
+      down_seconds:
+        type: integer
+      peer:
+        $ref: '#/definitions/metapb.Peer'
+        type: object
+    type: object
+  pdpb.ResponseHeader:
+    properties:
+      cluster_id:
+        description: cluster_id is the ID of the cluster which sent the response.
+        type: integer
+      error:
+        $ref: '#/definitions/pdpb.Error'
+        type: object
+    type: object
+  pflag.Flag:
+    properties:
+      annotations:
+        additionalProperties:
+          items:
+            type: string
+          type: array
+        description: used by cobra.Command bash autocomple code
+        type: object
+      changed:
+        description: If the user set the value (or if left to default)
+        type: boolean
+      defValue:
+        description: default value (as text); for usage message
+        type: string
+      deprecated:
+        description: If this flag is deprecated, this string is the new or now thing
+          to use
+        type: string
+      hidden:
+        description: used by cobra.Command to allow flags to be hidden from help/usage
+          text
+        type: boolean
+      name:
+        description: name as it appears on command line
+        type: string
+      noOptDefVal:
+        description: default value (as text); if the flag is on the command line without
+          any options
+        type: string
+      shorthand:
+        description: one-letter abbreviated flag
+        type: string
+      shorthandDeprecated:
+        description: If the shorthand of this flag is deprecated, this string is the
+          new or now thing to use
+        type: string
+      usage:
+        description: help message
+        type: string
+      value:
+        $ref: '#/definitions/pflag.Value'
+        description: value as set
+        type: object
+    type: object
+  pflag.FlagSet:
+    properties:
+      actual:
+        additionalProperties:
+          $ref: '#/definitions/pflag.Flag'
+        type: object
+      addedGoFlagSets:
+        type: string
+      args:
+        description: arguments after flags
+        items:
+          type: string
+        type: array
+      argsLenAtDash:
+        description: len(args) when a '--' was located when parsing, or -1 if no --
+        type: integer
+      errorHandling:
+        type: integer
+      formal:
+        additionalProperties:
+          $ref: '#/definitions/pflag.Flag'
+        type: object
+      interspersed:
+        description: allow interspersed option/non-option args
+        type: boolean
+      name:
+        type: string
+      orderedActual:
+        items:
+          $ref: '#/definitions/pflag.Flag'
+        type: array
+      orderedFormal:
+        items:
+          $ref: '#/definitions/pflag.Flag'
+        type: array
+      output:
+        description: nil means stderr; use out() accessor
+        type: string
+      parseErrorsWhitelist:
+        $ref: '#/definitions/pflag.ParseErrorsWhitelist'
+        description: ParseErrorsWhitelist is used to configure a whitelist of errors
+        type: object
+      parsed:
+        type: boolean
+      shorthands:
+        additionalProperties:
+          $ref: '#/definitions/pflag.Flag'
+        type: object
+      sortFlags:
+        description: |-
+          SortFlags is used to indicate, if user wants to have sorted flags in
+          help/usage messages.
+        type: boolean
+      sortedActual:
+        items:
+          $ref: '#/definitions/pflag.Flag'
+        type: array
+      sortedFormal:
+        items:
+          $ref: '#/definitions/pflag.Flag'
+        type: array
+    type: object
+  pflag.ParseErrorsWhitelist:
+    properties:
+      unknownFlags:
+        description: UnknownFlags will ignore unknown flags errors and continue parsing
+          rest of the flags
+        type: boolean
+    type: object
+  pflag.Value:
+    type: object
+  placement.LabelConstraint:
+    properties:
+      key:
+        type: string
+      op:
+        type: string
+      values:
+        items:
+          type: string
+        type: array
+    type: object
+  placement.Rule:
+    properties:
+      count:
+        description: expected count of the peers
+        type: integer
+      end_key:
+        description: hex format end key, for marshal/unmarshal
+        type: string
+      group_id:
+        description: mark the source that add the rule
+        type: string
+      id:
+        description: unique ID within a group
+        type: string
+      index:
+        description: rule apply order in a group, rule with less ID is applied first
+          when indexes are equal
+        type: integer
+      label_constraints:
+        description: used to select stores to place peers
+        items:
+          $ref: '#/definitions/placement.LabelConstraint'
+        type: array
+      location_labels:
+        description: used to make peers isolated physically
+        items:
+          type: string
+        type: array
+      override:
+        description: when it is true, all rules with less indexes are disabled
+        type: boolean
+      role:
+        description: expected role of the peers
+        type: string
+      start_key:
+        description: hex format start key, for marshal/unmarshal
+        type: string
+    type: object
+  prometheus.Counter:
+    type: object
+  schedule.OperatorWithStatus:
+    properties:
+      op:
+        $ref: '#/definitions/operator.Operator'
+        type: object
+      status:
+        type: integer
+    type: object
+  schedule.StoreLimitScene:
+    properties:
+      high:
+        type: integer
+      idle:
+        type: integer
+      low:
+        type: integer
+      normal:
+        type: integer
+    type: object
+  semver.Version:
+    properties:
+      major:
+        type: integer
+      metadata:
+        type: string
+      minor:
+        type: integer
+      patch:
+        type: integer
+      preRelease:
+        type: string
+    type: object
+  statistics.HotPeerStat:
+    properties:
+      anti_count:
+        description: AntiCount used to eliminate some noise when remove region in
+          cache
+        type: integer
+      flow_bytes:
+        type: number
+      flow_keys:
+        type: number
+      hot_degree:
+        description: HotDegree records the hot region update times
+        type: integer
+      isLeader:
+        type: boolean
+      isNew:
+        type: boolean
+      kind:
+        type: integer
+      last_update_time:
+        description: LastUpdateTime used to calculate average write
+        type: string
+      needDelete:
+        type: boolean
+      region_id:
+        type: integer
+      rollingByteRate:
+        $ref: '#/definitions/statistics.MovingAvg'
+        description: rolling statistics, recording some recently added records.
+        type: object
+      rollingKeyRate:
+        $ref: '#/definitions/statistics.MovingAvg'
+        type: object
+      store_id:
+        type: integer
+      version:
+        description: Version used to check the region split times
+        type: integer
+    type: object
+  statistics.HotPeersStat:
+    properties:
+      regions_count:
+        type: integer
+      statistics:
+        items:
+          $ref: '#/definitions/statistics.HotPeerStat'
+        type: array
+      total_flow_bytes:
+        type: number
+    type: object
+  statistics.MovingAvg:
+    type: object
+  statistics.RegionStats:
+    properties:
+      count:
+        type: integer
+      empty_count:
+        type: integer
+      storage_keys:
+        type: integer
+      storage_size:
+        type: integer
+      store_leader_count:
+        additionalProperties:
+          type: integer
+        type: object
+      store_leader_keys:
+        additionalProperties:
+          type: integer
+        type: object
+      store_leader_size:
+        additionalProperties:
+          type: integer
+        type: object
+      store_peer_count:
+        additionalProperties:
+          type: integer
+        type: object
+      store_peer_keys:
+        additionalProperties:
+          type: integer
+        type: object
+      store_peer_size:
+        additionalProperties:
+          type: integer
+        type: object
+    type: object
+  statistics.StoreHotPeersInfos:
+    properties:
+      as_leader:
+        $ref: '#/definitions/statistics.StoreHotPeersStat'
+        type: object
+      as_peer:
+        $ref: '#/definitions/statistics.StoreHotPeersStat'
+        type: object
+    type: object
+  statistics.StoreHotPeersStat:
+    additionalProperties:
+      $ref: '#/definitions/statistics.HotPeersStat'
+    type: object
+  typeutil.Duration:
+    type: object
+  typeutil.StringSlice:
+    items:
+      type: string
+    type: array
+  zap.AtomicLevel:
+    properties:
+      l:
+        $ref: '#/definitions/atomic.Int32'
+        type: object
+    type: object
+  zap.Logger:
+    properties:
+      addCaller:
+        type: boolean
+      addStack:
+        $ref: '#/definitions/zapcore.LevelEnabler'
+        type: object
+      callerSkip:
+        type: integer
+      core:
+        $ref: '#/definitions/zapcore.Core'
+        type: object
+      development:
+        type: boolean
+      errorOutput:
+        $ref: '#/definitions/zapcore.WriteSyncer'
+        type: object
+      name:
+        type: string
+    type: object
+  zap.SamplingConfig:
+    properties:
+      initial:
+        type: integer
+      thereafter:
+        type: integer
+    type: object
+  zapcore.Core:
+    type: object
+  zapcore.LevelEnabler:
+    type: object
+  zapcore.WriteSyncer:
+    type: object
+info:
+  contact:
+    email: info@pingcap.com
+    name: Placement Driver Support
+    url: https://github.com/pingcap/pd/issues
+  description: This is placement driver.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  title: Placement Driver Core API
+  version: "1.0"
+paths:
+  /admin/cache/region/{id}:
+    delete:
+      parameters:
+      - description: Region Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The region is removed from server cache.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Drop a specific region from cache.
+      tags:
+      - admin
+  /admin/log:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: level
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The log level is updated.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Set log level.
+      tags:
+      - admin
+  /admin/reset-ts:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Reset ts success.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "403":
+          description: Reset ts is forbidden.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Reset the ts.
+      tags:
+      - admin
+  /cluster:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/metapb.Cluster'
+      summary: Get cluster info.
+      tags:
+      - cluster
+  /cluster/status:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cluster.Status'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get cluster status.
+      tags:
+      - cluster
+  /config:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/config.Config'
+      summary: Get full config.
+      tags:
+      - config
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The config is updated.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Update a config item.
+      tags:
+      - config
+  /config/cluster-version:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/semver.Version'
+      summary: Get cluster version.
+      tags:
+      - config
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+      summary: Update cluster version.
+      tags:
+      - config
+  /config/default:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/config.Config'
+      summary: Get default config.
+      tags:
+      - config
+  /config/label-property:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/config.LabelPropertyConfig'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+      summary: Get label property config.
+      tags:
+      - config
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The config is updated.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Update label property config item.
+      tags:
+      - config
+  /config/replicate:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/config.ReplicationConfig'
+      summary: Get replication config.
+      tags:
+      - config
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The config is updated.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Update a replication config item.
+      tags:
+      - config
+  /config/rule:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Parameters of rule
+        in: body
+        name: rule
+        required: true
+        schema:
+          $ref: '#/definitions/placement.Rule'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Update rule success.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "412":
+          description: Placement rules feature is disabled.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Update rule of cluster.
+      tags:
+      - rule
+  /config/rule/{group}/{id}:
+    delete:
+      parameters:
+      - description: The name of group
+        in: path
+        name: group
+        required: true
+        type: string
+      - description: Rule Id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Delete rule success.
+          schema:
+            type: string
+        "412":
+          description: Placement rules feature is disabled.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Delete rule of cluster.
+      tags:
+      - rule
+    get:
+      parameters:
+      - description: The name of group
+        in: path
+        name: group
+        required: true
+        type: string
+      - description: Rule Id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/placement.Rule'
+        "412":
+          description: Placement rules feature is disabled.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get rule of cluster by group and id.
+      tags:
+      - rule
+  /config/rules:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/placement.Rule'
+            type: array
+        "412":
+          description: Placement rules feature is disabled.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all rules of cluster.
+      tags:
+      - rule
+  /config/rules/group/{group}:
+    get:
+      parameters:
+      - description: The name of group
+        in: path
+        name: group
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/placement.Rule'
+            type: array
+        "412":
+          description: Placement rules feature is disabled.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all rules of cluster by group.
+      tags:
+      - rule
+  /config/rules/key/{key}:
+    get:
+      parameters:
+      - description: The name of key
+        in: path
+        name: key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/placement.Rule'
+            type: array
+        "412":
+          description: Placement rules feature is disabled.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all rules of cluster by key.
+      tags:
+      - rule
+  /config/rules/region/{region}:
+    get:
+      parameters:
+      - description: The name of region
+        in: path
+        name: region
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/placement.Rule'
+            type: array
+        "412":
+          description: Placement rules feature is disabled.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all rules of cluster by region.
+      tags:
+      - rule
+  /config/schedule:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/config.ScheduleConfig'
+      summary: Get schedule config.
+      tags:
+      - config
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The config is updated.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Update a schedule config item.
+      tags:
+      - config
+  /diagnose:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.Recommendation'
+            type: array
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Diagnostic information of the cluster.
+      tags:
+      - diagnose
+  /health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.Health'
+            type: array
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Health status of PD servers.
+  /hotspot/regions/read:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/statistics.StoreHotPeersInfos'
+      summary: List the hot read regions.
+      tags:
+      - hotspot
+  /hotspot/regions/write:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/statistics.StoreHotPeersInfos'
+      summary: List the hot write regions.
+      tags:
+      - hotspot
+  /hotspot/stores:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.HotStoreStats'
+      summary: List the hot stores.
+      tags:
+      - hotspot
+  /labels:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/metapb.StoreLabel'
+            type: array
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all label values.
+      tags:
+      - label
+  /labels/stores:
+    get:
+      parameters:
+      - description: name of store label filter
+        in: query
+        name: name
+        required: true
+        type: string
+      - description: value of store label filter
+        in: query
+        name: value
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.StoresInfo'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List stores that have specific label values.
+      tags:
+      - label
+  /leader:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The transfer command is submitted.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get the leader PD server of the cluster.
+      tags:
+      - leader
+  /leader/resign:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The transfer command is submitted.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Transfer leadership to another PD server.
+      tags:
+      - leader
+  /leader/transfer/{nextLeader}:
+    post:
+      parameters:
+      - description: PD server that transfer leader to
+        in: path
+        name: nextLeader
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The transfer command is submitted.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Transfer leadership to the specific PD server.
+      tags:
+      - leader
+  /members:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/pdpb.GetMembersResponse'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all PD servers in the cluster.
+      tags:
+      - member
+  /members/id/{id}:
+    delete:
+      parameters:
+      - description: PD server Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The PD server is successfully removed.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Remove a PD server from the cluster.
+      tags:
+      - member
+  /members/name/{name}:
+    delete:
+      parameters:
+      - description: PD server name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The PD server is successfully removed.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "404":
+          description: The member does not exist.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Remove a PD server from the cluster.
+      tags:
+      - member
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: PD server name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: json params
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The leader priority is updated.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "404":
+          description: The member does not exist.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Set leader priority of a PD member.
+      tags:
+      - member
+  /operators:
+    get:
+      parameters:
+      - description: Specify the operator kind.
+        enum:
+        - admin
+        - leader
+        - region
+        in: query
+        name: kind
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/operator.Operator'
+            type: array
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List pending operators.
+      tags:
+      - operator
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The operator is created.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Create an operator.
+      tags:
+      - operator
+  /operators/{region_id}:
+    delete:
+      parameters:
+      - description: A Region's Id
+        in: path
+        name: region_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The pending operator is cancelled.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Cancel a Region's pending operator.
+      tags:
+      - operator
+    get:
+      parameters:
+      - description: A Region's Id
+        in: path
+        name: region_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/schedule.OperatorWithStatus'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get a Region's pending operator.
+      tags:
+      - operator
+  /plugin:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Unload plugin success.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Unload plugin.
+      tags:
+      - plugin
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Load plugin success.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Load plugin.
+      tags:
+      - plugin
+  /region/id/{id}:
+    get:
+      parameters:
+      - description: Region Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionInfo'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Search for a region by region ID.
+      tags:
+      - region
+  /region/key/{key}:
+    get:
+      parameters:
+      - description: Region key
+        in: path
+        name: key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionInfo'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Search for a region by a key.
+      tags:
+      - region
+  /regions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all regions in the cluster.
+      tags:
+      - region
+  /regions/check/down-peer:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all regions that has down peer.
+      tags:
+      - region
+  /regions/check/empty-region:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all empty regions.
+      tags:
+      - region
+  /regions/check/extra-peer:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all regions that has extra peer.
+      tags:
+      - region
+  /regions/check/hist-keys:
+    get:
+      parameters:
+      - description: Key bound of region histogram
+        in: query
+        name: bound
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.histItem'
+            type: array
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get keys of histogram.
+      tags:
+      - region
+  /regions/check/hist-size:
+    get:
+      parameters:
+      - description: Size bound of region histogram
+        in: query
+        name: bound
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.histItem'
+            type: array
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get size of histogram.
+      tags:
+      - region
+  /regions/check/miss-peer:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all regions that miss peer.
+      tags:
+      - region
+  /regions/check/offline-peer:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all regions that has offline peer.
+      tags:
+      - region
+  /regions/check/pending-peer:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all regions that has pending peer.
+      tags:
+      - region
+  /regions/confver:
+    get:
+      parameters:
+      - default: 16
+        description: Limit count
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List regions with the largest conf version.
+      tags:
+      - region
+  /regions/count:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+      summary: Get count of regions.
+      tags:
+      - region
+  /regions/key:
+    get:
+      parameters:
+      - description: Region key
+        in: query
+        name: key
+        required: true
+        type: string
+      - default: 16
+        description: Limit count
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List regions start from a key.
+      tags:
+      - region
+  /regions/readflow:
+    get:
+      parameters:
+      - default: 16
+        description: Limit count
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List regions with the highest read flow.
+      tags:
+      - region
+  /regions/sibling/{id}:
+    get:
+      parameters:
+      - description: Region Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "404":
+          description: The region does not exist.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List sibling regions of a specific region.
+      tags:
+      - region
+  /regions/size:
+    get:
+      parameters:
+      - default: 16
+        description: Limit count
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List regions with the largest size.
+      tags:
+      - region
+  /regions/store/{id}:
+    get:
+      parameters:
+      - description: Store Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List all regions of a specific store.
+      tags:
+      - region
+  /regions/version:
+    get:
+      parameters:
+      - default: 16
+        description: Limit count
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List regions with the largest version.
+      tags:
+      - region
+  /regions/writeflow:
+    get:
+      parameters:
+      - default: 16
+        description: Limit count
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.RegionsInfo'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List regions with the highest write flow.
+      tags:
+      - region
+  /schedulers:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: List running schedulers.
+      tags:
+      - scheduler
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The scheduler is created.
+          schema:
+            type: string
+        "400":
+          description: Bad format request.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Create a scheduler.
+      tags:
+      - scheduler
+  /schedulers/{name}:
+    delete:
+      parameters:
+      - description: The name of the scheduler.
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The scheduler is removed.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Delete a scheduler.
+      tags:
+      - scheduler
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: The name of the scheduler.
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: json params
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pause or resume the scheduler success.
+          schema:
+            type: string
+        "400":
+          description: Bad format request.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Pause or resume a scheduler.
+      tags:
+      - scheduler
+  /stats/region:
+    get:
+      parameters:
+      - description: Start key
+        in: query
+        name: start_key
+        required: true
+        type: string
+      - description: End key
+        in: query
+        name: end_key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/statistics.RegionStats'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get region statistics of a specified range.
+      tags:
+      - stats
+  /status:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.status'
+      summary: Get the build info of PD server.
+  /store/{id}:
+    delete:
+      parameters:
+      - description: Store Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The store is set as Offline or Tombstone.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "404":
+          description: The store does not exist.
+          schema:
+            type: string
+        "410":
+          description: The store has already been removed.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Take down a store from the cluster.
+      tags:
+      - store
+    get:
+      parameters:
+      - description: Store Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.StoreInfo'
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get a store's information.
+      tags:
+      - store
+  /store/{id}/label:
+    post:
+      parameters:
+      - description: Store Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Labels in json format
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The store's label is updated.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Set the store's label.
+      tags:
+      - store
+  /store/{id}/limit:
+    post:
+      parameters:
+      - description: Store Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: json params
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The store's label is updated.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Set the store's limit.
+      tags:
+      - store
+  /store/{id}/state:
+    post:
+      parameters:
+      - description: Store Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: state
+        enum:
+        - Up
+        - Offline
+        - Tombstone
+        in: query
+        name: state
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The store's state is updated.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "404":
+          description: The store does not exist.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Set the store's state.
+      tags:
+      - store
+  /store/{id}/weight:
+    post:
+      parameters:
+      - description: Store Id
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: json params
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The store's label is updated.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Set the store's leader/region weight.
+      tags:
+      - store
+  /stores:
+    get:
+      parameters:
+      - description: Specify accepted store states.
+        in: query
+        name: state
+        required: true
+        type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.StoreInfo'
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get stores in the cluster.
+      tags:
+      - store
+  /stores/limit:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/string'
+      summary: Get limit of all stores in the cluster.
+      tags:
+      - store
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: json params
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Set store limit success.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Set limit of all stores in the cluster.
+      tags:
+      - store
+  /stores/limit/scene:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Set store limit scene success.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get limit scene in the cluster.
+      tags:
+      - store
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Store limit scene
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/schedule.StoreLimitScene'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Set store limit scene success.
+          schema:
+            type: string
+        "400":
+          description: The input is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Set limit scene in the cluster.
+      tags:
+      - store
+  /stores/remove-tombstone:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Remove tomestone success.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Remove tombstone records in the cluster.
+      tags:
+      - store
+  /trend:
+    get:
+      parameters:
+      - description: From Unix timestamp
+        in: query
+        name: from
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.Trend'
+        "400":
+          description: The request is invalid.
+          schema:
+            type: string
+        "500":
+          description: PD server failed to proceed the request.
+          schema:
+            type: string
+      summary: Get the growth and changes of data in the most recent period of time.
+      tags:
+      - trend
+  /version:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.version'
+      summary: Get the version of PD server.
+swagger: "2.0"

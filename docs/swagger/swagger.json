@@ -1,0 +1,4614 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "This is placement driver.",
+        "title": "Placement Driver Core API",
+        "contact": {
+            "name": "Placement Driver Support",
+            "url": "https://github.com/pingcap/pd/issues",
+            "email": "info@pingcap.com"
+        },
+        "license": {
+            "name": "Apache 2.0",
+            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+        },
+        "version": "1.0"
+    },
+    "basePath": "/pd/api/v1",
+    "paths": {
+        "/admin/cache/region/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Drop a specific region from cache.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Region Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The region is removed from server cache.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/log": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Set log level.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "level",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The log level is updated.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/reset-ts": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Reset the ts.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Reset ts success.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "403": {
+                        "description": "Reset ts is forbidden.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/cluster": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cluster"
+                ],
+                "summary": "Get cluster info.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/metapb.Cluster"
+                        }
+                    }
+                }
+            }
+        },
+        "/cluster/status": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cluster"
+                ],
+                "summary": "Get cluster status.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/cluster.Status"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Get full config.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/config.Config"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Update a config item.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The config is updated.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/cluster-version": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Get cluster version.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/semver.Version"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Update cluster version.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/default": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Get default config.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/config.Config"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/label-property": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Get label property config.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/config.LabelPropertyConfig"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Update label property config item.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The config is updated.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/replicate": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Get replication config.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/config.ReplicationConfig"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Update a replication config item.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The config is updated.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/rule": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rule"
+                ],
+                "summary": "Update rule of cluster.",
+                "parameters": [
+                    {
+                        "description": "Parameters of rule",
+                        "name": "rule",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/placement.Rule"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Update rule success.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "412": {
+                        "description": "Placement rules feature is disabled.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/rule/{group}/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rule"
+                ],
+                "summary": "Get rule of cluster by group and id.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "The name of group",
+                        "name": "group",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Rule Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/placement.Rule"
+                        }
+                    },
+                    "412": {
+                        "description": "Placement rules feature is disabled.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rule"
+                ],
+                "summary": "Delete rule of cluster.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "The name of group",
+                        "name": "group",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Rule Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Delete rule success.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "412": {
+                        "description": "Placement rules feature is disabled.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/rules": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rule"
+                ],
+                "summary": "List all rules of cluster.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/placement.Rule"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Placement rules feature is disabled.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/rules/group/{group}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rule"
+                ],
+                "summary": "List all rules of cluster by group.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "The name of group",
+                        "name": "group",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/placement.Rule"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Placement rules feature is disabled.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/rules/key/{key}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rule"
+                ],
+                "summary": "List all rules of cluster by key.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "The name of key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/placement.Rule"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Placement rules feature is disabled.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/rules/region/{region}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rule"
+                ],
+                "summary": "List all rules of cluster by region.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "The name of region",
+                        "name": "region",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/placement.Rule"
+                            }
+                        }
+                    },
+                    "412": {
+                        "description": "Placement rules feature is disabled.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/config/schedule": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Get schedule config.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/config.ScheduleConfig"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Update a schedule config item.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The config is updated.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/diagnose": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "diagnose"
+                ],
+                "summary": "Diagnostic information of the cluster.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.Recommendation"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Health status of PD servers.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.Health"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/hotspot/regions/read": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "hotspot"
+                ],
+                "summary": "List the hot read regions.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/statistics.StoreHotPeersInfos"
+                        }
+                    }
+                }
+            }
+        },
+        "/hotspot/regions/write": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "hotspot"
+                ],
+                "summary": "List the hot write regions.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/statistics.StoreHotPeersInfos"
+                        }
+                    }
+                }
+            }
+        },
+        "/hotspot/stores": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "hotspot"
+                ],
+                "summary": "List the hot stores.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.HotStoreStats"
+                        }
+                    }
+                }
+            }
+        },
+        "/labels": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "label"
+                ],
+                "summary": "List all label values.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/metapb.StoreLabel"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/labels/stores": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "label"
+                ],
+                "summary": "List stores that have specific label values.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "name of store label filter",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "value of store label filter",
+                        "name": "value",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.StoresInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/leader": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "leader"
+                ],
+                "summary": "Get the leader PD server of the cluster.",
+                "responses": {
+                    "200": {
+                        "description": "The transfer command is submitted.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/leader/resign": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "leader"
+                ],
+                "summary": "Transfer leadership to another PD server.",
+                "responses": {
+                    "200": {
+                        "description": "The transfer command is submitted.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/leader/transfer/{nextLeader}": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "leader"
+                ],
+                "summary": "Transfer leadership to the specific PD server.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PD server that transfer leader to",
+                        "name": "nextLeader",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The transfer command is submitted.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/members": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "member"
+                ],
+                "summary": "List all PD servers in the cluster.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/pdpb.GetMembersResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/id/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "member"
+                ],
+                "summary": "Remove a PD server from the cluster.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "PD server Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The PD server is successfully removed.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/members/name/{name}": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "member"
+                ],
+                "summary": "Set leader priority of a PD member.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PD server name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The leader priority is updated.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "The member does not exist.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "member"
+                ],
+                "summary": "Remove a PD server from the cluster.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "PD server name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The PD server is successfully removed.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "The member does not exist.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/operators": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "operator"
+                ],
+                "summary": "List pending operators.",
+                "parameters": [
+                    {
+                        "enum": [
+                            "admin",
+                            "leader",
+                            "region"
+                        ],
+                        "type": "string",
+                        "description": "Specify the operator kind.",
+                        "name": "kind",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/operator.Operator"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "operator"
+                ],
+                "summary": "Create an operator.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The operator is created.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/operators/{region_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "operator"
+                ],
+                "summary": "Get a Region's pending operator.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "A Region's Id",
+                        "name": "region_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/schedule.OperatorWithStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "operator"
+                ],
+                "summary": "Cancel a Region's pending operator.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "A Region's Id",
+                        "name": "region_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The pending operator is cancelled.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugin": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "plugin"
+                ],
+                "summary": "Load plugin.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Load plugin success.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "plugin"
+                ],
+                "summary": "Unload plugin.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Unload plugin success.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/region/id/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "Search for a region by region ID.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Region Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/region/key/{key}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "Search for a region by a key.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Region key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List all regions in the cluster.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/check/down-peer": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List all regions that has down peer.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/check/empty-region": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List all empty regions.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/check/extra-peer": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List all regions that has extra peer.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/check/hist-keys": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "Get keys of histogram.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Key bound of region histogram",
+                        "name": "bound",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.histItem"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/check/hist-size": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "Get size of histogram.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Size bound of region histogram",
+                        "name": "bound",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/api.histItem"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/check/miss-peer": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List all regions that miss peer.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/check/offline-peer": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List all regions that has offline peer.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/check/pending-peer": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List all regions that has pending peer.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/confver": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List regions with the largest conf version.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 16,
+                        "description": "Limit count",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/count": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "Get count of regions.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/key": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List regions start from a key.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Region key",
+                        "name": "key",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 16,
+                        "description": "Limit count",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/readflow": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List regions with the highest read flow.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 16,
+                        "description": "Limit count",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/sibling/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List sibling regions of a specific region.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Region Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "The region does not exist.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/size": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List regions with the largest size.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 16,
+                        "description": "Limit count",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/store/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List all regions of a specific store.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Store Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/version": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List regions with the largest version.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 16,
+                        "description": "Limit count",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/regions/writeflow": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "region"
+                ],
+                "summary": "List regions with the highest write flow.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 16,
+                        "description": "Limit count",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.RegionsInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/schedulers": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scheduler"
+                ],
+                "summary": "List running schedulers.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scheduler"
+                ],
+                "summary": "Create a scheduler.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The scheduler is created.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad format request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/schedulers/{name}": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scheduler"
+                ],
+                "summary": "Pause or resume a scheduler.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "The name of the scheduler.",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Pause or resume the scheduler success.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad format request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scheduler"
+                ],
+                "summary": "Delete a scheduler.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "The name of the scheduler.",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The scheduler is removed.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/stats/region": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "stats"
+                ],
+                "summary": "Get region statistics of a specified range.",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Start key",
+                        "name": "start_key",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "End key",
+                        "name": "end_key",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/statistics.RegionStats"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/status": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Get the build info of PD server.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.status"
+                        }
+                    }
+                }
+            }
+        },
+        "/store/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Get a store's information.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Store Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.StoreInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Take down a store from the cluster.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Store Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The store is set as Offline or Tombstone.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "The store does not exist.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "410": {
+                        "description": "The store has already been removed.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/store/{id}/label": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Set the store's label.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Store Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Labels in json format",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The store's label is updated.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/store/{id}/limit": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Set the store's limit.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Store Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The store's label is updated.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/store/{id}/state": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Set the store's state.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Store Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "Up",
+                            "Offline",
+                            "Tombstone"
+                        ],
+                        "type": "string",
+                        "description": "state",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The store's state is updated.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "The store does not exist.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/store/{id}/weight": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Set the store's leader/region weight.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Store Id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The store's label is updated.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/stores": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Get stores in the cluster.",
+                "parameters": [
+                    {
+                        "type": "array",
+                        "description": "Specify accepted store states.",
+                        "name": "state",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.StoreInfo"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/stores/limit": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Get limit of all stores in the cluster.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/string"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Set limit of all stores in the cluster.",
+                "parameters": [
+                    {
+                        "description": "json params",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Set store limit success.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/stores/limit/scene": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Get limit scene in the cluster.",
+                "responses": {
+                    "200": {
+                        "description": "Set store limit scene success.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Set limit scene in the cluster.",
+                "parameters": [
+                    {
+                        "description": "Store limit scene",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/schedule.StoreLimitScene"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Set store limit scene success.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "The input is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/stores/remove-tombstone": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "store"
+                ],
+                "summary": "Remove tombstone records in the cluster.",
+                "responses": {
+                    "200": {
+                        "description": "Remove tomestone success.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/trend": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "trend"
+                ],
+                "summary": "Get the growth and changes of data in the most recent period of time.",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "From Unix timestamp",
+                        "name": "from",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.Trend"
+                        }
+                    },
+                    "400": {
+                        "description": "The request is invalid.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "PD server failed to proceed the request.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/version": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "Get the version of PD server.",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.version"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "api.Health": {
+            "type": "object",
+            "properties": {
+                "client_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "health": {
+                    "type": "boolean"
+                },
+                "member_id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.HotStoreStats": {
+            "type": "object",
+            "properties": {
+                "bytes-read-rate": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                },
+                "bytes-write-rate": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                },
+                "keys-read-rate": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                },
+                "keys-write-rate": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                }
+            }
+        },
+        "api.MetaStore": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "description": "Address to handle client requests (kv, cop, etc.)",
+                    "type": "string"
+                },
+                "binary_path": {
+                    "type": "string"
+                },
+                "git_hash": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "labels": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/metapb.StoreLabel"
+                    }
+                },
+                "last_heartbeat": {
+                    "description": "The last heartbeat timestamp of the store.",
+                    "type": "integer"
+                },
+                "peer_address": {
+                    "description": "Address to handle peer requests (raft messages from other store).\nEmpty means same as address.",
+                    "type": "string"
+                },
+                "start_timestamp": {
+                    "description": "The start timestamp of the current store",
+                    "type": "integer"
+                },
+                "state": {
+                    "type": "integer"
+                },
+                "state_name": {
+                    "type": "string"
+                },
+                "status_address": {
+                    "description": "Status address provides the HTTP service for external components",
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.Recommendation": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "instruction": {
+                    "type": "string"
+                },
+                "level": {
+                    "type": "string"
+                },
+                "module": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.RegionInfo": {
+            "type": "object",
+            "properties": {
+                "approximate_keys": {
+                    "type": "integer"
+                },
+                "approximate_size": {
+                    "type": "integer"
+                },
+                "down_peers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/pdpb.PeerStats"
+                    }
+                },
+                "end_key": {
+                    "type": "string"
+                },
+                "epoch": {
+                    "type": "object",
+                    "$ref": "#/definitions/metapb.RegionEpoch"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "leader": {
+                    "type": "object",
+                    "$ref": "#/definitions/metapb.Peer"
+                },
+                "peers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/metapb.Peer"
+                    }
+                },
+                "pending_peers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/metapb.Peer"
+                    }
+                },
+                "read_bytes": {
+                    "type": "integer"
+                },
+                "read_keys": {
+                    "type": "integer"
+                },
+                "start_key": {
+                    "type": "string"
+                },
+                "written_bytes": {
+                    "type": "integer"
+                },
+                "written_keys": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.RegionsInfo": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "regions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.RegionInfo"
+                    }
+                }
+            }
+        },
+        "api.StoreInfo": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "object",
+                    "$ref": "#/definitions/api.StoreStatus"
+                },
+                "store": {
+                    "type": "object",
+                    "$ref": "#/definitions/api.MetaStore"
+                }
+            }
+        },
+        "api.StoreStatus": {
+            "type": "object",
+            "properties": {
+                "applying_snap_count": {
+                    "type": "integer"
+                },
+                "available": {
+                    "type": "integer"
+                },
+                "capacity": {
+                    "type": "integer"
+                },
+                "is_busy": {
+                    "type": "boolean"
+                },
+                "last_heartbeat_ts": {
+                    "type": "string"
+                },
+                "leader_count": {
+                    "type": "integer"
+                },
+                "leader_score": {
+                    "type": "number"
+                },
+                "leader_size": {
+                    "type": "integer"
+                },
+                "leader_weight": {
+                    "type": "number"
+                },
+                "receiving_snap_count": {
+                    "type": "integer"
+                },
+                "region_count": {
+                    "type": "integer"
+                },
+                "region_score": {
+                    "type": "number"
+                },
+                "region_size": {
+                    "type": "integer"
+                },
+                "region_weight": {
+                    "type": "number"
+                },
+                "sending_snap_count": {
+                    "type": "integer"
+                },
+                "start_ts": {
+                    "type": "string"
+                },
+                "uptime": {
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                },
+                "used_size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.StoresInfo": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "stores": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.StoreInfo"
+                    }
+                }
+            }
+        },
+        "api.Trend": {
+            "type": "object",
+            "properties": {
+                "history": {
+                    "type": "object",
+                    "$ref": "#/definitions/api.trendHistory"
+                },
+                "stores": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.trendStore"
+                    }
+                }
+            }
+        },
+        "api.histItem": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "end": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.status": {
+            "type": "object",
+            "properties": {
+                "build_ts": {
+                    "type": "string"
+                },
+                "git_hash": {
+                    "type": "string"
+                },
+                "start_timestamp": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.trendHistory": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "integer"
+                },
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.trendHistoryEntry"
+                    }
+                },
+                "start": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.trendHistoryEntry": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "from": {
+                    "type": "integer"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.trendStore": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string"
+                },
+                "available": {
+                    "type": "integer"
+                },
+                "capacity": {
+                    "type": "integer"
+                },
+                "hot_read_flow": {
+                    "type": "number"
+                },
+                "hot_read_region_flows": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "hot_write_flow": {
+                    "type": "number"
+                },
+                "hot_write_region_flows": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "last_heartbeat_ts": {
+                    "type": "string"
+                },
+                "leader_count": {
+                    "type": "integer"
+                },
+                "region_count": {
+                    "type": "integer"
+                },
+                "start_ts": {
+                    "type": "string"
+                },
+                "state_name": {
+                    "type": "string"
+                },
+                "uptime": {
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                }
+            }
+        },
+        "api.version": {
+            "type": "object",
+            "properties": {
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "atomic.Int32": {
+            "type": "object",
+            "properties": {
+                "v": {
+                    "type": "integer"
+                }
+            }
+        },
+        "cluster.Status": {
+            "type": "object",
+            "properties": {
+                "is_initialized": {
+                    "type": "boolean"
+                },
+                "raft_bootstrap_time": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.Config": {
+            "type": "object",
+            "properties": {
+                "advertise-client-urls": {
+                    "type": "string"
+                },
+                "advertise-peer-urls": {
+                    "type": "string"
+                },
+                "auto-compaction-mode": {
+                    "description": "AutoCompactionMode is either 'periodic' or 'revision'. The default value is 'periodic'.",
+                    "type": "string"
+                },
+                "auto-compaction-retention-v2": {
+                    "description": "AutoCompactionRetention is either duration string with time unit\n(e.g. '5m' for 5-minute), or revision unit (e.g. '5000').\nIf no time unit is provided and compaction mode is 'periodic',\nthe unit defaults to hour. For example, '5' translates into 5-hour.\nThe default retention is 1 hour.\nBefore etcd v3.3.x, the type of retention is int. We add 'v2' suffix to make it backward compatible.",
+                    "type": "string"
+                },
+                "client-urls": {
+                    "type": "string"
+                },
+                "cluster-version": {
+                    "type": "object",
+                    "$ref": "#/definitions/semver.Version"
+                },
+                "configFile": {
+                    "type": "string"
+                },
+                "dashboard": {
+                    "type": "object",
+                    "$ref": "#/definitions/config.DashboardConfig"
+                },
+                "data-dir": {
+                    "type": "string"
+                },
+                "disableStrictReconfigCheck": {
+                    "type": "boolean"
+                },
+                "electionInterval": {
+                    "description": "ElectionInterval is the interval for etcd Raft election.",
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                },
+                "enable-dynamic-config": {
+                    "type": "boolean"
+                },
+                "enable-grpc-gateway": {
+                    "type": "boolean"
+                },
+                "enableDashboard": {
+                    "type": "boolean"
+                },
+                "flagSet": {
+                    "type": "object",
+                    "$ref": "#/definitions/pflag.FlagSet"
+                },
+                "force-new-cluster": {
+                    "type": "boolean"
+                },
+                "heartbeatStreamBindInterval": {
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                },
+                "initial-cluster": {
+                    "type": "string"
+                },
+                "initial-cluster-state": {
+                    "type": "string"
+                },
+                "join": {
+                    "description": "Join to an existing pd cluster, a string of endpoints.",
+                    "type": "string"
+                },
+                "label-property": {
+                    "type": "object",
+                    "$ref": "#/definitions/config.LabelPropertyConfig"
+                },
+                "leaderPriorityCheckInterval": {
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                },
+                "lease": {
+                    "description": "LeaderLease time, if leader doesn't update its TTL\nin etcd after lease time, etcd will expire the leader key\nand other servers can campaign the leader again.\nEtcd only supports seconds TTL, so here is second too.",
+                    "type": "integer"
+                },
+                "log": {
+                    "description": "Log related config.",
+                    "type": "object",
+                    "$ref": "#/definitions/log.Config"
+                },
+                "log-file": {
+                    "description": "Backward compatibility.",
+                    "type": "string"
+                },
+                "log-level": {
+                    "type": "string"
+                },
+                "logProps": {
+                    "type": "object",
+                    "$ref": "#/definitions/log.ZapProperties"
+                },
+                "logger": {
+                    "type": "object",
+                    "$ref": "#/definitions/zap.Logger"
+                },
+                "metric": {
+                    "type": "object",
+                    "$ref": "#/definitions/metricutil.MetricConfig"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nextRetryDelay": {
+                    "description": "Only test can change them.",
+                    "type": "string"
+                },
+                "pd-server": {
+                    "type": "object",
+                    "$ref": "#/definitions/config.PDServerConfig"
+                },
+                "peer-urls": {
+                    "type": "string"
+                },
+                "preVote": {
+                    "description": "Prevote is true to enable Raft Pre-Vote.\nIf enabled, Raft runs an additional election phase\nto check whether it would get enough votes to win\nan election, thus minimizing disruptions.",
+                    "type": "boolean"
+                },
+                "quota-backend-bytes": {
+                    "description": "QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.\nthe default size is 2GB, the maximum is 8GB.",
+                    "type": "integer"
+                },
+                "replication": {
+                    "type": "object",
+                    "$ref": "#/definitions/config.ReplicationConfig"
+                },
+                "schedule": {
+                    "type": "object",
+                    "$ref": "#/definitions/config.ScheduleConfig"
+                },
+                "security": {
+                    "type": "object",
+                    "$ref": "#/definitions/grpcutil.SecurityConfig"
+                },
+                "tickInterval": {
+                    "description": "TickInterval is the interval for etcd Raft tick.",
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                },
+                "tso-save-interval": {
+                    "description": "TsoSaveInterval is the interval to save timestamp.",
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                },
+                "warningMsgs": {
+                    "description": "For all warnings during parsing.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "config.DashboardConfig": {
+            "type": "object",
+            "properties": {
+                "tidb_cacert_path": {
+                    "type": "string"
+                },
+                "tidb_cert_path": {
+                    "type": "string"
+                },
+                "tidb_key_path": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.LabelPropertyConfig": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "items": {
+                    "$ref": "#/definitions/config.StoreLabel"
+                }
+            }
+        },
+        "config.PDServerConfig": {
+            "type": "object",
+            "properties": {
+                "key-type": {
+                    "description": "KeyType is option to specify the type of keys.\nThere are some types supported: [\"table\", \"raw\", \"txn\"], default: \"table\"",
+                    "type": "string"
+                },
+                "max-reset-ts-gap": {
+                    "description": "MaxResetTSGap is the max gap to reset the tso.",
+                    "type": "string"
+                },
+                "metric-storage": {
+                    "description": "MetricStorage is the cluster metric storage.\nCurrently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.",
+                    "type": "string"
+                },
+                "runtime-services": {
+                    "description": "RuntimeServices is the running the running extension services.",
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.StringSlice"
+                },
+                "use-region-storage": {
+                    "description": "UseRegionStorage enables the independent region storage.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "config.ReplicationConfig": {
+            "type": "object",
+            "properties": {
+                "enable-placement-rules": {
+                    "description": "When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not uesd any more.",
+                    "type": "boolean"
+                },
+                "location-labels": {
+                    "description": "The label keys specified the location of a store.\nThe placement priorities is implied by the order of label keys.\nFor example, [\"zone\", \"rack\"] means that we should place replicas to\ndifferent zones first, then to different racks if we don't have enough zones.",
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.StringSlice"
+                },
+                "max-replicas": {
+                    "description": "MaxReplicas is the number of replicas for each region.",
+                    "type": "integer"
+                },
+                "strictly-match-label": {
+                    "description": "StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "config.ScheduleConfig": {
+            "type": "object",
+            "properties": {
+                "disable-location-replacement": {
+                    "description": "DisableLocationReplacement is the option to prevent replica checker from\nmoving replica to a better location.\nWARN: DisableLocationReplacement is deprecated.",
+                    "type": "boolean"
+                },
+                "disable-make-up-replica": {
+                    "description": "DisableMakeUpReplica is the option to prevent replica checker from making up\nreplicas when replica count is less than expected.\nWARN: DisableMakeUpReplica is deprecated.",
+                    "type": "boolean"
+                },
+                "disable-raft-learner": {
+                    "description": "WARN: DisableLearner is deprecated.\nDisableLearner is the option to disable using AddLearnerNode instead of AddNode.",
+                    "type": "boolean"
+                },
+                "disable-remove-down-replica": {
+                    "description": "DisableRemoveDownReplica is the option to prevent replica checker from\nremoving down replicas.\nWARN: DisableRemoveDownReplica is deprecated.",
+                    "type": "boolean"
+                },
+                "disable-remove-extra-replica": {
+                    "description": "DisableRemoveExtraReplica is the option to prevent replica checker from\nremoving extra replicas.\nWARN: DisableRemoveExtraReplica is deprecated.",
+                    "type": "boolean"
+                },
+                "disable-replace-offline-replica": {
+                    "description": "DisableReplaceOfflineReplica is the option to prevent replica checker from\nreplacing offline replicas.\nWARN: DisableReplaceOfflineReplica is deprecated.",
+                    "type": "boolean"
+                },
+                "enable-cross-table-merge": {
+                    "description": "EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.\nThis option only works when key type is \"table\".",
+                    "type": "boolean"
+                },
+                "enable-debug-metrics": {
+                    "description": "EnableDebugMetrics is the option to enable debug metrics.",
+                    "type": "boolean"
+                },
+                "enable-location-replacement": {
+                    "description": "EnableLocationReplacement is the option to enable replica checker to move replica to a better location.",
+                    "type": "boolean"
+                },
+                "enable-make-up-replica": {
+                    "description": "EnableMakeUpReplica is the option to enable replica checker to make up replica.",
+                    "type": "boolean"
+                },
+                "enable-one-way-merge": {
+                    "description": "EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.",
+                    "type": "boolean"
+                },
+                "enable-remove-down-replica": {
+                    "description": "EnableRemoveDownReplica is the option to enable replica checker to remove down replica.",
+                    "type": "boolean"
+                },
+                "enable-remove-extra-replica": {
+                    "description": "EnableRemoveExtraReplica is the option to enable replica checker to remove extra replica.",
+                    "type": "boolean"
+                },
+                "enable-replace-offline-replica": {
+                    "description": "EnableReplaceOfflineReplica is the option to enable replica checker to replace offline replica.",
+                    "type": "boolean"
+                },
+                "high-space-ratio": {
+                    "description": "HighSpaceRatio is the highest usage ratio of store which regraded as high space.\nHigh space means there is a lot of spare capacity, and store region score varies directly with used size.",
+                    "type": "number"
+                },
+                "hot-region-cache-hits-threshold": {
+                    "description": "HotRegionCacheHitThreshold is the cache hits threshold of the hot region.\nIf the number of times a region hits the hot cache is greater than this\nthreshold, it is considered a hot region.",
+                    "type": "integer"
+                },
+                "hot-region-schedule-limit": {
+                    "description": "HotRegionScheduleLimit is the max coexist hot region schedules.",
+                    "type": "integer"
+                },
+                "leader-schedule-limit": {
+                    "description": "LeaderScheduleLimit is the max coexist leader schedules.",
+                    "type": "integer"
+                },
+                "leader-schedule-policy": {
+                    "description": "LeaderSchedulePolicy is the option to balance leader, there are some policies supported: [\"count\", \"size\"], default: \"count\"",
+                    "type": "string"
+                },
+                "low-space-ratio": {
+                    "description": "high space stage         transition stage           low space stage\n  |--------------------|-----------------------------|-------------------------|\n  ^                    ^                             ^                         ^\n  0       HighSpaceRatio * capacity       LowSpaceRatio * capacity          capacity\n\nLowSpaceRatio is the lowest usage ratio of store which regraded as low space.\nWhen in low space, store region score increases to very large and varies inversely with available size.",
+                    "type": "number"
+                },
+                "max-merge-region-keys": {
+                    "type": "integer"
+                },
+                "max-merge-region-size": {
+                    "description": "If both the size of region is smaller than MaxMergeRegionSize\nand the number of rows in region is smaller than MaxMergeRegionKeys,\nit will try to merge with adjacent regions.",
+                    "type": "integer"
+                },
+                "max-pending-peer-count": {
+                    "type": "integer"
+                },
+                "max-snapshot-count": {
+                    "description": "If the snapshot count of one store is greater than this value,\nit will never be used as a source or target store.",
+                    "type": "integer"
+                },
+                "max-store-down-time": {
+                    "description": "MaxStoreDownTime is the max duration after which\na store will be considered to be down if it hasn't reported heartbeats.",
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                },
+                "merge-schedule-limit": {
+                    "description": "MergeScheduleLimit is the max coexist merge schedules.",
+                    "type": "integer"
+                },
+                "patrol-region-interval": {
+                    "description": "PatrolRegionInterval is the interval for scanning region during patrol.",
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                },
+                "region-schedule-limit": {
+                    "description": "RegionScheduleLimit is the max coexist region schedules.",
+                    "type": "integer"
+                },
+                "replica-schedule-limit": {
+                    "description": "ReplicaScheduleLimit is the max coexist replica schedules.",
+                    "type": "integer"
+                },
+                "scheduler-max-waiting-operator": {
+                    "description": "SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.",
+                    "type": "integer"
+                },
+                "schedulers-payload": {
+                    "description": "Only used to display",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "schedulers-v2": {
+                    "description": "Schedulers support for loading customized schedulers",
+                    "type": "object",
+                    "$ref": "#/definitions/config.SchedulerConfigs"
+                },
+                "split-merge-interval": {
+                    "description": "SplitMergeInterval is the minimum interval time to permit merge after split.",
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                },
+                "store-balance-rate": {
+                    "description": "StoreBalanceRate is the maximum of balance rate for each store.",
+                    "type": "number"
+                },
+                "store-limit-mode": {
+                    "description": "StoreLimitMode can be auto or manual, when set to auto,\nPD tries to change the store limit values according to\nthe load state of the cluster dynamically. User can\noverwrite the auto-tuned value by pd-ctl, when the value\nis overwritten, the value is fixed until it is deleted.\nDefault: manual",
+                    "type": "string"
+                },
+                "tolerant-size-ratio": {
+                    "description": "TolerantSizeRatio is the ratio of buffer size for balance scheduler.",
+                    "type": "number"
+                }
+            }
+        },
+        "config.SchedulerConfig": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "args-payload": {
+                    "type": "string"
+                },
+                "disable": {
+                    "type": "boolean"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "config.SchedulerConfigs": {
+            "type": "array",
+            "items": {
+                "$ref": "#/definitions/config.SchedulerConfig"
+            }
+        },
+        "config.StoreLabel": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "grpcutil.SecurityConfig": {
+            "type": "object",
+            "properties": {
+                "cacert-path": {
+                    "description": "CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty",
+                    "type": "string"
+                },
+                "cert-allowed-cn": {
+                    "description": "CertAllowedCN is a CN which must be provided by a client",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "cert-path": {
+                    "description": "CertPath is the path of file that contains X509 certificate in PEM format.",
+                    "type": "string"
+                },
+                "client-cert-auth": {
+                    "type": "boolean"
+                },
+                "key-path": {
+                    "description": "KeyPath is the path of file that contains X509 key in PEM format.",
+                    "type": "string"
+                }
+            }
+        },
+        "log.Config": {
+            "type": "object",
+            "properties": {
+                "development": {
+                    "description": "Development puts the logger in development mode, which changes the\nbehavior of DPanicLevel and takes stacktraces more liberally.",
+                    "type": "boolean"
+                },
+                "disable-caller": {
+                    "description": "DisableCaller stops annotating logs with the calling function's file\nname and line number. By default, all logs are annotated.",
+                    "type": "boolean"
+                },
+                "disable-error-verbose": {
+                    "description": "DisableErrorVerbose stops annotating logs with the full verbose error\nmessage.",
+                    "type": "boolean"
+                },
+                "disable-stacktrace": {
+                    "description": "DisableStacktrace completely disables automatic stacktrace capturing. By\ndefault, stacktraces are captured for WarnLevel and above logs in\ndevelopment and ErrorLevel and above in production.",
+                    "type": "boolean"
+                },
+                "disable-timestamp": {
+                    "description": "Disable automatic timestamps in output.",
+                    "type": "boolean"
+                },
+                "file": {
+                    "description": "File log config.",
+                    "type": "object",
+                    "$ref": "#/definitions/log.FileLogConfig"
+                },
+                "format": {
+                    "description": "Log format. one of json, text, or console.",
+                    "type": "string"
+                },
+                "level": {
+                    "description": "Log level.",
+                    "type": "string"
+                },
+                "sampling": {
+                    "description": "SamplingConfig sets a sampling strategy for the logger. Sampling caps the\nglobal CPU and I/O load that logging puts on your process while attempting\nto preserve a representative subset of your logs.\n\nValues configured here are per-second. See zapcore.NewSampler for details.",
+                    "type": "object",
+                    "$ref": "#/definitions/zap.SamplingConfig"
+                }
+            }
+        },
+        "log.FileLogConfig": {
+            "type": "object",
+            "properties": {
+                "filename": {
+                    "description": "Log filename, leave empty to disable file log.",
+                    "type": "string"
+                },
+                "max-backups": {
+                    "description": "Maximum number of old log files to retain.",
+                    "type": "integer"
+                },
+                "max-days": {
+                    "description": "Max log keep days, default is never deleting.",
+                    "type": "integer"
+                },
+                "max-size": {
+                    "description": "Max size for a single file, in MB.",
+                    "type": "integer"
+                }
+            }
+        },
+        "log.ZapProperties": {
+            "type": "object",
+            "properties": {
+                "core": {
+                    "type": "object",
+                    "$ref": "#/definitions/zapcore.Core"
+                },
+                "level": {
+                    "type": "object",
+                    "$ref": "#/definitions/zap.AtomicLevel"
+                },
+                "syncer": {
+                    "type": "object",
+                    "$ref": "#/definitions/zapcore.WriteSyncer"
+                }
+            }
+        },
+        "metapb.Cluster": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "max_peer_count": {
+                    "description": "max peer count for a region.\npd will do the auto-balance if region peer count mismatches.",
+                    "type": "integer"
+                }
+            }
+        },
+        "metapb.Peer": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "is_learner": {
+                    "type": "boolean"
+                },
+                "store_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "metapb.RegionEpoch": {
+            "type": "object",
+            "properties": {
+                "conf_ver": {
+                    "description": "Conf change version, auto increment when add or remove peer",
+                    "type": "integer"
+                },
+                "version": {
+                    "description": "Region version, auto increment when split or merge",
+                    "type": "integer"
+                }
+            }
+        },
+        "metapb.StoreLabel": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "metricutil.MetricConfig": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "type": "string"
+                },
+                "interval": {
+                    "type": "object",
+                    "$ref": "#/definitions/typeutil.Duration"
+                },
+                "job": {
+                    "type": "string"
+                }
+            }
+        },
+        "operator.OpStatusTracker": {
+            "type": "object",
+            "properties": {
+                "current": {
+                    "description": "Current status",
+                    "type": "integer"
+                },
+                "reachTimes": {
+                    "description": "Time when reach the current status",
+                    "type": "object",
+                    "$ref": "#/definitions/operator.statusTimes"
+                },
+                "rw": {
+                    "type": "string"
+                }
+            }
+        },
+        "operator.OpStep": {
+            "type": "object"
+        },
+        "operator.Operator": {
+            "type": "object",
+            "properties": {
+                "brief": {
+                    "type": "string"
+                },
+                "counters": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/prometheus.Counter"
+                    }
+                },
+                "currentStep": {
+                    "type": "integer"
+                },
+                "desc": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "integer"
+                },
+                "level": {
+                    "type": "integer"
+                },
+                "regionEpoch": {
+                    "type": "object",
+                    "$ref": "#/definitions/metapb.RegionEpoch"
+                },
+                "regionID": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "object",
+                    "$ref": "#/definitions/operator.OpStatusTracker"
+                },
+                "stepTime": {
+                    "type": "integer"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/operator.OpStep"
+                    }
+                }
+            }
+        },
+        "operator.statusTimes": {
+            "type": "array",
+            "items": {
+                "$ref": "#/definitions/time.Time"
+            }
+        },
+        "pdpb.Error": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "integer"
+                }
+            }
+        },
+        "pdpb.GetMembersResponse": {
+            "type": "object",
+            "properties": {
+                "etcd_leader": {
+                    "type": "object",
+                    "$ref": "#/definitions/pdpb.Member"
+                },
+                "header": {
+                    "type": "object",
+                    "$ref": "#/definitions/pdpb.ResponseHeader"
+                },
+                "leader": {
+                    "type": "object",
+                    "$ref": "#/definitions/pdpb.Member"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/pdpb.Member"
+                    }
+                }
+            }
+        },
+        "pdpb.Member": {
+            "type": "object",
+            "properties": {
+                "binary_version": {
+                    "type": "string"
+                },
+                "client_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "deploy_path": {
+                    "type": "string"
+                },
+                "leader_priority": {
+                    "type": "integer"
+                },
+                "member_id": {
+                    "description": "member_id is the unique id of the PD member.",
+                    "type": "integer"
+                },
+                "name": {
+                    "description": "name is the name of the PD member.",
+                    "type": "string"
+                },
+                "peer_urls": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "pdpb.PeerStats": {
+            "type": "object",
+            "properties": {
+                "down_seconds": {
+                    "type": "integer"
+                },
+                "peer": {
+                    "type": "object",
+                    "$ref": "#/definitions/metapb.Peer"
+                }
+            }
+        },
+        "pdpb.ResponseHeader": {
+            "type": "object",
+            "properties": {
+                "cluster_id": {
+                    "description": "cluster_id is the ID of the cluster which sent the response.",
+                    "type": "integer"
+                },
+                "error": {
+                    "type": "object",
+                    "$ref": "#/definitions/pdpb.Error"
+                }
+            }
+        },
+        "pflag.Flag": {
+            "type": "object",
+            "properties": {
+                "annotations": {
+                    "description": "used by cobra.Command bash autocomple code",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "changed": {
+                    "description": "If the user set the value (or if left to default)",
+                    "type": "boolean"
+                },
+                "defValue": {
+                    "description": "default value (as text); for usage message",
+                    "type": "string"
+                },
+                "deprecated": {
+                    "description": "If this flag is deprecated, this string is the new or now thing to use",
+                    "type": "string"
+                },
+                "hidden": {
+                    "description": "used by cobra.Command to allow flags to be hidden from help/usage text",
+                    "type": "boolean"
+                },
+                "name": {
+                    "description": "name as it appears on command line",
+                    "type": "string"
+                },
+                "noOptDefVal": {
+                    "description": "default value (as text); if the flag is on the command line without any options",
+                    "type": "string"
+                },
+                "shorthand": {
+                    "description": "one-letter abbreviated flag",
+                    "type": "string"
+                },
+                "shorthandDeprecated": {
+                    "description": "If the shorthand of this flag is deprecated, this string is the new or now thing to use",
+                    "type": "string"
+                },
+                "usage": {
+                    "description": "help message",
+                    "type": "string"
+                },
+                "value": {
+                    "description": "value as set",
+                    "type": "object",
+                    "$ref": "#/definitions/pflag.Value"
+                }
+            }
+        },
+        "pflag.FlagSet": {
+            "type": "object",
+            "properties": {
+                "actual": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/pflag.Flag"
+                    }
+                },
+                "addedGoFlagSets": {
+                    "type": "string"
+                },
+                "args": {
+                    "description": "arguments after flags",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "argsLenAtDash": {
+                    "description": "len(args) when a '--' was located when parsing, or -1 if no --",
+                    "type": "integer"
+                },
+                "errorHandling": {
+                    "type": "integer"
+                },
+                "formal": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/pflag.Flag"
+                    }
+                },
+                "interspersed": {
+                    "description": "allow interspersed option/non-option args",
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "orderedActual": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/pflag.Flag"
+                    }
+                },
+                "orderedFormal": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/pflag.Flag"
+                    }
+                },
+                "output": {
+                    "description": "nil means stderr; use out() accessor",
+                    "type": "string"
+                },
+                "parseErrorsWhitelist": {
+                    "description": "ParseErrorsWhitelist is used to configure a whitelist of errors",
+                    "type": "object",
+                    "$ref": "#/definitions/pflag.ParseErrorsWhitelist"
+                },
+                "parsed": {
+                    "type": "boolean"
+                },
+                "shorthands": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/pflag.Flag"
+                    }
+                },
+                "sortFlags": {
+                    "description": "SortFlags is used to indicate, if user wants to have sorted flags in\nhelp/usage messages.",
+                    "type": "boolean"
+                },
+                "sortedActual": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/pflag.Flag"
+                    }
+                },
+                "sortedFormal": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/pflag.Flag"
+                    }
+                }
+            }
+        },
+        "pflag.ParseErrorsWhitelist": {
+            "type": "object",
+            "properties": {
+                "unknownFlags": {
+                    "description": "UnknownFlags will ignore unknown flags errors and continue parsing rest of the flags",
+                    "type": "boolean"
+                }
+            }
+        },
+        "pflag.Value": {
+            "type": "object"
+        },
+        "placement.LabelConstraint": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "op": {
+                    "type": "string"
+                },
+                "values": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "placement.Rule": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "description": "expected count of the peers",
+                    "type": "integer"
+                },
+                "end_key": {
+                    "description": "hex format end key, for marshal/unmarshal",
+                    "type": "string"
+                },
+                "group_id": {
+                    "description": "mark the source that add the rule",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "unique ID within a group",
+                    "type": "string"
+                },
+                "index": {
+                    "description": "rule apply order in a group, rule with less ID is applied first when indexes are equal",
+                    "type": "integer"
+                },
+                "label_constraints": {
+                    "description": "used to select stores to place peers",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/placement.LabelConstraint"
+                    }
+                },
+                "location_labels": {
+                    "description": "used to make peers isolated physically",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "override": {
+                    "description": "when it is true, all rules with less indexes are disabled",
+                    "type": "boolean"
+                },
+                "role": {
+                    "description": "expected role of the peers",
+                    "type": "string"
+                },
+                "start_key": {
+                    "description": "hex format start key, for marshal/unmarshal",
+                    "type": "string"
+                }
+            }
+        },
+        "prometheus.Counter": {
+            "type": "object"
+        },
+        "schedule.OperatorWithStatus": {
+            "type": "object",
+            "properties": {
+                "op": {
+                    "type": "object",
+                    "$ref": "#/definitions/operator.Operator"
+                },
+                "status": {
+                    "type": "integer"
+                }
+            }
+        },
+        "schedule.StoreLimitScene": {
+            "type": "object",
+            "properties": {
+                "high": {
+                    "type": "integer"
+                },
+                "idle": {
+                    "type": "integer"
+                },
+                "low": {
+                    "type": "integer"
+                },
+                "normal": {
+                    "type": "integer"
+                }
+            }
+        },
+        "semver.Version": {
+            "type": "object",
+            "properties": {
+                "major": {
+                    "type": "integer"
+                },
+                "metadata": {
+                    "type": "string"
+                },
+                "minor": {
+                    "type": "integer"
+                },
+                "patch": {
+                    "type": "integer"
+                },
+                "preRelease": {
+                    "type": "string"
+                }
+            }
+        },
+        "statistics.HotPeerStat": {
+            "type": "object",
+            "properties": {
+                "anti_count": {
+                    "description": "AntiCount used to eliminate some noise when remove region in cache",
+                    "type": "integer"
+                },
+                "flow_bytes": {
+                    "type": "number"
+                },
+                "flow_keys": {
+                    "type": "number"
+                },
+                "hot_degree": {
+                    "description": "HotDegree records the hot region update times",
+                    "type": "integer"
+                },
+                "isLeader": {
+                    "type": "boolean"
+                },
+                "isNew": {
+                    "type": "boolean"
+                },
+                "kind": {
+                    "type": "integer"
+                },
+                "last_update_time": {
+                    "description": "LastUpdateTime used to calculate average write",
+                    "type": "string"
+                },
+                "needDelete": {
+                    "type": "boolean"
+                },
+                "region_id": {
+                    "type": "integer"
+                },
+                "rollingByteRate": {
+                    "description": "rolling statistics, recording some recently added records.",
+                    "type": "object",
+                    "$ref": "#/definitions/statistics.MovingAvg"
+                },
+                "rollingKeyRate": {
+                    "type": "object",
+                    "$ref": "#/definitions/statistics.MovingAvg"
+                },
+                "store_id": {
+                    "type": "integer"
+                },
+                "version": {
+                    "description": "Version used to check the region split times",
+                    "type": "integer"
+                }
+            }
+        },
+        "statistics.HotPeersStat": {
+            "type": "object",
+            "properties": {
+                "regions_count": {
+                    "type": "integer"
+                },
+                "statistics": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/statistics.HotPeerStat"
+                    }
+                },
+                "total_flow_bytes": {
+                    "type": "number"
+                }
+            }
+        },
+        "statistics.MovingAvg": {
+            "type": "object"
+        },
+        "statistics.RegionStats": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "empty_count": {
+                    "type": "integer"
+                },
+                "storage_keys": {
+                    "type": "integer"
+                },
+                "storage_size": {
+                    "type": "integer"
+                },
+                "store_leader_count": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "store_leader_keys": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "store_leader_size": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "store_peer_count": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "store_peer_keys": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "store_peer_size": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "statistics.StoreHotPeersInfos": {
+            "type": "object",
+            "properties": {
+                "as_leader": {
+                    "type": "object",
+                    "$ref": "#/definitions/statistics.StoreHotPeersStat"
+                },
+                "as_peer": {
+                    "type": "object",
+                    "$ref": "#/definitions/statistics.StoreHotPeersStat"
+                }
+            }
+        },
+        "statistics.StoreHotPeersStat": {
+            "type": "object",
+            "additionalProperties": {
+                "$ref": "#/definitions/statistics.HotPeersStat"
+            }
+        },
+        "typeutil.Duration": {
+            "type": "object"
+        },
+        "typeutil.StringSlice": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "zap.AtomicLevel": {
+            "type": "object",
+            "properties": {
+                "l": {
+                    "type": "object",
+                    "$ref": "#/definitions/atomic.Int32"
+                }
+            }
+        },
+        "zap.Logger": {
+            "type": "object",
+            "properties": {
+                "addCaller": {
+                    "type": "boolean"
+                },
+                "addStack": {
+                    "type": "object",
+                    "$ref": "#/definitions/zapcore.LevelEnabler"
+                },
+                "callerSkip": {
+                    "type": "integer"
+                },
+                "core": {
+                    "type": "object",
+                    "$ref": "#/definitions/zapcore.Core"
+                },
+                "development": {
+                    "type": "boolean"
+                },
+                "errorOutput": {
+                    "type": "object",
+                    "$ref": "#/definitions/zapcore.WriteSyncer"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "zap.SamplingConfig": {
+            "type": "object",
+            "properties": {
+                "initial": {
+                    "type": "integer"
+                },
+                "thereafter": {
+                    "type": "integer"
+                }
+            }
+        },
+        "zapcore.Core": {
+            "type": "object"
+        },
+        "zapcore.LevelEnabler": {
+            "type": "object"
+        },
+        "zapcore.WriteSyncer": {
+            "type": "object"
+        }
+    }
+}

@@ -13,4 +13,3 @@ default*
 .vscode/
 /.dashboard_asset_cache
 /.tools/bin
-docs/swagger*
