@@ -15,6 +15,8 @@ require (
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
 	github.com/elazarl/go-bindata-assetfs v1.0.0
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32
+	github.com/go-openapi/spec v0.19.7 // indirect
+	github.com/go-openapi/swag v0.19.8 // indirect
 	github.com/go-playground/overalls v0.0.0-20180201144345-22ec1a223b7c
 	github.com/go-playground/universal-translator v0.17.0 // indirect
 	github.com/gogo/protobuf v1.3.1
@@ -30,6 +32,7 @@ require (
 	github.com/juju/ratelimit v1.0.1
 	github.com/kevinburke/go-bindata v3.18.0+incompatible
 	github.com/leodido/go-urn v1.2.0 // indirect
+	github.com/mailru/easyjson v0.7.1 // indirect
 	github.com/mattn/go-shellwords v1.0.3
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.0.0-20151014174947-eeaced052adb
@@ -49,7 +52,7 @@ require (
 	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.1
 	github.com/swaggo/http-swagger v0.0.0-20200103000832-0e9263c4b516
-	github.com/swaggo/swag v1.6.5
+	github.com/swaggo/swag v1.6.6-0.20200323071853-8e21f4cefeea
 	github.com/syndtr/goleveldb v0.0.0-20180815032940-ae2bd5eed72d
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20171017195756-830351dc03c6 // indirect
 	github.com/unrolled/render v0.0.0-20171102162132-65450fb6b2d3
@@ -57,9 +60,8 @@ require (
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.uber.org/goleak v0.10.0
 	go.uber.org/zap v1.13.0
-	golang.org/x/net v0.0.0-20200301022130-244492dfa37a // indirect
-	golang.org/x/sys v0.0.0-20200113162924-86b910548bc1 // indirect
-	golang.org/x/tools v0.0.0-20200301222351-066e0c02454c
+	golang.org/x/net v0.0.0-20200324143707-d3edc9973b7e // indirect
+	golang.org/x/tools v0.0.0-20200325010219-a49f79bcc224
 	google.golang.org/grpc v1.25.1
 	gopkg.in/go-playground/validator.v9 v9.31.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
