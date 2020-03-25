@@ -42,11 +42,10 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 	}
 }
 
-// TODO: swag cannot parse pdpb.GetMembersResponse, use string instead
 // @Tags member
 // @Summary List all PD servers in the cluster.
 // @Produce json
-// @Success 200 {string} string
+// @Success 200 {object} pdpb.GetMembersResponse
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /members [get]
 func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
