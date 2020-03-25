@@ -194,6 +194,12 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
 		return nil
 	}
+	schedulerName := s.GetName()
+	if isTrendDiff(cluster, schedulerName, sourceStoreID) {
+		label := strconv.FormatUint(sourceStoreID, 10)
+		schedulerCounter.WithLabelValues(schedulerName, "trend-source-"+label).Inc()
+		return nil
+	}
 	exclude := make(map[uint64]struct{})
 	excludeFilter := filter.NewExcludedFilter(s.GetName(), nil, exclude)
 	for {
@@ -222,19 +228,19 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		exclude[target.GetID()] = struct{}{} // exclude next round.
 
 		regionID := region.GetID()
-		sourceID := source.GetID()
 		targetID := target.GetID()
-		log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
+		log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceStoreID), zap.Uint64("target-store", targetID))
 
 		opInfluence := s.opController.GetOpInfluence(cluster)
 		kind := core.NewScheduleKind(core.RegionKind, core.BySize)
-		scheduleName := s.GetName()
-		if !shouldBalance(cluster, source, target, region, kind, opInfluence, scheduleName) {
+		if !shouldBalance(cluster, source, target, region, kind, opInfluence, schedulerName) {
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 			continue
 		}
 
-		if isTrendDiff(cluster, scheduleName, sourceID) || isTrendDiff(cluster, scheduleName, targetID) {
+		if isTrendDiff(cluster, schedulerName, targetID) {
+			label := strconv.FormatUint(targetID, 10)
+			schedulerCounter.WithLabelValues(schedulerName, "trend-target-"+label).Inc()
 			continue
 		}
 
@@ -244,7 +250,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil
 		}
-		sourceLabel := strconv.FormatUint(sourceID, 10)
+		sourceLabel := strconv.FormatUint(sourceStoreID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.Counters = append(op.Counters,
 			s.counter.WithLabelValues("move-peer", source.GetAddress()+"-out", sourceLabel),
