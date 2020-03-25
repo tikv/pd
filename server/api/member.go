@@ -42,6 +42,13 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 	}
 }
 
+// TODO: swag cannot parse pdpb.GetMembersResponse, use string instead
+// @Tags member
+// @Summary List all PD servers in the cluster.
+// @Produce json
+// @Success 200 {string} string
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /members [get]
 func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	members, err := h.getMembers()
 	if err != nil {
@@ -82,6 +89,15 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 	return members, nil
 }
 
+// @Tags member
+// @Summary Remove a PD server from the cluster.
+// @Param name path string true "PD server name"
+// @Produce json
+// @Success 200 {string} string "The PD server is successfully removed."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The member does not exist."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /members/name/{name} [delete]
 func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
 
@@ -120,6 +136,14 @@ func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %s", name))
 }
 
+// @Tags member
+// @Summary Remove a PD server from the cluster.
+// @Param id path integer true "PD server Id"
+// @Produce json
+// @Success 200 {string} string "The PD server is successfully removed."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /members/id/{id} [delete]
 func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
@@ -144,6 +168,18 @@ func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %v", id))
 }
 
+// TODO: swag cannot handle map[string]interface{} in param, use string instead
+// @Tags member
+// @Summary Set leader priority of a PD member.
+// @Accept json
+// @Param name path string true "PD server name"
+// @Param "leader-priority" body integer true "leader priority"
+// @Produce json
+// @Success 200 {string} string "The leader priority is updated."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The member does not exist."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /members/name/{name} [post]
 func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.Request) {
 	members, membersErr := h.getMembers()
 	if membersErr != nil {
