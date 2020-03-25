@@ -395,7 +395,6 @@ func (h *confHandler) GetClusterVersion(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, h.svr.GetClusterVersion())
 }
 
-
 // @Tags config
 // @Summary Update cluster version.
 // @Accept json
