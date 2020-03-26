@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package replicate_mode
+package replicate
 
 import (
 	"strings"
@@ -36,7 +36,7 @@ type ReplicateMode struct {
 	storage *core.Storage
 	idAlloc id.Allocator
 
-	drAutosync DRAutosyncStatus
+	drAutosync drAutosyncStatus
 }
 
 // NewReplicateMode creates the replicate mode manager.
@@ -85,7 +85,7 @@ const (
 	drStateSyncRecover = "sync_recover"
 )
 
-type DRAutosyncStatus struct {
+type drAutosyncStatus struct {
 	State     string `json:"state,omitempty"`
 	RecoverID uint64 `json:"recover_id,omitempty"`
 }
@@ -97,7 +97,7 @@ func (m *ReplicateMode) loadDRAutosync() error {
 	}
 	if !ok {
 		// initialize
-		m.drAutosync = DRAutosyncStatus{State: drStateSync}
+		m.drAutosync = drAutosyncStatus{State: drStateSync}
 	}
 	return nil
 }
@@ -105,7 +105,7 @@ func (m *ReplicateMode) loadDRAutosync() error {
 func (m *ReplicateMode) drSwitchToAsync() error {
 	m.Lock()
 	defer m.Unlock()
-	dr := DRAutosyncStatus{State: drStateAsync}
+	dr := drAutosyncStatus{State: drStateAsync}
 	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (m *ReplicateMode) drSwitchToSyncRecover() error {
 	if err != nil {
 		return err
 	}
-	dr := DRAutosyncStatus{State: drStateSyncRecover, RecoverID: id}
+	dr := drAutosyncStatus{State: drStateSyncRecover, RecoverID: id}
 	if err = m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func (m *ReplicateMode) drSwitchToSyncRecover() error {
 func (m *ReplicateMode) drSwitchToSync() error {
 	m.Lock()
 	defer m.Unlock()
-	dr := DRAutosyncStatus{State: drStateSync}
+	dr := drAutosyncStatus{State: drStateSync}
 	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
 		return err
 	}

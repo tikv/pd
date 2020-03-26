@@ -261,6 +261,7 @@ func (s *Storage) LoadRules(f func(k, v string)) (bool, error) {
 	}
 }
 
+// SaveReplicateStatus stores replicate status by mode.
 func (s *Storage) SaveReplicateStatus(mode string, status interface{}) error {
 	value, err := json.Marshal(status)
 	if err != nil {
@@ -269,6 +270,7 @@ func (s *Storage) SaveReplicateStatus(mode string, status interface{}) error {
 	return s.Save(path.Join(replicatePath, mode), string(value))
 }
 
+// LoadReplicateStatus loads replicate status by mode.
 func (s *Storage) LoadReplicateStatus(mode string, status interface{}) (bool, error) {
 	v, err := s.Load(path.Join(replicatePath, mode))
 	if err != nil {
