@@ -582,7 +582,9 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, err
 	}
 
-	return &pdpb.BootstrapResponse{}, nil
+	return &pdpb.BootstrapResponse{
+		ReplicateStatus: s.cluster.GetReplicateMode().GetReplicateStatus(),
+	}, nil
 }
 
 func (s *Server) createRaftCluster() error {

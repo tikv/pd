@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/id"
 	syncer "github.com/pingcap/pd/v4/server/region_syncer"
+	"github.com/pingcap/pd/v4/server/replicate_mode"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/checker"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
@@ -54,6 +55,7 @@ const (
 // Server is the interface for cluster.
 type Server interface {
 	GetAllocator() *id.AllocatorImpl
+	GetConfig() *config.Config
 	GetScheduleOption() *config.ScheduleOption
 	GetStorage() *core.Storage
 	GetHBStreams() opt.HeartbeatStreams
@@ -102,6 +104,8 @@ type RaftCluster struct {
 
 	ruleManager *placement.RuleManager
 	client      *clientv3.Client
+
+	replicateMode *replicate_mode.ReplicateMode
 
 	schedulersCallback func()
 	configCheck        bool
@@ -212,6 +216,11 @@ func (c *RaftCluster) Start(s Server) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	c.replicateMode, err = replicate_mode.NewReplicateMode(s.GetConfig().ReplicateMode, s.GetStorage(), s.GetAllocator())
+	if err != nil {
+		return err
 	}
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
@@ -364,6 +373,13 @@ func (c *RaftCluster) GetRegionSyncer() *syncer.RegionSyncer {
 	c.RLock()
 	defer c.RUnlock()
 	return c.regionSyncer
+}
+
+// GetReplicateMode returns the ReplicateMode.
+func (c *RaftCluster) GetReplicateMode() *replicate_mode.ReplicateMode {
+	c.RLock()
+	defer c.RUnlock()
+	return c.replicateMode
 }
 
 // GetStorage returns the storage.
