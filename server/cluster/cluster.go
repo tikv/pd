@@ -105,7 +105,7 @@ type RaftCluster struct {
 	ruleManager *placement.RuleManager
 	client      *clientv3.Client
 
-	replicateMode *replicate.ReplicateMode
+	replicateMode *replicate.ModeManager
 
 	schedulersCallback func()
 	configCheck        bool
@@ -218,7 +218,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.replicateMode, err = replicate.NewReplicateMode(s.GetConfig().ReplicateMode, s.GetStorage(), s.GetAllocator())
+	c.replicateMode, err = replicate.NewReplicateModeManager(s.GetConfig().ReplicateMode, s.GetStorage(), s.GetAllocator())
 	if err != nil {
 		return err
 	}
@@ -376,7 +376,7 @@ func (c *RaftCluster) GetRegionSyncer() *syncer.RegionSyncer {
 }
 
 // GetReplicateMode returns the ReplicateMode.
-func (c *RaftCluster) GetReplicateMode() *replicate.ReplicateMode {
+func (c *RaftCluster) GetReplicateMode() *replicate.ModeManager {
 	c.RLock()
 	defer c.RUnlock()
 	return c.replicateMode

@@ -38,7 +38,7 @@ func (s *testReplicateMode) TestInitial(c *C) {
 	store := core.NewStorage(kv.NewMemoryKV())
 	id := mockid.NewIDAllocator()
 	conf := config.ReplicateModeConfig{ReplicateMode: modeMajority}
-	rep, err := NewReplicateMode(conf, store, id)
+	rep, err := NewReplicateModeManager(conf, store, id)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{Mode: pb.ReplicateStatus_MAJORITY})
 
@@ -51,7 +51,7 @@ func (s *testReplicateMode) TestInitial(c *C) {
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
-	rep, err = NewReplicateMode(conf, store, id)
+	rep, err = NewReplicateModeManager(conf, store, id)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
@@ -69,7 +69,7 @@ func (s *testReplicateMode) TestStatus(c *C) {
 		LabelKey:        "dr-label",
 		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	rep, err := NewReplicateMode(conf, store, id)
+	rep, err := NewReplicateModeManager(conf, store, id)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
@@ -103,7 +103,7 @@ func (s *testReplicateMode) TestStatus(c *C) {
 	})
 
 	// test reload
-	rep, err = NewReplicateMode(conf, store, id)
+	rep, err = NewReplicateModeManager(conf, store, id)
 	c.Assert(err, IsNil)
 	c.Assert(rep.drAutosync.State, Equals, drStateSyncRecover)
 

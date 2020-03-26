@@ -28,9 +28,9 @@ const (
 	modeDRAutosync = "dr_autosync"
 )
 
-// ReplicateMode is used to control how raft logs are synchronized between
+// ModeManager is used to control how raft logs are synchronized between
 // different tikv nodes.
-type ReplicateMode struct {
+type ModeManager struct {
 	sync.RWMutex
 	config  config.ReplicateModeConfig
 	storage *core.Storage
@@ -39,9 +39,9 @@ type ReplicateMode struct {
 	drAutosync drAutosyncStatus
 }
 
-// NewReplicateMode creates the replicate mode manager.
-func NewReplicateMode(config config.ReplicateModeConfig, storage *core.Storage, idAlloc id.Allocator) (*ReplicateMode, error) {
-	m := &ReplicateMode{
+// NewReplicateModeManager creates the replicate mode manager.
+func NewReplicateModeManager(config config.ReplicateModeConfig, storage *core.Storage, idAlloc id.Allocator) (*ModeManager, error) {
+	m := &ModeManager{
 		config:  config,
 		storage: storage,
 		idAlloc: idAlloc,
@@ -57,7 +57,7 @@ func NewReplicateMode(config config.ReplicateModeConfig, storage *core.Storage, 
 }
 
 // GetReplicateStatus returns the status to sync with tikv servers.
-func (m *ReplicateMode) GetReplicateStatus() *pb.ReplicateStatus {
+func (m *ModeManager) GetReplicateStatus() *pb.ReplicateStatus {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -90,7 +90,7 @@ type drAutosyncStatus struct {
 	RecoverID uint64 `json:"recover_id,omitempty"`
 }
 
-func (m *ReplicateMode) loadDRAutosync() error {
+func (m *ModeManager) loadDRAutosync() error {
 	ok, err := m.storage.LoadReplicateStatus(modeDRAutosync, &m.drAutosync)
 	if err != nil {
 		return err
@@ -102,7 +102,7 @@ func (m *ReplicateMode) loadDRAutosync() error {
 	return nil
 }
 
-func (m *ReplicateMode) drSwitchToAsync() error {
+func (m *ModeManager) drSwitchToAsync() error {
 	m.Lock()
 	defer m.Unlock()
 	dr := drAutosyncStatus{State: drStateAsync}
@@ -113,7 +113,7 @@ func (m *ReplicateMode) drSwitchToAsync() error {
 	return nil
 }
 
-func (m *ReplicateMode) drSwitchToSyncRecover() error {
+func (m *ModeManager) drSwitchToSyncRecover() error {
 	m.Lock()
 	defer m.Unlock()
 	id, err := m.idAlloc.Alloc()
@@ -128,7 +128,7 @@ func (m *ReplicateMode) drSwitchToSyncRecover() error {
 	return nil
 }
 
-func (m *ReplicateMode) drSwitchToSync() error {
+func (m *ModeManager) drSwitchToSync() error {
 	m.Lock()
 	defer m.Unlock()
 	dr := drAutosyncStatus{State: drStateSync}
