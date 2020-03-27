@@ -90,16 +90,16 @@ func (s *serverTestSuite) CheckRespCode(c *C, cluster *tests.TestCluster, hasSer
 		c.Assert(srv.GetScheduleOption().GetDashboardAddress(), Equals, dashboardAddress)
 		addr := srv.GetAddr()
 		if addr == dashboardAddress {
-			checkRespCode(fmt.Sprintf("%s/dashboard/", addr), 200)
-			checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), 401)
+			checkRespCode(fmt.Sprintf("%s/dashboard/", addr), http.StatusOK)
+			checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusUnauthorized)
 			countServiceNode++
 		} else {
 			if hasServiceNode {
-				checkRespCode(fmt.Sprintf("%s/dashboard/", addr), 302)
-				checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), 302)
+				checkRespCode(fmt.Sprintf("%s/dashboard/", addr), http.StatusTemporaryRedirect)
+				checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusTemporaryRedirect)
 			} else {
-				checkRespCode(fmt.Sprintf("%s/dashboard/", addr), 404)
-				checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), 404)
+				checkRespCode(fmt.Sprintf("%s/dashboard/", addr), http.StatusNotFound)
+				checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusNotFound)
 			}
 		}
 	}
