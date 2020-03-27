@@ -336,6 +336,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	show := &cobra.Command{
 		Use:   "show",
 		Short: "show placement rules",
+		Run:   getPlacementRulesFunc,
 	}
 	show.Flags().String("group", "", "group id")
 	show.Flags().String("id", "", "rule id")
@@ -369,7 +370,7 @@ func enablePlacementRulesFunc(cmd *cobra.Command, args []string) {
 }
 
 func disablePlacementRulesFunc(cmd *cobra.Command, args []string) {
-	err := postConfigDataWithPath(cmd, "enable-placement-rules", "true", configPrefix)
+	err := postConfigDataWithPath(cmd, "enable-placement-rules", "false", configPrefix)
 	if err != nil {
 		cmd.Printf("Failed to set config: %s\n", err)
 		return
@@ -385,7 +386,7 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		return ""
 	}
 
-	group, id, region, file := getFlag("group"), getFlag("id"), getFlag("region"), getFlag("in")
+	group, id, region, file := getFlag("group"), getFlag("id"), getFlag("region"), getFlag("out")
 	var reqPath string
 	respIsList := true
 	switch {
@@ -395,7 +396,7 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		fmt.Println(`"id" should be specified along with "group"`)
 		return
 	case region == "" && group != "" && id == "": // all rules in a group
-		reqPath = path.Join(rulesPrefix, group)
+		reqPath = path.Join(rulesPrefix, "group", group)
 	case region == "" && group != "" && id != "": // single rule
 		reqPath, respIsList = path.Join(rulePrefix, group, id), false
 	case region != "" && group == "" && id == "": // rules matches a region
@@ -426,7 +427,7 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 
 func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	var file string
-	if f := cmd.Flag("out"); f != nil {
+	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
 	}
 	content, err := ioutil.ReadFile(file)
@@ -444,17 +445,17 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 			b, _ := json.Marshal(r)
 			_, err = doRequest(cmd, rulePrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
 			if err != nil {
-				fmt.Printf("failed to save rule %v: %v\n", r.Key(), err)
+				fmt.Printf("failed to save rule %s/%s: %v\n", r.GroupID, r.ID, err)
 				return
 			}
-			fmt.Printf("saved rule %v", r.Key())
+			fmt.Printf("saved rule %s/%s\n", r.GroupID, r.ID)
 		} else {
 			_, err = doRequest(cmd, path.Join(rulePrefix, r.GroupID, r.ID), http.MethodDelete)
 			if err != nil {
-				fmt.Printf("failed to delete rule %v: %v\n", r.Key(), err)
+				fmt.Printf("failed to delete rule %s/%s: %v\n", r.GroupID, r.ID, err)
 				return
 			}
-			fmt.Printf("deleted rule %v", r.Key())
+			fmt.Printf("deleted rule %s/%s\n", r.GroupID, r.ID)
 		}
 	}
 	fmt.Println("Success!")
