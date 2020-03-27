@@ -1421,6 +1421,16 @@ func (c *RaftCluster) GetKeyType() core.KeyType {
 	return c.opt.GetKeyType()
 }
 
+// GetDashboardAddress gets dashboard address.
+func (c *RaftCluster) GetDashboardAddress() string {
+	return c.opt.GetDashboardAddress()
+}
+
+// SetDashboardAddress sets dashboard address.
+func (c *RaftCluster) SetDashboardAddress(address string) {
+	c.opt.SetDashboardAddress(address)
+}
+
 // IsReplaceOfflineReplicaEnabled returns if replace offline replica is enabled.
 func (c *RaftCluster) IsReplaceOfflineReplicaEnabled() bool {
 	return c.opt.IsReplaceOfflineReplicaEnabled()
