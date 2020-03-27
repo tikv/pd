@@ -687,8 +687,8 @@ func (s *Server) GetSchedulersCallback() func() {
 				log.Error("failed to encode config", zap.Error(err))
 			}
 
-			if err := s.updateConfigManager("schedule.schedulers", buf.String()); err != nil {
-				log.Error("failed to update the schedulers", zap.Error(err))
+			if err := s.UpdateConfigManager("schedule.schedulers", buf.String()); err != nil {
+				log.Error("failed to update the schedulers in config manager", zap.Error(err))
 			}
 		}
 	}
@@ -911,7 +911,8 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	return nil
 }
 
-func (s *Server) updateConfigManager(name, value string) error {
+// UpdateConfigManager is used to update config manager directly.
+func (s *Server) UpdateConfigManager(name, value string) error {
 	configManager := s.GetConfigManager()
 	globalVersion := configManager.GetGlobalConfigs(Component).GetVersion()
 	version := &configpb.Version{Global: globalVersion}
