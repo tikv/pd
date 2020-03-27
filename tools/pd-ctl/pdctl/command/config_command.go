@@ -393,7 +393,7 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	case region == "" && group == "" && id == "": // all rules
 		reqPath = rulesPrefix
 	case region == "" && group == "" && id != "":
-		fmt.Println(`"id" should be specified along with "group"`)
+		cmd.Println(`"id" should be specified along with "group"`)
 		return
 	case region == "" && group != "" && id == "": // all rules in a group
 		reqPath = path.Join(rulesPrefix, "group", group)
@@ -402,16 +402,16 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	case region != "" && group == "" && id == "": // rules matches a region
 		reqPath = path.Join(rulesPrefix, "region", region)
 	default:
-		fmt.Println(`"region" should not be specified with "group" or "id" at the same time`)
+		cmd.Println(`"region" should not be specified with "group" or "id" at the same time`)
 		return
 	}
 	res, err := doRequest(cmd, reqPath, http.MethodGet)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 	if file == "" {
-		fmt.Println(res)
+		cmd.Println(res)
 		return
 	}
 	if !respIsList {
@@ -419,10 +419,10 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	}
 	err = ioutil.WriteFile(file, []byte(res), 0644)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
-	fmt.Println("rules saved to file " + file)
+	cmd.Println("rules saved to file " + file)
 }
 
 func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
@@ -432,12 +432,12 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	}
 	content, err := ioutil.ReadFile(file)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 	var rules []*placement.Rule
 	if err = json.Unmarshal(content, &rules); err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 	for _, r := range rules {
@@ -458,5 +458,5 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 			fmt.Printf("deleted rule %s/%s\n", r.GroupID, r.ID)
 		}
 	}
-	fmt.Println("Success!")
+	cmd.Println("Success!")
 }
