@@ -565,7 +565,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	tc.AddRegionStore(2, 4)
 	tc.AddRegionStore(3, 2)
 	tc.AddRegionStore(4, 0)
-	tc.AddRegionStore(5, 0)
+	tc.AddRegionStore(5, 10)
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	tc.AddLeaderRegion(2, 1, 2, 3)
 	tc.AddLeaderRegion(3, 1, 2, 3)

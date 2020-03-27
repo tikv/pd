@@ -27,10 +27,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// Interval to save store meta (including heartbeat ts) to etcd.
-const storePersistInterval = 5 * time.Minute
-const lowSpaceThreshold = 100 * (1 << 10)  // 100 GB
-const highSpaceThreshold = 300 * (1 << 10) // 300 GB
+const (
+	// Interval to save store meta (including heartbeat ts) to etcd.
+	storePersistInterval = 5 * time.Minute
+	lowSpaceThreshold    = 100 * (1 << 10) // 100 GB
+	highSpaceThreshold   = 300 * (1 << 10) // 300 GB
+)
 
 // StoreInfo contains information about a store.
 type StoreInfo struct {
