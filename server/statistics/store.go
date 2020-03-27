@@ -266,7 +266,6 @@ type RollingStoreStats struct {
 }
 
 const storeStatsRollingWindows = 3
-const storeAvgInterval time.Duration = StoreHeartBeatReportInterval * time.Second
 
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
