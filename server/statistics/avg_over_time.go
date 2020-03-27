@@ -116,9 +116,5 @@ func (t *TimeMedian) Add(delta float64, interval time.Duration) {
 
 // Set sets the given average.
 func (t *TimeMedian) Set(avg float64) {
-	t.aot.Set(avg)
-	if t.aot.intervalSum >= t.aotInterval {
-		t.mf.Set(t.aot.Get())
-		t.aot.Clear()
-	}
+	t.mf.Set(avg)
 }
