@@ -135,9 +135,9 @@ type Config struct {
 
 	EnableDynamicConfig bool `toml:"enable-dynamic-config" json:"enable-dynamic-config"`
 
-	EnableDashboard bool
-
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
+
+	ReplicateMode ReplicateModeConfig `toml:"replicate-mode" json:"replicate-mode"`
 }
 
 // NewConfig creates a new config.
@@ -170,8 +170,6 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
-
-	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", true, "Enable Dashboard API and UI on this node")
 
 	return cfg
 }
@@ -211,6 +209,10 @@ const (
 	defaultDisableErrorVerbose = true
 
 	defaultEnableDynamicConfig = true
+	defaultDashboardAddress    = "auto"
+
+	defaultDRWaitStoreTimeout = time.Minute
+	defaultDRWaitSyncTimeout  = time.Minute
 )
 
 var (
@@ -458,6 +460,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if !configMetaData.IsDefined("enable-dynamic-config") {
 		c.EnableDynamicConfig = defaultEnableDynamicConfig
 	}
+
+	c.ReplicateMode.adjust(configMetaData.Child("replicate-mode"))
+
 	return nil
 }
 
@@ -923,6 +928,8 @@ type PDServerConfig struct {
 	// MetricStorage is the cluster metric storage.
 	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
+	// There are some values supported: "auto", "none", or a specific address, default: "auto"
+	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -938,7 +945,23 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("runtime-services") {
 		c.RuntimeServices = defaultRuntimeServices
 	}
+	if !meta.IsDefined("dashboard-address") {
+		c.DashboardAddress = defaultDashboardAddress
+	}
 	return nil
+}
+
+func (c *PDServerConfig) clone() *PDServerConfig {
+	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
+	copy(runtimeServices, c.RuntimeServices)
+	return &PDServerConfig{
+		UseRegionStorage: c.UseRegionStorage,
+		MaxResetTSGap:    c.MaxResetTSGap,
+		KeyType:          c.KeyType,
+		MetricStorage:    c.MetricStorage,
+		DashboardAddress: c.DashboardAddress,
+		RuntimeServices:  runtimeServices,
+	}
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.
@@ -1114,4 +1137,37 @@ func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 		return tlsConfig, nil
 	}
 	return nil, nil
+}
+
+// ReplicateModeConfig is the configuration for the replicate policy.
+type ReplicateModeConfig struct {
+	ReplicateMode string                    `toml:"replicate-mode" json:"replicate-mode"` // can be 'dr-autosync' or 'majority', default value is 'majority'
+	DRAutoSync    DRAutoSyncReplicateConfig `toml:"dr-autosync" json:"dr-autosync"`       // used when ReplicateMode is 'dr-autosync'
+}
+
+func (c *ReplicateModeConfig) adjust(meta *configMetaData) {
+	if !meta.IsDefined("replicate-mode") {
+		c.ReplicateMode = "majority"
+	}
+	c.DRAutoSync.adjust(meta.Child("dr-autosync"))
+}
+
+// DRAutoSyncReplicateConfig is the configuration for auto sync mode between 2 data centers.
+type DRAutoSyncReplicateConfig struct {
+	LabelKey         string            `toml:"label-key" json:"label-key"`
+	Primary          string            `toml:"primary" json:"primary"`
+	DR               string            `toml:"dr" json:"dr"`
+	PrimaryReplicas  int               `toml:"primary-replicas" json:"primary-replicas"`
+	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
+	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
+	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
+}
+
+func (c *DRAutoSyncReplicateConfig) adjust(meta *configMetaData) {
+	if !meta.IsDefined("wait-store-timeout") {
+		c.WaitStoreTimeout = typeutil.Duration{Duration: defaultDRWaitStoreTimeout}
+	}
+	if !meta.IsDefined("wait-sync-timeout") {
+		c.WaitSyncTimeout = typeutil.Duration{Duration: defaultDRWaitSyncTimeout}
+	}
 }
