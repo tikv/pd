@@ -21,11 +21,6 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 )
 
-const (
-	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
-	StoreHeartBeatReportInterval = 10
-)
-
 // StoresStats is a cache hold hot regions.
 type StoresStats struct {
 	sync.RWMutex
@@ -261,25 +256,25 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex
-	bytesWriteRate          *AvgOverTime
-	bytesReadRate           *AvgOverTime
-	keysWriteRate           *AvgOverTime
-	keysReadRate            *AvgOverTime
+	bytesWriteRate          *TimeMedian
+	bytesReadRate           *TimeMedian
+	keysWriteRate           *TimeMedian
+	keysReadRate            *TimeMedian
 	totalCPUUsage           MovingAvg
 	totalBytesDiskReadRate  MovingAvg
 	totalBytesDiskWriteRate MovingAvg
 }
 
 const storeStatsRollingWindows = 3
-const storeAvgInterval time.Duration = 3 * StoreHeartBeatReportInterval * time.Second
+const storeAvgInterval time.Duration = StoreHeartBeatReportInterval * time.Second
 
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate:          NewAvgOverTime(storeAvgInterval),
-		bytesReadRate:           NewAvgOverTime(storeAvgInterval),
-		keysWriteRate:           NewAvgOverTime(storeAvgInterval),
-		keysReadRate:            NewAvgOverTime(storeAvgInterval),
+		bytesWriteRate:          NewTimeMedian(2, 5),
+		bytesReadRate:           NewTimeMedian(2, 5),
+		keysWriteRate:           NewTimeMedian(2, 5),
+		keysReadRate:            NewTimeMedian(2, 5),
 		totalCPUUsage:           NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskReadRate:  NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskWriteRate: NewMedianFilter(storeStatsRollingWindows),
