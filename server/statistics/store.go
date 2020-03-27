@@ -268,9 +268,9 @@ type RollingStoreStats struct {
 const (
 	storeStatsRollingWindows = 3
 	// DefaultAotSize is default size of average over time.
-	DefaultAotSize           = 2
+	DefaultAotSize = 2
 	// DefaultMfSize is default size of median filter
-	DefaultMfSize            = 5
+	DefaultMfSize = 5
 )
 
 // NewRollingStoreStats creates a RollingStoreStats.
