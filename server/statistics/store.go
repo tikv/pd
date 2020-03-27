@@ -265,15 +265,21 @@ type RollingStoreStats struct {
 	totalBytesDiskWriteRate MovingAvg
 }
 
-const storeStatsRollingWindows = 3
+const (
+	storeStatsRollingWindows = 3
+	// DefaultAotSize is default size of average over time.
+	DefaultAotSize           = 2
+	// DefaultMfSize is default size of median filter
+	DefaultMfSize            = 5
+)
 
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate:          NewTimeMedian(2, 5),
-		bytesReadRate:           NewTimeMedian(2, 5),
-		keysWriteRate:           NewTimeMedian(2, 5),
-		keysReadRate:            NewTimeMedian(2, 5),
+		bytesWriteRate:          NewTimeMedian(DefaultAotSize, DefaultMfSize),
+		bytesReadRate:           NewTimeMedian(DefaultAotSize, DefaultMfSize),
+		keysWriteRate:           NewTimeMedian(DefaultAotSize, DefaultMfSize),
+		keysReadRate:            NewTimeMedian(DefaultAotSize, DefaultMfSize),
 		totalCPUUsage:           NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskReadRate:  NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskWriteRate: NewMedianFilter(storeStatsRollingWindows),
