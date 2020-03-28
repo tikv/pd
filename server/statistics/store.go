@@ -21,11 +21,6 @@ import (
 	"github.com/pingcap/pd/v3/server/core"
 )
 
-const (
-	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
-	StoreHeartBeatReportInterval = 10
-)
-
 // StoresStats is a cache hold hot regions.
 type StoresStats struct {
 	sync.RWMutex
@@ -261,25 +256,30 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex
-	bytesWriteRate          *AvgOverTime
-	bytesReadRate           *AvgOverTime
-	keysWriteRate           *AvgOverTime
-	keysReadRate            *AvgOverTime
+	bytesWriteRate          *TimeMedian
+	bytesReadRate           *TimeMedian
+	keysWriteRate           *TimeMedian
+	keysReadRate            *TimeMedian
 	totalCPUUsage           MovingAvg
 	totalBytesDiskReadRate  MovingAvg
 	totalBytesDiskWriteRate MovingAvg
 }
 
-const storeStatsRollingWindows = 3
-const storeAvgInterval time.Duration = 3 * StoreHeartBeatReportInterval * time.Second
+const (
+	storeStatsRollingWindows = 3
+	// DefaultAotSize is default size of average over time.
+	DefaultAotSize = 2
+	// DefaultMfSize is default size of median filter
+	DefaultMfSize = 5
+)
 
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate:          NewAvgOverTime(storeAvgInterval),
-		bytesReadRate:           NewAvgOverTime(storeAvgInterval),
-		keysWriteRate:           NewAvgOverTime(storeAvgInterval),
-		keysReadRate:            NewAvgOverTime(storeAvgInterval),
+		bytesWriteRate:          NewTimeMedian(DefaultAotSize, DefaultMfSize),
+		bytesReadRate:           NewTimeMedian(DefaultAotSize, DefaultMfSize),
+		keysWriteRate:           NewTimeMedian(DefaultAotSize, DefaultMfSize),
+		keysReadRate:            NewTimeMedian(DefaultAotSize, DefaultMfSize),
 		totalCPUUsage:           NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskReadRate:  NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskWriteRate: NewMedianFilter(storeStatsRollingWindows),
