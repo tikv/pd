@@ -350,6 +350,7 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	}
 	return &statistics.HotPeersStat{
 		TotalBytesRate: li.LoadPred.Current.ByteRate,
+		TotalKeysRate:  li.LoadPred.Current.KeyRate,
 		Count:          len(li.HotPeers),
 		Stats:          peers,
 	}

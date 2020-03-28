@@ -115,7 +115,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	hotReadRegionID, hotWriteRegionID, hotStoreId := uint64(3), uint64(2), uint64(1)
 	pdctl.MustPutRegion(c, cluster, hotReadRegionID, hotStoreId, []byte("b"), []byte("c"), core.SetReadBytes(1000000000), core.SetReportInterval(reportInterval))
 	pdctl.MustPutRegion(c, cluster, hotWriteRegionID, hotStoreId, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000), core.SetReportInterval(reportInterval))
-	time.Sleep(3200 * time.Millisecond)
+	time.Sleep(5000 * time.Millisecond)
 	testHot(hotReadRegionID, hotStoreId, "read")
 	testHot(hotWriteRegionID, hotStoreId, "write")
 }

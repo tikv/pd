@@ -19,6 +19,7 @@ import (
 	"math/rand"
 	"net/http"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -70,7 +71,9 @@ const (
 	// HotWriteRegionType is hot write region scheduler type.
 	HotWriteRegionType = "hot-write-region"
 
-	hotRegionLimitFactor = 0.75
+	hotRegionLimitFactor   = 0.75
+	minHotScheduleInterval = time.Second
+	maxHotScheduleInterval = 20 * time.Second
 )
 
 type hotScheduler struct {
@@ -136,6 +139,13 @@ func (h *hotScheduler) GetType() string {
 
 func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.conf.ServeHTTP(w, r)
+}
+
+func (h *hotScheduler) GetMinInterval() time.Duration {
+	return minHotScheduleInterval
+}
+func (h *hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
 
 func (h *hotScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
@@ -922,6 +932,9 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 			operator.OpHotRegion,
 			bs.cur.srcStoreID,
 			dstPeer)
+
+		op.Counters = append(op.Counters, balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(bs.cur.srcStoreID, 10)+"-out"))
+		op.Counters = append(op.Counters, balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(dstPeer.GetStoreId(), 10)+"-in"))
 	case transferLeader:
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
 			return nil, nil
@@ -934,6 +947,8 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 			bs.cur.srcStoreID,
 			bs.cur.dstStoreID,
 			operator.OpHotRegion)
+		op.Counters = append(op.Counters, balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(bs.cur.srcStoreID, 10)+"-out"))
+		op.Counters = append(op.Counters, balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(bs.cur.dstStoreID, 10)+"-in"))
 	}
 
 	if err != nil {
