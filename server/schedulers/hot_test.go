@@ -298,6 +298,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.SetToleranceRatio(1)
 	opt.HotRegionCacheHitsThreshold = 0
 
 	tc := mockcluster.NewCluster(opt)
@@ -307,17 +308,11 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
 
-	tc.UpdateStorageWrittenBytes(1, 10.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 9.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 9.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 9*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(5, 8.9*MB*statistics.StoreHeartBeatReportInterval)
-
-	tc.UpdateStorageWrittenKeys(1, 10*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenKeys(2, 9.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenKeys(3, 9.8*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenKeys(4, 9*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenKeys(5, 9.2*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(1, 10.5*MB*statistics.StoreHeartBeatReportInterval, 10.2*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 9.5*MB*statistics.StoreHeartBeatReportInterval, 9.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 9.5*MB*statistics.StoreHeartBeatReportInterval, 9.8*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 9*MB*statistics.StoreHeartBeatReportInterval, 9*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 8.9*MB*statistics.StoreHeartBeatReportInterval, 9.2*MB*statistics.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, write, []testRegionInfo{
 		{1, []uint64{2, 1, 3}, 0.5 * MB, 0.5 * MB},
@@ -331,19 +326,19 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 		// byteDecRatio <= 0.95 && keyDecRatio <= 0.95
 		testutil.CheckTransferPeer(c, op, operator.OpHotRegion, 1, 4)
 		// store byte rate (min, max): (10, 10.5) | 9.5 | 9.5 | (9, 9.5) | 8.9
-		// store key rate (min, max):  (9.5, 10) | 9.5 | 9.8 | (9, 9.5) | 9.2
+		// store key rate (min, max):  (9.7, 10.2) | 9.5 | 9.8 | (9, 9.5) | 9.2
 
 		op = hb.Schedule(tc)[0]
 		// byteDecRatio <= 0.99 && keyDecRatio <= 0.95
 		testutil.CheckTransferPeer(c, op, operator.OpHotRegion, 3, 5)
 		// store byte rate (min, max): (10, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 8.95)
-		// store key rate (min, max):  (9.5, 10) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.3)
+		// store key rate (min, max):  (9.7, 10.2) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.3)
 
 		op = hb.Schedule(tc)[0]
 		// byteDecRatio <= 0.95
 		testutil.CheckTransferPeer(c, op, operator.OpHotRegion, 1, 5)
 		// store byte rate (min, max): (9.5, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 9.45)
-		// store key rate (min, max):  (9, 10) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.8)
+		// store key rate (min, max):  (9.2, 10.2) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.8)
 	}
 }
 
@@ -586,6 +581,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
+	hb.(*hotScheduler).conf.SetToleranceRatio(1)
 	opt.HotRegionCacheHitsThreshold = 0
 
 	tc := mockcluster.NewCluster(opt)
@@ -595,17 +591,11 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
 
-	tc.UpdateStorageReadBytes(1, 10.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(2, 9.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(3, 9.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(4, 9*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(5, 8.9*MB*statistics.StoreHeartBeatReportInterval)
-
-	tc.UpdateStorageReadKeys(1, 10*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadKeys(2, 9.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadKeys(3, 9.8*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadKeys(4, 9*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadKeys(5, 9.2*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(1, 10.5*MB*statistics.StoreHeartBeatReportInterval, 10.2*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(2, 9.5*MB*statistics.StoreHeartBeatReportInterval, 9.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(3, 9.5*MB*statistics.StoreHeartBeatReportInterval, 9.8*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(4, 9*MB*statistics.StoreHeartBeatReportInterval, 9*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(5, 8.9*MB*statistics.StoreHeartBeatReportInterval, 9.2*MB*statistics.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, read, []testRegionInfo{
 		{1, []uint64{1, 2, 4}, 0.5 * MB, 0.5 * MB},
@@ -619,19 +609,19 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 		// byteDecRatio <= 0.95 && keyDecRatio <= 0.95
 		testutil.CheckTransferLeader(c, op, operator.OpHotRegion, 1, 4)
 		// store byte rate (min, max): (10, 10.5) | 9.5 | 9.5 | (9, 9.5) | 8.9
-		// store key rate (min, max):  (9.5, 10) | 9.5 | 9.8 | (9, 9.5) | 9.2
+		// store key rate (min, max):  (9.7, 10.2) | 9.5 | 9.8 | (9, 9.5) | 9.2
 
 		op = hb.Schedule(tc)[0]
 		// byteDecRatio <= 0.99 && keyDecRatio <= 0.95
 		testutil.CheckTransferLeader(c, op, operator.OpHotRegion, 3, 5)
 		// store byte rate (min, max): (10, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 8.95)
-		// store key rate (min, max):  (9.5, 10) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.3)
+		// store key rate (min, max):  (9.7, 10.2) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.3)
 
 		op = hb.Schedule(tc)[0]
 		// byteDecRatio <= 0.95
 		testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 5)
 		// store byte rate (min, max): (9.5, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 9.45)
-		// store key rate (min, max):  (9, 10) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.8)
+		// store key rate (min, max):  (9.2, 10.2) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.8)
 	}
 }
 
