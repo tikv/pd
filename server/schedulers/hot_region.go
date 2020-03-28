@@ -71,7 +71,6 @@ const (
 	// HotWriteRegionType is hot write region scheduler type.
 	HotWriteRegionType = "hot-write-region"
 
-	hotRegionLimitFactor   = 0.75
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
 )
