@@ -264,6 +264,9 @@ func summaryStoresLoad(
 	kind core.ResourceKind,
 ) map[uint64]*storeLoadDetail {
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
+	allByteSum := 0.0
+	allKeySum := 0.0
+	allCount := 0.0
 
 	// Stores without byte rate statistics is not available to schedule.
 	for id, byteRate := range storeByteRate {
@@ -295,6 +298,9 @@ func summaryStoresLoad(
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keySum)
 			}
 		}
+		allByteSum += byteRate
+		allKeySum += keyRate
+		allCount += float64(len(hotPeers))
 
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
@@ -307,6 +313,29 @@ func summaryStoresLoad(
 		loadDetail[id] = &storeLoadDetail{
 			LoadPred: stLoadPred,
 			HotPeers: hotPeers,
+		}
+	}
+	storeLen := float64(len(storeByteRate))
+
+	for id, detail := range loadDetail {
+		byteExp := allByteSum / storeLen
+		keyExp := allKeySum / storeLen
+		countExp := allCount / storeLen
+		detail.LoadPred.Future.ExpByteRate = byteExp
+		detail.LoadPred.Future.ExpKeyRate = keyExp
+		detail.LoadPred.Future.ExpCount = countExp
+		// Debug
+		{
+			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(byteExp)
+		}
+		{
+			ty := "exp-key-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keyExp)
+		}
+		{
+			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(countExp)
 		}
 	}
 	return loadDetail
@@ -553,7 +582,12 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		ret[id] = detail
+		if detail.LoadPred.min().ByteRate > bs.sche.conf.GetToleranceRatio()*detail.LoadPred.Future.ExpByteRate &&
+			detail.LoadPred.min().KeyRate > bs.sche.conf.GetToleranceRatio()*detail.LoadPred.Future.ExpKeyRate {
+			ret[id] = detail
+			balanceHotRegionCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+		}
+		balanceHotRegionCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 	}
 	return ret
 }
@@ -716,6 +750,13 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
 	for _, store := range candidates {
 		if filter.Target(bs.cluster, store, filters) {
+			detail := bs.stLoadDetail[store.GetID()]
+			if detail.LoadPred.max().ByteRate*bs.sche.conf.GetToleranceRatio() < detail.LoadPred.Future.ExpByteRate &&
+				detail.LoadPred.max().KeyRate*bs.sche.conf.GetToleranceRatio() < detail.LoadPred.Future.ExpKeyRate {
+				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
+				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
+			}
+			balanceHotRegionCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
 			ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 		}
 	}
@@ -731,9 +772,8 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	rank := int64(0)
 	if bs.rwTy == write && bs.opTy == transferLeader {
 		// In this condition, CPU usage is the matter.
-		// Only consider about count and key rate.
-		if srcLd.Count > dstLd.Count &&
-			srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
+		// Only consider about key rate.
+		if srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
 			rank = -1
 		}
 	} else {
