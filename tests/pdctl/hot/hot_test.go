@@ -70,7 +70,6 @@ func (s *hotTestSuite) TestHot(c *C) {
 	// test hot store
 	ss := leaderServer.GetStore(1)
 	now := time.Now().Second()
-	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - 10), EndTimestamp: uint64(now)}
 	newStats := proto.Clone(ss.GetStoreStats()).(*pdpb.StoreStats)
 	bytesWritten := uint64(8 * 1024 * 1024)
 	bytesRead := uint64(16 * 1024 * 1024)
@@ -80,9 +79,12 @@ func (s *hotTestSuite) TestHot(c *C) {
 	newStats.BytesRead = bytesRead
 	newStats.KeysWritten = keysWritten
 	newStats.KeysRead = keysRead
-	newStats.Interval = interval
 	rc := leaderServer.GetRaftCluster()
-	rc.GetStoresStats().Observe(ss.GetID(), newStats)
+	for i := statistics.DefaultMfSize; i > 0; i-- {
+		newStats.Interval = &pdpb.TimeInterval{StartTimestamp: uint64(now - 10*i), EndTimestamp: uint64(now - 10*i + 10)}
+		rc.GetStoresStats().Observe(ss.GetID(), newStats)
+	}
+
 	args := []string{"-u", pdAddr, "hot", "store"}
 	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
