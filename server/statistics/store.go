@@ -18,9 +18,8 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/server/core"
-
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/server/core"
 	"go.uber.org/zap"
 )
 
