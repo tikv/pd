@@ -42,7 +42,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		GreatDecRatio:         0.95,
 		MinorDecRatio:         0.99,
 		MaxPeerNum:            1000,
-		ToleranceRatio:        1.02,
+		ToleranceRatio:        1.02, // Tolerate 2% difference
 	}
 }
 
