@@ -62,7 +62,7 @@ type hotRegionSchedulerConfig struct {
 	CountRankStepRatio    float64 `json:"count-rank-step-ratio"`
 	GreatDecRatio         float64 `json:"great-dec-ratio"`
 	MinorDecRatio         float64 `json:"minor-dec-ratio"`
-	ToleranceRatio        float64 `json:"minorDecRatio"`
+	ToleranceRatio        float64 `json:"tolerance-ratio"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
