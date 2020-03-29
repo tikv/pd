@@ -33,9 +33,8 @@ the .bash_profile.
 	    brew install bash-completion
 	## or, if running Bash 4.1+
 	    brew install bash-completion@2
-	## If tkctl is installed via homebrew, this should start working immediately.
 	## If you've installed via other means, you may need add the completion to your completion directory
-	    tkctl completion bash > $(brew --prefix)/etc/bash_completion.d/tkctl
+	    pd-ctl completion bash > $(brew --prefix)/etc/bash_completion.d/pd-ctl
 
 
 	# Installing bash completion on Linux
@@ -62,13 +61,12 @@ func NewCompletionCommand() *cobra.Command {
 		Long:                  completionLongDesc,
 		Example:               completionExample,
 		Run: func(cmd *cobra.Command, args []string) {
-			if len(args) == 1 && args[0] != "bash" {
-				cmd.Printf("Unsupported shell type %s.\n", args[0])
+			if len(args) != 1 {
 				cmd.Usage()
 				return
 			}
-			if len(args) > 1 {
-				cmd.Println("Too many arguments. Expected only the shell type.")
+			if args[0] != "bash" {
+				cmd.Printf("Unsupported shell type %s. \n", args[0])
 				cmd.Usage()
 				return
 			}
