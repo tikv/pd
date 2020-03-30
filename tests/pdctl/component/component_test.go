@@ -108,4 +108,18 @@ func (s *componentTestSuite) TestComponent(c *C) {
 		c.Assert(strings.Contains(obtain, `location-labels = ["zone", "rack"]`), IsTrue)
 		c.Assert(strings.Contains(obtain, `level = "warn"`), IsTrue)
 	}
+
+	// change multi config at one time
+	args = []string{"-u", pdAddrs[0], "component", "set", "pd", "schedule.high-space-ratio", "0.3", "schedule.low-space-ratio", "0.4"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	time.Sleep(20 * time.Millisecond)
+	for i := 0; i < len(pdAddrs); i++ {
+		args = []string{"-u", pdAddrs[0], "component", "show", pdAddrs[i][7:]}
+		_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+		c.Assert(err, IsNil)
+		obtain := string(output)
+		c.Assert(strings.Contains(obtain, "high-space-ratio = 0.3"), IsTrue)
+		c.Assert(strings.Contains(obtain, "low-space-ratio = 0.4"), IsTrue)
+	}
 }
