@@ -29,6 +29,10 @@ import (
 	"github.com/pingcap/pd/v3/server/statistics"
 )
 
+func init() {
+	schedulePeerPr = 1.0
+}
+
 var _ = Suite(&testHotWriteRegionSchedulerSuite{})
 var _ = Suite(&testHotSchedulerSuite{})
 
