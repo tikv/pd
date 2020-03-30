@@ -45,6 +45,7 @@ func newlogHandler(svr *server.Server, rd *render.Render) *logHandler {
 // @Success 200 {string} string "The log level is updated."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
+// @Failure 503 {string} string "PD server has no leader."
 // @Router /admin/log [post]
 func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if h.svr.GetConfig().EnableDynamicConfig {

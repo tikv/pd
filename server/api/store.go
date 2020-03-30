@@ -443,6 +443,7 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Summary Get limit of all stores in the cluster.
 // @Produce json
 // @Success 200 {object} string
+// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [get]
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	limits, err := h.GetAllStoresLimit()
@@ -487,7 +488,6 @@ func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 // @Summary Get limit scene in the cluster.
 // @Produce json
 // @Success 200 {string} string "Set store limit scene success."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit/scene [get]
 func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
 	scene := h.Handler.GetStoreLimitScene()
@@ -498,7 +498,7 @@ func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 // @Summary Get stores in the cluster.
 // @Param state query array true "Specify accepted store states."
 // @Produce json
-// @Success 200 {object} StoreInfo
+// @Success 200 {object} StoresInfo
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores [get]
 func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

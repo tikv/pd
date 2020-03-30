@@ -38,7 +38,6 @@ func newStatsHandler(svr *server.Server, rd *render.Render) *statsHandler {
 // @Param end_key query string true "End key"
 // @Produce json
 // @Success 200 {object} statistics.RegionStats
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stats/region [get]
 func (h *statsHandler) Region(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())

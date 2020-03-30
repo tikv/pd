@@ -41,7 +41,6 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 // @Produce json
 // @Success 200 {string} string "The region is removed from server cache."
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /admin/cache/region/{id} [delete]
 func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())

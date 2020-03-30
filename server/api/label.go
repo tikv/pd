@@ -40,7 +40,6 @@ func newLabelsHandler(svr *server.Server, rd *render.Render) *labelsHandler {
 // @Summary List all label values.
 // @Produce json
 // @Success 200 {array} metapb.StoreLabel
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /labels [get]
 func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())

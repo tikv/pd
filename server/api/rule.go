@@ -48,7 +48,6 @@ func newRulesHandler(svr *server.Server, rd *render.Render) *ruleHandler {
 // @Produce json
 // @Success 200 {array} placement.Rule
 // @Failure 412 {string} string "Placement rules feature is disabled."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/rules [get]
 func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
@@ -66,7 +65,6 @@ func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Success 200 {array} placement.Rule
 // @Failure 412 {string} string "Placement rules feature is disabled."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/rules/group/{group} [get]
 func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
@@ -84,8 +82,9 @@ func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
 // @Param region path string true "The name of region"
 // @Produce json
 // @Success 200 {array} placement.Rule
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The region does not exist."
 // @Failure 412 {string} string "Placement rules feature is disabled."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/rules/region/{region} [get]
 func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
@@ -113,8 +112,8 @@ func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
 // @Param key path string true "The name of key"
 // @Produce json
 // @Success 200 {array} placement.Rule
+// @Failure 400 {string} string "The input is invalid."
 // @Failure 412 {string} string "Placement rules feature is disabled."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/rules/key/{key} [get]
 func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
@@ -138,8 +137,8 @@ func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 // @Param id path string true "Rule Id"
 // @Produce json
 // @Success 200 {object} placement.Rule
+// @Failure 404 {string} string "The rule does not exist."
 // @Failure 412 {string} string "Placement rules feature is disabled."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/rule/{group}/{id} [get]
 func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())

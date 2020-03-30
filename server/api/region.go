@@ -99,7 +99,6 @@ func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
 // @Produce json
 // @Success 200 {object} RegionInfo
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /region/id/{id} [get]
 func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
@@ -121,7 +120,6 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 // @Param key path string true "Region key"
 // @Produce json
 // @Success 200 {object} RegionInfo
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /region/key/{key} [get]
 func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
@@ -163,7 +161,6 @@ func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
 // @Summary List all regions in the cluster.
 // @Produce json
 // @Success 200 {object} RegionsInfo
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions [get]
 func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
@@ -179,7 +176,6 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/key [get]
 func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
@@ -219,7 +215,6 @@ func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) 
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/store/{id} [get]
 func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
@@ -363,7 +358,6 @@ func (hist histSlice) Less(i, j int) bool {
 // @Produce json
 // @Success 200 {array} histItem
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/check/hist-size [get]
 func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request) {
 	bound := minRegionHistogramSize
@@ -388,7 +382,6 @@ func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request
 // @Produce json
 // @Success 200 {array} histItem
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/check/hist-keys [get]
 func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request) {
 	bound := minRegionHistogramKeys
@@ -449,7 +442,6 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 404 {string} string "The region does not exist."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/sibling/{id} [get]
 func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
@@ -484,7 +476,6 @@ const (
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/writeflow [get]
 func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() })
@@ -496,7 +487,6 @@ func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request)
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/readflow [get]
 func (h *regionsHandler) GetTopReadFlow(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() })
@@ -508,7 +498,6 @@ func (h *regionsHandler) GetTopReadFlow(w http.ResponseWriter, r *http.Request) 
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/confver [get]
 func (h *regionsHandler) GetTopConfVer(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
@@ -522,7 +511,6 @@ func (h *regionsHandler) GetTopConfVer(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/version [get]
 func (h *regionsHandler) GetTopVersion(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
@@ -536,7 +524,6 @@ func (h *regionsHandler) GetTopVersion(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/size [get]
 func (h *regionsHandler) GetTopSize(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {

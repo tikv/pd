@@ -237,7 +237,6 @@ func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
 // @Summary Get the leader PD server of the cluster.
 // @Produce json
 // @Success 200 {string} string "The transfer command is submitted."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /leader [get]
 func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLeader())

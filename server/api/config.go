@@ -58,6 +58,7 @@ func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Summary Get default config.
 // @Produce json
 // @Success 200 {object} config.Config
+// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/default [get]
 func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
 	config := config.NewConfig()
@@ -76,7 +77,9 @@ func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
 // @Param body body object false "json params"
 // @Produce json
 // @Success 200 {string} string "The config is updated."
+// @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
+// @Failure 503 {string} string "PD server has no leader."
 // @Router /config [post]
 func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 	if h.svr.GetConfig().EnableDynamicConfig {
@@ -206,6 +209,7 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {string} string "The config is updated."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
+// @Failure 503 {string} string "PD server has no leader."
 // @Router /config/schedule [post]
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 	if h.svr.GetConfig().EnableDynamicConfig {
@@ -259,6 +263,7 @@ func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {string} string "The config is updated."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
+// @Failure 503 {string} string "PD server has no leader."
 // @Router /config/replicate [post]
 func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 	if h.svr.GetConfig().EnableDynamicConfig {
@@ -313,6 +318,7 @@ func (h *confHandler) GetLabelProperty(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Success 200 {string} string "The config is updated."
 // @Failure 500 {string} string "PD server failed to proceed the request."
+// @Failure 503 {string} string "PD server has no leader."
 // @Router /config/label-property [post]
 func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
@@ -401,6 +407,8 @@ func (h *confHandler) GetClusterVersion(w http.ResponseWriter, r *http.Request) 
 // @Param body body object string "json params"
 // @Produce json
 // @Success 200 {string} string
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Failure 503 {string} string "PD server has no leader."
 // @Router /config/cluster-version [post]
 func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
