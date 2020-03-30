@@ -206,7 +206,8 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 
 	// swagger docs
 	swaggerHandler := swaggerserver.Handler()
-	apiRouter.PathPrefix("/swagger").Handler(swaggerHandler).Methods("GET")
+	apiRouter.PathPrefix("/swagger/").Handler(swaggerHandler)
+	apiRouter.Path("/swagger").Subrouter().StrictSlash(true).Handle("/", swaggerHandler)
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
