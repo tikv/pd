@@ -4,7 +4,6 @@ go 1.13
 
 require (
 	github.com/BurntSushi/toml v0.3.1
-	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/chzyer/logex v1.1.10 // indirect
 	github.com/chzyer/readline v0.0.0-20171208011716-f6d7a1f6fbf3
 	github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1 // indirect
