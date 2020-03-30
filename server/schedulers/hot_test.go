@@ -30,7 +30,7 @@ import (
 )
 
 func init() {
-	randomLowBound = 1
+	schedulePeerPr = 1.0
 }
 
 var _ = Suite(&testHotWriteRegionSchedulerSuite{})

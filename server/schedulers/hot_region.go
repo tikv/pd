@@ -75,10 +75,8 @@ const (
 	maxHotScheduleInterval = 20 * time.Second
 )
 
-var (
-	randomUpperBound = 3
-	randomLowBound   = 0
-)
+// schedulePeerPr the probability of schedule the hot peer.
+var schedulePeerPr = 0.66
 
 type hotScheduler struct {
 	name string
@@ -404,9 +402,9 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 
 func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
 	// prefer to balance by peer
-	seed := h.r.Intn(randomUpperBound-randomLowBound) + randomLowBound
+	s := h.r.Intn(100)
 	switch {
-	case seed > 0:
+	case s < int(schedulePeerPr*100):
 		peerSolver := newBalanceSolver(h, cluster, write, movePeer)
 		ops := peerSolver.solve()
 		if len(ops) > 0 {
