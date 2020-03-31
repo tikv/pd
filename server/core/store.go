@@ -32,6 +32,7 @@ const (
 	storePersistInterval = 5 * time.Minute
 	lowSpaceThreshold    = 100 * (1 << 10) // 100 GB
 	highSpaceThreshold   = 300 * (1 << 10) // 300 GB
+	mb                   = 1 << 20         // megabyte
 )
 
 // StoreInfo contains information about a store.
@@ -276,8 +277,8 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	var score float64
 	var amplification float64
-	available := float64(s.GetAvailable()) / (1 << 20)
-	used := float64(s.GetUsedSize()) / (1 << 20)
+	available := float64(s.GetAvailable()) / mb
+	used := float64(s.GetUsedSize()) / mb
 
 	if s.GetRegionSize() == 0 {
 		amplification = 1
@@ -325,7 +326,7 @@ func (s *StoreInfo) StorageSize() uint64 {
 // GetSpaceThreshold returns the threshold of low/high space in MB.
 func (s *StoreInfo) GetSpaceThreshold(spaceRatio, spaceThreshold float64) float64 {
 	var min float64 = spaceThreshold
-	capacity := float64(s.GetCapacity()) / (1 << 20)
+	capacity := float64(s.GetCapacity()) / mb
 	space := capacity * (1.0 - spaceRatio)
 	if min > space {
 		min = space
@@ -335,7 +336,7 @@ func (s *StoreInfo) GetSpaceThreshold(spaceRatio, spaceThreshold float64) float6
 
 // IsLowSpace checks if the store is lack of space.
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
-	available := float64(s.GetAvailable()) / (1 << 20)
+	available := float64(s.GetAvailable()) / mb
 	return s.GetStoreStats() != nil && available <= s.GetSpaceThreshold(lowSpaceRatio, lowSpaceThreshold)
 }
 
