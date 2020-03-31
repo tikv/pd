@@ -748,6 +748,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 		return err
 	}
 	old := s.scheduleOpt.Load()
+	cfg.SchedulersPayload = nil
 	s.scheduleOpt.Store(&cfg)
 	if err := s.scheduleOpt.Persist(s.storage); err != nil {
 		s.scheduleOpt.Store(old)
@@ -1295,38 +1296,36 @@ func (s *Server) updateComponentConfig(cfg string) error {
 		return err
 	}
 	var err error
-	if !reflect.DeepEqual(s.GetScheduleConfig(), &new.Schedule) {
-		if err = new.Schedule.Validate(); err != nil {
-			return err
-		}
+	old := *s.GetConfig()
+	// SchedulersPayload doesn't need to be updated.
+	new.Schedule.SchedulersPayload = nil
+	old.Schedule.SchedulersPayload = nil
+	if !reflect.DeepEqual(old.Schedule, new.Schedule) {
 		err = s.SetScheduleConfig(new.Schedule)
 		saveFile = true
 	}
 
-	if !reflect.DeepEqual(s.GetReplicationConfig(), &new.Replication) {
-		if err = new.Replication.Validate(); err != nil {
-			return err
-		}
+	if !reflect.DeepEqual(old.Replication, new.Replication) {
 		err = s.SetReplicationConfig(new.Replication)
 		saveFile = true
 	}
 
-	if !reflect.DeepEqual(s.GetPDServerConfig(), &new.PDServerCfg) {
+	if !reflect.DeepEqual(old.PDServerCfg, new.PDServerCfg) {
 		err = s.SetPDServerConfig(new.PDServerCfg)
 		saveFile = true
 	}
 
-	if !reflect.DeepEqual(s.GetClusterVersion(), new.ClusterVersion) {
+	if !reflect.DeepEqual(old.ClusterVersion, new.ClusterVersion) {
 		err = s.SetClusterVersion(new.ClusterVersion.String())
 		saveFile = true
 	}
 
-	if !reflect.DeepEqual(s.GetLabelProperty(), new.LabelProperty) {
+	if !reflect.DeepEqual(old.LabelProperty, new.LabelProperty) {
 		err = s.SetLabelPropertyConfig(new.LabelProperty)
 		saveFile = true
 	}
 
-	if !reflect.DeepEqual(s.GetLogConfig(), &new.Log) {
+	if !reflect.DeepEqual(old.Log, new.Log) {
 		err = s.SetLogConfig(new.Log)
 		saveFile = true
 	}

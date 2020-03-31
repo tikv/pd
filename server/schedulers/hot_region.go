@@ -71,10 +71,12 @@ const (
 	// HotWriteRegionType is hot write region scheduler type.
 	HotWriteRegionType = "hot-write-region"
 
-	hotRegionLimitFactor   = 0.75
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
 )
+
+// schedulePeerPr the probability of schedule the hot peer.
+var schedulePeerPr = 0.66
 
 type hotScheduler struct {
 	name string
@@ -153,12 +155,12 @@ func (h *hotScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (h *hotScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
-	return h.OpController.OperatorCount(operator.OpHotRegion) < minUint64(h.leaderLimit, cluster.GetHotRegionScheduleLimit()) &&
+	return h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetHotRegionScheduleLimit() &&
 		h.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
 func (h *hotScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
-	return h.OpController.OperatorCount(operator.OpHotRegion) < minUint64(h.peerLimit, cluster.GetHotRegionScheduleLimit())
+	return h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetHotRegionScheduleLimit()
 }
 
 func (h *hotScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
@@ -400,14 +402,19 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 
 func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
 	// prefer to balance by peer
-	peerSolver := newBalanceSolver(h, cluster, write, movePeer)
-	ops := peerSolver.solve()
-	if len(ops) > 0 {
-		return ops
+	s := h.r.Intn(100)
+	switch {
+	case s < int(schedulePeerPr*100):
+		peerSolver := newBalanceSolver(h, cluster, write, movePeer)
+		ops := peerSolver.solve()
+		if len(ops) > 0 {
+			return ops
+		}
+	default:
 	}
 
 	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
-	ops = leaderSolver.solve()
+	ops := leaderSolver.solve()
 	if len(ops) > 0 {
 		return ops
 	}
@@ -966,7 +973,6 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
 		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, IsLearner: srcPeer.IsLearner}
-		bs.sche.peerLimit = bs.sche.adjustBalanceLimit(bs.cur.srcStoreID, bs.stLoadDetail)
 		op, err = operator.CreateMovePeerOperator(
 			"move-hot-"+bs.rwTy.String()+"-region",
 			bs.cluster,
@@ -981,7 +987,6 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
 			return nil, nil
 		}
-		bs.sche.leaderLimit = bs.sche.adjustBalanceLimit(bs.cur.srcStoreID, bs.stLoadDetail)
 		op, err = operator.CreateTransferLeaderOperator(
 			"transfer-hot-"+bs.rwTy.String()+"-leader",
 			bs.cluster,
@@ -1011,20 +1016,6 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	}
 
 	return []*operator.Operator{op}, []Influence{infl}
-}
-
-func (h *hotScheduler) adjustBalanceLimit(storeID uint64, loadDetail map[uint64]*storeLoadDetail) uint64 {
-	srcStoreStatistics := loadDetail[storeID]
-
-	var hotRegionTotalCount int
-	for _, m := range loadDetail {
-		hotRegionTotalCount += len(m.HotPeers)
-	}
-
-	avgRegionCount := float64(hotRegionTotalCount) / float64(len(loadDetail))
-	// Multiplied by hotRegionLimitFactor to avoid transfer back and forth
-	limit := uint64((float64(len(srcStoreStatistics.HotPeers)) - avgRegionCount) * hotRegionLimitFactor)
-	return maxUint64(limit, 1)
 }
 
 func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
