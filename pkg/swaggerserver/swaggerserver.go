@@ -12,3 +12,31 @@
 // limitations under the License.
 
 package swaggerserver
+
+import (
+	"context"
+	"github.com/pingcap/pd/v4/server"
+	"net/http"
+)
+
+const swaggerPrefix = "/swagger/"
+
+var (
+	swaggerServiceGroup = server.ServiceGroup{
+		Name:       "swagger",
+		Version:    "v1",
+		IsCore:     false,
+		PathPrefix: swaggerPrefix,
+	}
+)
+
+// GetServiceBuilders returns all ServiceBuilders required by Swagger
+func GetServiceBuilders() []server.HandlerBuilder {
+	return []server.HandlerBuilder{
+		func(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
+			swaggerHandler := http.NewServeMux()
+			swaggerHandler.Handle(swaggerPrefix, Handler())
+			return swaggerHandler, swaggerServiceGroup, nil
+		},
+	}
+}

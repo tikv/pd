@@ -26,7 +26,6 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/swaggerserver"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -203,11 +202,6 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	apiRouter.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
 	apiRouter.Handle("/debug/pprof/block", pprof.Handler("block"))
 	apiRouter.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
-
-	// swagger docs
-	swaggerHandler := swaggerserver.Handler()
-	apiRouter.PathPrefix("/swagger/").Handler(swaggerHandler)
-	apiRouter.Path("/swagger").Subrouter().StrictSlash(true).Handle("/", swaggerHandler)
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
