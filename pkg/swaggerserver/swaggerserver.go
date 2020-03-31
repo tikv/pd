@@ -33,6 +33,6 @@ var (
 // NewHandler creates a HTTP handler for Swagger.
 func NewHandler(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
 	swaggerHandler := http.NewServeMux()
-	swaggerHandler.Handle(swaggerPrefix, Handler())
+	swaggerHandler.Handle(swaggerPrefix, handler())
 	return swaggerHandler, swaggerServiceGroup, nil
 }

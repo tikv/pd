@@ -19,9 +19,8 @@ import (
 	"net/http"
 )
 
-// Handler return empty swagger handler
-func Handler() http.Handler {
+func handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "Swagger UI is not built. Use `SWAGGER=1 make`.\n")
+		_, _ = io.WriteString(w, "Swagger UI is not built. Try `make` without `SWAGGER=0`.\n")
 	})
 }
