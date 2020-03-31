@@ -99,6 +99,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	args = []string{"-u", pdAddr, "config", "set", "hot-region-cache-hits-threshold", "0"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
+	time.Sleep(20 * time.Millisecond)
 
 	testHot := func(hotRegionID, hotStoreID uint64, hotType string) {
 		args = []string{"-u", pdAddr, "hot", hotType}
