@@ -702,7 +702,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	// if the space of store 5 is normal, we can balance region to store 5
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], operator.OpBalance, 1, 5)
 
-	// the used size of  store 5 reach (highSpace, lowSpace)
+	// the used size of store 5 reach (highSpace, lowSpace)
 	origin := tc.GetStore(5)
 	stats := origin.GetStoreStats()
 	stats.Capacity = 50
@@ -713,7 +713,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 
 	// the scheduler first picks store 1 as source store,
 	// and store 5 as target store, but cannot pass `shouldBalance`.
-	// Then it will try store4.
+	// Then it will try store 4.
 	testutil.CheckTransferPeer(c, sb.Schedule(tc)[0], operator.OpBalance, 1, 4)
 }
 

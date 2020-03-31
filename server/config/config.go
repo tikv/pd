@@ -662,7 +662,7 @@ const (
 	defaultStoreBalanceRate       = 15
 	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
-	defaultHighSpaceRatio         = 0.6
+	defaultHighSpaceRatio         = 0.7
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
