@@ -34,7 +34,7 @@ DEADLOCK_DISABLE := $$(\
 
 BUILD_TAGS ?=
 
-ifeq ($(SWAGGER), 1)
+ifneq ($(SWAGGER), 0)
 	BUILD_TAGS += swagger_server
 endif
 
@@ -62,7 +62,7 @@ build: pd-server pd-ctl
 tools: pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench
 pd-server: export GO111MODULE=on
 pd-server:
-ifeq ($(SWAGGER), 1)
+ifneq ($(SWAGGER), 0)
 	make swagger-spec
 endif
 ifneq ($(OS),Windows_NT)
