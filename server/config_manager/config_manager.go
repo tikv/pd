@@ -207,8 +207,9 @@ func (c *ConfigManager) CreateConfig(version *configpb.Version, component, compo
 	latestVersion := c.GetLatestVersion(component, componentID)
 	initVersion := &configpb.Version{Local: 0, Global: 0}
 	if localCfgs, ok := c.LocalCfgs[component]; ok {
-		if _, ok := localCfgs[componentID]; ok {
+		if local, ok := localCfgs[componentID]; ok {
 			// restart a component
+			local.updateLocalConfig(cfg)
 			if versionEqual(initVersion, version) {
 				status = &configpb.Status{Code: configpb.StatusCode_OK}
 			} else {
@@ -539,6 +540,31 @@ func (lc *LocalConfig) getUpdateEntries() map[string]*EntryValue {
 func (lc *LocalConfig) updateEntry(entry *configpb.ConfigEntry, version *configpb.Version) {
 	entries := lc.getUpdateEntries()
 	entries[entry.GetName()] = NewEntryValue(entry, version)
+}
+
+// updateLocalConfig updates a LocalConfig when there is a new config item.
+func (lc *LocalConfig) updateLocalConfig(cfg string) error {
+	new := make(map[string]interface{})
+	if err := decodeConfigs(cfg, new); err != nil {
+		return err
+	}
+	old := lc.getConfigs()
+	updateItem(new, old)
+	return nil
+}
+
+func updateItem(new, old map[string]interface{}) {
+	for key := range new {
+		if sub, ok := old[key]; ok {
+			oldSub, ok := sub.(map[string]interface{})
+			newSub, ok1 := new[key].(map[string]interface{})
+			if ok && ok1 {
+				updateItem(newSub, oldSub)
+			}
+		} else {
+			old[key] = new[key]
+		}
+	}
 }
 
 // GetVersion return the local config version for a component.
