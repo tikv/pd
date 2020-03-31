@@ -97,7 +97,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	serviceBuilders = append(serviceBuilders, swaggerserver.GetServiceBuilders()...)
+	serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", zap.Error(err))

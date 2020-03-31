@@ -30,13 +30,9 @@ var (
 	}
 )
 
-// GetServiceBuilders returns all ServiceBuilders required by Swagger
-func GetServiceBuilders() []server.HandlerBuilder {
-	return []server.HandlerBuilder{
-		func(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
-			swaggerHandler := http.NewServeMux()
-			swaggerHandler.Handle(swaggerPrefix, Handler())
-			return swaggerHandler, swaggerServiceGroup, nil
-		},
-	}
+// NewHandler creates a HTTP handler for Swagger.
+func NewHandler(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
+	swaggerHandler := http.NewServeMux()
+	swaggerHandler.Handle(swaggerPrefix, Handler())
+	return swaggerHandler, swaggerServiceGroup, nil
 }
