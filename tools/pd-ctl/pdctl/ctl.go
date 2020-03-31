@@ -86,6 +86,7 @@ func getBasicCmd() *cobra.Command {
 		command.NewLogCommand(),
 		command.NewPluginCommand(),
 		command.NewComponentCommand(),
+		command.NewCompletionCommand(),
 	)
 
 	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true
