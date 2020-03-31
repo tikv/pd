@@ -63,7 +63,7 @@ tools: pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench
 pd-server: export GO111MODULE=on
 pd-server:
 ifeq ($(SWAGGER), 1)
-	make swagger_spec
+	make swagger-spec
 endif
 ifneq ($(OS),Windows_NT)
 	./scripts/embed-dashboard-ui.sh
@@ -140,7 +140,7 @@ lint:
 	@echo "linting"
 	CGO_ENABLED=0 revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
-swagger_spec: install-tools
+swagger-spec: install-tools
 	go mod vendor
 	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
 
