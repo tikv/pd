@@ -18,8 +18,6 @@ import (
 	"net/http"
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/v4/server"
@@ -44,28 +42,19 @@ var (
 // GetServiceBuilders returns all ServiceBuilders required by Dashboard
 func GetServiceBuilders() []server.HandlerBuilder {
 	var s *apiserver.Service
+	redirector := NewRedirector()
+
 	return []server.HandlerBuilder{
 		// Dashboard API Service
 		func(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, error) {
 			var err error
-			if s, err = newAPIService(srv); err != nil {
+			if s, err = newAPIService(srv, redirector); err != nil {
 				return nil, apiServiceGroup, err
 			}
 
-			srv.AddStartCallback(func() {
-				if err := s.Start(ctx); err != nil {
-					log.Error("Can not start dashboard server", zap.Error(err))
-				} else {
-					log.Info("Dashboard server is started", zap.String("path", uiServiceGroup.PathPrefix))
-				}
-			})
-			srv.AddCloseCallback(func() {
-				if err := s.Stop(context.Background()); err != nil {
-					log.Error("Stop dashboard server error", zap.Error(err))
-				} else {
-					log.Info("Dashboard server is stopped")
-				}
-			})
+			m := NewManager(srv, s, redirector)
+			srv.AddStartCallback(m.start)
+			srv.AddCloseCallback(m.stop)
 
 			return apiserver.Handler(s), apiServiceGroup, nil
 		},

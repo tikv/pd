@@ -233,9 +233,9 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	log.Info("put store ok", zap.Stringer("store", store))
 	v := rc.OnStoreVersionChange()
 	if s.GetConfig().EnableDynamicConfig && v != nil {
-		err := s.updateConfigManager("cluster-version", v.String())
+		err := s.UpdateConfigManager("cluster-version", v.String())
 		if err != nil {
-			log.Error("failed to update the cluster version", zap.Error(err))
+			log.Error("failed to update the cluster version in config manager", zap.Error(err))
 		}
 	}
 	CheckPDVersion(s.scheduleOpt)

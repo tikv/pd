@@ -205,8 +205,11 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 		apiRouter.HandleFunc("/component/ids/{component}", func(w http.ResponseWriter, r *http.Request) {
 			vars := mux.Vars(r)
 			varName := vars["component"]
-			componentIDs := svr.GetConfigManager().GetComponentIDs(varName)
-			rd.JSON(w, http.StatusOK, componentIDs)
+			if varName == "all" {
+				rd.JSON(w, http.StatusOK, svr.GetConfigManager().GetAllComponentIDs())
+			} else {
+				rd.JSON(w, http.StatusOK, svr.GetConfigManager().GetComponentIDs(varName))
+			}
 		}).Methods("GET")
 		return rootRouter, func() { lazyComponentRouter(ctx, svr, apiRouter) }
 	}

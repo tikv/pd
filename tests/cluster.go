@@ -69,9 +69,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 		return nil, err
 	}
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler}
-	if cfg.EnableDashboard {
-		serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	}
+	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		return nil, err

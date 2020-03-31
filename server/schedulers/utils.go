@@ -208,6 +208,10 @@ type storeLoad struct {
 	ByteRate float64
 	KeyRate  float64
 	Count    float64
+
+	ExpByteRate float64
+	ExpKeyRate  float64
+	ExpCount    float64
 }
 
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
@@ -350,6 +354,7 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	}
 	return &statistics.HotPeersStat{
 		TotalBytesRate: li.LoadPred.Current.ByteRate,
+		TotalKeysRate:  li.LoadPred.Current.KeyRate,
 		Count:          len(li.HotPeers),
 		Stats:          peers,
 	}
