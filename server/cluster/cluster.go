@@ -1594,6 +1594,7 @@ func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 }
 
 // DialClient used to dial http request.
+// Alreadly supports tls in InitHTTPClient(pd-server/main.go)
 var DialClient = &http.Client{
 	Timeout: clientTimeout,
 	Transport: &http.Transport{
