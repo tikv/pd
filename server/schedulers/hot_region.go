@@ -589,8 +589,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		if detail.LoadPred.min().ByteRate > bs.sche.conf.GetToleranceRatio()*detail.LoadPred.Future.ExpByteRate &&
-			detail.LoadPred.min().KeyRate > bs.sche.conf.GetToleranceRatio()*detail.LoadPred.Future.ExpKeyRate {
+		if detail.LoadPred.min().ByteRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpByteRate &&
+			detail.LoadPred.min().KeyRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpKeyRate {
 			ret[id] = detail
 			balanceHotRegionCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 		}
@@ -758,8 +758,8 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	for _, store := range candidates {
 		if filter.Target(bs.cluster, store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
-			if detail.LoadPred.max().ByteRate*bs.sche.conf.GetToleranceRatio() < detail.LoadPred.Future.ExpByteRate &&
-				detail.LoadPred.max().KeyRate*bs.sche.conf.GetToleranceRatio() < detail.LoadPred.Future.ExpKeyRate {
+			if detail.LoadPred.max().ByteRate*bs.sche.conf.GetDstToleranceRatio() < detail.LoadPred.Future.ExpByteRate &&
+				detail.LoadPred.max().KeyRate*bs.sche.conf.GetDstToleranceRatio() < detail.LoadPred.Future.ExpKeyRate {
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}

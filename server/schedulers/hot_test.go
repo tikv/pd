@@ -302,7 +302,8 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
-	hb.(*hotScheduler).conf.SetToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	opt.HotRegionCacheHitsThreshold = 0
 
 	tc := mockcluster.NewCluster(opt)
@@ -585,7 +586,8 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	hb, err := schedule.CreateScheduler(HotReadRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
-	hb.(*hotScheduler).conf.SetToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	opt.HotRegionCacheHitsThreshold = 0
 
 	tc := mockcluster.NewCluster(opt)
