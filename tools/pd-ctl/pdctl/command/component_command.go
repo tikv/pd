@@ -136,14 +136,16 @@ func getComponentIDCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func postComponentConfigData(cmd *cobra.Command, componentInfo, key, value string) error {
-	var val interface{}
+func postComponentConfigData(cmd *cobra.Command, componentInfo string, kvPairs map[string]string) error {
 	data := make(map[string]interface{})
-	val, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		val = value
+	for k, v := range kvPairs {
+		var val interface{}
+		val, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			val = v
+		}
+		data[k] = val
 	}
-	data[key] = val
 	data["componentInfo"] = componentInfo
 
 	reqData, err := json.Marshal(&data)
@@ -160,12 +162,16 @@ func postComponentConfigData(cmd *cobra.Command, componentInfo, key, value strin
 }
 
 func setComponentConfigCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 3 {
-		cmd.Println(cmd.UsageString())
+	if len(args) < 3 || len(args)%2 != 1 {
+		cmd.Usage()
 		return
 	}
-	componentInfo, opt, val := args[0], args[1], args[2]
-	err := postComponentConfigData(cmd, componentInfo, opt, val)
+	kvPairs := make(map[string]string)
+	for i := 1; i < len(args); i += 2 {
+		kvPairs[args[i]] = args[i+1]
+	}
+	componentInfo := args[0]
+	err := postComponentConfigData(cmd, componentInfo, kvPairs)
 	if err != nil {
 		cmd.Printf("Failed to set component config: %s\n", err)
 		return

@@ -22,6 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tests/pdctl"
 )
@@ -42,7 +43,7 @@ func (s *componentTestSuite) SetUpSuite(c *C) {
 func (s *componentTestSuite) TestComponent(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2)
+	cluster, err := tests.NewTestCluster(ctx, 2, func(cfg *config.Config) { cfg.EnableDynamicConfig = true })
 	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
@@ -107,5 +108,19 @@ func (s *componentTestSuite) TestComponent(c *C) {
 		c.Assert(strings.Contains(obtain, "region-schedule-limit = 1"), IsTrue)
 		c.Assert(strings.Contains(obtain, `location-labels = ["zone", "rack"]`), IsTrue)
 		c.Assert(strings.Contains(obtain, `level = "warn"`), IsTrue)
+	}
+
+	// change multi config at one time
+	args = []string{"-u", pdAddrs[0], "component", "set", "pd", "schedule.high-space-ratio", "0.3", "schedule.low-space-ratio", "0.4"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	time.Sleep(20 * time.Millisecond)
+	for i := 0; i < len(pdAddrs); i++ {
+		args = []string{"-u", pdAddrs[0], "component", "show", pdAddrs[i][7:]}
+		_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+		c.Assert(err, IsNil)
+		obtain := string(output)
+		c.Assert(strings.Contains(obtain, "high-space-ratio = 0.3"), IsTrue)
+		c.Assert(strings.Contains(obtain, "low-space-ratio = 0.4"), IsTrue)
 	}
 }
