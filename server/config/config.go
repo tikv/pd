@@ -208,7 +208,7 @@ const (
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 
-	defaultEnableDynamicConfig = true
+	defaultEnableDynamicConfig = false
 	defaultDashboardAddress    = "auto"
 
 	defaultDRWaitStoreTimeout = time.Minute
