@@ -215,7 +215,7 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+	pdAddr := cluster.GetConfig().GetClientURLs()
 	cmd := pdctl.InitCommand()
 
 	store := metapb.Store{
