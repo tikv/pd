@@ -127,7 +127,7 @@ func redirectUpdateReq(ctx context.Context, client pd.ConfigClient, cm *configma
 		configEntry := &configpb.ConfigEntry{Name: e.key, Value: e.value}
 		configEntries = append(configEntries, configEntry)
 	}
-	version := &configpb.Version{Global: cm.GlobalCfgs[server.Component].GetVersion()}
+	version := &configpb.Version{Global: cm.GetGlobalVersion(cm.GetGlobalConfigs(server.Component))}
 	kind := &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: server.Component}}}
 	status, _, err := client.Update(ctx, version, kind, configEntries)
 	if err != nil {

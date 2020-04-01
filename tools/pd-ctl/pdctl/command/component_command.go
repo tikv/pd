@@ -64,7 +64,7 @@ func NewDeleteComponentConfigCommand() *cobra.Command {
 // NewSetComponentConfigCommand return a set subcommand of componentCmd.
 func NewSetComponentConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "set [<component>|<component ID>] <option> <value>",
+		Use:   "set [<component>|<component ID>] <option> <value> [<option> <value>]...",
 		Short: "set the component config (set option with value)",
 		Run:   setComponentConfigCommandFunc,
 	}

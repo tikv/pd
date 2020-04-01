@@ -173,14 +173,12 @@ func updateBody(s *server.Server, component, componentID string, kind string, en
 	var version *configpb.Version
 	var k *configpb.ConfigKind
 	cm := s.GetConfigManager()
-	cm.RLock()
-	defer cm.RUnlock()
 	switch kind {
 	case localKind:
-		version = cm.LocalCfgs[component][componentID].GetVersion()
+		version = cm.GetLocalVersion(cm.GetLocalConfig(component, componentID))
 		k = &configpb.ConfigKind{Kind: &configpb.ConfigKind_Local{Local: &configpb.Local{ComponentId: componentID}}}
 	case globalKind:
-		version = &configpb.Version{Global: cm.GlobalCfgs[component].GetVersion()}
+		version = &configpb.Version{Global: cm.GetGlobalVersion(cm.GetGlobalConfigs(component))}
 		k = &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: component}}}
 	default:
 		return "", errors.New("no valid kind")
@@ -205,9 +203,7 @@ func handleComponentPost(s *server.Server, r *http.Request) (*http.Request, int,
 	json.NewDecoder(r.Body).Decode(&req)
 	cm := s.GetConfigManager()
 	componentInfo := getComponentInfo(req)
-	cm.RLock()
 	component = cm.GetComponent(componentInfo)
-	cm.RUnlock()
 	if component == "" {
 		if strings.Contains(componentInfo, ":") {
 			return nil, http.StatusBadRequest, errors.Errorf("invalid component id: %v", componentInfo)
@@ -252,10 +248,8 @@ func handleComponentGet(s *server.Server, r *http.Request) (*http.Request, int, 
 		return nil, http.StatusBadRequest, errors.Errorf("field %s is not present", varName)
 	}
 	cm := s.GetConfigManager()
-	cm.RLock()
 	component = cm.GetComponent(componentID)
 	version := cm.GetLatestVersion(component, componentID)
-	cm.RUnlock()
 	if component == "" {
 		return nil, http.StatusBadRequest, errors.Errorf("cannot find component with component ID: %s", componentID)
 	}
@@ -280,10 +274,8 @@ func handleComponentDelete(s *server.Server, r *http.Request) (*http.Request, in
 		return nil, http.StatusBadRequest, errors.Errorf("field %s is not present", varName)
 	}
 	cm := s.GetConfigManager()
-	cm.RLock()
 	component = cm.GetComponent(componentID)
 	version := cm.GetLatestVersion(component, componentID)
-	cm.RUnlock()
 	clusterID := s.ClusterID()
 	getURI := fmt.Sprintf("/component?header.cluster_id=%d&kind.local.component_id=%s&version.local=%d&version.global=%d",
 		clusterID, componentID, version.GetLocal(), version.GetGlobal())

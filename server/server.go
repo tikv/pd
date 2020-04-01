@@ -294,7 +294,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
+	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
 
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -365,6 +365,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
+	if !s.cfg.EnableDynamicConfig {
+		s.cluster.SetConfigCheck()
+	}
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
 	// Run callbacks
@@ -582,7 +585,9 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, err
 	}
 
-	return &pdpb.BootstrapResponse{}, nil
+	return &pdpb.BootstrapResponse{
+		ReplicateStatus: s.cluster.GetReplicateMode().GetReplicateStatus(),
+	}, nil
 }
 
 func (s *Server) createRaftCluster() error {
@@ -912,18 +917,16 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 
 // UpdateConfigManager is used to update config manager directly.
 func (s *Server) UpdateConfigManager(name, value string) error {
-	configManager := s.GetConfigManager()
-	globalVersion := configManager.GetGlobalConfigs(Component).GetVersion()
+	cm := s.GetConfigManager()
+	globalVersion := cm.GetGlobalVersion(cm.GetGlobalConfigs(Component))
 	version := &configpb.Version{Global: globalVersion}
 	entries := []*configpb.ConfigEntry{{Name: name, Value: value}}
-	configManager.Lock()
-	_, status := configManager.UpdateGlobal(Component, version, entries)
-	configManager.Unlock()
+	_, status := cm.UpdateGlobal(Component, version, entries)
 	if status.GetCode() != configpb.StatusCode_OK {
 		return errors.New(status.GetMessage())
 	}
 
-	return configManager.Persist(s.GetStorage())
+	return cm.Persist(s.GetStorage())
 }
 
 // GetLabelProperty returns the whole label property config.
