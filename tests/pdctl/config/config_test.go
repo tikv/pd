@@ -16,6 +16,7 @@ package config_test
 import (
 	"context"
 	"encoding/json"
+	"io/ioutil"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tests/pdctl"
 )
@@ -209,4 +211,94 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args1 = []string{"-u", pdAddr, "config", "set", "enable-placement-rules", "true"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
+}
+
+func (s *configTestSuite) TestPlacementRules(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctl.InitCommand()
+
+	store := metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	defer cluster.Destroy()
+
+	_, output, err := pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+
+	// wait config manager reload
+	time.Sleep(time.Second)
+
+	// test show
+	var rules []placement.Rule
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "show")
+	c.Assert(err, IsNil)
+	err = json.Unmarshal(output, &rules)
+	c.Assert(err, IsNil)
+	c.Assert(rules, HasLen, 1)
+	c.Assert(rules[0].Key(), Equals, [2]string{"pd", "default"})
+
+	f, _ := ioutil.TempFile("/tmp", "pd_tests")
+	fname := f.Name()
+	f.Close()
+
+	// test load
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
+	c.Assert(err, IsNil)
+	b, _ := ioutil.ReadFile(fname)
+	c.Assert(json.Unmarshal(b, &rules), IsNil)
+	c.Assert(rules, HasLen, 1)
+	c.Assert(rules[0].Key(), Equals, [2]string{"pd", "default"})
+
+	// test save
+	rules = append(rules, placement.Rule{
+		GroupID: "pd",
+		ID:      "test1",
+		Role:    "voter",
+		Count:   1,
+	}, placement.Rule{
+		GroupID: "test-group",
+		ID:      "test2",
+		Role:    "voter",
+		Count:   2,
+	})
+	b, _ = json.Marshal(rules)
+	ioutil.WriteFile(fname, b, 0644)
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
+	c.Assert(err, IsNil)
+
+	// test show group
+	var rules2 []placement.Rule
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "show", "--group=pd")
+	c.Assert(err, IsNil)
+	err = json.Unmarshal(output, &rules2)
+	c.Assert(err, IsNil)
+	c.Assert(rules2, HasLen, 2)
+	c.Assert(rules2[0].Key(), Equals, [2]string{"pd", "default"})
+	c.Assert(rules2[1].Key(), Equals, [2]string{"pd", "test1"})
+
+	// test delete
+	rules[0].Count = 0
+	b, _ = json.Marshal(rules)
+	ioutil.WriteFile(fname, b, 0644)
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
+	c.Assert(err, IsNil)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "show", "--group=pd")
+	c.Assert(err, IsNil)
+	err = json.Unmarshal(output, &rules)
+	c.Assert(err, IsNil)
+	c.Assert(rules, HasLen, 1)
+	c.Assert(rules[0].Key(), Equals, [2]string{"pd", "test1"})
 }
