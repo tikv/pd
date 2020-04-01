@@ -42,6 +42,12 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 	}
 }
 
+// @Tags member
+// @Summary List all PD servers in the cluster.
+// @Produce json
+// @Success 200 {object} pdpb.GetMembersResponse
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /members [get]
 func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	members, err := h.getMembers()
 	if err != nil {
@@ -82,6 +88,15 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 	return members, nil
 }
 
+// @Tags member
+// @Summary Remove a PD server from the cluster.
+// @Param name path string true "PD server name"
+// @Produce json
+// @Success 200 {string} string "The PD server is successfully removed."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The member does not exist."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /members/name/{name} [delete]
 func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
 
@@ -120,6 +135,14 @@ func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %s", name))
 }
 
+// @Tags member
+// @Summary Remove a PD server from the cluster.
+// @Param id path integer true "PD server Id"
+// @Produce json
+// @Success 200 {string} string "The PD server is successfully removed."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /members/id/{id} [delete]
 func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
@@ -144,6 +167,18 @@ func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %v", id))
 }
 
+// FIXME: details of input json body params
+// @Tags member
+// @Summary Set leader priority of a PD member.
+// @Accept json
+// @Param name path string true "PD server name"
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "The leader priority is updated."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The member does not exist."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /members/name/{name} [post]
 func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.Request) {
 	members, membersErr := h.getMembers()
 	if membersErr != nil {
@@ -198,10 +233,21 @@ func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
 	}
 }
 
+// @Tags leader
+// @Summary Get the leader PD server of the cluster.
+// @Produce json
+// @Success 200 {string} string "The transfer command is submitted."
+// @Router /leader [get]
 func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLeader())
 }
 
+// @Tags leader
+// @Summary Transfer leadership to another PD server.
+// @Produce json
+// @Success 200 {string} string "The transfer command is submitted."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /leader/resign [post]
 func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
 	err := h.svr.GetMember().ResignLeader(h.svr.Context(), h.svr.Name(), "")
 	if err != nil {
@@ -212,6 +258,13 @@ func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
+// @Tags leader
+// @Summary Transfer leadership to the specific PD server.
+// @Param nextLeader path string true "PD server that transfer leader to"
+// @Produce json
+// @Success 200 {string} string "The transfer command is submitted."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /leader/transfer/{nextLeader} [post]
 func (h *leaderHandler) Transfer(w http.ResponseWriter, r *http.Request) {
 	err := h.svr.GetMember().ResignLeader(h.svr.Context(), h.svr.Name(), mux.Vars(r)["next_leader"])
 	if err != nil {

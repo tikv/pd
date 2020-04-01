@@ -156,6 +156,12 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 	return nil
 }
 
+// @Tags diagnose
+// @Summary Diagnostic information of the cluster.
+// @Produce json
+// @Success 200 {array} Recommendation
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /diagnose [get]
 func (d *diagnoseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rdd := []*Recommendation{}
 	if err := d.membersDiagnose(&rdd); err != nil {

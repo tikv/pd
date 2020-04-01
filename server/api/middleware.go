@@ -209,6 +209,9 @@ func handleComponentPost(s *server.Server, r *http.Request) (*http.Request, int,
 	component = cm.GetComponent(componentInfo)
 	cm.RUnlock()
 	if component == "" {
+		if strings.Contains(componentInfo, ":") {
+			return nil, http.StatusBadRequest, errors.Errorf("invalid component id: %v", componentInfo)
+		}
 		component = componentInfo
 		kind = globalKind
 	} else {

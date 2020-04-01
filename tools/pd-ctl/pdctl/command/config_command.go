@@ -16,10 +16,13 @@ package command
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"net/http"
 	"path"
 	"strconv"
 
+	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/spf13/cobra"
 )
 
@@ -29,6 +32,8 @@ var (
 	replicationPrefix    = "pd/api/v1/config/replicate"
 	labelPropertyPrefix  = "pd/api/v1/config/label-property"
 	clusterVersionPrefix = "pd/api/v1/config/cluster-version"
+	rulesPrefix          = "pd/api/v1/config/rules"
+	rulePrefix           = "pd/api/v1/config/rule"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -40,6 +45,7 @@ func NewConfigCommand() *cobra.Command {
 	conf.AddCommand(NewShowConfigCommand())
 	conf.AddCommand(NewSetConfigCommand())
 	conf.AddCommand(NewDeleteConfigCommand())
+	conf.AddCommand(NewPlacementRulesCommand())
 	return conf
 }
 
@@ -309,4 +315,148 @@ func setClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 		"cluster-version": args[0],
 	}
 	postJSON(cmd, clusterVersionPrefix, input)
+}
+
+// NewPlacementRulesCommand placement rules subcommand
+func NewPlacementRulesCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "placement-rules",
+		Short: "placement rules configuration",
+	}
+	enable := &cobra.Command{
+		Use:   "enable",
+		Short: "enable placement rules",
+		Run:   enablePlacementRulesFunc,
+	}
+	disable := &cobra.Command{
+		Use:   "disable",
+		Short: "disable placement rules",
+		Run:   disablePlacementRulesFunc,
+	}
+	show := &cobra.Command{
+		Use:   "show",
+		Short: "show placement rules",
+		Run:   getPlacementRulesFunc,
+	}
+	show.Flags().String("group", "", "group id")
+	show.Flags().String("id", "", "rule id")
+	show.Flags().String("region", "", "region id")
+	load := &cobra.Command{
+		Use:   "load",
+		Short: "load placement rules to a file",
+		Run:   getPlacementRulesFunc,
+	}
+	load.Flags().String("group", "", "group id")
+	load.Flags().String("id", "", "rule id")
+	load.Flags().String("region", "", "region id")
+	load.Flags().String("out", "rules.json", "the filename contains rules")
+	save := &cobra.Command{
+		Use:   "save",
+		Short: "save rules from file",
+		Run:   putPlacementRulesFunc,
+	}
+	save.Flags().String("in", "rules.json", "the filename contains rules")
+	c.AddCommand(enable, disable, show, load, save)
+	return c
+}
+
+func enablePlacementRulesFunc(cmd *cobra.Command, args []string) {
+	err := postConfigDataWithPath(cmd, "enable-placement-rules", "true", configPrefix)
+	if err != nil {
+		cmd.Printf("Failed to set config: %s\n", err)
+		return
+	}
+	cmd.Println("Success!")
+}
+
+func disablePlacementRulesFunc(cmd *cobra.Command, args []string) {
+	err := postConfigDataWithPath(cmd, "enable-placement-rules", "false", configPrefix)
+	if err != nil {
+		cmd.Printf("Failed to set config: %s\n", err)
+		return
+	}
+	cmd.Println("Success!")
+}
+
+func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
+	getFlag := func(key string) string {
+		if f := cmd.Flag(key); f != nil {
+			return f.Value.String()
+		}
+		return ""
+	}
+
+	group, id, region, file := getFlag("group"), getFlag("id"), getFlag("region"), getFlag("out")
+	var reqPath string
+	respIsList := true
+	switch {
+	case region == "" && group == "" && id == "": // all rules
+		reqPath = rulesPrefix
+	case region == "" && group == "" && id != "":
+		cmd.Println(`"id" should be specified along with "group"`)
+		return
+	case region == "" && group != "" && id == "": // all rules in a group
+		reqPath = path.Join(rulesPrefix, "group", group)
+	case region == "" && group != "" && id != "": // single rule
+		reqPath, respIsList = path.Join(rulePrefix, group, id), false
+	case region != "" && group == "" && id == "": // rules matches a region
+		reqPath = path.Join(rulesPrefix, "region", region)
+	default:
+		cmd.Println(`"region" should not be specified with "group" or "id" at the same time`)
+		return
+	}
+	res, err := doRequest(cmd, reqPath, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	if file == "" {
+		cmd.Println(res)
+		return
+	}
+	if !respIsList {
+		res = "[\n" + res + "]\n"
+	}
+	err = ioutil.WriteFile(file, []byte(res), 0644)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println("rules saved to file " + file)
+}
+
+func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
+	var file string
+	if f := cmd.Flag("in"); f != nil {
+		file = f.Value.String()
+	}
+	content, err := ioutil.ReadFile(file)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	var rules []*placement.Rule
+	if err = json.Unmarshal(content, &rules); err != nil {
+		cmd.Println(err)
+		return
+	}
+	for _, r := range rules {
+		if r.Count > 0 {
+			b, _ := json.Marshal(r)
+			_, err = doRequest(cmd, rulePrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
+			if err != nil {
+				fmt.Printf("failed to save rule %s/%s: %v\n", r.GroupID, r.ID, err)
+				return
+			}
+			fmt.Printf("saved rule %s/%s\n", r.GroupID, r.ID)
+		} else {
+			_, err = doRequest(cmd, path.Join(rulePrefix, r.GroupID, r.ID), http.MethodDelete)
+			if err != nil {
+				fmt.Printf("failed to delete rule %s/%s: %v\n", r.GroupID, r.ID, err)
+				return
+			}
+			fmt.Printf("deleted rule %s/%s\n", r.GroupID, r.ID)
+		}
+	}
+	cmd.Println("Success!")
 }
