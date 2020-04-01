@@ -221,14 +221,6 @@ func (o *ScheduleOption) GetDashboardAddress() string {
 	return o.LoadPDServerConfig().DashboardAddress
 }
 
-// SetDashboardAddress sets the number of replicas for each region.
-func (o *ScheduleOption) SetDashboardAddress(address string) {
-	c := o.LoadPDServerConfig()
-	v := c.clone()
-	v.DashboardAddress = address
-	o.SetPDServerConfig(v)
-}
-
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (o *ScheduleOption) IsRemoveDownReplicaEnabled() bool {
 	return o.Load().EnableRemoveDownReplica

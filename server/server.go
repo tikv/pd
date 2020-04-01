@@ -294,7 +294,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
+	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
 
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -365,6 +365,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
+	if !s.cfg.EnableDynamicConfig {
+		s.cluster.SetConfigCheck()
+	}
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
 	// Run callbacks
@@ -582,7 +585,9 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, err
 	}
 
-	return &pdpb.BootstrapResponse{}, nil
+	return &pdpb.BootstrapResponse{
+		ReplicateStatus: s.cluster.GetReplicateMode().GetReplicateStatus(),
+	}, nil
 }
 
 func (s *Server) createRaftCluster() error {
