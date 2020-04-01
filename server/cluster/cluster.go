@@ -515,6 +515,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetKeysRead() != origin.GetKeysRead() {
 			saveCache, statsChange = true, true
 		}
+
+		if region.GetReplicateStatus().GetState() != origin.GetReplicateStatus().GetState() ||
+			region.GetReplicateStatus().GetRecoverId() != origin.GetReplicateStatus().GetRecoverId() {
+			saveCache = true
+		}
 	}
 
 	if len(writeItems) == 0 && len(readItems) == 0 && !saveKV && !saveCache && !isNew {
