@@ -951,7 +951,8 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	return nil
 }
 
-func (c *PDServerConfig) clone() *PDServerConfig {
+// Clone retruns a cloned PD server config.
+func (c *PDServerConfig) Clone() *PDServerConfig {
 	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
 	copy(runtimeServices, c.RuntimeServices)
 	return &PDServerConfig{

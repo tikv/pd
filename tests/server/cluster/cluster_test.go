@@ -162,7 +162,10 @@ func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 }
 
 func (s *clusterTestSuite) TestReloadConfig(c *C) {
-	tc, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	tc, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) {
+		conf.PDServerCfg.UseRegionStorage = true
+		conf.EnableDynamicConfig = true
+	})
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 

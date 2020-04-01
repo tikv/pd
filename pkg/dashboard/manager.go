@@ -100,6 +100,9 @@ func (m *Manager) updateInfo() {
 		m.isLeader = false
 		m.rc = nil
 		m.members = nil
+		if !m.enableDynamic {
+			m.srv.GetScheduleOption().Reload(m.srv.GetStorage())
+		}
 		return
 	}
 
@@ -184,12 +187,15 @@ func (m *Manager) setNewAddress() {
 		}
 	}
 	// set new dashboard address
-	m.rc.SetDashboardAddress(addr)
 	if m.enableDynamic {
 		if err := m.srv.UpdateConfigManager("pd-server.dashboard-address", addr); err != nil {
 			log.Error("failed to update the dashboard address in config manager", zap.Error(err))
 		}
+		return
 	}
+	cfg := m.srv.GetScheduleOption().GetPDServerConfig().Clone()
+	cfg.DashboardAddress = addr
+	m.srv.SetPDServerConfig(*cfg)
 }
 
 func (m *Manager) startService() {
