@@ -36,24 +36,21 @@ var _ = Suite(&clientTLSTestSuite{})
 
 var (
 	testTLSInfo = transport.TLSInfo{
-		KeyFile:        "./cert/pd-server-key.pem",
-		CertFile:       "./cert/pd-server.pem",
-		TrustedCAFile:  "./cert/ca.pem",
-		ClientCertAuth: true,
+		KeyFile:       "./cert/pd-server-key.pem",
+		CertFile:      "./cert/pd-server.pem",
+		TrustedCAFile: "./cert/ca.pem",
 	}
 
 	testClientTLSInfo = transport.TLSInfo{
-		KeyFile:        "./cert/client-key.pem",
-		CertFile:       "./cert/client.pem",
-		TrustedCAFile:  "./cert/ca.pem",
-		ClientCertAuth: true,
+		KeyFile:       "./cert/client-key.pem",
+		CertFile:      "./cert/client.pem",
+		TrustedCAFile: "./cert/ca.pem",
 	}
 
 	testTLSInfoExpired = transport.TLSInfo{
-		KeyFile:        "./cert-expired/pd-server-key.pem",
-		CertFile:       "./cert-expired/pd-server.pem",
-		TrustedCAFile:  "./cert-expired/ca.pem",
-		ClientCertAuth: true,
+		KeyFile:       "./cert-expired/pd-server-key.pem",
+		CertFile:      "./cert-expired/pd-server.pem",
+		TrustedCAFile: "./cert-expired/ca.pem",
 	}
 )
 
@@ -132,10 +129,9 @@ func (s *clientTLSTestSuite) testTLSReload(
 	// 1. start cluster with valid certs
 	clus, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config) {
 		conf.Security = grpcutil.SecurityConfig{
-			KeyPath:        tlsInfo.KeyFile,
-			CertPath:       tlsInfo.CertFile,
-			CAPath:         tlsInfo.TrustedCAFile,
-			ClientCertAuth: tlsInfo.ClientCertAuth,
+			KeyPath:  tlsInfo.KeyFile,
+			CertPath: tlsInfo.CertFile,
+			CAPath:   tlsInfo.TrustedCAFile,
 		}
 		conf.AdvertiseClientUrls = strings.ReplaceAll(conf.AdvertiseClientUrls, "http", "https")
 		conf.ClientUrls = strings.ReplaceAll(conf.ClientUrls, "http", "https")
