@@ -423,7 +423,8 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 
 	if h.svr.GetConfig().EnableDynamicConfig {
 		kind := &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: server.Component}}}
-		v := &configpb.Version{Global: h.svr.GetConfigManager().GlobalCfgs[server.Component].GetVersion()}
+		cm := h.svr.GetConfigManager()
+		v := &configpb.Version{Global: cm.GetGlobalVersion(cm.GetGlobalConfigs(server.Component))}
 		entry := &configpb.ConfigEntry{Name: "cluster-version", Value: version}
 		client := h.svr.GetConfigClient()
 		if client == nil {
