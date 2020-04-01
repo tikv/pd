@@ -24,6 +24,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/replicate_mode"
 )
 
 // RegionInfo records detail region info.
@@ -42,6 +43,7 @@ type RegionInfo struct {
 	approximateSize int64
 	approximateKeys int64
 	interval        *pdpb.TimeInterval
+	replicateStatus *replicate_mode.RegionReplicateStatus
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -98,6 +100,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		approximateSize: int64(regionSize),
 		approximateKeys: int64(heartbeat.GetApproximateKeys()),
 		interval:        heartbeat.GetInterval(),
+		replicateStatus: heartbeat.GetReplicateStatus(),
 	}
 
 	classifyVoterAndLearner(region)
@@ -127,6 +130,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		approximateSize: r.approximateSize,
 		approximateKeys: r.approximateKeys,
 		interval:        proto.Clone(r.interval).(*pdpb.TimeInterval),
+		replicateStatus: r.replicateStatus,
 	}
 
 	for _, opt := range opts {
@@ -391,6 +395,11 @@ func (r *RegionInfo) GetPeers() []*metapb.Peer {
 // GetRegionEpoch returns the region epoch of the region.
 func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 	return r.meta.RegionEpoch
+}
+
+// GetReplicateStatus returns the region's replicate status.
+func (r *RegionInfo) GetReplicateStatus() *replicate_mode.RegionReplicateStatus {
+	return r.replicateStatus
 }
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.
