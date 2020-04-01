@@ -294,7 +294,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
+	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
 
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,

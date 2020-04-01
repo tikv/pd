@@ -48,7 +48,7 @@ func NewConfigClient(pdAddrs []string, security SecurityOption) (ConfigClient, e
 
 // NewConfigClientWithContext creates a PD configuration client with the context.
 func NewConfigClientWithContext(ctx context.Context, pdAddrs []string, security SecurityOption) (ConfigClient, error) {
-	log.Info("[pd] create pd configuration client with endpoints", zap.Strings("pd-address", pdAddrs))
+	log.Info("[pd] create pd configuration client with endpoints", zap.Strings("pd-address", pdAddrs), zap.Reflect("cert", security))
 	base, err := newBaseClient(ctx, addrsToUrls(pdAddrs), security)
 	if err != nil {
 		return nil, err
