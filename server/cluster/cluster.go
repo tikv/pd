@@ -218,7 +218,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.replicateMode, err = replicate.NewReplicateModeManager(s.GetConfig().ReplicateMode, s.GetStorage(), s.GetAllocator(), cluster)
+	c.replicateMode, err = replicate.NewReplicateModeManager(s.GetConfig().ReplicateMode, s.GetStorage(), cluster)
 	if err != nil {
 		return err
 	}

@@ -14,15 +14,17 @@
 package replicate
 
 import (
+	"bytes"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/replicate_mode"
 	pb "github.com/pingcap/kvproto/pkg/replicate_mode"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/id"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -37,19 +39,17 @@ type ModeManager struct {
 	sync.RWMutex
 	config  config.ReplicateModeConfig
 	storage *core.Storage
-	idAlloc id.Allocator
-	stores  core.StoreSetInformer
+	cluster opt.Cluster
 
 	drAutosync drAutosyncStatus
 }
 
 // NewReplicateModeManager creates the replicate mode manager.
-func NewReplicateModeManager(config config.ReplicateModeConfig, storage *core.Storage, idAlloc id.Allocator, stores core.StoreSetInformer) (*ModeManager, error) {
+func NewReplicateModeManager(config config.ReplicateModeConfig, storage *core.Storage, cluster opt.Cluster) (*ModeManager, error) {
 	m := &ModeManager{
 		config:  config,
 		storage: storage,
-		idAlloc: idAlloc,
-		stores:  stores,
+		cluster: cluster,
 	}
 	switch config.ReplicateMode {
 	case modeMajority:
@@ -100,6 +100,7 @@ type drAutosyncStatus struct {
 	State            string    `json:"state,omitempty"`
 	RecoverID        uint64    `json:"recover_id,omitempty"`
 	RecoverStartTime time.Time `json:"recover_start,omitempty"`
+	RecoverProgress  float32   `json:"recover_progress,omitempty"`
 }
 
 func (m *ModeManager) loadDRAutosync() error {
@@ -130,7 +131,7 @@ func (m *ModeManager) drSwitchToAsync() error {
 func (m *ModeManager) drSwitchToSyncRecover() error {
 	m.Lock()
 	defer m.Unlock()
-	id, err := m.idAlloc.Alloc()
+	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
@@ -202,8 +203,11 @@ func (m *ModeManager) tickDR() {
 	}
 
 	if m.drGetState() == drStateSyncRecover {
-		if current, total := m.recoverProgress(); current >= total {
+		current, total := m.recoverProgress()
+		if current >= total {
 			m.drSwitchToSync()
+		} else {
+			m.updateRecoverProgress(float32(current) / float32(total))
 		}
 	}
 }
@@ -212,7 +216,7 @@ func (m *ModeManager) checkCanSync() bool {
 	m.RLock()
 	defer m.RUnlock()
 	var countPrimary, countDR int
-	for _, s := range m.stores.GetStores() {
+	for _, s := range m.cluster.GetStores() {
 		if !s.IsTombstone() && s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration {
 			labelValue := s.GetLabelValue(m.config.DRAutoSync.LabelKey)
 			if labelValue == m.config.DRAutoSync.Primary {
@@ -227,13 +231,35 @@ func (m *ModeManager) checkCanSync() bool {
 }
 
 func (m *ModeManager) recoverProgress() (current, total int) {
-	// FIXME: only a placeholder now. (done in 30s)
 	m.RLock()
 	defer m.RUnlock()
-	total = 300
-	current = int(time.Since(m.drAutosync.RecoverStartTime).Seconds() * 10)
-	if current > total {
-		current = total
+	var key []byte
+	for len(key) > 0 || total == 0 {
+		regions := m.cluster.ScanRegions(key, nil, 1024)
+		if len(regions) == 0 {
+			log.Warn("scan empty regions", zap.ByteString("start-key", key))
+			total++ // make sure it won't complete
+			return
+		}
+
+		total += len(regions)
+		for _, r := range regions {
+			if !bytes.Equal(key, r.GetStartKey()) {
+				log.Warn("found region gap", zap.ByteString("key", key), zap.ByteString("region-start-key", r.GetStartKey()))
+				total++
+			}
+			if r.GetReplicateStatus().GetRecoverId() == m.drAutosync.RecoverID &&
+				r.GetReplicateStatus().GetState() == replicate_mode.RegionReplicateStatus_INTEGRITY_OVER_LABEL {
+				current++
+			}
+			key = r.GetEndKey()
+		}
 	}
 	return
+}
+
+func (m *ModeManager) updateRecoverProgress(progress float32) {
+	m.Lock()
+	defer m.Unlock()
+	m.drAutosync.RecoverProgress = progress
 }
