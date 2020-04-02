@@ -179,7 +179,7 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+	tc, co, cleanup := prepare(nil, func(tc *testCluster) { tc.prepareChecker.isPrepared = true }, nil, c)
 	defer cleanup()
 
 	// Transfer peer from store 4 to store 1.
@@ -289,7 +289,6 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 		setTc(tc)
 	}
 	tc.RaftCluster.configCheck = true
-	tc.RaftCluster.prepareChecker.isPrepared = true
 	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
 	if run != nil {
 		run(co)
