@@ -172,6 +172,7 @@ const (
 
 // Run starts the background job.
 func (m *ModeManager) Run(quit chan struct{}) {
+	// Wait for a while when just start, in case tikv do not connect in time.
 	select {
 	case <-time.After(idleTimeout):
 	case <-quit:
