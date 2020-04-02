@@ -119,11 +119,11 @@ func (m *ModeManager) drSwitchToAsync() error {
 	defer m.Unlock()
 	dr := drAutosyncStatus{State: drStateAsync}
 	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
-		log.Warn("failed to switch to async state", zap.String("replicate-mode", "dr_async"), zap.Error(err))
+		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
 	}
 	m.drAutosync = dr
-	log.Warn("switched to async state", zap.String("replicate-mode", "dr_async"))
+	log.Info("switched to async state", zap.String("replicate-mode", modeDRAutosync))
 	return nil
 }
 
@@ -132,16 +132,16 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 	defer m.Unlock()
 	id, err := m.idAlloc.Alloc()
 	if err != nil {
-		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", "dr_async"), zap.Error(err))
+		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
 	}
 	dr := drAutosyncStatus{State: drStateSyncRecover, RecoverID: id, RecoverStartTime: time.Now()}
 	if err = m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
-		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", "dr_async"), zap.Error(err))
+		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
 	}
 	m.drAutosync = dr
-	log.Warn("switched to sync_recover state", zap.String("replicate-mode", "dr_async"))
+	log.Info("switched to sync_recover state", zap.String("replicate-mode", modeDRAutosync))
 	return nil
 }
 
@@ -150,11 +150,11 @@ func (m *ModeManager) drSwitchToSync() error {
 	defer m.Unlock()
 	dr := drAutosyncStatus{State: drStateSync}
 	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
-		log.Warn("failed to switch to sync state", zap.String("replicate-mode", "dr_async"), zap.Error(err))
+		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
 	}
 	m.drAutosync = dr
-	log.Warn("switched to sync state", zap.String("replicate-mode", "dr_async"))
+	log.Info("switched to sync state", zap.String("replicate-mode", modeDRAutosync))
 	return nil
 }
 
