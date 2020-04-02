@@ -341,7 +341,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 
 		// byteDecRatio <= 0.95
 		// op = hb.Schedule(tc)[0]
-		// TODO: cover this case
+		// FIXME: cover this case
 		// testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 5)
 		// store byte rate (min, max): (9.5, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 9.45)
 		// store key rate (min, max):  (9.2, 10.2) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.8)
@@ -615,13 +615,13 @@ func (s *testHotReadRegionSchedulerSuite) TestWithKeyRate(c *C) {
 		// byteDecRatio <= 0.95 && keyDecRatio <= 0.95
 		testutil.CheckTransferLeader(c, op, operator.OpHotRegion, 1, 4)
 		// store byte rate (min, max): (10, 10.5) | 9.5 | 9.5 | (9, 9.5) | 8.9
-		// store key rate (min, max):  (9.7, 10.2) | 9.5 | 9.8 | (9, 9.5) | 9.2
+		// store key rate (min, max):  (10, 10.5) | 9.5 | 9.8 | (9, 9.5) | 9.2
 
 		op = hb.Schedule(tc)[0]
 		// byteDecRatio <= 0.99 && keyDecRatio <= 0.95
 		testutil.CheckTransferLeader(c, op, operator.OpHotRegion, 3, 5)
 		// store byte rate (min, max): (10, 10.5) | 9.5 | (9.45, 9.5) | (9, 9.5) | (8.9, 8.95)
-		// store key rate (min, max):  (9.7, 10.2) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.3)
+		// store key rate (min, max):  (10, 10.5) | 9.5 | (9.7, 9.8) | (9, 9.5) | (9.2, 9.3)
 
 		// byteDecRatio <= 0.95
 		// FIXME: cover this case

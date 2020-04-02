@@ -783,15 +783,15 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			rank = -1
 		}
 	} else {
-		getDiv := func(a, b float64) float64 {
-			if a-b == 0 {
+		getSrcDecRate := func(a, b float64) float64 {
+			if a-b <= 0 {
 				return 1
 			}
 			return a - b
 		}
-		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getDiv(srcLd.KeyRate, peer.GetKeyRate())
+		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getSrcDecRate(srcLd.KeyRate, peer.GetKeyRate())
 		keyHot := peer.GetKeyRate() >= bs.sche.conf.GetMinHotKeyRate()
-		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / getDiv(srcLd.ByteRate, peer.GetByteRate())
+		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / getSrcDecRate(srcLd.ByteRate, peer.GetByteRate())
 		byteHot := peer.GetByteRate() > bs.sche.conf.GetMinHotByteRate()
 		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
 		switch {
