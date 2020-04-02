@@ -419,11 +419,15 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
-	origin, err := c.core.PreCheckPutRegion(region)
+	origin := c.core.Regions.GetRegion(region.GetID())
+	//origin,_,_, err := c.core.PreCheckPutRegion(region)
+	/*
 	if err != nil {
 		c.RUnlock()
 		return err
 	}
+
+	 */
 	writeItems := c.CheckWriteStatus(region)
 	readItems := c.CheckReadStatus(region)
 	c.RUnlock()
@@ -508,26 +512,32 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		// check its validation again here.
 		//
 		// However it can't solve the race condition of concurrent heartbeats from the same region.
-		if _, err := c.core.PreCheckPutRegion(region); err != nil {
+		_,overlaps,oldRegionItem,err := c.core.PreCheckPutRegion(region)
+		if err != nil {
 			c.Unlock()
 			return err
 		}
-		overlaps := c.core.PutRegion(region)
+		c.core.ReplaceOrAddRegion(region,overlaps,oldRegionItem)
 		if c.storage != nil {
 			for _, item := range overlaps {
-				if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
-					log.Error("failed to delete region from storage",
-						zap.Uint64("region-id", item.GetID()),
-						zap.Stringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
-						zap.Error(err))
+				if region.GetID() != item.GetID() || !core.IsEqualRegion(region,oldRegionItem) {
+					if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
+						log.Error("failed to delete region from storage",
+							zap.Uint64("region-id", item.GetID()),
+							zap.Stringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
+							zap.Error(err))
+					}
 				}
 			}
 		}
+
 		for _, item := range overlaps {
-			if c.regionStats != nil {
-				c.regionStats.ClearDefunctRegion(item.GetID())
+			if region.GetID() != item.GetID() || !core.IsEqualRegion(region,oldRegionItem) {
+				if c.regionStats != nil {
+					c.regionStats.ClearDefunctRegion(item.GetID())
+				}
+				c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.GetLocationLabels())
 			}
-			c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.GetLocationLabels())
 		}
 
 		// Update related stores.

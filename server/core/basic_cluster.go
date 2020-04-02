@@ -285,26 +285,27 @@ func (bc *BasicCluster) TakeStore(storeID uint64) *StoreInfo {
 }
 
 // PreCheckPutRegion checks if the region is valid to put.
-func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
+func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo,[]*RegionInfo,*regionItem,error) {
 	bc.RLock()
-	for _, item := range bc.Regions.GetOverlaps(region) {
+	overlaps,oldRegionItem := bc.Regions.GetOverlaps(region)
+	for _, item := range overlaps {
 		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
 			bc.RUnlock()
-			return nil, ErrRegionIsStale(region.GetMeta(), item.GetMeta())
+			return nil,overlaps,oldRegionItem,ErrRegionIsStale(region.GetMeta(), item.GetMeta())
 		}
 	}
 	origin := bc.Regions.GetRegion(region.GetID())
 	bc.RUnlock()
 	if origin == nil {
-		return nil, nil
+		return nil, overlaps,oldRegionItem,nil
 	}
 	r := region.GetRegionEpoch()
 	o := origin.GetRegionEpoch()
 	// Region meta is stale, return an error.
 	if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-		return origin, ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
+		return origin,overlaps, oldRegionItem,ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
 	}
-	return origin, nil
+	return origin, overlaps,oldRegionItem,nil
 }
 
 // PutRegion put a region.
@@ -314,9 +315,16 @@ func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	return bc.Regions.SetRegion(region)
 }
 
+// ReplaceOrAddRegion put a region with overlaps and regionItem.
+func (bc *BasicCluster) ReplaceOrAddRegion(region *RegionInfo,overlaps []*RegionInfo,oldRegionItem *regionItem)  {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Regions.ReplaceOrAddRegion(region,overlaps,oldRegionItem)
+}
+
 // CheckAndPutRegion checks if the region is valid to put,if valid then put.
 func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
-	origin, err := bc.PreCheckPutRegion(region)
+	origin,_,_, err := bc.PreCheckPutRegion(region)
 	if err != nil {
 		log.Warn("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
 		// return the state region to delete.
@@ -355,7 +363,7 @@ func (bc *BasicCluster) ScanRange(startKey, endKey []byte, limit int) []*RegionI
 }
 
 // GetOverlaps returns the regions which are overlapped with the specified region range.
-func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
+func (bc *BasicCluster) GetOverlaps(region *RegionInfo) ([]*RegionInfo,*regionItem) {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Regions.GetOverlaps(region)

@@ -586,7 +586,7 @@ func (r *RegionsInfo) TreeLength() int {
 }
 
 // GetOverlaps returns the regions which are overlapped with the specified region range.
-func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
+func (r *RegionsInfo) GetOverlaps(region *RegionInfo) ([]*RegionInfo,*regionItem) {
 	return r.tree.getOverlaps(region)
 }
 
@@ -644,6 +644,73 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 	}
 
 	return overlaps
+}
+
+// ReplaceOrAddRegion adds or replaces RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
+func (r *RegionsInfo) ReplaceOrAddRegion(region *RegionInfo,overlaps []*RegionInfo,oldRegionItem *regionItem) {
+	// Add to tree and regions.
+
+	if !IsEqualRegion(region,oldRegionItem){
+		overlaps = r.tree.update(region)
+		for _, item := range overlaps {
+			r.RemoveRegion(r.GetRegion(item.GetID()))
+		}
+	}else {
+		for _, item := range overlaps {
+			if item.GetID() == region.GetID(){
+				continue
+			}
+			r.RemoveRegion(r.GetRegion(item.GetID()))
+		}
+		oldRegionItem.region = region
+	}
+
+	r.regions.Put(region)
+
+	// Add to leaders and followers.
+	for _, peer := range region.GetVoters() {
+		storeID := peer.GetStoreId()
+		if peer.GetId() == region.leader.GetId() {
+			// Add leader peer to leaders.
+			store, ok := r.leaders[storeID]
+			if !ok {
+				store = newRegionSubTree()
+				r.leaders[storeID] = store
+			}
+			store.update(region)
+		} else {
+			// Add follower peer to followers.
+			store, ok := r.followers[storeID]
+			if !ok {
+				store = newRegionSubTree()
+				r.followers[storeID] = store
+			}
+			store.update(region)
+		}
+	}
+
+	// Add to learners.
+	for _, peer := range region.GetLearners() {
+		storeID := peer.GetStoreId()
+		store, ok := r.learners[storeID]
+		if !ok {
+			store = newRegionSubTree()
+			r.learners[storeID] = store
+		}
+		store.update(region)
+	}
+
+	for _, peer := range region.pendingPeers {
+		storeID := peer.GetStoreId()
+		store, ok := r.pendingPeers[storeID]
+		if !ok {
+			store = newRegionSubTree()
+			r.pendingPeers[storeID] = store
+		}
+		store.update(region)
+	}
+
+	return
 }
 
 // RemoveRegion removes RegionInfo from regionTree and regionMap
@@ -903,6 +970,22 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 
 func isInvolved(region *RegionInfo, startKey, endKey []byte) bool {
 	return bytes.Compare(region.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), endKey) <= 0))
+}
+
+func IsEqualRegion(region *RegionInfo,item *regionItem) bool{
+	if region == nil || item == nil {
+		return false
+	}
+	if item.region.GetID() != region.GetID(){
+		return false
+	}
+	if bytes.Compare(item.region.GetStartKey(),region.GetStartKey()) !=0{
+		return false
+	}
+	if bytes.Compare(item.region.GetEndKey(),region.GetEndKey()) !=0{
+		return false
+	}
+	return true
 }
 
 // String converts slice of bytes to string without copy.
