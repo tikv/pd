@@ -80,7 +80,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	newStats.KeysWritten = keysWritten
 	newStats.KeysRead = keysRead
 	rc := leaderServer.GetRaftCluster()
-	for i := statistics.DefaultMfSize; i > 0; i-- {
+	for i := statistics.DefaultWriteMfSize; i > 0; i-- {
 		newStats.Interval = &pdpb.TimeInterval{StartTimestamp: uint64(now - 10*i), EndTimestamp: uint64(now - 10*i + 10)}
 		rc.GetStoresStats().Observe(ss.GetID(), newStats)
 	}
