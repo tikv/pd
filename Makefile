@@ -130,6 +130,7 @@ check-plugin:
 	cd ./plugin/scheduler_example && make evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
 static: export GO111MODULE=on
+static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	CGO_ENABLED=0 golangci-lint run $$($(PACKAGE_DIRECTORIES))
