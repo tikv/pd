@@ -40,14 +40,29 @@ func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusH
 	}
 }
 
+// @Tags hotspot
+// @Summary List the hot write regions.
+// @Produce json
+// @Success 200 {object} statistics.StoreHotPeersInfos
+// @Router /hotspot/regions/write [get]
 func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.Handler.GetHotWriteRegions())
 }
 
+// @Tags hotspot
+// @Summary List the hot read regions.
+// @Produce json
+// @Success 200 {object} statistics.StoreHotPeersInfos
+// @Router /hotspot/regions/read [get]
 func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.Handler.GetHotReadRegions())
 }
 
+// @Tags hotspot
+// @Summary List the hot stores.
+// @Produce json
+// @Success 200 {object} HotStoreStats
+// @Router /hotspot/stores [get]
 func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) {
 	bytesWriteStats := h.GetHotBytesWriteStores()
 	bytesReadStats := h.GetHotBytesReadStores()

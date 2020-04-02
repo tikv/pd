@@ -554,3 +554,68 @@ log-level = "debug"
 	c.Assert(status.GetCode(), Equals, configpb.StatusCode_COMPONENT_ID_NOT_FOUND)
 	c.Assert(config, Equals, "")
 }
+
+func (s *testComponentsConfigSuite) TestCreateNewItem(c *C) {
+	cfgData := `
+log-level = "debug"
+`
+	cfg := NewConfigManager(nil)
+
+	v, config, status := cfg.CreateConfig(&configpb.Version{Global: 0, Local: 0}, "tikv", "tikv1", cfgData)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.StatusCode_OK)
+	expect := `log-level = "debug"
+`
+	c.Assert(config, Equals, expect)
+	cfgData1 := `
+log-level = "info"
+[rocksdb]
+wal-recovery-mode = 1
+
+[rocksdb.defaultcf]
+block-size = "12KB"
+disable-block-cache = false
+compression-per-level = [
+    "no",
+    "lz4",
+]
+
+[rocksdb.defaultcf.titan]
+discardable-ratio = 0.00156
+`
+	v, config, status = cfg.CreateConfig(&configpb.Version{Global: 0, Local: 0}, "tikv", "tikv1", cfgData1)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.StatusCode_OK)
+	expect1 := `log-level = "debug"
+
+[rocksdb]
+  wal-recovery-mode = 1
+  [rocksdb.defaultcf]
+    block-size = "12KB"
+    compression-per-level = ["no", "lz4"]
+    disable-block-cache = false
+    [rocksdb.defaultcf.titan]
+      discardable-ratio = 0.00156
+`
+	c.Assert(config, Equals, expect1)
+	cfgData2 := `
+log-level = "info"
+[rocksdb]
+wal-recovery-mode = 2
+
+[rocksdb.defaultcf]
+block-size = "10KB"
+disable-block-cache = true
+compression-per-level = [
+    "lz4",
+    "no",
+]
+
+[rocksdb.defaultcf.titan]
+discardable-ratio = 0.00211
+`
+	v, config, status = cfg.CreateConfig(&configpb.Version{Global: 0, Local: 0}, "tikv", "tikv1", cfgData2)
+	c.Assert(v, DeepEquals, &configpb.Version{Global: 0, Local: 0})
+	c.Assert(status.GetCode(), Equals, configpb.StatusCode_OK)
+	c.Assert(config, Equals, expect1)
+}

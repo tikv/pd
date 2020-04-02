@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/replicate_mode"
 	"github.com/pingcap/pd/v4/pkg/mock/mockid"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
@@ -162,7 +163,10 @@ func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 }
 
 func (s *clusterTestSuite) TestReloadConfig(c *C) {
-	tc, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) { conf.PDServerCfg.UseRegionStorage = true })
+	tc, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) {
+		conf.PDServerCfg.UseRegionStorage = true
+		conf.EnableDynamicConfig = true
+	})
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
@@ -786,6 +790,36 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 	c.Assert(err, IsNil)
 	err = leaderServer.GetServer().SetReplicationConfig(rep)
 	c.Assert(err, IsNil)
+}
+
+func (s *clusterTestSuite) TestReplicateModeStatus(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config) {
+		conf.ReplicateMode.ReplicateMode = "dr_autosync"
+	})
+
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	req := newBootstrapRequest(c, clusterID, "127.0.0.1:0")
+	res, err := grpcPDClient.Bootstrap(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(res.GetReplicateStatus().GetMode(), Equals, replicate_mode.ReplicateStatus_DR_AUTOSYNC) // check status in bootstrap response
+	store := &metapb.Store{Id: 11, Address: "127.0.0.1:1", Version: "v4.1.0"}
+	putRes, err := putStore(c, grpcPDClient, clusterID, store)
+	c.Assert(err, IsNil)
+	c.Assert(putRes.GetReplicateStatus().GetMode(), Equals, replicate_mode.ReplicateStatus_DR_AUTOSYNC) // check status in putStore response
+	hbReq := &pdpb.StoreHeartbeatRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Stats:  &pdpb.StoreStats{StoreId: store.GetId()},
+	}
+	hbRes, err := grpcPDClient.StoreHeartbeat(context.Background(), hbReq)
+	c.Assert(err, IsNil)
+	c.Assert(hbRes.GetReplicateStatus().GetMode(), Equals, replicate_mode.ReplicateStatus_DR_AUTOSYNC) // check status in store heartbeat response
 }
 
 func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {

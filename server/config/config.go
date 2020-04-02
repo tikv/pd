@@ -208,7 +208,7 @@ const (
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 
-	defaultEnableDynamicConfig = true
+	defaultEnableDynamicConfig = false
 	defaultDashboardAddress    = "auto"
 
 	defaultDRWaitStoreTimeout = time.Minute
@@ -662,7 +662,7 @@ const (
 	defaultStoreBalanceRate       = 15
 	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
-	defaultHighSpaceRatio         = 0.6
+	defaultHighSpaceRatio         = 0.7
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
@@ -951,7 +951,8 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	return nil
 }
 
-func (c *PDServerConfig) clone() *PDServerConfig {
+// Clone retruns a cloned PD server config.
+func (c *PDServerConfig) Clone() *PDServerConfig {
 	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
 	copy(runtimeServices, c.RuntimeServices)
 	return &PDServerConfig{
@@ -1079,7 +1080,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
-	cfg.ClientTLSInfo.AllowedCN = allowedCN
+	// Client no need to set the CN. (cfg.ClientTLSInfo.AllowedCN = allowedCN)
 	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
