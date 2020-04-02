@@ -239,4 +239,27 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"})
 	c.Assert(strings.Contains(echo, "Success!"), IsFalse)
+
+	// test hot region config
+	var conf map[string]interface{}
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
+	expected1 := map[string]interface{}{
+		"min-hot-byte-rate":         float64(100),
+		"min-hot-key-rate":          float64(10),
+		"max-zombie-rounds":         float64(3),
+		"max-peer-number":           float64(1000),
+		"byte-rate-rank-step-ratio": 0.05,
+		"key-rate-rank-step-ratio":  0.05,
+		"count-rank-step-ratio":     0.01,
+		"great-dec-ratio":           0.95,
+		"minor-dec-ratio":           0.99,
+		"src-tolerance-ratio":       1.02,
+		"dst-tolerance-ratio":       1.02,
+	}
+	c.Assert(conf, DeepEquals, expected1)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.05"}, nil)
+	expected1["src-tolerance-ratio"] = 1.05
+	var conf1 map[string]interface{}
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	c.Assert(conf1, DeepEquals, expected1)
 }

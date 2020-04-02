@@ -528,7 +528,11 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	path := path.Join(schedulerConfigPrefix, cmd.Name(), "list")
+	p := cmd.Name()
+	if p == "list" {
+		p = cmd.Parent().Name()
+	}
+	path := path.Join(schedulerConfigPrefix, p, "list")
 	r, err := doRequest(cmd, path, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
