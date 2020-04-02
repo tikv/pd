@@ -179,7 +179,7 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
-	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+	tc, co, cleanup := prepare(nil, func(tc *testCluster) { tc.prepareChecker.isPrepared = true }, nil, c)
 	defer cleanup()
 
 	// Transfer peer from store 4 to store 1.
@@ -195,6 +195,8 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	c.Assert(tc.updateLeaderCount(2, 20), IsNil)
 	c.Assert(tc.updateLeaderCount(1, 10), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 4, 3, 2), IsNil)
+
+	co.run()
 
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)
