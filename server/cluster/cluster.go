@@ -218,7 +218,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.replicateMode, err = replicate.NewReplicateModeManager(s.GetConfig().ReplicateMode, s.GetStorage(), s.GetAllocator())
+	c.replicateMode, err = replicate.NewReplicateModeManager(s.GetConfig().ReplicateMode, s.GetStorage(), s.GetAllocator(), cluster)
 	if err != nil {
 		return err
 	}
@@ -228,13 +228,14 @@ func (c *RaftCluster) Start(s Server) error {
 	c.limiter = NewStoreLimiter(c.coordinator.opController)
 	c.quit = make(chan struct{})
 
-	c.wg.Add(3)
+	c.wg.Add(4)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.syncRegions()
+	go c.runReplicateMode()
 	c.running = true
 
 	return nil
@@ -314,6 +315,12 @@ func (c *RaftCluster) syncRegions() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 	c.regionSyncer.RunServer(c.changedRegionNotifier(), c.quit)
+}
+
+func (c *RaftCluster) runReplicateMode() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+	c.replicateMode.Run(c.quit)
 }
 
 // Stop stops the cluster.

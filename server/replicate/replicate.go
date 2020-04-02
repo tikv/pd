@@ -16,11 +16,14 @@ package replicate
 import (
 	"strings"
 	"sync"
+	"time"
 
 	pb "github.com/pingcap/kvproto/pkg/replicate_mode"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/id"
+	"go.uber.org/zap"
 )
 
 const (
@@ -35,16 +38,18 @@ type ModeManager struct {
 	config  config.ReplicateModeConfig
 	storage *core.Storage
 	idAlloc id.Allocator
+	stores  core.StoreSetInformer
 
 	drAutosync drAutosyncStatus
 }
 
 // NewReplicateModeManager creates the replicate mode manager.
-func NewReplicateModeManager(config config.ReplicateModeConfig, storage *core.Storage, idAlloc id.Allocator) (*ModeManager, error) {
+func NewReplicateModeManager(config config.ReplicateModeConfig, storage *core.Storage, idAlloc id.Allocator, stores core.StoreSetInformer) (*ModeManager, error) {
 	m := &ModeManager{
 		config:  config,
 		storage: storage,
 		idAlloc: idAlloc,
+		stores:  stores,
 	}
 	switch config.ReplicateMode {
 	case modeMajority:
@@ -79,6 +84,12 @@ func (m *ModeManager) GetReplicateStatus() *pb.ReplicateStatus {
 	return p
 }
 
+func (m *ModeManager) getModeName() string {
+	m.RLock()
+	defer m.RUnlock()
+	return m.config.ReplicateMode
+}
+
 const (
 	drStateSync        = "sync"
 	drStateAsync       = "async"
@@ -86,8 +97,9 @@ const (
 )
 
 type drAutosyncStatus struct {
-	State     string `json:"state,omitempty"`
-	RecoverID uint64 `json:"recover_id,omitempty"`
+	State            string    `json:"state,omitempty"`
+	RecoverID        uint64    `json:"recover_id,omitempty"`
+	RecoverStartTime time.Time `json:"recover_start,omitempty"`
 }
 
 func (m *ModeManager) loadDRAutosync() error {
@@ -107,9 +119,11 @@ func (m *ModeManager) drSwitchToAsync() error {
 	defer m.Unlock()
 	dr := drAutosyncStatus{State: drStateAsync}
 	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
+		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
 	}
 	m.drAutosync = dr
+	log.Info("switched to async state", zap.String("replicate-mode", modeDRAutosync))
 	return nil
 }
 
@@ -118,13 +132,16 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 	defer m.Unlock()
 	id, err := m.idAlloc.Alloc()
 	if err != nil {
+		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
 	}
-	dr := drAutosyncStatus{State: drStateSyncRecover, RecoverID: id}
+	dr := drAutosyncStatus{State: drStateSyncRecover, RecoverID: id, RecoverStartTime: time.Now()}
 	if err = m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
+		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
 	}
 	m.drAutosync = dr
+	log.Info("switched to sync_recover state", zap.String("replicate-mode", modeDRAutosync))
 	return nil
 }
 
@@ -133,8 +150,90 @@ func (m *ModeManager) drSwitchToSync() error {
 	defer m.Unlock()
 	dr := drAutosyncStatus{State: drStateSync}
 	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
+		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
 	}
 	m.drAutosync = dr
+	log.Info("switched to sync state", zap.String("replicate-mode", modeDRAutosync))
 	return nil
+}
+
+func (m *ModeManager) drGetState() string {
+	m.RLock()
+	defer m.RUnlock()
+	return m.drAutosync.State
+}
+
+const (
+	idleTimeout  = time.Minute
+	tickInterval = time.Second * 10
+)
+
+// Run starts the background job.
+func (m *ModeManager) Run(quit chan struct{}) {
+	select {
+	case <-time.After(idleTimeout):
+	case <-quit:
+		return
+	}
+	for {
+		select {
+		case <-time.After(tickInterval):
+		case <-quit:
+			return
+		}
+		m.tickDR()
+	}
+}
+
+func (m *ModeManager) tickDR() {
+	if m.getModeName() != modeDRAutosync {
+		return
+	}
+
+	canSync := m.checkCanSync()
+
+	if !canSync && m.drGetState() != drStateAsync {
+		m.drSwitchToAsync()
+	}
+
+	if canSync && m.drGetState() == drStateAsync {
+		m.drSwitchToSyncRecover()
+	}
+
+	if m.drGetState() == drStateSyncRecover {
+		if current, total := m.recoverProgress(); current >= total {
+			m.drSwitchToSync()
+		}
+	}
+}
+
+func (m *ModeManager) checkCanSync() bool {
+	m.RLock()
+	defer m.RUnlock()
+	var countPrimary, countDR int
+	for _, s := range m.stores.GetStores() {
+		if !s.IsTombstone() && s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration {
+			labelValue := s.GetLabelValue(m.config.DRAutoSync.LabelKey)
+			if labelValue == m.config.DRAutoSync.Primary {
+				countPrimary++
+			}
+			if labelValue == m.config.DRAutoSync.DR {
+				countDR++
+			}
+		}
+	}
+	return countPrimary < m.config.DRAutoSync.PrimaryReplicas && countDR < m.config.DRAutoSync.DRReplicas
+}
+
+func (m *ModeManager) recoverProgress() (current, total int) {
+	// FIXME: only a placeholder now. (done in 30s)
+	m.RLock()
+	defer m.RUnlock()
+	total = 300
+	current = int(time.Since(m.drAutosync.RecoverStartTime).Seconds() * 10)
+	if current > total {
+		current = total
+	}
+	return
 }

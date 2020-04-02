@@ -32,7 +32,6 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl"
-	ctl "github.com/pingcap/pd/v4/tools/pd-ctl/pdctl"
 	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
 )
@@ -156,7 +155,7 @@ func GetEcho(args []string) string {
 	old := os.Stdout
 	temp, _ := os.Create(filename)
 	os.Stdout = temp
-	ctl.Start(args)
+	pdctl.Start(args)
 	temp.Close()
 	os.Stdout = old
 	out, _ := ioutil.ReadFile(filename)
