@@ -24,6 +24,7 @@ import (
 	. "github.com/pingcap/check"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
@@ -51,6 +52,8 @@ type serverTestSuite struct {
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
+	server.ConfigCheckInterval = 10 * time.Millisecond
+	dashboard.ConfigCheckInterval = 10 * time.Millisecond
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.httpClient = &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -78,7 +81,7 @@ func (s *serverTestSuite) checkRespCode(c *C, url string, code int) {
 }
 
 func (s *serverTestSuite) waitForConfigSync() {
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second)
 }
 
 func (s *serverTestSuite) checkServiceIsStarted(c *C, servers map[string]*tests.TestServer, leader *tests.TestServer) string {
@@ -162,7 +165,7 @@ func (s *serverTestSuite) TestDashboard(c *C) {
 		} else {
 			changingAddr = dashboardAddress1
 		}
-		args = []string{"-u", leaderAddr, "component", "set", addr[7:], "dashboard-address", changingAddr}
+		args = []string{"-u", leaderAddr, "component", "set", addr[7:], "pd-server.dashboard-address", changingAddr}
 		_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 		c.Assert(err, IsNil)
 	}

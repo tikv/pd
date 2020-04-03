@@ -30,8 +30,9 @@ import (
 	"github.com/pingcap/pd/v4/server/cluster"
 )
 
-const (
-	checkInterval = time.Second
+var (
+	// ConfigCheckInterval represents the time interval of running config check.
+	ConfigCheckInterval = time.Second
 )
 
 // Manager is used to control dashboard.
@@ -78,7 +79,7 @@ func (m *Manager) serviceLoop() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 
-	ticker := time.NewTicker(checkInterval)
+	ticker := time.NewTicker(ConfigCheckInterval)
 	defer ticker.Stop()
 
 	for {
