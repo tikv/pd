@@ -53,7 +53,7 @@ type serverTestSuite struct {
 func (s *serverTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
 	server.ConfigCheckInterval = 10 * time.Millisecond
-	dashboard.ConfigCheckInterval = 10 * time.Millisecond
+	dashboard.CheckInterval = 10 * time.Millisecond
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.httpClient = &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {

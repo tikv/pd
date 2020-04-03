@@ -31,8 +31,8 @@ import (
 )
 
 var (
-	// ConfigCheckInterval represents the time interval of running config check.
-	ConfigCheckInterval = time.Second
+	// CheckInterval represents the time interval of running check.
+	CheckInterval = time.Second
 )
 
 // Manager is used to control dashboard.
@@ -79,7 +79,7 @@ func (m *Manager) serviceLoop() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 
-	ticker := time.NewTicker(ConfigCheckInterval)
+	ticker := time.NewTicker(CheckInterval)
 	defer ticker.Stop()
 
 	for {
