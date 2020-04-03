@@ -84,6 +84,34 @@ func (m *ModeManager) GetReplicateStatus() *pb.ReplicateStatus {
 	return p
 }
 
+// HTTPReplicateStatus is for query status from HTTP API.
+type HTTPReplicateStatus struct {
+	Mode       string `json:"mode"`
+	DrAutosync struct {
+		LabelKey        string  `json:"label_key"`
+		State           string  `json:"state"`
+		RecoverID       uint64  `json:"recover_id,omitempty"`
+		RecoverProgress float32 `json:"recover_progress,omitempty"`
+	} `json:"dr_autosync,omitempty"`
+}
+
+// GetReplicateStatusHTTP returns status for HTTP API.
+func (m *ModeManager) GetReplicateStatusHTTP() *HTTPReplicateStatus {
+	m.RLock()
+	defer m.RUnlock()
+	var status HTTPReplicateStatus
+	status.Mode = m.config.ReplicateMode
+	switch status.Mode {
+	case modeMajority:
+	case modeDRAutosync:
+		status.DrAutosync.LabelKey = m.config.DRAutoSync.LabelKey
+		status.DrAutosync.State = m.drAutosync.State
+		status.DrAutosync.RecoverID = m.drAutosync.RecoverID
+		status.DrAutosync.RecoverProgress = m.drAutosync.RecoverProgress
+	}
+	return &status
+}
+
 func (m *ModeManager) getModeName() string {
 	m.RLock()
 	defer m.RUnlock()
