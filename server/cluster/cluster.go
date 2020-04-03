@@ -517,7 +517,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 
 		if region.GetReplicateStatus().GetState() != origin.GetReplicateStatus().GetState() ||
-			region.GetReplicateStatus().GetRecoverId() != origin.GetReplicateStatus().GetRecoverId() {
+			region.GetReplicateStatus().GetStateId() != origin.GetReplicateStatus().GetStateId() {
 			saveCache = true
 		}
 	}

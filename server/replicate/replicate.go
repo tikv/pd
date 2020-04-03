@@ -77,7 +77,7 @@ func (m *ModeManager) GetReplicateStatus() *pb.ReplicateStatus {
 			State:    pb.DRAutoSync_State(pb.DRAutoSync_State_value[strings.ToUpper(m.drAutosync.State)]),
 		}
 		if m.drAutosync.State == drStateSyncRecover {
-			p.DrAutosync.RecoverId = m.drAutosync.RecoverID
+			p.DrAutosync.StateId = m.drAutosync.StateID
 			p.DrAutosync.WaitSyncTimeoutHint = int32(m.config.DRAutoSync.WaitSyncTimeout.Seconds())
 		}
 	}
@@ -90,7 +90,7 @@ type HTTPReplicateStatus struct {
 	DrAutosync struct {
 		LabelKey        string  `json:"label_key"`
 		State           string  `json:"state"`
-		RecoverID       uint64  `json:"recover_id,omitempty"`
+		StateID         uint64  `json:"state_id,omitempty"`
 		RecoverProgress float32 `json:"recover_progress,omitempty"`
 	} `json:"dr_autosync,omitempty"`
 }
@@ -106,7 +106,7 @@ func (m *ModeManager) GetReplicateStatusHTTP() *HTTPReplicateStatus {
 	case modeDRAutosync:
 		status.DrAutosync.LabelKey = m.config.DRAutoSync.LabelKey
 		status.DrAutosync.State = m.drAutosync.State
-		status.DrAutosync.RecoverID = m.drAutosync.RecoverID
+		status.DrAutosync.StateID = m.drAutosync.StateID
 		status.DrAutosync.RecoverProgress = m.drAutosync.RecoverProgress
 	}
 	return &status
@@ -126,7 +126,7 @@ const (
 
 type drAutosyncStatus struct {
 	State            string    `json:"state,omitempty"`
-	RecoverID        uint64    `json:"recover_id,omitempty"`
+	StateID          uint64    `json:"state_id,omitempty"`
 	RecoverStartTime time.Time `json:"recover_start,omitempty"`
 	RecoverProgress  float32   `json:"recover_progress,omitempty"`
 }
@@ -138,7 +138,11 @@ func (m *ModeManager) loadDRAutosync() error {
 	}
 	if !ok {
 		// initialize
-		m.drAutosync = drAutosyncStatus{State: drStateSync}
+		id, err := m.cluster.AllocID()
+		if err != nil {
+			return err
+		}
+		m.drAutosync = drAutosyncStatus{State: drStateSync, StateID: id}
 	}
 	return nil
 }
@@ -146,7 +150,12 @@ func (m *ModeManager) loadDRAutosync() error {
 func (m *ModeManager) drSwitchToAsync() error {
 	m.Lock()
 	defer m.Unlock()
-	dr := drAutosyncStatus{State: drStateAsync}
+	id, err := m.cluster.AllocID()
+	if err != nil {
+		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
+		return err
+	}
+	dr := drAutosyncStatus{State: drStateAsync, StateID: id}
 	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", "dr_async"), zap.Error(err))
 		return err
@@ -164,7 +173,7 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", "dr_async"), zap.Error(err))
 		return err
 	}
-	dr := drAutosyncStatus{State: drStateSyncRecover, RecoverID: id, RecoverStartTime: time.Now()}
+	dr := drAutosyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: time.Now()}
 	if err = m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", "dr_async"), zap.Error(err))
 		return err
@@ -177,7 +186,12 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 func (m *ModeManager) drSwitchToSync() error {
 	m.Lock()
 	defer m.Unlock()
-	dr := drAutosyncStatus{State: drStateSync}
+	id, err := m.cluster.AllocID()
+	if err != nil {
+		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
+		return err
+	}
+	dr := drAutosyncStatus{State: drStateSync, StateID: id}
 	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
 		log.Warn("failed to switch to sync state", zap.String("replicate-mode", "dr_async"), zap.Error(err))
 		return err
@@ -277,7 +291,7 @@ func (m *ModeManager) recoverProgress() (current, total int) {
 				log.Warn("found region gap", zap.ByteString("key", key), zap.ByteString("region-start-key", r.GetStartKey()))
 				total++
 			}
-			if r.GetReplicateStatus().GetRecoverId() == m.drAutosync.RecoverID &&
+			if r.GetReplicateStatus().GetStateId() == m.drAutosync.StateID &&
 				r.GetReplicateStatus().GetState() == replicate_mode.RegionReplicateStatus_INTEGRITY_OVER_LABEL {
 				current++
 			}
