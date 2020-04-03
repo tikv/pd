@@ -115,7 +115,20 @@ func (m *Manager) updateInfo() {
 
 	var err error
 	if m.members, err = cluster.GetMembers(m.srv.GetClient()); err != nil {
-		log.Error("failed to get members")
+		log.Warn("failed to get members")
+		m.members = nil
+		return
+	}
+
+	allHasClientUrls := true
+	for _, member := range m.members {
+		if len(member.GetClientUrls()) == 0 {
+			allHasClientUrls = false
+		}
+	}
+	if !allHasClientUrls {
+		log.Warn("failed to get member client urls")
+		m.members = nil
 	}
 }
 
