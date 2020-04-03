@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/replicate_mode"
 	pb "github.com/pingcap/kvproto/pkg/replicate_mode"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/config"
@@ -250,7 +249,7 @@ func (m *ModeManager) recoverProgress() (current, total int) {
 				total++
 			}
 			if r.GetReplicateStatus().GetRecoverId() == m.drAutosync.RecoverID &&
-				r.GetReplicateStatus().GetState() == replicate_mode.RegionReplicateStatus_INTEGRITY_OVER_LABEL {
+				r.GetReplicateStatus().GetState() == pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL {
 				current++
 			}
 			key = r.GetEndKey()
