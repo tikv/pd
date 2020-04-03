@@ -202,15 +202,15 @@ func (s *testReplicateMode) TestStateSwitch(c *C) {
 	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
 
 	region = region.Clone(core.SetReplicateStatus(&replicate_mode.RegionReplicateStatus{
-		State:     replicate_mode.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
-		RecoverId: rep.drAutosync.RecoverID - 1, // mismatch recover id
+		State:   replicate_mode.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
+		StateId: rep.drAutosync.StateID - 1, // mismatch recover id
 	}))
 	cluster.PutRegion(region)
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
 	region = region.Clone(core.SetReplicateStatus(&replicate_mode.RegionReplicateStatus{
-		State:     replicate_mode.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
-		RecoverId: rep.drAutosync.RecoverID,
+		State:   replicate_mode.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
+		StateId: rep.drAutosync.StateID,
 	}))
 	cluster.PutRegion(region)
 	rep.tickDR()
