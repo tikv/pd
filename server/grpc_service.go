@@ -125,13 +125,14 @@ func (s *Server) Bootstrap(ctx context.Context, request *pdpb.BootstrapRequest) 
 			Header: s.errorHeader(err),
 		}, nil
 	}
-	if _, err := s.bootstrapCluster(request); err != nil {
+
+	res, err := s.bootstrapCluster(request)
+	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
-	return &pdpb.BootstrapResponse{
-		Header: s.header(),
-	}, nil
+	res.Header = s.header()
+	return res, nil
 }
 
 // IsBootstrapped implements gRPC PDServer.
@@ -241,7 +242,8 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	CheckPDVersion(s.scheduleOpt)
 
 	return &pdpb.PutStoreResponse{
-		Header: s.header(),
+		Header:          s.header(),
+		ReplicateStatus: rc.GetReplicateMode().GetReplicateStatus(),
 	}, nil
 }
 
@@ -300,7 +302,8 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	}
 
 	return &pdpb.StoreHeartbeatResponse{
-		Header: s.header(),
+		Header:          s.header(),
+		ReplicateStatus: rc.GetReplicateMode().GetReplicateStatus(),
 	}, nil
 }
 

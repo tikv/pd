@@ -43,6 +43,12 @@ func newRulesHandler(svr *server.Server, rd *render.Render) *ruleHandler {
 	}
 }
 
+// @Tags rule
+// @Summary List all rules of cluster.
+// @Produce json
+// @Success 200 {array} placement.Rule
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Router /config/rules [get]
 func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
@@ -53,6 +59,13 @@ func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
+// @Tags rule
+// @Summary List all rules of cluster by group.
+// @Param group path string true "The name of group"
+// @Produce json
+// @Success 200 {array} placement.Rule
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Router /config/rules/group/{group} [get]
 func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
@@ -64,6 +77,15 @@ func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
+// @Tags rule
+// @Summary List all rules of cluster by region.
+// @Param region path string true "The name of region"
+// @Produce json
+// @Success 200 {array} placement.Rule
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The region does not exist."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Router /config/rules/region/{region} [get]
 func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
@@ -85,6 +107,14 @@ func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
+// @Tags rule
+// @Summary List all rules of cluster by key.
+// @Param key path string true "The name of key"
+// @Produce json
+// @Success 200 {array} placement.Rule
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Router /config/rules/key/{key} [get]
 func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
@@ -101,6 +131,15 @@ func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
+// @Tags rule
+// @Summary Get rule of cluster by group and id.
+// @Param group path string true "The name of group"
+// @Param id path string true "Rule Id"
+// @Produce json
+// @Success 200 {object} placement.Rule
+// @Failure 404 {string} string "The rule does not exist."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Router /config/rule/{group}/{id} [get]
 func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
@@ -116,6 +155,16 @@ func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, rule)
 }
 
+// @Tags rule
+// @Summary Update rule of cluster.
+// @Accept json
+// @Param rule body placement.Rule true "Parameters of rule"
+// @Produce json
+// @Success 200 {string} string "Update rule success."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /config/rule [post]
 func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {
@@ -167,6 +216,15 @@ func (h *ruleHandler) checkRule(r *placement.Rule) error {
 	return nil
 }
 
+// @Tags rule
+// @Summary Delete rule of cluster.
+// @Param group path string true "The name of group"
+// @Param id path string true "Rule Id"
+// @Produce json
+// @Success 200 {string} string "Delete rule success."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /config/rule/{group}/{id} [delete]
 func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r.Context())
 	if !cluster.IsPlacementRulesEnabled() {

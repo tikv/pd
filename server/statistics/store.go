@@ -18,12 +18,9 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
-)
-
-const (
-	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
-	StoreHeartBeatReportInterval = 10
+	"go.uber.org/zap"
 )
 
 // StoresStats is a cache hold hot regions.
@@ -261,25 +258,32 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex
-	bytesWriteRate          *AvgOverTime
-	bytesReadRate           *AvgOverTime
-	keysWriteRate           *AvgOverTime
-	keysReadRate            *AvgOverTime
+	bytesWriteRate          *TimeMedian
+	bytesReadRate           *TimeMedian
+	keysWriteRate           *TimeMedian
+	keysReadRate            *TimeMedian
 	totalCPUUsage           MovingAvg
 	totalBytesDiskReadRate  MovingAvg
 	totalBytesDiskWriteRate MovingAvg
 }
 
-const storeStatsRollingWindows = 3
-const storeAvgInterval time.Duration = 3 * StoreHeartBeatReportInterval * time.Second
+const (
+	storeStatsRollingWindows = 3
+	// DefaultAotSize is default size of average over time.
+	DefaultAotSize = 2
+	// DefaultWriteMfSize is default size of write median filter
+	DefaultWriteMfSize = 5
+	// DefaultReadMfSize is default size of read median filter
+	DefaultReadMfSize = 3
+)
 
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
 	return &RollingStoreStats{
-		bytesWriteRate:          NewAvgOverTime(storeAvgInterval),
-		bytesReadRate:           NewAvgOverTime(storeAvgInterval),
-		keysWriteRate:           NewAvgOverTime(storeAvgInterval),
-		keysReadRate:            NewAvgOverTime(storeAvgInterval),
+		bytesWriteRate:          NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
+		bytesReadRate:           NewTimeMedian(DefaultAotSize, DefaultReadMfSize),
+		keysWriteRate:           NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
+		keysReadRate:            NewTimeMedian(DefaultAotSize, DefaultReadMfSize),
 		totalCPUUsage:           NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskReadRate:  NewMedianFilter(storeStatsRollingWindows),
 		totalBytesDiskWriteRate: NewMedianFilter(storeStatsRollingWindows),
@@ -298,6 +302,7 @@ func collect(records []*pdpb.RecordPair) float64 {
 func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 	statInterval := stats.GetInterval()
 	interval := statInterval.GetEndTimestamp() - statInterval.GetStartTimestamp()
+	log.Debug("update store stats", zap.Uint64("key-write", stats.KeysWritten), zap.Uint64("bytes-write", stats.BytesWritten), zap.Duration("interval", time.Duration(interval)*time.Second), zap.Uint64("store-id", stats.GetStoreId()))
 	r.Lock()
 	defer r.Unlock()
 	r.bytesWriteRate.Add(float64(stats.BytesWritten), time.Duration(interval)*time.Second)

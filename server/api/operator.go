@@ -36,6 +36,14 @@ func newOperatorHandler(handler *server.Handler, r *render.Render) *operatorHand
 	}
 }
 
+// @Tags operator
+// @Summary Get a Region's pending operator.
+// @Param region_id path int true "A Region's Id"
+// @Produce json
+// @Success 200 {object} schedule.OperatorWithStatus
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /operators/{region_id} [get]
 func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["region_id"]
 
@@ -54,6 +62,13 @@ func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, op)
 }
 
+// @Tags operator
+// @Summary List pending operators.
+// @Param kind query string false "Specify the operator kind." Enums(admin, leader, region)
+// @Produce json
+// @Success 200 {array} operator.Operator
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /operators [get]
 func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 	var (
 		results []*operator.Operator
@@ -91,6 +106,16 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, results)
 }
 
+// FIXME: details of input json body params
+// @Tags operator
+// @Summary Create an operator.
+// @Accept json
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "The operator is created."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /operators [post]
 func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
@@ -262,6 +287,14 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, nil)
 }
 
+// @Tags operator
+// @Summary Cancel a Region's pending operator.
+// @Param region_id path int true "A Region's Id"
+// @Produce json
+// @Success 200 {string} string "The pending operator is cancelled."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /operators/{region_id} [delete]
 func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["region_id"]
 

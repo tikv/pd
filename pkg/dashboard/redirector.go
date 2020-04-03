@@ -44,5 +44,5 @@ func (h *Redirector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		apiserver.StoppedHandler.ServeHTTP(w, r)
 		return
 	}
-	http.Redirect(w, r, addr+r.RequestURI, 302)
+	http.Redirect(w, r, addr+r.RequestURI, http.StatusTemporaryRedirect)
 }

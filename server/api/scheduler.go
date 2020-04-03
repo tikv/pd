@@ -41,6 +41,12 @@ func newSchedulerHandler(handler *server.Handler, r *render.Render) *schedulerHa
 	}
 }
 
+// @Tags scheduler
+// @Summary List running schedulers.
+// @Produce json
+// @Success 200 {array} string
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /schedulers [get]
 func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 	schedulers, err := h.GetSchedulers()
 	if err != nil {
@@ -50,6 +56,16 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, schedulers)
 }
 
+// FIXME: details of input json body params
+// @Tags scheduler
+// @Summary Create a scheduler.
+// @Accept json
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "The scheduler is created."
+// @Failure 400 {string} string "Bad format request."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /schedulers [post]
 func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
@@ -202,6 +218,13 @@ func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64)
 	return postJSON(updateURL, body)
 }
 
+// @Tags scheduler
+// @Summary Delete a scheduler.
+// @Param name path string true "The name of the scheduler."
+// @Produce json
+// @Success 200 {string} string "The scheduler is removed."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /schedulers/{name} [delete]
 func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	switch {
@@ -238,6 +261,17 @@ func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) e
 	return nil
 }
 
+// FIXME: details of input json body params
+// @Tags scheduler
+// @Summary Pause or resume a scheduler.
+// @Accept json
+// @Param name path string true "The name of the scheduler."
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "Pause or resume the scheduler success."
+// @Failure 400 {string} string "Bad format request."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /schedulers/{name} [post]
 func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
 	var input map[string]int
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
