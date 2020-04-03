@@ -60,7 +60,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 		},
 		// Dashboard UI
 		func(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
-			handler := s.NewStatusAwareHandler(http.StripPrefix(uiServiceGroup.PathPrefix, uiserver.Handler()))
+			handler := s.NewStatusAwareHandler(http.StripPrefix(uiServiceGroup.PathPrefix, uiserver.Handler()), redirector)
 			return handler, uiServiceGroup, nil
 		},
 	}
