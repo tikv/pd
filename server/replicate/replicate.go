@@ -73,12 +73,10 @@ func (m *ModeManager) GetReplicateStatus() *pb.ReplicateStatus {
 	case modeMajority:
 	case modeDRAutosync:
 		p.DrAutosync = &pb.DRAutoSync{
-			LabelKey: m.config.DRAutoSync.LabelKey,
-			State:    pb.DRAutoSync_State(pb.DRAutoSync_State_value[strings.ToUpper(m.drAutosync.State)]),
-		}
-		if m.drAutosync.State == drStateSyncRecover {
-			p.DrAutosync.StateId = m.drAutosync.StateID
-			p.DrAutosync.WaitSyncTimeoutHint = int32(m.config.DRAutoSync.WaitSyncTimeout.Seconds())
+			LabelKey:            m.config.DRAutoSync.LabelKey,
+			State:               pb.DRAutoSync_State(pb.DRAutoSync_State_value[strings.ToUpper(m.drAutosync.State)]),
+			StateId:             m.drAutosync.StateID,
+			WaitSyncTimeoutHint: int32(m.config.DRAutoSync.WaitSyncTimeout.Seconds()),
 		}
 	}
 	return p
