@@ -296,7 +296,11 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		}
 		if last {
 			if err := handler.config.cluster.RemoveScheduler(GrantLeaderName); err != nil {
-				handler.rd.JSON(w, http.StatusInternalServerError, err)
+				if err == ErrSchedulerNotFound {
+					handler.rd.JSON(w, http.StatusNotFound, err)
+				} else {
+					handler.rd.JSON(w, http.StatusInternalServerError, err)
+				}
 				return
 			}
 			resp = lastStoreDeleteInfo
@@ -305,7 +309,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	handler.rd.JSON(w, http.StatusInternalServerError, ErrScheduleConfigNotExist)
+	handler.rd.JSON(w, http.StatusNotFound, ErrScheduleConfigNotExist)
 }
 
 func newGrantLeaderHandler(config *grantLeaderSchedulerConfig) http.Handler {
