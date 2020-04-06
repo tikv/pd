@@ -419,15 +419,11 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
-	origin := c.core.Regions.GetRegion(region.GetID())
-	//origin,_,_, err := c.core.PreCheckPutRegion(region)
-	/*
+	origin, _, _, err := c.core.PreCheckPutRegion(region, core.LOOSE)
 	if err != nil {
 		c.RUnlock()
 		return err
 	}
-
-	 */
 	writeItems := c.CheckWriteStatus(region)
 	readItems := c.CheckReadStatus(region)
 	c.RUnlock()
@@ -512,15 +508,15 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		// check its validation again here.
 		//
 		// However it can't solve the race condition of concurrent heartbeats from the same region.
-		_,overlaps,oldRegionItem,err := c.core.PreCheckPutRegion(region)
+		_, overlaps, oldRegionItem, err := c.core.PreCheckPutRegion(region, core.STRICT)
 		if err != nil {
 			c.Unlock()
 			return err
 		}
-		c.core.ReplaceOrAddRegion(region,overlaps,oldRegionItem)
+		c.core.ReplaceOrAddRegion(region, overlaps, oldRegionItem)
 		if c.storage != nil {
 			for _, item := range overlaps {
-				if region.GetID() != item.GetID() || !core.IsEqualRegion(region,oldRegionItem) {
+				if region.GetID() != item.GetID() || !core.IsEqualRegion(region, oldRegionItem) {
 					if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
 						log.Error("failed to delete region from storage",
 							zap.Uint64("region-id", item.GetID()),
@@ -532,21 +528,30 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 
 		for _, item := range overlaps {
-			if region.GetID() != item.GetID() || !core.IsEqualRegion(region,oldRegionItem) {
+			if region.GetID() != item.GetID() || !core.IsEqualRegion(region, oldRegionItem) {
 				if c.regionStats != nil {
 					c.regionStats.ClearDefunctRegion(item.GetID())
 				}
 				c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.GetLocationLabels())
 			}
 		}
-
 		// Update related stores.
+
+		var storeMap map[uint64]uint64
 		if origin != nil {
+			storeMap = make(map[uint64]uint64)
 			for _, p := range origin.GetPeers() {
 				c.updateStoreStatusLocked(p.GetStoreId())
+				storeMap[p.GetStoreId()] = p.GetStoreId()
 			}
 		}
 		for _, p := range region.GetPeers() {
+			if storeMap != nil {
+				if _, ok := storeMap[p.GetStoreId()]; !ok {
+					c.updateStoreStatusLocked(p.GetStoreId())
+				}
+				continue
+			}
 			c.updateStoreStatusLocked(p.GetStoreId())
 		}
 		regionEventCounter.WithLabelValues("update_cache").Inc()
