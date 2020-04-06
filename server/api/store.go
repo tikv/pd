@@ -460,16 +460,10 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Router /stores/limit [get]
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	typeName := r.URL.Query().Get("type")
-	var typeValue storelimit.Type
-	if typeName == "" {
-		typeValue = storelimit.RegionAdd
-	} else {
-		if value, ok := storelimit.TypeNameValue[typeName]; ok {
-			typeValue = value
-		} else {
-			h.rd.JSON(w, http.StatusBadRequest, "unknown type")
-			return
-		}
+	typeValue, err := parseStoreLimitType(typeName)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	limits, err := h.GetAllStoresLimit(typeValue)
 	if err != nil {

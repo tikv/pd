@@ -393,14 +393,8 @@ func (f StoreStateFilter) filterMoveRegion(opt opt.Options, isSource bool, store
 		return false
 	}
 
-	if isSource {
-		if !store.IsAvailable(storelimit.RegionRemove) {
-			return false
-		}
-	} else {
-		if !store.IsAvailable(storelimit.RegionAdd) {
-			return false
-		}
+	if (isSource && !store.IsAvailable(storelimit.RegionRemove)) || (!isSource && !store.IsAvailable(storelimit.RegionAdd)) {
+		return false
 	}
 
 	if uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
