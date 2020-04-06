@@ -615,11 +615,9 @@ func (filter *storeStateFilter) filter(stores []*metapb.Store) []*metapb.Store {
 
 func getStoreLimitType(input map[string]interface{}) (storelimit.Type, error) {
 	typeNameIface, ok := input["type"]
-	var typeValue storelimit.Type
+	typeValue := storelimit.RegionAdd
 	var err error
-	if !ok {
-		typeValue = storelimit.RegionAdd
-	} else {
+	if ok {
 		typeName, ok := typeNameIface.(string)
 		if !ok {
 			err = errors.New("bad format type")
@@ -631,11 +629,9 @@ func getStoreLimitType(input map[string]interface{}) (storelimit.Type, error) {
 }
 
 func parseStoreLimitType(typeName string) (storelimit.Type, error) {
-	var typeValue storelimit.Type
+	typeValue := storelimit.RegionAdd
 	var err error
-	if typeName == "" {
-		typeValue = storelimit.RegionAdd
-	} else {
+	if typeName != "" {
 		if value, ok := storelimit.TypeNameValue[typeName]; ok {
 			typeValue = value
 		} else {
