@@ -216,6 +216,11 @@ func (o *ScheduleOption) GetKeyType() core.KeyType {
 	return core.StringToKeyType(o.LoadPDServerConfig().KeyType)
 }
 
+// GetDashboardAddress gets dashboard address.
+func (o *ScheduleOption) GetDashboardAddress() string {
+	return o.LoadPDServerConfig().DashboardAddress
+}
+
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (o *ScheduleOption) IsRemoveDownReplicaEnabled() bool {
 	return o.Load().EnableRemoveDownReplica

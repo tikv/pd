@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2020 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -10,13 +10,17 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
+// +build swagger_server
 
-package statistics
+package swaggerserver
 
-// HotPeersStat records all hot regions statistics
-type HotPeersStat struct {
-	TotalBytesRate float64       `json:"total_flow_bytes"`
-	TotalKeysRate  float64       `json:"total_flow_keys"`
-	Count          int           `json:"regions_count"`
-	Stats          []HotPeerStat `json:"statistics"`
+import (
+	"net/http"
+
+	_ "github.com/pingcap/pd/v4/docs/swagger" // nolint: swagger docs
+	httpSwagger "github.com/swaggo/http-swagger"
+)
+
+func handler() http.Handler {
+	return httpSwagger.Handler()
 }

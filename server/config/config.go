@@ -135,8 +135,6 @@ type Config struct {
 
 	EnableDynamicConfig bool `toml:"enable-dynamic-config" json:"enable-dynamic-config"`
 
-	EnableDashboard bool
-
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicateMode ReplicateModeConfig `toml:"replicate-mode" json:"replicate-mode"`
@@ -172,8 +170,6 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
-
-	fs.BoolVar(&cfg.EnableDashboard, "enable-dashboard", true, "Enable Dashboard API and UI on this node")
 
 	return cfg
 }
@@ -212,7 +208,8 @@ const (
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 
-	defaultEnableDynamicConfig = true
+	defaultEnableDynamicConfig = false
+	defaultDashboardAddress    = "auto"
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
@@ -665,7 +662,7 @@ const (
 	defaultStoreBalanceRate       = 15
 	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
-	defaultHighSpaceRatio         = 0.6
+	defaultHighSpaceRatio         = 0.7
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
@@ -931,6 +928,8 @@ type PDServerConfig struct {
 	// MetricStorage is the cluster metric storage.
 	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
+	// There are some values supported: "auto", "none", or a specific address, default: "auto"
+	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -946,7 +945,24 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("runtime-services") {
 		c.RuntimeServices = defaultRuntimeServices
 	}
+	if !meta.IsDefined("dashboard-address") {
+		c.DashboardAddress = defaultDashboardAddress
+	}
 	return nil
+}
+
+// Clone retruns a cloned PD server config.
+func (c *PDServerConfig) Clone() *PDServerConfig {
+	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
+	copy(runtimeServices, c.RuntimeServices)
+	return &PDServerConfig{
+		UseRegionStorage: c.UseRegionStorage,
+		MaxResetTSGap:    c.MaxResetTSGap,
+		KeyType:          c.KeyType,
+		MetricStorage:    c.MetricStorage,
+		DashboardAddress: c.DashboardAddress,
+		RuntimeServices:  runtimeServices,
+	}
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.
@@ -1064,7 +1080,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
-	cfg.ClientTLSInfo.AllowedCN = allowedCN
+	// Client no need to set the CN. (cfg.ClientTLSInfo.AllowedCN = allowedCN)
 	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath

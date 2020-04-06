@@ -71,6 +71,14 @@ var balanceRegionCounter = prometheus.NewCounterVec(
 		Help:      "Counter of balance region scheduler.",
 	}, []string{"type", "address", "store"})
 
+var balanceHotRegionCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "hot_region",
+		Help:      "Counter of hot region scheduler.",
+	}, []string{"type", "store"})
+
 var balanceDirectionCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",
@@ -101,6 +109,7 @@ func init() {
 	prometheus.MustRegister(hotPeerSummary)
 	prometheus.MustRegister(balanceLeaderCounter)
 	prometheus.MustRegister(balanceRegionCounter)
+	prometheus.MustRegister(balanceHotRegionCounter)
 	prometheus.MustRegister(balanceDirectionCounter)
 	prometheus.MustRegister(scatterRangeLeaderCounter)
 	prometheus.MustRegister(scatterRangeRegionCounter)

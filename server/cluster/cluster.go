@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/id"
 	syncer "github.com/pingcap/pd/v4/server/region_syncer"
+	"github.com/pingcap/pd/v4/server/replicate"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/checker"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
@@ -44,7 +45,7 @@ import (
 	"go.uber.org/zap"
 )
 
-var backgroundJobInterval = time.Minute
+var backgroundJobInterval = 10 * time.Second
 
 const (
 	clientTimeout              = 3 * time.Second
@@ -54,6 +55,7 @@ const (
 // Server is the interface for cluster.
 type Server interface {
 	GetAllocator() *id.AllocatorImpl
+	GetConfig() *config.Config
 	GetScheduleOption() *config.ScheduleOption
 	GetStorage() *core.Storage
 	GetHBStreams() opt.HeartbeatStreams
@@ -102,6 +104,8 @@ type RaftCluster struct {
 
 	ruleManager *placement.RuleManager
 	client      *clientv3.Client
+
+	replicateMode *replicate.ModeManager
 
 	schedulersCallback func()
 	configCheck        bool
@@ -214,18 +218,24 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
+	c.replicateMode, err = replicate.NewReplicateModeManager(s.GetConfig().ReplicateMode, s.GetStorage(), s.GetAllocator(), cluster)
+	if err != nil {
+		return err
+	}
+
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt)
 	c.limiter = NewStoreLimiter(c.coordinator.opController)
 	c.quit = make(chan struct{})
 
-	c.wg.Add(3)
+	c.wg.Add(4)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.syncRegions()
+	go c.runReplicateMode()
 	c.running = true
 
 	return nil
@@ -307,6 +317,12 @@ func (c *RaftCluster) syncRegions() {
 	c.regionSyncer.RunServer(c.changedRegionNotifier(), c.quit)
 }
 
+func (c *RaftCluster) runReplicateMode() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+	c.replicateMode.Run(c.quit)
+}
+
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
 	c.Lock()
@@ -364,6 +380,13 @@ func (c *RaftCluster) GetRegionSyncer() *syncer.RegionSyncer {
 	c.RLock()
 	defer c.RUnlock()
 	return c.regionSyncer
+}
+
+// GetReplicateMode returns the ReplicateMode.
+func (c *RaftCluster) GetReplicateMode() *replicate.ModeManager {
+	c.RLock()
+	defer c.RUnlock()
+	return c.replicateMode
 }
 
 // GetStorage returns the storage.
@@ -1643,6 +1666,7 @@ func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 }
 
 // DialClient used to dial http request.
+// Alreadly supports tls in InitHTTPClient(pd-server/main.go)
 var DialClient = &http.Client{
 	Timeout: clientTimeout,
 	Transport: &http.Transport{

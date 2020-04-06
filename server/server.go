@@ -294,7 +294,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
+	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
 
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -365,6 +365,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
+	if !s.cfg.EnableDynamicConfig {
+		s.cluster.SetConfigCheck()
+	}
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
 	// Run callbacks
@@ -582,7 +585,9 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, err
 	}
 
-	return &pdpb.BootstrapResponse{}, nil
+	return &pdpb.BootstrapResponse{
+		ReplicateStatus: s.cluster.GetReplicateMode().GetReplicateStatus(),
+	}, nil
 }
 
 func (s *Server) createRaftCluster() error {
@@ -685,8 +690,8 @@ func (s *Server) GetSchedulersCallback() func() {
 				log.Error("failed to encode config", zap.Error(err))
 			}
 
-			if err := s.updateConfigManager("schedule.schedulers", buf.String()); err != nil {
-				log.Error("failed to update the schedulers", zap.Error(err))
+			if err := s.UpdateConfigManager("schedule.schedulers", buf.String()); err != nil {
+				log.Error("failed to update the schedulers in config manager", zap.Error(err))
 			}
 		}
 	}
@@ -748,6 +753,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 		return err
 	}
 	old := s.scheduleOpt.Load()
+	cfg.SchedulersPayload = nil
 	s.scheduleOpt.Store(&cfg)
 	if err := s.scheduleOpt.Persist(s.storage); err != nil {
 		s.scheduleOpt.Store(old)
@@ -909,19 +915,18 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	return nil
 }
 
-func (s *Server) updateConfigManager(name, value string) error {
-	configManager := s.GetConfigManager()
-	globalVersion := configManager.GetGlobalConfigs(Component).GetVersion()
+// UpdateConfigManager is used to update config manager directly.
+func (s *Server) UpdateConfigManager(name, value string) error {
+	cm := s.GetConfigManager()
+	globalVersion := cm.GetGlobalVersion(cm.GetGlobalConfigs(Component))
 	version := &configpb.Version{Global: globalVersion}
 	entries := []*configpb.ConfigEntry{{Name: name, Value: value}}
-	configManager.Lock()
-	_, status := configManager.UpdateGlobal(Component, version, entries)
-	configManager.Unlock()
+	_, status := cm.UpdateGlobal(Component, version, entries)
 	if status.GetCode() != configpb.StatusCode_OK {
 		return errors.New(status.GetMessage())
 	}
 
-	return configManager.Persist(s.GetStorage())
+	return cm.Persist(s.GetStorage())
 }
 
 // GetLabelProperty returns the whole label property config.
@@ -1294,38 +1299,36 @@ func (s *Server) updateComponentConfig(cfg string) error {
 		return err
 	}
 	var err error
-	if !reflect.DeepEqual(s.GetScheduleConfig(), &new.Schedule) {
-		if err = new.Schedule.Validate(); err != nil {
-			return err
-		}
+	old := *s.GetConfig()
+	// SchedulersPayload doesn't need to be updated.
+	new.Schedule.SchedulersPayload = nil
+	old.Schedule.SchedulersPayload = nil
+	if !reflect.DeepEqual(old.Schedule, new.Schedule) {
 		err = s.SetScheduleConfig(new.Schedule)
 		saveFile = true
 	}
 
-	if !reflect.DeepEqual(s.GetReplicationConfig(), &new.Replication) {
-		if err = new.Replication.Validate(); err != nil {
-			return err
-		}
+	if !reflect.DeepEqual(old.Replication, new.Replication) {
 		err = s.SetReplicationConfig(new.Replication)
 		saveFile = true
 	}
 
-	if !reflect.DeepEqual(s.GetPDServerConfig(), &new.PDServerCfg) {
+	if !reflect.DeepEqual(old.PDServerCfg, new.PDServerCfg) {
 		err = s.SetPDServerConfig(new.PDServerCfg)
 		saveFile = true
 	}
 
-	if !reflect.DeepEqual(s.GetClusterVersion(), new.ClusterVersion) {
+	if !reflect.DeepEqual(old.ClusterVersion, new.ClusterVersion) {
 		err = s.SetClusterVersion(new.ClusterVersion.String())
 		saveFile = true
 	}
 
-	if !reflect.DeepEqual(s.GetLabelProperty(), new.LabelProperty) {
+	if !reflect.DeepEqual(old.LabelProperty, new.LabelProperty) {
 		err = s.SetLabelPropertyConfig(new.LabelProperty)
 		saveFile = true
 	}
 
-	if !reflect.DeepEqual(s.GetLogConfig(), &new.Log) {
+	if !reflect.DeepEqual(old.Log, new.Log) {
 		err = s.SetLogConfig(new.Log)
 		saveFile = true
 	}

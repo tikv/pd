@@ -19,6 +19,11 @@ import (
 	"github.com/phf/go-queue/queue"
 )
 
+const (
+	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
+	StoreHeartBeatReportInterval = 10
+)
+
 type deltaWithInterval struct {
 	delta    float64
 	interval time.Duration
@@ -48,10 +53,14 @@ func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 
 // Get returns change rate in the last interval.
 func (aot *AvgOverTime) Get() float64 {
-	if aot.intervalSum.Seconds() < 1 {
-		return 0
-	}
 	return aot.deltaSum / aot.intervalSum.Seconds()
+}
+
+// Clear clears the AvgOverTime.
+func (aot *AvgOverTime) Clear() {
+	aot.que = queue.New()
+	aot.intervalSum = 0
+	aot.deltaSum = 0
 }
 
 // Add adds recent change to AvgOverTime.
@@ -59,27 +68,53 @@ func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
 	aot.que.PushBack(deltaWithInterval{delta, interval})
 	aot.deltaSum += delta
 	aot.intervalSum += interval
-	if aot.intervalSum <= aot.avgInterval {
-		return
-	}
-	for aot.que.Len() > 0 {
-		front := aot.que.Front().(deltaWithInterval)
-		if aot.intervalSum-front.interval >= aot.avgInterval {
-			aot.que.PopFront()
-			aot.deltaSum -= front.delta
-			aot.intervalSum -= front.interval
-		} else {
-			break
-		}
-	}
 }
 
 // Set sets AvgOverTime to the given average.
 func (aot *AvgOverTime) Set(avg float64) {
-	for aot.que.Len() > 0 {
-		aot.que.PopFront()
-	}
+	aot.Clear()
 	aot.deltaSum = avg * aot.avgInterval.Seconds()
 	aot.intervalSum = aot.avgInterval
 	aot.que.PushBack(deltaWithInterval{delta: aot.deltaSum, interval: aot.intervalSum})
+}
+
+// TimeMedian is AvgOverTime + MedianFilter
+// Size of MedianFilter should be larger than double size of AvgOverTime to denoisy.
+// Delay is aotSize * mfSize * StoreHeartBeatReportInterval /4
+type TimeMedian struct {
+	aotInterval time.Duration
+	aot         *AvgOverTime
+	mf          *MedianFilter
+}
+
+// NewTimeMedian returns a TimeMedian with given size.
+func NewTimeMedian(aotSize, mfSize int) *TimeMedian {
+	interval := time.Duration(aotSize*StoreHeartBeatReportInterval) * time.Second
+	return &TimeMedian{
+		aotInterval: interval,
+		aot:         NewAvgOverTime(interval),
+		mf:          NewMedianFilter(mfSize),
+	}
+}
+
+// Get returns change rate in the median of the several intervals.
+func (t *TimeMedian) Get() float64 {
+	return t.mf.Get()
+}
+
+// Add adds recent change to TimeMedian.
+func (t *TimeMedian) Add(delta float64, interval time.Duration) {
+	if interval < 1 {
+		return
+	}
+	t.aot.Add(delta, interval)
+	if t.aot.intervalSum >= t.aotInterval {
+		t.mf.Add(t.aot.Get())
+		t.aot.Clear()
+	}
+}
+
+// Set sets the given average.
+func (t *TimeMedian) Set(avg float64) {
+	t.mf.Set(avg)
 }
