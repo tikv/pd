@@ -18,7 +18,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/kvproto/pkg/replicate_mode"
 	pb "github.com/pingcap/kvproto/pkg/replicate_mode"
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
@@ -201,15 +200,15 @@ func (s *testReplicateMode) TestStateSwitch(c *C) {
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
 
-	region = region.Clone(core.SetReplicateStatus(&replicate_mode.RegionReplicateStatus{
-		State:   replicate_mode.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
+	region = region.Clone(core.SetReplicateStatus(&pb.RegionReplicateStatus{
+		State:   pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
 		StateId: rep.drAutosync.StateID - 1, // mismatch state id
 	}))
 	cluster.PutRegion(region)
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
-	region = region.Clone(core.SetReplicateStatus(&replicate_mode.RegionReplicateStatus{
-		State:   replicate_mode.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
+	region = region.Clone(core.SetReplicateStatus(&pb.RegionReplicateStatus{
+		State:   pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
 		StateId: rep.drAutosync.StateID,
 	}))
 	cluster.PutRegion(region)
