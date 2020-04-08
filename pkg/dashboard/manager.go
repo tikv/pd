@@ -46,7 +46,6 @@ type Manager struct {
 	enableDynamic bool
 
 	isLeader bool
-	rc       *cluster.RaftCluster
 	members  []*pdpb.Member
 }
 
@@ -97,7 +96,6 @@ func (m *Manager) serviceLoop() {
 func (m *Manager) updateInfo() {
 	if !m.srv.GetMember().IsLeader() {
 		m.isLeader = false
-		m.rc = nil
 		m.members = nil
 		if !m.enableDynamic {
 			m.srv.GetScheduleOption().Reload(m.srv.GetStorage())
@@ -106,15 +104,23 @@ func (m *Manager) updateInfo() {
 	}
 
 	m.isLeader = true
-	m.rc = m.srv.GetRaftCluster()
-	if m.rc == nil || !m.rc.IsRunning() {
+
+	var err error
+	if m.members, err = cluster.GetMembers(m.srv.GetClient()); err != nil {
+		log.Warn("failed to get members", zap.Error(err))
 		m.members = nil
 		return
 	}
 
-	var err error
-	if m.members, err = cluster.GetMembers(m.srv.GetClient()); err != nil {
-		log.Error("failed to get members")
+	allHasClientUrls := true
+	for _, member := range m.members {
+		if len(member.GetClientUrls()) == 0 {
+			allHasClientUrls = false
+		}
+	}
+	if !allHasClientUrls {
+		log.Warn("failed to get member client urls")
+		m.members = nil
 	}
 }
 
