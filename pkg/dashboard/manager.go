@@ -30,9 +30,8 @@ import (
 	"github.com/pingcap/pd/v4/server/cluster"
 )
 
-const (
-	checkInterval = time.Second
-)
+// CheckInterval is used to check if the dashboard address is switched
+var CheckInterval = time.Second
 
 // Manager is used to control dashboard.
 type Manager struct {
@@ -78,7 +77,7 @@ func (m *Manager) serviceLoop() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 
-	ticker := time.NewTicker(checkInterval)
+	ticker := time.NewTicker(CheckInterval)
 	defer ticker.Stop()
 
 	for {

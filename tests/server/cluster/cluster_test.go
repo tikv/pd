@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replicate_mode"
+	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/mock/mockid"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
@@ -60,6 +61,8 @@ func (s *clusterTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
 	server.ConfigCheckInterval = 1 * time.Second
+	// to prevent GetStorage
+	dashboard.CheckInterval = 30 * time.Minute
 }
 
 func (s *clusterTestSuite) TearDownSuite(c *C) {
@@ -588,7 +591,8 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 }
 
 func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
-	tc, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config) { cfg.EnableDynamicConfig = true })
+	// Here needs to disable dynamic config to prevent GetStorage, otherwise, it may have a data race problem.
+	tc, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config) { cfg.EnableDynamicConfig = false })
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
