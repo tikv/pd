@@ -917,18 +917,16 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 
 // UpdateConfigManager is used to update config manager directly.
 func (s *Server) UpdateConfigManager(name, value string) error {
-	configManager := s.GetConfigManager()
-	globalVersion := configManager.GetGlobalConfigs(Component).GetVersion()
+	cm := s.GetConfigManager()
+	globalVersion := cm.GetGlobalVersion(cm.GetGlobalConfigs(Component))
 	version := &configpb.Version{Global: globalVersion}
 	entries := []*configpb.ConfigEntry{{Name: name, Value: value}}
-	configManager.Lock()
-	_, status := configManager.UpdateGlobal(Component, version, entries)
-	configManager.Unlock()
+	_, status := cm.UpdateGlobal(Component, version, entries)
 	if status.GetCode() != configpb.StatusCode_OK {
 		return errors.New(status.GetMessage())
 	}
 
-	return configManager.Persist(s.GetStorage())
+	return cm.Persist(s.GetStorage())
 }
 
 // GetLabelProperty returns the whole label property config.
