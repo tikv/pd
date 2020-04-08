@@ -57,8 +57,10 @@ func (s *testReplicateMode) TestInitial(c *C) {
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
 		DrAutosync: &pb.DRAutoSync{
-			LabelKey: "dr-label",
-			State:    pb.DRAutoSync_SYNC,
+			LabelKey:            "dr-label",
+			State:               pb.DRAutoSync_SYNC,
+			StateId:             1,
+			WaitSyncTimeoutHint: 60,
 		},
 	})
 }
@@ -75,8 +77,10 @@ func (s *testReplicateMode) TestStatus(c *C) {
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
 		DrAutosync: &pb.DRAutoSync{
-			LabelKey: "dr-label",
-			State:    pb.DRAutoSync_SYNC,
+			LabelKey:            "dr-label",
+			State:               pb.DRAutoSync_SYNC,
+			StateId:             1,
+			WaitSyncTimeoutHint: 60,
 		},
 	})
 
@@ -85,8 +89,10 @@ func (s *testReplicateMode) TestStatus(c *C) {
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
 		DrAutosync: &pb.DRAutoSync{
-			LabelKey: "dr-label",
-			State:    pb.DRAutoSync_ASYNC,
+			LabelKey:            "dr-label",
+			State:               pb.DRAutoSync_ASYNC,
+			StateId:             2,
+			WaitSyncTimeoutHint: 60,
 		},
 	})
 
@@ -113,8 +119,10 @@ func (s *testReplicateMode) TestStatus(c *C) {
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
 		DrAutosync: &pb.DRAutoSync{
-			LabelKey: "dr-label",
-			State:    pb.DRAutoSync_SYNC,
+			LabelKey:            "dr-label",
+			State:               pb.DRAutoSync_SYNC,
+			StateId:             rep.drAutosync.StateID,
+			WaitSyncTimeoutHint: 60,
 		},
 	})
 }
