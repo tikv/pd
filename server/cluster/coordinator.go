@@ -46,14 +46,8 @@ const (
 	PluginUnload = "PluginUnload"
 )
 
-var (
-	// ErrNotBootstrapped is error info for cluster not bootstrapped.
-	ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
-	// ErrSchedulerExisted is error info for scheduler has already existed.
-	ErrSchedulerExisted = errors.New("scheduler existed")
-	// ErrSchedulerNotFound is error info for scheduler is not found.
-	ErrSchedulerNotFound = errors.New("scheduler not found")
-)
+// ErrNotBootstrapped is error info for cluster not bootstrapped.
+var ErrNotBootstrapped = errors.New("TiKV cluster not bootstrapped, please start TiKV first")
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
 type coordinator struct {
@@ -241,7 +235,7 @@ func (c *coordinator) run() {
 		}
 
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != ErrSchedulerExisted {
+		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != schedulers.ErrSchedulerExisted {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		} else {
 			// Only records the valid scheduler config.
@@ -466,7 +460,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	defer c.Unlock()
 
 	if _, ok := c.schedulers[scheduler.GetName()]; ok {
-		return ErrSchedulerExisted
+		return schedulers.ErrSchedulerExisted
 	}
 
 	s := newScheduleController(c, scheduler)
@@ -491,7 +485,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	}
 	s, ok := c.schedulers[name]
 	if !ok {
-		return ErrSchedulerNotFound
+		return schedulers.ErrSchedulerNotFound
 	}
 
 	s.Stop()
@@ -525,7 +519,7 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	if name != "all" {
 		sc, ok := c.schedulers[name]
 		if !ok {
-			return ErrSchedulerNotFound
+			return schedulers.ErrSchedulerNotFound
 		}
 		s = append(s, sc)
 	} else {

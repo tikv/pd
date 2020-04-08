@@ -194,8 +194,8 @@ func (s *testReplicateMode) TestStateSwitch(c *C) {
 	cluster.AddLeaderRegion(1, 1, 2, 5)
 	region := cluster.GetRegion(1)
 
-	region = region.Clone(core.WithStartKey(nil), core.WithEndKey(nil), core.SetReplicateStatus(&replicate_mode.RegionReplicateStatus{
-		State: replicate_mode.RegionReplicateStatus_MAJORITY,
+	region = region.Clone(core.WithStartKey(nil), core.WithEndKey(nil), core.SetReplicateStatus(&pb.RegionReplicateStatus{
+		State: pb.RegionReplicateStatus_MAJORITY,
 	}))
 	cluster.PutRegion(region)
 	rep.tickDR()
@@ -203,7 +203,7 @@ func (s *testReplicateMode) TestStateSwitch(c *C) {
 
 	region = region.Clone(core.SetReplicateStatus(&replicate_mode.RegionReplicateStatus{
 		State:   replicate_mode.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
-		StateId: rep.drAutosync.StateID - 1, // mismatch recover id
+		StateId: rep.drAutosync.StateID - 1, // mismatch state id
 	}))
 	cluster.PutRegion(region)
 	rep.tickDR()
