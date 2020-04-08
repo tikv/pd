@@ -219,7 +219,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.replicateMode, err = replicate.NewReplicateModeManager(s.GetConfig().ReplicateMode, s.GetStorage(), s.GetAllocator(), cluster)
+	c.replicateMode, err = replicate.NewReplicateModeManager(s.GetConfig().ReplicateMode, s.GetStorage(), cluster)
 	if err != nil {
 		return err
 	}
@@ -515,6 +515,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
 			region.GetKeysRead() != origin.GetKeysRead() {
 			saveCache, statsChange = true, true
+		}
+
+		if region.GetReplicateStatus().GetState() != origin.GetReplicateStatus().GetState() ||
+			region.GetReplicateStatus().GetRecoverId() != origin.GetReplicateStatus().GetRecoverId() {
+			saveCache = true
 		}
 	}
 
