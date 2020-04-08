@@ -488,7 +488,7 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Tags store
 // @Summary Set limit scene in the cluster.
 // @Accept json
-// @Param body body schedule.StoreLimitScene true "Store limit scene"
+// @Param body body storelimit.Scene true "Store limit scene"
 // @Produce json
 // @Success 200 {string} string "Set store limit scene success."
 // @Failure 400 {string} string "The input is invalid."
