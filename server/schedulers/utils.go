@@ -36,8 +36,14 @@ const (
 	minTolerantSizeRatio    float64 = 1.0
 )
 
-// ErrScheduleConfigNotExist the config is not correct.
-var ErrScheduleConfigNotExist = errors.New("the config does not exist")
+var (
+	// ErrSchedulerExisted is error info for scheduler has already existed.
+	ErrSchedulerExisted = errors.New("scheduler existed")
+	// ErrSchedulerNotFound is error info for scheduler is not found.
+	ErrSchedulerNotFound = errors.New("scheduler not found")
+	// ErrScheduleConfigNotExist the config is not correct.
+	ErrScheduleConfigNotExist = errors.New("the config does not exist")
+)
 
 func minUint64(a, b uint64) uint64 {
 	if a < b {

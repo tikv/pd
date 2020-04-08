@@ -652,7 +652,8 @@ func (s *Server) GetStorage() *core.Storage {
 	return s.storage
 }
 
-// SetStorage changes the storage for test purpose.
+// SetStorage changes the storage only for test purpose.
+// When we use it, we should prevent calling GetStorage, otherwise, it may cause a data race problem.
 func (s *Server) SetStorage(storage *core.Storage) {
 	s.storage = storage
 }
