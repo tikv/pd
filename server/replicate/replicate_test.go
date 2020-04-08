@@ -20,7 +20,6 @@ import (
 	. "github.com/pingcap/check"
 	pb "github.com/pingcap/kvproto/pkg/replicate_mode"
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockid"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/config"
@@ -38,10 +37,9 @@ type testReplicateMode struct{}
 
 func (s *testReplicateMode) TestInitial(c *C) {
 	store := core.NewStorage(kv.NewMemoryKV())
-	id := mockid.NewIDAllocator()
 	conf := config.ReplicateModeConfig{ReplicateMode: modeMajority}
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
-	rep, err := NewReplicateModeManager(conf, store, id, cluster)
+	rep, err := NewReplicateModeManager(conf, store, cluster)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{Mode: pb.ReplicateStatus_MAJORITY})
 
@@ -54,7 +52,7 @@ func (s *testReplicateMode) TestInitial(c *C) {
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
-	rep, err = NewReplicateModeManager(conf, store, id, cluster)
+	rep, err = NewReplicateModeManager(conf, store, cluster)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
@@ -67,13 +65,12 @@ func (s *testReplicateMode) TestInitial(c *C) {
 
 func (s *testReplicateMode) TestStatus(c *C) {
 	store := core.NewStorage(kv.NewMemoryKV())
-	id := mockid.NewIDAllocator()
 	conf := config.ReplicateModeConfig{ReplicateMode: modeDRAutosync, DRAutoSync: config.DRAutoSyncReplicateConfig{
 		LabelKey:        "dr-label",
 		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
-	rep, err := NewReplicateModeManager(conf, store, id, cluster)
+	rep, err := NewReplicateModeManager(conf, store, cluster)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
@@ -107,7 +104,7 @@ func (s *testReplicateMode) TestStatus(c *C) {
 	})
 
 	// test reload
-	rep, err = NewReplicateModeManager(conf, store, id, cluster)
+	rep, err = NewReplicateModeManager(conf, store, cluster)
 	c.Assert(err, IsNil)
 	c.Assert(rep.drAutosync.State, Equals, drStateSyncRecover)
 
@@ -124,7 +121,6 @@ func (s *testReplicateMode) TestStatus(c *C) {
 
 func (s *testReplicateMode) TestStateSwitch(c *C) {
 	store := core.NewStorage(kv.NewMemoryKV())
-	id := mockid.NewIDAllocator()
 	conf := config.ReplicateModeConfig{ReplicateMode: modeDRAutosync, DRAutoSync: config.DRAutoSyncReplicateConfig{
 		LabelKey:         "zone",
 		Primary:          "zone1",
@@ -135,7 +131,7 @@ func (s *testReplicateMode) TestStateSwitch(c *C) {
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
-	rep, err := NewReplicateModeManager(conf, store, id, cluster)
+	rep, err := NewReplicateModeManager(conf, store, cluster)
 	c.Assert(err, IsNil)
 
 	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
@@ -182,7 +178,28 @@ func (s *testReplicateMode) TestStateSwitch(c *C) {
 	// sync_recover -> sync
 	rep.drSwitchToSyncRecover()
 	s.setStoreState(cluster, 4, "up")
-	rep.drAutosync.RecoverStartTime = time.Now().Add(-time.Hour)
+	cluster.AddLeaderRegion(1, 1, 2, 5)
+	region := cluster.GetRegion(1)
+
+	region = region.Clone(core.WithStartKey(nil), core.WithEndKey(nil), core.SetReplicateStatus(&pb.RegionReplicateStatus{
+		State: pb.RegionReplicateStatus_MAJORITY,
+	}))
+	cluster.PutRegion(region)
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
+
+	region = region.Clone(core.SetReplicateStatus(&pb.RegionReplicateStatus{
+		State:     pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
+		RecoverId: rep.drAutosync.RecoverID - 1, // mismatch recover id
+	}))
+	cluster.PutRegion(region)
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
+	region = region.Clone(core.SetReplicateStatus(&pb.RegionReplicateStatus{
+		State:     pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
+		RecoverId: rep.drAutosync.RecoverID,
+	}))
+	cluster.PutRegion(region)
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSync)
 }
