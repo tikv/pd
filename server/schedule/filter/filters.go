@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/pd/v3/server/core"
 	"github.com/pingcap/pd/v3/server/schedule/opt"
 	"github.com/pingcap/pd/v3/server/schedule/placement"
+	"github.com/pingcap/pd/v3/server/schedule/storelimit"
 )
 
 // revive:disable:unused-parameter
@@ -134,11 +135,11 @@ func (f *storeLimitFilter) Type() string {
 }
 
 func (f *storeLimitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return !store.IsAvailable()
+	return !store.IsAvailable(storelimit.RegionRemove)
 }
 
 func (f *storeLimitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return !store.IsAvailable()
+	return !store.IsAvailable(storelimit.RegionAdd)
 }
 
 type stateFilter struct{ scope string }
@@ -379,7 +380,7 @@ func (f StoreStateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 		return true
 	}
 
-	if f.MoveRegion && f.filterMoveRegion(opt, store) {
+	if f.MoveRegion && f.filterMoveRegion(opt, true, store) {
 		return true
 	}
 	return false
@@ -407,19 +408,19 @@ func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
 			return true
 		}
 
-		if f.filterMoveRegion(opts, store) {
+		if f.filterMoveRegion(opts, false, store) {
 			return true
 		}
 	}
 	return false
 }
 
-func (f StoreStateFilter) filterMoveRegion(opt opt.Options, store *core.StoreInfo) bool {
+func (f StoreStateFilter) filterMoveRegion(opt opt.Options, isSource bool, store *core.StoreInfo) bool { // revive:disable-line:flag-parameter
 	if store.IsBusy() {
 		return true
 	}
 
-	if !store.IsAvailable() {
+	if (isSource && !store.IsAvailable(storelimit.RegionRemove)) || (!isSource && !store.IsAvailable(storelimit.RegionAdd)) {
 		return true
 	}
 
