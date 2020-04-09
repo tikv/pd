@@ -242,8 +242,8 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	CheckPDVersion(s.scheduleOpt)
 
 	return &pdpb.PutStoreResponse{
-		Header:          s.header(),
-		ReplicateStatus: rc.GetReplicateMode().GetReplicateStatus(),
+		Header:            s.header(),
+		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 	}, nil
 }
 
@@ -302,8 +302,8 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	}
 
 	return &pdpb.StoreHeartbeatResponse{
-		Header:          s.header(),
-		ReplicateStatus: rc.GetReplicateMode().GetReplicateStatus(),
+		Header:            s.header(),
+		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 	}, nil
 }
 

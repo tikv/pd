@@ -29,7 +29,7 @@ import (
 var (
 	configPrefix         = "pd/api/v1/config"
 	schedulePrefix       = "pd/api/v1/config/schedule"
-	replicationPrefix    = "pd/api/v1/config/replicate"
+	replicationPrefix    = "pd/api/v1/config/replication"
 	labelPropertyPrefix  = "pd/api/v1/config/label-property"
 	clusterVersionPrefix = "pd/api/v1/config/cluster-version"
 	rulesPrefix          = "pd/api/v1/config/rules"

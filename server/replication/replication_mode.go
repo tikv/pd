@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package replicate
+package replication
 
 import (
 	"bytes"
@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	pb "github.com/pingcap/kvproto/pkg/replicate_mode"
+	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
@@ -29,82 +29,82 @@ import (
 
 const (
 	modeMajority   = "majority"
-	modeDRAutosync = "dr_autosync"
+	modeDRAutoSync = "dr_auto_sync"
 )
 
 // ModeManager is used to control how raft logs are synchronized between
 // different tikv nodes.
 type ModeManager struct {
 	sync.RWMutex
-	config  config.ReplicateModeConfig
+	config  config.ReplicationModeConfig
 	storage *core.Storage
 	cluster opt.Cluster
 
-	drAutosync drAutosyncStatus
+	drAutoSync drAutoSyncStatus
 }
 
-// NewReplicateModeManager creates the replicate mode manager.
-func NewReplicateModeManager(config config.ReplicateModeConfig, storage *core.Storage, cluster opt.Cluster) (*ModeManager, error) {
+// NewReplicationModeManager creates the replicate mode manager.
+func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, cluster opt.Cluster) (*ModeManager, error) {
 	m := &ModeManager{
 		config:  config,
 		storage: storage,
 		cluster: cluster,
 	}
-	switch config.ReplicateMode {
+	switch config.ReplicationMode {
 	case modeMajority:
-	case modeDRAutosync:
-		if err := m.loadDRAutosync(); err != nil {
+	case modeDRAutoSync:
+		if err := m.loadDRAutoSync(); err != nil {
 			return nil, err
 		}
 	}
 	return m, nil
 }
 
-// GetReplicateStatus returns the status to sync with tikv servers.
-func (m *ModeManager) GetReplicateStatus() *pb.ReplicateStatus {
+// GetReplicationStatus returns the status to sync with tikv servers.
+func (m *ModeManager) GetReplicationStatus() *pb.ReplicationStatus {
 	m.RLock()
 	defer m.RUnlock()
 
-	p := &pb.ReplicateStatus{
-		Mode: pb.ReplicateStatus_Mode(pb.ReplicateStatus_Mode_value[strings.ToUpper(m.config.ReplicateMode)]),
+	p := &pb.ReplicationStatus{
+		Mode: pb.ReplicationMode(pb.ReplicationMode_value[strings.ToUpper(m.config.ReplicationMode)]),
 	}
-	switch m.config.ReplicateMode {
+	switch m.config.ReplicationMode {
 	case modeMajority:
-	case modeDRAutosync:
-		p.DrAutosync = &pb.DRAutoSync{
+	case modeDRAutoSync:
+		p.DrAutoSync = &pb.DRAutoSync{
 			LabelKey:            m.config.DRAutoSync.LabelKey,
-			State:               pb.DRAutoSync_State(pb.DRAutoSync_State_value[strings.ToUpper(m.drAutosync.State)]),
-			StateId:             m.drAutosync.StateID,
+			State:               pb.DRAutoSyncState(pb.DRAutoSyncState_value[strings.ToUpper(m.drAutoSync.State)]),
+			StateId:             m.drAutoSync.StateID,
 			WaitSyncTimeoutHint: int32(m.config.DRAutoSync.WaitSyncTimeout.Seconds()),
 		}
 	}
 	return p
 }
 
-// HTTPReplicateStatus is for query status from HTTP API.
-type HTTPReplicateStatus struct {
+// HTTPReplicationStatus is for query status from HTTP API.
+type HTTPReplicationStatus struct {
 	Mode       string `json:"mode"`
-	DrAutosync struct {
+	DrAutoSync struct {
 		LabelKey        string  `json:"label_key"`
 		State           string  `json:"state"`
 		StateID         uint64  `json:"state_id,omitempty"`
 		RecoverProgress float32 `json:"recover_progress,omitempty"`
-	} `json:"dr_autosync,omitempty"`
+	} `json:"dr_auto_sync,omitempty"`
 }
 
-// GetReplicateStatusHTTP returns status for HTTP API.
-func (m *ModeManager) GetReplicateStatusHTTP() *HTTPReplicateStatus {
+// GetReplicationStatusHTTP returns status for HTTP API.
+func (m *ModeManager) GetReplicationStatusHTTP() *HTTPReplicationStatus {
 	m.RLock()
 	defer m.RUnlock()
-	var status HTTPReplicateStatus
-	status.Mode = m.config.ReplicateMode
+	var status HTTPReplicationStatus
+	status.Mode = m.config.ReplicationMode
 	switch status.Mode {
 	case modeMajority:
-	case modeDRAutosync:
-		status.DrAutosync.LabelKey = m.config.DRAutoSync.LabelKey
-		status.DrAutosync.State = m.drAutosync.State
-		status.DrAutosync.StateID = m.drAutosync.StateID
-		status.DrAutosync.RecoverProgress = m.drAutosync.RecoverProgress
+	case modeDRAutoSync:
+		status.DrAutoSync.LabelKey = m.config.DRAutoSync.LabelKey
+		status.DrAutoSync.State = m.drAutoSync.State
+		status.DrAutoSync.StateID = m.drAutoSync.StateID
+		status.DrAutoSync.RecoverProgress = m.drAutoSync.RecoverProgress
 	}
 	return &status
 }
@@ -112,7 +112,7 @@ func (m *ModeManager) GetReplicateStatusHTTP() *HTTPReplicateStatus {
 func (m *ModeManager) getModeName() string {
 	m.RLock()
 	defer m.RUnlock()
-	return m.config.ReplicateMode
+	return m.config.ReplicationMode
 }
 
 const (
@@ -121,15 +121,15 @@ const (
 	drStateSyncRecover = "sync_recover"
 )
 
-type drAutosyncStatus struct {
+type drAutoSyncStatus struct {
 	State            string    `json:"state,omitempty"`
 	StateID          uint64    `json:"state_id,omitempty"`
 	RecoverStartTime time.Time `json:"recover_start,omitempty"`
 	RecoverProgress  float32   `json:"recover_progress,omitempty"`
 }
 
-func (m *ModeManager) loadDRAutosync() error {
-	ok, err := m.storage.LoadReplicateStatus(modeDRAutosync, &m.drAutosync)
+func (m *ModeManager) loadDRAutoSync() error {
+	ok, err := m.storage.LoadReplicationStatus(modeDRAutoSync, &m.drAutoSync)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func (m *ModeManager) loadDRAutosync() error {
 		if err != nil {
 			return err
 		}
-		m.drAutosync = drAutosyncStatus{State: drStateSync, StateID: id}
+		m.drAutoSync = drAutoSyncStatus{State: drStateSync, StateID: id}
 	}
 	return nil
 }
@@ -149,16 +149,16 @@ func (m *ModeManager) drSwitchToAsync() error {
 	defer m.Unlock()
 	id, err := m.cluster.AllocID()
 	if err != nil {
-		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
+		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
-	dr := drAutosyncStatus{State: drStateAsync, StateID: id}
-	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
-		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
+	dr := drAutoSyncStatus{State: drStateAsync, StateID: id}
+	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
+		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
-	m.drAutosync = dr
-	log.Info("switched to async state", zap.String("replicate-mode", modeDRAutosync))
+	m.drAutoSync = dr
+	log.Info("switched to async state", zap.String("replicate-mode", modeDRAutoSync))
 	return nil
 }
 
@@ -167,16 +167,16 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 	defer m.Unlock()
 	id, err := m.cluster.AllocID()
 	if err != nil {
-		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
+		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
-	dr := drAutosyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: time.Now()}
-	if err = m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
-		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
+	dr := drAutoSyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: time.Now()}
+	if err = m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
+		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
-	m.drAutosync = dr
-	log.Info("switched to sync_recover state", zap.String("replicate-mode", modeDRAutosync))
+	m.drAutoSync = dr
+	log.Info("switched to sync_recover state", zap.String("replicate-mode", modeDRAutoSync))
 	return nil
 }
 
@@ -185,23 +185,23 @@ func (m *ModeManager) drSwitchToSync() error {
 	defer m.Unlock()
 	id, err := m.cluster.AllocID()
 	if err != nil {
-		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
+		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
-	dr := drAutosyncStatus{State: drStateSync, StateID: id}
-	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
-		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
+	dr := drAutoSyncStatus{State: drStateSync, StateID: id}
+	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
+		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
-	m.drAutosync = dr
-	log.Info("switched to sync state", zap.String("replicate-mode", modeDRAutosync))
+	m.drAutoSync = dr
+	log.Info("switched to sync state", zap.String("replicate-mode", modeDRAutoSync))
 	return nil
 }
 
 func (m *ModeManager) drGetState() string {
 	m.RLock()
 	defer m.RUnlock()
-	return m.drAutosync.State
+	return m.drAutoSync.State
 }
 
 const (
@@ -228,7 +228,7 @@ func (m *ModeManager) Run(quit chan struct{}) {
 }
 
 func (m *ModeManager) tickDR() {
-	if m.getModeName() != modeDRAutosync {
+	if m.getModeName() != modeDRAutoSync {
 		return
 	}
 
@@ -288,8 +288,8 @@ func (m *ModeManager) recoverProgress() (current, total int) {
 				log.Warn("found region gap", zap.ByteString("key", key), zap.ByteString("region-start-key", r.GetStartKey()), zap.Uint64("region-id", r.GetID()))
 				total++
 			}
-			if r.GetReplicateStatus().GetStateId() == m.drAutosync.StateID &&
-				r.GetReplicateStatus().GetState() == pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL {
+			if r.GetReplicationStatus().GetStateId() == m.drAutoSync.StateID &&
+				r.GetReplicationStatus().GetState() == pb.RegionReplicationState_INTEGRITY_OVER_LABEL {
 				current++
 			}
 			key = r.GetEndKey()
@@ -301,5 +301,5 @@ func (m *ModeManager) recoverProgress() (current, total int) {
 func (m *ModeManager) updateRecoverProgress(progress float32) {
 	m.Lock()
 	defer m.Unlock()
-	m.drAutosync.RecoverProgress = progress
+	m.drAutoSync.RecoverProgress = progress
 }
