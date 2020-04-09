@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/replicate_mode"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
@@ -517,8 +518,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache, statsChange = true, true
 		}
 
-		if region.GetReplicateStatus().GetState() != origin.GetReplicateStatus().GetState() ||
-			region.GetReplicateStatus().GetRecoverId() != origin.GetReplicateStatus().GetRecoverId() {
+		if region.GetReplicateStatus().GetState() != replicate_mode.RegionReplicateStatus_UNKNOWN &&
+			(region.GetReplicateStatus().GetState() != origin.GetReplicateStatus().GetState() ||
+				region.GetReplicateStatus().GetStateId() != origin.GetReplicateStatus().GetStateId()) {
 			saveCache = true
 		}
 	}

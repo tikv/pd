@@ -57,8 +57,10 @@ func (s *testReplicateMode) TestInitial(c *C) {
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
 		DrAutosync: &pb.DRAutoSync{
-			LabelKey: "dr-label",
-			State:    pb.DRAutoSync_SYNC,
+			LabelKey:            "dr-label",
+			State:               pb.DRAutoSync_SYNC,
+			StateId:             1,
+			WaitSyncTimeoutHint: 60,
 		},
 	})
 }
@@ -75,8 +77,10 @@ func (s *testReplicateMode) TestStatus(c *C) {
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
 		DrAutosync: &pb.DRAutoSync{
-			LabelKey: "dr-label",
-			State:    pb.DRAutoSync_SYNC,
+			LabelKey:            "dr-label",
+			State:               pb.DRAutoSync_SYNC,
+			StateId:             1,
+			WaitSyncTimeoutHint: 60,
 		},
 	})
 
@@ -85,20 +89,22 @@ func (s *testReplicateMode) TestStatus(c *C) {
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
 		DrAutosync: &pb.DRAutoSync{
-			LabelKey: "dr-label",
-			State:    pb.DRAutoSync_ASYNC,
+			LabelKey:            "dr-label",
+			State:               pb.DRAutoSync_ASYNC,
+			StateId:             2,
+			WaitSyncTimeoutHint: 60,
 		},
 	})
 
 	err = rep.drSwitchToSyncRecover()
 	c.Assert(err, IsNil)
-	recoverID := rep.drAutosync.RecoverID
+	stateID := rep.drAutosync.StateID
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
 		DrAutosync: &pb.DRAutoSync{
 			LabelKey:            "dr-label",
 			State:               pb.DRAutoSync_SYNC_RECOVER,
-			RecoverId:           recoverID,
+			StateId:             stateID,
 			WaitSyncTimeoutHint: 60,
 		},
 	})
@@ -113,8 +119,10 @@ func (s *testReplicateMode) TestStatus(c *C) {
 	c.Assert(rep.GetReplicateStatus(), DeepEquals, &pb.ReplicateStatus{
 		Mode: pb.ReplicateStatus_DR_AUTOSYNC,
 		DrAutosync: &pb.DRAutoSync{
-			LabelKey: "dr-label",
-			State:    pb.DRAutoSync_SYNC,
+			LabelKey:            "dr-label",
+			State:               pb.DRAutoSync_SYNC,
+			StateId:             rep.drAutosync.StateID,
+			WaitSyncTimeoutHint: 60,
 		},
 	})
 }
@@ -142,6 +150,12 @@ func (s *testReplicateMode) TestStateSwitch(c *C) {
 
 	// initial state is sync
 	c.Assert(rep.drGetState(), Equals, drStateSync)
+	stateID := rep.drAutosync.StateID
+	c.Assert(stateID, Not(Equals), uint64(0))
+	assertStateIDUpdate := func() {
+		c.Assert(rep.drAutosync.StateID, Not(Equals), stateID)
+		stateID = rep.drAutosync.StateID
+	}
 
 	// sync -> async
 	rep.tickDR()
@@ -152,21 +166,25 @@ func (s *testReplicateMode) TestStateSwitch(c *C) {
 	s.setStoreState(cluster, 2, "down")
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateAsync)
+	assertStateIDUpdate()
 	rep.drSwitchToSync()
 	s.setStoreState(cluster, 1, "up")
 	s.setStoreState(cluster, 2, "up")
 	s.setStoreState(cluster, 5, "down")
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateAsync)
+	assertStateIDUpdate()
 
 	// async -> sync_recover
 	s.setStoreState(cluster, 5, "up")
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
+	assertStateIDUpdate()
 	rep.drSwitchToAsync()
 	s.setStoreState(cluster, 1, "down")
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
+	assertStateIDUpdate()
 
 	// sync_recover -> async
 	rep.tickDR()
@@ -174,9 +192,11 @@ func (s *testReplicateMode) TestStateSwitch(c *C) {
 	s.setStoreState(cluster, 4, "down")
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateAsync)
+	assertStateIDUpdate()
 
 	// sync_recover -> sync
 	rep.drSwitchToSyncRecover()
+	assertStateIDUpdate()
 	s.setStoreState(cluster, 4, "up")
 	cluster.AddLeaderRegion(1, 1, 2, 5)
 	region := cluster.GetRegion(1)
@@ -189,19 +209,20 @@ func (s *testReplicateMode) TestStateSwitch(c *C) {
 	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
 
 	region = region.Clone(core.SetReplicateStatus(&pb.RegionReplicateStatus{
-		State:     pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
-		RecoverId: rep.drAutosync.RecoverID - 1, // mismatch recover id
+		State:   pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
+		StateId: rep.drAutosync.StateID - 1, // mismatch state id
 	}))
 	cluster.PutRegion(region)
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
 	region = region.Clone(core.SetReplicateStatus(&pb.RegionReplicateStatus{
-		State:     pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
-		RecoverId: rep.drAutosync.RecoverID,
+		State:   pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL,
+		StateId: rep.drAutosync.StateID,
 	}))
 	cluster.PutRegion(region)
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSync)
+	assertStateIDUpdate()
 }
 
 func (s *testReplicateMode) setStoreState(cluster *mockcluster.Cluster, id uint64, state string) {
