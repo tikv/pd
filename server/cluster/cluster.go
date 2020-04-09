@@ -40,6 +40,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/checker"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
@@ -991,8 +992,8 @@ func (c *RaftCluster) UnblockStore(storeID uint64) {
 }
 
 // AttachAvailableFunc attaches an available function to a specific store.
-func (c *RaftCluster) AttachAvailableFunc(storeID uint64, f func() bool) {
-	c.core.AttachAvailableFunc(storeID, f)
+func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
+	c.core.AttachAvailableFunc(storeID, limitType, f)
 }
 
 // SetConfigCheck sets a flag for preventing outdated config.

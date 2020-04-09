@@ -407,6 +407,15 @@ types:
       low: integer
       normal: integer
       high: integer
+  StoreLimit:
+    type: object
+    properties:
+      type:
+        type: string
+        enum: [ region-add, region-remove ]
+        default: region-add
+        required: false
+      rate: number
 
 /cluster/status:
   description: Cluster status.
@@ -775,6 +784,12 @@ types:
     description: Get or update the store limit for scenes
     get:
       description: Get the store limit for scenes
+      queryParameters:
+        type?:
+          description: rate limit type.
+          type: string
+          enum: [ region-add, region-remove ]
+          default: region-add
       responses:
         200:
           body:
@@ -784,6 +799,12 @@ types:
           description: PD server failed to proceed the request.
     post:
       description: Update the store limit for scenes
+      queryParameters:
+        type?:
+          description: rate limit type.
+          type: string
+          enum: [ region-add, region-remove ]
+          default: region-add
       body:
         application/json:
         type: StoreLimitScene
@@ -797,6 +818,12 @@ types:
     description: The balance rate limit for all stores.
     get:
       description: Get all stores' balance rate limit.
+      queryParameters:
+        type?:
+          description: rate limit type.
+          type: string
+          enum: [ region-add, region-remove ]
+          default: region-add
       responses:
         200:
           body:
@@ -808,8 +835,8 @@ types:
       description: Set all stores' balance rate limit.
       body:
         application/json:
-          description: key-value pair.
-          type: object
+          description: rate limit type and rate.
+          type: StoreLimit
       responses:
         200:
           description: All stores' balance rate limits are updated.
@@ -920,8 +947,8 @@ types:
       description: Set the store's balance rate limit.
       body:
         application/json:
-          description: key-value pair.
-          type: object
+          description: rate limit type and rate.
+          type: StoreLimit
       responses:
         200:
           description: The store's balance rate limit is updated.

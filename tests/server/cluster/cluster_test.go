@@ -35,7 +35,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
 	syncer "github.com/pingcap/pd/v4/server/region_syncer"
-	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tests/pdctl"
 	"github.com/pkg/errors"
@@ -275,25 +275,29 @@ func testStateAndLimit(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDCl
 	// prepare
 	storeID := store.GetId()
 	oc := rc.GetOperatorController()
-	oc.SetAllStoresLimit(1.0, schedule.StoreLimitManual)
+	oc.SetAllStoresLimit(1.0, storelimit.Manual, storelimit.RegionAdd)
+	oc.SetAllStoresLimit(1.0, storelimit.Manual, storelimit.RegionRemove)
 	resetStoreState(c, rc, store.GetId(), beforeState)
-	_, isOKBefore := oc.GetAllStoresLimit()[storeID]
+	_, isRegionAddLimitOKBefore := oc.GetAllStoresLimit(storelimit.RegionAdd)[storeID]
+	_, isRegionRemoveLimitOKBefore := oc.GetAllStoresLimit(storelimit.RegionRemove)[storeID]
 	// run
 	err := run(rc)
 	// judge
-	_, isOKAfter := oc.GetAllStoresLimit()[storeID]
+	_, isRegionAddLimitOKAfter := oc.GetAllStoresLimit(storelimit.RegionAdd)[storeID]
+	_, isRegionRemoveLimitOKAfter := oc.GetAllStoresLimit(storelimit.RegionRemove)[storeID]
 	if len(expectStates) != 0 {
 		c.Assert(err, IsNil)
 		expectState := expectStates[0]
 		c.Assert(getStore(c, clusterID, grpcPDClient, storeID).GetState(), Equals, expectState)
 		if expectState == metapb.StoreState_Offline {
-			c.Assert(isOKAfter, IsTrue)
+			c.Assert(isRegionAddLimitOKAfter && isRegionRemoveLimitOKAfter, IsTrue)
 		} else if expectState == metapb.StoreState_Tombstone {
-			c.Assert(isOKAfter, IsFalse)
+			c.Assert(isRegionAddLimitOKAfter || isRegionRemoveLimitOKAfter, IsFalse)
 		}
 	} else {
 		c.Assert(err, NotNil)
-		c.Assert(isOKAfter, Equals, isOKBefore)
+		c.Assert(isRegionAddLimitOKAfter, Equals, isRegionAddLimitOKBefore)
+		c.Assert(isRegionRemoveLimitOKAfter, Equals, isRegionRemoveLimitOKBefore)
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/slice"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
 
@@ -141,10 +142,10 @@ func (bc *BasicCluster) UnblockStore(storeID uint64) {
 }
 
 // AttachAvailableFunc attaches an available function to a specific store.
-func (bc *BasicCluster) AttachAvailableFunc(storeID uint64, f func() bool) {
+func (bc *BasicCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.AttachAvailableFunc(storeID, f)
+	bc.Stores.AttachAvailableFunc(storeID, limitType, f)
 }
 
 // UpdateStoreStatus updates the information of the store.
@@ -396,7 +397,7 @@ type StoreSetController interface {
 	BlockStore(id uint64) error
 	UnblockStore(id uint64)
 
-	AttachAvailableFunc(id uint64, f func() bool)
+	AttachAvailableFunc(id uint64, limitType storelimit.Type, f func() bool)
 }
 
 // KeyRange is a key range.

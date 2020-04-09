@@ -13,7 +13,10 @@
 
 package operator
 
-import "github.com/pingcap/pd/v4/server/core"
+import (
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+)
 
 // OpInfluence records the influence of the cluster.
 type OpInfluence struct {
@@ -36,7 +39,7 @@ type StoreInfluence struct {
 	RegionCount int64
 	LeaderSize  int64
 	LeaderCount int64
-	StepCost    int64
+	StepCost    map[storelimit.Type]int64
 }
 
 // ResourceProperty returns delta size of leader/region by influence.
@@ -55,5 +58,29 @@ func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
 		return s.RegionSize
 	default:
 		return 0
+	}
+}
+
+// GetStepCost returns the specific type step cost
+func (s StoreInfluence) GetStepCost(limitType storelimit.Type) int64 {
+	if s.StepCost == nil {
+		return 0
+	}
+	return s.StepCost[limitType]
+}
+
+func (s *StoreInfluence) addStepCost(limitType storelimit.Type, cost int64) {
+	if s.StepCost == nil {
+		s.StepCost = make(map[storelimit.Type]int64)
+	}
+	s.StepCost[limitType] += cost
+}
+
+// AdjustStepCost adjusts the step cost of specific type store limit according to region size
+func (s *StoreInfluence) AdjustStepCost(limitType storelimit.Type, regionSize int64) {
+	if regionSize > storelimit.SmallRegionThreshold {
+		s.addStepCost(limitType, storelimit.RegionInfluence[limitType])
+	} else if regionSize <= storelimit.SmallRegionThreshold && regionSize > core.EmptyRegionApproximateSize {
+		s.addStepCost(limitType, storelimit.SmallRegionInfluence[limitType])
 	}
 }
