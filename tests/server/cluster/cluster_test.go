@@ -812,18 +812,18 @@ func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {
 	req := newBootstrapRequest(c, clusterID, "127.0.0.1:0")
 	res, err := grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
-	c.Assert(res.GetReplicationStatus().GetMode(), Equals, replication_modepb.ReplicationStatus_DRAutoSync) // check status in bootstrap response
+	c.Assert(res.GetReplicationStatus().GetMode(), Equals, replication_modepb.ReplicationMode_DR_AUTO_SYNC) // check status in bootstrap response
 	store := &metapb.Store{Id: 11, Address: "127.0.0.1:1", Version: "v4.1.0"}
 	putRes, err := putStore(c, grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
-	c.Assert(putRes.GetReplicationStatus().GetMode(), Equals, replication_modepb.ReplicationStatus_DRAutoSync) // check status in putStore response
+	c.Assert(putRes.GetReplicationStatus().GetMode(), Equals, replication_modepb.ReplicationMode_DR_AUTO_SYNC) // check status in putStore response
 	hbReq := &pdpb.StoreHeartbeatRequest{
 		Header: testutil.NewRequestHeader(clusterID),
 		Stats:  &pdpb.StoreStats{StoreId: store.GetId()},
 	}
 	hbRes, err := grpcPDClient.StoreHeartbeat(context.Background(), hbReq)
 	c.Assert(err, IsNil)
-	c.Assert(hbRes.GetReplicationStatus().GetMode(), Equals, replication_modepb.ReplicationStatus_DRAutoSync) // check status in store heartbeat response
+	c.Assert(hbRes.GetReplicationStatus().GetMode(), Equals, replication_modepb.ReplicationMode_DR_AUTO_SYNC) // check status in store heartbeat response
 }
 
 func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {
