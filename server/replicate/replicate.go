@@ -14,6 +14,7 @@
 package replicate
 
 import (
+	"bytes"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/id"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -37,19 +38,17 @@ type ModeManager struct {
 	sync.RWMutex
 	config  config.ReplicateModeConfig
 	storage *core.Storage
-	idAlloc id.Allocator
-	stores  core.StoreSetInformer
+	cluster opt.Cluster
 
 	drAutosync drAutosyncStatus
 }
 
 // NewReplicateModeManager creates the replicate mode manager.
-func NewReplicateModeManager(config config.ReplicateModeConfig, storage *core.Storage, idAlloc id.Allocator, stores core.StoreSetInformer) (*ModeManager, error) {
+func NewReplicateModeManager(config config.ReplicateModeConfig, storage *core.Storage, cluster opt.Cluster) (*ModeManager, error) {
 	m := &ModeManager{
 		config:  config,
 		storage: storage,
-		idAlloc: idAlloc,
-		stores:  stores,
+		cluster: cluster,
 	}
 	switch config.ReplicateMode {
 	case modeMajority:
@@ -73,15 +72,41 @@ func (m *ModeManager) GetReplicateStatus() *pb.ReplicateStatus {
 	case modeMajority:
 	case modeDRAutosync:
 		p.DrAutosync = &pb.DRAutoSync{
-			LabelKey: m.config.DRAutoSync.LabelKey,
-			State:    pb.DRAutoSync_State(pb.DRAutoSync_State_value[strings.ToUpper(m.drAutosync.State)]),
-		}
-		if m.drAutosync.State == drStateSyncRecover {
-			p.DrAutosync.RecoverId = m.drAutosync.RecoverID
-			p.DrAutosync.WaitSyncTimeoutHint = int32(m.config.DRAutoSync.WaitSyncTimeout.Seconds())
+			LabelKey:            m.config.DRAutoSync.LabelKey,
+			State:               pb.DRAutoSync_State(pb.DRAutoSync_State_value[strings.ToUpper(m.drAutosync.State)]),
+			StateId:             m.drAutosync.StateID,
+			WaitSyncTimeoutHint: int32(m.config.DRAutoSync.WaitSyncTimeout.Seconds()),
 		}
 	}
 	return p
+}
+
+// HTTPReplicateStatus is for query status from HTTP API.
+type HTTPReplicateStatus struct {
+	Mode       string `json:"mode"`
+	DrAutosync struct {
+		LabelKey        string  `json:"label_key"`
+		State           string  `json:"state"`
+		StateID         uint64  `json:"state_id,omitempty"`
+		RecoverProgress float32 `json:"recover_progress,omitempty"`
+	} `json:"dr_autosync,omitempty"`
+}
+
+// GetReplicateStatusHTTP returns status for HTTP API.
+func (m *ModeManager) GetReplicateStatusHTTP() *HTTPReplicateStatus {
+	m.RLock()
+	defer m.RUnlock()
+	var status HTTPReplicateStatus
+	status.Mode = m.config.ReplicateMode
+	switch status.Mode {
+	case modeMajority:
+	case modeDRAutosync:
+		status.DrAutosync.LabelKey = m.config.DRAutoSync.LabelKey
+		status.DrAutosync.State = m.drAutosync.State
+		status.DrAutosync.StateID = m.drAutosync.StateID
+		status.DrAutosync.RecoverProgress = m.drAutosync.RecoverProgress
+	}
+	return &status
 }
 
 func (m *ModeManager) getModeName() string {
@@ -98,8 +123,9 @@ const (
 
 type drAutosyncStatus struct {
 	State            string    `json:"state,omitempty"`
-	RecoverID        uint64    `json:"recover_id,omitempty"`
+	StateID          uint64    `json:"state_id,omitempty"`
 	RecoverStartTime time.Time `json:"recover_start,omitempty"`
+	RecoverProgress  float32   `json:"recover_progress,omitempty"`
 }
 
 func (m *ModeManager) loadDRAutosync() error {
@@ -109,7 +135,11 @@ func (m *ModeManager) loadDRAutosync() error {
 	}
 	if !ok {
 		// initialize
-		m.drAutosync = drAutosyncStatus{State: drStateSync}
+		id, err := m.cluster.AllocID()
+		if err != nil {
+			return err
+		}
+		m.drAutosync = drAutosyncStatus{State: drStateSync, StateID: id}
 	}
 	return nil
 }
@@ -117,7 +147,12 @@ func (m *ModeManager) loadDRAutosync() error {
 func (m *ModeManager) drSwitchToAsync() error {
 	m.Lock()
 	defer m.Unlock()
-	dr := drAutosyncStatus{State: drStateAsync}
+	id, err := m.cluster.AllocID()
+	if err != nil {
+		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
+		return err
+	}
+	dr := drAutosyncStatus{State: drStateAsync, StateID: id}
 	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
@@ -130,12 +165,12 @@ func (m *ModeManager) drSwitchToAsync() error {
 func (m *ModeManager) drSwitchToSyncRecover() error {
 	m.Lock()
 	defer m.Unlock()
-	id, err := m.idAlloc.Alloc()
+	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
 	}
-	dr := drAutosyncStatus{State: drStateSyncRecover, RecoverID: id, RecoverStartTime: time.Now()}
+	dr := drAutosyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: time.Now()}
 	if err = m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
@@ -148,7 +183,12 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 func (m *ModeManager) drSwitchToSync() error {
 	m.Lock()
 	defer m.Unlock()
-	dr := drAutosyncStatus{State: drStateSync}
+	id, err := m.cluster.AllocID()
+	if err != nil {
+		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
+		return err
+	}
+	dr := drAutosyncStatus{State: drStateSync, StateID: id}
 	if err := m.storage.SaveReplicateStatus(modeDRAutosync, dr); err != nil {
 		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutosync), zap.Error(err))
 		return err
@@ -171,6 +211,7 @@ const (
 
 // Run starts the background job.
 func (m *ModeManager) Run(quit chan struct{}) {
+	// Wait for a while when just start, in case tikv do not connect in time.
 	select {
 	case <-time.After(idleTimeout):
 	case <-quit:
@@ -202,8 +243,11 @@ func (m *ModeManager) tickDR() {
 	}
 
 	if m.drGetState() == drStateSyncRecover {
-		if current, total := m.recoverProgress(); current >= total {
+		current, total := m.recoverProgress()
+		if current >= total {
 			m.drSwitchToSync()
+		} else {
+			m.updateRecoverProgress(float32(current) / float32(total))
 		}
 	}
 }
@@ -212,7 +256,7 @@ func (m *ModeManager) checkCanSync() bool {
 	m.RLock()
 	defer m.RUnlock()
 	var countPrimary, countDR int
-	for _, s := range m.stores.GetStores() {
+	for _, s := range m.cluster.GetStores() {
 		if !s.IsTombstone() && s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration {
 			labelValue := s.GetLabelValue(m.config.DRAutoSync.LabelKey)
 			if labelValue == m.config.DRAutoSync.Primary {
@@ -227,13 +271,35 @@ func (m *ModeManager) checkCanSync() bool {
 }
 
 func (m *ModeManager) recoverProgress() (current, total int) {
-	// FIXME: only a placeholder now. (done in 30s)
 	m.RLock()
 	defer m.RUnlock()
-	total = 300
-	current = int(time.Since(m.drAutosync.RecoverStartTime).Seconds() * 10)
-	if current > total {
-		current = total
+	var key []byte
+	for len(key) > 0 || total == 0 {
+		regions := m.cluster.ScanRegions(key, nil, 1024)
+		if len(regions) == 0 {
+			log.Warn("scan empty regions", zap.ByteString("start-key", key))
+			total++ // make sure it won't complete
+			return
+		}
+
+		total += len(regions)
+		for _, r := range regions {
+			if !bytes.Equal(key, r.GetStartKey()) {
+				log.Warn("found region gap", zap.ByteString("key", key), zap.ByteString("region-start-key", r.GetStartKey()), zap.Uint64("region-id", r.GetID()))
+				total++
+			}
+			if r.GetReplicateStatus().GetStateId() == m.drAutosync.StateID &&
+				r.GetReplicateStatus().GetState() == pb.RegionReplicateStatus_INTEGRITY_OVER_LABEL {
+				current++
+			}
+			key = r.GetEndKey()
+		}
 	}
 	return
+}
+
+func (m *ModeManager) updateRecoverProgress(progress float32) {
+	m.Lock()
+	defer m.Unlock()
+	m.drAutosync.RecoverProgress = progress
 }
