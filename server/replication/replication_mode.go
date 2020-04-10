@@ -254,7 +254,8 @@ func (m *ModeManager) tickDR() {
 
 	if m.drGetState() == drStateSyncRecover {
 		m.updateProgress()
-		if len(m.drRecoverKey) == 0 && m.drRecoverCount > 0 {
+		progress := m.estimateProgress()
+		if progress == 1.0 {
 			m.drSwitchToSync()
 		} else {
 			m.updateRecoverProgress(m.estimateProgress())
@@ -280,7 +281,7 @@ func (m *ModeManager) checkCanSync() bool {
 	return countPrimary < m.config.DRAutoSync.PrimaryReplicas && countDR < m.config.DRAutoSync.DRReplicas
 }
 
-const (
+var (
 	regionScanBatchSize = 1024
 	regionMinSampleSize = 512
 )
@@ -324,6 +325,10 @@ func (m *ModeManager) updateProgress() {
 }
 
 func (m *ModeManager) estimateProgress() float32 {
+	if len(m.drRecoverKey) == 0 && m.drRecoverCount > 0 {
+		return 1.0
+	}
+
 	// make sure progress less than 1
 	if m.drSampleTotalRegion <= m.drSampleRecoverCount {
 		m.drSampleTotalRegion = m.drSampleRecoverCount + 1
