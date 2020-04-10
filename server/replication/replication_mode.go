@@ -88,6 +88,8 @@ type HTTPReplicationStatus struct {
 		LabelKey        string  `json:"label_key"`
 		State           string  `json:"state"`
 		StateID         uint64  `json:"state_id,omitempty"`
+		TotalRegions    int     `json:"total_regions,omitempty"`
+		SyncedRegions   int     `json:"synced_regions,omitempty"`
 		RecoverProgress float32 `json:"recover_progress,omitempty"`
 	} `json:"dr_auto_sync,omitempty"`
 }
@@ -100,11 +102,13 @@ func (m *ModeManager) GetReplicationStatusHTTP() *HTTPReplicationStatus {
 	status.Mode = m.config.ReplicationMode
 	switch status.Mode {
 	case modeMajority:
-	case modeDRAutoSync:
-		status.DrAutoSync.LabelKey = m.config.DRAutoSync.LabelKey
-		status.DrAutoSync.State = m.drAutoSync.State
-		status.DrAutoSync.StateID = m.drAutoSync.StateID
-		status.DrAutoSync.RecoverProgress = m.drAutoSync.RecoverProgress
+	case modeDRAutosync:
+		status.DrAutosync.LabelKey = m.config.DRAutoSync.LabelKey
+		status.DrAutosync.State = m.drAutosync.State
+		status.DrAutosync.StateID = m.drAutosync.StateID
+		status.DrAutosync.RecoverProgress = m.drAutosync.RecoverProgress
+		status.DrAutosync.TotalRegions = m.drAutosync.TotalRegions
+		status.DrAutosync.SyncedRegions = m.drAutosync.SyncedRegions
 	}
 	return &status
 }
@@ -125,6 +129,8 @@ type drAutoSyncStatus struct {
 	State            string    `json:"state,omitempty"`
 	StateID          uint64    `json:"state_id,omitempty"`
 	RecoverStartTime time.Time `json:"recover_start,omitempty"`
+	TotalRegions     int       `json:"total_regions,omitempty"`
+	SyncedRegions    int       `json:"synced_regions,omitempty"`
 	RecoverProgress  float32   `json:"recover_progress,omitempty"`
 }
 
@@ -247,7 +253,7 @@ func (m *ModeManager) tickDR() {
 		if current >= total {
 			m.drSwitchToSync()
 		} else {
-			m.updateRecoverProgress(float32(current) / float32(total))
+			m.updateRecoverProgress(float32(current)/float32(total), total, current)
 		}
 	}
 }
@@ -298,8 +304,10 @@ func (m *ModeManager) recoverProgress() (current, total int) {
 	return
 }
 
-func (m *ModeManager) updateRecoverProgress(progress float32) {
+func (m *ModeManager) updateRecoverProgress(progress float32, total int, current int) {
 	m.Lock()
 	defer m.Unlock()
-	m.drAutoSync.RecoverProgress = progress
+	m.drAutosync.RecoverProgress = progress
+	m.drAutosync.TotalRegions = total
+	m.drAutosync.SyncedRegions = current
 }
