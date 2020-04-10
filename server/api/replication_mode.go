@@ -20,23 +20,23 @@ import (
 	"github.com/unrolled/render"
 )
 
-type replicateHandler struct {
+type replicationModeHandler struct {
 	svr *server.Server
 	rd  *render.Render
 }
 
-func newReplicateHandler(svr *server.Server, rd *render.Render) *replicateHandler {
-	return &replicateHandler{
+func newReplicationModeHandler(svr *server.Server, rd *render.Render) *replicationModeHandler {
+	return &replicationModeHandler{
 		svr: svr,
 		rd:  rd,
 	}
 }
 
-// @Tags replicate_mode
-// @Summary Get status of replicate mode
+// @Tags replication_mode
+// @Summary Get status of replication mode
 // @Produce json
-// @Success 200 {object} replicate.HTTPReplicateStatus
-// @Router /replicate/status [get]
-func (h *replicateHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, getCluster(r.Context()).GetReplicateMode().GetReplicateStatusHTTP())
+// @Success 200 {object} replication.HTTPReplicationStatus
+// @Router /replication_mode/status [get]
+func (h *replicationModeHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, getCluster(r.Context()).GetReplicationMode().GetReplicationStatusHTTP())
 }

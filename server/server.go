@@ -586,7 +586,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	return &pdpb.BootstrapResponse{
-		ReplicateStatus: s.cluster.GetReplicateMode().GetReplicateStatus(),
+		ReplicationStatus: s.cluster.GetReplicationMode().GetReplicationStatus(),
 	}, nil
 }
 

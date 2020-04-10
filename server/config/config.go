@@ -137,7 +137,7 @@ type Config struct {
 
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
-	ReplicateMode ReplicateModeConfig `toml:"replicate-mode" json:"replicate-mode"`
+	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
 }
 
 // NewConfig creates a new config.
@@ -461,7 +461,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		c.EnableDynamicConfig = defaultEnableDynamicConfig
 	}
 
-	c.ReplicateMode.adjust(configMetaData.Child("replicate-mode"))
+	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
 	return nil
 }
@@ -1140,21 +1140,21 @@ func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 	return nil, nil
 }
 
-// ReplicateModeConfig is the configuration for the replicate policy.
-type ReplicateModeConfig struct {
-	ReplicateMode string                    `toml:"replicate-mode" json:"replicate-mode"` // can be 'dr-autosync' or 'majority', default value is 'majority'
-	DRAutoSync    DRAutoSyncReplicateConfig `toml:"dr-autosync" json:"dr-autosync"`       // used when ReplicateMode is 'dr-autosync'
+// ReplicationModeConfig is the configuration for the replication policy.
+type ReplicationModeConfig struct {
+	ReplicationMode string                      `toml:"replication-mode" json:"replication-mode"` // can be 'dr-auto-sync' or 'majority', default value is 'majority'
+	DRAutoSync      DRAutoSyncReplicationConfig `toml:"dr-auto-sync" json:"dr-auto-sync"`         // used when ReplicationMode is 'dr-auto-sync'
 }
 
-func (c *ReplicateModeConfig) adjust(meta *configMetaData) {
-	if !meta.IsDefined("replicate-mode") {
-		c.ReplicateMode = "majority"
+func (c *ReplicationModeConfig) adjust(meta *configMetaData) {
+	if !meta.IsDefined("replication-mode") {
+		c.ReplicationMode = "majority"
 	}
-	c.DRAutoSync.adjust(meta.Child("dr-autosync"))
+	c.DRAutoSync.adjust(meta.Child("dr-auto-sync"))
 }
 
-// DRAutoSyncReplicateConfig is the configuration for auto sync mode between 2 data centers.
-type DRAutoSyncReplicateConfig struct {
+// DRAutoSyncReplicationConfig is the configuration for auto sync mode between 2 data centers.
+type DRAutoSyncReplicationConfig struct {
 	LabelKey         string            `toml:"label-key" json:"label-key"`
 	Primary          string            `toml:"primary" json:"primary"`
 	DR               string            `toml:"dr" json:"dr"`
@@ -1164,7 +1164,7 @@ type DRAutoSyncReplicateConfig struct {
 	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
 }
 
-func (c *DRAutoSyncReplicateConfig) adjust(meta *configMetaData) {
+func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.Duration{Duration: defaultDRWaitStoreTimeout}
 	}
