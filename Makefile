@@ -83,7 +83,7 @@ endif
 ifneq ($(DASHBOARD), 0)
 	make dashboard-ui
 endif
-	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "${BUILD_TAGS}" -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o bin/pd-server cmd/pd-server/main.go
 
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 make pd-server
