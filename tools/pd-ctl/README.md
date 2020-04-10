@@ -561,21 +561,28 @@ Use this command to view the store information or remove a specified store. For 
 Usage:
 
 ```bash
->> store                        // Display information of all stores
+>> store                               // Display information of all stores
 {
   "count": 3,
   "stores": [...]
 }
->> store 1                      // Get the store with the store id of 1
+>> store 1                             // Get the store with the store id of 1
   ......
->> store delete 1               // Delete the store with the store id of 1
+>> store delete 1                      // Delete the store with the store id of 1
   ......
->> store label 1 zone cn        // Set the value of the label with the "zone" key to "cn" for the store with the store id of 1
->> store weight 1 5 10          // Set the leader weight to 5 and region weight to 10 for the store with the store id of 1
->> store remove-tombstone       // Remove stores that are in tombstone state
->> store limit                  // Show limits for all stores
->> store limit all 5            // Limit 5 operators per minute for all stores
->> store limit 1 5              // Limit 5 operators per minute for store 1
+>> store label 1 zone cn               // Set the value of the label with the "zone" key to "cn" for the store with the store id of 1
+>> store weight 1 5 10                 // Set the leader weight to 5 and region weight to 10 for the store with the store id of 1
+>> store remove-tombstone              // Remove stores that are in tombstone state
+>> store limit                         // Show limits of adding region operation for all stores
+>> store limit region-add              // Show limits of adding region operation for all stores
+>> store limit region-remove           // Show limits of removing region operation for all stores
+>> store limit all 5                   // Limit 5 adding region operations per minute for all stores
+>> store limit 1 5                     // Limit 5 adding region operations per minute for store 1
+>> store limit all 5 region-add        // Limit 5 adding region operations per minute for all stores
+>> store limit 1 5 region-add          // Limit 5 adding region operations per minute for store 1
+>> store limit 1 5 region-remove       // Limit 5 removing region operations per minute for store 1
+>> store limit all 5 region-remove     // Limit 5 removing region operations per minute for all stores
+
 ```
 
 ### `tso`

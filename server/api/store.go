@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -366,7 +367,13 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.SetStoreLimit(storeID, rate/schedule.StoreBalanceBaseTime); err != nil {
+	typeValue, err := getStoreLimitType(input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.SetStoreLimit(storeID, rate/schedule.StoreBalanceBaseTime, typeValue); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -430,7 +437,13 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.SetAllStoresLimit(rate / schedule.StoreBalanceBaseTime); err != nil {
+	typeValue, err := getStoreLimitType(input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.SetAllStoresLimit(rate/schedule.StoreBalanceBaseTime, typeValue); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -446,7 +459,13 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [get]
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
-	limits, err := h.GetAllStoresLimit()
+	typeName := r.URL.Query().Get("type")
+	typeValue, err := parseStoreLimitType(typeName)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	limits, err := h.GetAllStoresLimit(typeValue)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -469,18 +488,24 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Tags store
 // @Summary Set limit scene in the cluster.
 // @Accept json
-// @Param body body schedule.StoreLimitScene true "Store limit scene"
+// @Param body body storelimit.Scene true "Store limit scene"
 // @Produce json
 // @Success 200 {string} string "Set store limit scene success."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit/scene [post]
 func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
-	scene := h.Handler.GetStoreLimitScene()
+	typeName := r.URL.Query().Get("type")
+	typeValue, err := parseStoreLimitType(typeName)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	scene := h.Handler.GetStoreLimitScene(typeValue)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &scene); err != nil {
 		return
 	}
-	h.Handler.SetStoreLimitScene(scene)
+	h.Handler.SetStoreLimitScene(scene, typeValue)
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
@@ -490,7 +515,13 @@ func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 // @Success 200 {string} string "Set store limit scene success."
 // @Router /stores/limit/scene [get]
 func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
-	scene := h.Handler.GetStoreLimitScene()
+	typeName := r.URL.Query().Get("type")
+	typeValue, err := parseStoreLimitType(typeName)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	scene := h.Handler.GetStoreLimitScene(typeValue)
 	h.rd.JSON(w, http.StatusOK, scene)
 }
 
@@ -574,4 +605,32 @@ func (filter *storeStateFilter) filter(stores []*metapb.Store) []*metapb.Store {
 		}
 	}
 	return ret
+}
+
+func getStoreLimitType(input map[string]interface{}) (storelimit.Type, error) {
+	typeNameIface, ok := input["type"]
+	typeValue := storelimit.RegionAdd
+	var err error
+	if ok {
+		typeName, ok := typeNameIface.(string)
+		if !ok {
+			err = errors.New("bad format type")
+		} else {
+			return parseStoreLimitType(typeName)
+		}
+	}
+	return typeValue, err
+}
+
+func parseStoreLimitType(typeName string) (storelimit.Type, error) {
+	typeValue := storelimit.RegionAdd
+	var err error
+	if typeName != "" {
+		if value, ok := storelimit.TypeNameValue[typeName]; ok {
+			typeValue = value
+		} else {
+			err = errors.New("unknown type")
+		}
+	}
+	return typeValue, err
 }

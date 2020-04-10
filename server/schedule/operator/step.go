@@ -21,17 +21,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"go.uber.org/zap"
-)
-
-const (
-	// RegionInfluence represents the influence of a operator step, which is used by ratelimit.
-	RegionInfluence int64 = 1000
-	// smallRegionInfluence represents the influence of a operator step
-	// when the region size is smaller than smallRegionThreshold, which is used by ratelimit.
-	smallRegionInfluence int64 = 200
-	// smallRegionThreshold is used to represent a region which can be regarded as a small region once the size is small than it.
-	smallRegionThreshold int64 = 20
 )
 
 // OpStep describes the basic scheduling steps that can not be subdivided.
@@ -107,11 +98,7 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	regionSize := region.GetApproximateSize()
 	to.RegionSize += regionSize
 	to.RegionCount++
-	if regionSize > smallRegionThreshold {
-		to.StepCost += RegionInfluence
-	} else if regionSize <= smallRegionThreshold && regionSize > core.EmptyRegionApproximateSize {
-		to.StepCost += smallRegionInfluence
-	}
+	to.AdjustStepCost(storelimit.RegionAdd, regionSize)
 }
 
 // AddLearner is an OpStep that adds a region learner peer.
@@ -150,11 +137,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	regionSize := region.GetApproximateSize()
 	to.RegionSize += regionSize
 	to.RegionCount++
-	if regionSize > smallRegionThreshold {
-		to.StepCost += RegionInfluence
-	} else if regionSize <= smallRegionThreshold && regionSize > core.EmptyRegionApproximateSize {
-		to.StepCost += smallRegionInfluence
-	}
+	to.AdjustStepCost(storelimit.RegionAdd, regionSize)
 }
 
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
@@ -211,8 +194,10 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
-	from.RegionSize -= region.GetApproximateSize()
+	regionSize := region.GetApproximateSize()
+	from.RegionSize -= regionSize
 	from.RegionCount--
+	from.AdjustStepCost(storelimit.RegionRemove, regionSize)
 }
 
 // MergeRegion is an OpStep that merge two regions.

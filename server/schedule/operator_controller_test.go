@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/checker"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 )
 
 func Test(t *testing.T) {
@@ -314,7 +315,7 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	for i := uint64(1); i <= 1000; i++ {
 		tc.AddLeaderRegion(i, i)
 	}
-	oc.SetStoreLimit(2, 1, StoreLimitManual)
+	oc.SetStoreLimit(2, 1, storelimit.Manual, storelimit.RegionAdd)
 	for i := uint64(1); i <= 5; i++ {
 		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
@@ -324,19 +325,45 @@ func (t *testOperatorControllerSuite) TestStoreLimit(c *C) {
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
-	oc.SetStoreLimit(2, 2, StoreLimitManual)
+	oc.SetStoreLimit(2, 2, storelimit.Manual, storelimit.RegionAdd)
 	for i := uint64(1); i <= 10; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		checkRemoveOperatorSuccess(c, oc, op)
 	}
-	oc.SetAllStoresLimit(1, StoreLimitManual)
+	oc.SetAllStoresLimit(1, storelimit.Manual, storelimit.RegionAdd)
 	for i := uint64(1); i <= 5; i++ {
 		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		checkRemoveOperatorSuccess(c, oc, op)
 	}
 	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
+
+	oc.SetStoreLimit(2, 1, storelimit.Manual, storelimit.RegionRemove)
+	for i := uint64(1); i <= 5; i++ {
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		checkRemoveOperatorSuccess(c, oc, op)
+	}
+	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
+
+	oc.SetStoreLimit(2, 2, storelimit.Manual, storelimit.RegionRemove)
+	for i := uint64(1); i <= 10; i++ {
+		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		checkRemoveOperatorSuccess(c, oc, op)
+	}
+	oc.SetAllStoresLimit(1, storelimit.Manual, storelimit.RegionRemove)
+	for i := uint64(1); i <= 5; i++ {
+		op = operator.NewOperator("test", "test", i, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		checkRemoveOperatorSuccess(c, oc, op)
+	}
+	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
 
@@ -26,17 +27,22 @@ import (
 type StoreLimiter struct {
 	m       sync.RWMutex
 	oc      *schedule.OperatorController
-	scene   *schedule.StoreLimitScene
+	scene   map[storelimit.Type]*storelimit.Scene
 	state   *State
 	current LoadState
 }
 
 // NewStoreLimiter builds a store limiter object using the operator controller
 func NewStoreLimiter(c *schedule.OperatorController) *StoreLimiter {
+	defaultScene := map[storelimit.Type]*storelimit.Scene{
+		storelimit.RegionAdd:    storelimit.DefaultScene(storelimit.RegionAdd),
+		storelimit.RegionRemove: storelimit.DefaultScene(storelimit.RegionRemove),
+	}
+
 	return &StoreLimiter{
 		oc:      c,
 		state:   NewState(),
-		scene:   schedule.DefaultStoreLimitScene(),
+		scene:   defaultScene,
 		current: LoadStateNone,
 	}
 }
@@ -49,22 +55,19 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 	log.Debug("collected statistics", zap.Reflect("stats", stats))
 	s.state.Collect((*StatEntry)(stats))
 
-	rate := float64(0)
 	state := s.state.State()
-	switch state {
-	case LoadStateIdle:
-		rate = float64(s.scene.Idle) / schedule.StoreBalanceBaseTime
-	case LoadStateLow:
-		rate = float64(s.scene.Low) / schedule.StoreBalanceBaseTime
-	case LoadStateNormal:
-		rate = float64(s.scene.Normal) / schedule.StoreBalanceBaseTime
-	case LoadStateHigh:
-		rate = float64(s.scene.High) / schedule.StoreBalanceBaseTime
-	}
+	rateRegionAdd := s.calculateRate(storelimit.RegionAdd, state)
+	rateRegionRemove := s.calculateRate(storelimit.RegionRemove, state)
 
-	if rate > 0 {
-		s.oc.SetAllStoresLimitAuto(rate)
-		log.Info("change store limit for cluster", zap.Stringer("state", state), zap.Float64("rate", rate))
+	if rateRegionAdd > 0 || rateRegionRemove > 0 {
+		if rateRegionAdd > 0 {
+			s.oc.SetAllStoresLimitAuto(rateRegionAdd, storelimit.RegionAdd)
+			log.Info("change store region add limit for cluster", zap.Stringer("state", state), zap.Float64("rate", rateRegionAdd))
+		}
+		if rateRegionRemove > 0 {
+			s.oc.SetAllStoresLimitAuto(rateRegionAdd, storelimit.RegionRemove)
+			log.Info("change store region remove limit for cluster", zap.Stringer("state", state), zap.Float64("rate", rateRegionRemove))
+		}
 		s.current = state
 		collectClusterStateCurrent(state)
 	}
@@ -80,16 +83,34 @@ func collectClusterStateCurrent(state LoadState) {
 	}
 }
 
+func (s *StoreLimiter) calculateRate(limitType storelimit.Type, state LoadState) float64 {
+	rate := float64(0)
+	switch state {
+	case LoadStateIdle:
+		rate = float64(s.scene[limitType].Idle) / schedule.StoreBalanceBaseTime
+	case LoadStateLow:
+		rate = float64(s.scene[limitType].Low) / schedule.StoreBalanceBaseTime
+	case LoadStateNormal:
+		rate = float64(s.scene[limitType].Normal) / schedule.StoreBalanceBaseTime
+	case LoadStateHigh:
+		rate = float64(s.scene[limitType].High) / schedule.StoreBalanceBaseTime
+	}
+	return rate
+}
+
 // ReplaceStoreLimitScene replaces the store limit values for different scenes
-func (s *StoreLimiter) ReplaceStoreLimitScene(scene *schedule.StoreLimitScene) {
+func (s *StoreLimiter) ReplaceStoreLimitScene(scene *storelimit.Scene, limitType storelimit.Type) {
 	s.m.Lock()
 	defer s.m.Unlock()
-	s.scene = scene
+	if s.scene == nil {
+		s.scene = make(map[storelimit.Type]*storelimit.Scene)
+	}
+	s.scene[limitType] = scene
 }
 
 // StoreLimitScene returns the current limit for different scenes
-func (s *StoreLimiter) StoreLimitScene() *schedule.StoreLimitScene {
+func (s *StoreLimiter) StoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
 	s.m.RLock()
 	defer s.m.RUnlock()
-	return s.scene
+	return s.scene[limitType]
 }
