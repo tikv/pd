@@ -60,7 +60,7 @@ func (t *regionTree) length() int {
 }
 
 // getOverlaps gets the regions which are overlapped with the specified region range.
-func (t *regionTree) getOverlaps(region *RegionInfo) ([]*RegionInfo,*regionItem) {
+func (t *regionTree) getOverlaps(region *RegionInfo) ([]*RegionInfo, *regionItem) {
 	item := &regionItem{region: region}
 
 	// note that find() gets the last item that is less or equal than the region.
@@ -83,17 +83,17 @@ func (t *regionTree) getOverlaps(region *RegionInfo) ([]*RegionInfo,*regionItem)
 		overlaps = append(overlaps, over.region)
 		return true
 	})
-	if result == item{
+	if result == item {
 		result = nil
 	}
-	return overlaps,result
+	return overlaps, result
 }
 
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
 func (t *regionTree) update(region *RegionInfo) []*RegionInfo {
-	overlaps,_ := t.getOverlaps(region)
+	overlaps, _ := t.getOverlaps(region)
 	for _, item := range overlaps {
 		log.Debug("overlapping region",
 			zap.Uint64("region-id", item.GetID()),
