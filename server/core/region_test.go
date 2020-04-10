@@ -14,6 +14,7 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -129,6 +130,313 @@ func (*testRegionKey) TestRegionKey(c *C) {
 		c.Assert(s, Matches, ".*EndKey Changed.*")
 		c.Assert(strings.Contains(s, t.expect), IsTrue)
 	}
+}
+
+func (*testRegionKey) TestRegionOverlaps(c *C) {
+	regions := NewRegionsInfo()
+	for i := 0; i < 3; i++ {
+		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+		region := NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			Peers:    []*metapb.Peer{peer},
+			StartKey: []byte(fmt.Sprintf("%20d", i*10)),
+			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
+		}, peer)
+		regions.AddRegion(region)
+	}
+	peer := &metapb.Peer{StoreId: 1, Id: uint64(5)}
+	region := NewRegionInfo(&metapb.Region{
+		Id:       uint64(5),
+		Peers:    []*metapb.Peer{peer},
+		StartKey: []byte(fmt.Sprintf("%20d", 50)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 100)),
+	}, peer)
+	regions.AddRegion(region)
+
+	peer = &metapb.Peer{StoreId: 1, Id: uint64(1)}
+	region = NewRegionInfo(&metapb.Region{
+		Id:       uint64(1),
+		Peers:    []*metapb.Peer{peer},
+		StartKey: []byte(fmt.Sprintf("%20d", 5)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 15)),
+	}, peer)
+	overlaps, item := regions.GetOverlaps(region)
+	c.Assert(0, Equals, bytes.Compare(overlaps[0].GetStartKey(), []byte(fmt.Sprintf("%20d", 0))))
+	c.Assert(0, Equals, bytes.Compare(overlaps[1].GetStartKey(), []byte(fmt.Sprintf("%20d", 10))))
+	c.Assert(0, Equals, bytes.Compare(item.region.GetStartKey(), []byte(fmt.Sprintf("%20d", 0))))
+
+	region = NewRegionInfo(&metapb.Region{
+		Id:       uint64(1),
+		Peers:    []*metapb.Peer{peer},
+		StartKey: []byte(fmt.Sprintf("%20d", 15)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 17)),
+	}, peer)
+	overlaps, item = regions.GetOverlaps(region)
+	c.Assert(len(overlaps), Equals, 1)
+	c.Assert(0, Equals, bytes.Compare(overlaps[0].GetStartKey(), []byte(fmt.Sprintf("%20d", 10))))
+	c.Assert(0, Equals, bytes.Compare(item.region.GetStartKey(), []byte(fmt.Sprintf("%20d", 10))))
+
+	region = NewRegionInfo(&metapb.Region{
+		Id:       uint64(1),
+		Peers:    []*metapb.Peer{peer},
+		StartKey: []byte(fmt.Sprintf("%20d", 35)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 45)),
+	}, peer)
+	overlaps, item = regions.GetOverlaps(region)
+	c.Assert(len(overlaps), Equals, 0)
+	c.Assert(item, IsNil)
+
+	region = NewRegionInfo(&metapb.Region{
+		Id:       uint64(1),
+		Peers:    []*metapb.Peer{peer},
+		StartKey: []byte(fmt.Sprintf("%20d", 29)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 51)),
+	}, peer)
+	overlaps, item = regions.GetOverlaps(region)
+	c.Assert(len(overlaps), Equals, 2)
+	c.Assert(0, Equals, bytes.Compare(overlaps[0].GetStartKey(), []byte(fmt.Sprintf("%20d", 20))))
+	c.Assert(0, Equals, bytes.Compare(overlaps[1].GetStartKey(), []byte(fmt.Sprintf("%20d", 50))))
+	c.Assert(0, Equals, bytes.Compare(item.region.GetStartKey(), []byte(fmt.Sprintf("%20d", 20))))
+}
+
+func (*testRegionKey) TestReplaceOrAddRegion(c *C) {
+	regions := NewRegionsInfo()
+	for i := 0; i < 100; i++ {
+		peer1 := &metapb.Peer{StoreId: uint64(i%5 + 1), Id: uint64(i*5 + 1)}
+		peer2 := &metapb.Peer{StoreId: uint64((i+1)%5 + 1), Id: uint64(i*5 + 2)}
+		peer3 := &metapb.Peer{StoreId: uint64((i+2)%5 + 1), Id: uint64(i*5 + 3)}
+		region := NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			Peers:    []*metapb.Peer{peer1, peer2, peer3},
+			StartKey: []byte(fmt.Sprintf("%20d", i*10)),
+			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
+		}, peer1)
+		regions.ReplaceOrAddRegion(region, nil, nil)
+	}
+
+	peer1 := &metapb.Peer{StoreId: uint64(4), Id: uint64(101)}
+	peer2 := &metapb.Peer{StoreId: uint64(5), Id: uint64(102)}
+	peer3 := &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
+	region := NewRegionInfo(&metapb.Region{
+		Id:       uint64(21),
+		Peers:    []*metapb.Peer{peer1, peer2, peer3},
+		StartKey: []byte(fmt.Sprintf("%20d", 184)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
+	}, peer1)
+	region.learners = append(region.learners, region.voters[1])
+	region.pendingPeers = append(region.pendingPeers, region.voters[2])
+	overlaps, item := regions.GetOverlaps(region)
+	regions.ReplaceOrAddRegion(region, overlaps, item)
+	c.Assert(len(overlaps), Equals, 4)
+	c.Assert(item.region.GetID(), Equals, uint64(19))
+	c.Assert(regions.leaders[1].length(), Equals, 19)
+	c.Assert(regions.leaders[2].length(), Equals, 19)
+	c.Assert(regions.leaders[3].length(), Equals, 20)
+	c.Assert(regions.leaders[4].length(), Equals, 20)
+	c.Assert(regions.leaders[5].length(), Equals, 19)
+
+	c.Assert(regions.followers[1].length(), Equals, 39)
+	c.Assert(regions.followers[2].length(), Equals, 38)
+	c.Assert(regions.followers[3].length(), Equals, 38)
+	c.Assert(regions.followers[4].length(), Equals, 39)
+	c.Assert(regions.followers[5].length(), Equals, 40)
+
+	c.Assert(regions.learners[1].length(), Equals, 0)
+	c.Assert(regions.learners[2].length(), Equals, 0)
+	c.Assert(regions.learners[3].length(), Equals, 0)
+	c.Assert(regions.learners[4].length(), Equals, 0)
+	c.Assert(regions.learners[5].length(), Equals, 1)
+
+	c.Assert(regions.pendingPeers[1].length(), Equals, 1)
+	c.Assert(regions.pendingPeers[2].length(), Equals, 0)
+	c.Assert(regions.pendingPeers[3].length(), Equals, 0)
+	c.Assert(regions.pendingPeers[4].length(), Equals, 0)
+	c.Assert(regions.pendingPeers[5].length(), Equals, 0)
+	c.Assert(regions.tree.length(), Equals, 97)
+	c.Assert(len(regions.GetRegions()), Equals, 97)
+
+	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
+	peer2 = &metapb.Peer{StoreId: uint64(3), Id: uint64(102)}
+	peer3 = &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
+	region = NewRegionInfo(&metapb.Region{
+		Id:       uint64(21),
+		Peers:    []*metapb.Peer{peer1, peer2, peer3},
+		StartKey: []byte(fmt.Sprintf("%20d", 184)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
+	}, peer1)
+	region.learners = append(region.learners, region.voters[1])
+	region.pendingPeers = append(region.pendingPeers, region.voters[2])
+	overlaps, item = regions.GetOverlaps(region)
+	regions.ReplaceOrAddRegion(region, overlaps, item)
+	c.Assert(len(overlaps), Equals, 1)
+	c.Assert(IsEqualRegion(region, item), IsTrue)
+	c.Assert(regions.leaders[1].length(), Equals, 19)
+	c.Assert(regions.leaders[2].length(), Equals, 20)
+	c.Assert(regions.leaders[3].length(), Equals, 20)
+	c.Assert(regions.leaders[4].length(), Equals, 19)
+	c.Assert(regions.leaders[5].length(), Equals, 19)
+
+	c.Assert(regions.followers[1].length(), Equals, 39)
+	c.Assert(regions.followers[2].length(), Equals, 38)
+	c.Assert(regions.followers[3].length(), Equals, 39)
+	c.Assert(regions.followers[4].length(), Equals, 39)
+	c.Assert(regions.followers[5].length(), Equals, 39)
+
+	c.Assert(regions.learners[1].length(), Equals, 0)
+	c.Assert(regions.learners[2].length(), Equals, 0)
+	c.Assert(regions.learners[3].length(), Equals, 1)
+	c.Assert(regions.learners[4].length(), Equals, 0)
+	c.Assert(regions.learners[5].length(), Equals, 0)
+
+	c.Assert(regions.pendingPeers[1].length(), Equals, 1)
+	c.Assert(regions.pendingPeers[2].length(), Equals, 0)
+	c.Assert(regions.pendingPeers[3].length(), Equals, 0)
+	c.Assert(regions.pendingPeers[4].length(), Equals, 0)
+	c.Assert(regions.pendingPeers[5].length(), Equals, 0)
+	c.Assert(regions.tree.length(), Equals, 97)
+	c.Assert(len(regions.GetRegions()), Equals, 97)
+}
+
+func (*testRegionKey) TestUpdateRegionToSubTree(c *C) {
+	regions := NewRegionsInfo()
+	var regionChange *RegionInfo
+	for i := 0; i < 100; i++ {
+		peer1 := &metapb.Peer{StoreId: uint64(i%5 + 1), Id: uint64(i*5 + 1)}
+		peer2 := &metapb.Peer{StoreId: uint64((i+1)%5 + 1), Id: uint64(i*5 + 2)}
+		peer3 := &metapb.Peer{StoreId: uint64((i+2)%5 + 1), Id: uint64(i*5 + 3)}
+		region := NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			Peers:    []*metapb.Peer{peer1, peer2, peer3},
+			StartKey: []byte(fmt.Sprintf("%20d", i*10)),
+			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
+		}, peer1)
+		regions.ReplaceOrAddRegion(region, nil, nil)
+		if i == 40 {
+			regionChange = region
+		}
+	}
+	c.Assert(regions.leaders[1].length(), Equals, 20)
+	c.Assert(regions.leaders[2].length(), Equals, 20)
+	c.Assert(regions.leaders[3].length(), Equals, 20)
+	c.Assert(regions.leaders[4].length(), Equals, 20)
+	c.Assert(regions.leaders[5].length(), Equals, 20)
+
+	c.Assert(regions.followers[1].length(), Equals, 40)
+	c.Assert(regions.followers[2].length(), Equals, 40)
+	c.Assert(regions.followers[3].length(), Equals, 40)
+	c.Assert(regions.followers[4].length(), Equals, 40)
+	c.Assert(regions.followers[5].length(), Equals, 40)
+
+	regions.removeRegionFromSubTree(regionChange)
+	c.Assert(regions.leaders[1].length(), Equals, 19)
+	c.Assert(regions.leaders[2].length(), Equals, 20)
+	c.Assert(regions.leaders[3].length(), Equals, 20)
+	c.Assert(regions.leaders[4].length(), Equals, 20)
+	c.Assert(regions.leaders[5].length(), Equals, 20)
+
+	c.Assert(regions.followers[1].length(), Equals, 40)
+	c.Assert(regions.followers[2].length(), Equals, 39)
+	c.Assert(regions.followers[3].length(), Equals, 39)
+	c.Assert(regions.followers[4].length(), Equals, 40)
+	c.Assert(regions.followers[5].length(), Equals, 40)
+
+	regionChange.voters[0].IsLearner = true
+	regionChange.leader.Id = 203
+	regionChange.learners = append(regionChange.learners, regionChange.voters[0])
+	regionChange.leader = regionChange.voters[1]
+	regions.addRegionToSubTree(regionChange)
+
+	c.Assert(regions.leaders[1].length(), Equals, 19)
+	c.Assert(regions.leaders[2].length(), Equals, 21)
+	c.Assert(regions.leaders[3].length(), Equals, 20)
+	c.Assert(regions.leaders[4].length(), Equals, 20)
+	c.Assert(regions.leaders[5].length(), Equals, 20)
+
+	c.Assert(regions.followers[1].length(), Equals, 41)
+	c.Assert(regions.followers[2].length(), Equals, 39)
+	c.Assert(regions.followers[3].length(), Equals, 40)
+	c.Assert(regions.followers[4].length(), Equals, 40)
+	c.Assert(regions.followers[5].length(), Equals, 40)
+
+	c.Assert(regions.learners[1].length(), Equals, 1)
+	c.Assert(regions.learners[2].length(), Equals, 0)
+	c.Assert(regions.learners[3].length(), Equals, 0)
+	c.Assert(regions.learners[4].length(), Equals, 0)
+	c.Assert(regions.learners[5].length(), Equals, 0)
+}
+
+func (*testRegionKey) TestIsEqualRegion(c *C) {
+	peer1 := &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
+	peer2 := &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
+	peer3 := &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
+	region := NewRegionInfo(&metapb.Region{
+		Id:       uint64(1),
+		Peers:    []*metapb.Peer{peer1, peer2, peer3},
+		StartKey: []byte(fmt.Sprintf("%20d", 10)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
+	}, peer1)
+
+	otherRegion := NewRegionInfo(&metapb.Region{
+		Id:       uint64(2),
+		Peers:    []*metapb.Peer{peer1, peer2, peer3},
+		StartKey: []byte(fmt.Sprintf("%20d", 20)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 30)),
+	}, peer1)
+	other := &regionItem{region: otherRegion}
+
+	c.Assert(IsEqualRegion(region, nil), Equals, false)
+	c.Assert(IsEqualRegion(nil, nil), Equals, false)
+	c.Assert(IsEqualRegion(nil, other), Equals, false)
+	c.Assert(IsEqualRegion(region, other), Equals, false)
+	otherRegion.meta.Id = 1
+	otherRegion.meta.StartKey = []byte(fmt.Sprintf("%20d", 10))
+	otherRegion.meta.EndKey = []byte(fmt.Sprintf("%20d", 20))
+	c.Assert(IsEqualRegion(region, other), Equals, true)
+	otherRegion.meta.StartKey = []byte(fmt.Sprintf("%20d", 11))
+	c.Assert(IsEqualRegion(region, other), Equals, true)
+	otherRegion.meta.StartKey = []byte(fmt.Sprintf("%20d", 10))
+	otherRegion.meta.EndKey = []byte(fmt.Sprintf("%20d", 21))
+	c.Assert(IsEqualRegion(region, other), Equals, true)
+}
+
+func (*testRegionKey) TestIsEqualPeers(c *C) {
+	var peers [3]*metapb.Peer
+	peers[0] = &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
+	peers[1] = &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
+	peers[2] = &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
+	c.Assert(isEqualPeers(peers[:], nil), Equals, false)
+	c.Assert(isEqualPeers(nil, peers[:]), Equals, false)
+	c.Assert(isEqualPeers(nil, nil), Equals, true)
+
+	var others [4]*metapb.Peer
+	others[0] = &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
+	others[1] = &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
+	others[2] = &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
+	others[3] = &metapb.Peer{StoreId: uint64(3), Id: uint64(4)}
+	c.Assert(isEqualPeers(others[:], peers[:]), Equals, false)
+	c.Assert(isEqualPeers(peers[:], others[:]), Equals, false)
+
+	var others2 [3]*metapb.Peer
+	others2[0] = &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
+	others2[1] = &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
+	others2[2] = &metapb.Peer{StoreId: uint64(3), Id: uint64(4)}
+	c.Assert(isEqualPeers(others2[:], peers[:]), Equals, false)
+	c.Assert(isEqualPeers(peers[:], others2[:]), Equals, false)
+
+	var others3 [3]*metapb.Peer
+	others3[0] = &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
+	others3[1] = &metapb.Peer{StoreId: uint64(4), Id: uint64(2)}
+	others3[2] = &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
+	c.Assert(isEqualPeers(others3[:], peers[:]), Equals, false)
+	c.Assert(isEqualPeers(peers[:], others3[:]), Equals, false)
+
+	var others4 [4]*metapb.Peer
+	others4[2] = &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
+	others4[3] = &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
+	others4[1] = &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
+	c.Assert(isEqualPeers(peers[:], others4[:]), Equals, true)
+	c.Assert(isEqualPeers(others4[:], peers[:]), Equals, true)
+
 }
 
 func BenchmarkRandomRegion(b *testing.B) {

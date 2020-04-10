@@ -536,10 +536,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			c.Unlock()
 			return err
 		}
+
 		c.core.ReplaceOrAddRegion(region, overlaps, oldRegionItem)
 		if c.storage != nil {
 			for _, item := range overlaps {
-				if region.GetID() != item.GetID() || !core.IsEqualRegion(region, oldRegionItem) {
+				if region.GetID() != item.GetID() {
 					if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
 						log.Error("failed to delete region from storage",
 							zap.Uint64("region-id", item.GetID()),
@@ -551,15 +552,15 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 
 		for _, item := range overlaps {
-			if region.GetID() != item.GetID() || !core.IsEqualRegion(region, oldRegionItem) {
+			if region.GetID() != item.GetID() {
 				if c.regionStats != nil {
 					c.regionStats.ClearDefunctRegion(item.GetID())
 				}
 				c.labelLevelStats.ClearDefunctRegion(item.GetID(), c.GetLocationLabels())
 			}
 		}
-		// Update related stores.
 
+		// Update related stores.
 		var storeMap map[uint64]uint64
 		if origin != nil {
 			storeMap = make(map[uint64]uint64)

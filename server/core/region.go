@@ -599,82 +599,21 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 	}
 
 	r.regions.Put(region)
-
-	// Add to leaders and followers.
-	for _, peer := range region.GetVoters() {
-		storeID := peer.GetStoreId()
-		if peer.GetId() == region.leader.GetId() {
-			// Add leader peer to leaders.
-			store, ok := r.leaders[storeID]
-			if !ok {
-				store = newRegionSubTree()
-				r.leaders[storeID] = store
-			}
-			store.update(region)
-		} else {
-			// Add follower peer to followers.
-			store, ok := r.followers[storeID]
-			if !ok {
-				store = newRegionSubTree()
-				r.followers[storeID] = store
-			}
-			store.update(region)
-		}
-	}
-
-	// Add to learners.
-	for _, peer := range region.GetLearners() {
-		storeID := peer.GetStoreId()
-		store, ok := r.learners[storeID]
-		if !ok {
-			store = newRegionSubTree()
-			r.learners[storeID] = store
-		}
-		store.update(region)
-	}
-
-	for _, peer := range region.pendingPeers {
-		storeID := peer.GetStoreId()
-		store, ok := r.pendingPeers[storeID]
-		if !ok {
-			store = newRegionSubTree()
-			r.pendingPeers[storeID] = store
-		}
-		store.update(region)
-	}
-
+	r.addRegionToSubTree(region)
 	return overlaps
 }
 
 // ReplaceOrAddRegion adds or replaces RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
 func (r *RegionsInfo) ReplaceOrAddRegion(region *RegionInfo, overlaps []*RegionInfo, oldRegionItem *regionItem) {
 	// Add to tree and regions.
-	if origin := r.regions.Get(region.GetID()); origin != nil {
-		remove := false
-		if origin.leader.GetId() != region.leader.GetId() {
-			remove = true
-		} else if !IsEqualPeers(origin.GetVoters(), region.GetVoters()) {
-			remove = true
-		} else if !IsEqualPeers(origin.GetLearners(), region.GetLearners()) {
-			remove = true
-		} else if !IsEqualPeers(origin.GetPendingPeers(), region.GetPendingPeers()) {
-			remove = true
-		}
-		if remove {
-			for _, peer := range origin.meta.GetPeers() {
-				storeID := peer.GetStoreId()
-				r.leaders[origin.GetLeader().GetStoreId()].remove(origin)
-				r.followers[storeID].remove(origin)
-				r.learners[storeID].remove(origin)
-				r.pendingPeers[storeID].remove(origin)
-			}
-		}
-	}
 	if !IsEqualRegion(region, oldRegionItem) {
-		overlaps = r.tree.update(region)
 		for _, item := range overlaps {
 			r.RemoveRegion(r.GetRegion(item.GetID()))
 		}
+		if origin := r.regions.Get(region.GetID()); origin != nil {
+			r.RemoveRegion(origin)
+		}
+		r.tree.update(region)
 	} else {
 		for _, item := range overlaps {
 			if item.GetID() == region.GetID() {
@@ -683,9 +622,29 @@ func (r *RegionsInfo) ReplaceOrAddRegion(region *RegionInfo, overlaps []*RegionI
 			r.RemoveRegion(r.GetRegion(item.GetID()))
 		}
 		oldRegionItem.region = region
+		// Remove from leaders and followers.
+		if origin := r.regions.Get(region.GetID()); origin != nil {
+			remove := false
+			if origin.leader.GetId() != region.leader.GetId() {
+				remove = true
+			} else if !isEqualPeers(origin.GetVoters(), region.GetVoters()) {
+				remove = true
+			} else if !isEqualPeers(origin.GetLearners(), region.GetLearners()) {
+				remove = true
+			} else if !isEqualPeers(origin.GetPendingPeers(), region.GetPendingPeers()) {
+				remove = true
+			}
+			if remove {
+				r.removeRegionFromSubTree(origin)
+			}
+		}
 	}
 	r.regions.Put(region)
+	r.addRegionToSubTree(region)
+	return
+}
 
+func (r *RegionsInfo) addRegionToSubTree(region *RegionInfo) {
 	// Add to leaders and followers.
 	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()
@@ -728,8 +687,17 @@ func (r *RegionsInfo) ReplaceOrAddRegion(region *RegionInfo, overlaps []*RegionI
 		}
 		store.update(region)
 	}
-
 	return
+}
+
+func (r *RegionsInfo) removeRegionFromSubTree(region *RegionInfo) {
+	for _, peer := range region.meta.GetPeers() {
+		storeID := peer.GetStoreId()
+		r.leaders[storeID].remove(region)
+		r.followers[storeID].remove(region)
+		r.learners[storeID].remove(region)
+		r.pendingPeers[storeID].remove(region)
+	}
 }
 
 // RemoveRegion removes RegionInfo from regionTree and regionMap
@@ -738,13 +706,7 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	r.tree.remove(region)
 	r.regions.Delete(region.GetID())
 	// Remove from leaders and followers.
-	for _, peer := range region.meta.GetPeers() {
-		storeID := peer.GetStoreId()
-		r.leaders[storeID].remove(region)
-		r.followers[storeID].remove(region)
-		r.learners[storeID].remove(region)
-		r.pendingPeers[storeID].remove(region)
-	}
+	r.removeRegionFromSubTree(region)
 }
 
 // SearchRegion searches RegionInfo from regionTree
@@ -970,11 +932,17 @@ func DiffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
 	return strings.Join(ret, ",")
 }
 
-// IsEqualPeers return the peers is equal or not
-func IsEqualPeers(origin []*metapb.Peer, other []*metapb.Peer) bool {
+// isEqualPeers return the peers is equal or not
+func isEqualPeers(origin []*metapb.Peer, other []*metapb.Peer) bool {
 	for _, a := range origin {
+		if a == nil {
+			continue
+		}
 		both := false
 		for _, b := range other {
+			if b == nil {
+				continue
+			}
 			if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
 				both = true
 				break
@@ -985,8 +953,14 @@ func IsEqualPeers(origin []*metapb.Peer, other []*metapb.Peer) bool {
 		}
 	}
 	for _, b := range other {
+		if b == nil {
+			continue
+		}
 		both := false
 		for _, a := range origin {
+			if a == nil {
+				continue
+			}
 			if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
 				both = true
 				break
@@ -1020,17 +994,11 @@ func isInvolved(region *RegionInfo, startKey, endKey []byte) bool {
 	return bytes.Compare(region.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), endKey) <= 0))
 }
 
-func IsEqualRegion(region *RegionInfo, item *regionItem) bool {
-	if region == nil || item == nil {
+func IsEqualRegion(region *RegionInfo, other *regionItem) bool {
+	if region == nil || other == nil {
 		return false
 	}
-	if item.region.GetID() != region.GetID() {
-		return false
-	}
-	if bytes.Compare(item.region.GetStartKey(), region.GetStartKey()) != 0 {
-		return false
-	}
-	if bytes.Compare(item.region.GetEndKey(), region.GetEndKey()) != 0 {
+	if other.region.GetID() != region.GetID() {
 		return false
 	}
 	return true

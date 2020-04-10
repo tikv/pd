@@ -22,11 +22,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// RegionCheckType provides strict and loose check way for method PreCheckPutRegion.
 type RegionCheckType int32
 
 const (
+	//STRICT indicates strict verification
 	STRICT RegionCheckType = 0
-	LOOSE  RegionCheckType = 1
+	//LOOSE indicates loose verification
+	LOOSE RegionCheckType = 1
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
