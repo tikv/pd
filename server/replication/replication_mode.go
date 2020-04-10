@@ -102,13 +102,13 @@ func (m *ModeManager) GetReplicationStatusHTTP() *HTTPReplicationStatus {
 	status.Mode = m.config.ReplicationMode
 	switch status.Mode {
 	case modeMajority:
-	case modeDRAutosync:
-		status.DrAutosync.LabelKey = m.config.DRAutoSync.LabelKey
-		status.DrAutosync.State = m.drAutosync.State
-		status.DrAutosync.StateID = m.drAutosync.StateID
-		status.DrAutosync.RecoverProgress = m.drAutosync.RecoverProgress
-		status.DrAutosync.TotalRegions = m.drAutosync.TotalRegions
-		status.DrAutosync.SyncedRegions = m.drAutosync.SyncedRegions
+	case modeDRAutoSync:
+		status.DrAutoSync.LabelKey = m.config.DRAutoSync.LabelKey
+		status.DrAutoSync.State = m.drAutoSync.State
+		status.DrAutoSync.StateID = m.drAutoSync.StateID
+		status.DrAutoSync.RecoverProgress = m.drAutoSync.RecoverProgress
+		status.DrAutoSync.TotalRegions = m.drAutoSync.TotalRegions
+		status.DrAutoSync.SyncedRegions = m.drAutoSync.SyncedRegions
 	}
 	return &status
 }
@@ -307,7 +307,7 @@ func (m *ModeManager) recoverProgress() (current, total int) {
 func (m *ModeManager) updateRecoverProgress(progress float32, total int, current int) {
 	m.Lock()
 	defer m.Unlock()
-	m.drAutosync.RecoverProgress = progress
-	m.drAutosync.TotalRegions = total
-	m.drAutosync.SyncedRegions = current
+	m.drAutoSync.RecoverProgress = progress
+	m.drAutoSync.TotalRegions = total
+	m.drAutoSync.SyncedRegions = current
 }
