@@ -254,11 +254,11 @@ tidb-cert-path = "/path/client.pem"
 	c.Assert(cfg.Dashboard.TiDBCertPath, Equals, "/path/client.pem")
 }
 
-func (s *testConfigSuite) TestReplicateMode(c *C) {
+func (s *testConfigSuite) TestReplicationMode(c *C) {
 	cfgData := `
-[replicate-mode]
-replicate-mode = "dr-autosync"
-[replicate-mode.dr-autosync]
+[replication-mode]
+replication-mode = "dr-auto-sync"
+[replication-mode.dr-auto-sync]
 label-key = "zone"
 primary = "zone1"
 dr = "zone2"
@@ -272,19 +272,19 @@ wait-store-timeout = "120s"
 	err = cfg.Adjust(&meta)
 	c.Assert(err, IsNil)
 
-	c.Assert(cfg.ReplicateMode.ReplicateMode, Equals, "dr-autosync")
-	c.Assert(cfg.ReplicateMode.DRAutoSync.LabelKey, Equals, "zone")
-	c.Assert(cfg.ReplicateMode.DRAutoSync.Primary, Equals, "zone1")
-	c.Assert(cfg.ReplicateMode.DRAutoSync.DR, Equals, "zone2")
-	c.Assert(cfg.ReplicateMode.DRAutoSync.PrimaryReplicas, Equals, 2)
-	c.Assert(cfg.ReplicateMode.DRAutoSync.DRReplicas, Equals, 1)
-	c.Assert(cfg.ReplicateMode.DRAutoSync.WaitStoreTimeout.Duration, Equals, 2*time.Minute)
-	c.Assert(cfg.ReplicateMode.DRAutoSync.WaitSyncTimeout.Duration, Equals, time.Minute)
+	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "dr-auto-sync")
+	c.Assert(cfg.ReplicationMode.DRAutoSync.LabelKey, Equals, "zone")
+	c.Assert(cfg.ReplicationMode.DRAutoSync.Primary, Equals, "zone1")
+	c.Assert(cfg.ReplicationMode.DRAutoSync.DR, Equals, "zone2")
+	c.Assert(cfg.ReplicationMode.DRAutoSync.PrimaryReplicas, Equals, 2)
+	c.Assert(cfg.ReplicationMode.DRAutoSync.DRReplicas, Equals, 1)
+	c.Assert(cfg.ReplicationMode.DRAutoSync.WaitStoreTimeout.Duration, Equals, 2*time.Minute)
+	c.Assert(cfg.ReplicationMode.DRAutoSync.WaitSyncTimeout.Duration, Equals, time.Minute)
 
 	cfg = NewConfig()
 	meta, err = toml.Decode("", &cfg)
 	c.Assert(err, IsNil)
 	err = cfg.Adjust(&meta)
 	c.Assert(err, IsNil)
-	c.Assert(cfg.ReplicateMode.ReplicateMode, Equals, "majority")
+	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
 }

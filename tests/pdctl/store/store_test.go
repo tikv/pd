@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/api"
-	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tests/pdctl"
 )
@@ -154,24 +154,52 @@ func (s *storeTestSuite) TestStore(c *C) {
 	args = []string{"-u", pdAddr, "store", "limit", "1", "10"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	limits := leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
+	limits := leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit(storelimit.RegionAdd)
+	c.Assert(limits[1].Rate()*60, Equals, float64(10))
+
+	// store limit <store_id> <rate> <type>
+	args = []string{"-u", pdAddr, "store", "limit", "1", "5", "region-remove"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit(storelimit.RegionRemove)
+	c.Assert(limits[1].Rate()*60, Equals, float64(5))
+	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit(storelimit.RegionAdd)
 	c.Assert(limits[1].Rate()*60, Equals, float64(10))
 
 	// store limit all <rate>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "20"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
-	c.Assert(limits[1].Rate()*60, Equals, float64(20))
+	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit(storelimit.RegionAdd)
 	c.Assert(limits[3].Rate()*60, Equals, float64(20))
+	c.Assert(limits[1].Rate()*60, Equals, float64(20))
 	_, ok := limits[2]
 	c.Assert(ok, IsFalse)
 
+	// store limit all <rate> <type>
+	args = []string{"-u", pdAddr, "store", "limit", "all", "25", "region-remove"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit(storelimit.RegionRemove)
+	c.Assert(limits[3].Rate()*60, Equals, float64(25))
+	c.Assert(limits[1].Rate()*60, Equals, float64(25))
+	_, ok = limits[2]
+	c.Assert(ok, IsFalse)
+	// store limit <type>
+	echo := pdctl.GetEcho([]string{"-u", pdAddr, "store", "limit", "region-remove"})
+	allRegionAddLimit := make(map[string]map[string]interface{})
+	json.Unmarshal([]byte(echo), &allRegionAddLimit)
+	c.Assert(allRegionAddLimit["1"]["rate"].(float64), Equals, float64(25))
+	c.Assert(allRegionAddLimit["1"]["mode"].(string), Equals, "manual")
+	c.Assert(allRegionAddLimit["3"]["rate"].(float64), Equals, float64(25))
+	c.Assert(allRegionAddLimit["3"]["mode"].(string), Equals, "manual")
+	_, ok = allRegionAddLimit["2"]
+	c.Assert(ok, IsFalse)
 	// store limit
 	args = []string{"-u", pdAddr, "store", "limit"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit()
+	limits = leaderServer.GetRaftCluster().GetOperatorController().GetAllStoresLimit(storelimit.RegionAdd)
 	c.Assert(limits[1].Rate()*60, Equals, float64(20))
 	c.Assert(limits[3].Rate()*60, Equals, float64(20))
 	_, ok = limits[2]
@@ -211,27 +239,42 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(len([]*api.StoreInfo{storeInfo}), Equals, 1)
 
 	// It should be called after stores remove-tombstone.
-	echo := pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit"})
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit"})
 	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
-
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit", "region-remove"})
+	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "stores", "show", "limit", "region-add"})
+	c.Assert(strings.Contains(echo, "PANIC"), IsFalse)
 	// store limit-scene
 	args = []string{"-u", pdAddr, "store", "limit-scene"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	scene := &schedule.StoreLimitScene{}
+	scene := &storelimit.Scene{}
 	err = json.Unmarshal(output, scene)
 	c.Assert(err, IsNil)
-	c.Assert(scene, DeepEquals, schedule.DefaultStoreLimitScene())
+	c.Assert(scene, DeepEquals, storelimit.DefaultScene(storelimit.RegionAdd))
 
 	// store limit-scene <scene> <rate>
 	args = []string{"-u", pdAddr, "store", "limit-scene", "idle", "200"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "limit-scene"}
-	scene = &schedule.StoreLimitScene{}
+	scene = &storelimit.Scene{}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	err = json.Unmarshal(output, scene)
 	c.Assert(err, IsNil)
 	c.Assert(scene.Idle, Equals, 200)
+
+	// store limit-scene <scene> <rate> <type>
+	args = []string{"-u", pdAddr, "store", "limit-scene", "idle", "100", "region-remove"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "store", "limit-scene", "region-remove"}
+	scene = &storelimit.Scene{}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	err = json.Unmarshal(output, scene)
+	c.Assert(err, IsNil)
+	c.Assert(scene.Idle, Equals, 100)
 }

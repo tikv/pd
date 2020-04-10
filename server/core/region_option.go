@@ -16,6 +16,7 @@ package core
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/replication_modepb"
 )
 
 // RegionOption is used to select region.
@@ -221,6 +222,13 @@ func SetRegionVersion(version uint64) RegionCreateOption {
 func SetPeers(peers []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.meta.Peers = peers
+	}
+}
+
+// SetReplicationStatus sets the region's replication status.
+func SetReplicationStatus(status *replication_modepb.RegionReplicationStatus) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.replicationStatus = status
 	}
 }
 

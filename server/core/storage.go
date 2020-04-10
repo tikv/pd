@@ -33,12 +33,12 @@ import (
 )
 
 const (
-	clusterPath   = "raft"
-	configPath    = "config"
-	schedulePath  = "schedule"
-	gcPath        = "gc"
-	rulesPath     = "rules"
-	replicatePath = "replicate"
+	clusterPath     = "raft"
+	configPath      = "config"
+	schedulePath    = "schedule"
+	gcPath          = "gc"
+	rulesPath       = "rules"
+	replicationPath = "replication_mode"
 
 	customScheduleConfigPath = "scheduler_config"
 	componentsConfigPath     = "components_config"
@@ -261,18 +261,18 @@ func (s *Storage) LoadRules(f func(k, v string)) (bool, error) {
 	}
 }
 
-// SaveReplicateStatus stores replicate status by mode.
-func (s *Storage) SaveReplicateStatus(mode string, status interface{}) error {
+// SaveReplicationStatus stores replication status by mode.
+func (s *Storage) SaveReplicationStatus(mode string, status interface{}) error {
 	value, err := json.Marshal(status)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	return s.Save(path.Join(replicatePath, mode), string(value))
+	return s.Save(path.Join(replicationPath, mode), string(value))
 }
 
-// LoadReplicateStatus loads replicate status by mode.
-func (s *Storage) LoadReplicateStatus(mode string, status interface{}) (bool, error) {
-	v, err := s.Load(path.Join(replicatePath, mode))
+// LoadReplicationStatus loads replication status by mode.
+func (s *Storage) LoadReplicationStatus(mode string, status interface{}) (bool, error) {
+	v, err := s.Load(path.Join(replicationPath, mode))
 	if err != nil {
 		return false, err
 	}

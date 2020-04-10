@@ -346,7 +346,11 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		}
 		if last {
 			if err := handler.config.cluster.RemoveScheduler(EvictLeaderName); err != nil {
-				handler.rd.JSON(w, http.StatusInternalServerError, err)
+				if err == ErrSchedulerNotFound {
+					handler.rd.JSON(w, http.StatusNotFound, err)
+				} else {
+					handler.rd.JSON(w, http.StatusInternalServerError, err)
+				}
 				return
 			}
 			resp = lastStoreDeleteInfo
@@ -355,7 +359,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	handler.rd.JSON(w, http.StatusInternalServerError, ErrScheduleConfigNotExist)
+	handler.rd.JSON(w, http.StatusNotFound, ErrScheduleConfigNotExist)
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {

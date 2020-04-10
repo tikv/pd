@@ -88,11 +88,13 @@ func NewSetStoreWeightCommand() *cobra.Command {
 
 // NewStoreLimitCommand returns a limit subcommand of storeCmd.
 func NewStoreLimitCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "limit [<store_id>|<all> <rate>]",
-		Short: "set a store's rate limit",
+	c := &cobra.Command{
+		Use:   "limit [<type>]|[<store_id>|<all> <limit> <type>]",
+		Short: "show or set a store's rate limit",
+		Long:  "show or set a store's rate limit, <type> can be 'region-add'(default) or 'region-remove'",
 		Run:   storeLimitCommandFunc,
 	}
+	return c
 }
 
 // NewStoresCommand returns a store subcommand of rootCmd
@@ -136,17 +138,17 @@ func NewShowStoresCommand() *cobra.Command {
 		Run:        showStoresCommandFunc,
 		Deprecated: "use store [limit] instead",
 	}
-	sc.AddCommand(NewShowAllLimitCommand())
+	sc.AddCommand(NewShowAllStoresLimitCommand())
 	return sc
 }
 
-// NewShowAllLimitCommand return a show limit subcommand of show command
-func NewShowAllLimitCommand() *cobra.Command {
+// NewShowAllStoresLimitCommand return a show limit subcommand of show command
+func NewShowAllStoresLimitCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:        "limit",
-		Short:      "show all stores' limit",
+		Use:        "limit <type>",
+		Short:      "show all stores' limit, <type> can be 'region-add'(default) or 'region-remove'",
 		Deprecated: "use store limit instead",
-		Run:        showAllLimitCommandFunc,
+		Run:        showAllStoresLimitCommandFunc,
 	}
 	return sc
 }
@@ -165,8 +167,9 @@ func NewSetStoresCommand() *cobra.Command {
 // NewSetAllLimitCommand returns a set limit subcommand of set command.
 func NewSetAllLimitCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:        "limit <rate>",
+		Use:        "limit <rate> <type>",
 		Short:      "set all store's rate limit",
+		Long:       "set all store's rate limit, <type> can be 'region-add'(default) or 'region-remove'",
 		Deprecated: "use store limit all <rate> instead",
 		Run:        setAllLimitCommandFunc,
 	}
@@ -175,8 +178,9 @@ func NewSetAllLimitCommand() *cobra.Command {
 // NewStoreLimitSceneCommand returns a limit-scene command for store command
 func NewStoreLimitSceneCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "limit-scene [<scene> <rate>]",
+		Use:   "limit-scene [<type>]|[<scene> <rate> <type>]",
 		Short: "show or set the limit value for a scene",
+		Long:  "show or set the limit value for a scene, <type> can be 'region-add'(default) or 'region-remove'",
 		Run:   storeLimitSceneCommandFunc,
 	}
 }
@@ -187,18 +191,18 @@ func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := fmt.Sprintf("%s/limit/scene", storesPrefix)
 
 	switch len(args) {
-	case 0:
+	case 0, 1:
 		// show all limit values
+		if len(args) == 1 {
+			prefix += fmt.Sprintf("?type=%v", args[0])
+		}
 		resp, err = doRequest(cmd, prefix, http.MethodGet)
 		if err != nil {
 			cmd.Println(err)
 			return
 		}
 		cmd.Println(resp)
-	case 1:
-		cmd.Usage()
-		return
-	case 2:
+	case 2, 3:
 		// set limit value for a scene
 		scene := args[0]
 		if scene != "idle" &&
@@ -213,6 +217,9 @@ func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
 		if err != nil {
 			cmd.Println(err)
 			return
+		}
+		if len(args) == 3 {
+			prefix = path.Join(prefix, fmt.Sprintf("?type=%s", args[2]))
 		}
 		postJSON(cmd, prefix, map[string]interface{}{scene: rate})
 	}
@@ -354,31 +361,43 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) == 0 {
-		showAllLimitCommandFunc(cmd, args)
-		return
-	}
-	if len(args) != 2 {
+	argsCount := len(args)
+	switch argsCount {
+	case 0, 1:
+		prefix := path.Join(storesPrefix, "limit")
+		if argsCount == 1 {
+			prefix += fmt.Sprintf("?type=%s", args[0])
+		}
+		r, err := doRequest(cmd, prefix, http.MethodGet)
+		if err != nil {
+			cmd.Printf("Failed to get store limit: %s\n", err)
+			return
+		}
+		cmd.Println(r)
+	case 2, 3:
+		rate, err := strconv.ParseFloat(args[1], 64)
+		if err != nil || rate < 0 {
+			cmd.Println("rate should be a number that >= 0.")
+			return
+		}
+		// if the storeid is "all", set limits for all stores
+		var prefix string
+		if args[0] == "all" {
+			prefix = path.Join(storesPrefix, "limit")
+		} else {
+			prefix = fmt.Sprintf(path.Join(storePrefix, "limit"), args[0])
+		}
+		postInput := map[string]interface{}{
+			"rate": rate,
+		}
+		if argsCount == 3 {
+			postInput["type"] = args[2]
+		}
+		postJSON(cmd, prefix, postInput)
+	default:
 		cmd.Usage()
 		return
 	}
-	rate, err := strconv.ParseFloat(args[1], 64)
-	if err != nil || rate < 0 {
-		cmd.Println("rate should be a number that >= 0.")
-		return
-	}
-	// if the storeid is "all", set limits for all stores
-	if args[0] == "all" {
-		prefix := path.Join(storesPrefix, "limit")
-		postJSON(cmd, prefix, map[string]interface{}{
-			"rate": rate,
-		})
-		return
-	}
-	prefix := fmt.Sprintf(path.Join(storePrefix, "limit"), args[0])
-	postJSON(cmd, prefix, map[string]interface{}{
-		"rate": rate,
-	})
 }
 
 func showStoresCommandFunc(cmd *cobra.Command, args []string) {
@@ -395,11 +414,18 @@ func showStoresCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showAllLimitCommandFunc(cmd *cobra.Command, args []string) {
+func showAllStoresLimitCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) > 1 {
+		cmd.Usage()
+		return
+	}
 	prefix := path.Join(storesPrefix, "limit")
+	if len(args) == 1 {
+		prefix += fmt.Sprintf("?type=%s", args[0])
+	}
 	r, err := doRequest(cmd, prefix, http.MethodGet)
 	if err != nil {
-		cmd.Printf("Failed to get all limit: %s\n", err)
+		cmd.Printf("Failed to get all stores' limit: %s\n", err)
 		return
 	}
 	cmd.Println(r)
@@ -416,7 +442,8 @@ func removeTombStoneCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
+	argsCount := len(args)
+	if argsCount != 1 && argsCount != 2 {
 		cmd.Usage()
 		return
 	}
@@ -426,7 +453,11 @@ func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := path.Join(storesPrefix, "limit")
-	postJSON(cmd, prefix, map[string]interface{}{
+	input := map[string]interface{}{
 		"rate": rate,
-	})
+	}
+	if len(args) == 2 {
+		input["type"] = args[1]
+	}
+	postJSON(cmd, prefix, input)
 }

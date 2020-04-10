@@ -56,7 +56,7 @@ var (
 			Subsystem: "schedule",
 			Name:      "store_limit",
 			Help:      "Limit of store.",
-		}, []string{"store", "type"})
+		}, []string{"store", "type", "limit_type"})
 )
 
 func init() {

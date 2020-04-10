@@ -29,7 +29,7 @@ import (
 var (
 	configPrefix         = "pd/api/v1/config"
 	schedulePrefix       = "pd/api/v1/config/schedule"
-	replicationPrefix    = "pd/api/v1/config/replicate"
+	replicatePrefix      = "pd/api/v1/config/replicate"
 	labelPropertyPrefix  = "pd/api/v1/config/label-property"
 	clusterVersionPrefix = "pd/api/v1/config/cluster-version"
 	rulesPrefix          = "pd/api/v1/config/rules"
@@ -214,7 +214,7 @@ func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, replicationPrefix, http.MethodGet)
+	r, err := doRequest(cmd, replicatePrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return

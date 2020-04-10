@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedulers"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -111,7 +112,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	for i := 0; i < int(splitCount); i++ {
 		newRegionID, err := c.id.Alloc()
 		if err != nil {
-			return nil, ErrSchedulerNotFound
+			return nil, schedulers.ErrSchedulerNotFound
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))

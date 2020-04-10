@@ -22,7 +22,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/schedulers"
 	"github.com/unrolled/render"
 )
@@ -146,13 +145,13 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err := h.AddGrantLeaderScheduler(uint64(storeID))
-		if err == cluster.ErrSchedulerExisted {
+		if err == schedulers.ErrSchedulerExisted {
 			if err := h.redirectSchedulerUpdate(schedulers.GrantLeaderName, storeID); err != nil {
 				h.r.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
-		if err != nil && err != cluster.ErrSchedulerExisted {
+		if err != nil && err != schedulers.ErrSchedulerExisted {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -163,13 +162,13 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err := h.AddEvictLeaderScheduler(uint64(storeID))
-		if err == cluster.ErrSchedulerExisted {
+		if err == schedulers.ErrSchedulerExisted {
 			if err := h.redirectSchedulerUpdate(schedulers.EvictLeaderName, storeID); err != nil {
 				h.r.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
-		if err != nil && err != cluster.ErrSchedulerExisted {
+		if err != nil && err != schedulers.ErrSchedulerExisted {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -223,6 +222,7 @@ func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64)
 // @Param name path string true "The name of the scheduler."
 // @Produce json
 // @Success 200 {string} string "The scheduler is removed."
+// @Failure 404 {string} string "The scheduler is not found."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /schedulers/{name} [delete]
 func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -230,21 +230,29 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasPrefix(name, schedulers.EvictLeaderName) && name != schedulers.EvictLeaderName:
 		if err := h.redirectSchedulerDelete(name, schedulers.EvictLeaderName); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			h.handleErr(w, err)
 			return
 		}
 	case strings.HasPrefix(name, schedulers.GrantLeaderName) && name != schedulers.GrantLeaderName:
 		if err := h.redirectSchedulerDelete(name, schedulers.GrantLeaderName); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			h.handleErr(w, err)
 			return
 		}
 	default:
 		if err := h.RemoveScheduler(name); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			h.handleErr(w, err)
 			return
 		}
 	}
 	h.r.JSON(w, http.StatusOK, nil)
+}
+
+func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
+	if err == schedulers.ErrSchedulerNotFound {
+		h.r.JSON(w, http.StatusNotFound, err.Error())
+	} else {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+	}
 }
 
 func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) error {
@@ -253,7 +261,7 @@ func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) e
 	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
 	resp, err := doDelete(url)
 	if resp.StatusCode != 200 {
-		return cluster.ErrSchedulerNotFound
+		return schedulers.ErrSchedulerNotFound
 	}
 	if err != nil {
 		return err

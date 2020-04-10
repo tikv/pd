@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
@@ -34,11 +35,12 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/id"
 	syncer "github.com/pingcap/pd/v4/server/region_syncer"
-	"github.com/pingcap/pd/v4/server/replicate"
+	"github.com/pingcap/pd/v4/server/replication"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/checker"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
@@ -105,7 +107,7 @@ type RaftCluster struct {
 	ruleManager *placement.RuleManager
 	client      *clientv3.Client
 
-	replicateMode *replicate.ModeManager
+	replicationMode *replication.ModeManager
 
 	schedulersCallback func()
 	configCheck        bool
@@ -218,7 +220,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.replicateMode, err = replicate.NewReplicateModeManager(s.GetConfig().ReplicateMode, s.GetStorage(), s.GetAllocator(), cluster)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster)
 	if err != nil {
 		return err
 	}
@@ -235,7 +237,7 @@ func (c *RaftCluster) Start(s Server) error {
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.syncRegions()
-	go c.runReplicateMode()
+	go c.runReplicationMode()
 	c.running = true
 
 	return nil
@@ -317,10 +319,10 @@ func (c *RaftCluster) syncRegions() {
 	c.regionSyncer.RunServer(c.changedRegionNotifier(), c.quit)
 }
 
-func (c *RaftCluster) runReplicateMode() {
+func (c *RaftCluster) runReplicationMode() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	c.replicateMode.Run(c.quit)
+	c.replicationMode.Run(c.quit)
 }
 
 // Stop stops the cluster.
@@ -382,11 +384,11 @@ func (c *RaftCluster) GetRegionSyncer() *syncer.RegionSyncer {
 	return c.regionSyncer
 }
 
-// GetReplicateMode returns the ReplicateMode.
-func (c *RaftCluster) GetReplicateMode() *replicate.ModeManager {
+// GetReplicationMode returns the ReplicationMode.
+func (c *RaftCluster) GetReplicationMode() *replication.ModeManager {
 	c.RLock()
 	defer c.RUnlock()
-	return c.replicateMode
+	return c.replicationMode
 }
 
 // GetStorage returns the storage.
@@ -514,6 +516,12 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
 			region.GetKeysRead() != origin.GetKeysRead() {
 			saveCache, statsChange = true, true
+		}
+
+		if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
+			(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
+				region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
+			saveCache = true
 		}
 	}
 
@@ -1000,8 +1008,8 @@ func (c *RaftCluster) UnblockStore(storeID uint64) {
 }
 
 // AttachAvailableFunc attaches an available function to a specific store.
-func (c *RaftCluster) AttachAvailableFunc(storeID uint64, f func() bool) {
-	c.core.AttachAvailableFunc(storeID, f)
+func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
+	c.core.AttachAvailableFunc(storeID, limitType, f)
 }
 
 // SetConfigCheck sets a flag for preventing outdated config.

@@ -184,6 +184,9 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	logHandler := newlogHandler(svr, rd)
 	apiRouter.HandleFunc("/admin/log", logHandler.Handle).Methods("POST")
 
+	replicationModeHandler := newReplicationModeHandler(svr, rd)
+	clusterRouter.HandleFunc("/replication_mode/status", replicationModeHandler.GetStatus)
+
 	pluginHandler := newPluginHandler(handler, rd)
 	apiRouter.HandleFunc("/plugin", pluginHandler.LoadPlugin).Methods("POST")
 	apiRouter.HandleFunc("/plugin", pluginHandler.UnloadPlugin).Methods("DELETE")

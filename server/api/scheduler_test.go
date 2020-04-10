@@ -76,14 +76,15 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	c.Assert(readJSON(listURL, &resp1), IsNil)
 	c.Assert(resp1["store-id-ranges"], HasLen, 1)
 	deleteURL = fmt.Sprintf("%s/%s", s.urlPrefix, "evict-leader-scheduler-2")
-	_, err = doDelete(deleteURL)
+	res, err := doDelete(deleteURL)
 	c.Assert(err, IsNil)
+	c.Assert(res.StatusCode, Equals, 200)
 	c.Assert(rc.GetSchedulers(), HasLen, 0)
 	resp2 := make(map[string]interface{})
 	c.Assert(readJSON(listURL, &resp2), NotNil)
 
 	r, _ := doDelete(deleteURL)
-	c.Assert(r.StatusCode, Equals, 500)
+	c.Assert(r.StatusCode, Equals, 404)
 }
 
 func (s *testScheduleSuite) TestAPI(c *C) {
@@ -174,6 +175,9 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				delete(exceptMap, "2")
 				c.Assert(resp["store-id-ranges"], DeepEquals, exceptMap)
+				res, err := doDelete(deleteURL)
+				c.Assert(err, IsNil)
+				c.Assert(res.StatusCode, Equals, 404)
 			},
 		},
 		{
@@ -235,6 +239,9 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				c.Assert(readJSON(listURL, &resp), IsNil)
 				delete(exceptMap, "2")
 				c.Assert(resp["store-id-ranges"], DeepEquals, exceptMap)
+				res, err := doDelete(deleteURL)
+				c.Assert(err, IsNil)
+				c.Assert(res.StatusCode, Equals, 404)
 			},
 		},
 	}
