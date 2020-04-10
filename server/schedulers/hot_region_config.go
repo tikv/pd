@@ -24,9 +24,9 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/statistics"
+	"github.com/pingcap/pd/v3/server/core"
+	"github.com/pingcap/pd/v3/server/schedule"
+	"github.com/pingcap/pd/v3/server/statistics"
 	"github.com/unrolled/render"
 )
 
