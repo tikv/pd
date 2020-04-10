@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/replicate_mode"
+	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/mock/mockid"
 	"github.com/pingcap/pd/v4/pkg/testutil"
@@ -619,12 +619,12 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 
 	svr := leaderServer.GetServer()
 	scheduleCfg := opt.Load()
-	replicateCfg := svr.GetReplicationConfig()
+	replicationCfg := svr.GetReplicationConfig()
 	scheduleOpt := svr.GetScheduleOption()
 	pdServerCfg := scheduleOpt.LoadPDServerConfig()
 
 	// PUT GET DELETE succeed
-	replicateCfg.MaxReplicas = 5
+	replicationCfg.MaxReplicas = 5
 	scheduleCfg.MaxSnapshotCount = 10
 	pdServerCfg.UseRegionStorage = true
 	typ, labelKey, labelValue := "testTyp", "testKey", "testValue"
@@ -632,7 +632,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(svr.SetScheduleConfig(*scheduleCfg), IsNil)
 	c.Assert(svr.SetPDServerConfig(*pdServerCfg), IsNil)
 	c.Assert(svr.SetLabelProperty(typ, labelKey, labelValue), IsNil)
-	c.Assert(svr.SetReplicationConfig(*replicateCfg), IsNil)
+	c.Assert(svr.SetReplicationConfig(*replicationCfg), IsNil)
 
 	c.Assert(svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
 	c.Assert(scheduleOpt.GetMaxSnapshotCount(), Equals, uint64(10))
@@ -647,12 +647,12 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	// PUT GET failed
 	oldStorage := svr.GetStorage()
 	svr.SetStorage(core.NewStorage(&testErrorKV{}))
-	replicateCfg.MaxReplicas = 7
+	replicationCfg.MaxReplicas = 7
 	scheduleCfg.MaxSnapshotCount = 20
 	pdServerCfg.UseRegionStorage = false
 
 	c.Assert(svr.SetScheduleConfig(*scheduleCfg), NotNil)
-	c.Assert(svr.SetReplicationConfig(*replicateCfg), NotNil)
+	c.Assert(svr.SetReplicationConfig(*replicationCfg), NotNil)
 	c.Assert(svr.SetPDServerConfig(*pdServerCfg), NotNil)
 	c.Assert(svr.SetLabelProperty(typ, labelKey, labelValue), NotNil)
 
@@ -663,7 +663,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 
 	// DELETE failed
 	svr.SetStorage(oldStorage)
-	c.Assert(svr.SetReplicationConfig(*replicateCfg), IsNil)
+	c.Assert(svr.SetReplicationConfig(*replicationCfg), IsNil)
 
 	svr.SetStorage(core.NewStorage(&testErrorKV{}))
 	c.Assert(svr.DeleteLabelProperty(typ, labelKey, labelValue), NotNil)
@@ -800,9 +800,9 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 	c.Assert(err, IsNil)
 }
 
-func (s *clusterTestSuite) TestReplicateModeStatus(c *C) {
+func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {
 	tc, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config) {
-		conf.ReplicateMode.ReplicateMode = "dr_autosync"
+		conf.ReplicationMode.ReplicationMode = "dr_auto_sync"
 	})
 
 	defer tc.Destroy()
@@ -816,18 +816,18 @@ func (s *clusterTestSuite) TestReplicateModeStatus(c *C) {
 	req := newBootstrapRequest(c, clusterID, "127.0.0.1:0")
 	res, err := grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
-	c.Assert(res.GetReplicateStatus().GetMode(), Equals, replicate_mode.ReplicateStatus_DR_AUTOSYNC) // check status in bootstrap response
+	c.Assert(res.GetReplicationStatus().GetMode(), Equals, replication_modepb.ReplicationMode_DR_AUTO_SYNC) // check status in bootstrap response
 	store := &metapb.Store{Id: 11, Address: "127.0.0.1:1", Version: "v4.1.0"}
 	putRes, err := putStore(c, grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
-	c.Assert(putRes.GetReplicateStatus().GetMode(), Equals, replicate_mode.ReplicateStatus_DR_AUTOSYNC) // check status in putStore response
+	c.Assert(putRes.GetReplicationStatus().GetMode(), Equals, replication_modepb.ReplicationMode_DR_AUTO_SYNC) // check status in putStore response
 	hbReq := &pdpb.StoreHeartbeatRequest{
 		Header: testutil.NewRequestHeader(clusterID),
 		Stats:  &pdpb.StoreStats{StoreId: store.GetId()},
 	}
 	hbRes, err := grpcPDClient.StoreHeartbeat(context.Background(), hbReq)
 	c.Assert(err, IsNil)
-	c.Assert(hbRes.GetReplicateStatus().GetMode(), Equals, replicate_mode.ReplicateStatus_DR_AUTOSYNC) // check status in store heartbeat response
+	c.Assert(hbRes.GetReplicationStatus().GetMode(), Equals, replication_modepb.ReplicationMode_DR_AUTO_SYNC) // check status in store heartbeat response
 }
 
 func newIsBootstrapRequest(clusterID uint64) *pdpb.IsBootstrappedRequest {

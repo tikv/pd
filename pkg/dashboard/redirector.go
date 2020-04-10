@@ -15,34 +15,93 @@ package dashboard
 
 import (
 	"net/http"
-	"sync/atomic"
+	"net/http/httputil"
+	"net/url"
+	"sync"
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 )
 
+const (
+	proxyHeader = "Via"
+)
+
 // Redirector is used to redirect when the dashboard is started in another PD.
 type Redirector struct {
-	address atomic.Value
+	mu      sync.RWMutex
+	name    string
+	address string
+	proxy   *httputil.ReverseProxy
 }
 
 // NewRedirector creates a new Redirector.
-func NewRedirector() *Redirector {
-	h := new(Redirector)
-	h.address.Store("")
-	return h
+func NewRedirector(name string) *Redirector {
+	return &Redirector{
+		name: name,
+	}
 }
 
 // SetAddress is used to set a new address to be redirected.
 func (h *Redirector) SetAddress(addr string) {
-	h.address.Store(addr)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.address == addr {
+		return
+	}
+
+	if addr == "" {
+		h.address = ""
+		h.proxy = nil
+		return
+	}
+
+	h.address = addr
+	target, _ := url.Parse(addr) // error has been handled in checkAddress
+	h.proxy = httputil.NewSingleHostReverseProxy(target)
+	defaultDirector := h.proxy.Director
+	h.proxy.Director = func(r *http.Request) {
+		defaultDirector(r)
+		r.Header.Set(proxyHeader, h.name)
+	}
 }
 
-// ServeHTTP implements http.Handler.
-func (h *Redirector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	addr := h.address.Load().(string)
+// GetAddress is used to get the address to be redirected.
+func (h *Redirector) GetAddress() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.address
+}
+
+// GetProxy is used to get the reverse proxy arriving at address.
+func (h *Redirector) GetProxy() *httputil.ReverseProxy {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.proxy
+}
+
+// TemporaryRedirect sends the status code 307 to the client, and the client redirects itself.
+func (h *Redirector) TemporaryRedirect(w http.ResponseWriter, r *http.Request) {
+	addr := h.GetAddress()
 	if addr == "" {
 		apiserver.StoppedHandler.ServeHTTP(w, r)
 		return
 	}
 	http.Redirect(w, r, addr+r.RequestURI, http.StatusTemporaryRedirect)
+}
+
+// ReverseProxy forwards the request to address and returns the response to the client.
+func (h *Redirector) ReverseProxy(w http.ResponseWriter, r *http.Request) {
+	proxy := h.GetProxy()
+	if proxy == nil {
+		apiserver.StoppedHandler.ServeHTTP(w, r)
+		return
+	}
+
+	if len(r.Header.Get(proxyHeader)) > 0 {
+		w.WriteHeader(http.StatusLoopDetected)
+		return
+	}
+
+	proxy.ServeHTTP(w, r)
 }

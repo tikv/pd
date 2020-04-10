@@ -30,8 +30,10 @@ import (
 	"github.com/pingcap/pd/v4/server/cluster"
 )
 
-// CheckInterval is used to check if the dashboard address is switched
-var CheckInterval = time.Second
+var (
+	// CheckInterval represents the time interval of running check.
+	CheckInterval = time.Second
+)
 
 // Manager is used to control dashboard.
 type Manager struct {
