@@ -62,7 +62,7 @@ func (s *clusterTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
 	server.ConfigCheckInterval = 1 * time.Second
 	// to prevent GetStorage
-	dashboard.CheckInterval = 30 * time.Minute
+	dashboard.SetCheckInterval(30 * time.Minute)
 }
 
 func (s *clusterTestSuite) TearDownSuite(c *C) {

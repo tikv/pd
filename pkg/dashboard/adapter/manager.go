@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package dashboard
+package adapter
 
 import (
 	"context"
@@ -64,12 +64,12 @@ func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector
 	}
 }
 
-func (m *Manager) start() {
+func (m *Manager) Start() {
 	m.wg.Add(1)
 	go m.serviceLoop()
 }
 
-func (m *Manager) stop() {
+func (m *Manager) Stop() {
 	m.cancel()
 	m.wg.Wait()
 	log.Info("exit dashboard loop")
@@ -212,7 +212,7 @@ func (m *Manager) startService() {
 	if err := m.service.Start(m.ctx); err != nil {
 		log.Error("Can not start dashboard server", zap.Error(err))
 	} else {
-		log.Info("Dashboard server is started", zap.String("path", uiServiceGroup.PathPrefix))
+		log.Info("Dashboard server is started")
 	}
 }
 
