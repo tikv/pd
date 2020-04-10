@@ -64,11 +64,13 @@ func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector
 	}
 }
 
+// Start monitoring the dynamic config and control the dashboard.
 func (m *Manager) Start() {
 	m.wg.Add(1)
 	go m.serviceLoop()
 }
 
+// Stop monitoring the dynamic config and control the dashboard.
 func (m *Manager) Stop() {
 	m.cancel()
 	m.wg.Wait()

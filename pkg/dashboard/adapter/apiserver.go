@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/pd/v4/server"
 )
 
+// NewAPIService uses the PD information to create a new apiserver.Service.
 func NewAPIService(srv *server.Server, redirector http.Handler) (*apiserver.Service, error) {
 	cfg := srv.GetConfig()
 
