@@ -650,7 +650,6 @@ func (r *RegionsInfo) ReplaceOrAddRegion(region *RegionInfo, overlaps []*RegionI
 	}
 	r.regions.Put(region)
 	r.addRegionToSubTree(region)
-	return
 }
 
 func (r *RegionsInfo) addRegionToSubTree(region *RegionInfo) {
@@ -696,7 +695,6 @@ func (r *RegionsInfo) addRegionToSubTree(region *RegionInfo) {
 		}
 		store.update(region)
 	}
-	return
 }
 
 func (r *RegionsInfo) removeRegionFromSubTree(region *RegionInfo) {
