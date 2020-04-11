@@ -269,7 +269,7 @@ func (*testRegionKey) TestReplaceOrAddRegion(c *C) {
 	overlaps, item = regions.GetOverlaps(region)
 	regions.ReplaceOrAddRegion(region, overlaps, item)
 	c.Assert(len(overlaps), Equals, 1)
-	c.Assert(IsEqualRegion(region, item), IsTrue)
+	c.Assert(isEqualRegion(region, item), IsTrue)
 	c.Assert(regions.leaders[1].length(), Equals, 19)
 	c.Assert(regions.leaders[2].length(), Equals, 20)
 	c.Assert(regions.leaders[3].length(), Equals, 20)
@@ -384,19 +384,19 @@ func (*testRegionKey) TestIsEqualRegion(c *C) {
 	}, peer1)
 	other := &regionItem{region: otherRegion}
 
-	c.Assert(IsEqualRegion(region, nil), Equals, false)
-	c.Assert(IsEqualRegion(nil, nil), Equals, false)
-	c.Assert(IsEqualRegion(nil, other), Equals, false)
-	c.Assert(IsEqualRegion(region, other), Equals, false)
+	c.Assert(isEqualRegion(region, nil), Equals, false)
+	c.Assert(isEqualRegion(nil, nil), Equals, false)
+	c.Assert(isEqualRegion(nil, other), Equals, false)
+	c.Assert(isEqualRegion(region, other), Equals, false)
 	otherRegion.meta.Id = 1
 	otherRegion.meta.StartKey = []byte(fmt.Sprintf("%20d", 10))
 	otherRegion.meta.EndKey = []byte(fmt.Sprintf("%20d", 20))
-	c.Assert(IsEqualRegion(region, other), Equals, true)
+	c.Assert(isEqualRegion(region, other), Equals, true)
 	otherRegion.meta.StartKey = []byte(fmt.Sprintf("%20d", 11))
-	c.Assert(IsEqualRegion(region, other), Equals, true)
+	c.Assert(isEqualRegion(region, other), Equals, true)
 	otherRegion.meta.StartKey = []byte(fmt.Sprintf("%20d", 10))
 	otherRegion.meta.EndKey = []byte(fmt.Sprintf("%20d", 21))
-	c.Assert(IsEqualRegion(region, other), Equals, true)
+	c.Assert(isEqualRegion(region, other), Equals, true)
 }
 
 func (*testRegionKey) TestIsEqualPeers(c *C) {

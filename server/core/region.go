@@ -615,7 +615,7 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 // ReplaceOrAddRegion adds or replaces RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
 func (r *RegionsInfo) ReplaceOrAddRegion(region *RegionInfo, overlaps []*RegionInfo, oldRegionItem *regionItem) {
 	// Add to tree and regions.
-	if !IsEqualRegion(region, oldRegionItem) {
+	if !isEqualRegion(region, oldRegionItem) {
 		for _, item := range overlaps {
 			r.RemoveRegion(r.GetRegion(item.GetID()))
 		}
@@ -1001,7 +1001,7 @@ func isInvolved(region *RegionInfo, startKey, endKey []byte) bool {
 	return bytes.Compare(region.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), endKey) <= 0))
 }
 
-func IsEqualRegion(region *RegionInfo, other *regionItem) bool {
+func isEqualRegion(region *RegionInfo, other *regionItem) bool {
 	if region == nil || other == nil {
 		return false
 	}
