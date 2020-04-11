@@ -22,6 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/unrolled/render"
@@ -44,6 +45,24 @@ type RegionInfo struct {
 	ReadKeys        uint64            `json:"read_keys"`
 	ApproximateSize int64             `json:"approximate_size"`
 	ApproximateKeys int64             `json:"approximate_keys"`
+
+	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
+}
+
+// ReplicationStatus represents the replication mode status of the region.
+type ReplicationStatus struct {
+	State   string `json:"state"`
+	StateID uint64 `json:"state_id"`
+}
+
+func fromPBReplicationStatus(s *replication_modepb.RegionReplicationStatus) *ReplicationStatus {
+	if s == nil {
+		return nil
+	}
+	return &ReplicationStatus{
+		State:   replication_modepb.RegionReplicationState_name[int32(s.GetState())],
+		StateID: s.GetStateId(),
+	}
 }
 
 // NewRegionInfo create a new api RegionInfo.
@@ -71,6 +90,7 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ReadKeys = r.GetKeysRead()
 	s.ApproximateSize = r.GetApproximateSize()
 	s.ApproximateKeys = r.GetApproximateKeys()
+	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())
 
 	return s
 }
