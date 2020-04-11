@@ -1375,7 +1375,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		return err
 	}
 	for _, member := range resp.Members {
-		url := filepath.Join(member.GetClientUrls()[0], "/pd/api/v1/admin/persist-file", name)
+		url := member.GetClientUrls()[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
 		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
 		req.Header.Set("PD-Allow-follower-handle", "true")
 		res, err := cluster.DialClient.Do(req)

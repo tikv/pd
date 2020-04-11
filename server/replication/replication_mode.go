@@ -15,6 +15,7 @@ package replication
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"sync"
@@ -36,10 +37,11 @@ const (
 // FileReplicater is the interface that can save important data to all cluster
 // nodes.
 type FileReplicater interface {
-	ReplicateFileToAllMembers(name string, data []byte) error
+	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
 }
 
 const drStatusFile = "DR_STATE"
+const persistFileTimeout = time.Second * 10
 
 // ModeManager is used to control how raft logs are synchronized between
 // different tikv nodes.
@@ -216,8 +218,10 @@ func (m *ModeManager) drSwitchToSync() error {
 
 func (m *ModeManager) drPersistStatus(status drAutoSyncStatus) error {
 	if m.fileReplicater != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), persistFileTimeout)
+		defer cancel()
 		data, _ := json.Marshal(status)
-		if err := m.fileReplicater.ReplicateFileToAllMembers(drStatusFile, data); err != nil {
+		if err := m.fileReplicater.ReplicateFileToAllMembers(ctx, drStatusFile, data); err != nil {
 			log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", status.State), zap.Error(err))
 			return err
 		}
