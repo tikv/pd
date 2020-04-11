@@ -1037,6 +1037,47 @@ func (s *Server) setConfigVersion(version *configpb.Version) {
 	s.configVersion = version
 }
 
+// GetReplicationModeConfig returns the replication mode config.
+func (s *Server) GetReplicationModeConfig() *config.ReplicationModeConfig {
+	return s.scheduleOpt.GetReplicationModeConfig()
+}
+
+// SetReplicationModeConfig sets the replication mode.
+func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) error {
+	old := s.scheduleOpt.GetReplicationModeConfig()
+	s.scheduleOpt.SetReplicationModeConfig(&cfg)
+	if err := s.scheduleOpt.Persist(s.storage); err != nil {
+		s.scheduleOpt.SetReplicationModeConfig(old)
+		log.Error("failed to update replication mode config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", &old),
+			zap.Error(err))
+		return err
+	}
+	log.Info("replication mode config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+
+	cluster := s.GetRaftCluster()
+	if cluster != nil {
+		err := cluster.GetReplicationMode().UpdateConfig(cfg)
+		if err != nil {
+			log.Warn("failed to update replication mode", zap.Error(err))
+			// revert to old config
+			// NOTE: since we can't put the 2 storage mutations in a batch, it
+			// is possible that memory and persistent data become different
+			// (when below revert fail). They will become the same after PD is
+			// restart or leader is changed.
+			s.scheduleOpt.SetReplicationModeConfig(old)
+			revertErr := s.scheduleOpt.Persist(s.storage)
+			if revertErr != nil {
+				log.Error("failed to revert replication mode persistent config", zap.Error(err))
+			}
+		}
+		return err
+	}
+
+	return nil
+}
+
 func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
@@ -1333,6 +1374,12 @@ func (s *Server) updateComponentConfig(cfg string) error {
 		err = s.SetLogConfig(new.Log)
 		saveFile = true
 	}
+
+	if !reflect.DeepEqual(old.ReplicationMode, new.ReplicationMode) {
+		err = s.SetReplicationModeConfig(new.ReplicationMode)
+		saveFile = true
+	}
+
 	if err != nil {
 		return err
 	}

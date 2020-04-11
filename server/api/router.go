@@ -96,6 +96,8 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	apiRouter.HandleFunc("/config/label-property", confHandler.SetLabelProperty).Methods("POST")
 	apiRouter.HandleFunc("/config/cluster-version", confHandler.GetClusterVersion).Methods("GET")
 	apiRouter.HandleFunc("/config/cluster-version", confHandler.SetClusterVersion).Methods("POST")
+	apiRouter.HandleFunc("/config/replication-mode", confHandler.GetReplicationMode).Methods("GET")
+	apiRouter.HandleFunc("/config/replication-mode", confHandler.SetReplicationMode).Methods("POST")
 
 	rulesHandler := newRulesHandler(svr, rd)
 	clusterRouter.HandleFunc("/config/rules", rulesHandler.GetAll).Methods("GET")

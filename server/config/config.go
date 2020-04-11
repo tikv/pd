@@ -1146,6 +1146,12 @@ type ReplicationModeConfig struct {
 	DRAutoSync      DRAutoSyncReplicationConfig `toml:"dr-auto-sync" json:"dr-auto-sync"`         // used when ReplicationMode is 'dr-auto-sync'
 }
 
+// Clone returns a copy of replication mode config.
+func (c *ReplicationModeConfig) Clone() *ReplicationModeConfig {
+	cfg := *c
+	return &cfg
+}
+
 func (c *ReplicationModeConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("replication-mode") {
 		c.ReplicationMode = "majority"

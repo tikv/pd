@@ -60,6 +60,25 @@ func NewReplicationModeManager(config config.ReplicationModeConfig, storage *cor
 	return m, nil
 }
 
+// UpdateConfig updates configuration online and updates internal state.
+func (m *ModeManager) UpdateConfig(config config.ReplicationModeConfig) error {
+	m.Lock()
+	defer m.Unlock()
+	// Handle 'majority -> dr_auto_sync' as special case. (sync_recover mode)
+	if m.config.ReplicationMode == modeMajority && config.ReplicationMode == modeDRAutoSync {
+		old := m.config
+		m.config = config
+		err := m.drSwitchToSyncRecoverWithLock()
+		if err != nil {
+			// restore
+			m.config = old
+		}
+		return err
+	}
+	m.config = config
+	return nil
+}
+
 // GetReplicationStatus returns the status to sync with tikv servers.
 func (m *ModeManager) GetReplicationStatus() *pb.ReplicationStatus {
 	m.RLock()
@@ -165,6 +184,10 @@ func (m *ModeManager) drSwitchToAsync() error {
 func (m *ModeManager) drSwitchToSyncRecover() error {
 	m.Lock()
 	defer m.Unlock()
+	return m.drSwitchToSyncRecoverWithLock()
+}
+
+func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
