@@ -64,7 +64,7 @@ type Server interface {
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
 	GetSchedulersCallback() func()
-	PersistFile(name string, data []byte) error
+	ReplicateFileToAllMembers(name string, data []byte) error
 }
 
 // RaftCluster is used for cluster config management.

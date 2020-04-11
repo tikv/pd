@@ -33,10 +33,10 @@ const (
 	modeDRAutoSync = "dr_auto_sync"
 )
 
-// FilePersister is the interface that can save important data to all cluster
+// FileReplicater is the interface that can save important data to all cluster
 // nodes.
-type FilePersister interface {
-	PersistFile(name string, data []byte) error
+type FileReplicater interface {
+	ReplicateFileToAllMembers(name string, data []byte) error
 }
 
 const drStatusFile = "DR_STATE"
@@ -45,21 +45,21 @@ const drStatusFile = "DR_STATE"
 // different tikv nodes.
 type ModeManager struct {
 	sync.RWMutex
-	config        config.ReplicationModeConfig
-	storage       *core.Storage
-	cluster       opt.Cluster
-	filePersister FilePersister
+	config         config.ReplicationModeConfig
+	storage        *core.Storage
+	cluster        opt.Cluster
+	fileReplicater FileReplicater
 
 	drAutoSync drAutoSyncStatus
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
-func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, cluster opt.Cluster, filePersister FilePersister) (*ModeManager, error) {
+func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, cluster opt.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
 	m := &ModeManager{
-		config:        config,
-		storage:       storage,
-		cluster:       cluster,
-		filePersister: filePersister,
+		config:         config,
+		storage:        storage,
+		cluster:        cluster,
+		fileReplicater: fileReplicater,
 	}
 	switch config.ReplicationMode {
 	case modeMajority:
@@ -215,9 +215,9 @@ func (m *ModeManager) drSwitchToSync() error {
 }
 
 func (m *ModeManager) drPersistStatus(status drAutoSyncStatus) error {
-	if m.filePersister != nil {
+	if m.fileReplicater != nil {
 		data, _ := json.Marshal(status)
-		if err := m.filePersister.PersistFile(drStatusFile, data); err != nil {
+		if err := m.fileReplicater.ReplicateFileToAllMembers(drStatusFile, data); err != nil {
 			log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", status.State), zap.Error(err))
 			return err
 		}
