@@ -25,6 +25,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
@@ -301,4 +302,53 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(rules, HasLen, 1)
 	c.Assert(rules[0].Key(), Equals, [2]string{"pd", "test1"})
+}
+
+func (s *configTestSuite) TestReplicationMode(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctl.InitCommand()
+
+	store := metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	defer cluster.Destroy()
+
+	conf := config.ReplicationModeConfig{
+		ReplicationMode: "majority",
+		DRAutoSync: config.DRAutoSyncReplicationConfig{
+			WaitStoreTimeout: typeutil.NewDuration(time.Minute),
+			WaitSyncTimeout:  typeutil.NewDuration(time.Minute),
+		},
+	}
+	check := func() {
+		_, output, err := pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "show", "replication-mode")
+		c.Assert(err, IsNil)
+		var conf2 config.ReplicationModeConfig
+		json.Unmarshal([]byte(output), &conf2)
+		c.Assert(conf2, DeepEquals, conf)
+	}
+
+	check()
+
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr_auto_sync")
+	c.Assert(err, IsNil)
+	conf.ReplicationMode = "dr_auto_sync"
+	check()
+
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr-auto-sync", "label-key", "foobar")
+	c.Assert(err, IsNil)
+	conf.DRAutoSync.LabelKey = "foobar"
+	check()
 }
