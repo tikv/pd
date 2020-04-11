@@ -350,6 +350,9 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 		postJSON(cmd, replicationModePrefix, map[string]interface{}{"replication-mode": args[0]})
 	} else if len(args) == 3 {
 		postJSON(cmd, replicationModePrefix, map[string]interface{}{args[0]: map[string]string{args[1]: args[2]}})
+	} else {
+		cmd.Println(cmd.UsageString())
+		return
 	}
 }
 
