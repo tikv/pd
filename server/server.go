@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -1364,4 +1365,33 @@ func (s *Server) reloadConfigFromKV() error {
 	}
 
 	return nil
+}
+
+// ReplicateFileToAllMembers is used to synchronize state among all members.
+// Each member will write `data` to a local file named `name`.
+func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
+	resp, err := s.GetMembers(ctx, nil)
+	if err != nil {
+		return err
+	}
+	for _, member := range resp.Members {
+		url := filepath.Join(member.GetClientUrls()[0], "/pd/api/v1/admin/persist-file", name)
+		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+		req.Header.Set("PD-Allow-follower-handle", "true")
+		res, err := cluster.DialClient.Do(req)
+		if err != nil {
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
+			return errors.Errorf("failed to replicate to member %s", member.GetName())
+		}
+		if res.StatusCode != http.StatusOK {
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
+			return errors.Errorf("failed to replicate to member %s", member.GetName())
+		}
+	}
+	return nil
+}
+
+// PersistFile saves a file in DataDir.
+func (s *Server) PersistFile(name string, data []byte) error {
+	return ioutil.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
 }

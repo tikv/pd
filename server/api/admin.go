@@ -14,6 +14,7 @@
 package api
 
 import (
+	"io/ioutil"
 	"net/http"
 	"strconv"
 
@@ -91,4 +92,21 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.rd.JSON(w, http.StatusOK, "success")
+}
+
+// Intentionally no swagger mark as it is supposed to be only used in
+// server-to-server.
+func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
+	data, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		h.rd.Text(w, http.StatusInternalServerError, "")
+		return
+	}
+	defer r.Body.Close()
+	err = h.svr.PersistFile(mux.Vars(r)["file_name"], data)
+	if err != nil {
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.Text(w, http.StatusOK, "")
 }
