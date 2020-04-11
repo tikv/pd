@@ -64,6 +64,7 @@ type Server interface {
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
 	GetSchedulersCallback() func()
+	PersistFile(name string, data []byte) error
 }
 
 // RaftCluster is used for cluster config management.
@@ -220,7 +221,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster, s)
 	if err != nil {
 		return err
 	}
