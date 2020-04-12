@@ -297,7 +297,7 @@ func (*testRegionKey) TestReplaceOrAddRegion(c *C) {
 	c.Assert(regions.pendingPeers[5].length(), Equals, 0)
 	c.Assert(regions.tree.length(), Equals, 97)
 	c.Assert(len(regions.GetRegions()), Equals, 97)
-	overlaps, item = regions.GetOverlaps(region)
+	_, item = regions.GetOverlaps(region)
 	c.Assert(bytes.Compare(item.region.GetEndKey(), []byte(fmt.Sprintf("%20d", 212))), Equals, 0)
 }
 
