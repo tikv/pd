@@ -255,6 +255,8 @@ func (*testRegionKey) TestReplaceOrAddRegion(c *C) {
 	c.Assert(regions.tree.length(), Equals, 97)
 	c.Assert(len(regions.GetRegions()), Equals, 97)
 
+	overlaps, item = regions.GetOverlaps(region)
+	c.Assert(bytes.Compare(item.region.GetStartKey(), []byte(fmt.Sprintf("%20d", 184))), Equals, 0)
 	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
 	peer2 = &metapb.Peer{StoreId: uint64(3), Id: uint64(102)}
 	peer3 = &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
@@ -262,7 +264,7 @@ func (*testRegionKey) TestReplaceOrAddRegion(c *C) {
 		Id:       uint64(21),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
 		StartKey: []byte(fmt.Sprintf("%20d", 184)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 212)),
 	}, peer1)
 	region.learners = append(region.learners, region.voters[1])
 	region.pendingPeers = append(region.pendingPeers, region.voters[2])
@@ -295,6 +297,8 @@ func (*testRegionKey) TestReplaceOrAddRegion(c *C) {
 	c.Assert(regions.pendingPeers[5].length(), Equals, 0)
 	c.Assert(regions.tree.length(), Equals, 97)
 	c.Assert(len(regions.GetRegions()), Equals, 97)
+	overlaps, item = regions.GetOverlaps(region)
+	c.Assert(bytes.Compare(item.region.GetEndKey(), []byte(fmt.Sprintf("%20d", 212))), Equals, 0)
 }
 
 func (*testRegionKey) TestUpdateRegionToSubTree(c *C) {
