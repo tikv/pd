@@ -34,8 +34,6 @@ This takes a while to run. The test suite uses a fork of [gocheck](http://labix.
 
 We use [Swagger 2.0](https://swagger.io/specification/v2/) to automatically generate RESTful API documentation. When a PR involves API changes, you need to update the Go annotations, and the specific format can refer to [Declarative Comments Format](https://github.com/swaggo/swag#declarative-comments-format).
 
-Consider that raml2html depends on various npm packages and can only be run under a specific version of node. It is recommended to use docker to simplify the compilation of raml. You can update html file with [scripts/build-api.sh](../scripts/build-api.sh)
-
 ## Error responses
 
 Error responses from the server are switching to using [errcode codes](https://github.com/pingcap/errcode).
