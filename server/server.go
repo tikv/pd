@@ -98,10 +98,10 @@ type Server struct {
 	startTimestamp int64
 
 	// Configs and initial fields.
-	cfg         *config.Config
-	etcdCfg     *embed.Config
-	scheduleOpt *config.ScheduleOption
-	handler     *Handler
+	cfg            *config.Config
+	etcdCfg        *embed.Config
+	persistOptions *config.PersistOptions
+	handler        *Handler
 
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -222,7 +222,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 
 	s := &Server{
 		cfg:               cfg,
-		scheduleOpt:       config.NewScheduleOption(cfg),
+		persistOptions:    config.NewPersistOptions(cfg),
 		member:            &member.Member{},
 		ctx:               ctx,
 		startTimestamp:    time.Now().Unix(),
@@ -354,7 +354,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.rootPath,
 		s.member.MemberValue(),
 		s.cfg.TsoSaveInterval.Duration,
-		func() time.Duration { return s.scheduleOpt.LoadPDServerConfig().MaxResetTSGap },
+		func() time.Duration { return s.persistOptions.LoadPDServerConfig().MaxResetTSGap },
 	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
@@ -522,7 +522,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	clusterMeta := metapb.Cluster{
 		Id:           clusterID,
-		MaxPeerCount: uint32(s.scheduleOpt.GetReplication().GetMaxReplicas()),
+		MaxPeerCount: uint32(s.persistOptions.GetReplication().GetMaxReplicas()),
 	}
 
 	// Set cluster meta
@@ -663,9 +663,9 @@ func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster
 }
 
-// GetScheduleOption returns the schedule option.
-func (s *Server) GetScheduleOption() *config.ScheduleOption {
-	return s.scheduleOpt
+// GetPersistOptions returns the schedule option.
+func (s *Server) GetPersistOptions() *config.PersistOptions {
+	return s.persistOptions
 }
 
 // GetHBStreams returns the heartbeat streams.
@@ -716,12 +716,12 @@ func (s *Server) StartTimestamp() int64 {
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
-	cfg.Schedule = *s.scheduleOpt.Load()
-	cfg.Replication = *s.scheduleOpt.GetReplication().Load()
-	cfg.LabelProperty = s.scheduleOpt.LoadLabelPropertyConfig().Clone()
-	cfg.ClusterVersion = *s.scheduleOpt.LoadClusterVersion()
-	cfg.PDServerCfg = *s.scheduleOpt.LoadPDServerConfig()
-	cfg.Log = *s.scheduleOpt.LoadLogConfig()
+	cfg.Schedule = *s.persistOptions.Load()
+	cfg.Replication = *s.persistOptions.GetReplication().Load()
+	cfg.LabelProperty = s.persistOptions.LoadLabelPropertyConfig().Clone()
+	cfg.ClusterVersion = *s.persistOptions.LoadClusterVersion()
+	cfg.PDServerCfg = *s.persistOptions.LoadPDServerConfig()
+	cfg.Log = *s.persistOptions.LoadLogConfig()
 	storage := s.GetStorage()
 	if storage == nil {
 		return cfg
@@ -741,7 +741,7 @@ func (s *Server) GetConfig() *config.Config {
 // GetScheduleConfig gets the balance config information.
 func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
 	cfg := &config.ScheduleConfig{}
-	*cfg = *s.scheduleOpt.Load()
+	*cfg = *s.persistOptions.Load()
 	return cfg
 }
 
@@ -753,11 +753,11 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 	if err := cfg.Deprecated(); err != nil {
 		return err
 	}
-	old := s.scheduleOpt.Load()
+	old := s.persistOptions.Load()
 	cfg.SchedulersPayload = nil
-	s.scheduleOpt.Store(&cfg)
-	if err := s.scheduleOpt.Persist(s.storage); err != nil {
-		s.scheduleOpt.Store(old)
+	s.persistOptions.Store(&cfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.Store(old)
 		log.Error("failed to update schedule config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
@@ -771,7 +771,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 // GetReplicationConfig get the replication config.
 func (s *Server) GetReplicationConfig() *config.ReplicationConfig {
 	cfg := &config.ReplicationConfig{}
-	*cfg = *s.scheduleOpt.GetReplication().Load()
+	*cfg = *s.persistOptions.GetReplication().Load()
 	return cfg
 }
 
@@ -780,7 +780,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	old := s.scheduleOpt.GetReplication().Load()
+	old := s.persistOptions.GetReplication().Load()
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
@@ -801,9 +801,9 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		}
 	}
 
-	s.scheduleOpt.GetReplication().Store(&cfg)
-	if err := s.scheduleOpt.Persist(s.storage); err != nil {
-		s.scheduleOpt.GetReplication().Store(old)
+	s.persistOptions.GetReplication().Store(&cfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.GetReplication().Store(old)
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
@@ -817,16 +817,16 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 // GetPDServerConfig gets the balance config information.
 func (s *Server) GetPDServerConfig() *config.PDServerConfig {
 	cfg := &config.PDServerConfig{}
-	*cfg = *s.scheduleOpt.GetPDServerConfig()
+	*cfg = *s.persistOptions.GetPDServerConfig()
 	return cfg
 }
 
 // SetPDServerConfig sets the server config.
 func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
-	old := s.scheduleOpt.LoadPDServerConfig()
-	s.scheduleOpt.SetPDServerConfig(&cfg)
-	if err := s.scheduleOpt.Persist(s.storage); err != nil {
-		s.scheduleOpt.SetPDServerConfig(old)
+	old := s.persistOptions.LoadPDServerConfig()
+	s.persistOptions.SetPDServerConfig(&cfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetPDServerConfig(old)
 		log.Error("failed to update PDServer config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
@@ -839,10 +839,10 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 
 // SetLabelPropertyConfig sets the label property config.
 func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
-	old := s.scheduleOpt.LoadLabelPropertyConfig()
-	s.scheduleOpt.SetLabelPropertyConfig(cfg)
-	if err := s.scheduleOpt.Persist(s.storage); err != nil {
-		s.scheduleOpt.SetLabelPropertyConfig(old)
+	old := s.persistOptions.LoadLabelPropertyConfig()
+	s.persistOptions.SetLabelPropertyConfig(cfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetLabelPropertyConfig(old)
 		log.Error("failed to update label property config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", &old),
@@ -856,17 +856,17 @@ func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 // GetLogConfig gets the log config.
 func (s *Server) GetLogConfig() *log.Config {
 	cfg := &log.Config{}
-	*cfg = *s.scheduleOpt.GetLogConfig()
+	*cfg = *s.persistOptions.GetLogConfig()
 	return cfg
 }
 
 // SetLogConfig sets the log config.
 func (s *Server) SetLogConfig(cfg log.Config) error {
-	old := s.scheduleOpt.LoadLogConfig()
-	s.scheduleOpt.SetLogConfig(&cfg)
+	old := s.persistOptions.LoadLogConfig()
+	s.persistOptions.SetLogConfig(&cfg)
 	log.SetLevel(logutil.StringToZapLogLevel(cfg.Level))
-	if err := s.scheduleOpt.Persist(s.storage); err != nil {
-		s.scheduleOpt.SetLogConfig(old)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetLogConfig(old)
 		log.SetLevel(logutil.StringToZapLogLevel(old.Level))
 		log.Error("failed to update log config",
 			zap.Reflect("new", cfg),
@@ -880,39 +880,39 @@ func (s *Server) SetLogConfig(cfg log.Config) error {
 
 // SetLabelProperty inserts a label property config.
 func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
-	s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
-	err := s.scheduleOpt.Persist(s.storage)
+	s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
+	err := s.persistOptions.Persist(s.storage)
 	if err != nil {
-		s.scheduleOpt.DeleteLabelProperty(typ, labelKey, labelValue)
+		s.persistOptions.DeleteLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to update label property config",
 			zap.String("typ", typ),
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
-			zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()),
+			zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()),
 			zap.Error(err))
 		return err
 	}
 
-	log.Info("label property config is updated", zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()))
+	log.Info("label property config is updated", zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()))
 	return nil
 }
 
 // DeleteLabelProperty deletes a label property config.
 func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
-	s.scheduleOpt.DeleteLabelProperty(typ, labelKey, labelValue)
-	err := s.scheduleOpt.Persist(s.storage)
+	s.persistOptions.DeleteLabelProperty(typ, labelKey, labelValue)
+	err := s.persistOptions.Persist(s.storage)
 	if err != nil {
-		s.scheduleOpt.SetLabelProperty(typ, labelKey, labelValue)
+		s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to delete label property config",
 			zap.String("typ", typ),
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
-			zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()),
+			zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()),
 			zap.Error(err))
 		return err
 	}
 
-	log.Info("label property config is deleted", zap.Reflect("config", s.scheduleOpt.LoadLabelPropertyConfig()))
+	log.Info("label property config is deleted", zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()))
 	return nil
 }
 
@@ -932,7 +932,7 @@ func (s *Server) UpdateConfigManager(name, value string) error {
 
 // GetLabelProperty returns the whole label property config.
 func (s *Server) GetLabelProperty() config.LabelPropertyConfig {
-	return s.scheduleOpt.LoadLabelPropertyConfig().Clone()
+	return s.persistOptions.LoadLabelPropertyConfig().Clone()
 }
 
 // SetClusterVersion sets the version of cluster.
@@ -941,11 +941,11 @@ func (s *Server) SetClusterVersion(v string) error {
 	if err != nil {
 		return err
 	}
-	old := s.scheduleOpt.LoadClusterVersion()
-	s.scheduleOpt.SetClusterVersion(version)
-	err = s.scheduleOpt.Persist(s.storage)
+	old := s.persistOptions.LoadClusterVersion()
+	s.persistOptions.SetClusterVersion(version)
+	err = s.persistOptions.Persist(s.storage)
 	if err != nil {
-		s.scheduleOpt.SetClusterVersion(old)
+		s.persistOptions.SetClusterVersion(old)
 		log.Error("failed to update cluster version",
 			zap.String("old-version", old.String()),
 			zap.String("new-version", v),
@@ -958,7 +958,7 @@ func (s *Server) SetClusterVersion(v string) error {
 
 // GetClusterVersion returns the version of cluster.
 func (s *Server) GetClusterVersion() semver.Version {
-	return *s.scheduleOpt.LoadClusterVersion()
+	return *s.persistOptions.LoadClusterVersion()
 }
 
 // GetSecurityConfig get the security config.
@@ -984,13 +984,13 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
 		Id:           s.clusterID,
-		MaxPeerCount: uint32(s.scheduleOpt.GetReplication().GetMaxReplicas()),
+		MaxPeerCount: uint32(s.persistOptions.GetReplication().GetMaxReplicas()),
 	}
 }
 
 // GetServerOption gets the option of the server.
-func (s *Server) GetServerOption() *config.ScheduleOption {
-	return s.scheduleOpt
+func (s *Server) GetServerOption() *config.PersistOptions {
+	return s.persistOptions
 }
 
 // GetMetaRegions gets meta regions from cluster.
@@ -1058,7 +1058,7 @@ func (s *Server) leaderLoop() {
 				continue
 			}
 			syncer := s.cluster.GetRegionSyncer()
-			if s.scheduleOpt.LoadPDServerConfig().UseRegionStorage {
+			if s.persistOptions.LoadPDServerConfig().UseRegionStorage {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
 			log.Info("start watch leader", zap.Stringer("leader", leader))
@@ -1122,7 +1122,7 @@ func (s *Server) campaignLeader() {
 	s.member.EnableLeader()
 	defer s.member.DisableLeader()
 
-	CheckPDVersion(s.scheduleOpt)
+	CheckPDVersion(s.persistOptions)
 	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
 
 	tsTicker := time.NewTicker(tso.UpdateTimestampStep)
@@ -1344,11 +1344,11 @@ func (s *Server) updateComponentConfig(cfg string) error {
 }
 
 func (s *Server) reloadConfigFromKV() error {
-	err := s.scheduleOpt.Reload(s.storage)
+	err := s.persistOptions.Reload(s.storage)
 	if err != nil {
 		return err
 	}
-	if s.scheduleOpt.LoadPDServerConfig().UseRegionStorage {
+	if s.persistOptions.LoadPDServerConfig().UseRegionStorage {
 		s.storage.SwitchToRegionStorage()
 		log.Info("server enable region storage")
 	} else {

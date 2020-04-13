@@ -58,7 +58,7 @@ const (
 type Server interface {
 	GetAllocator() *id.AllocatorImpl
 	GetConfig() *config.Config
-	GetScheduleOption() *config.ScheduleOption
+	GetPersistOptions() *config.PersistOptions
 	GetStorage() *core.Storage
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
@@ -85,7 +85,7 @@ type RaftCluster struct {
 	// cached cluster info
 	core    *core.BasicCluster
 	meta    *metapb.Cluster
-	opt     *config.ScheduleOption
+	opt     *config.PersistOptions
 	storage *core.Storage
 	id      id.Allocator
 	limiter *StoreLimiter
@@ -180,7 +180,7 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster, cb func()) {
+func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster, cb func()) {
 	c.core = basicCluster
 	c.opt = opt
 	c.storage = storage
@@ -203,7 +203,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage(), s.GetBasicCluster(), s.GetSchedulersCallback())
+	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster(), s.GetSchedulersCallback())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -1313,7 +1313,7 @@ func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 }
 
 // GetOpt returns the scheduling options.
-func (c *RaftCluster) GetOpt() *config.ScheduleOption {
+func (c *RaftCluster) GetOpt() *config.PersistOptions {
 	return c.opt
 }
 

@@ -193,7 +193,7 @@ func (s *clusterTestSuite) TestReloadConfig(c *C) {
 	tc.ResignLeader()
 	tc.WaitLeader()
 	leaderServer = tc.GetServer(tc.GetLeader())
-	c.Assert(leaderServer.GetServer().GetScheduleOption().GetReplication().IsPlacementRulesEnabled(), IsFalse)
+	c.Assert(leaderServer.GetServer().GetPersistOptions().GetReplication().IsPlacementRulesEnabled(), IsFalse)
 	rc = leaderServer.GetServer().GetRaftCluster()
 	r := &metapb.Region{
 		Id: 3,
@@ -210,12 +210,12 @@ func (s *clusterTestSuite) TestReloadConfig(c *C) {
 
 	// wait for checking region
 	time.Sleep(300 * time.Millisecond)
-	c.Assert(leaderServer.GetServer().GetScheduleOption().GetReplication().IsPlacementRulesEnabled(), IsFalse)
+	c.Assert(leaderServer.GetServer().GetPersistOptions().GetReplication().IsPlacementRulesEnabled(), IsFalse)
 	c.Assert(rc.GetOperatorController().GetOperator(3), IsNil)
 
 	// wait for configuration valid
 	time.Sleep(1 * time.Second)
-	c.Assert(leaderServer.GetServer().GetScheduleOption().GetReplication().IsPlacementRulesEnabled(), IsTrue)
+	c.Assert(leaderServer.GetServer().GetPersistOptions().GetReplication().IsPlacementRulesEnabled(), IsTrue)
 	c.Assert(rc.GetOperatorController().GetOperator(3), IsNil)
 }
 
@@ -614,14 +614,14 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	cfg.Schedule.StoreBalanceRate = 60
 	err = cfg.Adjust(nil)
 	c.Assert(err, IsNil)
-	opt := config.NewScheduleOption(cfg)
+	opt := config.NewPersistOptions(cfg)
 	c.Assert(err, IsNil)
 
 	svr := leaderServer.GetServer()
 	scheduleCfg := opt.Load()
 	replicationCfg := svr.GetReplicationConfig()
-	scheduleOpt := svr.GetScheduleOption()
-	pdServerCfg := scheduleOpt.LoadPDServerConfig()
+	persistOptions := svr.GetPersistOptions()
+	pdServerCfg := persistOptions.LoadPDServerConfig()
 
 	// PUT GET DELETE succeed
 	replicationCfg.MaxReplicas = 5
@@ -635,14 +635,14 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(svr.SetReplicationConfig(*replicationCfg), IsNil)
 
 	c.Assert(svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
-	c.Assert(scheduleOpt.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(scheduleOpt.LoadPDServerConfig().UseRegionStorage, Equals, true)
-	c.Assert(scheduleOpt.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
-	c.Assert(scheduleOpt.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
+	c.Assert(persistOptions.GetMaxSnapshotCount(), Equals, uint64(10))
+	c.Assert(persistOptions.LoadPDServerConfig().UseRegionStorage, Equals, true)
+	c.Assert(persistOptions.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
+	c.Assert(persistOptions.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
 
 	c.Assert(svr.DeleteLabelProperty(typ, labelKey, labelValue), IsNil)
 
-	c.Assert(len(scheduleOpt.LoadLabelPropertyConfig()[typ]), Equals, 0)
+	c.Assert(len(persistOptions.LoadLabelPropertyConfig()[typ]), Equals, 0)
 
 	// PUT GET failed
 	oldStorage := svr.GetStorage()
@@ -657,9 +657,9 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(svr.SetLabelProperty(typ, labelKey, labelValue), NotNil)
 
 	c.Assert(svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
-	c.Assert(scheduleOpt.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(scheduleOpt.LoadPDServerConfig().UseRegionStorage, Equals, true)
-	c.Assert(len(scheduleOpt.LoadLabelPropertyConfig()[typ]), Equals, 0)
+	c.Assert(persistOptions.GetMaxSnapshotCount(), Equals, uint64(10))
+	c.Assert(persistOptions.LoadPDServerConfig().UseRegionStorage, Equals, true)
+	c.Assert(len(persistOptions.LoadLabelPropertyConfig()[typ]), Equals, 0)
 
 	// DELETE failed
 	svr.SetStorage(oldStorage)
@@ -668,8 +668,8 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	svr.SetStorage(core.NewStorage(&testErrorKV{}))
 	c.Assert(svr.DeleteLabelProperty(typ, labelKey, labelValue), NotNil)
 
-	c.Assert(scheduleOpt.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
-	c.Assert(scheduleOpt.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
+	c.Assert(persistOptions.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
+	c.Assert(persistOptions.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
 	svr.SetStorage(oldStorage)
 }
 
@@ -687,7 +687,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient())
 
 	// Cluster is not bootstrapped.
-	rc.InitCluster(svr.GetAllocator(), svr.GetScheduleOption(), svr.GetStorage(), svr.GetBasicCluster(), func() {})
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), func() {})
 	raftCluster, err := rc.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, IsNil)

@@ -652,24 +652,24 @@ type testCluster struct {
 	*RaftCluster
 }
 
-func newTestScheduleConfig() (*config.ScheduleConfig, *config.ScheduleOption, error) {
+func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
 	cfg.Schedule.StoreBalanceRate = 60
 	if err := cfg.Adjust(nil); err != nil {
 		return nil, nil, err
 	}
-	opt := config.NewScheduleOption(cfg)
+	opt := config.NewPersistOptions(cfg)
 	opt.SetClusterVersion(MinSupportedVersion(Version2_0))
 	return &cfg.Schedule, opt, nil
 }
 
-func newTestCluster(opt *config.ScheduleOption) *testCluster {
+func newTestCluster(opt *config.PersistOptions) *testCluster {
 	rc := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	return &testCluster{RaftCluster: rc}
 }
 
-func newTestRaftCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
+func newTestRaftCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
 	rc := &RaftCluster{}
 	rc.InitCluster(id, opt, storage, basicCluster, func() {})
 	return rc
