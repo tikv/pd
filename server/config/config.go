@@ -133,8 +133,6 @@ type Config struct {
 	logger   *zap.Logger
 	logProps *log.ZapProperties
 
-	EnableDynamicConfig bool `toml:"enable-dynamic-config" json:"enable-dynamic-config"`
-
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
@@ -208,8 +206,7 @@ const (
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 
-	defaultEnableDynamicConfig = false
-	defaultDashboardAddress    = "auto"
+	defaultDashboardAddress = "auto"
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
@@ -455,10 +452,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
-	}
-
-	if !configMetaData.IsDefined("enable-dynamic-config") {
-		c.EnableDynamicConfig = defaultEnableDynamicConfig
 	}
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))

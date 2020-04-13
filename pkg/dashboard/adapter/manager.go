@@ -55,12 +55,11 @@ type Manager struct {
 func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector) *Manager {
 	ctx, cancel := context.WithCancel(srv.Context())
 	return &Manager{
-		ctx:           ctx,
-		cancel:        cancel,
-		srv:           srv,
-		service:       s,
-		redirector:    redirector,
-		enableDynamic: srv.GetConfig().EnableDynamicConfig,
+		ctx:        ctx,
+		cancel:     cancel,
+		srv:        srv,
+		service:    s,
+		redirector: redirector,
 	}
 }
 
@@ -195,14 +194,7 @@ func (m *Manager) setNewAddress() {
 			}
 		}
 	}
-	// set new dashboard address
-	if m.enableDynamic {
-		if err := m.srv.UpdateConfigManager("pd-server.dashboard-address", addr); err != nil {
-			log.Error("failed to update the dashboard address in config manager", zap.Error(err))
-		}
-		return
-	}
-	cfg := m.srv.GetPersistOptions().GetPDServerConfig().Clone()
+	cfg := m.srv.GetScheduleOption().GetPDServerConfig().Clone()
 	cfg.DashboardAddress = addr
 	m.srv.SetPDServerConfig(*cfg)
 }

@@ -671,7 +671,7 @@ func newTestCluster(opt *config.PersistOptions) *testCluster {
 
 func newTestRaftCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
 	rc := &RaftCluster{}
-	rc.InitCluster(id, opt, storage, basicCluster, func() {})
+	rc.InitCluster(id, opt, storage, basicCluster)
 	return rc
 }
 
