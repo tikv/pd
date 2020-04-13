@@ -257,6 +257,7 @@ func (*testRegionKey) TestReplaceOrAddRegion(c *C) {
 
 	overlaps, item = regions.GetOverlaps(region)
 	c.Assert(bytes.Compare(item.region.GetStartKey(), []byte(fmt.Sprintf("%20d", 184))), Equals, 0)
+	c.Assert(len(overlaps), Equals, 1)
 	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
 	peer2 = &metapb.Peer{StoreId: uint64(3), Id: uint64(102)}
 	peer3 = &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
