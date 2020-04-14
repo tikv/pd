@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package dashboard
+package adapter
 
 import (
 	"net/http"
@@ -25,7 +25,8 @@ import (
 	"github.com/pingcap/pd/v4/server"
 )
 
-func newAPIService(srv *server.Server, redirector http.Handler) (*apiserver.Service, error) {
+// NewAPIService uses the PD information to create a new apiserver.Service.
+func NewAPIService(srv *server.Server, redirector http.Handler) (*apiserver.Service, error) {
 	cfg := srv.GetConfig()
 
 	etcdCfg, err := cfg.GenEmbedEtcdConfig()
