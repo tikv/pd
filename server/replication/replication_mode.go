@@ -97,6 +97,8 @@ type HTTPReplicationStatus struct {
 		LabelKey        string  `json:"label_key"`
 		State           string  `json:"state"`
 		StateID         uint64  `json:"state_id,omitempty"`
+		TotalRegions    int     `json:"total_regions,omitempty"`
+		SyncedRegions   int     `json:"synced_regions,omitempty"`
 		RecoverProgress float32 `json:"recover_progress,omitempty"`
 	} `json:"dr_auto_sync,omitempty"`
 }
@@ -114,6 +116,8 @@ func (m *ModeManager) GetReplicationStatusHTTP() *HTTPReplicationStatus {
 		status.DrAutoSync.State = m.drAutoSync.State
 		status.DrAutoSync.StateID = m.drAutoSync.StateID
 		status.DrAutoSync.RecoverProgress = m.drAutoSync.RecoverProgress
+		status.DrAutoSync.TotalRegions = m.drAutoSync.TotalRegions
+		status.DrAutoSync.SyncedRegions = m.drAutoSync.SyncedRegions
 	}
 	return &status
 }
@@ -134,6 +138,8 @@ type drAutoSyncStatus struct {
 	State            string    `json:"state,omitempty"`
 	StateID          uint64    `json:"state_id,omitempty"`
 	RecoverStartTime time.Time `json:"recover_start,omitempty"`
+	TotalRegions     int       `json:"total_regions,omitempty"`
+	SyncedRegions    int       `json:"synced_regions,omitempty"`
 	RecoverProgress  float32   `json:"recover_progress,omitempty"`
 }
 
@@ -258,7 +264,7 @@ func (m *ModeManager) tickDR() {
 		if progress == 1.0 {
 			m.drSwitchToSync()
 		} else {
-			m.updateRecoverProgress(m.estimateProgress())
+			m.updateRecoverProgress(progress)
 		}
 	}
 }
@@ -355,4 +361,6 @@ func (m *ModeManager) updateRecoverProgress(progress float32) {
 	m.Lock()
 	defer m.Unlock()
 	m.drAutoSync.RecoverProgress = progress
+	m.drAutoSync.TotalRegions = m.drTotalRegion
+	m.drAutoSync.SyncedRegions = m.drRecoverCount
 }

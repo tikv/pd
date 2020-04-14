@@ -11,14 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// +build !without_dashboard
+
 package dashboard
 
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 
+	"github.com/pingcap/pd/v4/pkg/dashboard/adapter"
 	"github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/v4/server"
 )
@@ -39,28 +43,38 @@ var (
 	}
 )
 
+// SetCheckInterval changes adapter.CheckInterval
+func SetCheckInterval(d time.Duration) {
+	adapter.CheckInterval = d
+}
+
 // GetServiceBuilders returns all ServiceBuilders required by Dashboard
 func GetServiceBuilders() []server.HandlerBuilder {
 	var s *apiserver.Service
-	redirector := NewRedirector()
+	var redirector *adapter.Redirector
 
 	return []server.HandlerBuilder{
 		// Dashboard API Service
 		func(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, error) {
+			redirector = adapter.NewRedirector(srv.Name())
+
 			var err error
-			if s, err = newAPIService(srv, redirector); err != nil {
+			if s, err = adapter.NewAPIService(srv, http.HandlerFunc(redirector.ReverseProxy)); err != nil {
 				return nil, apiServiceGroup, err
 			}
 
-			m := NewManager(srv, s, redirector)
-			srv.AddStartCallback(m.start)
-			srv.AddCloseCallback(m.stop)
+			m := adapter.NewManager(srv, s, redirector)
+			srv.AddStartCallback(m.Start)
+			srv.AddCloseCallback(m.Stop)
 
 			return apiserver.Handler(s), apiServiceGroup, nil
 		},
 		// Dashboard UI
 		func(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
-			handler := s.NewStatusAwareHandler(http.StripPrefix(uiServiceGroup.PathPrefix, uiserver.Handler()))
+			handler := s.NewStatusAwareHandler(
+				http.StripPrefix(uiServiceGroup.PathPrefix, uiserver.Handler()),
+				http.HandlerFunc(redirector.TemporaryRedirect),
+			)
 			return handler, uiServiceGroup, nil
 		},
 	}
