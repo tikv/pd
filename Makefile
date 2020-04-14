@@ -32,10 +32,23 @@ DEADLOCK_DISABLE := $$(\
 						find . -name "*.bak" | xargs rm && \
 						go mod tidy)
 
+BUILD_FLAGS ?=
 BUILD_TAGS ?=
+BUILD_CGO_ENABLED := 0
 
 ifneq ($(SWAGGER), 0)
 	BUILD_TAGS += swagger_server
+endif
+
+ifeq ($(DASHBOARD), 0)
+	BUILD_TAGS += without_dashboard
+else
+	BUILD_CGO_ENABLED := 1
+endif
+
+ifeq ("$(WITH_RACE)", "1")
+	BUILD_FLAGS += -race
+	BUILD_CGO_ENABLED := 1
 endif
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
@@ -59,19 +72,30 @@ dev: build tools check test
 ci: build check basic-test
 
 build: pd-server pd-ctl
+
 tools: pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench
+
 pd-server: export GO111MODULE=on
 pd-server:
 ifneq ($(SWAGGER), 0)
 	make swagger-spec
 endif
+ifneq ($(DASHBOARD), 0)
+	make dashboard-ui
+endif
+	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o bin/pd-server cmd/pd-server/main.go
+
+pd-server-basic:
+	SWAGGER=0 DASHBOARD=0 make pd-server
+
+# dependent
+swagger-spec: install-tools
+	go mod vendor
+	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
+
+dashboard-ui:
 ifneq ($(OS),Windows_NT)
 	./scripts/embed-dashboard-ui.sh
-endif
-ifeq ("$(WITH_RACE)", "1")
-	CGO_ENABLED=1 go build -race -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "${BUILD_TAGS}" -o bin/pd-server cmd/pd-server/main.go
-else
-	CGO_ENABLED=1 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "${BUILD_TAGS}" -o bin/pd-server cmd/pd-server/main.go
 endif
 
 # Tools
@@ -139,10 +163,6 @@ static:
 lint:
 	@echo "linting"
 	CGO_ENABLED=0 revive -formatter friendly -config revive.toml $$($(PACKAGES))
-
-swagger-spec: install-tools
-	go mod vendor
-	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
 
 tidy:
 	@echo "go mod tidy"
