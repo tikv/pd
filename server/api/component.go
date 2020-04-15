@@ -43,8 +43,9 @@ func newComponentHandler(svr *server.Server, rd *render.Render) *componentHandle
 // @Summary Register component address.
 // @Produce json
 // @Success 200 {string} string
-// @Failure 400 {string} string "PD server failed to proceed the request."
-// @Router /component/register [post]
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /component [post]
 func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
@@ -62,6 +63,25 @@ func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	m := h.svr.GetComponentManager()
 	err := m.Register(component, addr)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+// @Tags component
+// @Summary Unregister component address.
+// @Produce json
+// @Success 200 {string} string
+// @Failure 400 {string} string "The input is invalid."
+// @Router /component [delete]
+func (h *componentHandler) UnRegister(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	component := vars["component"]
+	addr := vars["addr"]
+	m := h.svr.GetComponentManager()
+	err := m.UnRegister(component, addr)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return

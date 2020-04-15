@@ -15,8 +15,6 @@ package component
 
 import (
 	"fmt"
-	"net"
-	"strings"
 	"sync"
 
 	"github.com/pingcap/log"
@@ -41,7 +39,7 @@ func NewManager() *Manager {
 func (c *Manager) GetComponentAddrs(component string) []string {
 	c.RLock()
 	defer c.RUnlock()
-	var addresses []string
+	addresses := []string{}
 	if ca, ok := c.Addresses[component]; ok {
 		addresses = append(addresses, ca...)
 	}
@@ -52,7 +50,13 @@ func (c *Manager) GetComponentAddrs(component string) []string {
 func (c *Manager) GetAllComponentAddrs() map[string][]string {
 	c.RLock()
 	defer c.RUnlock()
-	return c.Addresses
+	n := make(map[string][]string)
+	for k, v := range c.Addresses {
+		b := make([]string, len(v))
+		copy(b, v)
+		n[k] = b
+	}
+	return n
 }
 
 // GetComponent returns the component from a given component ID.
@@ -60,7 +64,7 @@ func (c *Manager) GetComponent(addr string) string {
 	c.RLock()
 	defer c.RUnlock()
 	for component, ca := range c.Addresses {
-		if contains(ca, addr) {
+		if exist, _ := contains(ca, addr); exist {
 			return component
 		}
 	}
@@ -72,16 +76,8 @@ func (c *Manager) Register(component, addr string) error {
 	c.Lock()
 	defer c.Unlock()
 
-	str := strings.Split(addr, ":")
-	if len(str) != 0 {
-		ip := net.ParseIP(str[0])
-		if ip == nil {
-			return fmt.Errorf("failed to parse address %s of component %s", addr, component)
-		}
-	}
-
 	ca, ok := c.Addresses[component]
-	if ok && contains(ca, addr) {
+	if exist, _ := contains(ca, addr); ok && exist {
 		log.Info("address has already been registered", zap.String("component", component), zap.String("address", addr))
 		return fmt.Errorf("component %s address %s has already been registered", component, addr)
 	}
@@ -92,12 +88,37 @@ func (c *Manager) Register(component, addr string) error {
 	return nil
 }
 
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
+// UnRegister is used for unregistering a component with an address from PD.
+func (c *Manager) UnRegister(component, addr string) error {
+	c.Lock()
+	defer c.Unlock()
+
+	ca, ok := c.Addresses[component]
+	if !ok {
+		return fmt.Errorf("component %s not found", component)
+	}
+
+	if exist, idx := contains(ca, addr); exist {
+		ca = append(ca[:idx], ca[idx+1:]...)
+		log.Info("address has successfully been unregistered", zap.String("component", component), zap.String("address", addr))
+		if len(ca) == 0 {
+			delete(c.Addresses, component)
+			return nil
+		}
+
+		c.Addresses[component] = ca
+		return nil
+	}
+
+	return fmt.Errorf("address %s not found", addr)
+}
+
+func contains(slice []string, item string) (bool, int) {
+	for i, s := range slice {
 		if s == item {
-			return true
+			return true, i
 		}
 	}
 
-	return false
+	return false, 0
 }

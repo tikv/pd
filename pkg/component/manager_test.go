@@ -36,17 +36,28 @@ func (s *testManagerSuite) TestManager(c *C) {
 	// register repeatedly
 	c.Assert(strings.Contains(m.Register("c1", "127.0.0.1:2").Error(), "already"), IsTrue)
 	c.Assert(m.Register("c2", "127.0.0.1:3"), IsNil)
-	// register illegal address
-	c.Assert(m.Register("c2", "abcde"), NotNil)
 
+	// get all addresses
 	all := map[string][]string{
 		"c1": {"127.0.0.1:1", "127.0.0.1:2"},
 		"c2": {"127.0.0.1:3"},
 	}
 	c.Assert(m.GetAllComponentAddrs(), DeepEquals, all)
+
+	// get the specific component addresses
 	c.Assert(m.GetComponentAddrs("c1"), DeepEquals, all["c1"])
 	c.Assert(m.GetComponentAddrs("c2"), DeepEquals, all["c2"])
+
+	// get the component from the address
 	c.Assert(m.GetComponent("127.0.0.1:1"), Equals, "c1")
 	c.Assert(m.GetComponent("127.0.0.1:2"), Equals, "c1")
 	c.Assert(m.GetComponent("127.0.0.1:3"), Equals, "c2")
+
+	// unregister address
+	c.Assert(m.UnRegister("c1", "127.0.0.1:1"), IsNil)
+	c.Assert(m.GetComponentAddrs("c1"), DeepEquals, []string{"127.0.0.1:2"})
+	c.Assert(m.UnRegister("c1", "127.0.0.1:2"), IsNil)
+	c.Assert(m.GetComponentAddrs("c1"), DeepEquals, []string{})
+	all = map[string][]string{"c2": {"127.0.0.1:3"}}
+	c.Assert(m.GetAllComponentAddrs(), DeepEquals, all)
 }
