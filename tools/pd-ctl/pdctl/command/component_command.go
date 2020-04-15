@@ -82,8 +82,9 @@ func NewGetComponentIDCommand() *cobra.Command {
 }
 
 func showComponentConfigCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
-		cmd.Usage()
+	argLen := len(args)
+	if argLen < 1 {
+		_ = cmd.Usage()
 		return
 	}
 
@@ -93,7 +94,22 @@ func showComponentConfigCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to get component config: %s\n", err)
 		return
 	}
-	cmd.Println(r)
+	if argLen == 1 {
+		cmd.Println(r)
+		return
+	}
+	param := args[1]
+	var data map[string]interface{}
+	err = json.Unmarshal([]byte(r), &data)
+	if err != nil {
+		cmd.Printf("Failed to unmarshal result: %s\n", err)
+		return
+	}
+	if paramVal, ok := data[param]; ok {
+		cmd.Println(paramVal)
+		return
+	}
+	cmd.Printf("Failed to get component config param: %s\n", err)
 }
 
 func deleteComponentConfigCommandFunc(cmd *cobra.Command, args []string) {
