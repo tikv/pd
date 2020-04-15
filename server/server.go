@@ -676,7 +676,6 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.LabelProperty = s.persistOptions.LoadLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.LoadClusterVersion()
 	cfg.PDServerCfg = *s.persistOptions.LoadPDServerConfig()
-	cfg.Log = *s.persistOptions.LoadLogConfig()
 	storage := s.GetStorage()
 	if storage == nil {
 		return cfg
@@ -808,31 +807,6 @@ func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 	return nil
 }
 
-// GetLogConfig gets the log config.
-func (s *Server) GetLogConfig() *log.Config {
-	cfg := &log.Config{}
-	*cfg = *s.persistOptions.GetLogConfig()
-	return cfg
-}
-
-// SetLogConfig sets the log config.
-func (s *Server) SetLogConfig(cfg log.Config) error {
-	old := s.persistOptions.LoadLogConfig()
-	s.persistOptions.SetLogConfig(&cfg)
-	log.SetLevel(logutil.StringToZapLogLevel(cfg.Level))
-	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetLogConfig(old)
-		log.SetLevel(logutil.StringToZapLogLevel(old.Level))
-		log.Error("failed to update log config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
-			zap.Error(err))
-		return err
-	}
-	log.Info("log config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
-	return nil
-}
-
 // SetLabelProperty inserts a label property config.
 func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
@@ -960,10 +934,23 @@ func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 }
 
 // SetLogLevel sets log level.
-func (s *Server) SetLogLevel(level string) {
+func (s *Server) SetLogLevel(level string) error {
+	if !isLevelLegal(level) {
+		return errors.Errorf("log level %s is illegal", level)
+	}
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
+	return nil
+}
+
+func isLevelLegal(level string) bool {
+	switch strings.ToLower(level) {
+	case "fatal", "error", "warn", "warning", "debug", "info":
+		return true
+	default:
+		return false
+	}
 }
 
 // GetReplicationModeConfig returns the replication mode config.

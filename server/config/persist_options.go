@@ -22,7 +22,6 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
@@ -37,7 +36,6 @@ type PersistOptions struct {
 	labelProperty   atomic.Value
 	clusterVersion  unsafe.Pointer
 	pdServerConfig  atomic.Value
-	logConfig       atomic.Value
 	replicationMode atomic.Value
 }
 
@@ -49,7 +47,6 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
-	o.logConfig.Store(&cfg.Log)
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	return o
 }
@@ -77,16 +74,6 @@ func (o *PersistOptions) GetPDServerConfig() *PDServerConfig {
 // SetPDServerConfig sets the PD configuration.
 func (o *PersistOptions) SetPDServerConfig(cfg *PDServerConfig) {
 	o.pdServerConfig.Store(cfg)
-}
-
-// GetLogConfig returns log configuration.
-func (o *PersistOptions) GetLogConfig() *log.Config {
-	return o.logConfig.Load().(*log.Config)
-}
-
-// SetLogConfig sets the log configuration.
-func (o *PersistOptions) SetLogConfig(cfg *log.Config) {
-	o.logConfig.Store(cfg)
 }
 
 // GetReplicationModeConfig returns the replication mode config.
@@ -376,11 +363,6 @@ func (o *PersistOptions) LoadPDServerConfig() *PDServerConfig {
 	return o.pdServerConfig.Load().(*PDServerConfig)
 }
 
-// LoadLogConfig returns log configuration.
-func (o *PersistOptions) LoadLogConfig() *log.Config {
-	return o.logConfig.Load().(*log.Config)
-}
-
 // Persist saves the configuration to the storage.
 func (o *PersistOptions) Persist(storage *core.Storage) error {
 	cfg := &Config{
@@ -389,7 +371,6 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 		LabelProperty:   o.LoadLabelPropertyConfig(),
 		ClusterVersion:  *o.LoadClusterVersion(),
 		PDServerCfg:     *o.LoadPDServerConfig(),
-		Log:             *o.LoadLogConfig(),
 		ReplicationMode: *o.GetReplicationModeConfig(),
 	}
 	err := storage.SaveConfig(cfg)
@@ -404,7 +385,6 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 		LabelProperty:   o.LoadLabelPropertyConfig().Clone(),
 		ClusterVersion:  *o.LoadClusterVersion(),
 		PDServerCfg:     *o.LoadPDServerConfig(),
-		Log:             *o.LoadLogConfig(),
 		ReplicationMode: *o.GetReplicationModeConfig().Clone(),
 	}
 	isExist, err := storage.LoadConfig(cfg)
@@ -418,7 +398,6 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.SetClusterVersion(&cfg.ClusterVersion)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
-		o.logConfig.Store(&cfg.Log)
 		o.replicationMode.Store(&cfg.ReplicationMode)
 	}
 	return nil

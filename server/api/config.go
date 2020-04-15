@@ -16,13 +16,16 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"reflect"
 	"strings"
 
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
+	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pkg/errors"
@@ -85,6 +88,48 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	conf := make(map[string]interface{})
+	if err := json.Unmarshal(data, &conf); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	for k, v := range conf {
+		if kp := strings.Split(k, "."); len(kp) == 2 {
+			if !isPrefixLegal(kp[0]) {
+				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("prefix %s not found", kp[0]))
+				return
+			}
+			delete(conf, k)
+			conf[kp[1]] = v
+		}
+	}
+	data, err = json.Marshal(conf)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.updateWithoutPrefix(w, config, data)
+
+	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+func isPrefixLegal(prefix string) bool {
+	switch prefix {
+	case "schedule", "replication", "pd-server", "log":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *confHandler) updateWithoutPrefix(w http.ResponseWriter, config *config.Config, data []byte) {
+	var err error
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	found1, err := h.updateSchedule(data, config)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -100,11 +145,15 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if !found1 && !found2 && !found3 {
+	found4, err := h.updateLogLevel(data, config)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !found1 && !found2 && !found3 && !found4 {
 		h.rd.JSON(w, http.StatusBadRequest, "config item not found")
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, nil)
 }
 
 func (h *confHandler) updateSchedule(data []byte, config *config.Config) (bool, error) {
@@ -138,6 +187,24 @@ func (h *confHandler) updatePDServerConfig(data []byte, config *config.Config) (
 		err = h.svr.SetPDServerConfig(config.PDServerCfg)
 	}
 	return found, err
+}
+
+func (h *confHandler) updateLogLevel(data []byte, config *config.Config) (bool, error) {
+	cfg := make(map[string]interface{})
+	err := json.Unmarshal(data, &cfg)
+	if err != nil {
+		return false, err
+	}
+
+	if level, ok := cfg["level"].(string); ok {
+		err = h.svr.SetLogLevel(level)
+		if err != nil {
+			return true, err
+		}
+		log.SetLevel(logutil.StringToZapLogLevel(level))
+		return true, nil
+	}
+	return false, err
 }
 
 func (h *confHandler) mergeConfig(v interface{}, data []byte) (updated bool, found bool, err error) {

@@ -16,6 +16,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -50,6 +51,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	err := readJSON(addr, cfg)
 	c.Assert(err, IsNil)
 
+	// the original way
 	r := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(r)
 	c.Assert(err, IsNil)
@@ -80,6 +82,44 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	cfg.Schedule.RegionScheduleLimit = 10
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:9090"
 	c.Assert(cfg, DeepEquals, newCfg)
+
+	// the new way
+	l = map[string]interface{}{
+		"schedule.tolerant-size-ratio": 2.5,
+		"replication.location-labels":  "idc,host",
+		"pd-server.metric-storage":     "http://127.0.0.1:1234",
+		"log.level":                    "warn",
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(err, IsNil)
+	newCfg1 := &config.Config{}
+	err = readJSON(addr, newCfg1)
+	c.Assert(err, IsNil)
+	cfg.Schedule.TolerantSizeRatio = 2.5
+	cfg.Replication.LocationLabels = []string{"idc", "host"}
+	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:1234"
+	cfg.Log.Level = "warn"
+	c.Assert(newCfg1, DeepEquals, cfg)
+
+	// illegal prefix
+	l = map[string]interface{}{
+		"replicate.max-replicas": 1,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(strings.Contains(err.Error(), "replicate"), IsTrue)
+
+	// config item not found
+	l = map[string]interface{}{
+		"schedule.region-limit": 10,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(strings.Contains(err.Error(), "config item not found"), IsTrue)
 }
 
 func (s *testConfigSuite) TestConfigSchedule(c *C) {
