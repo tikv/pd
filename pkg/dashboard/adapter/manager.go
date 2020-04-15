@@ -45,8 +45,6 @@ type Manager struct {
 	service    *apiserver.Service
 	redirector *Redirector
 
-	enableDynamic bool
-
 	isLeader bool
 	members  []*pdpb.Member
 }
@@ -100,9 +98,7 @@ func (m *Manager) updateInfo() {
 	if !m.srv.GetMember().IsLeader() {
 		m.isLeader = false
 		m.members = nil
-		if !m.enableDynamic {
-			m.srv.GetPersistOptions().Reload(m.srv.GetStorage())
-		}
+		m.srv.GetPersistOptions().Reload(m.srv.GetStorage())
 		return
 	}
 
@@ -194,7 +190,7 @@ func (m *Manager) setNewAddress() {
 			}
 		}
 	}
-	cfg := m.srv.GetScheduleOption().GetPDServerConfig().Clone()
+	cfg := m.srv.GetPersistOptions().GetPDServerConfig().Clone()
 	cfg.DashboardAddress = addr
 	m.srv.SetPDServerConfig(*cfg)
 }
