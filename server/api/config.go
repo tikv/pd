@@ -150,7 +150,17 @@ func (h *confHandler) updateWithoutPrefix(w http.ResponseWriter, config *config.
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !found1 && !found2 && !found3 && !found4 {
+	found5, err := h.updateClusterVersion(data, config)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	found6, err := h.updateLabelProperty(data, config)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !found1 && !found2 && !found3 && !found4 && !found5 && !found6 {
 		h.rd.JSON(w, http.StatusBadRequest, "config item not found")
 		return
 	}
@@ -202,6 +212,52 @@ func (h *confHandler) updateLogLevel(data []byte, config *config.Config) (bool, 
 			return true, err
 		}
 		log.SetLevel(logutil.StringToZapLogLevel(level))
+		return true, nil
+	}
+	return false, err
+}
+
+func (h *confHandler) updateClusterVersion(data []byte, config *config.Config) (bool, error) {
+	cfg := make(map[string]interface{})
+	err := json.Unmarshal(data, &cfg)
+	if err != nil {
+		return false, err
+	}
+
+	if version, ok := cfg["cluster-version"].(string); ok {
+		err := h.svr.SetClusterVersion(version)
+		if err != nil {
+			return true, err
+		}
+		return true, nil
+	}
+	return false, err
+}
+
+func (h *confHandler) updateLabelProperty(data []byte, config *config.Config) (bool, error) {
+	cfg := make(map[string]interface{})
+	err := json.Unmarshal(data, &cfg)
+	if err != nil {
+		return false, err
+	}
+
+	if lp, ok := cfg["label-property"].(string); ok {
+		input := make(map[string]string)
+		err = json.Unmarshal([]byte(lp), &input)
+		if err != nil {
+			return true, err
+		}
+		switch input["action"] {
+		case "set":
+			err = h.svr.SetLabelProperty(input["type"], input["label-key"], input["label-value"])
+		case "delete":
+			err = h.svr.DeleteLabelProperty(input["type"], input["label-key"], input["label-value"])
+		default:
+			err = errors.Errorf("unknown action %v", input["action"])
+		}
+		if err != nil {
+			return true, err
+		}
 		return true, nil
 	}
 	return false, err

@@ -22,6 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/config"
 )
 
@@ -89,6 +90,8 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 		"replication.location-labels":  "idc,host",
 		"pd-server.metric-storage":     "http://127.0.0.1:1234",
 		"log.level":                    "warn",
+		"cluster-version":              "v4.0.0-beta",
+		"label-property":               `{"type": "foo", "action": "set", "label-key": "zone", "label-value": "cn1"}`,
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
@@ -101,7 +104,21 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	cfg.Replication.LocationLabels = []string{"idc", "host"}
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:1234"
 	cfg.Log.Level = "warn"
+	v, err := cluster.ParseVersion("v4.0.0-beta")
+	c.Assert(err, IsNil)
+	cfg.ClusterVersion = *v
+	cfg.LabelProperty = map[string][]config.StoreLabel{
+		"foo": {{Key: "zone", Value: "cn1"}},
+	}
 	c.Assert(newCfg1, DeepEquals, cfg)
+
+	l = map[string]interface{}{
+		"label-property": `{"type": "foo", "action": "delete", "label-key": "zone", "label-value": "cn1"}`,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(err, IsNil)
 
 	// illegal prefix
 	l = map[string]interface{}{
