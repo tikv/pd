@@ -123,4 +123,13 @@ func (s *componentTestSuite) TestComponent(c *C) {
 		c.Assert(strings.Contains(obtain, "high-space-ratio = 0.3"), IsTrue)
 		c.Assert(strings.Contains(obtain, "low-space-ratio = 0.4"), IsTrue)
 	}
+
+	// component show single param
+	for i := 0; i < len(pdAddrs); i++ {
+		args = []string{"-u", pdAddrs[0], "component", "show", pdAddrs[i][7:], "replication-mode"}
+		_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+		c.Assert(err, IsNil)
+		obtain := string(output)
+		c.Assert(strings.Contains(obtain, "replication-mode"), IsTrue)
+	}
 }

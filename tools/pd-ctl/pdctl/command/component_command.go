@@ -20,6 +20,7 @@ import (
 	"path"
 	"strconv"
 
+	"github.com/pelletier/go-toml"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -98,18 +99,12 @@ func showComponentConfigCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(r)
 		return
 	}
-	param := args[1]
-	var data map[string]interface{}
-	err = json.Unmarshal([]byte(r), &data)
+	tree, err := toml.Load(r)
 	if err != nil {
-		cmd.Printf("Failed to unmarshal result: %s\n", err)
+		cmd.Printf("Failed to load data: %s\n", err)
 		return
 	}
-	if paramVal, ok := data[param]; ok {
-		cmd.Println(paramVal)
-		return
-	}
-	cmd.Printf("Failed to get component config param: %s\n", err)
+	cmd.Println(tree.Get(args[1]))
 }
 
 func deleteComponentConfigCommandFunc(cmd *cobra.Command, args []string) {

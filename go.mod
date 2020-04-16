@@ -38,6 +38,7 @@ require (
 	github.com/montanaflynn/stats v0.0.0-20151014174947-eeaced052adb
 	github.com/onsi/gomega v1.4.2 // indirect
 	github.com/opentracing/opentracing-go v1.0.2
+	github.com/pelletier/go-toml v1.3.0
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
 	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200407064406-b2b8ad403d01
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
