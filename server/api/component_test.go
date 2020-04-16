@@ -61,6 +61,7 @@ func (s *testComponentSuite) TestComponent(c *C) {
 		{"component": "c1", "addr": "127.0.0.1:1"},
 		{"component": "c1", "addr": "127.0.0.1:2"},
 		{"component": "c2", "addr": "127.0.0.1:3"},
+		{"component": "c3", "addr": "example.com"},
 	}
 	for _, req := range reqs {
 		postData, err := json.Marshal(req)
@@ -73,6 +74,7 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	expected := map[string][]string{
 		"c1": {"127.0.0.1:1", "127.0.0.1:2"},
 		"c2": {"127.0.0.1:3"},
+		"c3": {"example.com"},
 	}
 
 	output = make(map[string][]string)
@@ -103,6 +105,7 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	expected3 := map[string][]string{
 		"c1": {"127.0.0.1:2"},
 		"c2": {"127.0.0.1:3"},
+		"c3": {"example.com"},
 	}
 	output = make(map[string][]string)
 	err = readJSON(addr, &output)
@@ -113,7 +116,10 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	res, err = doDelete(addr4)
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, 200)
-	expected4 := map[string][]string{"c2": {"127.0.0.1:3"}}
+	expected4 := map[string][]string{
+		"c2": {"127.0.0.1:3"},
+		"c3": {"example.com"},
+	}
 	output = make(map[string][]string)
 	err = readJSON(addr, &output)
 	c.Assert(err, IsNil)

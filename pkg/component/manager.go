@@ -15,6 +15,7 @@ package component
 
 import (
 	"fmt"
+	"net/url"
 	"sync"
 
 	"github.com/pingcap/log"
@@ -63,6 +64,11 @@ func (c *Manager) GetAllComponentAddrs() map[string][]string {
 func (c *Manager) GetComponent(addr string) string {
 	c.RLock()
 	defer c.RUnlock()
+
+	addr, err := validateAddr(addr)
+	if err != nil {
+		return ""
+	}
 	for component, ca := range c.Addresses {
 		if exist, _ := contains(ca, addr); exist {
 			return component
@@ -76,6 +82,10 @@ func (c *Manager) Register(component, addr string) error {
 	c.Lock()
 	defer c.Unlock()
 
+	addr, err := validateAddr(addr)
+	if err != nil {
+		return err
+	}
 	ca, ok := c.Addresses[component]
 	if exist, _ := contains(ca, addr); ok && exist {
 		log.Info("address has already been registered", zap.String("component", component), zap.String("address", addr))
@@ -93,6 +103,10 @@ func (c *Manager) UnRegister(component, addr string) error {
 	c.Lock()
 	defer c.Unlock()
 
+	addr, err := validateAddr(addr)
+	if err != nil {
+		return err
+	}
 	ca, ok := c.Addresses[component]
 	if !ok {
 		return fmt.Errorf("component %s not found", component)
@@ -121,4 +135,16 @@ func contains(slice []string, item string) (bool, int) {
 	}
 
 	return false, 0
+}
+
+func validateAddr(addr string) (string, error) {
+	u, err := url.Parse(addr)
+	if err != nil || u.Host == "" {
+		u1, err1 := url.Parse("http://" + addr)
+		if err1 != nil {
+			return "", fmt.Errorf("address %s is not valid", addr)
+		}
+		return u1.Host, nil
+	}
+	return u.Host, nil
 }

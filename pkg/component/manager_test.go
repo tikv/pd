@@ -37,6 +37,9 @@ func (s *testManagerSuite) TestManager(c *C) {
 	c.Assert(strings.Contains(m.Register("c1", "127.0.0.1:2").Error(), "already"), IsTrue)
 	c.Assert(m.Register("c2", "127.0.0.1:3"), IsNil)
 
+	// register illegal address
+	c.Assert(m.Register("c1", " 127.0.0.1:4"), NotNil)
+
 	// get all addresses
 	all := map[string][]string{
 		"c1": {"127.0.0.1:1", "127.0.0.1:2"},
