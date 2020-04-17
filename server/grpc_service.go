@@ -232,14 +232,8 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	v := rc.OnStoreVersionChange()
-	if s.GetConfig().EnableDynamicConfig && v != nil {
-		err := s.UpdateConfigManager("cluster-version", v.String())
-		if err != nil {
-			log.Error("failed to update the cluster version in config manager", zap.Error(err))
-		}
-	}
-	CheckPDVersion(s.scheduleOpt)
+	rc.OnStoreVersionChange()
+	CheckPDVersion(s.persistOptions)
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
@@ -796,7 +790,7 @@ func (s *Server) notBootstrappedHeader() *pdpb.ResponseHeader {
 }
 
 func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
-	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.scheduleOpt.LoadClusterVersion())
+	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.persistOptions.LoadClusterVersion())
 	return s.errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
 		Message: msg,

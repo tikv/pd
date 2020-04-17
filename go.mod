@@ -27,7 +27,6 @@ require (
 	github.com/gorilla/mux v1.7.3
 	github.com/gorilla/websocket v1.2.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
-	github.com/grpc-ecosystem/grpc-gateway v1.12.1
 	github.com/json-iterator/go v1.1.9 // indirect
 	github.com/juju/ratelimit v1.0.1
 	github.com/kevinburke/go-bindata v3.18.0+incompatible

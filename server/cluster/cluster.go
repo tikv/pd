@@ -58,7 +58,7 @@ const (
 type Server interface {
 	GetAllocator() *id.AllocatorImpl
 	GetConfig() *config.Config
-	GetScheduleOption() *config.ScheduleOption
+	GetPersistOptions() *config.PersistOptions
 	GetStorage() *core.Storage
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
@@ -86,7 +86,7 @@ type RaftCluster struct {
 	// cached cluster info
 	core    *core.BasicCluster
 	meta    *metapb.Cluster
-	opt     *config.ScheduleOption
+	opt     *config.PersistOptions
 	storage *core.Storage
 	id      id.Allocator
 	limiter *StoreLimiter
@@ -109,9 +109,6 @@ type RaftCluster struct {
 	client      *clientv3.Client
 
 	replicationMode *replication.ModeManager
-
-	schedulersCallback func()
-	configCheck        bool
 }
 
 // Status saves some state information.
@@ -181,7 +178,7 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, storage *core.Storage, basicCluster *core.BasicCluster, cb func()) {
+func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) {
 	c.core = basicCluster
 	c.opt = opt
 	c.storage = storage
@@ -191,7 +188,6 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.ScheduleOption, s
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
-	c.schedulersCallback = cb
 }
 
 // Start starts a cluster.
@@ -204,7 +200,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.InitCluster(s.GetAllocator(), s.GetScheduleOption(), s.GetStorage(), s.GetBasicCluster(), s.GetSchedulersCallback())
+	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -336,7 +332,6 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.running = false
-	c.configCheck = false
 	close(c.quit)
 	c.coordinator.stop()
 	c.Unlock()
@@ -622,6 +617,7 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
+//nolint:unused
 func (c *RaftCluster) getClusterID() uint64 {
 	c.RLock()
 	defer c.RUnlock()
@@ -997,20 +993,6 @@ func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.T
 	c.core.AttachAvailableFunc(storeID, limitType, f)
 }
 
-// SetConfigCheck sets a flag for preventing outdated config.
-func (c *RaftCluster) SetConfigCheck() {
-	c.Lock()
-	defer c.Unlock()
-	c.configCheck = true
-}
-
-// GetConfigCheck returns a configCheck flag.
-func (c *RaftCluster) GetConfigCheck() bool {
-	c.Lock()
-	defer c.Unlock()
-	return c.configCheck
-}
-
 // SetStoreState sets up a store's state.
 func (c *RaftCluster) SetStoreState(storeID uint64, state metapb.StoreState) error {
 	c.Lock()
@@ -1234,7 +1216,7 @@ func (c *RaftCluster) AllocID() (uint64, error) {
 }
 
 // OnStoreVersionChange changes the version of the cluster when needed.
-func (c *RaftCluster) OnStoreVersionChange() *semver.Version {
+func (c *RaftCluster) OnStoreVersionChange() {
 	c.RLock()
 	defer c.RUnlock()
 	var (
@@ -1271,9 +1253,7 @@ func (c *RaftCluster) OnStoreVersionChange() *semver.Version {
 		log.Info("cluster version changed",
 			zap.Stringer("old-cluster-version", clusterVersion),
 			zap.Stringer("new-cluster-version", minVersion))
-		return minVersion
 	}
-	return nil
 }
 
 func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
@@ -1314,7 +1294,7 @@ func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 }
 
 // GetOpt returns the scheduling options.
-func (c *RaftCluster) GetOpt() *config.ScheduleOption {
+func (c *RaftCluster) GetOpt() *config.PersistOptions {
 	return c.opt
 }
 
@@ -1487,7 +1467,7 @@ func (c *RaftCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel
 func (c *RaftCluster) isPrepared() bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.prepareChecker.check(c) && c.configCheck
+	return c.prepareChecker.check(c)
 }
 
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
@@ -1542,6 +1522,7 @@ func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.Hot
 
 // TODO: remove me.
 // only used in test.
+//nolint:unused
 func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()

@@ -6,10 +6,9 @@ INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; |
                      sort -u | sed -e "s/^\./github.com\/pingcap\/pd\/v4/" | grep -E "tests")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 
-IGNORE := grep -v 'dashboard/uiserver'
-PACKAGES := go list ./... | $(IGNORE)
+PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
-GOCHECKER := $(IGNORE) | awk '{ print } END { if (NR > 0) { exit 1 } }'
+GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
 TOOL_BIN_PATH := $(shell pwd)/.tools/bin
@@ -156,7 +155,7 @@ check-plugin:
 static: export GO111MODULE=on
 static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
-	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
+	gofmt -s -l -d $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	CGO_ENABLED=0 golangci-lint run $$($(PACKAGE_DIRECTORIES))
 	CGO_ENABLED=0 staticcheck $$($(PACKAGES))
 
