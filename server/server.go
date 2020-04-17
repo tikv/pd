@@ -14,6 +14,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
@@ -1122,7 +1123,12 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		return err
 	}
 	for _, member := range resp.Members {
-		url := member.GetClientUrls()[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
+		clientUrls := member.GetClientUrls()
+		if len(clientUrls) == 0 {
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
+			return errors.Errorf("failed to replicate to member %s: clientUrls is empty", member.GetName())
+		}
+		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
 		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
 		req.Header.Set("PD-Allow-follower-handle", "true")
 		res, err := cluster.DialClient.Do(req)

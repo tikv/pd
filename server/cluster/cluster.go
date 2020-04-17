@@ -63,7 +63,6 @@ type Server interface {
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
-	GetSchedulersCallback() func()
 	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
 }
 
