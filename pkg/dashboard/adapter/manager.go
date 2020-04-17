@@ -102,7 +102,7 @@ func (m *Manager) updateInfo() {
 		m.isLeader = false
 		m.members = nil
 		if !m.enableDynamic {
-			m.srv.GetScheduleOption().Reload(m.srv.GetStorage())
+			m.srv.GetPersistOptions().Reload(m.srv.GetStorage())
 		}
 		return
 	}
@@ -130,7 +130,7 @@ func (m *Manager) updateInfo() {
 
 // checkDashboardAddress checks if the dashboard service needs to change due to dashboard address is changed.
 func (m *Manager) checkAddress() {
-	dashboardAddress := m.srv.GetScheduleOption().GetDashboardAddress()
+	dashboardAddress := m.srv.GetPersistOptions().GetDashboardAddress()
 	switch dashboardAddress {
 	case "auto":
 		if m.isLeader && len(m.members) > 0 {
@@ -202,7 +202,7 @@ func (m *Manager) setNewAddress() {
 		}
 		return
 	}
-	cfg := m.srv.GetScheduleOption().GetPDServerConfig().Clone()
+	cfg := m.srv.GetPersistOptions().GetPDServerConfig().Clone()
 	cfg.DashboardAddress = addr
 	m.srv.SetPDServerConfig(*cfg)
 }

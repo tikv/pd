@@ -330,7 +330,7 @@ func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 		cm := h.svr.GetConfigManager()
 		typ := input["type"]
 		labelKey, labelValue := input["label-key"], input["label-value"]
-		cfg := h.svr.GetScheduleOption().LoadLabelPropertyConfig().Clone()
+		cfg := h.svr.GetPersistOptions().LoadLabelPropertyConfig().Clone()
 		switch input["action"] {
 		case "set":
 			for _, l := range cfg[typ] {

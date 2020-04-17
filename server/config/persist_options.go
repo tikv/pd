@@ -29,8 +29,9 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule"
 )
 
-// ScheduleOption is a wrapper to access the configuration safely.
-type ScheduleOption struct {
+// PersistOptions wraps all configurations that need to persist to storage and
+// allows to access them safely.
+type PersistOptions struct {
 	schedule       atomic.Value
 	replication    *Replication
 	labelProperty  atomic.Value
@@ -39,9 +40,9 @@ type ScheduleOption struct {
 	logConfig      atomic.Value
 }
 
-// NewScheduleOption creates a new ScheduleOption.
-func NewScheduleOption(cfg *Config) *ScheduleOption {
-	o := &ScheduleOption{}
+// NewPersistOptions creates a new PersistOptions instance.
+func NewPersistOptions(cfg *Config) *PersistOptions {
+	o := &PersistOptions{}
 	o.Store(&cfg.Schedule)
 	o.replication = newReplication(&cfg.Replication)
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
@@ -52,212 +53,212 @@ func NewScheduleOption(cfg *Config) *ScheduleOption {
 }
 
 // Load returns scheduling configurations.
-func (o *ScheduleOption) Load() *ScheduleConfig {
+func (o *PersistOptions) Load() *ScheduleConfig {
 	return o.schedule.Load().(*ScheduleConfig)
 }
 
 // Store sets scheduling configurations.
-func (o *ScheduleOption) Store(cfg *ScheduleConfig) {
+func (o *PersistOptions) Store(cfg *ScheduleConfig) {
 	o.schedule.Store(cfg)
 }
 
 // GetReplication returns replication configurations.
-func (o *ScheduleOption) GetReplication() *Replication {
+func (o *PersistOptions) GetReplication() *Replication {
 	return o.replication
 }
 
 // GetPDServerConfig returns pd server configurations.
-func (o *ScheduleOption) GetPDServerConfig() *PDServerConfig {
+func (o *PersistOptions) GetPDServerConfig() *PDServerConfig {
 	return o.pdServerConfig.Load().(*PDServerConfig)
 }
 
 // SetPDServerConfig sets the PD configuration.
-func (o *ScheduleOption) SetPDServerConfig(cfg *PDServerConfig) {
+func (o *PersistOptions) SetPDServerConfig(cfg *PDServerConfig) {
 	o.pdServerConfig.Store(cfg)
 }
 
 // GetLogConfig returns log configuration.
-func (o *ScheduleOption) GetLogConfig() *log.Config {
+func (o *PersistOptions) GetLogConfig() *log.Config {
 	return o.logConfig.Load().(*log.Config)
 }
 
 // SetLogConfig sets the log configuration.
-func (o *ScheduleOption) SetLogConfig(cfg *log.Config) {
+func (o *PersistOptions) SetLogConfig(cfg *log.Config) {
 	o.logConfig.Store(cfg)
 }
 
 // GetMaxReplicas returns the number of replicas for each region.
-func (o *ScheduleOption) GetMaxReplicas() int {
+func (o *PersistOptions) GetMaxReplicas() int {
 	return o.replication.GetMaxReplicas()
 }
 
 // SetMaxReplicas sets the number of replicas for each region.
-func (o *ScheduleOption) SetMaxReplicas(replicas int) {
+func (o *PersistOptions) SetMaxReplicas(replicas int) {
 	o.replication.SetMaxReplicas(replicas)
 }
 
 // GetLocationLabels returns the location labels for each region.
-func (o *ScheduleOption) GetLocationLabels() []string {
+func (o *PersistOptions) GetLocationLabels() []string {
 	return o.replication.GetLocationLabels()
 }
 
 // IsPlacementRulesEnabled returns if the placement rules is enabled.
-func (o *ScheduleOption) IsPlacementRulesEnabled() bool {
+func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.replication.IsPlacementRulesEnabled()
 }
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
-func (o *ScheduleOption) GetMaxSnapshotCount() uint64 {
+func (o *PersistOptions) GetMaxSnapshotCount() uint64 {
 	return o.Load().MaxSnapshotCount
 }
 
 // GetMaxPendingPeerCount returns the number of the max pending peers.
-func (o *ScheduleOption) GetMaxPendingPeerCount() uint64 {
+func (o *PersistOptions) GetMaxPendingPeerCount() uint64 {
 	return o.Load().MaxPendingPeerCount
 }
 
 // GetMaxMergeRegionSize returns the max region size.
-func (o *ScheduleOption) GetMaxMergeRegionSize() uint64 {
+func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
 	return o.Load().MaxMergeRegionSize
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
-func (o *ScheduleOption) GetMaxMergeRegionKeys() uint64 {
+func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
 	return o.Load().MaxMergeRegionKeys
 }
 
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
-func (o *ScheduleOption) GetSplitMergeInterval() time.Duration {
+func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 	return o.Load().SplitMergeInterval.Duration
 }
 
 // SetSplitMergeInterval to set the interval between finishing split and starting to merge. It's only used to test.
-func (o *ScheduleOption) SetSplitMergeInterval(splitMergeInterval time.Duration) {
+func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration) {
 	o.Load().SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
 }
 
 // IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
-func (o *ScheduleOption) IsOneWayMergeEnabled() bool {
+func (o *PersistOptions) IsOneWayMergeEnabled() bool {
 	return o.Load().EnableOneWayMerge
 }
 
 // IsCrossTableMergeEnabled returns if across table merge is enabled.
-func (o *ScheduleOption) IsCrossTableMergeEnabled() bool {
+func (o *PersistOptions) IsCrossTableMergeEnabled() bool {
 	return o.Load().EnableCrossTableMerge
 }
 
 // GetPatrolRegionInterval returns the interval of patroling region.
-func (o *ScheduleOption) GetPatrolRegionInterval() time.Duration {
+func (o *PersistOptions) GetPatrolRegionInterval() time.Duration {
 	return o.Load().PatrolRegionInterval.Duration
 }
 
 // GetMaxStoreDownTime returns the max down time of a store.
-func (o *ScheduleOption) GetMaxStoreDownTime() time.Duration {
+func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 	return o.Load().MaxStoreDownTime.Duration
 }
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.
-func (o *ScheduleOption) GetLeaderScheduleLimit() uint64 {
+func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
 	return o.Load().LeaderScheduleLimit
 }
 
 // GetRegionScheduleLimit returns the limit for region schedule.
-func (o *ScheduleOption) GetRegionScheduleLimit() uint64 {
+func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
 	return o.Load().RegionScheduleLimit
 }
 
 // GetReplicaScheduleLimit returns the limit for replica schedule.
-func (o *ScheduleOption) GetReplicaScheduleLimit() uint64 {
+func (o *PersistOptions) GetReplicaScheduleLimit() uint64 {
 	return o.Load().ReplicaScheduleLimit
 }
 
 // GetMergeScheduleLimit returns the limit for merge schedule.
-func (o *ScheduleOption) GetMergeScheduleLimit() uint64 {
+func (o *PersistOptions) GetMergeScheduleLimit() uint64 {
 	return o.Load().MergeScheduleLimit
 }
 
 // GetHotRegionScheduleLimit returns the limit for hot region schedule.
-func (o *ScheduleOption) GetHotRegionScheduleLimit() uint64 {
+func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 	return o.Load().HotRegionScheduleLimit
 }
 
 // GetStoreBalanceRate returns the balance rate of a store.
-func (o *ScheduleOption) GetStoreBalanceRate() float64 {
+func (o *PersistOptions) GetStoreBalanceRate() float64 {
 	return o.Load().StoreBalanceRate
 }
 
 // GetTolerantSizeRatio gets the tolerant size ratio.
-func (o *ScheduleOption) GetTolerantSizeRatio() float64 {
+func (o *PersistOptions) GetTolerantSizeRatio() float64 {
 	return o.Load().TolerantSizeRatio
 }
 
 // GetLowSpaceRatio returns the low space ratio.
-func (o *ScheduleOption) GetLowSpaceRatio() float64 {
+func (o *PersistOptions) GetLowSpaceRatio() float64 {
 	return o.Load().LowSpaceRatio
 }
 
 // GetHighSpaceRatio returns the high space ratio.
-func (o *ScheduleOption) GetHighSpaceRatio() float64 {
+func (o *PersistOptions) GetHighSpaceRatio() float64 {
 	return o.Load().HighSpaceRatio
 }
 
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
-func (o *ScheduleOption) GetSchedulerMaxWaitingOperator() uint64 {
+func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
 	return o.Load().SchedulerMaxWaitingOperator
 }
 
 // GetLeaderSchedulePolicy is to get leader schedule policy.
-func (o *ScheduleOption) GetLeaderSchedulePolicy() core.SchedulePolicy {
+func (o *PersistOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	return core.StringToSchedulePolicy(o.Load().LeaderSchedulePolicy)
 }
 
 // GetKeyType is to get key type.
-func (o *ScheduleOption) GetKeyType() core.KeyType {
+func (o *PersistOptions) GetKeyType() core.KeyType {
 	return core.StringToKeyType(o.LoadPDServerConfig().KeyType)
 }
 
 // GetDashboardAddress gets dashboard address.
-func (o *ScheduleOption) GetDashboardAddress() string {
+func (o *PersistOptions) GetDashboardAddress() string {
 	return o.LoadPDServerConfig().DashboardAddress
 }
 
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
-func (o *ScheduleOption) IsRemoveDownReplicaEnabled() bool {
+func (o *PersistOptions) IsRemoveDownReplicaEnabled() bool {
 	return o.Load().EnableRemoveDownReplica
 }
 
 // IsReplaceOfflineReplicaEnabled returns if replace offline replica is enabled.
-func (o *ScheduleOption) IsReplaceOfflineReplicaEnabled() bool {
+func (o *PersistOptions) IsReplaceOfflineReplicaEnabled() bool {
 	return o.Load().EnableReplaceOfflineReplica
 }
 
 // IsMakeUpReplicaEnabled returns if make up replica is enabled.
-func (o *ScheduleOption) IsMakeUpReplicaEnabled() bool {
+func (o *PersistOptions) IsMakeUpReplicaEnabled() bool {
 	return o.Load().EnableMakeUpReplica
 }
 
 // IsRemoveExtraReplicaEnabled returns if remove extra replica is enabled.
-func (o *ScheduleOption) IsRemoveExtraReplicaEnabled() bool {
+func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 	return o.Load().EnableRemoveExtraReplica
 }
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
-func (o *ScheduleOption) IsLocationReplacementEnabled() bool {
+func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 	return o.Load().EnableLocationReplacement
 }
 
 // IsDebugMetricsEnabled mocks method
-func (o *ScheduleOption) IsDebugMetricsEnabled() bool {
+func (o *PersistOptions) IsDebugMetricsEnabled() bool {
 	return o.Load().EnableDebugMetrics
 }
 
 // GetSchedulers gets the scheduler configurations.
-func (o *ScheduleOption) GetSchedulers() SchedulerConfigs {
+func (o *PersistOptions) GetSchedulers() SchedulerConfigs {
 	return o.Load().Schedulers
 }
 
 // AddSchedulerCfg adds the scheduler configurations.
-func (o *ScheduleOption) AddSchedulerCfg(tp string, args []string) {
+func (o *PersistOptions) AddSchedulerCfg(tp string, args []string) {
 	c := o.Load()
 	v := c.Clone()
 	for i, schedulerCfg := range v.Schedulers {
@@ -280,7 +281,7 @@ func (o *ScheduleOption) AddSchedulerCfg(tp string, args []string) {
 }
 
 // RemoveSchedulerCfg removes the scheduler configurations.
-func (o *ScheduleOption) RemoveSchedulerCfg(ctx context.Context, name string) error {
+func (o *PersistOptions) RemoveSchedulerCfg(ctx context.Context, name string) error {
 	c := o.Load()
 	v := c.Clone()
 	for i, schedulerCfg := range v.Schedulers {
@@ -305,7 +306,7 @@ func (o *ScheduleOption) RemoveSchedulerCfg(ctx context.Context, name string) er
 }
 
 // SetLabelProperty sets the label property.
-func (o *ScheduleOption) SetLabelProperty(typ, labelKey, labelValue string) {
+func (o *PersistOptions) SetLabelProperty(typ, labelKey, labelValue string) {
 	cfg := o.LoadLabelPropertyConfig().Clone()
 	for _, l := range cfg[typ] {
 		if l.Key == labelKey && l.Value == labelValue {
@@ -317,7 +318,7 @@ func (o *ScheduleOption) SetLabelProperty(typ, labelKey, labelValue string) {
 }
 
 // DeleteLabelProperty deletes the label property.
-func (o *ScheduleOption) DeleteLabelProperty(typ, labelKey, labelValue string) {
+func (o *PersistOptions) DeleteLabelProperty(typ, labelKey, labelValue string) {
 	cfg := o.LoadLabelPropertyConfig().Clone()
 	oldLabels := cfg[typ]
 	cfg[typ] = []StoreLabel{}
@@ -334,42 +335,42 @@ func (o *ScheduleOption) DeleteLabelProperty(typ, labelKey, labelValue string) {
 }
 
 // LoadLabelPropertyConfig returns the label property.
-func (o *ScheduleOption) LoadLabelPropertyConfig() LabelPropertyConfig {
+func (o *PersistOptions) LoadLabelPropertyConfig() LabelPropertyConfig {
 	return o.labelProperty.Load().(LabelPropertyConfig)
 }
 
 // SetLabelPropertyConfig sets the label property configuration.
-func (o *ScheduleOption) SetLabelPropertyConfig(cfg LabelPropertyConfig) {
+func (o *PersistOptions) SetLabelPropertyConfig(cfg LabelPropertyConfig) {
 	o.labelProperty.Store(cfg)
 }
 
 // SetClusterVersion sets the cluster version.
-func (o *ScheduleOption) SetClusterVersion(v *semver.Version) {
+func (o *PersistOptions) SetClusterVersion(v *semver.Version) {
 	atomic.StorePointer(&o.clusterVersion, unsafe.Pointer(v))
 }
 
 // CASClusterVersion sets the cluster version.
-func (o *ScheduleOption) CASClusterVersion(old, new *semver.Version) bool {
+func (o *PersistOptions) CASClusterVersion(old, new *semver.Version) bool {
 	return atomic.CompareAndSwapPointer(&o.clusterVersion, unsafe.Pointer(old), unsafe.Pointer(new))
 }
 
 // LoadClusterVersion returns the cluster version.
-func (o *ScheduleOption) LoadClusterVersion() *semver.Version {
+func (o *PersistOptions) LoadClusterVersion() *semver.Version {
 	return (*semver.Version)(atomic.LoadPointer(&o.clusterVersion))
 }
 
 // LoadPDServerConfig returns PD server configuration.
-func (o *ScheduleOption) LoadPDServerConfig() *PDServerConfig {
+func (o *PersistOptions) LoadPDServerConfig() *PDServerConfig {
 	return o.pdServerConfig.Load().(*PDServerConfig)
 }
 
 // LoadLogConfig returns log configuration.
-func (o *ScheduleOption) LoadLogConfig() *log.Config {
+func (o *PersistOptions) LoadLogConfig() *log.Config {
 	return o.logConfig.Load().(*log.Config)
 }
 
 // Persist saves the configuration to the storage.
-func (o *ScheduleOption) Persist(storage *core.Storage) error {
+func (o *PersistOptions) Persist(storage *core.Storage) error {
 	cfg := &Config{
 		Schedule:       *o.Load(),
 		Replication:    *o.replication.Load(),
@@ -383,7 +384,7 @@ func (o *ScheduleOption) Persist(storage *core.Storage) error {
 }
 
 // Reload reloads the configuration from the storage.
-func (o *ScheduleOption) Reload(storage *core.Storage) error {
+func (o *PersistOptions) Reload(storage *core.Storage) error {
 	cfg := &Config{
 		Schedule:       *o.Load().Clone(),
 		Replication:    *o.replication.Load(),
@@ -408,7 +409,7 @@ func (o *ScheduleOption) Reload(storage *core.Storage) error {
 	return nil
 }
 
-func (o *ScheduleOption) adjustScheduleCfg(persistentCfg *Config) {
+func (o *PersistOptions) adjustScheduleCfg(persistentCfg *Config) {
 	scheduleCfg := o.Load().Clone()
 	for i, s := range scheduleCfg.Schedulers {
 		for _, ps := range persistentCfg.Schedule.Schedulers {
@@ -438,12 +439,12 @@ func (o *ScheduleOption) adjustScheduleCfg(persistentCfg *Config) {
 }
 
 // GetHotRegionCacheHitsThreshold is a threshold to decide if a region is hot.
-func (o *ScheduleOption) GetHotRegionCacheHitsThreshold() int {
+func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.Load().HotRegionCacheHitsThreshold)
 }
 
 // CheckLabelProperty checks the label property.
-func (o *ScheduleOption) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
 	pc := o.labelProperty.Load().(LabelPropertyConfig)
 	for _, cfg := range pc[typ] {
 		for _, l := range labels {

@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tests/pdctl"
+
 	// Register schedulers.
 	_ "github.com/pingcap/pd/v4/server/schedulers"
 )
@@ -86,10 +87,10 @@ func (s *serverTestSuite) waitForConfigSync() {
 
 func (s *serverTestSuite) checkServiceIsStarted(c *C, servers map[string]*tests.TestServer, leader *tests.TestServer) string {
 	s.waitForConfigSync()
-	dashboardAddress := leader.GetServer().GetScheduleOption().GetDashboardAddress()
+	dashboardAddress := leader.GetServer().GetPersistOptions().GetDashboardAddress()
 	hasServiceNode := false
 	for _, srv := range servers {
-		c.Assert(srv.GetScheduleOption().GetDashboardAddress(), Equals, dashboardAddress)
+		c.Assert(srv.GetPersistOptions().GetDashboardAddress(), Equals, dashboardAddress)
 		addr := srv.GetAddr()
 		if addr == dashboardAddress {
 			s.checkRespCode(c, fmt.Sprintf("%s/dashboard/", addr), http.StatusOK)
@@ -107,7 +108,7 @@ func (s *serverTestSuite) checkServiceIsStarted(c *C, servers map[string]*tests.
 func (s *serverTestSuite) checkServiceIsStopped(c *C, servers map[string]*tests.TestServer) {
 	s.waitForConfigSync()
 	for _, srv := range servers {
-		c.Assert(srv.GetScheduleOption().GetDashboardAddress(), Equals, "none")
+		c.Assert(srv.GetPersistOptions().GetDashboardAddress(), Equals, "none")
 		addr := srv.GetAddr()
 		s.checkRespCode(c, fmt.Sprintf("%s/dashboard/", addr), http.StatusNotFound)
 		s.checkRespCode(c, fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusNotFound)
@@ -154,7 +155,7 @@ func (s *serverTestSuite) TestDashboard(c *C) {
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	s.checkServiceIsStarted(c, servers, leader)
-	c.Assert(leader.GetServer().GetScheduleOption().GetDashboardAddress(), Equals, dashboardAddress2)
+	c.Assert(leader.GetServer().GetPersistOptions().GetDashboardAddress(), Equals, dashboardAddress2)
 
 	// Changing dashboard address
 	for _, srv := range servers {
