@@ -745,7 +745,12 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		return &pdpb.UpdateServiceGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if request.SafePoint > s.minServiceGCSafePoint {
+	min, err := s.storage.LoadMinServiceGCSafePoint()
+	if err != nil {
+		return nil, err
+	}
+
+	if request.SafePoint > min.SafePoint {
 		ssp := &core.ServiceSafePoint{
 			ServiceID: string(request.ServiceId),
 			ExpiredAt: time.Now().Unix() + request.TTL*int64(time.Second),
@@ -755,18 +760,19 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			return nil, err
 		}
 	}
-
-	ssp, err := s.storage.LoadMinServiceGCSafePoint()
-	if err != nil {
-		return nil, err
+	// If the min safepoint is updated, load the next one
+	if string(request.ServiceId) == min.ServiceID {
+		min, err = s.storage.LoadMinServiceGCSafePoint()
+		if err != nil {
+			return nil, err
+		}
 	}
-	atomic.StoreUint64(&s.minServiceGCSafePoint, ssp.SafePoint)
 
 	return &pdpb.UpdateServiceGCSafePointResponse{
 		Header:       s.header(),
-		ServiceId:    []byte(ssp.ServiceID),
-		TTL:          ssp.ExpiredAt - time.Now().Unix(),
-		MinSafePoint: ssp.SafePoint,
+		ServiceId:    []byte(min.ServiceID),
+		TTL:          min.ExpiredAt - time.Now().Unix(),
+		MinSafePoint: min.SafePoint,
 	}, nil
 }
 
