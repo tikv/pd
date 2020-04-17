@@ -141,9 +141,6 @@ type Server struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
-
-	// The minimum safe point of all services
-	minSafePoint uint64
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -372,13 +369,6 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.cluster.SetConfigCheck()
 	}
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
-
-	// Load the min safe point
-	minSafePoint, err := s.storage.LoadGCSafePoint()
-	if err != nil {
-		return err
-	}
-	s.minSafePoint = minSafePoint
 
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
