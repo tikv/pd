@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
