@@ -51,7 +51,7 @@ func (kv *LeveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, []
 	values := make([]string, 0, limit)
 	count := 0
 	for iter.Next() {
-		if count >= limit {
+		if limit > 0 && count >= limit {
 			break
 		}
 		keys = append(keys, string(iter.Key()))
