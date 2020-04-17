@@ -621,6 +621,12 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		"b", -100, 2)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(3))
+
+	// prevent backoff
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"b", 1000, 2)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(3))
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {
