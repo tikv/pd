@@ -409,7 +409,7 @@ func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
 	prefix := path.Join(gcPath, "safe_point", "service")
 	// the next of 'e' is 'f'
 	prefixEnd := path.Join(gcPath, "safe_point", "servicf")
-	keys, values, err := s.LoadRange(prefix, prefixEnd, math.MaxInt32)
+	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -418,9 +418,9 @@ func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
 	}
 
 	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
-	ssp := &ServiceSafePoint{}
 	now := time.Now().Unix()
 	for i, key := range keys {
+		ssp := &ServiceSafePoint{}
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
 		}
