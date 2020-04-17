@@ -15,22 +15,12 @@ package api
 
 import (
 	"context"
-	"errors"
-	"io"
 	"net/http"
 	"net/http/pprof"
-	"net/url"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
-	"github.com/grpc-ecosystem/grpc-gateway/runtime"
-	"github.com/pingcap/kvproto/pkg/configpb"
-	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 func createStreamingRender() *render.Render {
@@ -55,7 +45,7 @@ func createIndentRender() *render.Render {
 // @license.name Apache 2.0
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
 // @BasePath /pd/api/v1
-func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.Router, func()) {
+func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
@@ -187,6 +177,12 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	replicationModeHandler := newReplicationModeHandler(svr, rd)
 	clusterRouter.HandleFunc("/replication_mode/status", replicationModeHandler.GetStatus)
 
+	componentHandler := newComponentHandler(svr, rd)
+	apiRouter.HandleFunc("/component", componentHandler.Register).Methods("POST")
+	apiRouter.HandleFunc("/component/{component}/{addr}", componentHandler.UnRegister).Methods("DELETE")
+	apiRouter.HandleFunc("/component", componentHandler.GetAllAddress).Methods("GET")
+	apiRouter.HandleFunc("/component/{type}", componentHandler.GetAddress).Methods("GET")
+
 	pluginHandler := newPluginHandler(handler, rd)
 	apiRouter.HandleFunc("/plugin", pluginHandler.LoadPlugin).Methods("POST")
 	apiRouter.HandleFunc("/plugin", pluginHandler.UnloadPlugin).Methods("DELETE")
@@ -213,89 +209,5 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) (*mux.
 	// Deprecated
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
-	if svr.GetConfig().EnableDynamicConfig {
-		apiRouter.HandleFunc("/component/ids/{component}", func(w http.ResponseWriter, r *http.Request) {
-			vars := mux.Vars(r)
-			varName := vars["component"]
-			if varName == "all" {
-				rd.JSON(w, http.StatusOK, svr.GetConfigManager().GetAllComponentIDs())
-			} else {
-				rd.JSON(w, http.StatusOK, svr.GetConfigManager().GetComponentIDs(varName))
-			}
-		}).Methods("GET")
-		return rootRouter, func() { lazyComponentRouter(ctx, svr, apiRouter) }
-	}
-	return rootRouter, nil
+	return rootRouter
 }
-
-func lazyComponentRouter(ctx context.Context, svr *server.Server, apiRouter *mux.Router) {
-	componentRouter := apiRouter.PathPrefix("/component").Methods("POST", "GET", "DELETE").Subrouter()
-	CustomForwardResponseOption := func(ctx context.Context, w http.ResponseWriter, pm proto.Message) error {
-		if _, ok := pm.(*configpb.GetResponse); ok {
-			str := pm.(*configpb.GetResponse).GetConfig()
-			w.Write([]byte(str))
-		}
-		return nil
-	}
-	gwmux := runtime.NewServeMux(
-		runtime.WithForwardResponseOption(CustomForwardResponseOption),
-		runtime.WithMarshalerOption("application/json", &runtime.JSONPb{OrigName: true}),
-		runtime.WithMarshalerOption("application/toml", &nopMarshaler{}),
-	)
-	UnaryClientInterceptor := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		invoker(ctx, method, req, reply, cc, opts...)
-		var errMsg string
-		switch method {
-		case "/configpb.Config/Update":
-			errMsg = reply.(*configpb.UpdateResponse).GetStatus().GetMessage()
-		case "/configpb.Config/Get":
-			errMsg = reply.(*configpb.GetResponse).GetStatus().GetMessage()
-		case "/configpb.Config/Delete":
-			errMsg = reply.(*configpb.DeleteResponse).GetStatus().GetMessage()
-		}
-		if errMsg != "" {
-			return errors.New(errMsg)
-		}
-		return nil
-	}
-	tlsCfg, err := svr.GetSecurityConfig().ToTLSConfig()
-	if err != nil {
-		log.Error("fail to use TLS, use insecure instead", zap.Error(err))
-	}
-	opt := grpc.WithInsecure()
-	if tlsCfg != nil {
-		creds := credentials.NewTLS(tlsCfg)
-		opt = grpc.WithTransportCredentials(creds)
-	}
-	opts := []grpc.DialOption{opt, grpc.WithUnaryInterceptor(UnaryClientInterceptor)}
-	addr := svr.GetAddr()
-	u, err := url.Parse(addr)
-	if err != nil {
-		log.Error("failed to parse url", zap.Error(err))
-		return
-	}
-	err = configpb.RegisterConfigHandlerFromEndpoint(ctx, gwmux, u.Host+u.Path, opts)
-	if err != nil {
-		log.Error("fail to register grpc gateway", zap.Error(err))
-		return
-	}
-
-	componentRouter.Handle("", gwmux).Methods("POST")
-	componentRouter.Handle("/{component_id}", gwmux).Methods("GET")
-	componentRouter.Handle("/{component_id}", gwmux).Methods("DELETE")
-	componentRouter.Use(newComponentMiddleware(svr).Middleware)
-}
-
-type nopMarshaler struct{}
-
-func (c *nopMarshaler) Marshal(v interface{}) ([]byte, error) {
-	return nil, nil
-}
-
-func (c *nopMarshaler) Unmarshal(data []byte, v interface{}) error { return nil }
-
-func (c *nopMarshaler) NewDecoder(r io.Reader) runtime.Decoder { return nil }
-
-func (c *nopMarshaler) NewEncoder(w io.Writer) runtime.Encoder { return nil }
-
-func (c *nopMarshaler) ContentType() string { return "application/toml" }
