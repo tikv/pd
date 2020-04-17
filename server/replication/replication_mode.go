@@ -248,6 +248,8 @@ func (m *ModeManager) tickDR() {
 		return
 	}
 
+	drTickCounter.Inc()
+
 	canSync := m.checkCanSync()
 
 	if !canSync && m.drGetState() != drStateAsync {
@@ -261,6 +263,8 @@ func (m *ModeManager) tickDR() {
 	if m.drGetState() == drStateSyncRecover {
 		m.updateProgress()
 		progress := m.estimateProgress()
+		drRecoverProgressGauge.Set(float64(progress))
+
 		if progress == 1.0 {
 			m.drSwitchToSync()
 		} else {
