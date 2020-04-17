@@ -27,7 +27,7 @@ require (
 	github.com/gorilla/mux v1.7.3
 	github.com/gorilla/websocket v1.2.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
-	github.com/grpc-ecosystem/grpc-gateway v1.12.1
+	github.com/grpc-ecosystem/grpc-gateway v1.14.3
 	github.com/json-iterator/go v1.1.9 // indirect
 	github.com/juju/ratelimit v1.0.1
 	github.com/kevinburke/go-bindata v3.18.0+incompatible
@@ -68,3 +68,5 @@ require (
 	gopkg.in/yaml.v2 v2.2.8 // indirect
 	honnef.co/go/tools v0.0.1-2020.1.3
 )
+
+replace github.com/pingcap/kvproto => /home/shafreeck/Codes/pingcap/kvproto

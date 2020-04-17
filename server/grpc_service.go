@@ -734,6 +734,39 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 	}, nil
 }
 
+// UpdateServiceGCSafePoint update the safepoint for specific service
+func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (*pdpb.UpdateServiceGCSafePointResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.UpdateServiceGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	ssp := &core.ServiceSafePoint{
+		ServiceID: string(request.ServiceId),
+		ExpiredAt: time.Now().Unix() + request.TTL*int64(time.Second),
+		SafePoint: request.SafePoint,
+	}
+	if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
+		return nil, err
+	}
+
+	ssp, err := s.storage.LoadMinServiceGCSafePoint()
+	if err != nil {
+		return nil, err
+	}
+
+	return &pdpb.UpdateServiceGCSafePointResponse{
+		Header:       s.header(),
+		ServiceId:    []byte(ssp.ServiceID),
+		TTL:          ssp.ExpiredAt - time.Now().Unix(),
+		MinSafePoint: ssp.SafePoint,
+	}, nil
+}
+
 // GetOperator gets information about the operator belonging to the speicfy region.
 func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
