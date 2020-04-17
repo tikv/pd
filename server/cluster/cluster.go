@@ -615,7 +615,7 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
-//nolint
+//nolint:unused
 func (c *RaftCluster) getClusterID() uint64 {
 	c.RLock()
 	defer c.RUnlock()
@@ -1520,7 +1520,7 @@ func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.Hot
 
 // TODO: remove me.
 // only used in test.
-//nolint
+//nolint:unused
 func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()

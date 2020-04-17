@@ -190,6 +190,7 @@ func (m *Manager) setNewAddress() {
 			}
 		}
 	}
+	// set new dashboard address
 	cfg := m.srv.GetPersistOptions().GetPDServerConfig().Clone()
 	cfg.DashboardAddress = addr
 	m.srv.SetPDServerConfig(*cfg)
