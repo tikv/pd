@@ -434,7 +434,6 @@ func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
 	}
 
 	return min, nil
-
 }
 
 // LoadAllScheduleConfig loads all schedulers' config.
