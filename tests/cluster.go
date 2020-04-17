@@ -148,11 +148,11 @@ func (s *TestServer) GetConfig() *config.Config {
 	return s.server.GetConfig()
 }
 
-// GetScheduleOption returns the current TestServer's schedule option.
-func (s *TestServer) GetScheduleOption() *config.ScheduleOption {
+// GetPersistOptions returns the current TestServer's schedule option.
+func (s *TestServer) GetPersistOptions() *config.PersistOptions {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.GetScheduleOption()
+	return s.server.GetPersistOptions()
 }
 
 // GetAllocator returns the current TestServer's ID allocator.
