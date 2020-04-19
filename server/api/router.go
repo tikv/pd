@@ -183,6 +183,10 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	apiRouter.HandleFunc("/component", componentHandler.GetAllAddress).Methods("GET")
 	apiRouter.HandleFunc("/component/{type}", componentHandler.GetAddress).Methods("GET")
 
+	dashboardHandler := newDashboardHandler(svr, rd)
+	apiRouter.HandleFunc("/dashboard/auth/kvmode", dashboardHandler.Reset).Methods("POST")
+	apiRouter.HandleFunc("/dashboard/auth/kvmode", dashboardHandler.Delete).Methods("DELETE")
+
 	pluginHandler := newPluginHandler(handler, rd)
 	apiRouter.HandleFunc("/plugin", pluginHandler.LoadPlugin).Methods("POST")
 	apiRouter.HandleFunc("/plugin", pluginHandler.UnloadPlugin).Methods("DELETE")
