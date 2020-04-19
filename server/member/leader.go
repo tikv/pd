@@ -416,6 +416,7 @@ func (m *Member) SetMemberBinaryVersion(id uint64, releaseVersion string) error 
 	return nil
 }
 
+// SetMemberGitHash saves a member's git hash.
 func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
 	key := m.getMemberGitHashPath(id)
 	txn := kv.NewSlowLogTxn(m.client)
