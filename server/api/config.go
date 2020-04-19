@@ -21,16 +21,12 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/BurntSushi/toml"
 	"github.com/pingcap/errcode"
-	"github.com/pingcap/kvproto/pkg/configpb"
-	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 type confHandler struct {
@@ -82,28 +78,6 @@ func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /config [post]
 func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
-	if h.svr.GetConfig().EnableDynamicConfig {
-		cm := h.svr.GetConfigManager()
-		m := make(map[string]interface{})
-		json.NewDecoder(r.Body).Decode(&m)
-		entries, err := transToEntries(m)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-			return
-		}
-		err = redirectUpdateReq(h.svr.Context(), client, cm, entries)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		h.rd.JSON(w, http.StatusOK, nil)
-		return
-	}
 	config := h.svr.GetConfig()
 	data, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
@@ -212,28 +186,6 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /config/schedule [post]
 func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
-	if h.svr.GetConfig().EnableDynamicConfig {
-		cm := h.svr.GetConfigManager()
-		m := make(map[string]interface{})
-		json.NewDecoder(r.Body).Decode(&m)
-		entries, err := transToEntries(m)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-			return
-		}
-		err = redirectUpdateReq(h.svr.Context(), client, cm, entries)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		h.rd.JSON(w, http.StatusOK, nil)
-		return
-	}
 	config := h.svr.GetScheduleConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
@@ -266,29 +218,6 @@ func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /config/replicate [post]
 func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
-	if h.svr.GetConfig().EnableDynamicConfig {
-		cm := h.svr.GetConfigManager()
-		m := make(map[string]interface{})
-		json.NewDecoder(r.Body).Decode(&m)
-		entries, err := transToEntries(m)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-			return
-		}
-
-		err = redirectUpdateReq(h.svr.Context(), client, cm, entries)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		h.rd.JSON(w, http.StatusOK, nil)
-		return
-	}
 	config := h.svr.GetReplicationConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
@@ -323,56 +252,6 @@ func (h *confHandler) GetLabelProperty(w http.ResponseWriter, r *http.Request) {
 func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
-		return
-	}
-
-	if h.svr.GetConfig().EnableDynamicConfig {
-		cm := h.svr.GetConfigManager()
-		typ := input["type"]
-		labelKey, labelValue := input["label-key"], input["label-value"]
-		cfg := h.svr.GetPersistOptions().LoadLabelPropertyConfig().Clone()
-		switch input["action"] {
-		case "set":
-			for _, l := range cfg[typ] {
-				if l.Key == labelKey && l.Value == labelValue {
-					return
-				}
-			}
-			cfg[typ] = append(cfg[typ], config.StoreLabel{Key: labelKey, Value: labelValue})
-		case "delete":
-			oldLabels := cfg[typ]
-			cfg[typ] = []config.StoreLabel{}
-			for _, l := range oldLabels {
-				if l.Key == labelKey && l.Value == labelValue {
-					continue
-				}
-				cfg[typ] = append(cfg[typ], l)
-			}
-			if len(cfg[typ]) == 0 {
-				delete(cfg, typ)
-			}
-		default:
-			err := errors.Errorf("unknown action %v", input["action"])
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		var buf bytes.Buffer
-		if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		entries := []*entry{{key: "label-property", value: buf.String()}}
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-			return
-		}
-		err := redirectUpdateReq(h.svr.Context(), client, cm, entries)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		h.rd.JSON(w, http.StatusOK, nil)
 		return
 	}
 
@@ -418,23 +297,6 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 	version, ok := input["cluster-version"]
 	if !ok {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set cluster-version")))
-		return
-	}
-
-	if h.svr.GetConfig().EnableDynamicConfig {
-		kind := &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: server.Component}}}
-		cm := h.svr.GetConfigManager()
-		v := &configpb.Version{Global: cm.GetGlobalVersion(cm.GetGlobalConfigs(server.Component))}
-		entry := &configpb.ConfigEntry{Name: "cluster-version", Value: version}
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-		}
-		_, _, err := h.svr.GetConfigClient().Update(h.svr.Context(), v, kind, []*configpb.ConfigEntry{entry})
-		if err != nil {
-			log.Error("update cluster version meet error", zap.Error(err))
-		}
-		h.rd.JSON(w, http.StatusOK, nil)
 		return
 	}
 

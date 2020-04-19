@@ -14,39 +14,33 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"path"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	pd "github.com/pingcap/pd/v4/client"
+	"github.com/pingcap/pd/v4/pkg/component"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/grpcutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/config"
-	configmanager "github.com/pingcap/pd/v4/server/config_manager"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/id"
 	"github.com/pingcap/pd/v4/server/kv"
@@ -80,12 +74,6 @@ var (
 	// EtcdStartTimeout the timeout of the startup etcd.
 	EtcdStartTimeout = time.Minute * 5
 )
-
-// Component is used to represent the kind of component in config manager.
-const Component = "pd"
-
-// ConfigCheckInterval represents the time interval of running config check.
-var ConfigCheckInterval = 1 * time.Second
 
 // Server is the pd server.
 type Server struct {
@@ -132,11 +120,8 @@ type Server struct {
 	lg       *zap.Logger
 	logProps *log.ZapProperties
 
-	// components' configuration management
-	cfgManager *configmanager.ConfigManager
-	// component config
-	configVersion *configpb.Version
-	configClient  pd.ConfigClient
+	// It's used to manage components.
+	componentManager *component.Manager
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -229,7 +214,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 	}
 
-	s.cfgManager = configmanager.NewConfigManager(s)
 	s.handler = newHandler(s)
 
 	// Adjust etcd config.
@@ -247,7 +231,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		configpb.RegisterConfigServer(gs, s.cfgManager)
 	}
 	s.etcdCfg = etcdCfg
 	if EnableZap {
@@ -365,10 +348,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
-	if !s.cfg.EnableDynamicConfig {
-		s.cluster.SetConfigCheck()
-	}
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
+	s.componentManager = component.NewManager()
 
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
@@ -475,10 +456,6 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
-	if s.cfg.EnableDynamicConfig {
-		s.serverLoopWg.Add(1)
-		go s.configCheckLoop()
-	}
 }
 
 func (s *Server) stopServerLoop() {
@@ -627,14 +604,9 @@ func (s *Server) GetClient() *clientv3.Client {
 	return s.client
 }
 
-// GetConfigManager returns the config manager of server.
-func (s *Server) GetConfigManager() *configmanager.ConfigManager {
-	return s.cfgManager
-}
-
-// GetConfigClient returns the config client of server.
-func (s *Server) GetConfigClient() pd.ConfigClient {
-	return s.configClient
+// GetComponentManager returns the component manager of server.
+func (s *Server) GetComponentManager() *component.Manager {
+	return s.componentManager
 }
 
 // GetLeader returns leader of etcd.
@@ -676,26 +648,6 @@ func (s *Server) GetHBStreams() opt.HeartbeatStreams {
 // GetAllocator returns the ID allocator of server.
 func (s *Server) GetAllocator() *id.AllocatorImpl {
 	return s.idAllocator
-}
-
-// GetSchedulersCallback returns a callback function to update config manager.
-func (s *Server) GetSchedulersCallback() func() {
-	return func() {
-		if s.GetConfig().EnableDynamicConfig {
-			value := s.GetScheduleConfig().Schedulers
-			tmp := map[string]interface{}{
-				"schedulers": value,
-			}
-			var buf bytes.Buffer
-			if err := toml.NewEncoder(&buf).Encode(tmp); err != nil {
-				log.Error("failed to encode config", zap.Error(err))
-			}
-
-			if err := s.UpdateConfigManager("schedule.schedulers", buf.String()); err != nil {
-				log.Error("failed to update the schedulers in config manager", zap.Error(err))
-			}
-		}
-	}
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.
@@ -916,20 +868,6 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	return nil
 }
 
-// UpdateConfigManager is used to update config manager directly.
-func (s *Server) UpdateConfigManager(name, value string) error {
-	cm := s.GetConfigManager()
-	globalVersion := cm.GetGlobalVersion(cm.GetGlobalConfigs(Component))
-	version := &configpb.Version{Global: globalVersion}
-	entries := []*configpb.ConfigEntry{{Name: name, Value: value}}
-	_, status := cm.UpdateGlobal(Component, version, entries)
-	if status.GetCode() != configpb.StatusCode_OK {
-		return errors.New(status.GetMessage())
-	}
-
-	return cm.Persist(s.GetStorage())
-}
-
 // GetLabelProperty returns the whole label property config.
 func (s *Server) GetLabelProperty() config.LabelPropertyConfig {
 	return s.persistOptions.LoadLabelPropertyConfig().Clone()
@@ -1023,18 +961,6 @@ func (s *Server) SetLogLevel(level string) {
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
-}
-
-// GetConfigVersion returns the config version.
-func (s *Server) GetConfigVersion() *configpb.Version {
-	if s.configVersion == nil {
-		return &configpb.Version{Local: 0, Global: 0}
-	}
-	return s.configVersion
-}
-
-func (s *Server) setConfigVersion(version *configpb.Version) {
-	s.configVersion = version
 }
 
 func (s *Server) leaderLoop() {
@@ -1172,177 +1098,6 @@ func (s *Server) etcdLeaderLoop() {
 	}
 }
 
-func (s *Server) configCheckLoop() {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-
-	ticker := time.NewTicker(ConfigCheckInterval)
-	defer ticker.Stop()
-	for {
-		// wait leader
-		leader := s.GetLeader()
-		if leader != nil {
-			var err error
-			securityConfig := s.GetSecurityConfig()
-			s.configClient, err = pd.NewConfigClientWithContext(ctx, s.GetEndpoints(), pd.SecurityOption{
-				CAPath:   securityConfig.CAPath,
-				CertPath: securityConfig.CertPath,
-				KeyPath:  securityConfig.KeyPath,
-			})
-			if err != nil {
-				log.Error("failed to create config client", zap.Error(err))
-				return
-			}
-			break
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			log.Info("config check stop running")
-			return
-		}
-	}
-
-	addr := s.GetAddr()
-	u, err := url.Parse(addr)
-	if err != nil {
-		log.Error("failed to parse url", zap.Error(err))
-		return
-	}
-	compoenntID := u.Host + u.Path
-	version := s.GetConfigVersion()
-	var config bytes.Buffer
-	if err := toml.NewEncoder(&config).Encode(*s.GetConfig()); err != nil {
-		log.Error("failed to encode config", zap.Error(err))
-		return
-	}
-	if err := s.createComponentConfig(ctx, version, compoenntID, config.String()); err != nil {
-		log.Error("failed to create config", zap.Error(err))
-		return
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("config check has been stopped")
-			return
-		case <-ticker.C:
-			if err := s.updateConfig(ctx, compoenntID); err != nil {
-				log.Error("failed to update config", zap.Error(err))
-			}
-
-			rc := s.GetRaftCluster()
-			if s.GetMember().IsLeader() && rc != nil {
-				if !rc.GetConfigCheck() {
-					rc.SetConfigCheck()
-				}
-			}
-		}
-	}
-}
-
-func (s *Server) updateConfig(ctx context.Context, compoenntID string) error {
-	version := s.GetConfigVersion()
-	config, err := s.getComponentConfig(ctx, version, compoenntID)
-	if err != nil {
-		return err
-	}
-	if config == "" {
-		return nil
-	}
-	return s.updateComponentConfig(config)
-}
-
-func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Version, componentID, config string) error {
-	status, v, config, err := s.configClient.Create(ctx, version, Component, componentID, config)
-	if err != nil {
-		return err
-	}
-	switch status.GetCode() {
-	case configpb.StatusCode_OK, configpb.StatusCode_WRONG_VERSION:
-		s.setConfigVersion(v)
-		s.updateComponentConfig(config)
-	case configpb.StatusCode_UNKNOWN:
-		return errors.Errorf("unknown error: %v", status.GetMessage())
-	}
-	return nil
-}
-
-func (s *Server) getComponentConfig(ctx context.Context, version *configpb.Version, componentID string) (string, error) {
-	status, v, cfg, err := s.configClient.Get(ctx, version, Component, componentID)
-	if err != nil {
-		return "", err
-	}
-	var config string
-	switch status.GetCode() {
-	case configpb.StatusCode_OK:
-	case configpb.StatusCode_WRONG_VERSION:
-		config = cfg
-		s.setConfigVersion(v)
-	case configpb.StatusCode_COMPONENT_ID_NOT_FOUND:
-		return "", errors.Errorf("component ID not found: %v", componentID)
-	case configpb.StatusCode_COMPONENT_NOT_FOUND:
-		return "", errors.Errorf("component not found: %v", Component)
-	case configpb.StatusCode_UNKNOWN:
-		return "", errors.Errorf("unknown error: %v", status.GetMessage())
-	}
-	return config, nil
-}
-
-// TODO: support more config item
-func (s *Server) updateComponentConfig(cfg string) error {
-	new := &config.Config{}
-	var saveFile bool
-	if _, err := toml.Decode(cfg, &new); err != nil {
-		return err
-	}
-	var err error
-	old := *s.GetConfig()
-	// SchedulersPayload doesn't need to be updated.
-	new.Schedule.SchedulersPayload = nil
-	old.Schedule.SchedulersPayload = nil
-	if !reflect.DeepEqual(old.Schedule, new.Schedule) {
-		err = s.SetScheduleConfig(new.Schedule)
-		saveFile = true
-	}
-
-	if !reflect.DeepEqual(old.Replication, new.Replication) {
-		err = s.SetReplicationConfig(new.Replication)
-		saveFile = true
-	}
-
-	if !reflect.DeepEqual(old.PDServerCfg, new.PDServerCfg) {
-		err = s.SetPDServerConfig(new.PDServerCfg)
-		saveFile = true
-	}
-
-	if !reflect.DeepEqual(old.ClusterVersion, new.ClusterVersion) {
-		err = s.SetClusterVersion(new.ClusterVersion.String())
-		saveFile = true
-	}
-
-	if !reflect.DeepEqual(old.LabelProperty, new.LabelProperty) {
-		err = s.SetLabelPropertyConfig(new.LabelProperty)
-		saveFile = true
-	}
-
-	if !reflect.DeepEqual(old.Log, new.Log) {
-		err = s.SetLogConfig(new.Log)
-		saveFile = true
-	}
-	if err != nil {
-		return err
-	}
-
-	if saveFile {
-		return s.cfg.RewriteFile(new)
-	}
-	return nil
-}
-
 func (s *Server) reloadConfigFromKV() error {
 	err := s.persistOptions.Reload(s.storage)
 	if err != nil {
@@ -1355,13 +1110,5 @@ func (s *Server) reloadConfigFromKV() error {
 		s.storage.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
 	}
-
-	// The request only valid when there is a leader.
-	// And before the a PD becomes a leader it will firstly reload the config.
-	if s.cfg.EnableDynamicConfig {
-		err = s.cfgManager.Reload(s.storage)
-		return err
-	}
-
 	return nil
 }

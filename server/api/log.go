@@ -15,7 +15,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 
@@ -48,24 +47,6 @@ func newlogHandler(svr *server.Server, rd *render.Render) *logHandler {
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /admin/log [post]
 func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	if h.svr.GetConfig().EnableDynamicConfig {
-		cm := h.svr.GetConfigManager()
-		var str string
-		json.NewDecoder(r.Body).Decode(&str)
-		entries := []*entry{{key: "log.level", value: fmt.Sprintf("level = \"%v\"", str)}}
-		client := h.svr.GetConfigClient()
-		if client == nil {
-			h.rd.JSON(w, http.StatusServiceUnavailable, "no leader")
-			return
-		}
-		err := redirectUpdateReq(h.svr.Context(), client, cm, entries)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		h.rd.JSON(w, http.StatusOK, nil)
-		return
-	}
 	var level string
 	data, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
