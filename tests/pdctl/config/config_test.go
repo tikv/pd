@@ -25,6 +25,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
@@ -42,7 +43,6 @@ type configTestSuite struct{}
 
 func (s *configTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
-	server.ConfigCheckInterval = 10 * time.Millisecond
 }
 
 type testItem struct {
@@ -120,7 +120,6 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args2 := []string{"-u", pdAddr, "config", "set", "cluster-version", "2.1.0-rc.5"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
-	time.Sleep(20 * time.Millisecond)
 	c.Assert(clusterVersion, Not(DeepEquals), svr.GetClusterVersion())
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
@@ -140,7 +139,6 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args2 = []string{"-u", pdAddr, "config", "set", "label-property", "reject-leader", "zone", "cn"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args2...)
 	c.Assert(err, IsNil)
-	time.Sleep(20 * time.Millisecond)
 	c.Assert(labelPropertyCfg, Not(DeepEquals), svr.GetLabelProperty())
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
@@ -152,7 +150,6 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args3 := []string{"-u", pdAddr, "config", "delete", "label-property", "reject-leader", "zone", "cn"}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args3...)
 	c.Assert(err, IsNil)
-	time.Sleep(20 * time.Millisecond)
 	c.Assert(labelPropertyCfg, Not(DeepEquals), svr.GetLabelProperty())
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
@@ -238,9 +235,6 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 
-	// wait config manager reload
-	time.Sleep(time.Second)
-
 	// test show
 	var rules []placement.Rule
 	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "show")
@@ -301,4 +295,53 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(rules, HasLen, 1)
 	c.Assert(rules[0].Key(), Equals, [2]string{"pd", "test1"})
+}
+
+func (s *configTestSuite) TestReplicationMode(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctl.InitCommand()
+
+	store := metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	defer cluster.Destroy()
+
+	conf := config.ReplicationModeConfig{
+		ReplicationMode: "majority",
+		DRAutoSync: config.DRAutoSyncReplicationConfig{
+			WaitStoreTimeout: typeutil.NewDuration(time.Minute),
+			WaitSyncTimeout:  typeutil.NewDuration(time.Minute),
+		},
+	}
+	check := func() {
+		_, output, err := pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "show", "replication-mode")
+		c.Assert(err, IsNil)
+		var conf2 config.ReplicationModeConfig
+		json.Unmarshal([]byte(output), &conf2)
+		c.Assert(conf2, DeepEquals, conf)
+	}
+
+	check()
+
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr_auto_sync")
+	c.Assert(err, IsNil)
+	conf.ReplicationMode = "dr_auto_sync"
+	check()
+
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr-auto-sync", "label-key", "foobar")
+	c.Assert(err, IsNil)
+	conf.DRAutoSync.LabelKey = "foobar"
+	check()
 }
