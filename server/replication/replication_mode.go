@@ -15,6 +15,8 @@ package replication
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -32,23 +34,34 @@ const (
 	modeDRAutoSync = "dr_auto_sync"
 )
 
+// FileReplicater is the interface that can save important data to all cluster
+// nodes.
+type FileReplicater interface {
+	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
+}
+
+const drStatusFile = "DR_STATE"
+const persistFileTimeout = time.Second * 10
+
 // ModeManager is used to control how raft logs are synchronized between
 // different tikv nodes.
 type ModeManager struct {
 	sync.RWMutex
-	config  config.ReplicationModeConfig
-	storage *core.Storage
-	cluster opt.Cluster
+	config         config.ReplicationModeConfig
+	storage        *core.Storage
+	cluster        opt.Cluster
+	fileReplicater FileReplicater
 
 	drAutoSync drAutoSyncStatus
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
-func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, cluster opt.Cluster) (*ModeManager, error) {
+func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, cluster opt.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
 	m := &ModeManager{
-		config:  config,
-		storage: storage,
-		cluster: cluster,
+		config:         config,
+		storage:        storage,
+		cluster:        cluster,
+		fileReplicater: fileReplicater,
 	}
 	switch config.ReplicationMode {
 	case modeMajority:
@@ -141,11 +154,7 @@ func (m *ModeManager) loadDRAutoSync() error {
 	}
 	if !ok {
 		// initialize
-		id, err := m.cluster.AllocID()
-		if err != nil {
-			return err
-		}
-		m.drAutoSync = drAutoSyncStatus{State: drStateSync, StateID: id}
+		return m.drSwitchToSync()
 	}
 	return nil
 }
@@ -159,6 +168,9 @@ func (m *ModeManager) drSwitchToAsync() error {
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateAsync, StateID: id}
+	if err := m.drPersistStatus(dr); err != nil {
+		return err
+	}
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
@@ -177,6 +189,9 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: time.Now()}
+	if err := m.drPersistStatus(dr); err != nil {
+		return err
+	}
 	if err = m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
@@ -195,12 +210,28 @@ func (m *ModeManager) drSwitchToSync() error {
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateSync, StateID: id}
+	if err := m.drPersistStatus(dr); err != nil {
+		return err
+	}
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
 	m.drAutoSync = dr
 	log.Info("switched to sync state", zap.String("replicate-mode", modeDRAutoSync))
+	return nil
+}
+
+func (m *ModeManager) drPersistStatus(status drAutoSyncStatus) error {
+	if m.fileReplicater != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), persistFileTimeout)
+		defer cancel()
+		data, _ := json.Marshal(status)
+		if err := m.fileReplicater.ReplicateFileToAllMembers(ctx, drStatusFile, data); err != nil {
+			log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", status.State), zap.Error(err))
+			return err
+		}
+	}
 	return nil
 }
 
