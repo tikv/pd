@@ -78,10 +78,9 @@ func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {string} string "The config is updated."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Failure 503 {string} string "PD server has no leader."
 // @Router /config [post]
 func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
-	config := h.svr.GetConfig()
+	cfg := h.svr.GetConfig()
 	data, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -96,171 +95,189 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for k, v := range conf {
-		if kp := strings.Split(k, "."); len(kp) == 2 {
-			if !isPrefixLegal(kp[0]) {
-				h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("prefix %s not found", kp[0]))
+		if s := strings.Split(k, "."); len(s) > 1 {
+			if err := h.updateConfig(cfg, k, v); err != nil {
+				h.rd.JSON(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			delete(conf, k)
-			conf[kp[1]] = v
+			continue
+		}
+		key := findTag(reflect.TypeOf(&config.Config{}).Elem(), k)
+		if key == "" {
+			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
+			return
+		}
+		if err := h.updateConfig(cfg, key, v); err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
 		}
 	}
-	data, err = json.Marshal(conf)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.updateWithoutPrefix(w, config, data)
 
 	h.rd.JSON(w, http.StatusOK, nil)
 }
 
-func isPrefixLegal(prefix string) bool {
-	switch prefix {
-	case "schedule", "replication", "pd-server", "log":
-		return true
-	default:
-		return false
+func (h *confHandler) updateConfig(cfg *config.Config, key string, value interface{}) error {
+	kp := strings.Split(key, ".")
+	switch kp[0] {
+	case "schedule":
+		return h.updateSchedule(cfg, kp[len(kp)-1], value)
+	case "replication":
+		return h.updateReplication(cfg, kp[len(kp)-1], value)
+	case "replication-mode":
+		return h.updateReplicationModeConfig(cfg, kp[1:], value)
+	case "pd-server":
+		return h.updatePDServerConfig(cfg, kp[len(kp)-1], value)
+	case "log":
+		return h.updateLogLevel(kp, value)
+	case "cluster-version":
+		return h.updateClusterVersion(value)
+	case "label-property": // TODO: support changing label-property
 	}
+	return errors.Errorf("config prefix %s not found", kp[0])
 }
 
-func (h *confHandler) updateWithoutPrefix(w http.ResponseWriter, config *config.Config, data []byte) {
-	var err error
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
+func findTag(t reflect.Type, tag string) string {
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		column := field.Tag.Get("json")
+		c := strings.Split(column, ",")
+		if c[0] == tag {
+			return c[0]
+		}
+
+		if field.Type.Kind() == reflect.Struct {
+			path := findTag(field.Type, tag)
+			if path == "" {
+				continue
+			}
+			return field.Tag.Get("json") + "." + path
+		}
 	}
-	found1, err := h.updateSchedule(data, config)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	found2, err := h.updateReplication(data, config)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	found3, err := h.updatePDServerConfig(data, config)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	found4, err := h.updateLogLevel(data, config)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	found5, err := h.updateClusterVersion(data, config)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	found6, err := h.updateLabelProperty(data, config)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if !found1 && !found2 && !found3 && !found4 && !found5 && !found6 {
-		h.rd.JSON(w, http.StatusBadRequest, "config item not found")
-		return
-	}
+	return ""
 }
 
-func (h *confHandler) updateSchedule(data []byte, config *config.Config) (bool, error) {
+func (h *confHandler) updateSchedule(config *config.Config, key string, value interface{}) error {
+	data, err := json.Marshal(map[string]interface{}{key: value})
+	if err != nil {
+		return err
+	}
+
 	updated, found, err := h.mergeConfig(&config.Schedule, data)
 	if err != nil {
-		return false, err
+		return err
 	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
 	if updated {
 		err = h.svr.SetScheduleConfig(config.Schedule)
 	}
-	return found, err
+	return err
 }
 
-func (h *confHandler) updateReplication(data []byte, config *config.Config) (bool, error) {
+func (h *confHandler) updateReplication(config *config.Config, key string, value interface{}) error {
+	data, err := json.Marshal(map[string]interface{}{key: value})
+	if err != nil {
+		return err
+	}
+
 	updated, found, err := h.mergeConfig(&config.Replication, data)
 	if err != nil {
-		return false, err
+		return err
 	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
 	if updated {
 		err = h.svr.SetReplicationConfig(config.Replication)
 	}
-	return found, err
+	return err
 }
 
-func (h *confHandler) updatePDServerConfig(data []byte, config *config.Config) (bool, error) {
+func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []string, value interface{}) error {
+	cfg := make(map[string]interface{})
+	cfg = getConfigMap(cfg, key, value)
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+
+	updated, found, err := h.mergeConfig(&config.ReplicationMode, data)
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
+	if updated {
+		err = h.svr.SetReplicationModeConfig(config.ReplicationMode)
+	}
+	return err
+}
+
+func (h *confHandler) updatePDServerConfig(config *config.Config, key string, value interface{}) error {
+	data, err := json.Marshal(map[string]interface{}{key: value})
+	if err != nil {
+		return err
+	}
+
 	updated, found, err := h.mergeConfig(&config.PDServerCfg, data)
 	if err != nil {
-		return false, err
+		return err
 	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
 	if updated {
 		err = h.svr.SetPDServerConfig(config.PDServerCfg)
 	}
-	return found, err
+	return err
 }
 
-func (h *confHandler) updateLogLevel(data []byte, config *config.Config) (bool, error) {
-	cfg := make(map[string]interface{})
-	err := json.Unmarshal(data, &cfg)
-	if err != nil {
-		return false, err
+func (h *confHandler) updateLogLevel(kp []string, value interface{}) error {
+	if len(kp) != 2 || kp[1] != "level" {
+		return errors.Errorf("only support changing log level")
 	}
-
-	if level, ok := cfg["level"].(string); ok {
-		err = h.svr.SetLogLevel(level)
+	if level, ok := value.(string); ok {
+		err := h.svr.SetLogLevel(level)
 		if err != nil {
-			return true, err
+			return err
 		}
 		log.SetLevel(logutil.StringToZapLogLevel(level))
-		return true, nil
+		return nil
 	}
-	return false, err
+	return errors.Errorf("input value %v is illegal", value)
 }
 
-func (h *confHandler) updateClusterVersion(data []byte, config *config.Config) (bool, error) {
-	cfg := make(map[string]interface{})
-	err := json.Unmarshal(data, &cfg)
-	if err != nil {
-		return false, err
-	}
-
-	if version, ok := cfg["cluster-version"].(string); ok {
+func (h *confHandler) updateClusterVersion(value interface{}) error {
+	if version, ok := value.(string); ok {
 		err := h.svr.SetClusterVersion(version)
 		if err != nil {
-			return true, err
+			return err
 		}
-		return true, nil
+		return nil
 	}
-	return false, err
+	return errors.Errorf("input value %v is illegal", value)
 }
 
-func (h *confHandler) updateLabelProperty(data []byte, config *config.Config) (bool, error) {
-	cfg := make(map[string]interface{})
-	err := json.Unmarshal(data, &cfg)
-	if err != nil {
-		return false, err
+func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) map[string]interface{} {
+	if len(key) == 1 {
+		cfg[key[0]] = value
+		return cfg
 	}
 
-	if lp, ok := cfg["label-property"].(string); ok {
-		input := make(map[string]string)
-		err = json.Unmarshal([]byte(lp), &input)
-		if err != nil {
-			return true, err
-		}
-		switch input["action"] {
-		case "set":
-			err = h.svr.SetLabelProperty(input["type"], input["label-key"], input["label-value"])
-		case "delete":
-			err = h.svr.DeleteLabelProperty(input["type"], input["label-key"], input["label-value"])
-		default:
-			err = errors.Errorf("unknown action %v", input["action"])
-		}
-		if err != nil {
-			return true, err
-		}
-		return true, nil
-	}
-	return false, err
+	subConfig := make(map[string]interface{})
+	cfg[key[0]] = getConfigMap(subConfig, key[1:], value)
+	return cfg
 }
 
 func (h *confHandler) mergeConfig(v interface{}, data []byte) (updated bool, found bool, err error) {

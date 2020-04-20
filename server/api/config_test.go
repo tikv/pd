@@ -86,12 +86,13 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 
 	// the new way
 	l = map[string]interface{}{
-		"schedule.tolerant-size-ratio": 2.5,
-		"replication.location-labels":  "idc,host",
-		"pd-server.metric-storage":     "http://127.0.0.1:1234",
-		"log.level":                    "warn",
-		"cluster-version":              "v4.0.0-beta",
-		"label-property":               `{"type": "foo", "action": "set", "label-key": "zone", "label-value": "cn1"}`,
+		"schedule.tolerant-size-ratio":            2.5,
+		"replication.location-labels":             "idc,host",
+		"pd-server.metric-storage":                "http://127.0.0.1:1234",
+		"log.level":                               "warn",
+		"cluster-version":                         "v4.0.0-beta",
+		"replication-mode.replication-mode":       "dr_auto_sync",
+		"replication-mode.dr-auto-sync.label-key": "foobar",
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
@@ -104,17 +105,13 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	cfg.Replication.LocationLabels = []string{"idc", "host"}
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:1234"
 	cfg.Log.Level = "warn"
+	cfg.ReplicationMode.DRAutoSync.LabelKey = "foobar"
+	cfg.ReplicationMode.ReplicationMode = "dr_auto_sync"
 	v, err := cluster.ParseVersion("v4.0.0-beta")
 	c.Assert(err, IsNil)
 	cfg.ClusterVersion = *v
-	cfg.LabelProperty = map[string][]config.StoreLabel{
-		"foo": {{Key: "zone", Value: "cn1"}},
-	}
 	c.Assert(newCfg1, DeepEquals, cfg)
 
-	l = map[string]interface{}{
-		"label-property": `{"type": "foo", "action": "delete", "label-key": "zone", "label-value": "cn1"}`,
-	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
 	err = postJSON(addr, postData)
@@ -127,7 +124,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
 	err = postJSON(addr, postData)
-	c.Assert(strings.Contains(err.Error(), "replicate"), IsTrue)
+	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
 
 	// config item not found
 	l = map[string]interface{}{
@@ -136,7 +133,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
 	err = postJSON(addr, postData)
-	c.Assert(strings.Contains(err.Error(), "config item not found"), IsTrue)
+	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
 }
 
 func (s *testConfigSuite) TestConfigSchedule(c *C) {

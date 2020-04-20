@@ -213,12 +213,12 @@ func (o *PersistOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
 
 // GetKeyType is to get key type.
 func (o *PersistOptions) GetKeyType() core.KeyType {
-	return core.StringToKeyType(o.LoadPDServerConfig().KeyType)
+	return core.StringToKeyType(o.GetPDServerConfig().KeyType)
 }
 
 // GetDashboardAddress gets dashboard address.
 func (o *PersistOptions) GetDashboardAddress() string {
-	return o.LoadPDServerConfig().DashboardAddress
+	return o.GetPDServerConfig().DashboardAddress
 }
 
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
@@ -358,11 +358,6 @@ func (o *PersistOptions) LoadClusterVersion() *semver.Version {
 	return (*semver.Version)(atomic.LoadPointer(&o.clusterVersion))
 }
 
-// LoadPDServerConfig returns PD server configuration.
-func (o *PersistOptions) LoadPDServerConfig() *PDServerConfig {
-	return o.pdServerConfig.Load().(*PDServerConfig)
-}
-
 // Persist saves the configuration to the storage.
 func (o *PersistOptions) Persist(storage *core.Storage) error {
 	cfg := &Config{
@@ -370,7 +365,7 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 		Replication:     *o.replication.Load(),
 		LabelProperty:   o.LoadLabelPropertyConfig(),
 		ClusterVersion:  *o.LoadClusterVersion(),
-		PDServerCfg:     *o.LoadPDServerConfig(),
+		PDServerCfg:     *o.GetPDServerConfig(),
 		ReplicationMode: *o.GetReplicationModeConfig(),
 	}
 	err := storage.SaveConfig(cfg)
@@ -384,7 +379,7 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 		Replication:     *o.replication.Load(),
 		LabelProperty:   o.LoadLabelPropertyConfig().Clone(),
 		ClusterVersion:  *o.LoadClusterVersion(),
-		PDServerCfg:     *o.LoadPDServerConfig(),
+		PDServerCfg:     *o.GetPDServerConfig().Clone(),
 		ReplicationMode: *o.GetReplicationModeConfig().Clone(),
 	}
 	isExist, err := storage.LoadConfig(cfg)

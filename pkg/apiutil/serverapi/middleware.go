@@ -77,7 +77,7 @@ func IsServiceAllowed(s *server.Server, group server.ServiceGroup) bool {
 	}
 
 	opt := s.GetServerOption()
-	cfg := opt.LoadPDServerConfig()
+	cfg := opt.GetPDServerConfig()
 	if cfg != nil {
 		for _, allow := range cfg.RuntimeServices {
 			if group.Name == allow {

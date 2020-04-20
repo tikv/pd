@@ -340,7 +340,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.rootPath,
 		s.member.MemberValue(),
 		s.cfg.TsoSaveInterval.Duration,
-		func() time.Duration { return s.persistOptions.LoadPDServerConfig().MaxResetTSGap },
+		func() time.Duration { return s.persistOptions.GetPDServerConfig().MaxResetTSGap },
 	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
@@ -675,7 +675,8 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.Replication = *s.persistOptions.GetReplication().Load()
 	cfg.LabelProperty = s.persistOptions.LoadLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.LoadClusterVersion()
-	cfg.PDServerCfg = *s.persistOptions.LoadPDServerConfig()
+	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig()
+	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	storage := s.GetStorage()
 	if storage == nil {
 		return cfg
@@ -777,7 +778,7 @@ func (s *Server) GetPDServerConfig() *config.PDServerConfig {
 
 // SetPDServerConfig sets the server config.
 func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
-	old := s.persistOptions.LoadPDServerConfig()
+	old := s.persistOptions.GetPDServerConfig()
 	s.persistOptions.SetPDServerConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetPDServerConfig(old)
@@ -1015,7 +1016,7 @@ func (s *Server) leaderLoop() {
 				continue
 			}
 			syncer := s.cluster.GetRegionSyncer()
-			if s.persistOptions.LoadPDServerConfig().UseRegionStorage {
+			if s.persistOptions.GetPDServerConfig().UseRegionStorage {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
 			log.Info("start watch leader", zap.Stringer("leader", leader))
@@ -1134,7 +1135,7 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
-	if s.persistOptions.LoadPDServerConfig().UseRegionStorage {
+	if s.persistOptions.GetPDServerConfig().UseRegionStorage {
 		s.storage.SwitchToRegionStorage()
 		log.Info("server enable region storage")
 	} else {
