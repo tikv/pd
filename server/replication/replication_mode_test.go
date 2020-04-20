@@ -251,7 +251,7 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 	}}
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
-	rep, err := NewReplicationModeManager(conf, store, cluster)
+	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
 	c.Assert(err, IsNil)
 
 	prepare := func(n int, asyncRegions []int) {
