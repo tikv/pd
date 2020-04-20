@@ -324,7 +324,6 @@ func (h *confHandler) GetReplicationMode(w http.ResponseWriter, r *http.Request)
 // @Produce json
 // @Success 200 {string} string
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Failure 503 {string} string "PD server has no leader."
 // @Router /config/replication-mode [post]
 func (h *confHandler) SetReplicationMode(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetReplicationModeConfig()
