@@ -32,12 +32,13 @@ import (
 // PersistOptions wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistOptions struct {
-	schedule       atomic.Value
-	replication    *Replication
-	labelProperty  atomic.Value
-	clusterVersion unsafe.Pointer
-	pdServerConfig atomic.Value
-	logConfig      atomic.Value
+	schedule        atomic.Value
+	replication     *Replication
+	labelProperty   atomic.Value
+	clusterVersion  unsafe.Pointer
+	pdServerConfig  atomic.Value
+	logConfig       atomic.Value
+	replicationMode atomic.Value
 }
 
 // NewPersistOptions creates a new PersistOptions instance.
@@ -49,6 +50,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.logConfig.Store(&cfg.Log)
+	o.replicationMode.Store(&cfg.ReplicationMode)
 	return o
 }
 
@@ -85,6 +87,16 @@ func (o *PersistOptions) GetLogConfig() *log.Config {
 // SetLogConfig sets the log configuration.
 func (o *PersistOptions) SetLogConfig(cfg *log.Config) {
 	o.logConfig.Store(cfg)
+}
+
+// GetReplicationModeConfig returns the replication mode config.
+func (o *PersistOptions) GetReplicationModeConfig() *ReplicationModeConfig {
+	return o.replicationMode.Load().(*ReplicationModeConfig)
+}
+
+// SetReplicationModeConfig sets the replication mode config.
+func (o *PersistOptions) SetReplicationModeConfig(cfg *ReplicationModeConfig) {
+	o.replicationMode.Store(cfg)
 }
 
 // GetMaxReplicas returns the number of replicas for each region.
@@ -372,12 +384,13 @@ func (o *PersistOptions) LoadLogConfig() *log.Config {
 // Persist saves the configuration to the storage.
 func (o *PersistOptions) Persist(storage *core.Storage) error {
 	cfg := &Config{
-		Schedule:       *o.Load(),
-		Replication:    *o.replication.Load(),
-		LabelProperty:  o.LoadLabelPropertyConfig(),
-		ClusterVersion: *o.LoadClusterVersion(),
-		PDServerCfg:    *o.LoadPDServerConfig(),
-		Log:            *o.LoadLogConfig(),
+		Schedule:        *o.Load(),
+		Replication:     *o.replication.Load(),
+		LabelProperty:   o.LoadLabelPropertyConfig(),
+		ClusterVersion:  *o.LoadClusterVersion(),
+		PDServerCfg:     *o.LoadPDServerConfig(),
+		Log:             *o.LoadLogConfig(),
+		ReplicationMode: *o.GetReplicationModeConfig(),
 	}
 	err := storage.SaveConfig(cfg)
 	return err
@@ -386,12 +399,13 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 // Reload reloads the configuration from the storage.
 func (o *PersistOptions) Reload(storage *core.Storage) error {
 	cfg := &Config{
-		Schedule:       *o.Load().Clone(),
-		Replication:    *o.replication.Load(),
-		LabelProperty:  o.LoadLabelPropertyConfig().Clone(),
-		ClusterVersion: *o.LoadClusterVersion(),
-		PDServerCfg:    *o.LoadPDServerConfig(),
-		Log:            *o.LoadLogConfig(),
+		Schedule:        *o.Load().Clone(),
+		Replication:     *o.replication.Load(),
+		LabelProperty:   o.LoadLabelPropertyConfig().Clone(),
+		ClusterVersion:  *o.LoadClusterVersion(),
+		PDServerCfg:     *o.LoadPDServerConfig(),
+		Log:             *o.LoadLogConfig(),
+		ReplicationMode: *o.GetReplicationModeConfig().Clone(),
 	}
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
@@ -405,6 +419,7 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 		o.SetClusterVersion(&cfg.ClusterVersion)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
 		o.logConfig.Store(&cfg.Log)
+		o.replicationMode.Store(&cfg.ReplicationMode)
 	}
 	return nil
 }

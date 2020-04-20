@@ -15,6 +15,8 @@ package replication
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -32,23 +34,43 @@ const (
 	modeDRAutoSync = "dr_auto_sync"
 )
 
+// FileReplicater is the interface that can save important data to all cluster
+// nodes.
+type FileReplicater interface {
+	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
+}
+
+const drStatusFile = "DR_STATE"
+const persistFileTimeout = time.Second * 10
+
 // ModeManager is used to control how raft logs are synchronized between
 // different tikv nodes.
 type ModeManager struct {
 	sync.RWMutex
-	config  config.ReplicationModeConfig
-	storage *core.Storage
-	cluster opt.Cluster
+	config         config.ReplicationModeConfig
+	storage        *core.Storage
+	cluster        opt.Cluster
+	fileReplicater FileReplicater
 
 	drAutoSync drAutoSyncStatus
+	// intermediate states of the recovery process
+	// they are accessed without locks as they are only used by background job.
+	drRecoverKey   []byte // all regions that has startKey < drRecoverKey are successfully recovered
+	drRecoverCount int    // number of regions that has startKey < drRecoverKey
+	// When find a region that is not recovered, PD will not check all the
+	// remaining regions, but read a region to estimate the overall progress
+	drSampleRecoverCount int // number of regions that are recovered in sample
+	drSampleTotalRegion  int // number of regions in sample
+	drTotalRegion        int // number of all regions
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
-func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, cluster opt.Cluster) (*ModeManager, error) {
+func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, cluster opt.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
 	m := &ModeManager{
-		config:  config,
-		storage: storage,
-		cluster: cluster,
+		config:         config,
+		storage:        storage,
+		cluster:        cluster,
+		fileReplicater: fileReplicater,
 	}
 	switch config.ReplicationMode {
 	case modeMajority:
@@ -58,6 +80,25 @@ func NewReplicationModeManager(config config.ReplicationModeConfig, storage *cor
 		}
 	}
 	return m, nil
+}
+
+// UpdateConfig updates configuration online and updates internal state.
+func (m *ModeManager) UpdateConfig(config config.ReplicationModeConfig) error {
+	m.Lock()
+	defer m.Unlock()
+	// Handle 'majority -> dr_auto_sync' as special case. (sync_recover mode)
+	if m.config.ReplicationMode == modeMajority && config.ReplicationMode == modeDRAutoSync {
+		old := m.config
+		m.config = config
+		err := m.drSwitchToSyncRecoverWithLock()
+		if err != nil {
+			// restore
+			m.config = old
+		}
+		return err
+	}
+	m.config = config
+	return nil
 }
 
 // GetReplicationStatus returns the status to sync with tikv servers.
@@ -141,11 +182,7 @@ func (m *ModeManager) loadDRAutoSync() error {
 	}
 	if !ok {
 		// initialize
-		id, err := m.cluster.AllocID()
-		if err != nil {
-			return err
-		}
-		m.drAutoSync = drAutoSyncStatus{State: drStateSync, StateID: id}
+		return m.drSwitchToSync()
 	}
 	return nil
 }
@@ -159,6 +196,9 @@ func (m *ModeManager) drSwitchToAsync() error {
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateAsync, StateID: id}
+	if err := m.drPersistStatus(dr); err != nil {
+		return err
+	}
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
@@ -171,17 +211,25 @@ func (m *ModeManager) drSwitchToAsync() error {
 func (m *ModeManager) drSwitchToSyncRecover() error {
 	m.Lock()
 	defer m.Unlock()
+	return m.drSwitchToSyncRecoverWithLock()
+}
+
+func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: time.Now()}
+	if err := m.drPersistStatus(dr); err != nil {
+		return err
+	}
 	if err = m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
 	m.drAutoSync = dr
+	m.drRecoverKey, m.drRecoverCount = nil, 0
 	log.Info("switched to sync_recover state", zap.String("replicate-mode", modeDRAutoSync))
 	return nil
 }
@@ -195,12 +243,28 @@ func (m *ModeManager) drSwitchToSync() error {
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateSync, StateID: id}
+	if err := m.drPersistStatus(dr); err != nil {
+		return err
+	}
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
 	m.drAutoSync = dr
 	log.Info("switched to sync state", zap.String("replicate-mode", modeDRAutoSync))
+	return nil
+}
+
+func (m *ModeManager) drPersistStatus(status drAutoSyncStatus) error {
+	if m.fileReplicater != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), persistFileTimeout)
+		defer cancel()
+		data, _ := json.Marshal(status)
+		if err := m.fileReplicater.ReplicateFileToAllMembers(ctx, drStatusFile, data); err != nil {
+			log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", status.State), zap.Error(err))
+			return err
+		}
+	}
 	return nil
 }
 
@@ -238,6 +302,8 @@ func (m *ModeManager) tickDR() {
 		return
 	}
 
+	drTickCounter.Inc()
+
 	canSync := m.checkCanSync()
 
 	if !canSync && m.drGetState() != drStateAsync {
@@ -249,11 +315,14 @@ func (m *ModeManager) tickDR() {
 	}
 
 	if m.drGetState() == drStateSyncRecover {
-		current, total := m.recoverProgress()
-		if current >= total {
+		m.updateProgress()
+		progress := m.estimateProgress()
+		drRecoverProgressGauge.Set(float64(progress))
+
+		if progress == 1.0 {
 			m.drSwitchToSync()
 		} else {
-			m.updateRecoverProgress(float32(current)/float32(total), total, current)
+			m.updateRecoverProgress(progress)
 		}
 	}
 }
@@ -276,38 +345,80 @@ func (m *ModeManager) checkCanSync() bool {
 	return countPrimary < m.config.DRAutoSync.PrimaryReplicas && countDR < m.config.DRAutoSync.DRReplicas
 }
 
-func (m *ModeManager) recoverProgress() (current, total int) {
+var (
+	regionScanBatchSize = 1024
+	regionMinSampleSize = 512
+)
+
+func (m *ModeManager) updateProgress() {
 	m.RLock()
 	defer m.RUnlock()
-	var key []byte
-	for len(key) > 0 || total == 0 {
-		regions := m.cluster.ScanRegions(key, nil, 1024)
+
+	for len(m.drRecoverKey) > 0 || m.drRecoverCount == 0 {
+		regions := m.cluster.ScanRegions(m.drRecoverKey, nil, regionScanBatchSize)
 		if len(regions) == 0 {
-			log.Warn("scan empty regions", zap.ByteString("start-key", key))
-			total++ // make sure it won't complete
+			log.Warn("scan empty regions", zap.ByteString("recover-key", m.drRecoverKey))
 			return
 		}
-
-		total += len(regions)
-		for _, r := range regions {
-			if !bytes.Equal(key, r.GetStartKey()) {
-				log.Warn("found region gap", zap.ByteString("key", key), zap.ByteString("region-start-key", r.GetStartKey()), zap.Uint64("region-id", r.GetID()))
-				total++
+		for i, r := range regions {
+			if m.checkRegionRecover(r, m.drRecoverKey) {
+				m.drRecoverKey = r.GetEndKey()
+				m.drRecoverCount++
+				continue
 			}
-			if r.GetReplicationStatus().GetStateId() == m.drAutoSync.StateID &&
-				r.GetReplicationStatus().GetState() == pb.RegionReplicationState_INTEGRITY_OVER_LABEL {
-				current++
+			// take sample and quit iteration.
+			sampleRegions := regions[i:]
+			if len(sampleRegions) < regionMinSampleSize {
+				if last := sampleRegions[len(sampleRegions)-1]; len(last.GetEndKey()) > 0 {
+					sampleRegions = append(sampleRegions, m.cluster.ScanRegions(last.GetEndKey(), nil, regionMinSampleSize)...)
+				}
 			}
-			key = r.GetEndKey()
+			m.drSampleRecoverCount = 0
+			key := m.drRecoverKey
+			for _, r := range sampleRegions {
+				if m.checkRegionRecover(r, key) {
+					m.drSampleRecoverCount++
+				}
+				key = r.GetEndKey()
+			}
+			m.drSampleTotalRegion = len(sampleRegions)
+			m.drTotalRegion = m.cluster.GetRegionCount()
+			return
 		}
 	}
-	return
 }
 
-func (m *ModeManager) updateRecoverProgress(progress float32, total int, current int) {
+func (m *ModeManager) estimateProgress() float32 {
+	if len(m.drRecoverKey) == 0 && m.drRecoverCount > 0 {
+		return 1.0
+	}
+
+	// make sure progress less than 1
+	if m.drSampleTotalRegion <= m.drSampleRecoverCount {
+		m.drSampleTotalRegion = m.drSampleRecoverCount + 1
+	}
+	totalUnchecked := m.drTotalRegion - m.drRecoverCount
+	if totalUnchecked < m.drSampleTotalRegion {
+		totalUnchecked = m.drSampleTotalRegion
+	}
+	total := m.drRecoverCount + totalUnchecked
+	uncheckRecoverd := float32(totalUnchecked) * float32(m.drSampleRecoverCount) / float32(m.drSampleTotalRegion)
+	return (float32(m.drRecoverCount) + uncheckRecoverd) / float32(total)
+}
+
+func (m *ModeManager) checkRegionRecover(region *core.RegionInfo, startKey []byte) bool {
+	if !bytes.Equal(startKey, region.GetStartKey()) {
+		log.Warn("found region gap", zap.ByteString("key", startKey), zap.ByteString("region-start-key", region.GetStartKey()), zap.Uint64("region-id", region.GetID()))
+		return false
+	}
+	return region.GetReplicationStatus().GetStateId() == m.drAutoSync.StateID &&
+		region.GetReplicationStatus().GetState() == pb.RegionReplicationState_INTEGRITY_OVER_LABEL
+}
+
+func (m *ModeManager) updateRecoverProgress(progress float32) {
 	m.Lock()
 	defer m.Unlock()
 	m.drAutoSync.RecoverProgress = progress
-	m.drAutoSync.TotalRegions = total
-	m.drAutoSync.SyncedRegions = current
+	m.drAutoSync.TotalRegions = m.drTotalRegion
+	m.drAutoSync.SyncedRegions = m.drRecoverCount
 }

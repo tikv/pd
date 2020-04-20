@@ -472,8 +472,6 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
 	c.cluster.opt.AddSchedulerCfg(s.GetType(), args)
-	c.cluster.schedulersCallback()
-
 	return nil
 }
 
@@ -504,8 +502,6 @@ func (c *coordinator) removeScheduler(name string) error {
 			log.Error("can not remove the scheduler config", zap.Error(err))
 		}
 	}
-
-	c.cluster.schedulersCallback()
 	return err
 }
 

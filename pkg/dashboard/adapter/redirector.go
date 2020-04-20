@@ -14,6 +14,7 @@
 package adapter
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -28,16 +29,20 @@ const (
 
 // Redirector is used to redirect when the dashboard is started in another PD.
 type Redirector struct {
-	mu      sync.RWMutex
-	name    string
+	mu sync.RWMutex
+
+	name      string
+	tlsConfig *tls.Config
+
 	address string
 	proxy   *httputil.ReverseProxy
 }
 
 // NewRedirector creates a new Redirector.
-func NewRedirector(name string) *Redirector {
+func NewRedirector(name string, tlsConfig *tls.Config) *Redirector {
 	return &Redirector{
-		name: name,
+		name:      name,
+		tlsConfig: tlsConfig,
 	}
 }
 
@@ -59,10 +64,17 @@ func (h *Redirector) SetAddress(addr string) {
 	h.address = addr
 	target, _ := url.Parse(addr) // error has been handled in checkAddress
 	h.proxy = httputil.NewSingleHostReverseProxy(target)
+
 	defaultDirector := h.proxy.Director
 	h.proxy.Director = func(r *http.Request) {
 		defaultDirector(r)
 		r.Header.Set(proxyHeader, h.name)
+	}
+
+	if h.tlsConfig != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = h.tlsConfig
+		h.proxy.Transport = transport
 	}
 }
 

@@ -37,7 +37,6 @@ import (
 	syncer "github.com/pingcap/pd/v4/server/region_syncer"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/tests"
-	"github.com/pingcap/pd/v4/tests/pdctl"
 	"github.com/pkg/errors"
 )
 
@@ -60,7 +59,6 @@ type clusterTestSuite struct {
 func (s *clusterTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	server.EnableZap = true
-	server.ConfigCheckInterval = 1 * time.Second
 	// to prevent GetStorage
 	dashboard.SetCheckInterval(30 * time.Minute)
 }
@@ -163,60 +161,6 @@ func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 	c.Assert(resp, NotNil)
 	meta := getClusterConfig(c, clusterID, grpcPDClient)
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
-}
-
-func (s *clusterTestSuite) TestReloadConfig(c *C) {
-	tc, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) {
-		conf.PDServerCfg.UseRegionStorage = true
-		conf.EnableDynamicConfig = true
-	})
-	defer tc.Destroy()
-	c.Assert(err, IsNil)
-
-	err = tc.RunInitialServers()
-	c.Assert(err, IsNil)
-	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
-	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	rc := leaderServer.GetServer().GetRaftCluster()
-	c.Assert(rc, NotNil)
-
-	// wait for creating config client
-	time.Sleep(2 * time.Second)
-	cmd := pdctl.InitCommand()
-	pdAddr := leaderServer.GetAddr()
-	args := []string{"-u", pdAddr, "config", "set", "enable-placement-rules", "true"}
-	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-	c.Assert(err, IsNil)
-
-	// transfer leader
-	tc.ResignLeader()
-	tc.WaitLeader()
-	leaderServer = tc.GetServer(tc.GetLeader())
-	c.Assert(leaderServer.GetServer().GetPersistOptions().GetReplication().IsPlacementRulesEnabled(), IsFalse)
-	rc = leaderServer.GetServer().GetRaftCluster()
-	r := &metapb.Region{
-		Id: 3,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		StartKey: []byte{byte(1)},
-		EndKey:   []byte{byte(2)},
-		Peers:    []*metapb.Peer{{Id: 4, StoreId: uint64(1), IsLearner: true}},
-	}
-	region := core.NewRegionInfo(r, r.Peers[0])
-	c.Assert(rc.HandleRegionHeartbeat(region), IsNil)
-
-	// wait for checking region
-	time.Sleep(300 * time.Millisecond)
-	c.Assert(leaderServer.GetServer().GetPersistOptions().GetReplication().IsPlacementRulesEnabled(), IsFalse)
-	c.Assert(rc.GetOperatorController().GetOperator(3), IsNil)
-
-	// wait for configuration valid
-	time.Sleep(1 * time.Second)
-	c.Assert(leaderServer.GetServer().GetPersistOptions().GetReplication().IsPlacementRulesEnabled(), IsTrue)
-	c.Assert(rc.GetOperatorController().GetOperator(3), IsNil)
 }
 
 func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient pdpb.PDClient, store *metapb.Store) {
@@ -595,8 +539,7 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 }
 
 func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
-	// Here needs to disable dynamic config to prevent GetStorage, otherwise, it may have a data race problem.
-	tc, err := tests.NewTestCluster(s.ctx, 1, func(cfg *config.Config) { cfg.EnableDynamicConfig = false })
+	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
 
@@ -687,7 +630,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient())
 
 	// Cluster is not bootstrapped.
-	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), func() {})
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
 	raftCluster, err := rc.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, IsNil)
@@ -726,7 +669,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	c.Assert(storage.Flush(), IsNil)
 
 	raftCluster = &cluster.RaftCluster{}
-	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster, func() {})
+	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, NotNil)
