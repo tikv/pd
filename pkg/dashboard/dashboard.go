@@ -56,9 +56,13 @@ func GetServiceBuilders() []server.HandlerBuilder {
 	return []server.HandlerBuilder{
 		// Dashboard API Service
 		func(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, error) {
-			redirector = adapter.NewRedirector(srv.Name())
+			tlsConfig, err := srv.GetSecurityConfig().ToTLSConfig()
+			if err != nil {
+				return nil, apiServiceGroup, err
+			}
 
-			var err error
+			redirector = adapter.NewRedirector(srv.Name(), tlsConfig)
+
 			if s, err = adapter.NewAPIService(srv, http.HandlerFunc(redirector.ReverseProxy)); err != nil {
 				return nil, apiServiceGroup, err
 			}
