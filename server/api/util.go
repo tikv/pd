@@ -24,18 +24,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/configpb"
 	pd "github.com/pingcap/pd/v4/client"
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/cluster"
 	configmanager "github.com/pingcap/pd/v4/server/config_manager"
 	"github.com/pkg/errors"
 )
 
-// dialClient used to dial http request.
-var dialClient = &http.Client{
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
-
 var (
+
+	// dialClient used to dial http request.
+	dialClient        = cluster.DialClient
 	errNoImplement    = errors.New("no implement")
 	errOptionNotExist = func(name string) error { return errors.Errorf("the option %s does not exist", name) }
 )
