@@ -744,13 +744,18 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 	if rc == nil {
 		return &pdpb.UpdateServiceGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
+	if request.TTL <= 0 {
+		if err := s.storage.RemoveServiceGCSafePoint(string(request.ServiceId)); err != nil {
+			return nil, err
+		}
+	}
 
 	min, err := s.storage.LoadMinServiceGCSafePoint()
 	if err != nil {
 		return nil, err
 	}
 
-	if request.SafePoint > min.SafePoint {
+	if request.TTL > 0 && request.SafePoint > min.SafePoint {
 		ssp := &core.ServiceSafePoint{
 			ServiceID: string(request.ServiceId),
 			ExpiredAt: time.Now().Unix() + request.TTL*int64(time.Second),
@@ -759,12 +764,12 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
 			return nil, err
 		}
-	}
-	// If the min safepoint is updated, load the next one
-	if string(request.ServiceId) == min.ServiceID {
-		min, err = s.storage.LoadMinServiceGCSafePoint()
-		if err != nil {
-			return nil, err
+		// If the min safepoint is updated, load the next one
+		if string(request.ServiceId) == min.ServiceID {
+			min, err = s.storage.LoadMinServiceGCSafePoint()
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 

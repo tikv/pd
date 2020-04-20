@@ -404,6 +404,12 @@ func (s *Storage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 	return s.Save(key, string(value))
 }
 
+// RemoveServiceGCSafePoint removes a GC safepoint for the service
+func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
+	key := path.Join(gcPath, "safe_point", "service", serviceID)
+	return s.Remove(key)
+}
+
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
 func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
 	prefix := path.Join(gcPath, "safe_point", "service")
