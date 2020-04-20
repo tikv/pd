@@ -63,6 +63,7 @@ type Server interface {
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
+	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
 }
 
 // RaftCluster is used for cluster config management.
@@ -215,7 +216,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster, s)
 	if err != nil {
 		return err
 	}

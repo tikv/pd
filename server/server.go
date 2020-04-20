@@ -14,8 +14,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"path"
@@ -331,6 +333,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), PDReleaseVersion)
+	s.member.SetMemberGitHash(s.member.ID(), PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tso = tso.NewTimestampOracle(
 		s.client,
@@ -1152,4 +1155,38 @@ func (s *Server) reloadConfigFromKV() error {
 		log.Info("server disable region storage")
 	}
 	return nil
+}
+
+// ReplicateFileToAllMembers is used to synchronize state among all members.
+// Each member will write `data` to a local file named `name`.
+func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
+	resp, err := s.GetMembers(ctx, nil)
+	if err != nil {
+		return err
+	}
+	for _, member := range resp.Members {
+		clientUrls := member.GetClientUrls()
+		if len(clientUrls) == 0 {
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
+			return errors.Errorf("failed to replicate to member %s: clientUrls is empty", member.GetName())
+		}
+		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
+		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+		req.Header.Set("PD-Allow-follower-handle", "true")
+		res, err := cluster.DialClient.Do(req)
+		if err != nil {
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
+			return errors.Errorf("failed to replicate to member %s", member.GetName())
+		}
+		if res.StatusCode != http.StatusOK {
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
+			return errors.Errorf("failed to replicate to member %s", member.GetName())
+		}
+	}
+	return nil
+}
+
+// PersistFile saves a file in DataDir.
+func (s *Server) PersistFile(name string, data []byte) error {
+	return ioutil.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
 }
