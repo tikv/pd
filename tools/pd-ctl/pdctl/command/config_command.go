@@ -271,7 +271,7 @@ func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 func showReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, replicationModePrefix, http.MethodGet)
 	if err != nil {
-		cmd.Printf("Failed to get replication mode config:%s\n", err)
+		cmd.Printf("Failed to get replication mode config: %s\n", err)
 		return
 	}
 	cmd.Println(r)
