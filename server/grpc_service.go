@@ -736,6 +736,9 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 
 // UpdateServiceGCSafePoint update the safepoint for specific service
 func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (*pdpb.UpdateServiceGCSafePointResponse, error) {
+	s.serviceSafePointLock.Lock()
+	defer s.serviceSafePointLock.Unlock()
+
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
