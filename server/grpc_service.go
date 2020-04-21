@@ -755,7 +755,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 	if request.TTL > 0 && request.SafePoint > min.SafePoint {
 		ssp := &core.ServiceSafePoint{
 			ServiceID: string(request.ServiceId),
-			ExpiredAt: time.Now().Unix() + request.TTL*int64(time.Second),
+			ExpiredAt: time.Now().Unix() + request.TTL,
 			SafePoint: request.SafePoint,
 		}
 		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
