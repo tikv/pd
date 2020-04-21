@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/dashboard"
+	"github.com/pingcap/pd/v4/pkg/swaggerserver"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/api"
 	"github.com/pingcap/pd/v4/server/cluster"
@@ -68,7 +69,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, swaggerserver.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
@@ -147,11 +148,11 @@ func (s *TestServer) GetConfig() *config.Config {
 	return s.server.GetConfig()
 }
 
-// GetScheduleOption returns the current TestServer's schedule option.
-func (s *TestServer) GetScheduleOption() *config.ScheduleOption {
+// GetPersistOptions returns the current TestServer's schedule option.
+func (s *TestServer) GetPersistOptions() *config.PersistOptions {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.GetScheduleOption()
+	return s.server.GetPersistOptions()
 }
 
 // GetAllocator returns the current TestServer's ID allocator.

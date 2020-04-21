@@ -11,17 +11,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !swagger_server
+package replication
 
-package swaggerserver
+import "github.com/prometheus/client_golang/prometheus"
 
-import (
-	"io"
-	"net/http"
+var (
+	drTickCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "replication",
+			Name:      "dr_tick_total",
+			Help:      "Counter of background state check count",
+		})
+
+	drRecoverProgressGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "replication",
+			Name:      "dr_recover_progress",
+			Help:      "Progress of sync_recover process",
+		})
 )
-
-func handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "Swagger UI is not built. Try `make` without `SWAGGER=0`.\n")
-	})
-}

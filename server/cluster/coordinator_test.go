@@ -289,7 +289,6 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	if setTc != nil {
 		setTc(tc)
 	}
-	tc.RaftCluster.configCheck = true
 	co := newCoordinator(ctx, tc.RaftCluster, hbStreams)
 	if run != nil {
 		run(co)
@@ -339,7 +338,6 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	co.wg.Wait()
 
 	tc = newTestCluster(opt)
-	tc.configCheck = true
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package dashboard
+package adapter
 
 import (
 	"context"
@@ -45,8 +45,6 @@ type Manager struct {
 	service    *apiserver.Service
 	redirector *Redirector
 
-	enableDynamic bool
-
 	isLeader bool
 	members  []*pdpb.Member
 }
@@ -55,21 +53,22 @@ type Manager struct {
 func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector) *Manager {
 	ctx, cancel := context.WithCancel(srv.Context())
 	return &Manager{
-		ctx:           ctx,
-		cancel:        cancel,
-		srv:           srv,
-		service:       s,
-		redirector:    redirector,
-		enableDynamic: srv.GetConfig().EnableDynamicConfig,
+		ctx:        ctx,
+		cancel:     cancel,
+		srv:        srv,
+		service:    s,
+		redirector: redirector,
 	}
 }
 
-func (m *Manager) start() {
+// Start monitoring the dynamic config and control the dashboard.
+func (m *Manager) Start() {
 	m.wg.Add(1)
 	go m.serviceLoop()
 }
 
-func (m *Manager) stop() {
+// Stop monitoring the dynamic config and control the dashboard.
+func (m *Manager) Stop() {
 	m.cancel()
 	m.wg.Wait()
 	log.Info("exit dashboard loop")
@@ -99,9 +98,7 @@ func (m *Manager) updateInfo() {
 	if !m.srv.GetMember().IsLeader() {
 		m.isLeader = false
 		m.members = nil
-		if !m.enableDynamic {
-			m.srv.GetScheduleOption().Reload(m.srv.GetStorage())
-		}
+		m.srv.GetPersistOptions().Reload(m.srv.GetStorage())
 		return
 	}
 
@@ -128,7 +125,7 @@ func (m *Manager) updateInfo() {
 
 // checkDashboardAddress checks if the dashboard service needs to change due to dashboard address is changed.
 func (m *Manager) checkAddress() {
-	dashboardAddress := m.srv.GetScheduleOption().GetDashboardAddress()
+	dashboardAddress := m.srv.GetPersistOptions().GetDashboardAddress()
 	switch dashboardAddress {
 	case "auto":
 		if m.isLeader && len(m.members) > 0 {
@@ -194,13 +191,7 @@ func (m *Manager) setNewAddress() {
 		}
 	}
 	// set new dashboard address
-	if m.enableDynamic {
-		if err := m.srv.UpdateConfigManager("pd-server.dashboard-address", addr); err != nil {
-			log.Error("failed to update the dashboard address in config manager", zap.Error(err))
-		}
-		return
-	}
-	cfg := m.srv.GetScheduleOption().GetPDServerConfig().Clone()
+	cfg := m.srv.GetPersistOptions().GetPDServerConfig().Clone()
 	cfg.DashboardAddress = addr
 	m.srv.SetPDServerConfig(*cfg)
 }
@@ -212,7 +203,7 @@ func (m *Manager) startService() {
 	if err := m.service.Start(m.ctx); err != nil {
 		log.Error("Can not start dashboard server", zap.Error(err))
 	} else {
-		log.Info("Dashboard server is started", zap.String("path", uiServiceGroup.PathPrefix))
+		log.Info("Dashboard server is started")
 	}
 }
 
