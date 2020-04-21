@@ -102,7 +102,7 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		key := findTag(reflect.TypeOf(&config.Config{}).Elem(), k)
+		key := findTag(reflect.TypeOf(config.Config{}), k)
 		if key == "" {
 			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
 			return
@@ -124,6 +124,9 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 	case "replication":
 		return h.updateReplication(cfg, kp[len(kp)-1], value)
 	case "replication-mode":
+		if len(kp) < 2 {
+			return errors.Errorf("cannot update config prefix %s", kp[0])
+		}
 		return h.updateReplicationModeConfig(cfg, kp[1:], value)
 	case "pd-server":
 		return h.updatePDServerConfig(cfg, kp[len(kp)-1], value)
@@ -136,6 +139,8 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
 
+// If we have both "a.c" and "b.c" config items, for a given c, it's hard for us to decide which config item it represents.
+// We'd better to naming a config item without duplication.
 func findTag(t reflect.Type, tag string) string {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)

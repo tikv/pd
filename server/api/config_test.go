@@ -126,6 +126,15 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	err = postJSON(addr, postData)
 	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
 
+	// update prefix directly
+	l = map[string]interface{}{
+		"replication-mode": nil,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(strings.Contains(err.Error(), "cannot update config prefix"), IsTrue)
+
 	// config item not found
 	l = map[string]interface{}{
 		"schedule.region-limit": 10,
