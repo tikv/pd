@@ -232,14 +232,8 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	v := rc.OnStoreVersionChange()
-	if s.GetConfig().EnableDynamicConfig && v != nil {
-		err := s.UpdateConfigManager("cluster-version", v.String())
-		if err != nil {
-			log.Error("failed to update the cluster version in config manager", zap.Error(err))
-		}
-	}
-	CheckPDVersion(s.scheduleOpt)
+	rc.OnStoreVersionChange()
+	CheckPDVersion(s.persistOptions)
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
@@ -734,6 +728,64 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 	}, nil
 }
 
+// UpdateServiceGCSafePoint update the safepoint for specific service
+func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (*pdpb.UpdateServiceGCSafePointResponse, error) {
+	s.serviceSafePointLock.Lock()
+	defer s.serviceSafePointLock.Unlock()
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.UpdateServiceGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+	if request.TTL <= 0 {
+		if err := s.storage.RemoveServiceGCSafePoint(string(request.ServiceId)); err != nil {
+			return nil, err
+		}
+	}
+
+	min, err := s.storage.LoadMinServiceGCSafePoint()
+	if err != nil {
+		return nil, err
+	}
+
+	if request.TTL > 0 && request.SafePoint > min.SafePoint {
+		ssp := &core.ServiceSafePoint{
+			ServiceID: string(request.ServiceId),
+			ExpiredAt: time.Now().Unix() + request.TTL,
+			SafePoint: request.SafePoint,
+		}
+		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
+			return nil, err
+		}
+		log.Info("update service GC safe point",
+			zap.String("service-id", string(ssp.ServiceID)),
+			zap.Int64("expire-at", ssp.ExpiredAt),
+			zap.Uint64("safepoint", ssp.SafePoint))
+		// If the min safepoint is updated, load the next one
+		if string(request.ServiceId) == min.ServiceID {
+			min, err = s.storage.LoadMinServiceGCSafePoint()
+			if err != nil {
+				return nil, err
+			}
+		}
+		// If ssp is the first safepoint, it is the min value now
+		if min.SafePoint == 0 {
+			min = ssp
+		}
+	}
+
+	return &pdpb.UpdateServiceGCSafePointResponse{
+		Header:       s.header(),
+		ServiceId:    []byte(min.ServiceID),
+		TTL:          min.ExpiredAt - time.Now().Unix(),
+		MinSafePoint: min.SafePoint,
+	}, nil
+}
+
 // GetOperator gets information about the operator belonging to the speicfy region.
 func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
@@ -796,7 +848,7 @@ func (s *Server) notBootstrappedHeader() *pdpb.ResponseHeader {
 }
 
 func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
-	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.scheduleOpt.LoadClusterVersion())
+	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.persistOptions.LoadClusterVersion())
 	return s.errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
 		Message: msg,

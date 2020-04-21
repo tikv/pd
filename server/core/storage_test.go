@@ -14,8 +14,12 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"path"
+	"strings"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -192,6 +196,59 @@ func (s *testKVSuite) TestLoadGCSafePoint(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(safePoint, Equals, safePoint1)
 	}
+}
+
+func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
+	mem := kv.NewMemoryKV()
+	storage := NewStorage(mem)
+	expireAt := time.Now().Add(100 * time.Second).Unix()
+	serviceSafePoints := []*ServiceSafePoint{
+		{"1", expireAt, 1},
+		{"2", expireAt, 2},
+		{"3", expireAt, 3},
+	}
+
+	for _, ssp := range serviceSafePoints {
+		c.Assert(storage.SaveServiceGCSafePoint(ssp), IsNil)
+	}
+
+	prefix := path.Join(gcPath, "safe_point", "service")
+	prefixEnd := path.Join(gcPath, "safe_point", "servicf")
+	keys, values, err := mem.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
+	c.Assert(err, IsNil)
+	c.Assert(len(keys), Equals, 3)
+	c.Assert(len(values), Equals, 3)
+
+	ssp := &ServiceSafePoint{}
+	for i, key := range keys {
+		c.Assert(strings.HasSuffix(key, serviceSafePoints[i].ServiceID), IsTrue)
+
+		c.Assert(json.Unmarshal([]byte(values[i]), ssp), IsNil)
+		c.Assert(ssp.ServiceID, Equals, serviceSafePoints[i].ServiceID)
+		c.Assert(ssp.ExpiredAt, Equals, serviceSafePoints[i].ExpiredAt)
+		c.Assert(ssp.SafePoint, Equals, serviceSafePoints[i].SafePoint)
+	}
+}
+
+func (s *testKVSuite) TestLoadMinServiceGCSafePoint(c *C) {
+	mem := kv.NewMemoryKV()
+	storage := NewStorage(mem)
+	expireAt := time.Now().Add(1000 * time.Second).Unix()
+	serviceSafePoints := []*ServiceSafePoint{
+		{"1", 0, 1},
+		{"2", expireAt, 2},
+		{"3", expireAt, 3},
+	}
+
+	for _, ssp := range serviceSafePoints {
+		c.Assert(storage.SaveServiceGCSafePoint(ssp), IsNil)
+	}
+
+	ssp, err := storage.LoadMinServiceGCSafePoint()
+	c.Assert(err, IsNil)
+	c.Assert(ssp.ServiceID, Equals, "2")
+	c.Assert(ssp.ExpiredAt, Equals, expireAt)
+	c.Assert(ssp.SafePoint, Equals, uint64(2))
 }
 
 type KVWithMaxRangeLimit struct {

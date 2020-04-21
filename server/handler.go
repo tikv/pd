@@ -73,13 +73,13 @@ var (
 // Handler is a helper to export methods to handle API/RPC requests.
 type Handler struct {
 	s               *Server
-	opt             *config.ScheduleOption
+	opt             *config.PersistOptions
 	pluginChMap     map[string]chan string
 	pluginChMapLock sync.RWMutex
 }
 
 func newHandler(s *Server) *Handler {
-	return &Handler{s: s, opt: s.scheduleOpt, pluginChMap: make(map[string]chan string), pluginChMapLock: sync.RWMutex{}}
+	return &Handler{s: s, opt: s.persistOptions, pluginChMap: make(map[string]chan string), pluginChMapLock: sync.RWMutex{}}
 }
 
 // GetRaftCluster returns RaftCluster.

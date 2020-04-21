@@ -27,13 +27,14 @@ import (
 )
 
 var (
-	configPrefix         = "pd/api/v1/config"
-	schedulePrefix       = "pd/api/v1/config/schedule"
-	replicatePrefix      = "pd/api/v1/config/replicate"
-	labelPropertyPrefix  = "pd/api/v1/config/label-property"
-	clusterVersionPrefix = "pd/api/v1/config/cluster-version"
-	rulesPrefix          = "pd/api/v1/config/rules"
-	rulePrefix           = "pd/api/v1/config/rule"
+	configPrefix          = "pd/api/v1/config"
+	schedulePrefix        = "pd/api/v1/config/schedule"
+	replicatePrefix       = "pd/api/v1/config/replicate"
+	labelPropertyPrefix   = "pd/api/v1/config/label-property"
+	clusterVersionPrefix  = "pd/api/v1/config/cluster-version"
+	rulesPrefix           = "pd/api/v1/config/rules"
+	rulePrefix            = "pd/api/v1/config/rule"
+	replicationModePrefix = "pd/api/v1/config/replication-mode"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -61,6 +62,7 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(NewShowReplicationConfigCommand())
 	sc.AddCommand(NewShowLabelPropertyCommand())
 	sc.AddCommand(NewShowClusterVersionCommand())
+	sc.AddCommand(newShowReplicationModeCommand())
 	return sc
 }
 
@@ -114,6 +116,14 @@ func NewShowClusterVersionCommand() *cobra.Command {
 	return sc
 }
 
+func newShowReplicationModeCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "replication-mode",
+		Short: "show replication mode config",
+		Run:   showReplicationModeCommandFunc,
+	}
+}
+
 // NewSetConfigCommand return a set subcommand of configCmd
 func NewSetConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
@@ -123,6 +133,7 @@ func NewSetConfigCommand() *cobra.Command {
 	}
 	sc.AddCommand(NewSetLabelPropertyCommand())
 	sc.AddCommand(NewSetClusterVersionCommand())
+	sc.AddCommand(newSetReplicationModeCommand())
 	return sc
 }
 
@@ -144,6 +155,14 @@ func NewSetClusterVersionCommand() *cobra.Command {
 		Run:   setClusterVersionCommandFunc,
 	}
 	return sc
+}
+
+func newSetReplicationModeCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "replication-mode <mode> [<key>, <value>]",
+		Short: "set replication mode config",
+		Run:   setReplicationModeCommandFunc,
+	}
 }
 
 // NewDeleteConfigCommand a set subcommand of cfgCmd
@@ -249,6 +268,15 @@ func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
+func showReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, replicationModePrefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get replication mode config: %s\n", err)
+		return
+	}
+	cmd.Println(r)
+}
+
 func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 	var val interface{}
 	data := make(map[string]interface{})
@@ -315,6 +343,17 @@ func setClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 		"cluster-version": args[0],
 	}
 	postJSON(cmd, clusterVersionPrefix, input)
+}
+
+func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) == 1 {
+		postJSON(cmd, replicationModePrefix, map[string]interface{}{"replication-mode": args[0]})
+	} else if len(args) == 3 {
+		postJSON(cmd, replicationModePrefix, map[string]interface{}{args[0]: map[string]string{args[1]: args[2]}})
+	} else {
+		cmd.Println(cmd.UsageString())
+		return
+	}
 }
 
 // NewPlacementRulesCommand placement rules subcommand

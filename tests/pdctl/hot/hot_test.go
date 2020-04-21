@@ -41,7 +41,6 @@ type hotTestSuite struct{}
 
 func (s *hotTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
-	server.ConfigCheckInterval = 10 * time.Millisecond
 }
 
 func (s *hotTestSuite) TestHot(c *C) {

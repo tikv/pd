@@ -228,12 +228,12 @@ disable-make-up-replica = false
 	c.Assert(err, NotNil)
 }
 
-func newTestScheduleOption() (*ScheduleOption, error) {
+func newTestScheduleOption() (*PersistOptions, error) {
 	cfg := NewConfig()
 	if err := cfg.Adjust(nil); err != nil {
 		return nil, err
 	}
-	opt := NewScheduleOption(cfg)
+	opt := NewPersistOptions(cfg)
 	return opt, nil
 }
 

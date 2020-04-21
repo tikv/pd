@@ -57,7 +57,10 @@ func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	kv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item btree.Item) bool {
 		keys = append(keys, item.(memoryKVItem).key)
 		values = append(values, item.(memoryKVItem).value)
-		return len(keys) < limit
+		if limit > 0 {
+			return len(keys) < limit
+		}
+		return true
 	})
 	return keys, values, nil
 }

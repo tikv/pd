@@ -14,7 +14,7 @@ require (
 	github.com/dustin/go-humanize v0.0.0-20180421182945-02af3965c54e // indirect
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
 	github.com/elazarl/go-bindata-assetfs v1.0.0
-	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32
+	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32 // indirect
 	github.com/go-openapi/spec v0.19.7 // indirect
 	github.com/go-openapi/swag v0.19.8 // indirect
 	github.com/go-playground/overalls v0.0.0-20180201144345-22ec1a223b7c
@@ -27,7 +27,7 @@ require (
 	github.com/gorilla/mux v1.7.3
 	github.com/gorilla/websocket v1.2.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
-	github.com/grpc-ecosystem/grpc-gateway v1.12.1
+	github.com/grpc-ecosystem/grpc-gateway v1.14.3 // indirect
 	github.com/json-iterator/go v1.1.9 // indirect
 	github.com/juju/ratelimit v1.0.1
 	github.com/kevinburke/go-bindata v3.18.0+incompatible
@@ -43,7 +43,7 @@ require (
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
-	github.com/pingcap/kvproto v0.0.0-20200409042513-05af14db7537
+	github.com/pingcap/kvproto v0.0.0-20200417092353-efbe03bcffbd
 	github.com/pingcap/log v0.0.0-20200117041106-d28c14d3b1cd
 	github.com/pingcap/sysutil v0.0.0-20200408114249-ed3bd6f7fdb1
 	github.com/pkg/errors v0.9.1

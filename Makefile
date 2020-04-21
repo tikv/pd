@@ -6,10 +6,9 @@ INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; |
                      sort -u | sed -e "s/^\./github.com\/pingcap\/pd\/v4/" | grep -E "tests")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 
-IGNORE := grep -v 'dashboard/uiserver'
-PACKAGES := go list ./... | $(IGNORE)
+PACKAGES := go list ./...
 PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
-GOCHECKER := $(IGNORE) | awk '{ print } END { if (NR > 0) { exit 1 } }'
+GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
 TOOL_BIN_PATH := $(shell pwd)/.tools/bin
@@ -32,10 +31,23 @@ DEADLOCK_DISABLE := $$(\
 						find . -name "*.bak" | xargs rm && \
 						go mod tidy)
 
+BUILD_FLAGS ?=
 BUILD_TAGS ?=
+BUILD_CGO_ENABLED := 0
 
 ifneq ($(SWAGGER), 0)
 	BUILD_TAGS += swagger_server
+endif
+
+ifeq ($(DASHBOARD), 0)
+	BUILD_TAGS += without_dashboard
+else
+	BUILD_CGO_ENABLED := 1
+endif
+
+ifeq ("$(WITH_RACE)", "1")
+	BUILD_FLAGS += -race
+	BUILD_CGO_ENABLED := 1
 endif
 
 LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
@@ -59,19 +71,30 @@ dev: build tools check test
 ci: build check basic-test
 
 build: pd-server pd-ctl
+
 tools: pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench
+
 pd-server: export GO111MODULE=on
 pd-server:
 ifneq ($(SWAGGER), 0)
 	make swagger-spec
 endif
+ifneq ($(DASHBOARD), 0)
+	make dashboard-ui
+endif
+	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o bin/pd-server cmd/pd-server/main.go
+
+pd-server-basic:
+	SWAGGER=0 DASHBOARD=0 make pd-server
+
+# dependent
+swagger-spec: install-tools
+	go mod vendor
+	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
+
+dashboard-ui:
 ifneq ($(OS),Windows_NT)
 	./scripts/embed-dashboard-ui.sh
-endif
-ifeq ("$(WITH_RACE)", "1")
-	CGO_ENABLED=1 go build -race -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "${BUILD_TAGS}" -o bin/pd-server cmd/pd-server/main.go
-else
-	CGO_ENABLED=1 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "${BUILD_TAGS}" -o bin/pd-server cmd/pd-server/main.go
 endif
 
 # Tools
@@ -132,17 +155,13 @@ check-plugin:
 static: export GO111MODULE=on
 static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
-	gofmt -s -l $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
+	gofmt -s -l -d $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	CGO_ENABLED=0 golangci-lint run $$($(PACKAGE_DIRECTORIES))
 	CGO_ENABLED=0 staticcheck $$($(PACKAGES))
 
 lint:
 	@echo "linting"
 	CGO_ENABLED=0 revive -formatter friendly -config revive.toml $$($(PACKAGES))
-
-swagger-spec: install-tools
-	go mod vendor
-	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
 
 tidy:
 	@echo "go mod tidy"
