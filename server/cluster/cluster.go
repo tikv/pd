@@ -1566,7 +1566,7 @@ func (checker *prepareChecker) check(c *RaftCluster) bool {
 		return true
 	}
 	// The number of active regions should be more than total region of all stores * collectFactor
-	if float64(c.core.Length())*collectFactor > float64(checker.sum) {
+	if float64(c.core.GetRegionCount())*collectFactor > float64(checker.sum) {
 		return false
 	}
 	for _, store := range c.GetStores() {

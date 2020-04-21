@@ -362,15 +362,9 @@ func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
 	return bc.Regions.GetOverlaps(region)
 }
 
-// Length returns the RegionsInfo length.
-func (bc *BasicCluster) Length() int {
-	bc.RLock()
-	defer bc.RUnlock()
-	return bc.Regions.Length()
-}
-
 // RegionSetInformer provides access to a shared informer of regions.
 type RegionSetInformer interface {
+	GetRegionCount() int
 	RandFollowerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	RandLeaderRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	RandLearnerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo

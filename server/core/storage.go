@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/gogo/protobuf/proto"
@@ -383,6 +384,62 @@ func (s *Storage) LoadGCSafePoint() (uint64, error) {
 		return 0, err
 	}
 	return safePoint, nil
+}
+
+// ServiceSafePoint is the safepoint for a specific service
+type ServiceSafePoint struct {
+	ServiceID string
+	ExpiredAt int64
+	SafePoint uint64
+}
+
+// SaveServiceGCSafePoint saves a GC safepoint for the service
+func (s *Storage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
+	key := path.Join(gcPath, "safe_point", "service", ssp.ServiceID)
+	value, err := json.Marshal(ssp)
+	if err != nil {
+		return err
+	}
+
+	return s.Save(key, string(value))
+}
+
+// RemoveServiceGCSafePoint removes a GC safepoint for the service
+func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
+	key := path.Join(gcPath, "safe_point", "service", serviceID)
+	return s.Remove(key)
+}
+
+// LoadMinServiceGCSafePoint returns the minimum safepoint across all services
+func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
+	prefix := path.Join(gcPath, "safe_point", "service")
+	// the next of 'e' is 'f'
+	prefixEnd := path.Join(gcPath, "safe_point", "servicf")
+	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return &ServiceSafePoint{}, nil
+	}
+
+	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
+	now := time.Now().Unix()
+	for i, key := range keys {
+		ssp := &ServiceSafePoint{}
+		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
+			return nil, err
+		}
+		if ssp.ExpiredAt < now {
+			s.Remove(key)
+			continue
+		}
+		if ssp.SafePoint < min.SafePoint {
+			min = ssp
+		}
+	}
+
+	return min, nil
 }
 
 // LoadAllScheduleConfig loads all schedulers' config.

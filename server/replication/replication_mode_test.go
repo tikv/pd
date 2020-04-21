@@ -234,3 +234,83 @@ func (s *testReplicationMode) setStoreState(cluster *mockcluster.Cluster, id uin
 	}
 	cluster.PutStore(store)
 }
+
+func (s *testReplicationMode) TestRecoverProgress(c *C) {
+	regionScanBatchSize = 10
+	regionMinSampleSize = 5
+
+	store := core.NewStorage(kv.NewMemoryKV())
+	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
+		LabelKey:         "zone",
+		Primary:          "zone1",
+		DR:               "zone2",
+		PrimaryReplicas:  2,
+		DRReplicas:       1,
+		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+	}}
+	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	cluster.AddLabelsStore(1, 1, map[string]string{})
+	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
+	c.Assert(err, IsNil)
+
+	prepare := func(n int, asyncRegions []int) {
+		rep.drSwitchToSyncRecover()
+		regions := s.genRegions(cluster, rep.drAutoSync.StateID, n)
+		for _, i := range asyncRegions {
+			regions[i] = regions[i].Clone(core.SetReplicationStatus(&pb.RegionReplicationStatus{
+				State:   pb.RegionReplicationState_SIMPLE_MAJORITY,
+				StateId: regions[i].GetReplicationStatus().GetStateId(),
+			}))
+		}
+		for _, r := range regions {
+			cluster.PutRegion(r)
+		}
+		rep.updateProgress()
+	}
+
+	prepare(20, nil)
+	c.Assert(rep.drRecoverCount, Equals, 20)
+	c.Assert(rep.estimateProgress(), Equals, float32(1.0))
+
+	prepare(10, []int{9})
+	c.Assert(rep.drRecoverCount, Equals, 9)
+	c.Assert(rep.drTotalRegion, Equals, 10)
+	c.Assert(rep.drSampleTotalRegion, Equals, 1)
+	c.Assert(rep.drSampleRecoverCount, Equals, 0)
+	c.Assert(rep.estimateProgress(), Equals, float32(9)/float32(10))
+
+	prepare(30, []int{3, 4, 5, 6, 7, 8, 9})
+	c.Assert(rep.drRecoverCount, Equals, 3)
+	c.Assert(rep.drTotalRegion, Equals, 30)
+	c.Assert(rep.drSampleTotalRegion, Equals, 7)
+	c.Assert(rep.drSampleRecoverCount, Equals, 0)
+	c.Assert(rep.estimateProgress(), Equals, float32(3)/float32(30))
+
+	prepare(30, []int{9, 13, 14})
+	c.Assert(rep.drRecoverCount, Equals, 9)
+	c.Assert(rep.drTotalRegion, Equals, 30)
+	c.Assert(rep.drSampleTotalRegion, Equals, 6) // 9 + 10,11,12,13,14
+	c.Assert(rep.drSampleRecoverCount, Equals, 3)
+	c.Assert(rep.estimateProgress(), Equals, (float32(9)+float32(30-9)/2)/float32(30))
+}
+
+func (s *testReplicationMode) genRegions(cluster *mockcluster.Cluster, stateID uint64, n int) []*core.RegionInfo {
+	var regions []*core.RegionInfo
+	for i := 1; i <= n; i++ {
+		cluster.AddLeaderRegion(uint64(i), 1)
+		region := cluster.GetRegion(uint64(i))
+		if i == 1 {
+			region = region.Clone(core.WithStartKey(nil))
+		}
+		if i == n {
+			region = region.Clone(core.WithEndKey(nil))
+		}
+		region = region.Clone(core.SetReplicationStatus(&pb.RegionReplicationStatus{
+			State:   pb.RegionReplicationState_INTEGRITY_OVER_LABEL,
+			StateId: stateID,
+		}))
+		regions = append(regions, region)
+	}
+	return regions
+}

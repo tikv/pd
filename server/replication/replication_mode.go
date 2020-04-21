@@ -53,6 +53,15 @@ type ModeManager struct {
 	fileReplicater FileReplicater
 
 	drAutoSync drAutoSyncStatus
+	// intermediate states of the recovery process
+	// they are accessed without locks as they are only used by background job.
+	drRecoverKey   []byte // all regions that has startKey < drRecoverKey are successfully recovered
+	drRecoverCount int    // number of regions that has startKey < drRecoverKey
+	// When find a region that is not recovered, PD will not check all the
+	// remaining regions, but read a region to estimate the overall progress
+	drSampleRecoverCount int // number of regions that are recovered in sample
+	drSampleTotalRegion  int // number of regions in sample
+	drTotalRegion        int // number of all regions
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
@@ -220,6 +229,7 @@ func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 		return err
 	}
 	m.drAutoSync = dr
+	m.drRecoverKey, m.drRecoverCount = nil, 0
 	log.Info("switched to sync_recover state", zap.String("replicate-mode", modeDRAutoSync))
 	return nil
 }
@@ -292,6 +302,8 @@ func (m *ModeManager) tickDR() {
 		return
 	}
 
+	drTickCounter.Inc()
+
 	canSync := m.checkCanSync()
 
 	if !canSync && m.drGetState() != drStateAsync {
@@ -303,11 +315,14 @@ func (m *ModeManager) tickDR() {
 	}
 
 	if m.drGetState() == drStateSyncRecover {
-		current, total := m.recoverProgress()
-		if current >= total {
+		m.updateProgress()
+		progress := m.estimateProgress()
+		drRecoverProgressGauge.Set(float64(progress))
+
+		if progress == 1.0 {
 			m.drSwitchToSync()
 		} else {
-			m.updateRecoverProgress(float32(current)/float32(total), total, current)
+			m.updateRecoverProgress(progress)
 		}
 	}
 }
@@ -330,38 +345,80 @@ func (m *ModeManager) checkCanSync() bool {
 	return countPrimary < m.config.DRAutoSync.PrimaryReplicas && countDR < m.config.DRAutoSync.DRReplicas
 }
 
-func (m *ModeManager) recoverProgress() (current, total int) {
+var (
+	regionScanBatchSize = 1024
+	regionMinSampleSize = 512
+)
+
+func (m *ModeManager) updateProgress() {
 	m.RLock()
 	defer m.RUnlock()
-	var key []byte
-	for len(key) > 0 || total == 0 {
-		regions := m.cluster.ScanRegions(key, nil, 1024)
+
+	for len(m.drRecoverKey) > 0 || m.drRecoverCount == 0 {
+		regions := m.cluster.ScanRegions(m.drRecoverKey, nil, regionScanBatchSize)
 		if len(regions) == 0 {
-			log.Warn("scan empty regions", zap.ByteString("start-key", key))
-			total++ // make sure it won't complete
+			log.Warn("scan empty regions", zap.ByteString("recover-key", m.drRecoverKey))
 			return
 		}
-
-		total += len(regions)
-		for _, r := range regions {
-			if !bytes.Equal(key, r.GetStartKey()) {
-				log.Warn("found region gap", zap.ByteString("key", key), zap.ByteString("region-start-key", r.GetStartKey()), zap.Uint64("region-id", r.GetID()))
-				total++
+		for i, r := range regions {
+			if m.checkRegionRecover(r, m.drRecoverKey) {
+				m.drRecoverKey = r.GetEndKey()
+				m.drRecoverCount++
+				continue
 			}
-			if r.GetReplicationStatus().GetStateId() == m.drAutoSync.StateID &&
-				r.GetReplicationStatus().GetState() == pb.RegionReplicationState_INTEGRITY_OVER_LABEL {
-				current++
+			// take sample and quit iteration.
+			sampleRegions := regions[i:]
+			if len(sampleRegions) < regionMinSampleSize {
+				if last := sampleRegions[len(sampleRegions)-1]; len(last.GetEndKey()) > 0 {
+					sampleRegions = append(sampleRegions, m.cluster.ScanRegions(last.GetEndKey(), nil, regionMinSampleSize)...)
+				}
 			}
-			key = r.GetEndKey()
+			m.drSampleRecoverCount = 0
+			key := m.drRecoverKey
+			for _, r := range sampleRegions {
+				if m.checkRegionRecover(r, key) {
+					m.drSampleRecoverCount++
+				}
+				key = r.GetEndKey()
+			}
+			m.drSampleTotalRegion = len(sampleRegions)
+			m.drTotalRegion = m.cluster.GetRegionCount()
+			return
 		}
 	}
-	return
 }
 
-func (m *ModeManager) updateRecoverProgress(progress float32, total int, current int) {
+func (m *ModeManager) estimateProgress() float32 {
+	if len(m.drRecoverKey) == 0 && m.drRecoverCount > 0 {
+		return 1.0
+	}
+
+	// make sure progress less than 1
+	if m.drSampleTotalRegion <= m.drSampleRecoverCount {
+		m.drSampleTotalRegion = m.drSampleRecoverCount + 1
+	}
+	totalUnchecked := m.drTotalRegion - m.drRecoverCount
+	if totalUnchecked < m.drSampleTotalRegion {
+		totalUnchecked = m.drSampleTotalRegion
+	}
+	total := m.drRecoverCount + totalUnchecked
+	uncheckRecoverd := float32(totalUnchecked) * float32(m.drSampleRecoverCount) / float32(m.drSampleTotalRegion)
+	return (float32(m.drRecoverCount) + uncheckRecoverd) / float32(total)
+}
+
+func (m *ModeManager) checkRegionRecover(region *core.RegionInfo, startKey []byte) bool {
+	if !bytes.Equal(startKey, region.GetStartKey()) {
+		log.Warn("found region gap", zap.ByteString("key", startKey), zap.ByteString("region-start-key", region.GetStartKey()), zap.Uint64("region-id", region.GetID()))
+		return false
+	}
+	return region.GetReplicationStatus().GetStateId() == m.drAutoSync.StateID &&
+		region.GetReplicationStatus().GetState() == pb.RegionReplicationState_INTEGRITY_OVER_LABEL
+}
+
+func (m *ModeManager) updateRecoverProgress(progress float32) {
 	m.Lock()
 	defer m.Unlock()
 	m.drAutoSync.RecoverProgress = progress
-	m.drAutoSync.TotalRegions = total
-	m.drAutoSync.SyncedRegions = current
+	m.drAutoSync.TotalRegions = m.drTotalRegion
+	m.drAutoSync.SyncedRegions = m.drRecoverCount
 }
