@@ -561,7 +561,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(err, IsNil)
 
 	svr := leaderServer.GetServer()
-	scheduleCfg := opt.Load()
+	scheduleCfg := opt.GetScheduleConfig()
 	replicationCfg := svr.GetReplicationConfig()
 	persistOptions := svr.GetPersistOptions()
 	pdServerCfg := persistOptions.GetPDServerConfig()
@@ -577,15 +577,15 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(svr.SetLabelProperty(typ, labelKey, labelValue), IsNil)
 	c.Assert(svr.SetReplicationConfig(*replicationCfg), IsNil)
 
-	c.Assert(svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
+	c.Assert(persistOptions.GetMaxReplicas(), Equals, 5)
 	c.Assert(persistOptions.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(persistOptions.GetPDServerConfig().UseRegionStorage, Equals, true)
-	c.Assert(persistOptions.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
-	c.Assert(persistOptions.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
+	c.Assert(persistOptions.IsUseRegionStorage(), Equals, true)
+	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
+	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
 
 	c.Assert(svr.DeleteLabelProperty(typ, labelKey, labelValue), IsNil)
 
-	c.Assert(len(persistOptions.LoadLabelPropertyConfig()[typ]), Equals, 0)
+	c.Assert(len(persistOptions.GetLabelPropertyConfig()[typ]), Equals, 0)
 
 	// PUT GET failed
 	oldStorage := svr.GetStorage()
@@ -599,10 +599,10 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(svr.SetPDServerConfig(*pdServerCfg), NotNil)
 	c.Assert(svr.SetLabelProperty(typ, labelKey, labelValue), NotNil)
 
-	c.Assert(svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
+	c.Assert(persistOptions.GetMaxReplicas(), Equals, 5)
 	c.Assert(persistOptions.GetMaxSnapshotCount(), Equals, uint64(10))
 	c.Assert(persistOptions.GetPDServerConfig().UseRegionStorage, Equals, true)
-	c.Assert(len(persistOptions.LoadLabelPropertyConfig()[typ]), Equals, 0)
+	c.Assert(len(persistOptions.GetLabelPropertyConfig()[typ]), Equals, 0)
 
 	// DELETE failed
 	svr.SetStorage(oldStorage)
@@ -611,8 +611,8 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	svr.SetStorage(core.NewStorage(&testErrorKV{}))
 	c.Assert(svr.DeleteLabelProperty(typ, labelKey, labelValue), NotNil)
 
-	c.Assert(persistOptions.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
-	c.Assert(persistOptions.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
+	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
+	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
 	svr.SetStorage(oldStorage)
 }
 

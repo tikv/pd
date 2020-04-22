@@ -14,7 +14,6 @@
 package core
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -25,7 +24,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server/kv"
@@ -42,7 +40,6 @@ const (
 	replicationPath = "replication_mode"
 
 	customScheduleConfigPath = "scheduler_config"
-	componentsConfigPath     = "components_config"
 )
 
 const (
@@ -449,31 +446,6 @@ func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
 		keys[i] = strings.TrimPrefix(key, customScheduleConfigPath+"/")
 	}
 	return keys, values, err
-}
-
-// SaveComponentsConfig stores marshalable cfg to the componentsConfigPath.
-func (s *Storage) SaveComponentsConfig(cfg interface{}) error {
-	var value bytes.Buffer
-	if err := toml.NewEncoder(&value).Encode(cfg); err != nil {
-		return errors.WithStack(err)
-	}
-	return s.Save(componentsConfigPath, value.String())
-}
-
-// LoadComponentsConfig loads config from componentsConfigPath then unmarshal it to cfg.
-func (s *Storage) LoadComponentsConfig(cfg interface{}) (bool, error) {
-	value, err := s.Load(componentsConfigPath)
-	if err != nil {
-		return false, err
-	}
-	if value == "" {
-		return false, nil
-	}
-	_, err = toml.Decode(value, cfg)
-	if err != nil {
-		return false, errors.WithStack(err)
-	}
-	return true, nil
 }
 
 func loadProto(s kv.Base, key string, msg proto.Message) (bool, error) {
