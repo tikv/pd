@@ -20,14 +20,17 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pkg/errors"
 )
 
 var (
 
-	// dialClient used to dial http request.
-	dialClient        = cluster.DialClient
+	// testDialClient used to dial http request. only used for test.
+	testDialClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
 	errNoImplement    = errors.New("no implement")
 	errOptionNotExist = func(name string) error { return errors.Errorf("the option %s does not exist", name) }
 )
@@ -56,8 +59,8 @@ func collectStringOption(option string, input map[string]interface{}, collectors
 	return errOptionNotExist(option)
 }
 
-func readJSON(url string, data interface{}) error {
-	resp, err := dialClient.Get(url)
+func readJSON(client *http.Client, url string, data interface{}) error {
+	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
@@ -79,8 +82,8 @@ func readJSON(url string, data interface{}) error {
 	return nil
 }
 
-func postJSON(url string, data []byte, checkOpts ...func([]byte, int)) error {
-	resp, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
+func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -100,12 +103,12 @@ func postJSON(url string, data []byte, checkOpts ...func([]byte, int)) error {
 	return nil
 }
 
-func doDelete(url string) (*http.Response, error) {
+func doDelete(client *http.Client, url string) (*http.Response, error) {
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	res, err := dialClient.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

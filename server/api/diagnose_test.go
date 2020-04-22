@@ -50,7 +50,7 @@ func (s *testDiagnoseAPISuite) TestDiagnoseSlice(c *C) {
 	}
 	addr := leader.GetConfig().ClientUrls + apiPrefix + "/api/v1/diagnose"
 	follower.Close()
-	resp, err := dialClient.Get(addr)
+	resp, err := testDialClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	buf, err := ioutil.ReadAll(resp.Body)

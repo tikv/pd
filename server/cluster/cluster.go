@@ -105,7 +105,8 @@ type RaftCluster struct {
 	regionSyncer *syncer.RegionSyncer
 
 	ruleManager *placement.RuleManager
-	client      *clientv3.Client
+	etcdClient  *clientv3.Client
+	httpClient  *http.Client
 
 	replicationMode *replication.ModeManager
 }
@@ -117,14 +118,15 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, client *clientv3.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
 		ctx:          ctx,
 		running:      false,
 		clusterID:    clusterID,
 		clusterRoot:  root,
 		regionSyncer: regionSyncer,
-		client:       client,
+		httpClient:   httpClient,
+		etcdClient:   etcdClient,
 	}
 }
 
@@ -1167,11 +1169,11 @@ func (c *RaftCluster) resetClusterMetrics() {
 }
 
 func (c *RaftCluster) collectHealthStatus() {
-	members, err := GetMembers(c.client)
+	members, err := GetMembers(c.etcdClient)
 	if err != nil {
 		log.Error("get members error", zap.Error(err))
 	}
-	unhealth := CheckHealth(members)
+	unhealth := CheckHealth(c.httpClient, members)
 	for _, member := range members {
 		if _, ok := unhealth[member.GetMemberId()]; ok {
 			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
@@ -1639,27 +1641,26 @@ func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 	return c.limiter
 }
 
-// DialClient used to dial http request.
-// Alreadly supports tls in InitHTTPClient(pd-server/main.go)
-var DialClient = &http.Client{
-	Timeout: clientTimeout,
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
-
 var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.
-func CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
+func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.Member {
 	healthMembers := make(map[uint64]*pdpb.Member)
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
-			resp, err := DialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
+			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
+			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s", cURL, healthURL), nil)
+			if err != nil {
+				log.Error("failed to new request", zap.Error(err))
+				cancel()
+				continue
+			}
+
+			resp, err := client.Do(req)
 			if resp != nil {
 				resp.Body.Close()
 			}
-
+			cancel()
 			if err == nil && resp.StatusCode == http.StatusOK {
 				healthMembers[member.GetMemberId()] = member
 				break

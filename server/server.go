@@ -98,10 +98,13 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	member    *member.Member
-	client    *clientv3.Client
-	clusterID uint64 // pd cluster id.
-	rootPath  string
+	member *member.Member
+	// etcd client
+	client *clientv3.Client
+	// http client
+	httpClient *http.Client
+	clusterID  uint64 // pd cluster id.
+	rootPath   string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -310,6 +313,13 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		}
 	}
 	s.client = client
+	s.httpClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   tlsConfig,
+		},
+	}
+
 	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
 	})
@@ -353,7 +363,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	s.componentManager = component.NewManager()
 
@@ -608,6 +618,11 @@ func (s *Server) GetEndpoints() []string {
 // GetClient returns builtin etcd client.
 func (s *Server) GetClient() *clientv3.Client {
 	return s.client
+}
+
+// GetHTTPClient returns builtin etcd client.
+func (s *Server) GetHTTPClient() *http.Client {
+	return s.httpClient
 }
 
 // GetComponentManager returns the component manager of server.
@@ -1164,7 +1179,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
 		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
 		req.Header.Set("PD-Allow-follower-handle", "true")
-		res, err := cluster.DialClient.Do(req)
+		res, err := s.httpClient.Do(req)
 		if err != nil {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
 			return errors.Errorf("failed to replicate to member %s", member.GetName())

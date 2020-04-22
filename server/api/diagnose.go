@@ -116,7 +116,7 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 	lenMembers := len(members.Members)
 	if lenMembers > 0 {
 		for _, m := range members.Members {
-			pm, err := getEtcdPeerStats(m.ClientUrls[0])
+			pm, err := getEtcdPeerStats(d.svr.GetHTTPClient(), m.ClientUrls[0])
 			if err != nil {
 				// get peer etcd failed
 				lostMemberIDs = append(lostMemberIDs, m.MemberId)

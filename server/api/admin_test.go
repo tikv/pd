@@ -71,7 +71,7 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	url := fmt.Sprintf("%s/admin/cache/region/%d", s.urlPrefix, region.GetID())
 	req, err := http.NewRequest("DELETE", url, nil)
 	c.Assert(err, IsNil)
-	res, err := dialClient.Do(req)
+	res, err := testDialClient.Do(req)
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, http.StatusOK)
 	res.Body.Close()
@@ -117,7 +117,7 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = fmt.Sprintf("%d", t1)
 	values, err := json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values,
+	err = postJSON(testDialClient, url, values,
 		func(res []byte, code int) {
 			c.Assert(string(res), Equals, "\"success\"\n")
 			c.Assert(code, Equals, http.StatusOK)
@@ -128,7 +128,7 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = fmt.Sprintf("%d", t2)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values,
+	err = postJSON(testDialClient, url, values,
 		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "too large"), IsTrue)
@@ -137,7 +137,7 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = fmt.Sprintf("%d", t3)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values,
+	err = postJSON(testDialClient, url, values,
 		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "small"), IsTrue)
@@ -145,7 +145,7 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = ""
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values,
+	err = postJSON(testDialClient, url, values,
 		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
@@ -153,7 +153,7 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = "test"
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(url, values,
+	err = postJSON(testDialClient, url, values,
 		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")

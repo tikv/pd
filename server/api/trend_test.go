@@ -75,7 +75,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	mustRegionHeartbeat(c, svr, region6)
 
 	var trend Trend
-	err = readJSON(fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
+	err = readJSON(testDialClient, fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
 	c.Assert(err, IsNil)
 
 	// Check store states.

@@ -47,13 +47,13 @@ func (s *testClusterSuite) TearDownSuite(c *C) {
 func (s *testClusterSuite) TestCluster(c *C) {
 	url := fmt.Sprintf("%s/cluster", s.urlPrefix)
 	c1 := &metapb.Cluster{}
-	err := readJSON(url, c1)
+	err := readJSON(testDialClient, url, c1)
 	c.Assert(err, IsNil)
 
 	c2 := &metapb.Cluster{}
 	r := config.ReplicationConfig{MaxReplicas: 6}
 	c.Assert(s.svr.SetReplicationConfig(r), IsNil)
-	err = readJSON(url, c2)
+	err = readJSON(testDialClient, url, c2)
 	c.Assert(err, IsNil)
 
 	c1.MaxPeerCount = 6
@@ -63,18 +63,18 @@ func (s *testClusterSuite) TestCluster(c *C) {
 func (s *testClusterSuite) TestGetClusterStatus(c *C) {
 	url := fmt.Sprintf("%s/cluster/status", s.urlPrefix)
 	status := cluster.Status{}
-	err := readJSON(url, &status)
+	err := readJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.IsZero(), IsTrue)
 	c.Assert(status.IsInitialized, IsFalse)
 	now := time.Now()
 	mustBootstrapCluster(c, s.svr)
-	err = readJSON(url, &status)
+	err = readJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.After(now), IsTrue)
 	c.Assert(status.IsInitialized, IsFalse)
 	s.svr.SetReplicationConfig(config.ReplicationConfig{MaxReplicas: 1})
-	err = readJSON(url, &status)
+	err = readJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.After(now), IsTrue)
 	c.Assert(status.IsInitialized, IsTrue)
