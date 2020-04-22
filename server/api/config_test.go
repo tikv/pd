@@ -16,11 +16,13 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/config"
 )
 
@@ -50,6 +52,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	err := readJSON(addr, cfg)
 	c.Assert(err, IsNil)
 
+	// the original way
 	r := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(r)
 	c.Assert(err, IsNil)
@@ -80,6 +83,66 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	cfg.Schedule.RegionScheduleLimit = 10
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:9090"
 	c.Assert(cfg, DeepEquals, newCfg)
+
+	// the new way
+	l = map[string]interface{}{
+		"schedule.tolerant-size-ratio":            2.5,
+		"replication.location-labels":             "idc,host",
+		"pd-server.metric-storage":                "http://127.0.0.1:1234",
+		"log.level":                               "warn",
+		"cluster-version":                         "v4.0.0-beta",
+		"replication-mode.replication-mode":       "dr_auto_sync",
+		"replication-mode.dr-auto-sync.label-key": "foobar",
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(err, IsNil)
+	newCfg1 := &config.Config{}
+	err = readJSON(addr, newCfg1)
+	c.Assert(err, IsNil)
+	cfg.Schedule.TolerantSizeRatio = 2.5
+	cfg.Replication.LocationLabels = []string{"idc", "host"}
+	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:1234"
+	cfg.Log.Level = "warn"
+	cfg.ReplicationMode.DRAutoSync.LabelKey = "foobar"
+	cfg.ReplicationMode.ReplicationMode = "dr_auto_sync"
+	v, err := cluster.ParseVersion("v4.0.0-beta")
+	c.Assert(err, IsNil)
+	cfg.ClusterVersion = *v
+	c.Assert(newCfg1, DeepEquals, cfg)
+
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(err, IsNil)
+
+	// illegal prefix
+	l = map[string]interface{}{
+		"replicate.max-replicas": 1,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
+
+	// update prefix directly
+	l = map[string]interface{}{
+		"replication-mode": nil,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(strings.Contains(err.Error(), "cannot update config prefix"), IsTrue)
+
+	// config item not found
+	l = map[string]interface{}{
+		"schedule.region-limit": 10,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(addr, postData)
+	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
 }
 
 func (s *testConfigSuite) TestConfigSchedule(c *C) {

@@ -157,7 +157,7 @@ func (c *RaftCluster) isInitialized() bool {
 // GetReplicationConfig get the replication config.
 func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
 	cfg := &config.ReplicationConfig{}
-	*cfg = *c.opt.GetReplication().Load()
+	*cfg = *c.opt.GetReplicationConfig()
 	return cfg
 }
 
@@ -429,7 +429,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 
 	// c.limiter is nil before "start" is called
-	if c.limiter != nil && c.opt.Load().StoreLimitMode == "auto" {
+	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
@@ -868,7 +868,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 	if err != nil {
 		return errors.Errorf("invalid put store %v, error: %s", store, err)
 	}
-	clusterVersion := *c.opt.LoadClusterVersion()
+	clusterVersion := *c.opt.GetClusterVersion()
 	if !IsCompatible(clusterVersion, *v) {
 		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
 	}
@@ -1260,7 +1260,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 			minVersion = v
 		}
 	}
-	clusterVersion = c.opt.LoadClusterVersion()
+	clusterVersion = c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
 	failpoint.Inject("versionChangeConcurrency", func() {
@@ -1289,7 +1289,7 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 func (c *RaftCluster) IsFeatureSupported(f Feature) bool {
 	c.RLock()
 	defer c.RUnlock()
-	clusterVersion := *c.opt.LoadClusterVersion()
+	clusterVersion := *c.opt.GetClusterVersion()
 	minSupportVersion := *MinSupportedVersion(f)
 	return !clusterVersion.LessThan(minSupportVersion)
 }
@@ -1430,7 +1430,7 @@ func (c *RaftCluster) GetLocationLabels() []string {
 
 // GetStrictlyMatchLabel returns if the strictly label check is enabled.
 func (c *RaftCluster) GetStrictlyMatchLabel() bool {
-	return c.opt.GetReplication().GetStrictlyMatchLabel()
+	return c.opt.GetStrictlyMatchLabel()
 }
 
 // IsPlacementRulesEnabled returns if the placement rules feature is enabled.

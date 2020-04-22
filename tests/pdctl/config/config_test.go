@@ -195,7 +195,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args1 = []string{"-u", pdAddr, "config", "set", "foo-bar", "1"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "config item not found"), IsTrue)
+	c.Assert(strings.Contains(string(output), "not found"), IsTrue)
 	args1 = []string{"-u", pdAddr, "config", "set", "disable-remove-down-replica", "true"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args1...)
 	c.Assert(err, IsNil)

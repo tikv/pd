@@ -56,7 +56,7 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	c.Assert(strings.Contains(err.Error(), "404"), IsTrue)
 	c.Assert(len(output1), Equals, 0)
 
-	// register 2 c1 and 1 c2
+	// register 2 c1, 1 c2, and 1 c3
 	reqs := []map[string]string{
 		{"component": "c1", "addr": "127.0.0.1:1"},
 		{"component": "c1", "addr": "127.0.0.1:2"},
