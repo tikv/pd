@@ -691,7 +691,7 @@ func (r *RegionsInfo) addRegionToSubTree(region *RegionInfo) {
 	}
 }
 
-// shouldRemoveFromSubTree return true when the region leader changed, peer transfered,
+// shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
 // new peer was created, learners changed, pendingPeers changed, and so on.
 func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
 	checkPeersChange := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
