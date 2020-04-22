@@ -16,6 +16,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -940,7 +941,12 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", newStore.GetID()),
 		zap.String("store-address", newStore.GetAddress()))
-	return c.putStoreLocked(newStore)
+	err := c.putStoreLocked(newStore)
+	if err == nil {
+		// set the store limit to unlimit
+		c.coordinator.opController.SetStoreLimit(store.GetID(), float64(math.MaxInt64), storelimit.Auto, storelimit.RegionRemove)
+	}
+	return err
 }
 
 // BuryStore marks a store as tombstone in cluster.

@@ -14,6 +14,7 @@
 package storelimit
 
 import (
+	"math"
 	"time"
 
 	"github.com/juju/ratelimit"
@@ -96,10 +97,15 @@ type StoreLimit struct {
 // NewStoreLimit returns a StoreLimit object
 func NewStoreLimit(rate float64, mode Mode, regionInfluence int64) *StoreLimit {
 	capacity := regionInfluence
-	if rate > 1 {
+	// unlimited
+	if rate == float64(math.MaxInt64) {
+		capacity = math.MaxInt64
+	} else if rate > 1 {
 		capacity = int64(rate * float64(regionInfluence))
+		rate *= float64(regionInfluence)
+	} else {
+		rate *= float64(regionInfluence)
 	}
-	rate *= float64(regionInfluence)
 	return &StoreLimit{
 		bucket:          ratelimit.NewBucketWithRate(rate, capacity),
 		mode:            mode,
