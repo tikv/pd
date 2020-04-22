@@ -848,7 +848,7 @@ func (s *Server) notBootstrappedHeader() *pdpb.ResponseHeader {
 }
 
 func (s *Server) incompatibleVersion(tag string) *pdpb.ResponseHeader {
-	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.persistOptions.LoadClusterVersion())
+	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.persistOptions.GetClusterVersion())
 	return s.errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
 		Message: msg,

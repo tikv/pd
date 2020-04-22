@@ -81,7 +81,7 @@ func CheckPDVersion(opt *config.PersistOptions) {
 	if PDReleaseVersion != "None" {
 		pdVersion = *cluster.MustParseVersion(PDReleaseVersion)
 	}
-	clusterVersion := *opt.LoadClusterVersion()
+	clusterVersion := *opt.GetClusterVersion()
 	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))
 	if pdVersion.LessThan(clusterVersion) {
 		log.Warn(

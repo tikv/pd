@@ -187,7 +187,7 @@ func (c *coordinator) run() {
 		log.Fatal("cannot load schedulers' config", zap.Error(err))
 	}
 
-	scheduleCfg := c.cluster.opt.Load().Clone()
+	scheduleCfg := c.cluster.opt.GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
 		data := configs[i]
@@ -246,7 +246,7 @@ func (c *coordinator) run() {
 
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.opt.Store(scheduleCfg)
+	c.cluster.opt.SetScheduleConfig(scheduleCfg)
 	if err := c.cluster.opt.Persist(c.cluster.storage); err != nil {
 		log.Error("cannot persist schedule config", zap.Error(err))
 	}

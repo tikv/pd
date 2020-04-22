@@ -343,7 +343,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.rootPath,
 		s.member.MemberValue(),
 		s.cfg.TsoSaveInterval.Duration,
-		func() time.Duration { return s.persistOptions.GetPDServerConfig().MaxResetTSGap },
+		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
@@ -505,7 +505,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	clusterMeta := metapb.Cluster{
 		Id:           clusterID,
-		MaxPeerCount: uint32(s.persistOptions.GetReplication().GetMaxReplicas()),
+		MaxPeerCount: uint32(s.persistOptions.GetMaxReplicas()),
 	}
 
 	// Set cluster meta
@@ -674,12 +674,12 @@ func (s *Server) StartTimestamp() int64 {
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
-	cfg.Schedule = *s.persistOptions.Load()
-	cfg.Replication = *s.persistOptions.GetReplication().Load()
-	cfg.LabelProperty = s.persistOptions.LoadLabelPropertyConfig().Clone()
-	cfg.ClusterVersion = *s.persistOptions.LoadClusterVersion()
+	cfg.Schedule = *s.persistOptions.GetScheduleConfig()
+	cfg.Replication = *s.persistOptions.GetReplicationConfig()
 	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
+	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
+	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
 	storage := s.GetStorage()
 	if storage == nil {
 		return cfg
@@ -699,7 +699,7 @@ func (s *Server) GetConfig() *config.Config {
 // GetScheduleConfig gets the balance config information.
 func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
 	cfg := &config.ScheduleConfig{}
-	*cfg = *s.persistOptions.Load()
+	*cfg = *s.persistOptions.GetScheduleConfig()
 	return cfg
 }
 
@@ -711,11 +711,11 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 	if err := cfg.Deprecated(); err != nil {
 		return err
 	}
-	old := s.persistOptions.Load()
+	old := s.persistOptions.GetScheduleConfig()
 	cfg.SchedulersPayload = nil
-	s.persistOptions.Store(&cfg)
+	s.persistOptions.SetScheduleConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.Store(old)
+		s.persistOptions.SetScheduleConfig(old)
 		log.Error("failed to update schedule config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
@@ -729,7 +729,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 // GetReplicationConfig get the replication config.
 func (s *Server) GetReplicationConfig() *config.ReplicationConfig {
 	cfg := &config.ReplicationConfig{}
-	*cfg = *s.persistOptions.GetReplication().Load()
+	*cfg = *s.persistOptions.GetReplicationConfig()
 	return cfg
 }
 
@@ -738,7 +738,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	old := s.persistOptions.GetReplication().Load()
+	old := s.persistOptions.GetReplicationConfig()
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
@@ -759,9 +759,9 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		}
 	}
 
-	s.persistOptions.GetReplication().Store(&cfg)
+	s.persistOptions.SetReplicationConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.GetReplication().Store(old)
+		s.persistOptions.SetReplicationConfig(old)
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
@@ -797,7 +797,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 
 // SetLabelPropertyConfig sets the label property config.
 func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
-	old := s.persistOptions.LoadLabelPropertyConfig()
+	old := s.persistOptions.GetLabelPropertyConfig()
 	s.persistOptions.SetLabelPropertyConfig(cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetLabelPropertyConfig(old)
@@ -821,12 +821,12 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("typ", typ),
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
-			zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()),
+			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
 			zap.Error(err))
 		return err
 	}
 
-	log.Info("label property config is updated", zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()))
+	log.Info("label property config is updated", zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()))
 	return nil
 }
 
@@ -840,18 +840,18 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("typ", typ),
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
-			zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()),
+			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
 			zap.Error(err))
 		return err
 	}
 
-	log.Info("label property config is deleted", zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()))
+	log.Info("label property config is deleted", zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()))
 	return nil
 }
 
 // GetLabelProperty returns the whole label property config.
 func (s *Server) GetLabelProperty() config.LabelPropertyConfig {
-	return s.persistOptions.LoadLabelPropertyConfig().Clone()
+	return s.persistOptions.GetLabelPropertyConfig().Clone()
 }
 
 // SetClusterVersion sets the version of cluster.
@@ -860,7 +860,7 @@ func (s *Server) SetClusterVersion(v string) error {
 	if err != nil {
 		return err
 	}
-	old := s.persistOptions.LoadClusterVersion()
+	old := s.persistOptions.GetClusterVersion()
 	s.persistOptions.SetClusterVersion(version)
 	err = s.persistOptions.Persist(s.storage)
 	if err != nil {
@@ -877,7 +877,7 @@ func (s *Server) SetClusterVersion(v string) error {
 
 // GetClusterVersion returns the version of cluster.
 func (s *Server) GetClusterVersion() semver.Version {
-	return *s.persistOptions.LoadClusterVersion()
+	return *s.persistOptions.GetClusterVersion()
 }
 
 // GetSecurityConfig get the security config.
@@ -903,7 +903,7 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
 		Id:           s.clusterID,
-		MaxPeerCount: uint32(s.persistOptions.GetReplication().GetMaxReplicas()),
+		MaxPeerCount: uint32(s.persistOptions.GetMaxReplicas()),
 	}
 }
 
@@ -1019,7 +1019,7 @@ func (s *Server) leaderLoop() {
 				continue
 			}
 			syncer := s.cluster.GetRegionSyncer()
-			if s.persistOptions.GetPDServerConfig().UseRegionStorage {
+			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
 			log.Info("start watch leader", zap.Stringer("leader", leader))
@@ -1138,7 +1138,7 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
-	if s.persistOptions.GetPDServerConfig().UseRegionStorage {
+	if s.persistOptions.IsUseRegionStorage() {
 		s.storage.SwitchToRegionStorage()
 		log.Info("server enable region storage")
 	} else {
