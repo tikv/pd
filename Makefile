@@ -129,10 +129,10 @@ basic-test:
 
 # These need to be fixed before they can be ran regularly
 check-fail:
-	CGO_ENABLED=0 golangci-lint run --disable-all \
+	golangci-lint run --disable-all \
 	  --enable errcheck \
 	  $$($(PACKAGE_DIRECTORIES))
-	CGO_ENABLED=0 gosec $$($(PACKAGE_DIRECTORIES))
+	gosec $$($(PACKAGE_DIRECTORIES))
 
 check-all: static lint tidy
 	@echo "checking"
@@ -156,12 +156,12 @@ static: export GO111MODULE=on
 static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l -d $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
-	CGO_ENABLED=0 golangci-lint run $$($(PACKAGE_DIRECTORIES))
-	CGO_ENABLED=0 staticcheck $$($(PACKAGES))
+	golangci-lint run $$($(PACKAGE_DIRECTORIES))
+	staticcheck $$($(PACKAGES))
 
 lint:
 	@echo "linting"
-	CGO_ENABLED=0 revive -formatter friendly -config revive.toml $$($(PACKAGES))
+	revive -formatter friendly -config revive.toml $$($(PACKAGES))
 
 tidy:
 	@echo "go mod tidy"
