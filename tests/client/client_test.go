@@ -596,6 +596,39 @@ func (s *testClientSuite) TestUpdateGCSafePoint(c *C) {
 	s.checkGCSafePoint(c, math.MaxUint64)
 }
 
+func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
+	serviceSafePoints := []struct {
+		ServiceID string
+		TTL       int64
+		SafePoint uint64
+	}{
+		{"a", 1000, 1},
+		{"b", 1000, 2},
+		{"c", 1000, 3},
+	}
+	for _, ssp := range serviceSafePoints {
+		min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
+			ssp.ServiceID, 1000, ssp.SafePoint)
+		c.Assert(err, IsNil)
+		c.Assert(min, Equals, uint64(1))
+	}
+	min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
+		"a", 1000, 4)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(2))
+
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"b", -100, 2)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(3))
+
+	// prevent backoff
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"b", 1000, 2)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(3))
+}
+
 func (s *testClientSuite) TestScatterRegion(c *C) {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
