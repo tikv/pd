@@ -33,7 +33,6 @@ import (
 )
 
 const (
-	clientTimeout  = 3 * time.Second
 	requestTimeout = etcdutil.DefaultRequestTimeout
 )
 

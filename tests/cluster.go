@@ -53,8 +53,6 @@ type TestServer struct {
 	state  int32
 }
 
-var initHTTPClientOnce sync.Once
-
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.

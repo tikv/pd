@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server"
@@ -38,8 +37,6 @@ const (
 	errRedirectFailed      = "redirect failed"
 	errRedirectToNotLeader = "redirect to not leader"
 )
-
-var initHTTPClientOnce sync.Once
 
 type runtimeServiceValidator struct {
 	s     *server.Server
