@@ -614,38 +614,32 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 
 // ReplaceOrAddRegion adds or replaces RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
 func (r *RegionsInfo) ReplaceOrAddRegion(region *RegionInfo, overlaps []*RegionInfo, oldRegionItem *regionItem) {
-	// Add to tree and regions.
+	// If oldRegionItem is nil, or ID of the region not equal ID of the oldRegionItem's region.
 	if !isEqualRegion(region, oldRegionItem) {
+		// Remove all the regions of the overlaps.
 		for _, item := range overlaps {
 			r.RemoveRegion(r.GetRegion(item.GetID()))
 		}
+		// If old region exists. remove too.
 		if origin := r.regions.Get(region.GetID()); origin != nil {
 			r.RemoveRegion(origin)
 		}
+		// Add the new region to the regionTree.
 		r.tree.update(region)
 	} else {
+		// When else, remove the regions of the overlaps except the old region.
 		for _, item := range overlaps {
 			if item.GetID() == region.GetID() {
 				continue
 			}
 			r.RemoveRegion(r.GetRegion(item.GetID()))
 		}
+		// Update the region of oldRegionItem with the new region.
+		// To improve performance, not use the way of remove firstly and add secondly,
 		oldRegionItem.region = region
 		// Remove from leaders and followers.
-		if origin := r.regions.Get(region.GetID()); origin != nil {
-			remove := false
-			if origin.leader.GetId() != region.leader.GetId() {
-				remove = true
-			} else if !isEqualPeers(origin.GetVoters(), region.GetVoters()) {
-				remove = true
-			} else if !isEqualPeers(origin.GetLearners(), region.GetLearners()) {
-				remove = true
-			} else if !isEqualPeers(origin.GetPendingPeers(), region.GetPendingPeers()) {
-				remove = true
-			}
-			if remove {
-				r.removeRegionFromSubTree(origin)
-			}
+		if origin := r.regions.Get(region.GetID()); origin != nil && r.shouldRemoveFromSubTree(region, origin) {
+			r.removeRegionFromSubTree(origin)
 		}
 	}
 	r.regions.Put(region)
@@ -695,6 +689,62 @@ func (r *RegionsInfo) addRegionToSubTree(region *RegionInfo) {
 		}
 		store.update(region)
 	}
+}
+
+// shouldRemoveFromSubTree return true when the region leader changed, peer transfered,
+// new peer was created, learners changed, pendingPeers changed, and so on.
+func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
+	checkPeersChange := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
+		for _, a := range origin {
+			if a == nil {
+				continue
+			}
+			both := false
+			for _, b := range other {
+				if b == nil {
+					continue
+				}
+				if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
+					both = true
+					break
+				}
+			}
+			if !both {
+				return true
+			}
+		}
+		for _, b := range other {
+			if b == nil {
+				continue
+			}
+			both := false
+			for _, a := range origin {
+				if a == nil {
+					continue
+				}
+				if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
+					both = true
+					break
+				}
+			}
+			if !both {
+				return true
+			}
+		}
+		return false
+	}
+
+	remove := false
+	if origin.leader.GetId() != region.leader.GetId() {
+		remove = true
+	} else if checkPeersChange(origin.GetVoters(), region.GetVoters()) {
+		remove = true
+	} else if checkPeersChange(origin.GetLearners(), region.GetLearners()) {
+		remove = true
+	} else if checkPeersChange(origin.GetPendingPeers(), region.GetPendingPeers()) {
+		remove = true
+	}
+	return remove
 }
 
 func (r *RegionsInfo) removeRegionFromSubTree(region *RegionInfo) {
@@ -937,47 +987,6 @@ func DiffRegionPeersInfo(origin *RegionInfo, other *RegionInfo) string {
 		}
 	}
 	return strings.Join(ret, ",")
-}
-
-// isEqualPeers return the peers is equal or not
-func isEqualPeers(origin []*metapb.Peer, other []*metapb.Peer) bool {
-	for _, a := range origin {
-		if a == nil {
-			continue
-		}
-		both := false
-		for _, b := range other {
-			if b == nil {
-				continue
-			}
-			if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
-				both = true
-				break
-			}
-		}
-		if !both {
-			return false
-		}
-	}
-	for _, b := range other {
-		if b == nil {
-			continue
-		}
-		both := false
-		for _, a := range origin {
-			if a == nil {
-				continue
-			}
-			if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
-				both = true
-				break
-			}
-		}
-		if !both {
-			return false
-		}
-	}
-	return true
 }
 
 // DiffRegionKeyInfo return the difference of key info between two RegionInfo

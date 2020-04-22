@@ -439,6 +439,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.RLock()
+	//loose check region before put the region, not getOverlaps from the regionTree.
 	origin, _, _, err := c.core.PreCheckPutRegion(region, core.LOOSE)
 	if err != nil {
 		c.RUnlock()
@@ -534,15 +535,24 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		// check its validation again here.
 		//
 		// However it can't solve the race condition of concurrent heartbeats from the same region.
+		// The overlaps include the regions which are overlapped with the specified region range.
+		// The oldRegionItem come from the regionTree's method find(), find() gets the last item that is less or equal than the region.
 		_, overlaps, oldRegionItem, err := c.core.PreCheckPutRegion(region, core.STRICT)
 		if err != nil {
 			c.Unlock()
 			return err
 		}
 
+		// To replace the region if the old region had exists, otherwise put the new region.
+		//
+		// the overlaps and oldRegionItem pass into the function as a parameter,
+		// the purpose is to improve performance, avoid re-valued in the latter method.
 		c.core.ReplaceOrAddRegion(region, overlaps, oldRegionItem)
 		if c.storage != nil {
 			for _, item := range overlaps {
+				// Because the overlaps may has the old region of the special region,
+				// if the old region exists, it should not be deleted at the storage level,
+				// if it needs to delete or update the region, leave this operation to saveKV.
 				if region.GetID() != item.GetID() {
 					if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
 						log.Error("failed to delete region from storage",

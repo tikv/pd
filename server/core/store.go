@@ -91,7 +91,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	return store
 }
 
-// ShallowClone creates a copy of current StoreInfo,but not clone 'meta'.
+// ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
 		meta:             s.meta,

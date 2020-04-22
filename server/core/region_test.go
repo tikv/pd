@@ -229,29 +229,7 @@ func (*testRegionKey) TestReplaceOrAddRegion(c *C) {
 	regions.ReplaceOrAddRegion(region, overlaps, item)
 	c.Assert(len(overlaps), Equals, 4)
 	c.Assert(item.region.GetID(), Equals, uint64(19))
-	c.Assert(regions.leaders[1].length(), Equals, 19)
-	c.Assert(regions.leaders[2].length(), Equals, 19)
-	c.Assert(regions.leaders[3].length(), Equals, 20)
-	c.Assert(regions.leaders[4].length(), Equals, 20)
-	c.Assert(regions.leaders[5].length(), Equals, 19)
-
-	c.Assert(regions.followers[1].length(), Equals, 39)
-	c.Assert(regions.followers[2].length(), Equals, 38)
-	c.Assert(regions.followers[3].length(), Equals, 38)
-	c.Assert(regions.followers[4].length(), Equals, 39)
-	c.Assert(regions.followers[5].length(), Equals, 40)
-
-	c.Assert(regions.learners[1].length(), Equals, 0)
-	c.Assert(regions.learners[2].length(), Equals, 0)
-	c.Assert(regions.learners[3].length(), Equals, 0)
-	c.Assert(regions.learners[4].length(), Equals, 0)
-	c.Assert(regions.learners[5].length(), Equals, 1)
-
-	c.Assert(regions.pendingPeers[1].length(), Equals, 1)
-	c.Assert(regions.pendingPeers[2].length(), Equals, 0)
-	c.Assert(regions.pendingPeers[3].length(), Equals, 0)
-	c.Assert(regions.pendingPeers[4].length(), Equals, 0)
-	c.Assert(regions.pendingPeers[5].length(), Equals, 0)
+	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 97)
 	c.Assert(len(regions.GetRegions()), Equals, 97)
 
@@ -273,29 +251,7 @@ func (*testRegionKey) TestReplaceOrAddRegion(c *C) {
 	regions.ReplaceOrAddRegion(region, overlaps, item)
 	c.Assert(len(overlaps), Equals, 1)
 	c.Assert(isEqualRegion(region, item), IsTrue)
-	c.Assert(regions.leaders[1].length(), Equals, 19)
-	c.Assert(regions.leaders[2].length(), Equals, 20)
-	c.Assert(regions.leaders[3].length(), Equals, 20)
-	c.Assert(regions.leaders[4].length(), Equals, 19)
-	c.Assert(regions.leaders[5].length(), Equals, 19)
-
-	c.Assert(regions.followers[1].length(), Equals, 39)
-	c.Assert(regions.followers[2].length(), Equals, 38)
-	c.Assert(regions.followers[3].length(), Equals, 39)
-	c.Assert(regions.followers[4].length(), Equals, 39)
-	c.Assert(regions.followers[5].length(), Equals, 39)
-
-	c.Assert(regions.learners[1].length(), Equals, 0)
-	c.Assert(regions.learners[2].length(), Equals, 0)
-	c.Assert(regions.learners[3].length(), Equals, 1)
-	c.Assert(regions.learners[4].length(), Equals, 0)
-	c.Assert(regions.learners[5].length(), Equals, 0)
-
-	c.Assert(regions.pendingPeers[1].length(), Equals, 1)
-	c.Assert(regions.pendingPeers[2].length(), Equals, 0)
-	c.Assert(regions.pendingPeers[3].length(), Equals, 0)
-	c.Assert(regions.pendingPeers[4].length(), Equals, 0)
-	c.Assert(regions.pendingPeers[5].length(), Equals, 0)
+	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 97)
 	c.Assert(len(regions.GetRegions()), Equals, 97)
 	_, item = regions.GetOverlaps(region)
@@ -320,54 +276,16 @@ func (*testRegionKey) TestUpdateRegionToSubTree(c *C) {
 			regionChange = region
 		}
 	}
-	c.Assert(regions.leaders[1].length(), Equals, 20)
-	c.Assert(regions.leaders[2].length(), Equals, 20)
-	c.Assert(regions.leaders[3].length(), Equals, 20)
-	c.Assert(regions.leaders[4].length(), Equals, 20)
-	c.Assert(regions.leaders[5].length(), Equals, 20)
-
-	c.Assert(regions.followers[1].length(), Equals, 40)
-	c.Assert(regions.followers[2].length(), Equals, 40)
-	c.Assert(regions.followers[3].length(), Equals, 40)
-	c.Assert(regions.followers[4].length(), Equals, 40)
-	c.Assert(regions.followers[5].length(), Equals, 40)
-
-	regions.removeRegionFromSubTree(regionChange)
-	c.Assert(regions.leaders[1].length(), Equals, 19)
-	c.Assert(regions.leaders[2].length(), Equals, 20)
-	c.Assert(regions.leaders[3].length(), Equals, 20)
-	c.Assert(regions.leaders[4].length(), Equals, 20)
-	c.Assert(regions.leaders[5].length(), Equals, 20)
-
-	c.Assert(regions.followers[1].length(), Equals, 40)
-	c.Assert(regions.followers[2].length(), Equals, 39)
-	c.Assert(regions.followers[3].length(), Equals, 39)
-	c.Assert(regions.followers[4].length(), Equals, 40)
-	c.Assert(regions.followers[5].length(), Equals, 40)
-
+	checkRegions(c, regions)
 	regionChange.voters[0].IsLearner = true
 	regionChange.leader.Id = 203
 	regionChange.learners = append(regionChange.learners, regionChange.voters[0])
 	regionChange.leader = regionChange.voters[1]
+	regions.removeRegionFromSubTree(regionChange)
 	regions.addRegionToSubTree(regionChange)
-
-	c.Assert(regions.leaders[1].length(), Equals, 19)
-	c.Assert(regions.leaders[2].length(), Equals, 21)
-	c.Assert(regions.leaders[3].length(), Equals, 20)
-	c.Assert(regions.leaders[4].length(), Equals, 20)
-	c.Assert(regions.leaders[5].length(), Equals, 20)
-
-	c.Assert(regions.followers[1].length(), Equals, 41)
-	c.Assert(regions.followers[2].length(), Equals, 39)
-	c.Assert(regions.followers[3].length(), Equals, 40)
-	c.Assert(regions.followers[4].length(), Equals, 40)
-	c.Assert(regions.followers[5].length(), Equals, 40)
-
-	c.Assert(regions.learners[1].length(), Equals, 1)
-	c.Assert(regions.learners[2].length(), Equals, 0)
-	c.Assert(regions.learners[3].length(), Equals, 0)
-	c.Assert(regions.learners[4].length(), Equals, 0)
-	c.Assert(regions.learners[5].length(), Equals, 0)
+	checkRegions(c, regions)
+	regions.RemoveRegion(regionChange)
+	checkRegions(c, regions)
 }
 
 func (*testRegionKey) TestIsEqualRegion(c *C) {
@@ -393,55 +311,95 @@ func (*testRegionKey) TestIsEqualRegion(c *C) {
 	c.Assert(isEqualRegion(nil, nil), Equals, false)
 	c.Assert(isEqualRegion(nil, other), Equals, false)
 	c.Assert(isEqualRegion(region, other), Equals, false)
-	otherRegion.meta.Id = 1
-	otherRegion.meta.StartKey = []byte(fmt.Sprintf("%20d", 10))
-	otherRegion.meta.EndKey = []byte(fmt.Sprintf("%20d", 20))
-	c.Assert(isEqualRegion(region, other), Equals, true)
-	otherRegion.meta.StartKey = []byte(fmt.Sprintf("%20d", 11))
-	c.Assert(isEqualRegion(region, other), Equals, true)
-	otherRegion.meta.StartKey = []byte(fmt.Sprintf("%20d", 10))
-	otherRegion.meta.EndKey = []byte(fmt.Sprintf("%20d", 21))
-	c.Assert(isEqualRegion(region, other), Equals, true)
 }
 
-func (*testRegionKey) TestIsEqualPeers(c *C) {
-	var peers [3]*metapb.Peer
-	peers[0] = &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
-	peers[1] = &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
-	peers[2] = &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
-	c.Assert(isEqualPeers(peers[:], nil), Equals, false)
-	c.Assert(isEqualPeers(nil, peers[:]), Equals, false)
-	c.Assert(isEqualPeers(nil, nil), Equals, true)
+func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
+	regions := NewRegionsInfo()
+	peer1 := &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
+	peer2 := &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
+	peer3 := &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
+	peer4 := &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
+	region := NewRegionInfo(&metapb.Region{
+		Id:       uint64(1),
+		Peers:    []*metapb.Peer{peer1, peer2, peer4},
+		StartKey: []byte(fmt.Sprintf("%20d", 10)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
+	}, peer1)
 
-	var others [4]*metapb.Peer
-	others[0] = &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
-	others[1] = &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
-	others[2] = &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
-	others[3] = &metapb.Peer{StoreId: uint64(3), Id: uint64(4)}
-	c.Assert(isEqualPeers(others[:], peers[:]), Equals, false)
-	c.Assert(isEqualPeers(peers[:], others[:]), Equals, false)
+	origin := NewRegionInfo(&metapb.Region{
+		Id:       uint64(2),
+		Peers:    []*metapb.Peer{peer1, peer2, peer3},
+		StartKey: []byte(fmt.Sprintf("%20d", 20)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 30)),
+	}, peer1)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
 
-	var others2 [3]*metapb.Peer
-	others2[0] = &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
-	others2[1] = &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
-	others2[2] = &metapb.Peer{StoreId: uint64(3), Id: uint64(4)}
-	c.Assert(isEqualPeers(others2[:], peers[:]), Equals, false)
-	c.Assert(isEqualPeers(peers[:], others2[:]), Equals, false)
+	region.leader = peer2
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
 
-	var others3 [3]*metapb.Peer
-	others3[0] = &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
-	others3[1] = &metapb.Peer{StoreId: uint64(4), Id: uint64(2)}
-	others3[2] = &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
-	c.Assert(isEqualPeers(others3[:], peers[:]), Equals, false)
-	c.Assert(isEqualPeers(peers[:], others3[:]), Equals, false)
+	region.leader = peer1
+	region.pendingPeers = append(region.pendingPeers, peer4)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
 
-	var others4 [4]*metapb.Peer
-	others4[2] = &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
-	others4[3] = &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
-	others4[1] = &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
-	c.Assert(isEqualPeers(peers[:], others4[:]), Equals, true)
-	c.Assert(isEqualPeers(others4[:], peers[:]), Equals, true)
+	region.pendingPeers[0] = nil
+	region.learners = append(region.learners, peer2)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
 
+	origin.learners = append(origin.learners, peer2)
+	region.learners = append(region.learners, peer2)
+	region.voters[1] = nil
+	region.voters = append(region.voters, peer2)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
+
+	region.voters[2].StoreId = 4
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+}
+
+func checkRegions(c *C, regions *RegionsInfo) {
+	leaderMap := make(map[uint64]uint64)
+	followerMap := make(map[uint64]uint64)
+	learnerMap := make(map[uint64]uint64)
+	pendingPeerMap := make(map[uint64]uint64)
+	for _, item := range regions.GetRegions() {
+		if leaderCount, ok := leaderMap[item.leader.StoreId]; ok {
+			leaderMap[item.leader.StoreId] = leaderCount + 1
+		} else {
+			leaderMap[item.leader.StoreId] = 1
+		}
+		for _, follower := range item.GetFollowers() {
+			if followerCount, ok := followerMap[follower.StoreId]; ok {
+				followerMap[follower.StoreId] = followerCount + 1
+			} else {
+				followerMap[follower.StoreId] = 1
+			}
+		}
+		for _, learner := range item.GetLearners() {
+			if learnerCount, ok := learnerMap[learner.StoreId]; ok {
+				learnerMap[learner.StoreId] = learnerCount + 1
+			} else {
+				learnerMap[learner.StoreId] = 1
+			}
+		}
+		for _, pendingPeer := range item.GetPendingPeers() {
+			if pendingPeerCount, ok := pendingPeerMap[pendingPeer.StoreId]; ok {
+				pendingPeerMap[pendingPeer.StoreId] = pendingPeerCount + 1
+			} else {
+				pendingPeerMap[pendingPeer.StoreId] = 1
+			}
+		}
+	}
+	for key, value := range regions.leaders {
+		c.Assert(value.length(), Equals, int(leaderMap[key]))
+	}
+	for key, value := range regions.followers {
+		c.Assert(value.length(), Equals, int(followerMap[key]))
+	}
+	for key, value := range regions.learners {
+		c.Assert(value.length(), Equals, int(learnerMap[key]))
+	}
+	for key, value := range regions.pendingPeers {
+		c.Assert(value.length(), Equals, int(pendingPeerMap[key]))
+	}
 }
 
 func BenchmarkRandomRegion(b *testing.B) {

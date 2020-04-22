@@ -300,6 +300,7 @@ func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo, checkType RegionCh
 	var overlaps []*RegionInfo
 	var oldRegionItem *regionItem
 	bc.RLock()
+	//If it is a strict check, need to check the region version in the overlaps.
 	if checkType == STRICT {
 		overlaps, oldRegionItem = bc.Regions.GetOverlaps(region)
 		for _, item := range overlaps {
