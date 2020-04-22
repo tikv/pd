@@ -5,9 +5,7 @@ go 1.13
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
-	github.com/chzyer/logex v1.1.10 // indirect
-	github.com/chzyer/readline v0.0.0-20171208011716-f6d7a1f6fbf3
-	github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1 // indirect
+	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.2.0
 	github.com/coreos/pkg v0.0.0-20160727233714-3ac0863d7acf
 	github.com/docker/go-units v0.4.0
@@ -39,7 +37,7 @@ require (
 	github.com/onsi/gomega v1.4.2 // indirect
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
-	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200407064406-b2b8ad403d01
+	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200422085231-3ffcc38629d6
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d

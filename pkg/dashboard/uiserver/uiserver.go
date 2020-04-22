@@ -16,15 +16,25 @@ package uiserver
 import (
 	"io"
 	"net/http"
+
+	assetfs "github.com/elazarl/go-bindata-assetfs"
+)
+
+var (
+	fs = assetFS()
 )
 
 // Handler returns an http.Handler that serves the dashboard UI
 func Handler() http.Handler {
-	fs := assetFS()
 	if fs == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, "Dashboard UI is not built.\n")
 		})
 	}
 	return http.FileServer(fs)
+}
+
+// AssetFS returns the AssetFS of the dashboard UI
+func AssetFS() *assetfs.AssetFS {
+	return fs
 }

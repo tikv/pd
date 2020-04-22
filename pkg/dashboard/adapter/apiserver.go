@@ -22,6 +22,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 
 	"github.com/pingcap/pd/v4/pkg/dashboard/keyvisual/input"
+	"github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/v4/server"
 )
 
@@ -50,6 +51,7 @@ func NewAPIService(srv *server.Server, redirector http.Handler) (*apiserver.Serv
 	s := apiserver.NewService(
 		dashboardCfg,
 		redirector,
+		uiserver.AssetFS(),
 		func(c *config.Config, httpClient *http.Client, etcdClient *clientv3.Client) *region.PDDataProvider {
 			return &region.PDDataProvider{
 				EtcdClient:     etcdClient,
