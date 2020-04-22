@@ -128,6 +128,9 @@ type Server struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
+
+	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
+	serviceSafePointLock sync.Mutex
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -340,7 +343,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.rootPath,
 		s.member.MemberValue(),
 		s.cfg.TsoSaveInterval.Duration,
-		func() time.Duration { return s.persistOptions.LoadPDServerConfig().MaxResetTSGap },
+		func() time.Duration { return s.persistOptions.GetPDServerConfig().MaxResetTSGap },
 	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
@@ -675,8 +678,8 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.Replication = *s.persistOptions.GetReplication().Load()
 	cfg.LabelProperty = s.persistOptions.LoadLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.LoadClusterVersion()
-	cfg.PDServerCfg = *s.persistOptions.LoadPDServerConfig()
-	cfg.Log = *s.persistOptions.LoadLogConfig()
+	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig()
+	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	storage := s.GetStorage()
 	if storage == nil {
 		return cfg
@@ -778,7 +781,7 @@ func (s *Server) GetPDServerConfig() *config.PDServerConfig {
 
 // SetPDServerConfig sets the server config.
 func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
-	old := s.persistOptions.LoadPDServerConfig()
+	old := s.persistOptions.GetPDServerConfig()
 	s.persistOptions.SetPDServerConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetPDServerConfig(old)
@@ -805,31 +808,6 @@ func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 		return err
 	}
 	log.Info("label property config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
-	return nil
-}
-
-// GetLogConfig gets the log config.
-func (s *Server) GetLogConfig() *log.Config {
-	cfg := &log.Config{}
-	*cfg = *s.persistOptions.GetLogConfig()
-	return cfg
-}
-
-// SetLogConfig sets the log config.
-func (s *Server) SetLogConfig(cfg log.Config) error {
-	old := s.persistOptions.LoadLogConfig()
-	s.persistOptions.SetLogConfig(&cfg)
-	log.SetLevel(logutil.StringToZapLogLevel(cfg.Level))
-	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetLogConfig(old)
-		log.SetLevel(logutil.StringToZapLogLevel(old.Level))
-		log.Error("failed to update log config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
-			zap.Error(err))
-		return err
-	}
-	log.Info("log config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -960,10 +938,23 @@ func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 }
 
 // SetLogLevel sets log level.
-func (s *Server) SetLogLevel(level string) {
+func (s *Server) SetLogLevel(level string) error {
+	if !isLevelLegal(level) {
+		return errors.Errorf("log level %s is illegal", level)
+	}
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
+	return nil
+}
+
+func isLevelLegal(level string) bool {
+	switch strings.ToLower(level) {
+	case "fatal", "error", "warn", "warning", "debug", "info":
+		return true
+	default:
+		return false
+	}
 }
 
 // GetReplicationModeConfig returns the replication mode config.
@@ -1028,7 +1019,7 @@ func (s *Server) leaderLoop() {
 				continue
 			}
 			syncer := s.cluster.GetRegionSyncer()
-			if s.persistOptions.LoadPDServerConfig().UseRegionStorage {
+			if s.persistOptions.GetPDServerConfig().UseRegionStorage {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
 			log.Info("start watch leader", zap.Stringer("leader", leader))
@@ -1147,7 +1138,7 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
-	if s.persistOptions.LoadPDServerConfig().UseRegionStorage {
+	if s.persistOptions.GetPDServerConfig().UseRegionStorage {
 		s.storage.SwitchToRegionStorage()
 		log.Info("server enable region storage")
 	} else {

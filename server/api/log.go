@@ -60,7 +60,11 @@ func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.svr.SetLogLevel(level)
+	err = h.svr.SetLogLevel(level)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 
 	h.rd.JSON(w, http.StatusOK, nil)

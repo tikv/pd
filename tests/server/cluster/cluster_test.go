@@ -564,7 +564,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	scheduleCfg := opt.Load()
 	replicationCfg := svr.GetReplicationConfig()
 	persistOptions := svr.GetPersistOptions()
-	pdServerCfg := persistOptions.LoadPDServerConfig()
+	pdServerCfg := persistOptions.GetPDServerConfig()
 
 	// PUT GET DELETE succeed
 	replicationCfg.MaxReplicas = 5
@@ -579,7 +579,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 
 	c.Assert(svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
 	c.Assert(persistOptions.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(persistOptions.LoadPDServerConfig().UseRegionStorage, Equals, true)
+	c.Assert(persistOptions.GetPDServerConfig().UseRegionStorage, Equals, true)
 	c.Assert(persistOptions.LoadLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
 	c.Assert(persistOptions.LoadLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
 
@@ -601,7 +601,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 
 	c.Assert(svr.GetReplicationConfig().MaxReplicas, Equals, uint64(5))
 	c.Assert(persistOptions.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(persistOptions.LoadPDServerConfig().UseRegionStorage, Equals, true)
+	c.Assert(persistOptions.GetPDServerConfig().UseRegionStorage, Equals, true)
 	c.Assert(len(persistOptions.LoadLabelPropertyConfig()[typ]), Equals, 0)
 
 	// DELETE failed

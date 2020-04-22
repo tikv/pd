@@ -66,6 +66,12 @@ type Client interface {
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
+
+	// UpdateServiceGCSafePoint updates the safepoint for specific service and
+	// returns the minimum safepoint across all services, this value is used to
+	// determine the safepoint for multiple services, it does not tigger a GC
+	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
+	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	ScatterRegion(ctx context.Context, regionID uint64) error
@@ -602,6 +608,36 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 		return 0, errors.WithStack(err)
 	}
 	return resp.GetNewSafePoint(), nil
+}
+
+// UpdateServiceGCSafePoint updates the safepoint for specific service and
+// returns the minimum safepoint across all services, this value is used to
+// determine the safepoint for multiple services, it does not tigger a GC
+// job. Use UpdateGCSafePoint to trigger the GC job if needed.
+func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.UpdateServiceGCSafePoint", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+
+	start := time.Now()
+	defer func() { cmdDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	resp, err := c.leaderClient().UpdateServiceGCSafePoint(ctx, &pdpb.UpdateServiceGCSafePointRequest{
+		Header:    c.requestHeader(),
+		ServiceId: []byte(serviceID),
+		TTL:       ttl,
+		SafePoint: safePoint,
+	})
+	cancel()
+
+	if err != nil {
+		cmdFailedDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return 0, errors.WithStack(err)
+	}
+	return resp.GetMinSafePoint(), nil
 }
 
 func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
