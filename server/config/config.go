@@ -74,8 +74,8 @@ type Config struct {
 	Log log.Config `toml:"log" json:"log"`
 
 	// Backward compatibility.
-	LogFileDeprecated  string `toml:"log-file" json:"log-file"`
-	LogLevelDeprecated string `toml:"log-level" json:"log-level"`
+	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
+	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
 
 	// TsoSaveInterval is the interval to save timestamp.
 	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
@@ -132,8 +132,6 @@ type Config struct {
 
 	logger   *zap.Logger
 	logProps *log.ZapProperties
-
-	EnableDynamicConfig bool `toml:"enable-dynamic-config" json:"enable-dynamic-config"`
 
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
@@ -208,8 +206,7 @@ const (
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
 
-	defaultEnableDynamicConfig = false
-	defaultDashboardAddress    = "auto"
+	defaultDashboardAddress = "auto"
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
@@ -455,10 +452,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
-	}
-
-	if !configMetaData.IsDefined("enable-dynamic-config") {
-		c.EnableDynamicConfig = defaultEnableDynamicConfig
 	}
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
@@ -1144,6 +1137,12 @@ func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 type ReplicationModeConfig struct {
 	ReplicationMode string                      `toml:"replication-mode" json:"replication-mode"` // can be 'dr-auto-sync' or 'majority', default value is 'majority'
 	DRAutoSync      DRAutoSyncReplicationConfig `toml:"dr-auto-sync" json:"dr-auto-sync"`         // used when ReplicationMode is 'dr-auto-sync'
+}
+
+// Clone returns a copy of replication mode config.
+func (c *ReplicationModeConfig) Clone() *ReplicationModeConfig {
+	cfg := *c
+	return &cfg
 }
 
 func (c *ReplicationModeConfig) adjust(meta *configMetaData) {

@@ -17,36 +17,32 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"path"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	pd "github.com/pingcap/pd/v4/client"
+	"github.com/pingcap/pd/v4/pkg/component"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/grpcutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/config"
-	configmanager "github.com/pingcap/pd/v4/server/config_manager"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/id"
 	"github.com/pingcap/pd/v4/server/kv"
@@ -81,12 +77,6 @@ var (
 	EtcdStartTimeout = time.Minute * 5
 )
 
-// Component is used to represent the kind of component in config manager.
-const Component = "pd"
-
-// ConfigCheckInterval represents the time interval of running config check.
-var ConfigCheckInterval = 1 * time.Second
-
 // Server is the pd server.
 type Server struct {
 	diagnosticspb.DiagnosticsServer
@@ -108,10 +98,13 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	member    *member.Member
-	client    *clientv3.Client
-	clusterID uint64 // pd cluster id.
-	rootPath  string
+	member *member.Member
+	// etcd client
+	client *clientv3.Client
+	// http client
+	httpClient *http.Client
+	clusterID  uint64 // pd cluster id.
+	rootPath   string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -132,15 +125,15 @@ type Server struct {
 	lg       *zap.Logger
 	logProps *log.ZapProperties
 
-	// components' configuration management
-	cfgManager *configmanager.ConfigManager
-	// component config
-	configVersion *configpb.Version
-	configClient  pd.ConfigClient
+	// It's used to manage components.
+	componentManager *component.Manager
 
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
+
+	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
+	serviceSafePointLock sync.Mutex
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -229,7 +222,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 	}
 
-	s.cfgManager = configmanager.NewConfigManager(s)
 	s.handler = newHandler(s)
 
 	// Adjust etcd config.
@@ -247,7 +239,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, s)
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		configpb.RegisterConfigServer(gs, s.cfgManager)
 	}
 	s.etcdCfg = etcdCfg
 	if EnableZap {
@@ -322,6 +313,13 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		}
 	}
 	s.client = client
+	s.httpClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   tlsConfig,
+		},
+	}
+
 	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
 	})
@@ -348,13 +346,14 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), PDReleaseVersion)
+	s.member.SetMemberGitHash(s.member.ID(), PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tso = tso.NewTimestampOracle(
 		s.client,
 		s.rootPath,
 		s.member.MemberValue(),
 		s.cfg.TsoSaveInterval.Duration,
-		func() time.Duration { return s.persistOptions.LoadPDServerConfig().MaxResetTSGap },
+		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
 	path := filepath.Join(s.cfg.DataDir, "region-meta")
@@ -364,11 +363,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
-	if !s.cfg.EnableDynamicConfig {
-		s.cluster.SetConfigCheck()
-	}
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
+	s.componentManager = component.NewManager()
 
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
@@ -475,10 +472,6 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
-	if s.cfg.EnableDynamicConfig {
-		s.serverLoopWg.Add(1)
-		go s.configCheckLoop()
-	}
 }
 
 func (s *Server) stopServerLoop() {
@@ -522,7 +515,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	clusterMeta := metapb.Cluster{
 		Id:           clusterID,
-		MaxPeerCount: uint32(s.persistOptions.GetReplication().GetMaxReplicas()),
+		MaxPeerCount: uint32(s.persistOptions.GetMaxReplicas()),
 	}
 
 	// Set cluster meta
@@ -627,14 +620,14 @@ func (s *Server) GetClient() *clientv3.Client {
 	return s.client
 }
 
-// GetConfigManager returns the config manager of server.
-func (s *Server) GetConfigManager() *configmanager.ConfigManager {
-	return s.cfgManager
+// GetHTTPClient returns builtin etcd client.
+func (s *Server) GetHTTPClient() *http.Client {
+	return s.httpClient
 }
 
-// GetConfigClient returns the config client of server.
-func (s *Server) GetConfigClient() pd.ConfigClient {
-	return s.configClient
+// GetComponentManager returns the component manager of server.
+func (s *Server) GetComponentManager() *component.Manager {
+	return s.componentManager
 }
 
 // GetLeader returns leader of etcd.
@@ -678,26 +671,6 @@ func (s *Server) GetAllocator() *id.AllocatorImpl {
 	return s.idAllocator
 }
 
-// GetSchedulersCallback returns a callback function to update config manager.
-func (s *Server) GetSchedulersCallback() func() {
-	return func() {
-		if s.GetConfig().EnableDynamicConfig {
-			value := s.GetScheduleConfig().Schedulers
-			tmp := map[string]interface{}{
-				"schedulers": value,
-			}
-			var buf bytes.Buffer
-			if err := toml.NewEncoder(&buf).Encode(tmp); err != nil {
-				log.Error("failed to encode config", zap.Error(err))
-			}
-
-			if err := s.UpdateConfigManager("schedule.schedulers", buf.String()); err != nil {
-				log.Error("failed to update the schedulers in config manager", zap.Error(err))
-			}
-		}
-	}
-}
-
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
@@ -716,12 +689,12 @@ func (s *Server) StartTimestamp() int64 {
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
-	cfg.Schedule = *s.persistOptions.Load()
-	cfg.Replication = *s.persistOptions.GetReplication().Load()
-	cfg.LabelProperty = s.persistOptions.LoadLabelPropertyConfig().Clone()
-	cfg.ClusterVersion = *s.persistOptions.LoadClusterVersion()
-	cfg.PDServerCfg = *s.persistOptions.LoadPDServerConfig()
-	cfg.Log = *s.persistOptions.LoadLogConfig()
+	cfg.Schedule = *s.persistOptions.GetScheduleConfig()
+	cfg.Replication = *s.persistOptions.GetReplicationConfig()
+	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig()
+	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
+	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
+	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
 	storage := s.GetStorage()
 	if storage == nil {
 		return cfg
@@ -741,7 +714,7 @@ func (s *Server) GetConfig() *config.Config {
 // GetScheduleConfig gets the balance config information.
 func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
 	cfg := &config.ScheduleConfig{}
-	*cfg = *s.persistOptions.Load()
+	*cfg = *s.persistOptions.GetScheduleConfig()
 	return cfg
 }
 
@@ -753,11 +726,11 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 	if err := cfg.Deprecated(); err != nil {
 		return err
 	}
-	old := s.persistOptions.Load()
+	old := s.persistOptions.GetScheduleConfig()
 	cfg.SchedulersPayload = nil
-	s.persistOptions.Store(&cfg)
+	s.persistOptions.SetScheduleConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.Store(old)
+		s.persistOptions.SetScheduleConfig(old)
 		log.Error("failed to update schedule config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
@@ -771,7 +744,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 // GetReplicationConfig get the replication config.
 func (s *Server) GetReplicationConfig() *config.ReplicationConfig {
 	cfg := &config.ReplicationConfig{}
-	*cfg = *s.persistOptions.GetReplication().Load()
+	*cfg = *s.persistOptions.GetReplicationConfig()
 	return cfg
 }
 
@@ -780,7 +753,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	old := s.persistOptions.GetReplication().Load()
+	old := s.persistOptions.GetReplicationConfig()
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
@@ -801,9 +774,9 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		}
 	}
 
-	s.persistOptions.GetReplication().Store(&cfg)
+	s.persistOptions.SetReplicationConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.GetReplication().Store(old)
+		s.persistOptions.SetReplicationConfig(old)
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
@@ -823,7 +796,7 @@ func (s *Server) GetPDServerConfig() *config.PDServerConfig {
 
 // SetPDServerConfig sets the server config.
 func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
-	old := s.persistOptions.LoadPDServerConfig()
+	old := s.persistOptions.GetPDServerConfig()
 	s.persistOptions.SetPDServerConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetPDServerConfig(old)
@@ -839,7 +812,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 
 // SetLabelPropertyConfig sets the label property config.
 func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
-	old := s.persistOptions.LoadLabelPropertyConfig()
+	old := s.persistOptions.GetLabelPropertyConfig()
 	s.persistOptions.SetLabelPropertyConfig(cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetLabelPropertyConfig(old)
@@ -853,31 +826,6 @@ func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 	return nil
 }
 
-// GetLogConfig gets the log config.
-func (s *Server) GetLogConfig() *log.Config {
-	cfg := &log.Config{}
-	*cfg = *s.persistOptions.GetLogConfig()
-	return cfg
-}
-
-// SetLogConfig sets the log config.
-func (s *Server) SetLogConfig(cfg log.Config) error {
-	old := s.persistOptions.LoadLogConfig()
-	s.persistOptions.SetLogConfig(&cfg)
-	log.SetLevel(logutil.StringToZapLogLevel(cfg.Level))
-	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetLogConfig(old)
-		log.SetLevel(logutil.StringToZapLogLevel(old.Level))
-		log.Error("failed to update log config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
-			zap.Error(err))
-		return err
-	}
-	log.Info("log config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
-	return nil
-}
-
 // SetLabelProperty inserts a label property config.
 func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
@@ -888,12 +836,12 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("typ", typ),
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
-			zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()),
+			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
 			zap.Error(err))
 		return err
 	}
 
-	log.Info("label property config is updated", zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()))
+	log.Info("label property config is updated", zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()))
 	return nil
 }
 
@@ -907,32 +855,18 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("typ", typ),
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
-			zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()),
+			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
 			zap.Error(err))
 		return err
 	}
 
-	log.Info("label property config is deleted", zap.Reflect("config", s.persistOptions.LoadLabelPropertyConfig()))
+	log.Info("label property config is deleted", zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()))
 	return nil
-}
-
-// UpdateConfigManager is used to update config manager directly.
-func (s *Server) UpdateConfigManager(name, value string) error {
-	cm := s.GetConfigManager()
-	globalVersion := cm.GetGlobalVersion(cm.GetGlobalConfigs(Component))
-	version := &configpb.Version{Global: globalVersion}
-	entries := []*configpb.ConfigEntry{{Name: name, Value: value}}
-	_, status := cm.UpdateGlobal(Component, version, entries)
-	if status.GetCode() != configpb.StatusCode_OK {
-		return errors.New(status.GetMessage())
-	}
-
-	return cm.Persist(s.GetStorage())
 }
 
 // GetLabelProperty returns the whole label property config.
 func (s *Server) GetLabelProperty() config.LabelPropertyConfig {
-	return s.persistOptions.LoadLabelPropertyConfig().Clone()
+	return s.persistOptions.GetLabelPropertyConfig().Clone()
 }
 
 // SetClusterVersion sets the version of cluster.
@@ -941,7 +875,7 @@ func (s *Server) SetClusterVersion(v string) error {
 	if err != nil {
 		return err
 	}
-	old := s.persistOptions.LoadClusterVersion()
+	old := s.persistOptions.GetClusterVersion()
 	s.persistOptions.SetClusterVersion(version)
 	err = s.persistOptions.Persist(s.storage)
 	if err != nil {
@@ -958,7 +892,7 @@ func (s *Server) SetClusterVersion(v string) error {
 
 // GetClusterVersion returns the version of cluster.
 func (s *Server) GetClusterVersion() semver.Version {
-	return *s.persistOptions.LoadClusterVersion()
+	return *s.persistOptions.GetClusterVersion()
 }
 
 // GetSecurityConfig get the security config.
@@ -984,7 +918,7 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
 		Id:           s.clusterID,
-		MaxPeerCount: uint32(s.persistOptions.GetReplication().GetMaxReplicas()),
+		MaxPeerCount: uint32(s.persistOptions.GetMaxReplicas()),
 	}
 }
 
@@ -1019,22 +953,64 @@ func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 }
 
 // SetLogLevel sets log level.
-func (s *Server) SetLogLevel(level string) {
+func (s *Server) SetLogLevel(level string) error {
+	if !isLevelLegal(level) {
+		return errors.Errorf("log level %s is illegal", level)
+	}
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
+	return nil
 }
 
-// GetConfigVersion returns the config version.
-func (s *Server) GetConfigVersion() *configpb.Version {
-	if s.configVersion == nil {
-		return &configpb.Version{Local: 0, Global: 0}
+func isLevelLegal(level string) bool {
+	switch strings.ToLower(level) {
+	case "fatal", "error", "warn", "warning", "debug", "info":
+		return true
+	default:
+		return false
 	}
-	return s.configVersion
 }
 
-func (s *Server) setConfigVersion(version *configpb.Version) {
-	s.configVersion = version
+// GetReplicationModeConfig returns the replication mode config.
+func (s *Server) GetReplicationModeConfig() *config.ReplicationModeConfig {
+	return s.persistOptions.GetReplicationModeConfig()
+}
+
+// SetReplicationModeConfig sets the replication mode.
+func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) error {
+	old := s.persistOptions.GetReplicationModeConfig()
+	s.persistOptions.SetReplicationModeConfig(&cfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetReplicationModeConfig(old)
+		log.Error("failed to update replication mode config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", &old),
+			zap.Error(err))
+		return err
+	}
+	log.Info("replication mode config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+
+	cluster := s.GetRaftCluster()
+	if cluster != nil {
+		err := cluster.GetReplicationMode().UpdateConfig(cfg)
+		if err != nil {
+			log.Warn("failed to update replication mode", zap.Error(err))
+			// revert to old config
+			// NOTE: since we can't put the 2 storage mutations in a batch, it
+			// is possible that memory and persistent data become different
+			// (when below revert fail). They will become the same after PD is
+			// restart or leader is changed.
+			s.persistOptions.SetReplicationModeConfig(old)
+			revertErr := s.persistOptions.Persist(s.storage)
+			if revertErr != nil {
+				log.Error("failed to revert replication mode persistent config", zap.Error(err))
+			}
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (s *Server) leaderLoop() {
@@ -1058,7 +1034,7 @@ func (s *Server) leaderLoop() {
 				continue
 			}
 			syncer := s.cluster.GetRegionSyncer()
-			if s.persistOptions.LoadPDServerConfig().UseRegionStorage {
+			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
 			log.Info("start watch leader", zap.Stringer("leader", leader))
@@ -1172,196 +1148,51 @@ func (s *Server) etcdLeaderLoop() {
 	}
 }
 
-func (s *Server) configCheckLoop() {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-
-	ticker := time.NewTicker(ConfigCheckInterval)
-	defer ticker.Stop()
-	for {
-		// wait leader
-		leader := s.GetLeader()
-		if leader != nil {
-			var err error
-			securityConfig := s.GetSecurityConfig()
-			s.configClient, err = pd.NewConfigClientWithContext(ctx, s.GetEndpoints(), pd.SecurityOption{
-				CAPath:   securityConfig.CAPath,
-				CertPath: securityConfig.CertPath,
-				KeyPath:  securityConfig.KeyPath,
-			})
-			if err != nil {
-				log.Error("failed to create config client", zap.Error(err))
-				return
-			}
-			break
-		}
-		select {
-		case <-ticker.C:
-		case <-ctx.Done():
-			log.Info("config check stop running")
-			return
-		}
-	}
-
-	addr := s.GetAddr()
-	u, err := url.Parse(addr)
-	if err != nil {
-		log.Error("failed to parse url", zap.Error(err))
-		return
-	}
-	compoenntID := u.Host + u.Path
-	version := s.GetConfigVersion()
-	var config bytes.Buffer
-	if err := toml.NewEncoder(&config).Encode(*s.GetConfig()); err != nil {
-		log.Error("failed to encode config", zap.Error(err))
-		return
-	}
-	if err := s.createComponentConfig(ctx, version, compoenntID, config.String()); err != nil {
-		log.Error("failed to create config", zap.Error(err))
-		return
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("config check has been stopped")
-			return
-		case <-ticker.C:
-			if err := s.updateConfig(ctx, compoenntID); err != nil {
-				log.Error("failed to update config", zap.Error(err))
-			}
-
-			rc := s.GetRaftCluster()
-			if s.GetMember().IsLeader() && rc != nil {
-				if !rc.GetConfigCheck() {
-					rc.SetConfigCheck()
-				}
-			}
-		}
-	}
-}
-
-func (s *Server) updateConfig(ctx context.Context, compoenntID string) error {
-	version := s.GetConfigVersion()
-	config, err := s.getComponentConfig(ctx, version, compoenntID)
-	if err != nil {
-		return err
-	}
-	if config == "" {
-		return nil
-	}
-	return s.updateComponentConfig(config)
-}
-
-func (s *Server) createComponentConfig(ctx context.Context, version *configpb.Version, componentID, config string) error {
-	status, v, config, err := s.configClient.Create(ctx, version, Component, componentID, config)
-	if err != nil {
-		return err
-	}
-	switch status.GetCode() {
-	case configpb.StatusCode_OK, configpb.StatusCode_WRONG_VERSION:
-		s.setConfigVersion(v)
-		s.updateComponentConfig(config)
-	case configpb.StatusCode_UNKNOWN:
-		return errors.Errorf("unknown error: %v", status.GetMessage())
-	}
-	return nil
-}
-
-func (s *Server) getComponentConfig(ctx context.Context, version *configpb.Version, componentID string) (string, error) {
-	status, v, cfg, err := s.configClient.Get(ctx, version, Component, componentID)
-	if err != nil {
-		return "", err
-	}
-	var config string
-	switch status.GetCode() {
-	case configpb.StatusCode_OK:
-	case configpb.StatusCode_WRONG_VERSION:
-		config = cfg
-		s.setConfigVersion(v)
-	case configpb.StatusCode_COMPONENT_ID_NOT_FOUND:
-		return "", errors.Errorf("component ID not found: %v", componentID)
-	case configpb.StatusCode_COMPONENT_NOT_FOUND:
-		return "", errors.Errorf("component not found: %v", Component)
-	case configpb.StatusCode_UNKNOWN:
-		return "", errors.Errorf("unknown error: %v", status.GetMessage())
-	}
-	return config, nil
-}
-
-// TODO: support more config item
-func (s *Server) updateComponentConfig(cfg string) error {
-	new := &config.Config{}
-	var saveFile bool
-	if _, err := toml.Decode(cfg, &new); err != nil {
-		return err
-	}
-	var err error
-	old := *s.GetConfig()
-	// SchedulersPayload doesn't need to be updated.
-	new.Schedule.SchedulersPayload = nil
-	old.Schedule.SchedulersPayload = nil
-	if !reflect.DeepEqual(old.Schedule, new.Schedule) {
-		err = s.SetScheduleConfig(new.Schedule)
-		saveFile = true
-	}
-
-	if !reflect.DeepEqual(old.Replication, new.Replication) {
-		err = s.SetReplicationConfig(new.Replication)
-		saveFile = true
-	}
-
-	if !reflect.DeepEqual(old.PDServerCfg, new.PDServerCfg) {
-		err = s.SetPDServerConfig(new.PDServerCfg)
-		saveFile = true
-	}
-
-	if !reflect.DeepEqual(old.ClusterVersion, new.ClusterVersion) {
-		err = s.SetClusterVersion(new.ClusterVersion.String())
-		saveFile = true
-	}
-
-	if !reflect.DeepEqual(old.LabelProperty, new.LabelProperty) {
-		err = s.SetLabelPropertyConfig(new.LabelProperty)
-		saveFile = true
-	}
-
-	if !reflect.DeepEqual(old.Log, new.Log) {
-		err = s.SetLogConfig(new.Log)
-		saveFile = true
-	}
-	if err != nil {
-		return err
-	}
-
-	if saveFile {
-		return s.cfg.RewriteFile(new)
-	}
-	return nil
-}
-
 func (s *Server) reloadConfigFromKV() error {
 	err := s.persistOptions.Reload(s.storage)
 	if err != nil {
 		return err
 	}
-	if s.persistOptions.LoadPDServerConfig().UseRegionStorage {
+	if s.persistOptions.IsUseRegionStorage() {
 		s.storage.SwitchToRegionStorage()
 		log.Info("server enable region storage")
 	} else {
 		s.storage.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
 	}
+	return nil
+}
 
-	// The request only valid when there is a leader.
-	// And before the a PD becomes a leader it will firstly reload the config.
-	if s.cfg.EnableDynamicConfig {
-		err = s.cfgManager.Reload(s.storage)
+// ReplicateFileToAllMembers is used to synchronize state among all members.
+// Each member will write `data` to a local file named `name`.
+func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
+	resp, err := s.GetMembers(ctx, nil)
+	if err != nil {
 		return err
 	}
-
+	for _, member := range resp.Members {
+		clientUrls := member.GetClientUrls()
+		if len(clientUrls) == 0 {
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
+			return errors.Errorf("failed to replicate to member %s: clientUrls is empty", member.GetName())
+		}
+		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
+		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+		req.Header.Set("PD-Allow-follower-handle", "true")
+		res, err := s.httpClient.Do(req)
+		if err != nil {
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
+			return errors.Errorf("failed to replicate to member %s", member.GetName())
+		}
+		if res.StatusCode != http.StatusOK {
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
+			return errors.Errorf("failed to replicate to member %s", member.GetName())
+		}
+	}
 	return nil
+}
+
+// PersistFile saves a file in DataDir.
+func (s *Server) PersistFile(name string, data []byte) error {
+	return ioutil.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644)
 }

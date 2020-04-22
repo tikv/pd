@@ -16,11 +16,13 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/config"
 )
 
@@ -33,14 +35,11 @@ type testConfigSuite struct {
 }
 
 func (s *testConfigSuite) SetUpSuite(c *C) {
-	server.ConfigCheckInterval = 10 * time.Millisecond
-	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.EnableDynamicConfig = true })
+	s.svr, s.cleanup = mustNewServer(c)
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	addr := s.svr.GetAddr()
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
-	// make sure the config client is initialized
-	time.Sleep(20 * time.Millisecond)
 }
 
 func (s *testConfigSuite) TearDownSuite(c *C) {
@@ -50,13 +49,14 @@ func (s *testConfigSuite) TearDownSuite(c *C) {
 func (s *testConfigSuite) TestConfigAll(c *C) {
 	addr := fmt.Sprintf("%s/config", s.urlPrefix)
 	cfg := &config.Config{}
-	err := readJSON(addr, cfg)
+	err := readJSON(testDialClient, addr, cfg)
 	c.Assert(err, IsNil)
 
+	// the original way
 	r := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(r)
 	c.Assert(err, IsNil)
-	err = postJSON(addr, postData)
+	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 	l := map[string]interface{}{
 		"location-labels":       "zone,rack",
@@ -64,7 +64,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(addr, postData)
+	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 
 	l = map[string]interface{}{
@@ -72,41 +72,99 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(addr, postData)
+	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 
-	time.Sleep(20 * time.Millisecond)
 	newCfg := &config.Config{}
-	err = readJSON(addr, newCfg)
+	err = readJSON(testDialClient, addr, newCfg)
 	c.Assert(err, IsNil)
 	cfg.Replication.MaxReplicas = 5
 	cfg.Replication.LocationLabels = []string{"zone", "rack"}
 	cfg.Schedule.RegionScheduleLimit = 10
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:9090"
 	c.Assert(cfg, DeepEquals, newCfg)
+
+	// the new way
+	l = map[string]interface{}{
+		"schedule.tolerant-size-ratio":            2.5,
+		"replication.location-labels":             "idc,host",
+		"pd-server.metric-storage":                "http://127.0.0.1:1234",
+		"log.level":                               "warn",
+		"cluster-version":                         "v4.0.0-beta",
+		"replication-mode.replication-mode":       "dr_auto_sync",
+		"replication-mode.dr-auto-sync.label-key": "foobar",
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
+	newCfg1 := &config.Config{}
+	err = readJSON(testDialClient, addr, newCfg1)
+	c.Assert(err, IsNil)
+	cfg.Schedule.TolerantSizeRatio = 2.5
+	cfg.Replication.LocationLabels = []string{"idc", "host"}
+	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:1234"
+	cfg.Log.Level = "warn"
+	cfg.ReplicationMode.DRAutoSync.LabelKey = "foobar"
+	cfg.ReplicationMode.ReplicationMode = "dr_auto_sync"
+	v, err := cluster.ParseVersion("v4.0.0-beta")
+	c.Assert(err, IsNil)
+	cfg.ClusterVersion = *v
+	c.Assert(newCfg1, DeepEquals, cfg)
+
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
+
+	// illegal prefix
+	l = map[string]interface{}{
+		"replicate.max-replicas": 1,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
+
+	// update prefix directly
+	l = map[string]interface{}{
+		"replication-mode": nil,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(strings.Contains(err.Error(), "cannot update config prefix"), IsTrue)
+
+	// config item not found
+	l = map[string]interface{}{
+		"schedule.region-limit": 10,
+	}
+	postData, err = json.Marshal(l)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
 }
 
 func (s *testConfigSuite) TestConfigSchedule(c *C) {
 	addr := fmt.Sprintf("%s/config/schedule", s.urlPrefix)
 	sc := &config.ScheduleConfig{}
-	c.Assert(readJSON(addr, sc), IsNil)
+	c.Assert(readJSON(testDialClient, addr, sc), IsNil)
 
 	sc.MaxStoreDownTime.Duration = time.Second
 	postData, err := json.Marshal(sc)
 	c.Assert(err, IsNil)
-	err = postJSON(addr, postData)
+	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 
-	time.Sleep(20 * time.Millisecond)
 	sc1 := &config.ScheduleConfig{}
-	c.Assert(readJSON(addr, sc1), IsNil)
+	c.Assert(readJSON(testDialClient, addr, sc1), IsNil)
 	c.Assert(*sc, DeepEquals, *sc1)
 }
 
 func (s *testConfigSuite) TestConfigReplication(c *C) {
 	addr := fmt.Sprintf("%s/config/replicate", s.urlPrefix)
 	rc := &config.ReplicationConfig{}
-	err := readJSON(addr, rc)
+	err := readJSON(testDialClient, addr, rc)
 	c.Assert(err, IsNil)
 
 	rc.MaxReplicas = 5
@@ -114,19 +172,18 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	rc1 := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(rc1)
 	c.Assert(err, IsNil)
-	err = postJSON(addr, postData)
+	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 	rc.LocationLabels = []string{"zone", "rack"}
 
 	rc2 := map[string]string{"location-labels": "zone,rack"}
 	postData, err = json.Marshal(rc2)
 	c.Assert(err, IsNil)
-	err = postJSON(addr, postData)
+	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 
-	time.Sleep(20 * time.Millisecond)
 	rc3 := &config.ReplicationConfig{}
-	err = readJSON(addr, rc3)
+	err = readJSON(testDialClient, addr, rc3)
 	c.Assert(err, IsNil)
 
 	c.Assert(*rc, DeepEquals, *rc3)
@@ -137,7 +194,7 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 
 	loadProperties := func() config.LabelPropertyConfig {
 		var cfg config.LabelPropertyConfig
-		err := readJSON(addr, &cfg)
+		err := readJSON(testDialClient, addr, &cfg)
 		c.Assert(err, IsNil)
 		return cfg
 	}
@@ -151,9 +208,8 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 		`{"type": "bar", "action": "set", "label-key": "host", "label-value": "h1"}`,
 	}
 	for _, cmd := range cmds {
-		err := postJSON(addr, []byte(cmd))
+		err := postJSON(testDialClient, addr, []byte(cmd))
 		c.Assert(err, IsNil)
-		time.Sleep(20 * time.Millisecond)
 	}
 
 	cfg = loadProperties()
@@ -169,9 +225,8 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 		`{"type": "bar", "action": "delete", "label-key": "host", "label-value": "h1"}`,
 	}
 	for _, cmd := range cmds {
-		err := postJSON(addr, []byte(cmd))
+		err := postJSON(testDialClient, addr, []byte(cmd))
 		c.Assert(err, IsNil)
-		time.Sleep(20 * time.Millisecond)
 	}
 
 	cfg = loadProperties()
@@ -185,7 +240,7 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	r := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(r)
 	c.Assert(err, IsNil)
-	err = postJSON(addr, postData)
+	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 	l := map[string]interface{}{
 		"location-labels":       "zone,rack",
@@ -193,7 +248,7 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(addr, postData)
+	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 
 	l = map[string]interface{}{
@@ -201,13 +256,12 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(addr, postData)
+	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 
-	time.Sleep(20 * time.Millisecond)
 	addr = fmt.Sprintf("%s/config/default", s.urlPrefix)
 	defaultCfg := &config.Config{}
-	err = readJSON(addr, defaultCfg)
+	err = readJSON(testDialClient, addr, defaultCfg)
 	c.Assert(err, IsNil)
 
 	c.Assert(defaultCfg.Replication.MaxReplicas, Equals, uint64(3))

@@ -15,25 +15,13 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 
-	"github.com/pingcap/kvproto/pkg/configpb"
-	pd "github.com/pingcap/pd/v4/client"
-	"github.com/pingcap/pd/v4/server"
-	configmanager "github.com/pingcap/pd/v4/server/config_manager"
 	"github.com/pkg/errors"
 )
-
-// dialClient used to dial http request.
-var dialClient = &http.Client{
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
 
 var (
 	errNoImplement    = errors.New("no implement")
@@ -64,8 +52,8 @@ func collectStringOption(option string, input map[string]interface{}, collectors
 	return errOptionNotExist(option)
 }
 
-func readJSON(url string, data interface{}) error {
-	resp, err := dialClient.Get(url)
+func readJSON(client *http.Client, url string, data interface{}) error {
+	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
@@ -87,8 +75,8 @@ func readJSON(url string, data interface{}) error {
 	return nil
 }
 
-func postJSON(url string, data []byte, checkOpts ...func([]byte, int)) error {
-	resp, err := dialClient.Post(url, "application/json", bytes.NewBuffer(data))
+func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+	resp, err := client.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -108,33 +96,15 @@ func postJSON(url string, data []byte, checkOpts ...func([]byte, int)) error {
 	return nil
 }
 
-func doDelete(url string) (*http.Response, error) {
+func doDelete(client *http.Client, url string) (*http.Response, error) {
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	res, err := dialClient.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	res.Body.Close()
 	return res, nil
-}
-
-func redirectUpdateReq(ctx context.Context, client pd.ConfigClient, cm *configmanager.ConfigManager, entries []*entry) error {
-	var configEntries []*configpb.ConfigEntry
-	for _, e := range entries {
-		configEntry := &configpb.ConfigEntry{Name: e.key, Value: e.value}
-		configEntries = append(configEntries, configEntry)
-	}
-	version := &configpb.Version{Global: cm.GetGlobalVersion(cm.GetGlobalConfigs(server.Component))}
-	kind := &configpb.ConfigKind{Kind: &configpb.ConfigKind_Global{Global: &configpb.Global{Component: server.Component}}}
-	status, _, err := client.Update(ctx, version, kind, configEntries)
-	if err != nil {
-		return err
-	}
-	if status.GetCode() != configpb.StatusCode_OK {
-		return errors.New(status.GetMessage())
-	}
-	return nil
 }

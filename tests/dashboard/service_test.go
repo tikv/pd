@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tests/pdctl"
 
@@ -53,7 +52,6 @@ type serverTestSuite struct {
 
 func (s *serverTestSuite) SetUpSuite(c *C) {
 	server.EnableZap = true
-	server.ConfigCheckInterval = 10 * time.Millisecond
 	dashboard.SetCheckInterval(10 * time.Millisecond)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.httpClient = &http.Client{
@@ -115,19 +113,8 @@ func (s *serverTestSuite) checkServiceIsStopped(c *C, servers map[string]*tests.
 	}
 }
 
-func (s *serverTestSuite) checkServiceIsChanging(c *C, servers map[string]*tests.TestServer) {
-	s.waitForConfigSync()
-	for _, srv := range servers {
-		addr := srv.GetAddr()
-		s.checkRespCode(c, fmt.Sprintf("%s/dashboard/", addr), http.StatusTemporaryRedirect)
-		s.checkRespCode(c, fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusLoopDetected)
-	}
-}
-
 func (s *serverTestSuite) TestDashboard(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) {
-		conf.EnableDynamicConfig = true
-	})
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
@@ -156,21 +143,6 @@ func (s *serverTestSuite) TestDashboard(c *C) {
 	c.Assert(err, IsNil)
 	s.checkServiceIsStarted(c, servers, leader)
 	c.Assert(leader.GetServer().GetPersistOptions().GetDashboardAddress(), Equals, dashboardAddress2)
-
-	// Changing dashboard address
-	for _, srv := range servers {
-		addr := srv.GetAddr()
-		var changingAddr string
-		if addr == dashboardAddress1 {
-			changingAddr = dashboardAddress2
-		} else {
-			changingAddr = dashboardAddress1
-		}
-		args = []string{"-u", leaderAddr, "component", "set", addr[7:], "pd-server.dashboard-address", changingAddr}
-		_, _, err = pdctl.ExecuteCommandC(cmd, args...)
-		c.Assert(err, IsNil)
-	}
-	s.checkServiceIsChanging(c, servers)
 
 	// pd-ctl set stop
 	args = []string{"-u", leaderAddr, "config", "set", "dashboard-address", "none"}

@@ -15,6 +15,7 @@ package tests
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -52,8 +53,6 @@ type TestServer struct {
 	state  int32
 }
 
-var initHTTPClientOnce sync.Once
-
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
@@ -75,9 +74,6 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	if err != nil {
 		return nil, err
 	}
-	initHTTPClientOnce.Do(func() {
-		err = server.InitHTTPClient(svr)
-	})
 	if err != nil {
 		return nil, err
 	}
@@ -254,6 +250,13 @@ func (s *TestServer) GetEtcdClient() *clientv3.Client {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetClient()
+}
+
+// GetHTTPClient returns the builtin http client.
+func (s *TestServer) GetHTTPClient() *http.Client {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetHTTPClient()
 }
 
 // GetStores returns the stores of the cluster.
@@ -466,6 +469,12 @@ func (c *TestCluster) GetCluster() *metapb.Cluster {
 func (c *TestCluster) GetEtcdClient() *clientv3.Client {
 	leader := c.GetLeader()
 	return c.servers[leader].GetEtcdClient()
+}
+
+// GetHTTPClient returns the builtin http client.
+func (c *TestCluster) GetHTTPClient() *http.Client {
+	leader := c.GetLeader()
+	return c.servers[leader].GetHTTPClient()
 }
 
 // GetConfig returns the current TestCluster's configuration.

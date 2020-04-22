@@ -63,7 +63,7 @@ type Server interface {
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
-	GetSchedulersCallback() func()
+	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
 }
 
 // RaftCluster is used for cluster config management.
@@ -105,12 +105,10 @@ type RaftCluster struct {
 	regionSyncer *syncer.RegionSyncer
 
 	ruleManager *placement.RuleManager
-	client      *clientv3.Client
+	etcdClient  *clientv3.Client
+	httpClient  *http.Client
 
 	replicationMode *replication.ModeManager
-
-	schedulersCallback func()
-	configCheck        bool
 }
 
 // Status saves some state information.
@@ -120,14 +118,15 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, client *clientv3.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
 		ctx:          ctx,
 		running:      false,
 		clusterID:    clusterID,
 		clusterRoot:  root,
 		regionSyncer: regionSyncer,
-		client:       client,
+		httpClient:   httpClient,
+		etcdClient:   etcdClient,
 	}
 }
 
@@ -160,7 +159,7 @@ func (c *RaftCluster) isInitialized() bool {
 // GetReplicationConfig get the replication config.
 func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
 	cfg := &config.ReplicationConfig{}
-	*cfg = *c.opt.GetReplication().Load()
+	*cfg = *c.opt.GetReplicationConfig()
 	return cfg
 }
 
@@ -180,7 +179,7 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster, cb func()) {
+func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) {
 	c.core = basicCluster
 	c.opt = opt
 	c.storage = storage
@@ -190,7 +189,6 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
-	c.schedulersCallback = cb
 }
 
 // Start starts a cluster.
@@ -203,7 +201,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster(), s.GetSchedulersCallback())
+	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -220,7 +218,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster, s)
 	if err != nil {
 		return err
 	}
@@ -335,7 +333,6 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.running = false
-	c.configCheck = false
 	close(c.quit)
 	c.coordinator.stop()
 	c.Unlock()
@@ -434,7 +431,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 
 	// c.limiter is nil before "start" is called
-	if c.limiter != nil && c.opt.Load().StoreLimitMode == "auto" {
+	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
@@ -621,6 +618,7 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
+//nolint:unused
 func (c *RaftCluster) getClusterID() uint64 {
 	c.RLock()
 	defer c.RUnlock()
@@ -846,7 +844,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 	if err != nil {
 		return errors.Errorf("invalid put store %v, error: %s", store, err)
 	}
-	clusterVersion := *c.opt.LoadClusterVersion()
+	clusterVersion := *c.opt.GetClusterVersion()
 	if !IsCompatible(clusterVersion, *v) {
 		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
 	}
@@ -994,20 +992,6 @@ func (c *RaftCluster) UnblockStore(storeID uint64) {
 // AttachAvailableFunc attaches an available function to a specific store.
 func (c *RaftCluster) AttachAvailableFunc(storeID uint64, limitType storelimit.Type, f func() bool) {
 	c.core.AttachAvailableFunc(storeID, limitType, f)
-}
-
-// SetConfigCheck sets a flag for preventing outdated config.
-func (c *RaftCluster) SetConfigCheck() {
-	c.Lock()
-	defer c.Unlock()
-	c.configCheck = true
-}
-
-// GetConfigCheck returns a configCheck flag.
-func (c *RaftCluster) GetConfigCheck() bool {
-	c.Lock()
-	defer c.Unlock()
-	return c.configCheck
 }
 
 // SetStoreState sets up a store's state.
@@ -1185,11 +1169,11 @@ func (c *RaftCluster) resetClusterMetrics() {
 }
 
 func (c *RaftCluster) collectHealthStatus() {
-	members, err := GetMembers(c.client)
+	members, err := GetMembers(c.etcdClient)
 	if err != nil {
 		log.Error("get members error", zap.Error(err))
 	}
-	unhealth := CheckHealth(members)
+	unhealth := CheckHealth(c.httpClient, members)
 	for _, member := range members {
 		if _, ok := unhealth[member.GetMemberId()]; ok {
 			healthStatusGauge.WithLabelValues(member.GetName()).Set(0)
@@ -1233,7 +1217,7 @@ func (c *RaftCluster) AllocID() (uint64, error) {
 }
 
 // OnStoreVersionChange changes the version of the cluster when needed.
-func (c *RaftCluster) OnStoreVersionChange() *semver.Version {
+func (c *RaftCluster) OnStoreVersionChange() {
 	c.RLock()
 	defer c.RUnlock()
 	var (
@@ -1252,7 +1236,7 @@ func (c *RaftCluster) OnStoreVersionChange() *semver.Version {
 			minVersion = v
 		}
 	}
-	clusterVersion = c.opt.LoadClusterVersion()
+	clusterVersion = c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
 	failpoint.Inject("versionChangeConcurrency", func() {
@@ -1270,9 +1254,7 @@ func (c *RaftCluster) OnStoreVersionChange() *semver.Version {
 		log.Info("cluster version changed",
 			zap.Stringer("old-cluster-version", clusterVersion),
 			zap.Stringer("new-cluster-version", minVersion))
-		return minVersion
 	}
-	return nil
 }
 
 func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
@@ -1283,7 +1265,7 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 func (c *RaftCluster) IsFeatureSupported(f Feature) bool {
 	c.RLock()
 	defer c.RUnlock()
-	clusterVersion := *c.opt.LoadClusterVersion()
+	clusterVersion := *c.opt.GetClusterVersion()
 	minSupportVersion := *MinSupportedVersion(f)
 	return !clusterVersion.LessThan(minSupportVersion)
 }
@@ -1424,7 +1406,7 @@ func (c *RaftCluster) GetLocationLabels() []string {
 
 // GetStrictlyMatchLabel returns if the strictly label check is enabled.
 func (c *RaftCluster) GetStrictlyMatchLabel() bool {
-	return c.opt.GetReplication().GetStrictlyMatchLabel()
+	return c.opt.GetStrictlyMatchLabel()
 }
 
 // IsPlacementRulesEnabled returns if the placement rules feature is enabled.
@@ -1486,7 +1468,7 @@ func (c *RaftCluster) CheckLabelProperty(typ string, labels []*metapb.StoreLabel
 func (c *RaftCluster) isPrepared() bool {
 	c.RLock()
 	defer c.RUnlock()
-	return c.prepareChecker.check(c) && c.configCheck
+	return c.prepareChecker.check(c)
 }
 
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
@@ -1541,6 +1523,7 @@ func (c *RaftCluster) CheckReadStatus(region *core.RegionInfo) []*statistics.Hot
 
 // TODO: remove me.
 // only used in test.
+//nolint:unused
 func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()
@@ -1585,7 +1568,7 @@ func (checker *prepareChecker) check(c *RaftCluster) bool {
 		return true
 	}
 	// The number of active regions should be more than total region of all stores * collectFactor
-	if float64(c.core.Length())*collectFactor > float64(checker.sum) {
+	if float64(c.core.GetRegionCount())*collectFactor > float64(checker.sum) {
 		return false
 	}
 	for _, store := range c.GetStores() {
@@ -1658,27 +1641,26 @@ func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 	return c.limiter
 }
 
-// DialClient used to dial http request.
-// Alreadly supports tls in InitHTTPClient(pd-server/main.go)
-var DialClient = &http.Client{
-	Timeout: clientTimeout,
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
-
 var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.
-func CheckHealth(members []*pdpb.Member) map[uint64]*pdpb.Member {
+func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.Member {
 	healthMembers := make(map[uint64]*pdpb.Member)
 	for _, member := range members {
 		for _, cURL := range member.ClientUrls {
-			resp, err := DialClient.Get(fmt.Sprintf("%s%s", cURL, healthURL))
+			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
+			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s", cURL, healthURL), nil)
+			if err != nil {
+				log.Error("failed to new request", zap.Error(err))
+				cancel()
+				continue
+			}
+
+			resp, err := client.Do(req)
 			if resp != nil {
 				resp.Body.Close()
 			}
-
+			cancel()
 			if err == nil && resp.StatusCode == http.StatusOK {
 				healthMembers[member.GetMemberId()] = member
 				break

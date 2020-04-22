@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -108,10 +107,8 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 		},
 	}
 
-	server.ConfigCheckInterval = 10 * time.Millisecond
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.StrictlyMatchLabel = false
-		cfg.EnableDynamicConfig = true
 	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -122,8 +119,6 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 	for _, store := range s.stores {
 		mustPutStore(c, s.svr, store.Id, store.State, store.Labels)
 	}
-	// make sure the config client is initialized
-	time.Sleep(20 * time.Millisecond)
 }
 
 func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
@@ -133,12 +128,11 @@ func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
 func (s *testLabelsStoreSuite) TestLabelsGet(c *C) {
 	url := fmt.Sprintf("%s/labels", s.urlPrefix)
 	labels := make([]*metapb.StoreLabel, 0, len(s.stores))
-	err := readJSON(url, &labels)
+	err := readJSON(testDialClient, url, &labels)
 	c.Assert(err, IsNil)
 }
 
 func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
-
 	var table = []struct {
 		name, value string
 		want        []*metapb.Store
@@ -175,7 +169,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 	for _, t := range table {
 		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", s.urlPrefix, t.name, t.value)
 		info := new(StoresInfo)
-		err := readJSON(url, info)
+		err := readJSON(testDialClient, url, info)
 		c.Assert(err, IsNil)
 		checkStoresInfo(c, info.Stores, t.want)
 	}
@@ -190,11 +184,9 @@ type testStrictlyLabelsStoreSuite struct {
 }
 
 func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
-	server.ConfigCheckInterval = 10 * time.Millisecond
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.LocationLabels = []string{"zone", "disk"}
 		cfg.Replication.StrictlyMatchLabel = true
-		cfg.EnableDynamicConfig = true
 	})
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -202,8 +194,6 @@ func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
-	// make sure the config client is initialized
-	time.Sleep(20 * time.Millisecond)
 }
 
 func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
@@ -287,8 +277,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 	}
 
 	// enable placement rules. Report no error any more.
-	c.Assert(postJSON(fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`)), IsNil)
-	time.Sleep(20 * time.Millisecond)
+	c.Assert(postJSON(testDialClient, fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`)), IsNil)
 	for _, t := range cases {
 		_, err := s.svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},

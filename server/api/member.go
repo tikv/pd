@@ -84,6 +84,12 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 			continue
 		}
 		m.LeaderPriority = int32(leaderPriority)
+		gitHash, e := h.svr.GetMember().GetMemberGitHash(m.GetMemberId())
+		if e != nil {
+			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+			continue
+		}
+		m.GitHash = gitHash
 	}
 	return members, nil
 }

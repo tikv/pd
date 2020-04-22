@@ -14,7 +14,6 @@
 package core
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -23,8 +22,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server/kv"
@@ -41,7 +40,6 @@ const (
 	replicationPath = "replication_mode"
 
 	customScheduleConfigPath = "scheduler_config"
-	componentsConfigPath     = "components_config"
 )
 
 const (
@@ -385,6 +383,62 @@ func (s *Storage) LoadGCSafePoint() (uint64, error) {
 	return safePoint, nil
 }
 
+// ServiceSafePoint is the safepoint for a specific service
+type ServiceSafePoint struct {
+	ServiceID string
+	ExpiredAt int64
+	SafePoint uint64
+}
+
+// SaveServiceGCSafePoint saves a GC safepoint for the service
+func (s *Storage) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
+	key := path.Join(gcPath, "safe_point", "service", ssp.ServiceID)
+	value, err := json.Marshal(ssp)
+	if err != nil {
+		return err
+	}
+
+	return s.Save(key, string(value))
+}
+
+// RemoveServiceGCSafePoint removes a GC safepoint for the service
+func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
+	key := path.Join(gcPath, "safe_point", "service", serviceID)
+	return s.Remove(key)
+}
+
+// LoadMinServiceGCSafePoint returns the minimum safepoint across all services
+func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
+	prefix := path.Join(gcPath, "safe_point", "service")
+	// the next of 'e' is 'f'
+	prefixEnd := path.Join(gcPath, "safe_point", "servicf")
+	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return &ServiceSafePoint{}, nil
+	}
+
+	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
+	now := time.Now().Unix()
+	for i, key := range keys {
+		ssp := &ServiceSafePoint{}
+		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
+			return nil, err
+		}
+		if ssp.ExpiredAt < now {
+			s.Remove(key)
+			continue
+		}
+		if ssp.SafePoint < min.SafePoint {
+			min = ssp
+		}
+	}
+
+	return min, nil
+}
+
 // LoadAllScheduleConfig loads all schedulers' config.
 func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
 	keys, values, err := s.LoadRange(customScheduleConfigPath, clientv3.GetPrefixRangeEnd(customScheduleConfigPath), 1000)
@@ -392,31 +446,6 @@ func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
 		keys[i] = strings.TrimPrefix(key, customScheduleConfigPath+"/")
 	}
 	return keys, values, err
-}
-
-// SaveComponentsConfig stores marshalable cfg to the componentsConfigPath.
-func (s *Storage) SaveComponentsConfig(cfg interface{}) error {
-	var value bytes.Buffer
-	if err := toml.NewEncoder(&value).Encode(cfg); err != nil {
-		return errors.WithStack(err)
-	}
-	return s.Save(componentsConfigPath, value.String())
-}
-
-// LoadComponentsConfig loads config from componentsConfigPath then unmarshal it to cfg.
-func (s *Storage) LoadComponentsConfig(cfg interface{}) (bool, error) {
-	value, err := s.Load(componentsConfigPath)
-	if err != nil {
-		return false, err
-	}
-	if value == "" {
-		return false, nil
-	}
-	_, err = toml.Decode(value, cfg)
-	if err != nil {
-		return false, errors.WithStack(err)
-	}
-	return true, nil
 }
 
 func loadProto(s kv.Base, key string, msg proto.Message) (bool, error) {

@@ -102,10 +102,6 @@ func main() {
 		log.Fatal("create server failed", zap.Error(err))
 	}
 
-	if err = server.InitHTTPClient(svr); err != nil {
-		log.Fatal("initial http client for api handler failed", zap.Error(err))
-	}
-
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
