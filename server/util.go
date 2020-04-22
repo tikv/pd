@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"net/http"
 	"path"
 	"time"
 
@@ -34,7 +33,6 @@ import (
 )
 
 const (
-	clientTimeout  = 3 * time.Second
 	requestTimeout = etcdutil.DefaultRequestTimeout
 )
 
@@ -128,23 +126,6 @@ func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 	}
 
 	return typeutil.BytesToUint64(response.Kvs[0].Value)
-}
-
-// InitHTTPClient initials a http client.
-func InitHTTPClient(svr *Server) error {
-	tlsConfig, err := svr.GetSecurityConfig().ToTLSConfig()
-	if err != nil {
-		return err
-	}
-
-	cluster.DialClient = &http.Client{
-		Timeout: clientTimeout,
-		Transport: &http.Transport{
-			TLSClientConfig:   tlsConfig,
-			DisableKeepAlives: true,
-		},
-	}
-	return nil
 }
 
 func makeStoreKey(clusterRootPath string, storeID uint64) string {

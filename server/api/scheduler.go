@@ -31,13 +31,15 @@ const schedulerConfigPrefix = "pd/api/v1/scheduler-config"
 
 type schedulerHandler struct {
 	*server.Handler
-	r *render.Render
+	svr *server.Server
+	r   *render.Render
 }
 
-func newSchedulerHandler(handler *server.Handler, r *render.Render) *schedulerHandler {
+func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler {
 	return &schedulerHandler{
-		Handler: handler,
+		Handler: svr.GetHandler(),
 		r:       r,
+		svr:     svr,
 	}
 }
 
@@ -199,7 +201,7 @@ func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64)
 	if err != nil {
 		return err
 	}
-	return postJSON(updateURL, body)
+	return postJSON(h.svr.GetHTTPClient(), updateURL, body)
 }
 
 func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -228,7 +230,7 @@ func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) e
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
 	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
-	resp, err := doDelete(url)
+	resp, err := doDelete(h.svr.GetHTTPClient(), url)
 	if resp.StatusCode != 200 {
 		return cluster.ErrSchedulerNotFound
 	}

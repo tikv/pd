@@ -32,12 +32,12 @@ func (s *testEtcdAPISuite) TestGRPCGateway(c *C) {
 	addr := svr.GetConfig().ClientUrls + "/v3/kv/put"
 	putKey := map[string]string{"key": "Zm9v", "value": "YmFy"}
 	v, _ := json.Marshal(putKey)
-	err := postJSON(addr, v)
+	err := postJSON(testDialClient, addr, v)
 	c.Assert(err, IsNil)
 	addr = svr.GetConfig().ClientUrls + "/v3/kv/range"
 	getKey := map[string]string{"key": "Zm9v"}
 	v, _ = json.Marshal(getKey)
-	err = postJSON(addr, v, func(res []byte, code int) {
+	err = postJSON(testDialClient, addr, v, func(res []byte, code int) {
 		c.Assert(strings.Contains(string(res), "Zm9v"), IsTrue)
 		c.Assert(code, Equals, http.StatusOK)
 	})

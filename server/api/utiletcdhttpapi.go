@@ -15,6 +15,7 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -39,9 +40,9 @@ type PeerStats struct {
 	SendAppendRequestCnt int `json:"sendAppendRequestCnt"`
 }
 
-func getEtcdPeerStats(etcdClientURL string) (*PeerStats, error) {
+func getEtcdPeerStats(client *http.Client, etcdClientURL string) (*PeerStats, error) {
 	ps := &PeerStats{}
-	if err := readJSON(fmt.Sprintf("%s%s", etcdClientURL, etcdPeerStatsAPI), ps); err != nil {
+	if err := readJSON(client, fmt.Sprintf("%s%s", etcdClientURL, etcdPeerStatsAPI), ps); err != nil {
 		return nil, err
 	}
 	return ps, nil

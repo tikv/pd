@@ -39,7 +39,7 @@ func (s *testStatusAPISuite) TestStatus(c *C) {
 
 	for _, cfg := range cfgs {
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/status"
-		resp, err := dialClient.Get(addr)
+		resp, err := testDialClient.Get(addr)
 		c.Assert(err, IsNil)
 		buf, err := ioutil.ReadAll(resp.Body)
 		c.Assert(err, IsNil)

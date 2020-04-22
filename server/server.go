@@ -104,10 +104,13 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	member    *member.Member
-	client    *clientv3.Client
-	clusterID uint64 // pd cluster id.
-	rootPath  string
+	member *member.Member
+	// etcd client
+	client *clientv3.Client
+	// http client
+	httpClient *http.Client
+	clusterID  uint64 // pd cluster id.
+	rootPath   string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -316,6 +319,13 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		}
 	}
 	s.client = client
+	s.httpClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   tlsConfig,
+		},
+	}
+
 	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
 	})
@@ -356,7 +366,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
 	// Run callbacks
@@ -622,6 +632,11 @@ func (s *Server) GetConfigManager() *configmanager.ConfigManager {
 // GetConfigClient returns the config client of server.
 func (s *Server) GetConfigClient() pd.ConfigClient {
 	return s.configClient
+}
+
+// GetHTTPClient returns builtin etcd client.
+func (s *Server) GetHTTPClient() *http.Client {
+	return s.httpClient
 }
 
 // GetLeader returns leader of etcd.

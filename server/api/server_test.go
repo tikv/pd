@@ -15,6 +15,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"testing"
 
@@ -29,6 +30,13 @@ import (
 )
 
 var (
+	// testDialClient used to dial http request. only used for test.
+	testDialClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
+
 	store = &metapb.Store{
 		Id:      1,
 		Address: "localhost",
