@@ -74,8 +74,8 @@ type Config struct {
 	Log log.Config `toml:"log" json:"log"`
 
 	// Backward compatibility.
-	LogFileDeprecated  string `toml:"log-file" json:"log-file"`
-	LogLevelDeprecated string `toml:"log-level" json:"log-level"`
+	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
+	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
 
 	// TsoSaveInterval is the interval to save timestamp.
 	TsoSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`

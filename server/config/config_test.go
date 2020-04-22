@@ -56,7 +56,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	opt, err := newTestScheduleOption()
 	c.Assert(err, IsNil)
 	storage := core.NewStorage(kv.NewMemoryKV())
-	scheduleCfg := opt.Load()
+	scheduleCfg := opt.GetScheduleConfig()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
 	opt.GetPDServerConfig().UseRegionStorage = true
@@ -70,7 +70,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	c.Assert(newOpt.Reload(storage), IsNil)
 	schedulers := newOpt.GetSchedulers()
 	c.Assert(schedulers, HasLen, 5)
-	c.Assert(newOpt.GetPDServerConfig().UseRegionStorage, IsTrue)
+	c.Assert(newOpt.IsUseRegionStorage(), IsTrue)
 	for i, s := range schedulers {
 		c.Assert(s.Type, Equals, defaultSchedulers[i])
 		c.Assert(s.Disable, IsFalse)
