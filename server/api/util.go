@@ -24,13 +24,6 @@ import (
 )
 
 var (
-
-	// testDialClient used to dial http request. only used for test.
-	testDialClient = &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-		},
-	}
 	errNoImplement    = errors.New("no implement")
 	errOptionNotExist = func(name string) error { return errors.Errorf("the option %s does not exist", name) }
 )
