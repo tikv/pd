@@ -695,41 +695,29 @@ func (r *RegionsInfo) addRegionToSubTree(region *RegionInfo) {
 // new peer was created, learners changed, pendingPeers changed, and so on.
 func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
 	checkPeersChange := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
-		for _, a := range origin {
-			if a == nil {
-				continue
-			}
-			both := false
-			for _, b := range other {
-				if b == nil {
-					continue
-				}
-				if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
-					both = true
-					break
-				}
-			}
-			if !both {
-				return true
-			}
-		}
-		for _, b := range other {
-			if b == nil {
-				continue
-			}
-			both := false
+		checkPeersDiff := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
 			for _, a := range origin {
 				if a == nil {
 					continue
 				}
-				if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
-					both = true
-					break
+				both := false
+				for _, b := range other {
+					if b == nil {
+						continue
+					}
+					if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
+						both = true
+						break
+					}
+				}
+				if !both {
+					return true
 				}
 			}
-			if !both {
-				return true
-			}
+			return false
+		}
+		if checkPeersDiff(origin, other) || checkPeersDiff(other, origin) {
+			return true
 		}
 		return false
 	}
