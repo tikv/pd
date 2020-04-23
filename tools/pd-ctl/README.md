@@ -5,7 +5,7 @@ pd-ctl is a command line tool for PD, pd-ctl obtains the state information of th
 
 ## Build
 1. [Go](https://golang.org/) Version 1.9 or later
-2. In the root directory of the [PD project](https://github.com/pingcap/pd), use the `make` command to compile and generate `bin/pd-ctl`
+2. In the root directory of the [PD project](https://github.com/pingcap/pd), use the `make` or `make pd-ctl` command to compile and generate `bin/pd-ctl`
 
 > **Note:** Generally, you don't need to compile source code as the PD Control tool already exists in the released Binary or Docker. However, dev users can refer to the above instruction for compiling source code.
 
@@ -86,7 +86,7 @@ Usage:
 }
 ```
 
-### `config [show | set <option> <value>]`
+### `config [delete | show | set <option> <value> | placement-rules ]`
 
 Use this command to view or modify the configuration information.
 
@@ -96,12 +96,14 @@ Usage:
 >> config show                                // Display the config information of the replication and schedule
 {
   "replication": {
+    "enable-placement-rules": "false",
     "location-labels": "",
     "max-replicas": 3,
     "strictly-match-label": "false"
   },
   "schedule": {
     "enable-cross-table-merge": "false",
+    "enable-debug-metrics": "true",
     "enable-location-replacement": "true",
     "enable-make-up-replica": "true",
     "enable-one-way-merge": "false",
@@ -123,41 +125,10 @@ Usage:
     "patrol-region-interval": "100ms",
     "region-schedule-limit": 2048,
     "replica-schedule-limit": 64,
-    "scheduler-max-waiting-operator": 3,
-    "schedulers": {
-      "balance-hot-region-scheduler": "null",
-      "balance-leader-scheduler": "null",
-      "balance-region-scheduler": "null",
-      "label-scheduler": "null"
-    },
-    "schedulers-v2": [
-      {
-        "args": null,
-        "args-payload": "",
-        "disable": false,
-        "type": "balance-region"
-      },
-      {
-        "args": null,
-        "args-payload": "",
-        "disable": false,
-        "type": "balance-leader"
-      },
-      {
-        "args": null,
-        "args-payload": "",
-        "disable": false,
-        "type": "hot-region"
-      },
-      {
-        "args": null,
-        "args-payload": "",
-        "disable": false,
-        "type": "label"
-      }
-    ],
+    "scheduler-max-waiting-operator": 5,
     "split-merge-interval": "1h0m0s",
     "store-balance-rate": 15,
+    "store-limit-mode": "manual",
     "tolerant-size-ratio": 0
   }
 }
@@ -165,10 +136,14 @@ Usage:
 >> config show replication                    // Display the config information of replication
 {
   "max-replicas": 3,
-  "location-labels": ""
+  "location-labels": "",
+  "strictly-match-label": "false",
+  "enable-placement-rules": "false"
 }
 >> config show cluster-version                // Display the current version of the cluster, which is the current minimum version of TiKV nodes in the cluster and does not correspond to the binary version.
-"2.0.0"
+"4.1.0-alpha"
+
+>> config delete label-property <type> <key> <value> [flags]
 ```
 
 - `max-snapshot-count` controls the maximum number of snapshots that a single store receives or sends out at the same time. The scheduler is restricted by this configuration to avoid taking up normal application resources. When you need to improve the speed of adding replicas or balancing, increase this value.
@@ -189,10 +164,10 @@ Usage:
     >> config set max-merge-region-size 16 // Set the upper limit on the size of Region Merge to 16M
     ```
 
-- `max-merge-region-rows` controls the upper limit on the row count of Region Merge. When `regionRowCount` exceeds the specified value, PD does not merge it with the adjacent Region.
+- `max-merge-region-keys` controls the upper limit on the key count of Region Merge. When `regionKey` exceeds the specified value, PD does not merge it with the adjacent Region.
 
     ```bash
-    >> config set max-merge-region-rows 50000 // Set the the upper limit on rowCount to 50000
+    >> config set max-merge-region-keys 50000 // Set the the upper limit on regionKey to 50000
     ```
 
 - `split-merge-interval` controls the interval between the `split` and `merge` operations on a same Region. This means the newly split Region won't be merged within a period of time.
@@ -284,6 +259,32 @@ This option only works when key type is "table".
 
 - `enable-location-replacement` is used to enable the isolation level check. When you set it to `false`, PD does not improve the isolation level of Region replicas by scheduling.
 
+- `enable-debug-metrics` is used to enable the debug metrics. When you set it to `true`, PD will open some metrics, such as balance-tolerant-size and op influence.
+
+- `store-limit-mode` has two mode for setting limit: auto or manual, an auto-set value can be overwritten by a manual-set value, otherwise it is forbidden.
+
+#### Placement-rules
+
+[Placement Rules](https://pingcap.com/docs/stable/how-to/configure/placement-rules/#placement-rules) is region rules system used to guide PD to generate corresponding schedules for different types of data.
+
+```bash
+>> config placement-rules enable 
+
+>> config placement-rules disable
+
+>> config placement-rules show // Display all placement-rules
+
+>> config placement-rules show --group=pd // Display all placement-rules in pd group
+
+>> config placement-rules show --group=pd --id=default // Display placement-rule in pd group and with id.
+
+>> config placement-rules show --region=2 // Display placement-rule with region
+
+>> config placement-rules save --in=rules.json // Set rules with rules.json
+
+>> config placement-rules load --group=pd --out=rule.txt // Output rules to `rule.txt`
+```
+
 ### `health`
 
 Use this command to view the health information of the cluster.
@@ -292,7 +293,16 @@ Usage:
 
 ```bash
 >> health                                // Display the health information
-{"health": "true"}
+[
+  {
+    "name": "hot-test-pd-0",
+    "member_id": 13155432540099656863,
+    "client_urls": [
+      "http://127.0.0.1:2379"
+    ],
+    "health": true
+  }
+]
 ```
 
 ### `hot [read | write | store]`
@@ -307,17 +317,6 @@ Usage:
 >> hot store                            // Display hot spot for all the read and write operations
 ```
 
-### `label [store <name> <value>]`
-
-Use this command to view the label information of the cluster.
-
-Usage:
-
-```bash
->> label                                // Display all labels
->> label store zone cn                  // Display all stores including the "zone":"cn" label
-```
-
 ### `member [delete | leader_priority | leader [show | resign | transfer <member_name>]]`
 
 Use this command to view the PD members, remove a specified member, or configure the priority of leader.
@@ -327,6 +326,7 @@ Usage:
 ```bash
 >> member                               // Display the information of all members
 {
+  "header":{......},
   "members": [......],
   "leader": {......},
   "etcd_leader": {......},
@@ -337,9 +337,10 @@ Success!
 Success!
 >> member leader show                   // Display the leader information
 {
-  "name": "pd",
-  "addr": "http://192.168.199.229:2379",
-  "id": 9724873857558226554
+   "name": "pd",
+   "member_id": 13155432540099656863,
+   "peer_urls": [......],
+   "client_urls": [......]
 }
 >> member leader resign // Move leader away from the current member
 ......
@@ -347,7 +348,7 @@ Success!
 ......
 ```
 
-### `operator [show | add | remove]`
+### `operator [check | show | add | remove]`
 
 Use this command to view and control the scheduling operation.
 
@@ -380,8 +381,9 @@ Usage:
 >> ping
 time: 43.12698ms
 ```
+### `region`
 
-### `region <region_id> [--jq="<query string>"]`
+#### `region <region_id> [--jq="<query string>"]`
 
 Use this command to view the region information. For a jq formatted output, see [jq-formatted-json-output-usage](#jq-formatted-json-output-usage).
 
@@ -406,14 +408,14 @@ Usage:
 }
 ```
 
-### `region key [--format=raw|pb|proto|protobuf] <key>`
+#### `region key [--format=raw|pb|proto|protobuf] <key>`
 
 Use this command to query the region that a specific key resides in. It supports the raw and protobuf formats.
 
 Raw format usage (default):
 
 ```bash
->> region key abc
+>> region key abcd // need to use hex format
 {
   "region": {
     "id": 2,
@@ -434,7 +436,7 @@ Protobuf format usage:
 }
 ```
 
-### `region sibling <region_id>`
+#### `region sibling <region_id>`
 
 Use this command to check the adjacent Regions of a specific Region.
 
@@ -448,7 +450,7 @@ Usage:
 }
 ```
 
-### `region store <store_id>`
+#### `region store <store_id>`
 
 Use this command to list all Regions of a specific store.
 
@@ -462,7 +464,7 @@ Usage:
 }
 ```
 
-### `region topread [limit]`
+#### `region topread [limit]`
 
 Use this command to list Regions with top read flow. The default value of the limit is 10.
 
@@ -476,7 +478,7 @@ Usage:
 }
 ```
 
-### `region topwrite [limit]`
+#### `region topwrite [limit]`
 
 Use this command to list Regions with top write flow. The default value of the limit is 10.
 
@@ -490,7 +492,7 @@ Usage:
 }
 ```
 
-### `region topconfver [limit]`
+#### `region topconfver [limit]`
 
 Use this command to list Regions with top conf version. The default value of the limit is 10.
 
@@ -504,7 +506,7 @@ Usage:
 }
 ```
 
-### `region topversion [limit]`
+#### `region topversion [limit]`
 
 Use this command to list Regions with top version. The default value of the limit is 10.
 
@@ -518,7 +520,7 @@ Usage:
 }
 ```
 
-### `region check [miss-peer | extra-peer | down-peer | pending-peer | offline-peer | empty-region | hist-size | hist-keys]`
+#### `region check [miss-peer | extra-peer | down-peer | pending-peer | offline-peer | empty-region | hist-size | hist-keys]`
 
 Use this command to check the Regions in abnormal conditions.
 
@@ -539,7 +541,7 @@ Usage:
 }
 ```
 
-### `scheduler [show | add | remove]`
+### `scheduler [show | add | remove | pause | resume | config ]`
 
 Use this command to view and control the scheduling policy.
 
@@ -552,9 +554,72 @@ Usage:
 >> scheduler add shuffle-leader-scheduler     // Randomly exchange the leader on different stores
 >> scheduler add shuffle-region-scheduler     // Randomly scheduling the regions on different stores
 >> scheduler remove grant-leader-scheduler-1  // Remove the corresponding scheduler
+
+>> schedule pause balance-region-scheduler 10 // Pause balance-region-scheduler 10 seconds
+>> schedule pause all 10 // Pause all scheduler 10 seconds
+
+>> schedule resume balance-region-scheduler // Resume balance-region-scheduler 
+>> schedule resume all // Resume all scheduler 
 ```
 
-### `store [delete | label | weight | remove-tombstone | limit] <store_id>  [--jq="<query string>"]`
+#### `scheduler config balance-hot-region-scheduler [list | set]`
+
+Use this command to view and control the balance-hot-region-scheduler policy.
+
+Usage:
+
+```bash
+>> scheduler config balance-hot-region-scheduler  // Display all config
+{
+  "min-hot-byte-rate": 100,
+  "min-hot-key-rate": 10,
+  "max-zombie-rounds": 3,
+  "max-peer-number": 1000,
+  "byte-rate-rank-step-ratio": 0.05,
+  "key-rate-rank-step-ratio": 0.05,
+  "count-rank-step-ratio": 0.01,
+  "great-dec-ratio": 0.95,
+  "minor-dec-ratio": 0.99,
+  "src-tolerance-ratio": 1.02,
+  "dst-tolerance-ratio": 1.02
+}
+```
+
+- `min-hot-byte-rate` means the smallest byte counted, it is usually 100
+
+    ```bash
+    >> scheduler config balance-hot-region-scheduler set min-hot-byte-rate 100
+    ```
+- `min-hot-key-rate` means the smallest key counted, it is usually 10
+
+    ```bash
+    >> scheduler config balance-hot-region-scheduler set min-hot-key-rate 10
+    ```
+
+- `max-zombie-rounds` means the maximum number of heartbeat thatan operator is considered as a pending influence.
+
+    ```bash
+    >> scheduler config balance-hot-region-scheduler set max-zombie-rounds 3
+    ```
+- `max-peer-number` means the maximum number to solve, prevent scheduler too slow.
+
+    ```bash
+    >> scheduler config balance-hot-region-scheduler set max-peer-number 1000
+    ```
+
+- `byte-rate-rank-step-ratio`,`key-rate-rank-step-ratio`,`count-rank-step-ratio` means that step rank of  byte,key and count.Rank step ratio decide the step when calculate rank. `great-dec-ratio`,`minor-dec-ratio` are used to judge the dec rank. Usually we do not need to be modified them.
+
+    ```bash
+    >> scheduler config balance-hot-region-scheduler set byte-rate-rank-step-ratio 0.05
+    ```
+
+- `src-tolerance-ratio` and `dst-tolerance-ratio` are config for expectation scheduler. The smaller the `tolerance-ratio` , the easier it is to schedule. When redundant scheduling occurs, we can appropriately increase this.
+
+    ```bash
+    >> scheduler config balance-hot-region-scheduler set src-tolerance-ratio 1.05
+    ```
+
+### `store [delete | label | weight | remove-tombstone | limit | limit-scene] <store_id>  [--jq="<query string>"]`
 
 Use this command to view the store information or remove a specified store. For a jq formatted output, see [jq-formatted-json-output-usage](#jq-formatted-json-output-usage).
 
@@ -582,7 +647,14 @@ Usage:
 >> store limit 1 5 region-add          // Limit 5 adding region operations per minute for store 1
 >> store limit 1 5 region-remove       // Limit 5 removing region operations per minute for store 1
 >> store limit all 5 region-remove     // Limit 5 removing region operations per minute for all stores
-
+>> store limit-scene  // Show all limit scene 
+{
+  "Idle": 100,
+  "Low": 50,
+  "Normal": 32,
+  "High": 12
+}
+>> store limit-scene idle 100 // set rate to 100 in the idle scene
 ```
 
 ### `tso`
@@ -596,6 +668,7 @@ Usage:
 system:  2017-10-09 05:50:59 +0800 CST
 logic:  120102
 ```
+
 
 ## Jq formatted JSON output usage
 

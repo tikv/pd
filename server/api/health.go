@@ -54,7 +54,7 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	healthMembers := cluster.CheckHealth(members)
+	healthMembers := cluster.CheckHealth(h.svr.GetHTTPClient(), members)
 	healths := []Health{}
 	for _, member := range members {
 		h := Health{

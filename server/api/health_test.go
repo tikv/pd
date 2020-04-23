@@ -62,7 +62,7 @@ func (s *testHealthAPISuite) TestHealthSlice(c *C) {
 	mustBootstrapCluster(c, leader)
 	addr := leader.GetConfig().ClientUrls + apiPrefix + "/api/v1/health"
 	follow.Close()
-	resp, err := dialClient.Get(addr)
+	resp, err := testDialClient.Get(addr)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	buf, err := ioutil.ReadAll(resp.Body)
