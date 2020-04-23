@@ -46,13 +46,13 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	// register not happen
 	addr := fmt.Sprintf("%s/component", s.urlPrefix)
 	output := make(map[string][]string)
-	err := readJSON(addr, &output)
+	err := readJSON(testDialClient, addr, &output)
 	c.Assert(err, IsNil)
 	c.Assert(len(output), Equals, 0)
 
 	addr1 := fmt.Sprintf("%s/component/c1", s.urlPrefix)
 	var output1 []string
-	err = readJSON(addr1, &output)
+	err = readJSON(testDialClient, addr1, &output)
 	c.Assert(strings.Contains(err.Error(), "404"), IsTrue)
 	c.Assert(len(output1), Equals, 0)
 
@@ -66,7 +66,7 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	for _, req := range reqs {
 		postData, err := json.Marshal(req)
 		c.Assert(err, IsNil)
-		err = postJSON(addr, postData)
+		err = postJSON(testDialClient, addr, postData)
 		c.Assert(err, IsNil)
 	}
 
@@ -78,27 +78,27 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	}
 
 	output = make(map[string][]string)
-	err = readJSON(addr, &output)
+	err = readJSON(testDialClient, addr, &output)
 	c.Assert(err, IsNil)
 	c.Assert(output, DeepEquals, expected)
 
 	// get the specific component addresses
 	expected1 := []string{"127.0.0.1:1", "127.0.0.1:2"}
 	var output2 []string
-	err = readJSON(addr1, &output2)
+	err = readJSON(testDialClient, addr1, &output2)
 	c.Assert(err, IsNil)
 	c.Assert(output2, DeepEquals, expected1)
 
 	addr2 := fmt.Sprintf("%s/component/c2", s.urlPrefix)
 	expected2 := []string{"127.0.0.1:3"}
 	var output3 []string
-	err = readJSON(addr2, &output3)
+	err = readJSON(testDialClient, addr2, &output3)
 	c.Assert(err, IsNil)
 	c.Assert(output3, DeepEquals, expected2)
 
 	// unregister address
 	addr3 := fmt.Sprintf("%s/component/c1/127.0.0.1:1", s.urlPrefix)
-	res, err := doDelete(addr3)
+	res, err := doDelete(testDialClient, addr3)
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, 200)
 
@@ -108,12 +108,12 @@ func (s *testComponentSuite) TestComponent(c *C) {
 		"c3": {"example.com"},
 	}
 	output = make(map[string][]string)
-	err = readJSON(addr, &output)
+	err = readJSON(testDialClient, addr, &output)
 	c.Assert(err, IsNil)
 	c.Assert(output, DeepEquals, expected3)
 
 	addr4 := fmt.Sprintf("%s/component/c1/127.0.0.1:2", s.urlPrefix)
-	res, err = doDelete(addr4)
+	res, err = doDelete(testDialClient, addr4)
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, 200)
 	expected4 := map[string][]string{
@@ -121,7 +121,7 @@ func (s *testComponentSuite) TestComponent(c *C) {
 		"c3": {"example.com"},
 	}
 	output = make(map[string][]string)
-	err = readJSON(addr, &output)
+	err = readJSON(testDialClient, addr, &output)
 	c.Assert(err, IsNil)
 	c.Assert(output, DeepEquals, expected4)
 }

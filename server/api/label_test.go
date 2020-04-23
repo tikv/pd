@@ -128,7 +128,7 @@ func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
 func (s *testLabelsStoreSuite) TestLabelsGet(c *C) {
 	url := fmt.Sprintf("%s/labels", s.urlPrefix)
 	labels := make([]*metapb.StoreLabel, 0, len(s.stores))
-	err := readJSON(url, &labels)
+	err := readJSON(testDialClient, url, &labels)
 	c.Assert(err, IsNil)
 }
 
@@ -169,7 +169,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 	for _, t := range table {
 		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", s.urlPrefix, t.name, t.value)
 		info := new(StoresInfo)
-		err := readJSON(url, info)
+		err := readJSON(testDialClient, url, info)
 		c.Assert(err, IsNil)
 		checkStoresInfo(c, info.Stores, t.want)
 	}
@@ -277,7 +277,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 	}
 
 	// enable placement rules. Report no error any more.
-	c.Assert(postJSON(fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`)), IsNil)
+	c.Assert(postJSON(testDialClient, fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`)), IsNil)
 	for _, t := range cases {
 		_, err := s.svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},

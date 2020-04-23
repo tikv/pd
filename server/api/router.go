@@ -62,7 +62,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	apiRouter.HandleFunc("/operators/{region_id}", operatorHandler.Get).Methods("GET")
 	apiRouter.HandleFunc("/operators/{region_id}", operatorHandler.Delete).Methods("DELETE")
 
-	schedulerHandler := newSchedulerHandler(handler, rd)
+	schedulerHandler := newSchedulerHandler(svr, rd)
 	apiRouter.HandleFunc("/schedulers", schedulerHandler.List).Methods("GET")
 	apiRouter.HandleFunc("/schedulers", schedulerHandler.Post).Methods("POST")
 	apiRouter.HandleFunc("/schedulers/{name}", schedulerHandler.Delete).Methods("DELETE")
