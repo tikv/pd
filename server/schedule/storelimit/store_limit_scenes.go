@@ -11,9 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package storelimit
 
-// StoreLimitScene defines the store limitation on difference
+// Scene defines the store limitation on difference
 // scenes
 // Idle/Low/Normal/High indicates the load of the cluster, it is defined
 // in cluster.State. See the details there for how to calculate the
@@ -21,19 +21,29 @@ package schedule
 // The values here defines the store-limit for each load. For example:
 // Idle = 60, means that change the store-limit to 60 when the cluster is
 // idle.
-type StoreLimitScene struct {
+type Scene struct {
 	Idle   int
 	Low    int
 	Normal int
 	High   int
 }
 
-// DefaultStoreLimitScene returns StoreLimitScene object with default values
-func DefaultStoreLimitScene() *StoreLimitScene {
-	return &StoreLimitScene{
+// DefaultScene returns Scene object with default values
+func DefaultScene(limitType Type) *Scene {
+	defaultScene := &Scene{
 		Idle:   100,
 		Low:    50,
 		Normal: 32,
 		High:   12,
+	}
+
+	// change this if different type rate limit has different default scene
+	switch limitType {
+	case RegionAdd:
+		return defaultScene
+	case RegionRemove:
+		return defaultScene
+	default:
+		return nil
 	}
 }

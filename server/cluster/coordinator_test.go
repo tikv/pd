@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/pd/v3/server/schedule"
 	"github.com/pingcap/pd/v3/server/schedule/operator"
 	"github.com/pingcap/pd/v3/server/schedule/opt"
+	"github.com/pingcap/pd/v3/server/schedule/storelimit"
 	"github.com/pingcap/pd/v3/server/schedulers"
 	"github.com/pingcap/pd/v3/server/statistics"
 )
@@ -932,7 +933,9 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 
 	// reset all stores' limit
 	// scheduling one time needs 1/10 seconds
-	oc.SetAllStoresLimit(10, schedule.StoreLimitManual)
+	oc.SetAllStoresLimit(10, storelimit.Manual, storelimit.RegionAdd)
+	oc.SetAllStoresLimit(10, storelimit.Manual, storelimit.RegionRemove)
+
 	for i := 0; i < 10; i++ {
 		op1 := lb.Schedule(tc)[0]
 		c.Assert(op1, NotNil)
