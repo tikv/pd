@@ -253,12 +253,12 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 		"count-rank-step-ratio":     0.01,
 		"great-dec-ratio":           0.95,
 		"minor-dec-ratio":           0.99,
-		"src-tolerance-ratio":       1.02,
-		"dst-tolerance-ratio":       1.02,
+		"src-tolerance-ratio":       1.05,
+		"dst-tolerance-ratio":       1.05,
 	}
 	c.Assert(conf, DeepEquals, expected1)
-	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.05"}, nil)
-	expected1["src-tolerance-ratio"] = 1.05
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.02"}, nil)
+	expected1["src-tolerance-ratio"] = 1.02
 	var conf1 map[string]interface{}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	c.Assert(conf1, DeepEquals, expected1)
