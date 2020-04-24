@@ -114,7 +114,7 @@ pd-heartbeat-bench: export GO111MODULE=on
 pd-heartbeat-bench:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
-test: install-tools deadlock-setup
+test: install-tools
 	# testing...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
@@ -191,11 +191,7 @@ clean-test:
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
 
-deadlock-setup: export GO111MODULE=off
-deadlock-setup:
-	go get github.com/sasha-s/go-deadlock
-
-deadlock-enable: deadlock-setup
+deadlock-enable: install-tools
 	@$(DEADLOCK_ENABLE)
 
 deadlock-disable:
