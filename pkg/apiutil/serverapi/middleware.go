@@ -117,11 +117,6 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	client := h.s.GetHTTPClient()
 	NewCustomReverseProxies(client, urls).ServeHTTP(w, r)
 }
