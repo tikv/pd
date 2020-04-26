@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/component"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
@@ -109,6 +110,9 @@ type RaftCluster struct {
 	httpClient  *http.Client
 
 	replicationMode *replication.ModeManager
+
+	// It's used to manage components.
+	componentManager *component.Manager
 }
 
 // Status saves some state information.
@@ -216,6 +220,12 @@ func (c *RaftCluster) Start(s Server) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	c.componentManager = component.NewManager(c.storage)
+	_, err = c.storage.LoadComponent(&c.componentManager)
+	if err != nil {
+		return err
 	}
 
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster, s)
@@ -1292,6 +1302,13 @@ func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.checkers.GetMergeChecker()
+}
+
+// GetComponentManager returns component manager.
+func (c *RaftCluster) GetComponentManager() *component.Manager {
+	c.RLock()
+	defer c.RUnlock()
+	return c.componentManager
 }
 
 // GetOpt returns the scheduling options.
