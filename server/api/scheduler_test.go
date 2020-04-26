@@ -83,7 +83,7 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	c.Assert(readJSON(testDialClient, listURL, &resp2), NotNil)
 
 	r, _ := doDelete(testDialClient, deleteURL)
-	c.Assert(r.StatusCode, Equals, 404)
+	c.Assert(r.StatusCode, Equals, 500)
 }
 
 func (s *testScheduleSuite) TestAPI(c *C) {
