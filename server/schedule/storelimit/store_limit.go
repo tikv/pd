@@ -14,7 +14,6 @@
 package storelimit
 
 import (
-	"math"
 	"time"
 
 	"github.com/juju/ratelimit"
@@ -23,6 +22,8 @@ import (
 const (
 	// SmallRegionThreshold is used to represent a region which can be regarded as a small region once the size is small than it.
 	SmallRegionThreshold int64 = 20
+	// Unlimited is used to control the store limit. Here uses a big enough number to represent unlimited.
+	Unlimited = float64(100000000)
 )
 
 // RegionInfluence represents the influence of a operator step, which is used by store limit.
@@ -98,8 +99,8 @@ type StoreLimit struct {
 func NewStoreLimit(rate float64, mode Mode, regionInfluence int64) *StoreLimit {
 	capacity := regionInfluence
 	// unlimited
-	if rate == float64(math.MaxInt64) {
-		capacity = math.MaxInt64
+	if rate >= Unlimited {
+		capacity = int64(Unlimited)
 	} else if rate > 1 {
 		capacity = int64(rate * float64(regionInfluence))
 		rate *= float64(regionInfluence)

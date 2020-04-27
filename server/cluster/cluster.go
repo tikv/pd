@@ -16,7 +16,6 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -943,8 +942,8 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		// set the store limit to unlimit
-		c.coordinator.opController.SetStoreLimit(store.GetID(), float64(math.MaxInt64), storelimit.Auto, storelimit.RegionRemove)
+		// set the remove peer limit of the store to unlimited
+		c.coordinator.opController.SetStoreLimit(store.GetID(), storelimit.Unlimited, storelimit.Manual, storelimit.RegionRemove)
 	}
 	return err
 }
