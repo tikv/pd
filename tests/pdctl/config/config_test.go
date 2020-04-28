@@ -344,4 +344,9 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 	c.Assert(err, IsNil)
 	conf.DRAutoSync.LabelKey = "foobar"
 	check()
+
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr-auto-sync", "primary-replicas", "5")
+	c.Assert(err, IsNil)
+	conf.DRAutoSync.PrimaryReplicas = 5
+	check()
 }
