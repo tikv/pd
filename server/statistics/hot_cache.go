@@ -15,9 +15,7 @@ package statistics
 
 import (
 	"math/rand"
-	"time"
 
-	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/server/core"
 )
 
@@ -25,121 +23,28 @@ import (
 // only turned off by the simulator and the test.
 var Denoising = true
 
-const (
-	statCacheMaxLen            = 1000
-	minHotRegionReportInterval = 3
-	hotWriteRegionMinFlowRate  = 16 * 1024
-	hotReadRegionMinFlowRate   = 128 * 1024
-)
-
 // HotCache is a cache hold hot regions.
 type HotCache struct {
-	writeFlow     *hotPeerCache
-	readFlow      *hotPeerCache
-	hotWriteCache cache.Cache
-	hotReadCache  cache.Cache
+	writeFlow *hotPeerCache
+	readFlow  *hotPeerCache
 }
 
 // NewHotCache creates a new hot spot cache.
 func NewHotCache() *HotCache {
 	return &HotCache{
-		writeFlow:     NewHotStoresStats(WriteFlow),
-		readFlow:      NewHotStoresStats(ReadFlow),
-		hotWriteCache: cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
-		hotReadCache:  cache.NewCache(statCacheMaxLen, cache.TwoQueueCache),
+		writeFlow: NewHotStoresStats(WriteFlow),
+		readFlow:  NewHotStoresStats(ReadFlow),
 	}
 }
 
 // CheckWrite checks the write status, returns update items.
 func (w *HotCache) CheckWrite(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
-	w.updatehotWriteCache(region, stats)
 	return w.writeFlow.CheckRegionFlow(region, stats)
 }
 
 // CheckRead checks the read status, returns update items.
 func (w *HotCache) CheckRead(region *core.RegionInfo, stats *StoresStats) []*HotPeerStat {
-	w.updatehotReadCache(region, stats)
 	return w.readFlow.CheckRegionFlow(region, stats)
-}
-
-func (w *HotCache) updatehotWriteCache(region *core.RegionInfo, stats *StoresStats) {
-	var (
-		WrittenBytesPerSec float64
-		value              *HotPeerStat
-	)
-
-	WrittenBytesPerSec = float64(region.GetBytesWritten()) / float64(RegionHeartBeatReportInterval)
-
-	v, isExist := w.hotWriteCache.Peek(region.GetID())
-	if isExist {
-		value = v.(*HotPeerStat)
-		interval := time.Since(value.LastUpdateTime).Seconds()
-		if interval >= minHotRegionReportInterval {
-			WrittenBytesPerSec = float64(region.GetBytesWritten()) / interval
-		}
-	}
-
-	hotRegionThreshold := calculateWriteHotThreshold(stats)
-	if need, item := w.isNeedUpdateStatCache(region, WrittenBytesPerSec, hotRegionThreshold, value, WriteFlow); need {
-		w.updateHotCache(region.GetID(), item, WriteFlow)
-	}
-}
-
-func (w *HotCache) updatehotReadCache(region *core.RegionInfo, stats *StoresStats) {
-	var (
-		ReadBytesPerSec float64
-		value           *HotPeerStat
-	)
-
-	ReadBytesPerSec = float64(region.GetBytesRead()) / float64(RegionHeartBeatReportInterval)
-
-	v, isExist := w.hotReadCache.Peek(region.GetID())
-	if isExist {
-		value = v.(*HotPeerStat)
-		interval := time.Since(value.LastUpdateTime).Seconds()
-		if interval >= minHotRegionReportInterval {
-			ReadBytesPerSec = float64(region.GetBytesRead()) / interval
-		}
-	}
-
-	hotRegionThreshold := calculateReadHotThreshold(stats)
-	if need, item := w.isNeedUpdateStatCache(region, ReadBytesPerSec, hotRegionThreshold, value, ReadFlow); need {
-		w.updateHotCache(region.GetID(), item, ReadFlow)
-	}
-}
-
-func (w *HotCache) isNeedUpdateStatCache(region *core.RegionInfo, flowBytes float64, hotRegionThreshold uint64, oldItem *HotPeerStat, kind FlowKind) (bool, *HotPeerStat) {
-	newItem := &HotPeerStat{
-		RegionID:       region.GetID(),
-		ByteRate:       flowBytes,
-		LastUpdateTime: time.Now(),
-		StoreID:        region.GetLeader().GetStoreId(),
-		Version:        region.GetMeta().GetRegionEpoch().GetVersion(),
-		AntiCount:      hotRegionAntiCount,
-	}
-	if oldItem != nil {
-		newItem.HotDegree = oldItem.HotDegree + 1
-		newItem.rollingByteRate = oldItem.rollingByteRate
-	}
-	if flowBytes >= float64(hotRegionThreshold) {
-		if oldItem == nil {
-			newItem.rollingByteRate = NewMedianFilter(rollingWindowsSize)
-		}
-		newItem.rollingByteRate.Add(flowBytes)
-		return true, newItem
-	}
-	// smaller than hotRegionThreshold
-	if oldItem == nil {
-		return false, newItem
-	}
-	if oldItem.AntiCount <= 0 {
-		return true, nil
-	}
-	// eliminate some noise
-	newItem.HotDegree = oldItem.HotDegree - 1
-	newItem.AntiCount = oldItem.AntiCount - 1
-	newItem.rollingByteRate.Add(flowBytes)
-	return true, newItem
 }
 
 // Update updates the cache.
@@ -160,50 +65,6 @@ func (w *HotCache) Update(item *HotPeerStat) {
 	}
 }
 
-func (w *HotCache) updateHotCache(key uint64, item *HotPeerStat, kind FlowKind) {
-	switch kind {
-	case WriteFlow:
-		if item == nil {
-			w.hotWriteCache.Remove(key)
-		} else {
-			w.hotWriteCache.Put(key, item)
-		}
-	case ReadFlow:
-		if item == nil {
-			w.hotReadCache.Remove(key)
-		} else {
-			w.hotReadCache.Put(key, item)
-		}
-	}
-}
-
-func calculateWriteHotThreshold(stats *StoresStats) uint64 {
-	// hotRegionThreshold is used to pick hot region
-	// suppose the number of the hot Regions is statCacheMaxLen
-	// and we use total written Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	// divide 2 because the store reports data about two times than the region record write to rocksdb
-	divisor := float64(statCacheMaxLen) * 2
-	hotRegionThreshold := uint64(stats.TotalBytesWriteRate() / divisor)
-
-	if hotRegionThreshold < hotWriteRegionMinFlowRate {
-		hotRegionThreshold = hotWriteRegionMinFlowRate
-	}
-	return hotRegionThreshold
-}
-
-func calculateReadHotThreshold(stats *StoresStats) uint64 {
-	// hotRegionThreshold is used to pick hot region
-	// suppose the number of the hot Regions is statCacheMaxLen
-	// and we use total Read Bytes past storeHeartBeatReportInterval seconds to divide the number of hot Regions
-	divisor := float64(statCacheMaxLen)
-	hotRegionThreshold := uint64(stats.TotalBytesReadRate() / divisor)
-
-	if hotRegionThreshold < hotReadRegionMinFlowRate {
-		hotRegionThreshold = hotReadRegionMinFlowRate
-	}
-	return hotRegionThreshold
-}
-
 // RegionStats returns hot items according to kind
 func (w *HotCache) RegionStats(kind FlowKind) map[uint64][]*HotPeerStat {
 	switch kind {
@@ -211,17 +72,6 @@ func (w *HotCache) RegionStats(kind FlowKind) map[uint64][]*HotPeerStat {
 		return w.writeFlow.RegionStats()
 	case ReadFlow:
 		return w.readFlow.RegionStats()
-	}
-	return nil
-}
-
-// HotRegionCache returns hot cache according to kind
-func (w *HotCache) HotRegionCache(kind FlowKind) cache.Cache {
-	switch kind {
-	case WriteFlow:
-		return w.hotWriteCache
-	case ReadFlow:
-		return w.hotReadCache
 	}
 	return nil
 }
