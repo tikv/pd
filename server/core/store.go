@@ -91,6 +91,29 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	return store
 }
 
+// ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
+func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
+	store := &StoreInfo{
+		meta:             s.meta,
+		stats:            s.stats,
+		blocked:          s.blocked,
+		leaderCount:      s.leaderCount,
+		regionCount:      s.regionCount,
+		leaderSize:       s.leaderSize,
+		regionSize:       s.regionSize,
+		pendingPeerCount: s.pendingPeerCount,
+		lastPersistTime:  s.lastPersistTime,
+		leaderWeight:     s.leaderWeight,
+		regionWeight:     s.regionWeight,
+		available:        s.available,
+	}
+
+	for _, opt := range opts {
+		opt(store)
+	}
+	return store
+}
+
 // IsBlocked returns if the store is blocked.
 func (s *StoreInfo) IsBlocked() bool {
 	return s.blocked
@@ -640,7 +663,7 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 // UpdateStoreStatus updates the information of the store.
 func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
-		newStore := store.Clone(SetLeaderCount(leaderCount),
+		newStore := store.ShallowClone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),

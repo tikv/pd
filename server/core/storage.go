@@ -32,13 +32,13 @@ import (
 )
 
 const (
-	clusterPath     = "raft"
-	configPath      = "config"
-	schedulePath    = "schedule"
-	gcPath          = "gc"
-	rulesPath       = "rules"
-	replicationPath = "replication_mode"
-
+	clusterPath              = "raft"
+	configPath               = "config"
+	schedulePath             = "schedule"
+	gcPath                   = "gc"
+	rulesPath                = "rules"
+	replicationPath          = "replication_mode"
+	componentPath            = "component"
 	customScheduleConfigPath = "scheduler_config"
 )
 
@@ -278,6 +278,31 @@ func (s *Storage) LoadReplicationStatus(mode string, status interface{}) (bool, 
 		return false, nil
 	}
 	err = json.Unmarshal([]byte(v), status)
+	if err != nil {
+		return false, errors.WithStack(err)
+	}
+	return true, nil
+}
+
+// SaveComponent stores marshalable components to the componentPath.
+func (s *Storage) SaveComponent(component interface{}) error {
+	value, err := json.Marshal(component)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	return s.Save(componentPath, string(value))
+}
+
+// LoadComponent loads components from componentPath then unmarshal it to component.
+func (s *Storage) LoadComponent(component interface{}) (bool, error) {
+	v, err := s.Load(componentPath)
+	if err != nil {
+		return false, err
+	}
+	if v == "" {
+		return false, nil
+	}
+	err = json.Unmarshal([]byte(v), component)
 	if err != nil {
 		return false, errors.WithStack(err)
 	}
