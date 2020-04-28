@@ -74,9 +74,6 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	if err != nil {
 		return nil, err
 	}
-	if err != nil {
-		return nil, err
-	}
 	return &TestServer{
 		server: svr,
 		state:  Initial,
