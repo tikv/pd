@@ -181,10 +181,10 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	clusterRouter.HandleFunc("/replication_mode/status", replicationModeHandler.GetStatus)
 
 	componentHandler := newComponentHandler(svr, rd)
-	apiRouter.HandleFunc("/component", componentHandler.Register).Methods("POST")
-	apiRouter.HandleFunc("/component/{component}/{addr}", componentHandler.UnRegister).Methods("DELETE")
-	apiRouter.HandleFunc("/component", componentHandler.GetAllAddress).Methods("GET")
-	apiRouter.HandleFunc("/component/{type}", componentHandler.GetAddress).Methods("GET")
+	clusterRouter.HandleFunc("/component", componentHandler.Register).Methods("POST")
+	clusterRouter.HandleFunc("/component/{component}/{addr}", componentHandler.UnRegister).Methods("DELETE")
+	clusterRouter.HandleFunc("/component", componentHandler.GetAllAddress).Methods("GET")
+	clusterRouter.HandleFunc("/component/{type}", componentHandler.GetAddress).Methods("GET")
 
 	pluginHandler := newPluginHandler(handler, rd)
 	apiRouter.HandleFunc("/plugin", pluginHandler.LoadPlugin).Methods("POST")

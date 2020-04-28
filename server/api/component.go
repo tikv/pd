@@ -47,6 +47,7 @@ func newComponentHandler(svr *server.Server, rd *render.Render) *componentHandle
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /component [post]
 func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
 	input := make(map[string]string)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -61,9 +62,7 @@ func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set addr")))
 		return
 	}
-	m := h.svr.GetComponentManager()
-	err := m.Register(component, addr)
-	if err != nil {
+	if err := rc.GetComponentManager().Register(component, addr); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -77,12 +76,11 @@ func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Router /component [delete]
 func (h *componentHandler) UnRegister(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	component := vars["component"]
 	addr := vars["addr"]
-	m := h.svr.GetComponentManager()
-	err := m.UnRegister(component, addr)
-	if err != nil {
+	if err := rc.GetComponentManager().UnRegister(component, addr); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -95,8 +93,8 @@ func (h *componentHandler) UnRegister(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} Addresses
 // @Router /component [get]
 func (h *componentHandler) GetAllAddress(w http.ResponseWriter, r *http.Request) {
-	m := h.svr.GetComponentManager()
-	addrs := m.GetAllComponentAddrs()
+	rc := getCluster(r.Context())
+	addrs := rc.GetComponentManager().GetAllComponentAddrs()
 	h.rd.JSON(w, http.StatusOK, addrs)
 }
 
@@ -107,10 +105,10 @@ func (h *componentHandler) GetAllAddress(w http.ResponseWriter, r *http.Request)
 // @Failure 404 {string} string "The component does not exist."
 // @Router /component/{type} [get]
 func (h *componentHandler) GetAddress(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	component := vars["type"]
-	m := h.svr.GetComponentManager()
-	addrs := m.GetComponentAddrs(component)
+	addrs := rc.GetComponentManager().GetComponentAddrs(component)
 
 	if len(addrs) == 0 {
 		h.rd.JSON(w, http.StatusNotFound, "component not found")

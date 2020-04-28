@@ -20,22 +20,19 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
 )
 
 var _ = Suite(&testComponentSuite{})
 
 type testComponentSuite struct {
-	svr       *server.Server
-	cleanup   cleanUpFunc
-	urlPrefix string
+	cfgs    []*config.Config
+	svrs    []*server.Server
+	cleanup func()
 }
 
 func (s *testComponentSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	s.cfgs, s.svrs, s.cleanup = mustNewCluster(c, 3)
 }
 
 func (s *testComponentSuite) TearDownSuite(c *C) {
@@ -43,14 +40,19 @@ func (s *testComponentSuite) TearDownSuite(c *C) {
 }
 
 func (s *testComponentSuite) TestComponent(c *C) {
+	leaderServer := mustWaitLeader(c, s.svrs)
+
+	leaderAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1", leaderAddr, apiPrefix)
+	mustBootstrapCluster(c, leaderServer)
 	// register not happen
-	addr := fmt.Sprintf("%s/component", s.urlPrefix)
+	addr := fmt.Sprintf("%s/component", urlPrefix)
 	output := make(map[string][]string)
 	err := readJSON(testDialClient, addr, &output)
 	c.Assert(err, IsNil)
 	c.Assert(len(output), Equals, 0)
 
-	addr1 := fmt.Sprintf("%s/component/c1", s.urlPrefix)
+	addr1 := fmt.Sprintf("%s/component/c1", urlPrefix)
 	var output1 []string
 	err = readJSON(testDialClient, addr1, &output)
 	c.Assert(strings.Contains(err.Error(), "404"), IsTrue)
@@ -89,7 +91,7 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(output2, DeepEquals, expected1)
 
-	addr2 := fmt.Sprintf("%s/component/c2", s.urlPrefix)
+	addr2 := fmt.Sprintf("%s/component/c2", urlPrefix)
 	expected2 := []string{"127.0.0.1:3"}
 	var output3 []string
 	err = readJSON(testDialClient, addr2, &output3)
@@ -97,7 +99,7 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	c.Assert(output3, DeepEquals, expected2)
 
 	// unregister address
-	addr3 := fmt.Sprintf("%s/component/c1/127.0.0.1:1", s.urlPrefix)
+	addr3 := fmt.Sprintf("%s/component/c1/127.0.0.1:1", urlPrefix)
 	res, err := doDelete(testDialClient, addr3)
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, 200)
@@ -112,7 +114,7 @@ func (s *testComponentSuite) TestComponent(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(output, DeepEquals, expected3)
 
-	addr4 := fmt.Sprintf("%s/component/c1/127.0.0.1:2", s.urlPrefix)
+	addr4 := fmt.Sprintf("%s/component/c1/127.0.0.1:2", urlPrefix)
 	res, err = doDelete(testDialClient, addr4)
 	c.Assert(err, IsNil)
 	c.Assert(res.StatusCode, Equals, 200)
@@ -120,6 +122,20 @@ func (s *testComponentSuite) TestComponent(c *C) {
 		"c2": {"127.0.0.1:3"},
 		"c3": {"example.com"},
 	}
+	output = make(map[string][]string)
+	err = readJSON(testDialClient, addr, &output)
+	c.Assert(err, IsNil)
+	c.Assert(output, DeepEquals, expected4)
+
+	// change leader
+	addr5 := fmt.Sprintf("%s/leader/resign", urlPrefix)
+	err = postJSON(testDialClient, addr5, []byte(""))
+	c.Assert(err, IsNil)
+	leaderServer = mustWaitLeader(c, s.svrs)
+
+	leaderAddr = leaderServer.GetAddr()
+	urlPrefix = fmt.Sprintf("%s%s/api/v1", leaderAddr, apiPrefix)
+	addr = fmt.Sprintf("%s/component", urlPrefix)
 	output = make(map[string][]string)
 	err = readJSON(testDialClient, addr, &output)
 	c.Assert(err, IsNil)

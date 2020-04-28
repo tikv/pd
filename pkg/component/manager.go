@@ -19,19 +19,22 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/server/core"
 	"go.uber.org/zap"
 )
 
 // Manager is used to manage components.
 type Manager struct {
 	sync.RWMutex
+	storage *core.Storage
 	// component -> addresses
-	Addresses map[string][]string
+	Addresses map[string][]string `json:"address"`
 }
 
 // NewManager creates a new component manager.
-func NewManager() *Manager {
+func NewManager(storage *core.Storage) *Manager {
 	return &Manager{
+		storage:   storage,
 		Addresses: make(map[string][]string),
 	}
 }
@@ -94,7 +97,9 @@ func (c *Manager) Register(component, addr string) error {
 
 	ca = append(ca, addr)
 	c.Addresses[component] = ca
-	log.Info("address registers successfully", zap.String("component", component), zap.String("address", addr))
+	if err := c.storage.SaveComponent(c); err != nil {
+		return fmt.Errorf("failed to save component when registering component %s address %s", component, addr)
+	}
 	return nil
 }
 
@@ -114,13 +119,18 @@ func (c *Manager) UnRegister(component, addr string) error {
 
 	if exist, idx := contains(ca, addr); exist {
 		ca = append(ca[:idx], ca[idx+1:]...)
-		log.Info("address has successfully been unregistered", zap.String("component", component), zap.String("address", addr))
 		if len(ca) == 0 {
 			delete(c.Addresses, component)
+			if err := c.storage.SaveComponent(c); err != nil {
+				return fmt.Errorf("failed to save component when unregistering component %s address %s", component, addr)
+			}
 			return nil
 		}
 
 		c.Addresses[component] = ca
+		if err := c.storage.SaveComponent(c); err != nil {
+			return fmt.Errorf("failed to save component when unregistering component %s address %s", component, addr)
+		}
 		return nil
 	}
 
