@@ -95,36 +95,6 @@ func (s *testConcurrencySuite) TestCloneStore(c *C) {
 	wg.Wait()
 }
 
-func (s *testConcurrencySuite) TestShallowCloneStore(c *C) {
-	meta := &metapb.Store{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
-	store := NewStoreInfo(meta)
-	start := time.Now()
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		for {
-			if time.Since(start) > time.Second {
-				break
-			}
-			store.GetMeta().GetState()
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for {
-			if time.Since(start) > time.Second {
-				break
-			}
-			store.ShallowClone(
-				SetStoreState(metapb.StoreState_Up),
-				SetLastHeartbeatTS(time.Now()),
-			)
-		}
-	}()
-	wg.Wait()
-}
-
 var _ = Suite(&testStoreSuite{})
 
 type testStoreSuite struct{}
