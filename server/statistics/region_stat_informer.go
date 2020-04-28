@@ -13,7 +13,10 @@
 
 package statistics
 
-import "github.com/pingcap/pd/v4/server/core"
+import (
+	"github.com/pingcap/pd/v4/pkg/cache"
+	"github.com/pingcap/pd/v4/server/core"
+)
 
 // RegionStatInformer provides access to a shared informer of statistics.
 type RegionStatInformer interface {
@@ -21,4 +24,6 @@ type RegionStatInformer interface {
 	RegionWriteStats() map[uint64][]*HotPeerStat
 	RegionReadStats() map[uint64][]*HotPeerStat
 	RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo
+	HotWriteCache() cache.Cache
+	HotReadCache() cache.Cache
 }

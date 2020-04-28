@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
@@ -1509,6 +1510,16 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
 	return c.hotSpotCache.RegionStats(statistics.WriteFlow)
+}
+
+// HotWriteCache returns hot region's write cache.
+func (c *RaftCluster) HotWriteCache() cache.Cache {
+	return c.hotSpotCache.HotRegionCache(statistics.WriteFlow)
+}
+
+// HotReadCache returns hot region's read cache.
+func (c *RaftCluster) HotReadCache() cache.Cache {
+	return c.hotSpotCache.HotRegionCache(statistics.ReadFlow)
 }
 
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.

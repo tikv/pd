@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/pkg/mock/mockid"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
 	"github.com/pingcap/pd/v4/server/core"
@@ -100,6 +101,16 @@ func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 // RegionWriteStats returns hot region's write stats.
 func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	return mc.HotCache.RegionStats(statistics.WriteFlow)
+}
+
+// HotWriteCache returns hot region's write cache.
+func (mc *Cluster) HotWriteCache() cache.Cache {
+	return mc.HotCache.HotRegionCache(statistics.WriteFlow)
+}
+
+// HotReadCache returns hot region's read cache.
+func (mc *Cluster) HotReadCache() cache.Cache {
+	return mc.HotCache.HotRegionCache(statistics.ReadFlow)
 }
 
 // RandHotRegionFromStore random picks a hot region in specify store.

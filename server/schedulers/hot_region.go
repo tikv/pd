@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
@@ -385,13 +386,13 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 
 func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
 	// prefer to balance by leader
-	leaderSolver := newBalanceSolver(h, cluster, read, transferLeader)
+	leaderSolver := newBalanceSolver(h, cluster, read, transferLeader, cluster.HotReadCache())
 	ops := leaderSolver.solve()
 	if len(ops) > 0 {
 		return ops
 	}
 
-	peerSolver := newBalanceSolver(h, cluster, read, movePeer)
+	peerSolver := newBalanceSolver(h, cluster, read, movePeer, cluster.HotReadCache())
 	ops = peerSolver.solve()
 	if len(ops) > 0 {
 		return ops
@@ -406,7 +407,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 	s := h.r.Intn(100)
 	switch {
 	case s < int(schedulePeerPr*100):
-		peerSolver := newBalanceSolver(h, cluster, write, movePeer)
+		peerSolver := newBalanceSolver(h, cluster, write, movePeer, cluster.HotWriteCache())
 		ops := peerSolver.solve()
 		if len(ops) > 0 {
 			return ops
@@ -414,7 +415,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 	default:
 	}
 
-	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
+	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader, cluster.HotWriteCache())
 	ops := leaderSolver.solve()
 	if len(ops) > 0 {
 		return ops
@@ -436,6 +437,8 @@ type balanceSolver struct {
 	maxSrc   *storeLoad
 	minDst   *storeLoad
 	rankStep *storeLoad
+
+	cache cache.Cache
 }
 
 type solution struct {
@@ -496,12 +499,13 @@ func getUnhealthyStores(cluster opt.Cluster) []uint64 {
 	return ret
 }
 
-func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
+func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType, cache cache.Cache) *balanceSolver {
 	solver := &balanceSolver{
 		sche:    sche,
 		cluster: cluster,
 		rwTy:    rwTy,
 		opTy:    opTy,
+		cache:   cache,
 	}
 	solver.init()
 	return solver
@@ -806,6 +810,9 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			// Byte rate is balanced, ignore the key rate.
 			rank = -1
 		}
+	}
+	if _, ok := bs.cache.Peek(peer.ID()); ok {
+		rank--
 	}
 	bs.cur.progressiveRank = rank
 }
