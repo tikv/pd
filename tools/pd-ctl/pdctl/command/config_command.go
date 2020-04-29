@@ -352,7 +352,7 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 1 {
 		postJSON(cmd, replicationModePrefix, map[string]interface{}{"replication-mode": args[0]})
 	} else if len(args) == 3 {
-		t := findFieldByJsonTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
+		t := findFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
 		if t != nil && t.Kind() != reflect.String {
 			// convert to number for numberic fields.
 			arg2, err := strconv.ParseInt(args[2], 10, 64)
@@ -369,7 +369,7 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	}
 }
 
-func findFieldByJsonTag(t reflect.Type, tags []string) reflect.Type {
+func findFieldByJSONTag(t reflect.Type, tags []string) reflect.Type {
 	if len(tags) == 0 {
 		return t
 	}
@@ -382,7 +382,7 @@ func findFieldByJsonTag(t reflect.Type, tags []string) reflect.Type {
 			jsonTag = jsonTag[:i]
 		}
 		if jsonTag == tags[0] {
-			return findFieldByJsonTag(t.Field(i).Type, tags[1:])
+			return findFieldByJSONTag(t.Field(i).Type, tags[1:])
 		}
 	}
 	return nil
