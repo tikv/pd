@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/config"
@@ -35,12 +34,12 @@ const (
 	modeDRAutoSync = "dr-auto-sync"
 )
 
-func modeToPB(m string) replication_modepb.ReplicationMode {
+func modeToPB(m string) pb.ReplicationMode {
 	switch m {
 	case modeMajority:
-		return replication_modepb.ReplicationMode_MAJORITY
+		return pb.ReplicationMode_MAJORITY
 	case modeDRAutoSync:
-		return replication_modepb.ReplicationMode_DR_AUTO_SYNC
+		return pb.ReplicationMode_DR_AUTO_SYNC
 	}
 	return 0
 }
