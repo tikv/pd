@@ -97,13 +97,22 @@ func NewReplicationModeManager(config config.ReplicationModeConfig, storage *cor
 func (m *ModeManager) UpdateConfig(config config.ReplicationModeConfig) error {
 	m.Lock()
 	defer m.Unlock()
-	// If mode change from 'majority' to 'dr-auto-sync', or the label key is
-	// updated, switch to 'sync_recover' state.
-	if (m.config.ReplicationMode == modeMajority && config.ReplicationMode == modeDRAutoSync) ||
-		(m.config.ReplicationMode == modeDRAutoSync && config.ReplicationMode == modeDRAutoSync && m.config.DRAutoSync.LabelKey != config.DRAutoSync.LabelKey && m.drAutoSync.State == drStateSync) {
+	// If mode change from 'majority' to 'dr-auto-sync', switch to 'sync_recover'.
+	if m.config.ReplicationMode == modeMajority && config.ReplicationMode == modeDRAutoSync {
 		old := m.config
 		m.config = config
 		err := m.drSwitchToSyncRecoverWithLock()
+		if err != nil {
+			// restore
+			m.config = old
+		}
+		return err
+	}
+	// If the label key is updated, switch to 'async' state.
+	if m.config.ReplicationMode == modeDRAutoSync && config.ReplicationMode == modeDRAutoSync && m.config.DRAutoSync.LabelKey != config.DRAutoSync.LabelKey {
+		old := m.config
+		m.config = config
+		err := m.drSwitchToAsync()
 		if err != nil {
 			// restore
 			m.config = old
