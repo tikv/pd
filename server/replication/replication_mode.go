@@ -100,7 +100,7 @@ func (m *ModeManager) UpdateConfig(config config.ReplicationModeConfig) error {
 	// If mode change from 'majority' to 'dr-auto-sync', or the label key is
 	// updated, switch to 'sync_recover' state.
 	if (m.config.ReplicationMode == modeMajority && config.ReplicationMode == modeDRAutoSync) ||
-		(m.config.ReplicationMode == modeDRAutoSync && config.ReplicationMode == modeDRAutoSync && m.config.DRAutoSync.LabelKey != config.DRAutoSync.LabelKey) {
+		(m.config.ReplicationMode == modeDRAutoSync && config.ReplicationMode == modeDRAutoSync && m.config.DRAutoSync.LabelKey != config.DRAutoSync.LabelKey && m.drAutoSync.State == drStateSync) {
 		old := m.config
 		m.config = config
 		err := m.drSwitchToSyncRecoverWithLock()
