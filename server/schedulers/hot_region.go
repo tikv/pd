@@ -74,6 +74,10 @@ const (
 
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
+
+	divisor                   = float64(1000) * 2
+	hotWriteRegionMinFlowRate = 16 * 1024
+	hotReadRegionMinFlowRate  = 128 * 1024
 )
 
 // schedulePeerPr the probability of schedule the hot peer.
@@ -194,13 +198,14 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionRead := cluster.RegionReadStats()
 		storeByte := storesStat.GetStoresBytesReadStat()
 		storeKey := storesStat.GetStoresKeysReadStat()
-
+		hotRegionThreshold := getHotRegionThreshold(storesStat, read)
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
 			storeByte,
 			storeKey,
 			h.pendingSums[readLeader],
 			regionRead,
 			minHotDegree,
+			hotRegionThreshold,
 			read, core.LeaderKind)
 	}
 
@@ -208,13 +213,14 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionWrite := cluster.RegionWriteStats()
 		storeByte := storesStat.GetStoresBytesWriteStat()
 		storeKey := storesStat.GetStoresKeysWriteStat()
-
+		hotRegionThreshold := getHotRegionThreshold(storesStat, write)
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storeByte,
 			storeKey,
 			h.pendingSums[writeLeader],
 			regionWrite,
 			minHotDegree,
+			hotRegionThreshold,
 			write, core.LeaderKind)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
@@ -223,8 +229,29 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			h.pendingSums[writePeer],
 			regionWrite,
 			minHotDegree,
+			hotRegionThreshold,
 			write, core.RegionKind)
 	}
+}
+
+func getHotRegionThreshold(stats *statistics.StoresStats, typ rwType) uint64 {
+	var hotRegionThreshold uint64
+	switch typ {
+	case write:
+		hotRegionThreshold = uint64(stats.TotalBytesWriteRate() / divisor)
+		if hotRegionThreshold < hotWriteRegionMinFlowRate {
+			hotRegionThreshold = hotWriteRegionMinFlowRate
+		}
+		return hotRegionThreshold
+	case read:
+		hotRegionThreshold = uint64(stats.TotalBytesReadRate() / divisor)
+		if hotRegionThreshold < hotWriteRegionMinFlowRate {
+			hotRegionThreshold = hotWriteRegionMinFlowRate
+		}
+		return hotRegionThreshold
+	}
+
+	return 0
 }
 
 func (h *hotScheduler) summaryPendingInfluence() {
@@ -263,6 +290,7 @@ func summaryStoresLoad(
 	pendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
 	minHotDegree int,
+	hotRegionThreshold uint64,
 	rwTy rwType,
 	kind core.ResourceKind,
 ) map[uint64]*storeLoadDetail {
@@ -280,7 +308,7 @@ func summaryStoresLoad(
 		{
 			byteSum := 0.0
 			keySum := 0.0
-			for _, peer := range filterHotPeers(kind, minHotDegree, storeHotPeers[id]) {
+			for _, peer := range filterHotPeers(kind, minHotDegree, hotRegionThreshold, storeHotPeers[id]) {
 				byteSum += peer.GetByteRate()
 				keySum += peer.GetKeyRate()
 				hotPeers = append(hotPeers, peer.Clone())
@@ -347,12 +375,13 @@ func summaryStoresLoad(
 func filterHotPeers(
 	kind core.ResourceKind,
 	minHotDegree int,
+	hotRegionThreshold uint64,
 	peers []*statistics.HotPeerStat,
 ) []*statistics.HotPeerStat {
 	ret := make([]*statistics.HotPeerStat, 0)
 	for _, peer := range peers {
 		if (kind == core.LeaderKind && !peer.IsLeader()) ||
-			peer.HotDegree < minHotDegree {
+			peer.HotDegree < minHotDegree || peer.GetByteRate() < float64(hotRegionThreshold) {
 			continue
 		}
 		ret = append(ret, peer)
