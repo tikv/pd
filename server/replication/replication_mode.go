@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/config"
@@ -31,8 +32,18 @@ import (
 
 const (
 	modeMajority   = "majority"
-	modeDRAutoSync = "dr_auto_sync"
+	modeDRAutoSync = "dr-auto-sync"
 )
+
+func modeToPB(m string) replication_modepb.ReplicationMode {
+	switch m {
+	case modeMajority:
+		return replication_modepb.ReplicationMode_MAJORITY
+	case modeDRAutoSync:
+		return replication_modepb.ReplicationMode_DR_AUTO_SYNC
+	}
+	return 0
+}
 
 // FileReplicater is the interface that can save important data to all cluster
 // nodes.
@@ -86,7 +97,7 @@ func NewReplicationModeManager(config config.ReplicationModeConfig, storage *cor
 func (m *ModeManager) UpdateConfig(config config.ReplicationModeConfig) error {
 	m.Lock()
 	defer m.Unlock()
-	// Handle 'majority -> dr_auto_sync' as special case. (sync_recover mode)
+	// Handle 'majority -> dr-auto-sync' as special case. (sync_recover mode)
 	if m.config.ReplicationMode == modeMajority && config.ReplicationMode == modeDRAutoSync {
 		old := m.config
 		m.config = config
@@ -107,7 +118,7 @@ func (m *ModeManager) GetReplicationStatus() *pb.ReplicationStatus {
 	defer m.RUnlock()
 
 	p := &pb.ReplicationStatus{
-		Mode: pb.ReplicationMode(pb.ReplicationMode_value[strings.ToUpper(m.config.ReplicationMode)]),
+		Mode: modeToPB(m.config.ReplicationMode),
 	}
 	switch m.config.ReplicationMode {
 	case modeMajority:
@@ -132,7 +143,7 @@ type HTTPReplicationStatus struct {
 		TotalRegions    int     `json:"total_regions,omitempty"`
 		SyncedRegions   int     `json:"synced_regions,omitempty"`
 		RecoverProgress float32 `json:"recover_progress,omitempty"`
-	} `json:"dr_auto_sync,omitempty"`
+	} `json:"dr-auto-sync,omitempty"`
 }
 
 // GetReplicationStatusHTTP returns status for HTTP API.
