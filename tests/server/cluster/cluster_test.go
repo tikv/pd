@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
 	syncer "github.com/pingcap/pd/v4/server/region_syncer"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pkg/errors"
@@ -855,4 +856,89 @@ func getClusterConfig(c *C, clusterID uint64, grpcPDClient pdpb.PDClient) *metap
 	c.Assert(resp.GetCluster(), NotNil)
 
 	return resp.GetCluster()
+}
+
+func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
+	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1"}
+	rc := leaderServer.GetRaftCluster()
+	c.Assert(rc, NotNil)
+	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	id := leaderServer.GetAllocator()
+	for _, addr := range storeAddrs {
+		storeID, err := id.Alloc()
+		c.Assert(err, IsNil)
+		store := newMetaStore(storeID, addr, "4.0.0", metapb.StoreState_Up)
+		_, err = putStore(c, grpcPDClient, clusterID, store)
+		c.Assert(err, IsNil)
+	}
+	for i := uint64(1); i <= 2; i++ {
+		r := &metapb.Region{
+			Id: i,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i + 1)},
+			EndKey:   []byte{byte(i + 2)},
+			Peers:    []*metapb.Peer{{Id: i + 10, StoreId: uint64(i)}},
+		}
+		region := core.NewRegionInfo(r, r.Peers[0], core.SetApproximateSize(10))
+
+		err = rc.HandleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+	}
+
+	oc := rc.GetOperatorController()
+	oc.SetAllStoresLimit(1, storelimit.Manual, storelimit.RegionRemove)
+	// only can add 5 remove peer operators on store 1
+	for i := uint64(1); i <= 5; i++ {
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
+	}
+	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
+
+	// only can add 5 remove peer operators on store 2
+	for i := uint64(1); i <= 5; i++ {
+		op := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
+	}
+	op = operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
+
+	// reset all store limit
+	oc.SetAllStoresLimit(1, storelimit.Manual, storelimit.RegionRemove)
+
+	// only can add 5 remove peer operators on store 2
+	for i := uint64(1); i <= 5; i++ {
+		op := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
+	}
+	op = operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
+
+	// offline store 1
+	rc.RemoveStore(1)
+	// can add unlimited remove peer operators on store 1
+	for i := uint64(1); i <= 30; i++ {
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
+	}
 }

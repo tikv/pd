@@ -36,7 +36,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/component"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/grpcutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
@@ -124,9 +123,6 @@ type Server struct {
 	// Zap logger
 	lg       *zap.Logger
 	logProps *log.ZapProperties
-
-	// It's used to manage components.
-	componentManager *component.Manager
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -365,7 +361,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
-	s.componentManager = component.NewManager()
 
 	// Run callbacks
 	for _, cb := range s.startCallbacks {
@@ -623,11 +618,6 @@ func (s *Server) GetClient() *clientv3.Client {
 // GetHTTPClient returns builtin etcd client.
 func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
-}
-
-// GetComponentManager returns the component manager of server.
-func (s *Server) GetComponentManager() *component.Manager {
-	return s.componentManager
 }
 
 // GetLeader returns leader of etcd.

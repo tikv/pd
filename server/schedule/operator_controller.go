@@ -869,7 +869,6 @@ func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
 			if stepCost == 0 {
 				continue
 			}
-
 			available := oc.getOrCreateStoreLimit(storeID, v).Available()
 			storeLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), "available", n).Set(float64(available) / float64(storelimit.RegionInfluence[v]))
 			if available < stepCost {
