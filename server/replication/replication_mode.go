@@ -215,8 +215,6 @@ func (m *ModeManager) drSwitchToAsync() error {
 }
 
 func (m *ModeManager) drSwitchToAsyncWithLock() error {
-	m.Lock()
-	defer m.Unlock()
 	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
