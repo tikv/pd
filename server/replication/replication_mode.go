@@ -111,7 +111,7 @@ func (m *ModeManager) UpdateConfig(config config.ReplicationModeConfig) error {
 	if m.config.ReplicationMode == modeDRAutoSync && config.ReplicationMode == modeDRAutoSync && m.config.DRAutoSync.LabelKey != config.DRAutoSync.LabelKey {
 		old := m.config
 		m.config = config
-		err := m.drSwitchToAsync()
+		err := m.drSwitchToAsyncWithLock()
 		if err != nil {
 			// restore
 			m.config = old
@@ -209,6 +209,12 @@ func (m *ModeManager) loadDRAutoSync() error {
 }
 
 func (m *ModeManager) drSwitchToAsync() error {
+	m.Lock()
+	defer m.Unlock()
+	return m.drSwitchToAsyncWithLock()
+}
+
+func (m *ModeManager) drSwitchToAsyncWithLock() error {
 	m.Lock()
 	defer m.Unlock()
 	id, err := m.cluster.AllocID()
