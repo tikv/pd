@@ -569,13 +569,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 
 		// Update related stores.
-		storeMap := make(map[uint64]uint64)
+		storeMap := make(map[uint64]struct{})
 		for _, p := range region.GetPeers() {
-			storeMap[p.GetStoreId()] = p.GetStoreId()
+			storeMap[p.GetStoreId()] = struct{}{}
 		}
 		if origin != nil {
 			for _, p := range origin.GetPeers() {
-				storeMap[p.GetStoreId()] = p.GetStoreId()
+				storeMap[p.GetStoreId()] = struct{}{}
 			}
 		}
 		for key := range storeMap {
