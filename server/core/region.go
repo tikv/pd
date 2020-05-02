@@ -579,7 +579,10 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 // SetRegion sets the RegionInfo with regionID
 func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
 	if origin := r.regions.Get(region.GetID()); origin != nil {
-		r.RemoveRegion(origin)
+		r.removeRegionFromTreeAndMap(origin)
+		if r.shouldRemoveFromSubTree(region, origin) {
+			r.removeRegionFromSubTree(origin)
+		}
 	}
 	return r.AddRegion(region)
 }
@@ -658,8 +661,20 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 // RemoveRegion removes RegionInfo from regionTree and regionMap
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	// Remove from tree and regions.
+	r.removeRegionFromTreeAndMap(region)
+	// Remove from leaders and followers.
+	r.removeRegionFromSubTree(region)
+}
+
+// removeRegionFromTreeAndMap removes RegionInfo from regionTree and regionMap
+func (r *RegionsInfo) removeRegionFromTreeAndMap(region *RegionInfo) {
+	// Remove from tree and regions.
 	r.tree.remove(region)
 	r.regions.Delete(region.GetID())
+}
+
+// removeRegionFromSubTree removes RegionInfo from regionSubTrees
+func (r *RegionsInfo) removeRegionFromSubTree(region *RegionInfo) {
 	// Remove from leaders and followers.
 	for _, peer := range region.meta.GetPeers() {
 		storeID := peer.GetStoreId()
@@ -668,6 +683,50 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 		r.learners[storeID].remove(region)
 		r.pendingPeers[storeID].remove(region)
 	}
+}
+
+// shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
+// new peer was created, learners changed, pendingPeers changed, and so on.
+func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
+	checkPeersChange := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
+		checkPeersDiff := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
+			for _, a := range origin {
+				if a == nil {
+					continue
+				}
+				both := false
+				for _, b := range other {
+					if b == nil {
+						continue
+					}
+					if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
+						both = true
+						break
+					}
+				}
+				if !both {
+					return true
+				}
+			}
+			return false
+		}
+		if checkPeersDiff(origin, other) || checkPeersDiff(other, origin) {
+			return true
+		}
+		return false
+	}
+
+	remove := false
+	if origin.leader.GetId() != region.leader.GetId() {
+		remove = true
+	} else if checkPeersChange(origin.GetVoters(), region.GetVoters()) {
+		remove = true
+	} else if checkPeersChange(origin.GetLearners(), region.GetLearners()) {
+		remove = true
+	} else if checkPeersChange(origin.GetPendingPeers(), region.GetPendingPeers()) {
+		remove = true
+	}
+	return remove
 }
 
 // SearchRegion searches RegionInfo from regionTree
