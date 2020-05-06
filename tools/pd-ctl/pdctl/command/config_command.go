@@ -20,8 +20,11 @@ import (
 	"io/ioutil"
 	"net/http"
 	"path"
+	"reflect"
 	"strconv"
+	"strings"
 
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/spf13/cobra"
 )
@@ -349,11 +352,40 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 1 {
 		postJSON(cmd, replicationModePrefix, map[string]interface{}{"replication-mode": args[0]})
 	} else if len(args) == 3 {
+		t := findFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
+		if t != nil && t.Kind() != reflect.String {
+			// convert to number for numberic fields.
+			arg2, err := strconv.ParseInt(args[2], 10, 64)
+			if err != nil {
+				cmd.Printf("value %v cannot covert to number: %v", args[2], err)
+				return
+			}
+			postJSON(cmd, replicationModePrefix, map[string]interface{}{args[0]: map[string]interface{}{args[1]: arg2}})
+			return
+		}
 		postJSON(cmd, replicationModePrefix, map[string]interface{}{args[0]: map[string]string{args[1]: args[2]}})
 	} else {
 		cmd.Println(cmd.UsageString())
-		return
 	}
+}
+
+func findFieldByJSONTag(t reflect.Type, tags []string) reflect.Type {
+	if len(tags) == 0 {
+		return t
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	for i := 0; i < t.NumField(); i++ {
+		jsonTag := t.Field(i).Tag.Get("json")
+		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
+			jsonTag = jsonTag[:i]
+		}
+		if jsonTag == tags[0] {
+			return findFieldByJSONTag(t.Field(i).Type, tags[1:])
+		}
+	}
+	return nil
 }
 
 // NewPlacementRulesCommand placement rules subcommand
