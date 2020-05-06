@@ -208,7 +208,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			regionRead,
 			minHotDegree,
 			hotRegionThreshold,
-			read, core.LeaderKind)
+			read, core.LeaderKind, high)
 	}
 
 	{ // update write statistics
@@ -223,7 +223,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			regionWrite,
 			minHotDegree,
 			hotRegionThreshold,
-			write, core.LeaderKind)
+			write, core.LeaderKind, high)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storeByte,
@@ -232,7 +232,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			regionWrite,
 			minHotDegree,
 			hotRegionThreshold,
-			write, core.RegionKind)
+			write, core.RegionKind, high)
 	}
 }
 
@@ -303,6 +303,7 @@ func summaryStoresLoad(
 	hotRegionThreshold [2]uint64,
 	rwTy rwType,
 	kind core.ResourceKind,
+	hotPeerFilterTy hotPeerFilterType,
 ) map[uint64]*storeLoadDetail {
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
 	allByteSum := 0.0
@@ -318,7 +319,7 @@ func summaryStoresLoad(
 		{
 			byteSum := 0.0
 			keySum := 0.0
-			for _, peer := range filterHotPeers(kind, minHotDegree, hotRegionThreshold, storeHotPeers[id]) {
+			for _, peer := range filterHotPeers(kind, minHotDegree, hotRegionThreshold, storeHotPeers[id], hotPeerFilterTy) {
 				byteSum += peer.GetByteRate()
 				keySum += peer.GetKeyRate()
 				hotPeers = append(hotPeers, peer.Clone())
@@ -387,18 +388,34 @@ func filterHotPeers(
 	minHotDegree int,
 	hotRegionThreshold [2]uint64,
 	peers []*statistics.HotPeerStat,
+	hotPeerFilterTy hotPeerFilterType,
 ) []*statistics.HotPeerStat {
 	ret := make([]*statistics.HotPeerStat, 0)
 	for _, peer := range peers {
 		if (kind == core.LeaderKind && !peer.IsLeader()) ||
 			peer.HotDegree < minHotDegree ||
-			peer.GetByteRate() < float64(hotRegionThreshold[0]) ||
-			peer.GetKeyRate() < float64(hotRegionThreshold[1]) {
+			isHotPeerFiltered(peer, hotRegionThreshold, hotPeerFilterTy) {
 			continue
 		}
 		ret = append(ret, peer)
 	}
 	return ret
+}
+
+func isHotPeerFiltered(peer *statistics.HotPeerStat, hotRegionThreshold [2]uint64, hotPeerFilterTy hotPeerFilterType) bool {
+	var isFiltered bool
+	switch hotPeerFilterTy {
+	case high:
+		if peer.GetByteRate() < float64(hotRegionThreshold[0]) && peer.GetKeyRate() < float64(hotRegionThreshold[1]) {
+			isFiltered = true
+		}
+	case low:
+		if peer.GetByteRate() >= float64(hotRegionThreshold[0]) || peer.GetKeyRate() >= float64(hotRegionThreshold[1]) {
+			isFiltered = true
+		}
+	case mixed:
+	}
+	return isFiltered
 }
 
 func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, rwTy rwType, opTy opType) bool {
@@ -1163,6 +1180,14 @@ func (rw rwType) String() string {
 		return ""
 	}
 }
+
+type hotPeerFilterType int
+
+const (
+	high hotPeerFilterType = iota
+	low
+	mixed
+)
 
 type opType int
 

@@ -133,7 +133,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []
 			cluster.RegionReadStats(),
 			minHotDegree,
 			hotRegionThreshold,
-			read, core.LeaderKind)
+			read, core.LeaderKind, high)
 		return s.randomSchedule(cluster, s.stLoadInfos[readLeader])
 	case write:
 		hotRegionThreshold := getHotRegionThreshold(storesStats, write)
@@ -144,7 +144,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []
 			cluster.RegionWriteStats(),
 			minHotDegree,
 			hotRegionThreshold,
-			write, core.LeaderKind)
+			write, core.LeaderKind, high)
 		return s.randomSchedule(cluster, s.stLoadInfos[writeLeader])
 	}
 	return nil
