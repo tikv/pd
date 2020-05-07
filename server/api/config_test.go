@@ -91,7 +91,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 		"pd-server.metric-storage":                "http://127.0.0.1:1234",
 		"log.level":                               "warn",
 		"cluster-version":                         "v4.0.0-beta",
-		"replication-mode.replication-mode":       "dr_auto_sync",
+		"replication-mode.replication-mode":       "dr-auto-sync",
 		"replication-mode.dr-auto-sync.label-key": "foobar",
 	}
 	postData, err = json.Marshal(l)
@@ -106,7 +106,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:1234"
 	cfg.Log.Level = "warn"
 	cfg.ReplicationMode.DRAutoSync.LabelKey = "foobar"
-	cfg.ReplicationMode.ReplicationMode = "dr_auto_sync"
+	cfg.ReplicationMode.ReplicationMode = "dr-auto-sync"
 	v, err := cluster.ParseVersion("v4.0.0-beta")
 	c.Assert(err, IsNil)
 	cfg.ClusterVersion = *v
