@@ -716,17 +716,19 @@ func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *Region
 		return false
 	}
 
-	remove := false
 	if origin.leader.GetId() != region.leader.GetId() {
-		remove = true
-	} else if checkPeersChange(origin.GetVoters(), region.GetVoters()) {
-		remove = true
-	} else if checkPeersChange(origin.GetLearners(), region.GetLearners()) {
-		remove = true
-	} else if checkPeersChange(origin.GetPendingPeers(), region.GetPendingPeers()) {
-		remove = true
+		return true
 	}
-	return remove
+	if checkPeersChange(origin.GetVoters(), region.GetVoters()) {
+		return true
+	}
+	if checkPeersChange(origin.GetLearners(), region.GetLearners()) {
+		return true
+	}
+	if checkPeersChange(origin.GetPendingPeers(), region.GetPendingPeers()) {
+		return true
+	}
+	return false
 }
 
 // SearchRegion searches RegionInfo from regionTree
