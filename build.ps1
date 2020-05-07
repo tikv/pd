@@ -14,3 +14,5 @@ go build -o bin/pd-tso-bench.exe tools/pd-tso-bench/main.go
 echo "bin/pd-tso-bench.exe"
 go build -o bin/pd-recover.exe tools/pd-recover/main.go
 echo "bin/pd-recover.exe"
+poweshell.exe ./scripts/embed-dashboard-ui.ps1
+echo "embed-dashboard-ui.ps1"
