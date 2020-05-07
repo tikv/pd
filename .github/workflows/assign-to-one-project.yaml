@@ -20,7 +20,7 @@ jobs:
       with:
         project: 'https://github.com/pingcap/pd/projects/5'
         column_name: 'Issue: Need Triage'
-    - name: Run issues assignment to Question and Bug Reports
+    - name: Run issues assignment to Questions and Bug Reports
       uses: srggrs/assign-one-project-github-action@1.2.0
       if: |
         contains(github.event.issue.labels.*.name, 'type/question') ||
