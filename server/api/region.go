@@ -16,6 +16,7 @@ package api
 import (
 	"container/heap"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -119,6 +120,11 @@ func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
 	}
 	vars := mux.Vars(r)
 	key := vars["key"]
+	key, err := url.QueryUnescape(key)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	regionInfo := cluster.GetRegionInfoByKey([]byte(key))
 	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
 }

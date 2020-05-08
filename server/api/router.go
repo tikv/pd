@@ -94,7 +94,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	regionHandler := newRegionHandler(svr, rd)
 	router.HandleFunc("/api/v1/region/id/{id}", regionHandler.GetRegionByID).Methods("GET")
-	router.HandleFunc("/api/v1/region/key/{key}", regionHandler.GetRegionByKey).Methods("GET")
+	router.UseEncodedPath().HandleFunc("/api/v1/region/key/{key}", regionHandler.GetRegionByKey).Methods("GET")
 
 	srd := createStreamingRender()
 	regionsAllHandler := newRegionsHandler(svr, srd)
