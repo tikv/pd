@@ -208,7 +208,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			regionRead,
 			minHotDegree,
 			hotRegionThreshold,
-			read, core.LeaderKind, high)
+			read, core.LeaderKind, mixed)
 	}
 
 	{ // update write statistics
@@ -223,7 +223,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			regionWrite,
 			minHotDegree,
 			hotRegionThreshold,
-			write, core.LeaderKind, high)
+			write, core.LeaderKind, mixed)
 
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storeByte,
@@ -232,7 +232,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			regionWrite,
 			minHotDegree,
 			hotRegionThreshold,
-			write, core.RegionKind, high)
+			write, core.RegionKind, mixed)
 	}
 }
 
@@ -245,18 +245,18 @@ func getHotRegionThreshold(stats *statistics.StoresStats, typ rwType) [2]uint64 
 			hotRegionThreshold[0] = hotWriteRegionMinFlowRate
 		}
 		hotRegionThreshold[1] = uint64(stats.TotalKeysWriteRate() / divisor)
-		if hotRegionThreshold[1] < hotWriteRegionMinFlowRate {
-			hotRegionThreshold[1] = hotWriteRegionMinFlowRate
+		if hotRegionThreshold[1] < hotWriteRegionMinKeyRate {
+			hotRegionThreshold[1] = hotWriteRegionMinKeyRate
 		}
 		return hotRegionThreshold
 	case read:
 		hotRegionThreshold[0] = uint64(stats.TotalBytesReadRate() / divisor)
-		if hotRegionThreshold[0] < hotWriteRegionMinFlowRate {
-			hotRegionThreshold[0] = hotWriteRegionMinFlowRate
+		if hotRegionThreshold[0] < hotReadRegionMinFlowRate {
+			hotRegionThreshold[0] = hotReadRegionMinFlowRate
 		}
 		hotRegionThreshold[1] = uint64(stats.TotalKeysWriteRate() / divisor)
-		if hotRegionThreshold[1] < hotWriteRegionMinFlowRate {
-			hotRegionThreshold[1] = hotWriteRegionMinFlowRate
+		if hotRegionThreshold[1] < hotReadRegionMinKeyRate {
+			hotRegionThreshold[1] = hotReadRegionMinKeyRate
 		}
 		return hotRegionThreshold
 	default:
