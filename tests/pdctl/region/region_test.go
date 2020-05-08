@@ -236,6 +236,14 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
 	c.Assert(&regionInfo, DeepEquals, api.NewRegionInfo(r2))
 
+	// issue #2351
+	args = []string{"-u", pdAddr, "region", "key", "--format=hex", "622f62"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	regionInfo = api.RegionInfo{}
+	c.Assert(json.Unmarshal(output, &regionInfo), IsNil)
+	c.Assert(&regionInfo, DeepEquals, api.NewRegionInfo(r2))
+
 	// region startkey --format=raw <key> command
 	args = []string{"-u", pdAddr, "region", "startkey", "--format=raw", "b", "2"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)

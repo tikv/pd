@@ -11,9 +11,6 @@ PR Title Format:
 ### What is changed and how it works?
 
 
-### Release note <!-- bugfixes or new feature need a release note -->
-
-
 ### Check List <!--REMOVE the items that are not applicable-->
 
 Tests <!-- At least one of them must be included. -->
@@ -40,3 +37,5 @@ Related changes
 - PR to update `pingcap/docs`/`pingcap/docs-cn`:
 - PR to update `pingcap/tidb-ansible`:
 - Need to cherry-pick to the release branch
+
+### Release note <!-- bugfixes or new feature need a release note -->
