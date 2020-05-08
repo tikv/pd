@@ -1146,10 +1146,20 @@ func (c *ReplicationModeConfig) Clone() *ReplicationModeConfig {
 }
 
 func (c *ReplicationModeConfig) adjust(meta *configMetaData) {
-	if !meta.IsDefined("replication-mode") {
+	if !meta.IsDefined("replication-mode") || NormalizeReplicationMode(c.ReplicationMode) == "" {
 		c.ReplicationMode = "majority"
 	}
 	c.DRAutoSync.adjust(meta.Child("dr-auto-sync"))
+}
+
+// NormalizeReplicationMode converts user's input mode to internal use.
+// It returns "" if failed to convert.
+func NormalizeReplicationMode(m string) string {
+	s := strings.ReplaceAll(strings.ToLower(m), "_", "-")
+	if s == "majority" || s == "dr-auto-sync" {
+		return s
+	}
+	return ""
 }
 
 // DRAutoSyncReplicationConfig is the configuration for auto sync mode between 2 data centers.
