@@ -42,13 +42,13 @@ func exitErr(err error) {
 
 func main() {
 	fs := flag.NewFlagSet("pd-recover", flag.ExitOnError)
-	fs.BoolVar(&v, "V", false, "print version information.")
+	fs.BoolVar(&v, "V", false, "print version information")
 	fs.StringVar(&endpoints, "endpoints", "http://127.0.0.1:2379", "endpoints urls")
-	fs.Uint64Var(&allocID, "alloc-id ", 0, "please make sure alloced ID is safe")
+	fs.Uint64Var(&allocID, "alloc-id", 0, "please make sure alloced ID is safe")
 	fs.Uint64Var(&clusterID, "cluster-id", 0, "please make cluster ID match with tikv")
-	fs.StringVar(&caPath, "cacert", "", "path of file that contains list of trusted SSL CAs.")
-	fs.StringVar(&certPath, "cert", "", "path of file that contains list of trusted SSL CAs.")
-	fs.StringVar(&keyPath, "key", "", "path of file that contains X509 key in PEM format.")
+	fs.StringVar(&caPath, "cacert", "", "path of file that contains list of trusted SSL CAs")
+	fs.StringVar(&certPath, "cert", "", "path of file that contains list of trusted SSL CAs")
+	fs.StringVar(&keyPath, "key", "", "path of file that contains X509 key in PEM format")
 
 	if len(os.Args[1:]) == 0 {
 		fs.Usage()
