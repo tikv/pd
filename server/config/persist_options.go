@@ -262,7 +262,7 @@ func (o *PersistOptions) GetKeyType() core.KeyType {
 
 // GetMaxResetTSGap gets the max gap to reset the tso.
 func (o *PersistOptions) GetMaxResetTSGap() time.Duration {
-	return o.GetPDServerConfig().MaxResetTSGap
+	return o.GetPDServerConfig().MaxResetTSGap.Duration
 }
 
 // GetDashboardAddress gets dashboard address.
