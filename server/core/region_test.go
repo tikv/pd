@@ -208,14 +208,13 @@ func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
 	region.pendingPeers = append(region.pendingPeers, peer4)
 	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
 
-	region.pendingPeers[0] = nil
+	region.pendingPeers = nil
 	region.learners = append(region.learners, peer2)
 	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
 
+	origin.learners = append(origin.learners, peer3)
 	origin.learners = append(origin.learners, peer2)
-	region.learners = append(region.learners, peer2)
-	region.voters[1] = nil
-	region.voters = append(region.voters, peer2)
+	region.learners = append(region.learners, peer4)
 	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
 
 	region.voters[2].StoreId = 4

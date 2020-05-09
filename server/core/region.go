@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"unsafe"
 
@@ -685,50 +686,40 @@ func (r *RegionsInfo) removeRegionFromSubTree(region *RegionInfo) {
 	}
 }
 
+type peerSlice []*metapb.Peer
+
+func (s peerSlice) Len() int {
+	return len(s)
+}
+func (s peerSlice) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s peerSlice) Less(i, j int) bool {
+	return s[i].GetId() < s[j].GetId()
+}
+
 // shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
 // new peer was created, learners changed, pendingPeers changed, and so on.
 func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
 	checkPeersChange := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
-		checkPeersDiff := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
-			for _, a := range origin {
-				if a == nil {
-					continue
-				}
-				both := false
-				for _, b := range other {
-					if b == nil {
-						continue
-					}
-					if a.GetStoreId() == b.GetStoreId() && a.GetId() == b.GetId() {
-						both = true
-						break
-					}
-				}
-				if !both {
-					return true
-				}
-			}
-			return false
+		if len(origin) != len(other) {
+			return true
 		}
-		if checkPeersDiff(origin, other) || checkPeersDiff(other, origin) {
+		sort.Sort(peerSlice(origin))
+		sort.Sort(peerSlice(other))
+		for index, peer := range origin {
+			if peer.GetStoreId() == other[index].GetStoreId() && peer.GetId() == other[index].GetId() {
+				continue
+			}
 			return true
 		}
 		return false
 	}
 
-	if origin.leader.GetId() != region.leader.GetId() {
-		return true
-	}
-	if checkPeersChange(origin.GetVoters(), region.GetVoters()) {
-		return true
-	}
-	if checkPeersChange(origin.GetLearners(), region.GetLearners()) {
-		return true
-	}
-	if checkPeersChange(origin.GetPendingPeers(), region.GetPendingPeers()) {
-		return true
-	}
-	return false
+	return origin.leader.GetId() != region.leader.GetId() ||
+		checkPeersChange(origin.GetVoters(), region.GetVoters()) ||
+		checkPeersChange(origin.GetLearners(), region.GetLearners()) ||
+		checkPeersChange(origin.GetPendingPeers(), region.GetPendingPeers())
 }
 
 // SearchRegion searches RegionInfo from regionTree
