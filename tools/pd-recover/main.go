@@ -12,16 +12,18 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/transport"
 )
 
 var (
+	v         = flag.Bool("V", false, "print version information.")
 	endpoints = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
 	allocID   = flag.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
 	clusterID = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
 	caPath    = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
-	certPath  = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
+	certPath  = flag.String("cert", "", "path of file that contains X509 certificate in PEM format.")
 	keyPath   = flag.String("key", "", "path of file that contains X509 key in PEM format.")
 )
 
@@ -40,6 +42,10 @@ func exitErr(err error) {
 
 func main() {
 	flag.Parse()
+	if *v {
+		server.PrintPDInfo()
+		return
+	}
 	if *clusterID == 0 {
 		fmt.Println("please specify safe cluster-id")
 		return
