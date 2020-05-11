@@ -746,7 +746,7 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 
 func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {
 	tc, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config) {
-		conf.ReplicationMode.ReplicationMode = "dr_auto_sync"
+		conf.ReplicationMode.ReplicationMode = "dr-auto-sync"
 	})
 
 	defer tc.Destroy()

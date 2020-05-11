@@ -16,6 +16,7 @@ package api
 import (
 	"container/heap"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 
@@ -145,6 +146,11 @@ func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	key := vars["key"]
+	key, err := url.QueryUnescape(key)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	regionInfo := rc.GetRegionInfoByKey([]byte(key))
 	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
 }
