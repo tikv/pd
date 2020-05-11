@@ -912,7 +912,7 @@ type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
 	// MaxResetTSGap is the max gap to reset the tso.
-	MaxResetTSGap time.Duration `toml:"max-reset-ts-gap" json:"max-reset-ts-gap"`
+	MaxResetTSGap typeutil.Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
@@ -926,11 +926,9 @@ type PDServerConfig struct {
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
+	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTsGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
-	}
-	if !meta.IsDefined("max-reset-ts-gap") {
-		c.MaxResetTSGap = defaultMaxResetTsGap
 	}
 	if !meta.IsDefined("key-type") {
 		c.KeyType = defaultKeyType
@@ -1146,10 +1144,20 @@ func (c *ReplicationModeConfig) Clone() *ReplicationModeConfig {
 }
 
 func (c *ReplicationModeConfig) adjust(meta *configMetaData) {
-	if !meta.IsDefined("replication-mode") {
+	if !meta.IsDefined("replication-mode") || NormalizeReplicationMode(c.ReplicationMode) == "" {
 		c.ReplicationMode = "majority"
 	}
 	c.DRAutoSync.adjust(meta.Child("dr-auto-sync"))
+}
+
+// NormalizeReplicationMode converts user's input mode to internal use.
+// It returns "" if failed to convert.
+func NormalizeReplicationMode(m string) string {
+	s := strings.ReplaceAll(strings.ToLower(m), "_", "-")
+	if s == "majority" || s == "dr-auto-sync" {
+		return s
+	}
+	return ""
 }
 
 // DRAutoSyncReplicationConfig is the configuration for auto sync mode between 2 data centers.

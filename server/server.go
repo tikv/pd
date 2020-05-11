@@ -969,6 +969,10 @@ func (s *Server) GetReplicationModeConfig() *config.ReplicationModeConfig {
 
 // SetReplicationModeConfig sets the replication mode.
 func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) error {
+	if config.NormalizeReplicationMode(cfg.ReplicationMode) == "" {
+		return errors.Errorf("invalid replication mode: %v", cfg.ReplicationMode)
+	}
+
 	old := s.persistOptions.GetReplicationModeConfig()
 	s.persistOptions.SetReplicationModeConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
