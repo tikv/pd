@@ -62,446 +62,512 @@
   "links": [],
   "panels": [
     {
-      "collapsed": true,
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "rgba(245, 54, 54, 0.9)",
+        "rgba(237, 129, 40, 0.89)",
+        "rgba(50, 172, 45, 0.97)"
+      ],
+      "datasource": "${DS_TEST-CLUSTER}",
+      "description": "It indicates whether the current PD is the leader or a follower.",
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
       "gridPos": {
-        "h": 1,
-        "w": 24,
+        "h": 6,
+        "w": 4,
         "x": 0,
         "y": 0
       },
-      "id": 118,
-      "panels": [
+      "id": 55,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
         {
-          "cacheTimeout": null,
-          "colorBackground": false,
-          "colorValue": false,
-          "colors": [
-            "rgba(245, 54, 54, 0.9)",
-            "rgba(237, 129, 40, 0.89)",
-            "rgba(50, 172, 45, 0.97)"
-          ],
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "It indicates whether the current PD is the leader or a follower.",
-          "format": "none",
-          "gauge": {
-            "maxValue": 100,
-            "minValue": 0,
-            "show": false,
-            "thresholdLabels": false,
-            "thresholdMarkers": true
-          },
-          "gridPos": {
-            "h": 6,
-            "w": 4,
-            "x": 0,
-            "y": 1
-          },
-          "id": 55,
-          "interval": null,
-          "links": [],
-          "mappingType": 1,
-          "mappingTypes": [
-            {
-              "name": "value to text",
-              "value": 1
-            },
-            {
-              "name": "range to text",
-              "value": 2
-            }
-          ],
-          "maxDataPoints": 100,
-          "nullPointMode": "connected",
-          "nullText": null,
-          "postfix": "",
-          "postfixFontSize": "50%",
-          "prefix": "",
-          "prefixFontSize": "50%",
-          "rangeMaps": [
-            {
-              "from": "1",
-              "text": "Leader",
-              "to": "100000"
-            },
-            {
-              "from": "0",
-              "text": "Follower",
-              "to": "1"
-            }
-          ],
-          "sparkline": {
-            "fillColor": "rgba(31, 118, 189, 0.18)",
-            "full": false,
-            "lineColor": "rgb(31, 120, 193)",
-            "show": false
-          },
-          "tableColumn": "",
-          "targets": [
-            {
-              "expr": "delta(pd_tso_events{type=\"save\",instance=\"$instance\"}[1m]) > bool 0",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "",
-              "metric": "pd_server_tso",
-              "refId": "A",
-              "step": 40
-            }
-          ],
-          "thresholds": "",
-          "title": "PD role",
-          "type": "singlestat",
-          "valueFontSize": "50%",
-          "valueMaps": [
-            {
-              "op": "=",
-              "text": "Follower",
-              "value": "null"
-            },
-            {
-              "op": "=",
-              "text": "Leader",
-              "value": "1"
-            }
-          ],
-          "valueName": "current"
+          "name": "value to text",
+          "value": 1
         },
         {
-          "cacheTimeout": null,
-          "colorBackground": false,
-          "colorValue": false,
-          "colors": [
-            "rgba(245, 54, 54, 0.9)",
-            "rgba(237, 129, 40, 0.89)",
-            "rgba(50, 172, 45, 0.97)"
-          ],
-          "datasource": "${DS_TEST-CLUSTER}",
-          "decimals": null,
-          "description": "The total capacity size of the cluster",
-          "editable": true,
-          "error": false,
-          "format": "decbytes",
-          "gauge": {
-            "maxValue": 100,
-            "minValue": 0,
-            "show": false,
-            "thresholdLabels": false,
-            "thresholdMarkers": false
-          },
-          "gridPos": {
-            "h": 6,
-            "w": 4,
-            "x": 4,
-            "y": 1
-          },
-          "id": 10,
-          "interval": null,
-          "links": [],
-          "mappingType": 1,
-          "mappingTypes": [
-            {
-              "name": "value to text",
-              "value": 1
-            },
-            {
-              "name": "range to text",
-              "value": 2
-            }
-          ],
-          "maxDataPoints": 100,
-          "nullPointMode": "null",
-          "nullText": null,
-          "postfix": "",
-          "postfixFontSize": "50%",
-          "prefix": "",
-          "prefixFontSize": "50%",
-          "rangeMaps": [
-            {
-              "from": "null",
-              "text": "N/A",
-              "to": "null"
-            }
-          ],
-          "sparkline": {
-            "fillColor": "rgba(77, 135, 25, 0.18)",
-            "full": true,
-            "lineColor": "rgb(21, 179, 65)",
-            "show": false
-          },
-          "tableColumn": "",
-          "targets": [
-            {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"storage_capacity\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "refId": "A",
-              "step": 40
-            }
-          ],
-          "thresholds": "",
-          "title": "Storage capacity",
-          "type": "singlestat",
-          "valueFontSize": "80%",
-          "valueMaps": [
-            {
-              "op": "=",
-              "text": "N/A",
-              "value": "null"
-            }
-          ],
-          "valueName": "current"
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "1",
+          "text": "Leader",
+          "to": "100000"
         },
         {
-          "cacheTimeout": null,
-          "colorBackground": false,
-          "colorValue": false,
-          "colors": [
-            "rgba(245, 54, 54, 0.9)",
-            "rgba(237, 129, 40, 0.89)",
-            "rgba(50, 172, 45, 0.97)"
-          ],
-          "datasource": "${DS_TEST-CLUSTER}",
-          "decimals": 1,
-          "description": "The current storage size of the cluster",
-          "editable": true,
-          "error": false,
-          "format": "decbytes",
-          "gauge": {
-            "maxValue": 100,
-            "minValue": 0,
-            "show": false,
-            "thresholdLabels": false,
-            "thresholdMarkers": true
-          },
-          "gridPos": {
-            "h": 6,
-            "w": 4,
-            "x": 8,
-            "y": 1
-          },
-          "hideTimeOverride": false,
-          "id": 38,
-          "interval": null,
-          "links": [],
-          "mappingType": 1,
-          "mappingTypes": [
-            {
-              "name": "value to text",
-              "value": 1
-            },
-            {
-              "name": "range to text",
-              "value": 2
-            }
-          ],
-          "maxDataPoints": 100,
-          "nullPointMode": "null",
-          "nullText": null,
-          "postfix": "",
-          "postfixFontSize": "50%",
-          "prefix": "",
-          "prefixFontSize": "50%",
-          "rangeMaps": [
-            {
-              "from": "null",
-              "text": "N/A",
-              "to": "null"
-            }
-          ],
-          "sparkline": {
-            "fillColor": "rgba(31, 118, 189, 0.18)",
-            "full": true,
-            "lineColor": "rgb(31, 120, 193)",
-            "show": false
-          },
-          "tableColumn": "",
-          "targets": [
-            {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"storage_size\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "refId": "A",
-              "step": 40
-            }
-          ],
-          "thresholds": "",
-          "title": "Current storage size",
-          "type": "singlestat",
-          "valueFontSize": "80%",
-          "valueMaps": [
-            {
-              "op": "=",
-              "text": "N/A",
-              "value": "null"
-            }
-          ],
-          "valueName": "current"
+          "from": "0",
+          "text": "Follower",
+          "to": "1"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "expr": "delta(pd_tso_events{type=\"save\",instance=\"$instance\"}[1m]) > bool 0",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "",
+          "metric": "pd_server_tso",
+          "refId": "A",
+          "step": 40
+        }
+      ],
+      "thresholds": "",
+      "title": "PD role",
+      "type": "singlestat",
+      "valueFontSize": "50%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "Follower",
+          "value": "null"
         },
         {
-          "cacheTimeout": null,
-          "colorBackground": false,
-          "colorValue": true,
-          "colors": [
-            "rgba(50, 172, 45, 0.97)",
-            "rgba(237, 129, 40, 0.89)",
-            "rgba(245, 54, 54, 0.9)"
-          ],
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The current storage size and used ratio of the cluster",
-          "editable": true,
-          "error": false,
-          "format": "percentunit",
-          "gauge": {
-            "maxValue": 1,
-            "minValue": 0,
-            "show": true,
-            "thresholdLabels": false,
-            "thresholdMarkers": true
-          },
-          "gridPos": {
-            "h": 6,
-            "w": 4,
-            "x": 12,
-            "y": 1
-          },
-          "hideTimeOverride": false,
-          "id": 37,
-          "interval": null,
-          "links": [],
-          "mappingType": 1,
-          "mappingTypes": [
-            {
-              "name": "value to text",
-              "value": 1
-            },
-            {
-              "name": "range to text",
-              "value": 2
-            }
-          ],
-          "maxDataPoints": 100,
-          "nullPointMode": "null",
-          "nullText": null,
-          "postfix": "",
-          "postfixFontSize": "50%",
-          "prefix": "",
-          "prefixFontSize": "50%",
-          "rangeMaps": [
-            {
-              "from": "null",
-              "text": "N/A",
-              "to": "null"
-            }
-          ],
-          "sparkline": {
-            "fillColor": "rgba(31, 118, 189, 0.18)",
-            "full": true,
-            "lineColor": "rgb(31, 120, 193)",
-            "show": false
-          },
-          "tableColumn": "",
-          "targets": [
-            {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"storage_size\"}) / sum(pd_cluster_status{instance=\"$instance\",type=\"storage_capacity\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "refId": "A",
-              "step": 40
-            }
-          ],
-          "thresholds": "0.01,0.5",
-          "title": "Current storage used",
-          "type": "singlestat",
-          "valueFontSize": "80%",
-          "valueMaps": [
-            {
-              "op": "=",
-              "text": "N/A",
-              "value": "null"
-            }
-          ],
-          "valueName": "current"
+          "op": "=",
+          "text": "Leader",
+          "value": "1"
+        }
+      ],
+      "valueName": "current"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "rgba(245, 54, 54, 0.9)",
+        "rgba(237, 129, 40, 0.89)",
+        "rgba(50, 172, 45, 0.97)"
+      ],
+      "datasource": "${DS_TEST-CLUSTER}",
+      "decimals": null,
+      "description": "The total capacity size of the cluster",
+      "editable": true,
+      "error": false,
+      "format": "decbytes",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": false
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "id": 10,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
         },
         {
-          "cacheTimeout": null,
-          "colorBackground": false,
-          "colorValue": false,
-          "colors": [
-            "#d44a3a",
-            "rgba(237, 129, 40, 0.89)",
-            "#299c46"
-          ],
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The count of healthy stores",
-          "format": "none",
-          "gauge": {
-            "maxValue": 100,
-            "minValue": 0,
-            "show": false,
-            "thresholdLabels": false,
-            "thresholdMarkers": true
-          },
-          "gridPos": {
-            "h": 6,
-            "w": 4,
-            "x": 16,
-            "y": 1
-          },
-          "id": 97,
-          "interval": null,
-          "links": [],
-          "mappingType": 1,
-          "mappingTypes": [
-            {
-              "name": "value to text",
-              "value": 1
-            },
-            {
-              "name": "range to text",
-              "value": 2
-            }
-          ],
-          "maxDataPoints": 100,
-          "nullPointMode": "connected",
-          "nullText": null,
-          "postfix": "",
-          "postfixFontSize": "50%",
-          "prefix": "",
-          "prefixFontSize": "50%",
-          "rangeMaps": [
-            {
-              "from": "null",
-              "text": "N/A",
-              "to": "null"
-            }
-          ],
-          "sparkline": {
-            "fillColor": "rgba(31, 118, 189, 0.18)",
-            "full": false,
-            "lineColor": "rgb(31, 120, 193)",
-            "show": false
-          },
-          "tableColumn": "",
-          "targets": [
-            {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\",  type=\"store_up_count\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "refId": "A"
-            }
-          ],
-          "thresholds": "0,1",
-          "title": "Normal stores",
-          "type": "singlestat",
-          "valueFontSize": "100%",
-          "valueMaps": [
-            {
-              "op": "=",
-              "text": "N/A",
-              "value": "null"
-            }
-          ],
-          "valueName": "current"
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "null",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(77, 135, 25, 0.18)",
+        "full": true,
+        "lineColor": "rgb(21, 179, 65)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"storage_capacity\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "refId": "A",
+          "step": 40
+        }
+      ],
+      "thresholds": "",
+      "title": "Storage capacity",
+      "type": "singlestat",
+      "valueFontSize": "80%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "current"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "rgba(245, 54, 54, 0.9)",
+        "rgba(237, 129, 40, 0.89)",
+        "rgba(50, 172, 45, 0.97)"
+      ],
+      "datasource": "${DS_TEST-CLUSTER}",
+      "decimals": 1,
+      "description": "The current storage size of the cluster",
+      "editable": true,
+      "error": false,
+      "format": "decbytes",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "hideTimeOverride": false,
+      "id": 38,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
         },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "null",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": true,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"storage_size\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "refId": "A",
+          "step": 40
+        }
+      ],
+      "thresholds": "",
+      "title": "Current storage size",
+      "type": "singlestat",
+      "valueFontSize": "80%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "current"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": true,
+      "colors": [
+        "rgba(50, 172, 45, 0.97)",
+        "rgba(237, 129, 40, 0.89)",
+        "rgba(245, 54, 54, 0.9)"
+      ],
+      "datasource": "${DS_TEST-CLUSTER}",
+      "description": "The current storage size and used ratio of the cluster",
+      "editable": true,
+      "error": false,
+      "format": "percentunit",
+      "gauge": {
+        "maxValue": 1,
+        "minValue": 0,
+        "show": true,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "hideTimeOverride": false,
+      "id": 37,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "null",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": true,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"storage_size\"}) / sum(pd_cluster_status{instance=\"$instance\",type=\"storage_capacity\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "refId": "A",
+          "step": 40
+        }
+      ],
+      "thresholds": "0.01,0.5",
+      "title": "Current storage used",
+      "type": "singlestat",
+      "valueFontSize": "80%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "current"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "#d44a3a",
+        "rgba(237, 129, 40, 0.89)",
+        "#299c46"
+      ],
+      "datasource": "${DS_TEST-CLUSTER}",
+      "description": "The count of healthy stores",
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": true
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "id": 97,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "connected",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": false,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": false
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\",  type=\"store_up_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "refId": "A"
+        }
+      ],
+      "thresholds": "0,1",
+      "title": "Normal stores",
+      "type": "singlestat",
+      "valueFontSize": "100%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "current"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "rgba(245, 54, 54, 0.9)",
+        "rgba(237, 129, 40, 0.89)",
+        "rgba(50, 172, 45, 0.97)"
+      ],
+      "datasource": "${DS_TEST-CLUSTER}",
+      "description": "The total number of Regions without replicas",
+      "editable": true,
+      "error": false,
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": false
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "id": 20,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "null",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": true,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": true
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\",type=\"leader_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "refId": "A",
+          "step": 40
+        }
+      ],
+      "thresholds": "",
+      "title": "Number of Regions",
+      "type": "singlestat",
+      "valueFontSize": "80%",
+      "valueMaps": [
         {
           "op": "=",
           "text": "N/A",
@@ -1339,13 +1405,200 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
+          "description": "The number of different operators that are newly created",
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 22
+          },
+          "id": 45,
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 2,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "sum(delta(pd_schedule_operators_count{instance=\"$instance\", event=\"create\"}[1m])) by (type)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{type}}",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Schedule operator create",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "opm",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
+          "description": "The number of different operators that have been checked. It mainly checks if the current step is finished; if yes, it returns the next step to be executed.",
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 22
+          },
+          "id": 79,
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 2,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "sum(delta(pd_schedule_operators_count{instance=\"$instance\", event=\"check\"}[1m])) by (type)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{type}}",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Schedule operator check",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "opm",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "description": "The number of different operators that are finished",
           "fill": 0,
           "gridPos": {
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 9
+            "y": 29
           },
           "id": 77,
           "legend": {
@@ -1365,6 +1618,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -1430,12 +1684,13 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "fill": 0,
           "gridPos": {
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 9
+            "y": 29
           },
           "id": 78,
           "legend": {
@@ -1455,6 +1710,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -1502,7 +1758,7 @@
             },
             {
               "format": "short",
-              "label": null,
+              "label": "",
               "logBase": 1,
               "max": null,
               "min": null,
@@ -1520,13 +1776,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "description": "The number of different operators that are replaced or canceled",
           "fill": 0,
           "gridPos": {
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 16
+            "y": 36
           },
           "id": 80,
           "legend": {
@@ -1546,6 +1803,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -1625,7 +1883,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 16
+            "y": 36
           },
           "id": 47,
           "legend": {
@@ -1646,6 +1904,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -1718,7 +1977,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 23
+            "y": 43
           },
           "id": 67,
           "legend": {
@@ -1738,6 +1997,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "connected",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -1751,107 +2011,24 @@
               "expr": "histogram_quantile(0.99, sum(rate(pd_schedule_finish_operators_duration_seconds_bucket[5m])) by (type, le))",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{type}}",
+              "legendFormat": "{{type}}-99%",
               "refId": "A",
               "step": 4
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "99% Operator finish duration",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "s",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
             },
             {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The time consumed when the operator is finished in .50",
-          "fill": 0,
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 23
-          },
-          "id": 68,
-          "legend": {
-            "alignAsTable": true,
-            "avg": true,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 2,
-          "links": [],
-          "nullPointMode": "null",
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "histogram_quantile(0.5, sum(rate(pd_schedule_finish_operators_duration_seconds_bucket[5m])) by (type, le))",
+              "expr": "histogram_quantile(0.95, sum(rate(pd_schedule_finish_operators_duration_seconds_bucket[5m])) by (type, le))",
               "format": "time_series",
+              "hide": true,
               "intervalFactor": 2,
-              "legendFormat": "{{type}}",
-              "refId": "A",
-              "step": 4
+              "legendFormat": "{{type}}-95%",
+              "refId": "B"
             }
           ],
           "thresholds": [],
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "50% Operator finish duration",
+          "title": "Operator finish duration",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -1899,8 +2076,8 @@
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 0,
-            "y": 30
+            "x": 12,
+            "y": 43
           },
           "id": 81,
           "legend": {
@@ -1921,6 +2098,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -1934,105 +2112,23 @@
               "expr": "histogram_quantile(0.99, sum(rate(pd_schedule_finish_operator_steps_duration_seconds_bucket[5m])) by (type, le))",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{type}}",
+              "legendFormat": "{{type}}-99%",
               "refId": "A"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "99% Operator step finish duration",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "dtdurations",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
             },
             {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The time consumed when the operator step is finished in .50",
-          "fill": 0,
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 30
-          },
-          "id": 82,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 2,
-          "links": [],
-          "nullPointMode": "null",
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "histogram_quantile(0.5, sum(rate(pd_schedule_finish_operator_steps_duration_seconds_bucket[5m])) by (type, le))",
+              "expr": "histogram_quantile(0.95, sum(rate(pd_schedule_finish_operator_steps_duration_seconds_bucket[5m])) by (type, le))",
               "format": "time_series",
+              "hide": true,
               "intervalFactor": 2,
-              "legendFormat": "{{type}}",
-              "refId": "A"
+              "legendFormat": "{{type}}-95%",
+              "refId": "B"
             }
           ],
           "thresholds": [],
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "50% Operator step finish duration",
+          "title": "Operator step finish duration",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -2048,7 +2144,7 @@
           },
           "yaxes": [
             {
-              "format": "dtdurations",
+              "format": "s",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -2090,13 +2186,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "description": "The capacity size of each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 3
+            "y": 23
           },
           "id": 83,
           "legend": {
@@ -2119,6 +2216,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -2158,6 +2256,7 @@
           },
           "yaxes": [
             {
+              "decimals": null,
               "format": "decbytes",
               "label": null,
               "logBase": 1,
@@ -2185,13 +2284,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "description": "The available capacity size of each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 3
+            "y": 23
           },
           "id": 91,
           "legend": {
@@ -2211,6 +2311,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -2248,6 +2349,7 @@
           },
           "yaxes": [
             {
+              "decimals": null,
               "format": "decbytes",
               "label": null,
               "logBase": 1,
@@ -2275,13 +2377,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "description": "The used capacity size of each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 9
+            "y": 29
           },
           "id": 90,
           "legend": {
@@ -2302,6 +2405,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -2339,6 +2443,7 @@
           },
           "yaxes": [
             {
+              "decimals": 2,
               "format": "decbytes",
               "label": null,
               "logBase": 1,
@@ -2366,13 +2471,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "description": "It is equal to Store available capacity size over Store capacity size for each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 9
+            "y": 29
           },
           "id": 84,
           "legend": {
@@ -2392,6 +2498,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -2429,6 +2536,7 @@
           },
           "yaxes": [
             {
+              "decimals": 2,
               "format": "percentunit",
               "label": null,
               "logBase": 1,
@@ -2456,13 +2564,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "description": "The size amplification, which is equal to Store Region size over Store used capacity size, of each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 15
+            "y": 35
           },
           "id": 85,
           "legend": {
@@ -2482,6 +2591,7 @@
           "linewidth": 3,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -2557,7 +2667,7 @@
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 15
+            "y": 35
           },
           "id": 41,
           "legend": {
@@ -2579,6 +2689,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -2680,7 +2791,7 @@
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 21
+            "y": 41
           },
           "id": 40,
           "legend": {
@@ -2702,6 +2813,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -2776,13 +2888,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "description": "The total Region size of each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 21
+            "y": 41
           },
           "id": 57,
           "legend": {
@@ -2804,6 +2917,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -2842,6 +2956,7 @@
           },
           "yaxes": [
             {
+              "decimals": null,
               "format": "decmbytes",
               "label": null,
               "logBase": 1,
@@ -2869,13 +2984,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "description": " \tThe total leader size of each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 27
+            "y": 47
           },
           "id": 56,
           "legend": {
@@ -2897,6 +3013,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -2962,13 +3079,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 3,
           "description": "The Region count of each TiKV instance \t",
           "fill": 0,
           "gridPos": {
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 27
+            "y": 47
           },
           "id": 59,
           "legend": {
@@ -2990,6 +3108,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -3055,13 +3174,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 3,
           "description": "The leader count of each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 6,
             "w": 12,
             "x": 0,
-            "y": 33
+            "y": 53
           },
           "id": 58,
           "legend": {
@@ -3082,6 +3202,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -3147,13 +3268,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
           "description": "",
           "fill": 0,
           "gridPos": {
             "h": 6,
             "w": 12,
             "x": 12,
-            "y": 33
+            "y": 53
           },
           "id": 129,
           "legend": {
@@ -3282,15 +3404,15 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": 0,
-          "description": "The total number of leader Regions under hot write on each TiKV instance",
+          "description": "The total number of leader Regions under hot read on each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 83
+            "y": 24
           },
-          "id": 50,
+          "id": 60,
           "legend": {
             "alignAsTable": true,
             "avg": false,
@@ -3307,9 +3429,10 @@
             "values": true
           },
           "lines": true,
-          "linewidth": 2,
+          "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -3320,7 +3443,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"hot_write_region_as_leader\"}",
+              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"hot_read_region_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3332,7 +3455,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Hot write Region's leader distribution",
+          "title": "Hot Region's leader distribution",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -3348,6 +3471,7 @@
           },
           "yaxes": [
             {
+              "decimals": 0,
               "format": "short",
               "label": null,
               "logBase": 1,
@@ -3363,7 +3487,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -3371,16 +3499,16 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
-          "decimals": 0,
-          "description": "The total number of Regions which are not leader under hot write on each TiKV instance",
+          "decimals": 2,
+          "description": "The total bytes of hot read on leader Regions for each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 83
+            "y": 24
           },
-          "id": 51,
+          "id": 62,
           "legend": {
             "alignAsTable": true,
             "avg": false,
@@ -3400,6 +3528,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -3410,97 +3539,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"hot_write_region_as_peer\"}",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{address}}-store-{{store}}",
-              "refId": "A",
-              "step": 4
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Hot write Region's peer distribution",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ]
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "decimals": null,
-          "description": "The total bytes of hot write on leader Regions for each TiKV instance",
-          "fill": 0,
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 0,
-            "y": 90
-          },
-          "id": 48,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "sort": "current",
-            "sortDesc": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 2,
-          "links": [],
-          "nullPointMode": "null",
-          "percentage": false,
-          "pointradius": 1,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_written_bytes_as_leader\"}",
+              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_read_bytes_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3513,7 +3552,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Hot write Region's leader written bytes",
+          "title": "Total read bytes on hot leader Regions",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -3544,7 +3583,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -3552,16 +3595,15 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
-          "decimals": null,
-          "description": "The total bytes of hot write on Regions which are not leader for each TiKV instance",
+          "decimals": 0,
           "fill": 0,
           "gridPos": {
             "h": 7,
             "w": 12,
-            "x": 12,
-            "y": 90
+            "x": 0,
+            "y": 31
           },
-          "id": 49,
+          "id": 105,
           "legend": {
             "alignAsTable": true,
             "avg": false,
@@ -3578,9 +3620,10 @@
             "values": true
           },
           "lines": true,
-          "linewidth": 2,
+          "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -3591,7 +3634,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_written_bytes_as_peer\"}",
+              "expr": "pd_scheduler_store_status{store=~\"$store\", type=\"store_read_rate_bytes\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3603,7 +3646,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Hot Region's peer written bytes",
+          "title": "Store read rate bytes",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -3619,7 +3662,102 @@
           },
           "yaxes": [
             {
-              "format": "decbytes",
+              "format": "Bps",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 0,
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 31
+          },
+          "id": 107,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "pd_scheduler_store_status{store=~\"$store\", type=\"store_read_rate_keys\"}",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Store read rate keys",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "decimals": null,
+              "format": "Bps",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -3662,104 +3800,15 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": 0,
-          "description": "The total number of leader Regions under hot read on each TiKV instance",
+          "description": "The total number of leader Regions under hot write on each TiKV instance",
           "fill": 0,
           "gridPos": {
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 97
+            "y": 89
           },
-          "id": 60,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "sort": "current",
-            "sortDesc": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null",
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"hot_read_region_as_leader\"}",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{address}}-store-{{store}}",
-              "refId": "A",
-              "step": 4
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Hot read Region's leader distribution",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "cumulative"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ]
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The total bytes of hot read on leader Regions for each TiKV instance",
-          "fill": 0,
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 97
-          },
-          "id": 62,
+          "id": 50,
           "legend": {
             "alignAsTable": true,
             "avg": false,
@@ -3779,6 +3828,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -3789,7 +3839,103 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_read_bytes_as_leader\"}",
+              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"hot_write_region_as_leader\"}",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Hot Region's leader distribution",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "cumulative"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "decimals": 0,
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
+          "description": "The total bytes of hot write on leader Regions for each TiKV instance",
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 89
+          },
+          "id": 48,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 2,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 1,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_written_bytes_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -3802,7 +3948,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Hot read Region's leader read bytes",
+          "title": "Total written bytes on hot leader Regions",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -3833,7 +3979,202 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 0,
+          "description": "The total number of Regions which are not leader under hot write on each TiKV instance",
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 96
+          },
+          "id": 51,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 2,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"hot_write_region_as_peer\"}",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Hot Region's peer distribution",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "decimals": 0,
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
+          "description": "The total bytes of hot write on Regions which are not leader for each TiKV instance",
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 96
+          },
+          "id": 49,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 2,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "pd_hotspot_status{store=~\"$store\", instance=\"$instance\", type=\"total_written_bytes_as_peer\"}",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Total written bytes on hot peer Regions",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "decbytes",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -3847,7 +4188,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 104
+            "y": 103
           },
           "id": 61,
           "legend": {
@@ -3869,6 +4210,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -3923,7 +4265,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -3937,96 +4283,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 104
-          },
-          "id": 105,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "sort": "current",
-            "sortDesc": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null",
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", type=\"store_read_rate_bytes\"}",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{address}}-store-{{store}}",
-              "refId": "A",
-              "step": 4
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Store read rate bytes",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "Bps",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ]
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "decimals": 0,
-          "fill": 0,
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 0,
-            "y": 111
+            "y": 103
           },
           "id": 106,
           "legend": {
@@ -4048,6 +4305,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -4102,101 +4360,14 @@
               "min": null,
               "show": true
             }
-          ]
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "decimals": 0,
-          "fill": 0,
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 111
-          },
-          "id": 107,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "sort": "current",
-            "sortDesc": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null",
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "pd_scheduler_store_status{store=~\"$store\", type=\"store_read_rate_keys\"}",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{address}}-store-{{store}}",
-              "refId": "A",
-              "step": 4
-            }
           ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Store read rate keys",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "decimals": null,
-              "format": "none",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ]
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         }
       ],
-      "repeat": null,
-      "title": "Statistics - hotspot",
+      "title": "Statistics - hot write",
       "type": "row"
     },
     {
@@ -4221,7 +4392,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 112
+            "y": 26
           },
           "id": 46,
           "legend": {
@@ -4241,6 +4412,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 1,
           "points": false,
@@ -4295,7 +4467,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -4303,13 +4479,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": null,
           "description": "The leader movement details among TiKV instances",
           "fill": 1,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 120
+            "y": 34
           },
           "id": 87,
           "legend": {
@@ -4331,6 +4508,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -4341,7 +4519,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "- sum(delta(pd_scheduler_balance_leader{store=~\"$store\", address=~\".*out\",instance=\"$instance\", type=\"move-leader\"}[30s])) by (address, store)",
+              "expr": "-sum(delta(pd_scheduler_balance_leader{store=~\"$store\", address=~\".*out\",instance=\"$instance\", type=\"move-leader\"}[30s])) by (address, store)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{store}}",
@@ -4390,7 +4568,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -4398,13 +4580,14 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": null,
           "description": "The Region movement details among TiKV instances",
           "fill": 1,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 120
+            "y": 34
           },
           "hideTimeOverride": false,
           "id": 86,
@@ -4427,6 +4610,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -4486,7 +4670,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -4500,7 +4688,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 128
+            "y": 42
           },
           "id": 89,
           "legend": {
@@ -4520,6 +4708,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -4572,7 +4761,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -4586,7 +4779,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 128
+            "y": 42
           },
           "id": 88,
           "legend": {
@@ -4607,6 +4800,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -4659,7 +4853,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -4673,7 +4871,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 136
+            "y": 50
           },
           "id": 52,
           "legend": {
@@ -4695,6 +4893,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -4749,7 +4948,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -4763,7 +4966,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 136
+            "y": 50
           },
           "id": 53,
           "legend": {
@@ -4785,6 +4988,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -4839,7 +5043,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -4847,356 +5055,12 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The replica checker's status",
           "fill": 0,
           "gridPos": {
             "h": 8,
-            "w": 12,
+            "w": 24,
             "x": 0,
-            "y": 144
-          },
-          "id": 70,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": false,
-            "max": false,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "total": false,
-            "values": false
-          },
-          "lines": true,
-          "linewidth": 2,
-          "links": [],
-          "nullPointMode": "null",
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "sum(delta(pd_checker_event_count{instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{name}}",
-              "refId": "A",
-              "step": 10
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeShift": null,
-          "title": "Replica checker",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ]
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The merge checker's status",
-          "fill": 0,
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 144
-          },
-          "id": 71,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": false,
-            "max": false,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "total": false,
-            "values": false
-          },
-          "lines": true,
-          "linewidth": 2,
-          "links": [],
-          "nullPointMode": "null",
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "sum(delta(pd_checker_event_count{instance=\"$instance\", type=\"merge_checker\"}[1m])) by (name)",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{name}}",
-              "refId": "A",
-              "step": 10
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeShift": null,
-          "title": "Region merge checker",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ]
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "fill": 0,
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 152
-          },
-          "id": 110,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "sort": "current",
-            "sortDesc": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 2,
-          "links": [],
-          "nullPointMode": "null",
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "sum(delta(pd_schedule_filter{store=~\"$store\", action=\"filter-target\"}[1m])) by (store, type, scope)",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{scope}}-store-{{store}}-{{type}}",
-              "metric": "pd_scheduler_event_count",
-              "refId": "A",
-              "step": 4
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeShift": null,
-          "title": "Filter target",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "ops",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ]
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "fill": 0,
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 152
-          },
-          "id": 109,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "sort": "current",
-            "sortDesc": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 2,
-          "links": [],
-          "nullPointMode": "null",
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "sum(delta(pd_schedule_filter{store=~\"$store\", action=\"filter-source\"}[1m])) by (store, type, scope)",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{scope}}-store-{{store}}-{{type}}",
-              "metric": "pd_scheduler_event_count",
-              "refId": "A",
-              "step": 4
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeShift": null,
-          "title": "Filter source",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "ops",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ]
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "fill": 0,
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 160
+            "y": 58
           },
           "id": 108,
           "legend": {
@@ -5218,6 +5082,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -5239,6 +5104,7 @@
           ],
           "thresholds": [],
           "timeFrom": null,
+          "timeRegions": [],
           "timeShift": null,
           "title": "Balance Direction",
           "tooltip": {
@@ -5271,7 +5137,195 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "The replica checker's status",
+          "fill": 0,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 66
+          },
+          "id": 70,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 2,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "sum(delta(pd_checker_event_count{instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{name}}",
+              "refId": "A",
+              "step": 10
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Replica checker",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "The merge checker's status",
+          "fill": 0,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 66
+          },
+          "id": 71,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 2,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "sum(delta(pd_checker_event_count{instance=\"$instance\", type=\"merge_checker\"}[1m])) by (name)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{name}}",
+              "refId": "A",
+              "step": 10
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Region merge checker",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -5283,10 +5337,10 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 12,
-            "y": 160
+            "x": 0,
+            "y": 74
           },
-          "id": 111,
+          "id": 110,
           "legend": {
             "alignAsTable": true,
             "avg": false,
@@ -5306,6 +5360,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -5316,26 +5371,20 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_schedule_store_limit{store=~\"$store\", type=\"available\"}",
+              "expr": "sum(delta(pd_schedule_filter{store=~\"$store\", action=\"filter-target\"}[1m])) by (store, type, scope)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{store}}-avaliable",
+              "legendFormat": "{{scope}}-store-{{store}}-{{type}}",
               "metric": "pd_scheduler_event_count",
               "refId": "A",
               "step": 4
-            },
-            {
-              "expr": "pd_schedule_store_limit{store=~\"$store\", type=\"take\"}",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{store}}-take",
-              "refId": "B"
             }
           ],
           "thresholds": [],
           "timeFrom": null,
+          "timeRegions": [],
           "timeShift": null,
-          "title": "Store Limit",
+          "title": "Filter target",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -5366,7 +5415,105 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fill": 0,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 74
+          },
+          "id": 109,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 2,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "sum(delta(pd_schedule_filter{store=~\"$store\", action=\"filter-source\"}[1m])) by (store, type, scope)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{scope}}-store-{{store}}-{{type}}",
+              "metric": "pd_scheduler_event_count",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Filter source",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "ops",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         }
       ],
       "repeat": null,
@@ -5399,7 +5546,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 6
+            "y": 41
           },
           "id": 1,
           "legend": {
@@ -5420,6 +5567,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null as zero",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -5494,7 +5642,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 6
+            "y": 41
           },
           "id": 2,
           "legend": {
@@ -5516,6 +5664,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null as zero",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -5527,6 +5676,7 @@
           "targets": [
             {
               "expr": "histogram_quantile(0.99, sum(rate(grpc_server_handling_seconds_bucket{instance=\"$instance\"}[5m])) by (grpc_method, le))",
+              "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{grpc_method}}",
               "refId": "A",
@@ -5605,7 +5755,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 162
+            "y": 42
           },
           "id": 5,
           "legend": {
@@ -5624,6 +5774,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -5643,6 +5794,7 @@
           ],
           "thresholds": [],
           "timeFrom": null,
+          "timeRegions": [],
           "timeShift": null,
           "title": "Handle transactions rate",
           "tooltip": {
@@ -5676,7 +5828,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -5693,7 +5849,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 170
+            "y": 50
           },
           "id": 6,
           "legend": {
@@ -5712,6 +5868,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -5731,6 +5888,7 @@
           ],
           "thresholds": [],
           "timeFrom": null,
+          "timeRegions": [],
           "timeShift": null,
           "title": "99% Handle transactions duration",
           "tooltip": {
@@ -5764,7 +5922,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -5781,7 +5943,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 170
+            "y": 50
           },
           "id": 7,
           "legend": {
@@ -5802,6 +5964,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -5822,6 +5985,7 @@
           ],
           "thresholds": [],
           "timeFrom": null,
+          "timeRegions": [],
           "timeShift": null,
           "title": "99% WAL fsync duration",
           "tooltip": {
@@ -5830,7 +5994,6 @@
             "sort": 0,
             "value_type": "cumulative"
           },
-          "transparent": false,
           "type": "graph",
           "xaxis": {
             "buckets": null,
@@ -5856,7 +6019,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -5873,7 +6040,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 178
+            "y": 58
           },
           "id": 34,
           "legend": {
@@ -5892,6 +6059,7 @@
           "linewidth": 2,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -5912,6 +6080,7 @@
           ],
           "thresholds": [],
           "timeFrom": null,
+          "timeRegions": [],
           "timeShift": null,
           "title": "99% Peer round trip time seconds",
           "tooltip": {
@@ -5920,7 +6089,6 @@
             "sort": 0,
             "value_type": "cumulative"
           },
-          "transparent": false,
           "type": "graph",
           "xaxis": {
             "buckets": null,
@@ -5946,7 +6114,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "alert": {
@@ -6003,7 +6175,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 178
+            "y": 58
           },
           "id": 44,
           "legend": {
@@ -6019,6 +6191,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -6098,7 +6271,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 186
+            "y": 66
           },
           "id": 92,
           "legend": {
@@ -6118,6 +6291,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -6170,7 +6344,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -6184,7 +6362,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 186
+            "y": 66
           },
           "id": 93,
           "legend": {
@@ -6197,6 +6375,7 @@
             "max": false,
             "min": false,
             "rightSide": true,
+            "show": true,
             "total": false,
             "values": true
           },
@@ -6204,6 +6383,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -6256,7 +6436,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         },
         {
           "aliasColors": {},
@@ -6270,7 +6454,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 186
+            "y": 66
           },
           "id": 94,
           "legend": {
@@ -6290,6 +6474,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -6342,7 +6527,11 @@
               "min": null,
               "show": true
             }
-          ]
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
         }
       ],
       "repeat": null,
@@ -6374,7 +6563,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 8
+            "y": 83
           },
           "id": 28,
           "legend": {
@@ -6393,6 +6582,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -6467,7 +6657,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 16
+            "y": 91
           },
           "id": 29,
           "legend": {
@@ -6490,6 +6680,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null as zero",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -6587,7 +6778,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 9
+            "y": 150
           },
           "id": 74,
           "legend": {
@@ -6607,6 +6798,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null as zero",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -6683,7 +6875,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 9
+            "y": 150
           },
           "id": 64,
           "legend": {
@@ -6703,6 +6895,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null as zero",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -6779,7 +6972,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 17
+            "y": 158
           },
           "id": 54,
           "legend": {
@@ -6799,6 +6992,7 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null as zero",
+          "paceLength": 10,
           "percentage": false,
           "pointradius": 5,
           "points": false,
@@ -6867,17 +7061,14 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "description": "The count of the heartbeats with the ok status",
-          "editable": true,
-          "error": false,
           "fill": 0,
-          "grid": {},
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 17
+            "y": 158
           },
-          "id": 78,
+          "id": 131,
           "legend": {
             "alignAsTable": true,
             "avg": true,
@@ -6895,23 +7086,21 @@
           "linewidth": 1,
           "links": [],
           "nullPointMode": "null as zero",
+          "paceLength": 10,
           "percentage": false,
-          "pointradius": 5,
+          "pointradius": 2,
           "points": false,
           "renderer": "flot",
           "seriesOverrides": [],
-          "spaceLength": 10,
           "stack": false,
           "steppedLine": false,
           "targets": [
             {
               "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"bind\"}[1m])) by (address, store)",
               "format": "time_series",
-              "hide": false,
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
-              "refId": "A",
-              "step": 4
+              "refId": "A"
             }
           ],
           "thresholds": [],
@@ -6920,7 +7109,6 @@
           "timeShift": null,
           "title": "Region heartbeat report active",
           "tooltip": {
-            "msResolution": false,
             "shared": true,
             "sort": 0,
             "value_type": "individual"
@@ -6963,21 +7151,18 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "description": "The count of the heartbeats with the error status",
-          "editable": true,
-          "error": false,
-          "fill": 0,
-          "grid": {},
+          "fill": 1,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 25
+            "y": 166
           },
-          "id": 77,
+          "id": 133,
           "legend": {
             "alignAsTable": true,
             "avg": true,
-            "current": true,
+            "current": false,
             "hideEmpty": true,
             "hideZero": true,
             "max": true,
@@ -6990,24 +7175,22 @@
           "lines": true,
           "linewidth": 1,
           "links": [],
-          "nullPointMode": "null as zero",
+          "nullPointMode": "null",
+          "paceLength": 10,
           "percentage": false,
-          "pointradius": 5,
+          "pointradius": 2,
           "points": false,
           "renderer": "flot",
           "seriesOverrides": [],
-          "spaceLength": 10,
           "stack": false,
           "steppedLine": false,
           "targets": [
             {
               "expr": "sum(delta(pd_scheduler_region_heartbeat{store=~\"$store\", instance=\"$instance\", type=\"report\", status=\"err\"}[1m])) by (address, store)",
               "format": "time_series",
-              "hide": false,
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
-              "refId": "A",
-              "step": 4
+              "refId": "A"
             }
           ],
           "thresholds": [],
@@ -7016,7 +7199,6 @@
           "timeShift": null,
           "title": "Region heartbeat report error",
           "tooltip": {
-            "msResolution": false,
             "shared": true,
             "sort": 0,
             "value_type": "individual"
@@ -7035,7 +7217,7 @@
               "label": null,
               "logBase": 1,
               "max": null,
-              "min": "0",
+              "min": null,
               "show": true
             },
             {
@@ -7247,7 +7429,10 @@
     "list": [
       {
         "allValue": null,
-        "current": {},
+        "current": {
+          "text": "pd-test-pd-0",
+          "value": "pd-test-pd-0"
+        },
         "datasource": "${DS_TEST-CLUSTER}",
         "definition": "",
         "hide": 0,
@@ -7269,7 +7454,10 @@
       },
       {
         "allValue": ".*",
-        "current": {},
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
         "datasource": "${DS_TEST-CLUSTER}",
         "definition": "label_values(pd_scheduler_store_status, store)",
         "hide": 0,
