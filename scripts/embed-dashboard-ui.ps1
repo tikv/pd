@@ -16,7 +16,7 @@ echo '+ Discover Dashboard UI version'
 $DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap-incubator/tidb-dashboard)
 echo "  - Dashboard directory: $DASHBOARD_DIR"
 
-$DASHBOARD_UI_VERSION="20200427_1"
+$DASHBOARD_UI_VERSION= cat "${DASHBOARD_DIR}/ui/.github_release_version" | Select-String -Pattern "^#" -NotMatch 
 echo "  - Dashboard ui version: $DASHBOARD_UI_VERSION"
 
 echo '+ Check embedded assets exists in cache'
@@ -30,7 +30,8 @@ else{
   echo '  - Download pre-built embedded assets from GitHub release'
   $DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/releases/download/ui_release_${DASHBOARD_UI_VERSION}/embedded-assets-golang.zip"
   echo "  - Download ${DOWNLOAD_URL}"
-  curl -UseBasicParsing "${DOWNLOAD_URL}" > embedded-assets-golang.zip
+  $OUTPUT_FILE_NAME="embedded-assets-golang.zip"
+  Invoke-WebRequest -Uri ${DOWNLOAD_URL} -OutFile ${OUTPUT_FILE_NAME}
 
   echo "  - Save archive to cache: ${CACHE_FILE}"
   mv embedded-assets-golang.zip "${CACHE_FILE}"
