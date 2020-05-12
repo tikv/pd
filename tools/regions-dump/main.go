@@ -20,14 +20,14 @@ import (
 )
 
 var (
-	clusterID = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
+	clusterID = flag.Uint64("cluster-id", 0, "please make cluster ID match with TiKV")
 	endpoints = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
-	startID   = flag.Uint64("start-id", 0, "the id of the start region")
-	endID     = flag.Uint64("end-id", 0, "the id of the last region")
-	filePath  = flag.String("file", "regions.dump", "the dump file path and name")
-	caPath    = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
-	certPath  = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
-	keyPath   = flag.String("key", "", "path of file that contains X509 key in PEM format.")
+	startID   = flag.Uint64("start-id", 0, "ID of the start region")
+	endID     = flag.Uint64("end-id", 0, "ID of the last region")
+	filePath  = flag.String("file", "regions.dump", "dump file path and name")
+	caPath    = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
+	certPath  = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
+	keyPath   = flag.String("key", "", "path of file that contains X509 key in PEM format")
 )
 
 const (

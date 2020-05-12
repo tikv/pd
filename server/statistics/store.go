@@ -29,6 +29,8 @@ type StoresStats struct {
 	rollingStoresStats map[uint64]*RollingStoreStats
 	bytesReadRate      float64
 	bytesWriteRate     float64
+	keysReadRate       float64
+	keysWriteRate      float64
 }
 
 // NewStoresStats creates a new hot spot cache.
@@ -106,6 +108,29 @@ func (s *StoresStats) UpdateTotalBytesRate(f func() []*core.StoreInfo) {
 	s.bytesReadRate = totalBytesReadRate
 }
 
+// UpdateTotalKeysRate updates the total keys write rate and read rate.
+func (s *StoresStats) UpdateTotalKeysRate(f func() []*core.StoreInfo) {
+	var totalKeysWriteRate float64
+	var totalKeysReadRate float64
+	var writeRate, readRate float64
+	ss := f()
+	s.RLock()
+	defer s.RUnlock()
+	for _, store := range ss {
+		if store.IsUp() {
+			stats, ok := s.rollingStoresStats[store.GetID()]
+			if !ok {
+				continue
+			}
+			writeRate, readRate = stats.GetKeysRate()
+			totalKeysWriteRate += writeRate
+			totalKeysReadRate += readRate
+		}
+	}
+	s.keysWriteRate = totalKeysWriteRate
+	s.keysReadRate = totalKeysReadRate
+}
+
 // TotalBytesWriteRate returns the total written bytes rate of all StoreInfo.
 func (s *StoresStats) TotalBytesWriteRate() float64 {
 	return s.bytesWriteRate
@@ -114,6 +139,16 @@ func (s *StoresStats) TotalBytesWriteRate() float64 {
 // TotalBytesReadRate returns the total read bytes rate of all StoreInfo.
 func (s *StoresStats) TotalBytesReadRate() float64 {
 	return s.bytesReadRate
+}
+
+// TotalKeysWriteRate returns the total written keys rate of all StoreInfo.
+func (s *StoresStats) TotalKeysWriteRate() float64 {
+	return s.keysWriteRate
+}
+
+// TotalKeysReadRate returns the total read keys rate of all StoreInfo.
+func (s *StoresStats) TotalKeysReadRate() float64 {
+	return s.keysReadRate
 }
 
 // GetStoreBytesRate returns the bytes write stat of the specified store.
@@ -350,6 +385,13 @@ func (r *RollingStoreStats) GetBytesReadRate() float64 {
 	r.RLock()
 	defer r.RUnlock()
 	return r.bytesReadRate.Get()
+}
+
+// GetKeysRate returns the keys write rate and the keys read rate.
+func (r *RollingStoreStats) GetKeysRate() (writeRate float64, readRate float64) {
+	r.RLock()
+	defer r.RUnlock()
+	return r.keysWriteRate.Get(), r.keysReadRate.Get()
 }
 
 // GetKeysWriteRate returns the keys write rate.

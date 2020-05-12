@@ -23,9 +23,9 @@ import (
 )
 
 var (
-	input    = flag.String("input", "", "input pd log file, required.")
-	output   = flag.String("output", "", "output file, default output to stdout.")
-	logLevel = flag.String("logLevel", "info", "log level, default info.")
+	input    = flag.String("input", "", "input pd log file, required")
+	output   = flag.String("output", "", "output file, default output to stdout")
+	logLevel = flag.String("logLevel", "info", "log level, default info")
 	style    = flag.String("style", "", "analysis style, e.g. transfer-counter")
 	operator = flag.String("operator", "", "operator style, e.g. balance-region, balance-leader, transfer-hot-read-leader, move-hot-read-region, transfer-hot-write-leader, move-hot-write-region")
 	start    = flag.String("start", "", "start time, e.g. 2019/09/10 12:20:07, default: total file")
