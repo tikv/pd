@@ -22,6 +22,8 @@ import (
 const (
 	// SmallRegionThreshold is used to represent a region which can be regarded as a small region once the size is small than it.
 	SmallRegionThreshold int64 = 20
+	// Unlimited is used to control the store limit. Here uses a big enough number to represent unlimited.
+	Unlimited = float64(100000000)
 )
 
 // RegionInfluence represents the influence of a operator step, which is used by store limit.
@@ -96,10 +98,15 @@ type StoreLimit struct {
 // NewStoreLimit returns a StoreLimit object
 func NewStoreLimit(rate float64, mode Mode, regionInfluence int64) *StoreLimit {
 	capacity := regionInfluence
-	if rate > 1 {
+	// unlimited
+	if rate >= Unlimited {
+		capacity = int64(Unlimited)
+	} else if rate > 1 {
 		capacity = int64(rate * float64(regionInfluence))
+		rate *= float64(regionInfluence)
+	} else {
+		rate *= float64(regionInfluence)
 	}
-	rate *= float64(regionInfluence)
 	return &StoreLimit{
 		bucket:          ratelimit.NewBucketWithRate(rate, capacity),
 		mode:            mode,
