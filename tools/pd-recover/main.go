@@ -12,17 +12,19 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/transport"
 )
 
 var (
-	endpoints = flag.String("endpoints", "http://127.0.0.1:2379", "endpoints urls")
-	allocID   = flag.Uint64("alloc-id", 0, "please make sure alloced ID is safe")
-	clusterID = flag.Uint64("cluster-id", 0, "please make cluster ID match with tikv")
-	caPath    = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
-	certPath  = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
-	keyPath   = flag.String("key", "", "path of file that contains X509 key in PEM format.")
+	v         bool
+	endpoints string
+	allocID   uint64
+	clusterID uint64
+	caPath    string
+	certPath  string
+	keyPath   string
 )
 
 const (
@@ -39,26 +41,45 @@ func exitErr(err error) {
 }
 
 func main() {
-	flag.Parse()
-	if *clusterID == 0 {
+	fs := flag.NewFlagSet("pd-recover", flag.ExitOnError)
+	fs.BoolVar(&v, "V", false, "print version information")
+	fs.StringVar(&endpoints, "endpoints", "http://127.0.0.1:2379", "endpoints urls")
+	fs.Uint64Var(&allocID, "alloc-id", 0, "please make sure alloced ID is safe")
+	fs.Uint64Var(&clusterID, "cluster-id", 0, "please make cluster ID match with tikv")
+	fs.StringVar(&caPath, "cacert", "", "path of file that contains list of trusted SSL CAs")
+	fs.StringVar(&certPath, "cert", "", "path of file that contains list of trusted SSL CAs")
+	fs.StringVar(&keyPath, "key", "", "path of file that contains X509 key in PEM format")
+
+	if len(os.Args[1:]) == 0 {
+		fs.Usage()
+		return
+	}
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		exitErr(err)
+	}
+	if v {
+		server.PrintPDInfo()
+		return
+	}
+	if clusterID == 0 {
 		fmt.Println("please specify safe cluster-id")
 		return
 	}
-	if *allocID == 0 {
+	if allocID == 0 {
 		fmt.Println("please specify safe alloc-id")
 		return
 	}
 
-	rootPath := path.Join(pdRootPath, strconv.FormatUint(*clusterID, 10))
+	rootPath := path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
 	clusterRootPath := path.Join(rootPath, "raft")
 	raftBootstrapTimeKey := path.Join(clusterRootPath, "status", "raft_bootstrap_time")
 
-	urls := strings.Split(*endpoints, ",")
+	urls := strings.Split(endpoints, ",")
 
 	tlsInfo := transport.TLSInfo{
-		CertFile:      *certPath,
-		KeyFile:       *keyPath,
-		TrustedCAFile: *caPath,
+		CertFile:      certPath,
+		KeyFile:       keyPath,
+		TrustedCAFile: caPath,
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
@@ -79,14 +100,14 @@ func main() {
 
 	var ops []clientv3.Op
 	// recover cluster_id
-	ops = append(ops, clientv3.OpPut(pdClusterIDPath, string(typeutil.Uint64ToBytes(*clusterID))))
+	ops = append(ops, clientv3.OpPut(pdClusterIDPath, string(typeutil.Uint64ToBytes(clusterID))))
 	// recover alloc_id
 	allocIDPath := path.Join(rootPath, "alloc_id")
-	ops = append(ops, clientv3.OpPut(allocIDPath, string(typeutil.Uint64ToBytes(*allocID))))
+	ops = append(ops, clientv3.OpPut(allocIDPath, string(typeutil.Uint64ToBytes(allocID))))
 
 	// recover bootstrap
 	// recover meta of cluster
-	clusterMeta := metapb.Cluster{Id: *clusterID}
+	clusterMeta := metapb.Cluster{Id: clusterID}
 	clusterValue, err := clusterMeta.Marshal()
 	if err != nil {
 		exitErr(err)

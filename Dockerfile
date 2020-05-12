@@ -31,6 +31,7 @@ FROM alpine:3.5
 
 COPY --from=builder /go/src/github.com/pingcap/pd/bin/pd-server /pd-server
 COPY --from=builder /go/src/github.com/pingcap/pd/bin/pd-ctl /pd-ctl
+COPY --from=builder /go/src/github.com/pingcap/pd/bin/pd-recover /pd-recover
 COPY --from=builder /jq /usr/local/bin/jq
 
 EXPOSE 2379 2380
