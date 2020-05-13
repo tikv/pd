@@ -231,6 +231,8 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "set-roles", "learner"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
 	c.Assert(roles, DeepEquals, []string{"learner"})
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler"}, &roles)
+	c.Assert(roles, DeepEquals, []string{"learner"})
 
 	// test echo
 	echo := pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"})
