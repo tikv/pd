@@ -335,13 +335,18 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 
 	check()
 
-	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr_auto_sync")
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr-auto-sync")
 	c.Assert(err, IsNil)
-	conf.ReplicationMode = "dr_auto_sync"
+	conf.ReplicationMode = "dr-auto-sync"
 	check()
 
 	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr-auto-sync", "label-key", "foobar")
 	c.Assert(err, IsNil)
 	conf.DRAutoSync.LabelKey = "foobar"
+	check()
+
+	_, _, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr-auto-sync", "primary-replicas", "5")
+	c.Assert(err, IsNil)
+	conf.DRAutoSync.PrimaryReplicas = 5
 	check()
 }

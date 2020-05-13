@@ -57,8 +57,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 1,
-  "id": 13,
-  "iteration": 1587103280548,
+  "id": 17,
+  "iteration": 1588920540406,
   "links": [],
   "panels": [
     {
@@ -577,12 +577,353 @@
       "valueName": "current"
     },
     {
+      "columns": [
+        {
+          "text": "Current",
+          "value": "current"
+        }
+      ],
+      "datasource": "${DS_TEST-CLUSTER}",
+      "editable": true,
+      "error": false,
+      "fontSize": "100%",
+      "gridPos": {
+        "h": 7,
+        "w": 5,
+        "x": 0,
+        "y": 6
+      },
+      "hideTimeOverride": true,
+      "id": 96,
+      "links": [],
+      "pageSize": null,
+      "scroll": false,
+      "showHeader": true,
+      "sort": {
+        "col": null,
+        "desc": false
+      },
+      "styles": [
+        {
+          "dateFormat": "YYYY-MM-DD HH:mm:ss",
+          "pattern": "Metric",
+          "sanitize": false,
+          "type": "string"
+        },
+        {
+          "colorMode": "cell",
+          "colors": [
+            "rgba(50, 172, 45, 0.97)",
+            "rgba(237, 129, 40, 0.89)",
+            "rgba(245, 54, 54, 0.9)"
+          ],
+          "decimals": 0,
+          "pattern": "Current",
+          "thresholds": [
+            "1",
+            "2"
+          ],
+          "type": "number",
+          "unit": "short"
+        }
+      ],
+      "targets": [
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_disconnected_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Disconnect Stores",
+          "refId": "B",
+          "step": 20
+        },
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_unhealth_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Unhealth Stores",
+          "refId": "C",
+          "step": 20
+        },
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_low_space_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "LowSpace Stores",
+          "refId": "D",
+          "step": 20
+        },
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_down_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Down Stores",
+          "refId": "E",
+          "step": 20
+        },
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_offline_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Offline Stores",
+          "refId": "F",
+          "step": 20
+        },
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_tombstone_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "Tombstone Stores",
+          "refId": "G",
+          "step": 20
+        }
+      ],
+      "timeFrom": "1s",
+      "title": "Abnormal stores",
+      "transform": "timeseries_aggregations",
+      "type": "table"
+    },
+    {
+      "alert": {
+        "conditions": [
+          {
+            "evaluator": {
+              "params": [
+                100
+              ],
+              "type": "gt"
+            },
+            "operator": {
+              "type": "and"
+            },
+            "query": {
+              "params": [
+                "B",
+                "1m",
+                "now"
+              ]
+            },
+            "reducer": {
+              "params": [],
+              "type": "max"
+            },
+            "type": "query"
+          }
+        ],
+        "executionErrorState": "alerting",
+        "for": "0m",
+        "frequency": "60s",
+        "handler": 1,
+        "message": "Regions are unhealthy",
+        "name": "region health alert",
+        "noDataState": "keep_state",
+        "notifications": []
+      },
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "${DS_TEST-CLUSTER}",
+      "decimals": null,
+      "description": "It records the unusual Regions' count which may include pending peers, down peers, extra peers, offline peers, missing peers or learner peers",
+      "fill": 1,
+      "gridPos": {
+        "h": 7,
+        "w": 11,
+        "x": 5,
+        "y": 6
+      },
+      "id": 72,
+      "legend": {
+        "alignAsTable": true,
+        "avg": false,
+        "current": true,
+        "max": true,
+        "min": false,
+        "rightSide": true,
+        "show": true,
+        "total": false,
+        "values": true
+      },
+      "lines": true,
+      "linewidth": 1,
+      "links": [],
+      "nullPointMode": "null",
+      "paceLength": 10,
+      "percentage": false,
+      "pointradius": 5,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "expr": "pd_regions_status{instance=\"$instance\"}",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(pd_regions_status) by (instance, type)",
+          "format": "time_series",
+          "hide": true,
+          "intervalFactor": 2,
+          "legendFormat": "{{type}}",
+          "refId": "B"
+        }
+      ],
+      "thresholds": [
+        {
+          "colorMode": "critical",
+          "fill": true,
+          "line": true,
+          "op": "gt",
+          "value": 100,
+          "yaxis": "left"
+        }
+      ],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Region health",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "${DS_TEST-CLUSTER}",
+      "decimals": null,
+      "description": "The current peer count of the cluster",
+      "editable": true,
+      "error": false,
+      "fill": 0,
+      "grid": {},
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "id": 18,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": false,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 3,
+      "links": [],
+      "nullPointMode": "null",
+      "paceLength": 10,
+      "percentage": false,
+      "pointradius": 5,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": true,
+      "targets": [
+        {
+          "expr": "sum(pd_cluster_status{instance=\"$instance\",  type=\"region_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "legendFormat": "count",
+          "refId": "A",
+          "step": 4
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Current peer count",
+      "tooltip": {
+        "msResolution": false,
+        "shared": true,
+        "sort": 0,
+        "value_type": "cumulative"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "format": "none",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "format": "none",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": false
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
       "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 13
       },
       "id": 118,
       "panels": [
@@ -599,7 +940,7 @@
             "h": 7,
             "w": 6,
             "x": 0,
-            "y": 7
+            "y": 14
           },
           "hideTimeOverride": true,
           "id": 116,
@@ -649,6 +990,70 @@
           "type": "table"
         },
         {
+          "cacheTimeout": null,
+          "columns": [],
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fontSize": "100%",
+          "gridPos": {
+            "h": 3,
+            "w": 7,
+            "x": 6,
+            "y": 14
+          },
+          "hideTimeOverride": true,
+          "id": 139,
+          "links": [],
+          "pageSize": null,
+          "scroll": false,
+          "showHeader": true,
+          "sort": {
+            "col": 1,
+            "desc": false
+          },
+          "styles": [
+            {
+              "alias": "ID",
+              "colorMode": null,
+              "colors": [
+                "rgba(245, 54, 54, 0.9)",
+                "rgba(237, 129, 40, 0.89)",
+                "rgba(50, 172, 45, 0.97)"
+              ],
+              "dateFormat": "YYYY-MM-DD HH:mm:ss",
+              "decimals": 2,
+              "link": false,
+              "mappingType": 1,
+              "pattern": "Metric",
+              "preserveFormat": false,
+              "sanitize": false,
+              "thresholds": [],
+              "type": "string",
+              "unit": "short",
+              "valueMaps": [
+                {
+                  "text": "",
+                  "value": ""
+                }
+              ]
+            }
+          ],
+          "targets": [
+            {
+              "expr": "pd_cluster_metadata{instance=\"$instance\"}",
+              "format": "time_series",
+              "instant": true,
+              "intervalFactor": 2,
+              "legendFormat": "{{type}}",
+              "refId": "A"
+            }
+          ],
+          "timeFrom": "1s",
+          "timeShift": null,
+          "title": "Cluster ID",
+          "transform": "timeseries_aggregations",
+          "type": "table"
+        },
+        {
           "columns": [
             {
               "text": "Current",
@@ -660,8 +1065,8 @@
           "gridPos": {
             "h": 7,
             "w": 5,
-            "x": 6,
-            "y": 7
+            "x": 13,
+            "y": 14
           },
           "hideTimeOverride": true,
           "id": 103,
@@ -737,8 +1142,8 @@
           "gridPos": {
             "h": 7,
             "w": 6,
-            "x": 11,
-            "y": 7
+            "x": 18,
+            "y": 14
           },
           "hideTimeOverride": true,
           "id": 117,
@@ -810,171 +1215,68 @@
           "type": "table"
         },
         {
-          "columns": [
-            {
-              "text": "Current",
-              "value": "current"
-            }
+          "cacheTimeout": null,
+          "colorBackground": false,
+          "colorValue": false,
+          "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
           ],
           "datasource": "${DS_TEST-CLUSTER}",
-          "editable": true,
-          "error": false,
-          "fontSize": "100%",
+          "format": "none",
+          "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
+          },
           "gridPos": {
-            "h": 7,
+            "h": 2,
             "w": 7,
-            "x": 17,
-            "y": 7
+            "x": 6,
+            "y": 17
           },
           "hideTimeOverride": true,
-          "id": 96,
+          "id": 137,
+          "interval": null,
           "links": [],
-          "pageSize": null,
-          "scroll": false,
-          "showHeader": true,
-          "sort": {
-            "col": null,
-            "desc": false
-          },
-          "styles": [
+          "mappingType": 1,
+          "mappingTypes": [
             {
-              "dateFormat": "YYYY-MM-DD HH:mm:ss",
-              "pattern": "Metric",
-              "sanitize": false,
-              "type": "string"
+              "name": "value to text",
+              "value": 1
             },
             {
-              "colorMode": "cell",
-              "colors": [
-                "rgba(50, 172, 45, 0.97)",
-                "rgba(237, 129, 40, 0.89)",
-                "rgba(245, 54, 54, 0.9)"
-              ],
-              "decimals": 0,
-              "pattern": "Current",
-              "thresholds": [
-                "1",
-                "2"
-              ],
-              "type": "number",
-              "unit": "short"
+              "name": "range to text",
+              "value": 2
             }
           ],
+          "maxDataPoints": 100,
+          "nullPointMode": "connected",
+          "nullText": null,
+          "postfix": "",
+          "postfixFontSize": "50%",
+          "prefix": "",
+          "prefixFontSize": "50%",
+          "rangeMaps": [
+            {
+              "from": "null",
+              "text": "N/A",
+              "to": "null"
+            }
+          ],
+          "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
+          },
+          "tableColumn": "",
           "targets": [
             {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_disconnected_count\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "Disconnect Stores",
-              "refId": "B",
-              "step": 20
-            },
-            {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_unhealth_count\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "Unhealth Stores",
-              "refId": "C",
-              "step": 20
-            },
-            {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_low_space_count\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "LowSpace Stores",
-              "refId": "D",
-              "step": 20
-            },
-            {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_down_count\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "Down Stores",
-              "refId": "E",
-              "step": 20
-            },
-            {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_offline_count\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "Offline Stores",
-              "refId": "F",
-              "step": 20
-            },
-            {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\", type=\"store_tombstone_count\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "Tombstone Stores",
-              "refId": "G",
-              "step": 20
-            }
-          ],
-          "timeFrom": "1s",
-          "title": "Abnormal stores",
-          "transform": "timeseries_aggregations",
-          "type": "table"
-        },
-        {
-          "columns": [
-            {
-              "text": "Current",
-              "value": "current"
-            }
-          ],
-          "datasource": "${DS_TEST-CLUSTER}",
-          "fontSize": "90%",
-          "gridPos": {
-            "h": 7,
-            "w": 4,
-            "x": 0,
-            "y": 14
-          },
-          "hideTimeOverride": true,
-          "id": 115,
-          "links": [],
-          "pageSize": null,
-          "scroll": false,
-          "showHeader": true,
-          "sort": {
-            "col": 0,
-            "desc": true
-          },
-          "styles": [
-            {
-              "alias": "",
-              "colorMode": null,
-              "colors": [
-                "rgba(245, 54, 54, 0.9)",
-                "rgba(237, 129, 40, 0.89)",
-                "rgba(50, 172, 45, 0.97)"
-              ],
-              "decimals": 2,
-              "link": false,
-              "pattern": "Value",
-              "thresholds": [],
-              "type": "number",
-              "unit": "none"
-            },
-            {
-              "alias": "Meta",
-              "colorMode": null,
-              "colors": [
-                "rgba(245, 54, 54, 0.9)",
-                "rgba(237, 129, 40, 0.89)",
-                "rgba(50, 172, 45, 0.97)"
-              ],
-              "dateFormat": "YYYY-MM-DD HH:mm:ss",
-              "decimals": 2,
-              "pattern": "Metric",
-              "thresholds": [],
-              "type": "number",
-              "unit": "short"
-            }
-          ],
-          "targets": [
-            {
-              "expr": "pd_cluster_metadata{instance=\"$instance\"}",
+              "expr": "pd_cluster_tso{instance=\"$instance\"}",
               "format": "time_series",
               "instant": true,
               "intervalFactor": 2,
@@ -982,244 +1284,105 @@
               "refId": "A"
             }
           ],
-          "timeFrom": "1s",
-          "title": "PD cluster metadata",
-          "transform": "timeseries_aggregations",
-          "type": "table"
-        },
-        {
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "decimals": null,
-          "description": "The current peer count of the cluster",
-          "editable": true,
-          "error": false,
-          "fill": 0,
-          "grid": {},
-          "gridPos": {
-            "h": 7,
-            "w": 8,
-            "x": 4,
-            "y": 14
-          },
-          "id": 18,
-          "legend": {
-            "avg": false,
-            "current": false,
-            "max": false,
-            "min": false,
-            "show": false,
-            "total": false,
-            "values": false
-          },
-          "lines": true,
-          "linewidth": 3,
-          "links": [],
-          "nullPointMode": "null",
-          "paceLength": 10,
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": true,
-          "targets": [
+          "thresholds": "",
+          "timeFrom": null,
+          "timeShift": null,
+          "title": "Current TSO",
+          "type": "singlestat",
+          "valueFontSize": "80%",
+          "valueMaps": [
             {
-              "expr": "sum(pd_cluster_status{instance=\"$instance\",  type=\"region_count\"})",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "count",
-              "refId": "A",
-              "step": 4
+              "op": "=",
+              "text": "N/A",
+              "value": "null"
             }
           ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Current peer count",
-          "tooltip": {
-            "msResolution": false,
-            "shared": true,
-            "sort": 0,
-            "value_type": "cumulative"
+          "valueName": "avg"
+        },
+        {
+          "cacheTimeout": null,
+          "colorBackground": false,
+          "colorValue": false,
+          "colors": [
+            "#299c46",
+            "rgba(237, 129, 40, 0.89)",
+            "#d44a3a"
+          ],
+          "datasource": "${DS_TEST-CLUSTER}",
+          "format": "none",
+          "gauge": {
+            "maxValue": 100,
+            "minValue": 0,
+            "show": false,
+            "thresholdLabels": false,
+            "thresholdMarkers": true
           },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
+          "gridPos": {
+            "h": 2,
+            "w": 7,
+            "x": 6,
+            "y": 19
           },
-          "yaxes": [
+          "hideTimeOverride": true,
+          "id": 115,
+          "interval": null,
+          "links": [],
+          "mappingType": 1,
+          "mappingTypes": [
             {
-              "format": "none",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
+              "name": "value to text",
+              "value": 1
             },
             {
-              "format": "none",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": false
+              "name": "range to text",
+              "value": 2
             }
           ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "alert": {
-            "conditions": [
-              {
-                "evaluator": {
-                  "params": [
-                    100
-                  ],
-                  "type": "gt"
-                },
-                "operator": {
-                  "type": "and"
-                },
-                "query": {
-                  "params": [
-                    "B",
-                    "1m",
-                    "now"
-                  ]
-                },
-                "reducer": {
-                  "params": [],
-                  "type": "max"
-                },
-                "type": "query"
-              }
-            ],
-            "executionErrorState": "alerting",
-            "frequency": "60s",
-            "handler": 1,
-            "message": "Regions are unhealthy",
-            "name": "region health alert",
-            "noDataState": "keep_state",
-            "notifications": []
+          "maxDataPoints": 100,
+          "nullPointMode": "connected",
+          "nullText": null,
+          "postfix": "",
+          "postfixFontSize": "50%",
+          "prefix": "",
+          "prefixFontSize": "50%",
+          "rangeMaps": [
+            {
+              "from": "null",
+              "text": "N/A",
+              "to": "null"
+            }
+          ],
+          "sparkline": {
+            "fillColor": "rgba(31, 118, 189, 0.18)",
+            "full": false,
+            "lineColor": "rgb(31, 120, 193)",
+            "show": false
           },
-          "aliasColors": {},
-          "bars": false,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "decimals": 0,
-          "description": "It records the unusual Regions' count which may include pending peers, down peers, extra peers, offline peers, missing peers or learner peers",
-          "fill": 1,
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 14
-          },
-          "id": 72,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "max": true,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "total": false,
-            "values": true
-          },
-          "lines": true,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null",
-          "paceLength": 10,
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": false,
-          "steppedLine": false,
+          "tableColumn": "",
           "targets": [
             {
-              "expr": "pd_regions_status{instance=\"$instance\"}",
+              "expr": "pd_cluster_id{instance=\"$instance\"}",
               "format": "time_series",
+              "hide": false,
+              "instant": true,
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
               "refId": "A"
-            },
-            {
-              "expr": "sum(pd_regions_status) by (instance, type)",
-              "format": "time_series",
-              "hide": true,
-              "intervalFactor": 2,
-              "legendFormat": "{{type}}",
-              "refId": "B"
             }
           ],
-          "thresholds": [
+          "thresholds": "",
+          "timeFrom": "1s",
+          "title": "Current ID allocation",
+          "type": "singlestat",
+          "valueFontSize": "80%",
+          "valueMaps": [
             {
-              "colorMode": "critical",
-              "fill": true,
-              "line": true,
-              "op": "gt",
-              "value": 100,
-              "yaxis": "left"
+              "op": "=",
+              "text": "N/A",
+              "value": "null"
             }
           ],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Region health",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
+          "valueName": "avg"
         }
       ],
       "repeat": null,
@@ -1232,7 +1395,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 7
+        "y": 14
       },
       "id": 119,
       "panels": [
@@ -2013,7 +2176,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 15
       },
       "id": 120,
       "panels": [
@@ -3230,7 +3393,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 16
       },
       "id": 121,
       "panels": [
@@ -3626,7 +3789,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 17
       },
       "id": 135,
       "panels": [
@@ -4213,7 +4376,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 11
+        "y": 18
       },
       "id": 122,
       "panels": [
@@ -5363,7 +5526,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 19
       },
       "id": 123,
       "panels": [
@@ -5573,7 +5736,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 20
       },
       "id": 124,
       "panels": [
@@ -6381,7 +6544,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 21
       },
       "id": 125,
       "panels": [
@@ -6596,7 +6759,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 15
+        "y": 22
       },
       "id": 126,
       "panels": [
@@ -7082,7 +7245,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 23
       },
       "id": 127,
       "panels": [
@@ -7348,5 +7511,5 @@
   "timezone": "browser",
   "title": "Test-Cluster-PD",
   "uid": "Q6RuHYIWk",
-  "version": 5
+  "version": 1
 }

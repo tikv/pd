@@ -70,9 +70,9 @@ dev: build tools check test
 
 ci: build check basic-test
 
-build: pd-server pd-ctl
+build: pd-server pd-ctl pd-recover
 
-tools: pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench
+tools: pd-tso-bench pd-analysis pd-heartbeat-bench
 
 pd-server: export GO111MODULE=on
 pd-server:
@@ -106,7 +106,7 @@ pd-tso-bench:
 	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
 pd-recover: export GO111MODULE=on
 pd-recover:
-	CGO_ENABLED=0 go build -o bin/pd-recover tools/pd-recover/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-recover tools/pd-recover/main.go
 pd-analysis: export GO111MODULE=on
 pd-analysis:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-analysis tools/pd-analysis/main.go

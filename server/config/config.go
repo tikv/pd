@@ -146,7 +146,7 @@ func NewConfig() *Config {
 
 	fs.BoolVar(&cfg.Version, "V", false, "print version information and exit")
 	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
-	fs.StringVar(&cfg.configFile, "config", "", "Config file")
+	fs.StringVar(&cfg.configFile, "config", "", "config file")
 	fs.BoolVar(&cfg.ConfigCheck, "config-check", false, "check config file validity and exit")
 
 	fs.StringVar(&cfg.Name, "name", "", "human-readable name for this pd member")
@@ -159,15 +159,15 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
-	fs.StringVar(&cfg.Metric.PushAddress, "metrics-addr", "", "prometheus pushgateway address, leaves it empty will disable prometheus push.")
+	fs.StringVar(&cfg.Metric.PushAddress, "metrics-addr", "", "prometheus pushgateway address, leaves it empty will disable prometheus push")
 
 	fs.StringVar(&cfg.Log.Level, "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 
-	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "Path of file that contains list of trusted TLS CAs")
-	fs.StringVar(&cfg.Security.CertPath, "cert", "", "Path of file that contains X509 certificate in PEM format")
-	fs.StringVar(&cfg.Security.KeyPath, "key", "", "Path of file that contains X509 key in PEM format")
-	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "Force to create a new one-member cluster")
+	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "path of file that contains list of trusted TLS CAs")
+	fs.StringVar(&cfg.Security.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
+	fs.StringVar(&cfg.Security.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
+	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "force to create a new one-member cluster")
 
 	return cfg
 }
@@ -912,7 +912,7 @@ type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
 	// MaxResetTSGap is the max gap to reset the tso.
-	MaxResetTSGap time.Duration `toml:"max-reset-ts-gap" json:"max-reset-ts-gap"`
+	MaxResetTSGap typeutil.Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
@@ -926,11 +926,9 @@ type PDServerConfig struct {
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
+	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTsGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
-	}
-	if !meta.IsDefined("max-reset-ts-gap") {
-		c.MaxResetTSGap = defaultMaxResetTsGap
 	}
 	if !meta.IsDefined("key-type") {
 		c.KeyType = defaultKeyType
@@ -1146,10 +1144,20 @@ func (c *ReplicationModeConfig) Clone() *ReplicationModeConfig {
 }
 
 func (c *ReplicationModeConfig) adjust(meta *configMetaData) {
-	if !meta.IsDefined("replication-mode") {
+	if !meta.IsDefined("replication-mode") || NormalizeReplicationMode(c.ReplicationMode) == "" {
 		c.ReplicationMode = "majority"
 	}
 	c.DRAutoSync.adjust(meta.Child("dr-auto-sync"))
+}
+
+// NormalizeReplicationMode converts user's input mode to internal use.
+// It returns "" if failed to convert.
+func NormalizeReplicationMode(m string) string {
+	s := strings.ReplaceAll(strings.ToLower(m), "_", "-")
+	if s == "majority" || s == "dr-auto-sync" {
+		return s
+	}
+	return ""
 }
 
 // DRAutoSyncReplicationConfig is the configuration for auto sync mode between 2 data centers.
