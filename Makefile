@@ -34,6 +34,7 @@ DEADLOCK_DISABLE := $$(\
 BUILD_FLAGS ?=
 BUILD_TAGS ?=
 BUILD_CGO_ENABLED := 0
+PD_EDITION ?= Community
 
 ifneq ($(SWAGGER), 0)
 	BUILD_TAGS += swagger_server
@@ -54,6 +55,7 @@ LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --d
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
+LDFLAGS += -X "$(PD_PKG)/server.PDEdition=$(PD_EDITION)"
 
 GOVER_MAJOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\1/")
 GOVER_MINOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\2/")
