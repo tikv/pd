@@ -42,12 +42,14 @@ var (
 	PDBuildTS        = "None"
 	PDGitHash        = "None"
 	PDGitBranch      = "None"
+	PDEdition        = "None"
 )
 
 // LogPDInfo prints the PD version information.
 func LogPDInfo() {
 	log.Info("Welcome to Placement Driver (PD)")
 	log.Info("PD", zap.String("release-version", PDReleaseVersion))
+	log.Info("PD", zap.String("edition", PDEdition))
 	log.Info("PD", zap.String("git-hash", PDGitHash))
 	log.Info("PD", zap.String("git-branch", PDGitBranch))
 	log.Info("PD", zap.String("utc-build-time", PDBuildTS))
@@ -56,6 +58,7 @@ func LogPDInfo() {
 // PrintPDInfo prints the PD version information without log info.
 func PrintPDInfo() {
 	fmt.Println("Release Version:", PDReleaseVersion)
+	fmt.Println("Edition:", PDEdition)
 	fmt.Println("Git Commit Hash:", PDGitHash)
 	fmt.Println("Git Branch:", PDGitBranch)
 	fmt.Println("UTC Build Time: ", PDBuildTS)
