@@ -255,7 +255,7 @@ func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 
 func adjustPath(p *string) {
 	absPath, err := filepath.Abs(*p)
-	if err != nil {
+	if err == nil {
 		*p = absPath
 	}
 }
