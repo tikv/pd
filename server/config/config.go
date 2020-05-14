@@ -253,6 +253,13 @@ func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 	}
 }
 
+func adjustPath(p *string) {
+	absPath, err := filepath.Abs(*p)
+	if err == nil {
+		*p = absPath
+	}
+}
+
 // Parse parses flag definitions from the argument list.
 func (c *Config) Parse(arguments []string) error {
 	// Parse first to get config file.
@@ -382,6 +389,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		adjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
+	adjustPath(&c.DataDir)
 
 	if err := c.Validate(); err != nil {
 		return err

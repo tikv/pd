@@ -131,6 +131,143 @@ func (*testRegionKey) TestRegionKey(c *C) {
 	}
 }
 
+func (*testRegionKey) TestSetRegion(c *C) {
+	regions := NewRegionsInfo()
+	for i := 0; i < 100; i++ {
+		peer1 := &metapb.Peer{StoreId: uint64(i%5 + 1), Id: uint64(i*5 + 1)}
+		peer2 := &metapb.Peer{StoreId: uint64((i+1)%5 + 1), Id: uint64(i*5 + 2)}
+		peer3 := &metapb.Peer{StoreId: uint64((i+2)%5 + 1), Id: uint64(i*5 + 3)}
+		region := NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			Peers:    []*metapb.Peer{peer1, peer2, peer3},
+			StartKey: []byte(fmt.Sprintf("%20d", i*10)),
+			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
+		}, peer1)
+		regions.SetRegion(region)
+	}
+
+	peer1 := &metapb.Peer{StoreId: uint64(4), Id: uint64(101)}
+	peer2 := &metapb.Peer{StoreId: uint64(5), Id: uint64(102)}
+	peer3 := &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
+	region := NewRegionInfo(&metapb.Region{
+		Id:       uint64(21),
+		Peers:    []*metapb.Peer{peer1, peer2, peer3},
+		StartKey: []byte(fmt.Sprintf("%20d", 184)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
+	}, peer1)
+	region.learners = append(region.learners, peer2)
+	region.pendingPeers = append(region.pendingPeers, peer3)
+	regions.SetRegion(region)
+	checkRegions(c, regions)
+	c.Assert(regions.tree.length(), Equals, 97)
+	c.Assert(len(regions.GetRegions()), Equals, 97)
+
+	regions.SetRegion(region)
+	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
+	peer2 = &metapb.Peer{StoreId: uint64(3), Id: uint64(102)}
+	peer3 = &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
+	region = NewRegionInfo(&metapb.Region{
+		Id:       uint64(21),
+		Peers:    []*metapb.Peer{peer1, peer2, peer3},
+		StartKey: []byte(fmt.Sprintf("%20d", 184)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 212)),
+	}, peer1)
+	region.learners = append(region.learners, peer2)
+	region.pendingPeers = append(region.pendingPeers, peer3)
+	regions.SetRegion(region)
+	checkRegions(c, regions)
+	c.Assert(regions.tree.length(), Equals, 97)
+	c.Assert(len(regions.GetRegions()), Equals, 97)
+}
+
+func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
+	regions := NewRegionsInfo()
+	peer1 := &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
+	peer2 := &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
+	peer3 := &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
+	peer4 := &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
+	region := NewRegionInfo(&metapb.Region{
+		Id:       uint64(1),
+		Peers:    []*metapb.Peer{peer1, peer2, peer4},
+		StartKey: []byte(fmt.Sprintf("%20d", 10)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
+	}, peer1)
+
+	origin := NewRegionInfo(&metapb.Region{
+		Id:       uint64(2),
+		Peers:    []*metapb.Peer{peer1, peer2, peer3},
+		StartKey: []byte(fmt.Sprintf("%20d", 20)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 30)),
+	}, peer1)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
+
+	region.leader = peer2
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+
+	region.leader = peer1
+	region.pendingPeers = append(region.pendingPeers, peer4)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+
+	region.pendingPeers = nil
+	region.learners = append(region.learners, peer2)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+
+	origin.learners = append(origin.learners, peer3)
+	origin.learners = append(origin.learners, peer2)
+	region.learners = append(region.learners, peer4)
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, false)
+
+	region.voters[2].StoreId = 4
+	c.Assert(regions.shouldRemoveFromSubTree(region, origin), Equals, true)
+}
+
+func checkRegions(c *C, regions *RegionsInfo) {
+	leaderMap := make(map[uint64]uint64)
+	followerMap := make(map[uint64]uint64)
+	learnerMap := make(map[uint64]uint64)
+	pendingPeerMap := make(map[uint64]uint64)
+	for _, item := range regions.GetRegions() {
+		if leaderCount, ok := leaderMap[item.leader.StoreId]; ok {
+			leaderMap[item.leader.StoreId] = leaderCount + 1
+		} else {
+			leaderMap[item.leader.StoreId] = 1
+		}
+		for _, follower := range item.GetFollowers() {
+			if followerCount, ok := followerMap[follower.StoreId]; ok {
+				followerMap[follower.StoreId] = followerCount + 1
+			} else {
+				followerMap[follower.StoreId] = 1
+			}
+		}
+		for _, learner := range item.GetLearners() {
+			if learnerCount, ok := learnerMap[learner.StoreId]; ok {
+				learnerMap[learner.StoreId] = learnerCount + 1
+			} else {
+				learnerMap[learner.StoreId] = 1
+			}
+		}
+		for _, pendingPeer := range item.GetPendingPeers() {
+			if pendingPeerCount, ok := pendingPeerMap[pendingPeer.StoreId]; ok {
+				pendingPeerMap[pendingPeer.StoreId] = pendingPeerCount + 1
+			} else {
+				pendingPeerMap[pendingPeer.StoreId] = 1
+			}
+		}
+	}
+	for key, value := range regions.leaders {
+		c.Assert(value.length(), Equals, int(leaderMap[key]))
+	}
+	for key, value := range regions.followers {
+		c.Assert(value.length(), Equals, int(followerMap[key]))
+	}
+	for key, value := range regions.learners {
+		c.Assert(value.length(), Equals, int(learnerMap[key]))
+	}
+	for key, value := range regions.pendingPeers {
+		c.Assert(value.length(), Equals, int(pendingPeerMap[key]))
+	}
+}
+
 func BenchmarkRandomRegion(b *testing.B) {
 	regions := NewRegionsInfo()
 	for i := 0; i < 5000000; i++ {

@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"unsafe"
 
@@ -579,7 +580,10 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 // SetRegion sets the RegionInfo with regionID
 func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
 	if origin := r.regions.Get(region.GetID()); origin != nil {
-		r.RemoveRegion(origin)
+		r.removeRegionFromTreeAndMap(origin)
+		if r.shouldRemoveFromSubTree(region, origin) {
+			r.removeRegionFromSubTree(origin)
+		}
 	}
 	return r.AddRegion(region)
 }
@@ -658,8 +662,20 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 // RemoveRegion removes RegionInfo from regionTree and regionMap
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	// Remove from tree and regions.
+	r.removeRegionFromTreeAndMap(region)
+	// Remove from leaders and followers.
+	r.removeRegionFromSubTree(region)
+}
+
+// removeRegionFromTreeAndMap removes RegionInfo from regionTree and regionMap
+func (r *RegionsInfo) removeRegionFromTreeAndMap(region *RegionInfo) {
+	// Remove from tree and regions.
 	r.tree.remove(region)
 	r.regions.Delete(region.GetID())
+}
+
+// removeRegionFromSubTree removes RegionInfo from regionSubTrees
+func (r *RegionsInfo) removeRegionFromSubTree(region *RegionInfo) {
 	// Remove from leaders and followers.
 	for _, peer := range region.meta.GetPeers() {
 		storeID := peer.GetStoreId()
@@ -668,6 +684,42 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 		r.learners[storeID].remove(region)
 		r.pendingPeers[storeID].remove(region)
 	}
+}
+
+type peerSlice []*metapb.Peer
+
+func (s peerSlice) Len() int {
+	return len(s)
+}
+func (s peerSlice) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s peerSlice) Less(i, j int) bool {
+	return s[i].GetId() < s[j].GetId()
+}
+
+// shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
+// new peer was created, learners changed, pendingPeers changed, and so on.
+func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
+	checkPeersChange := func(origin []*metapb.Peer, other []*metapb.Peer) bool {
+		if len(origin) != len(other) {
+			return true
+		}
+		sort.Sort(peerSlice(origin))
+		sort.Sort(peerSlice(other))
+		for index, peer := range origin {
+			if peer.GetStoreId() == other[index].GetStoreId() && peer.GetId() == other[index].GetId() {
+				continue
+			}
+			return true
+		}
+		return false
+	}
+
+	return origin.leader.GetId() != region.leader.GetId() ||
+		checkPeersChange(origin.GetVoters(), region.GetVoters()) ||
+		checkPeersChange(origin.GetLearners(), region.GetLearners()) ||
+		checkPeersChange(origin.GetPendingPeers(), region.GetPendingPeers())
 }
 
 // SearchRegion searches RegionInfo from regionTree
