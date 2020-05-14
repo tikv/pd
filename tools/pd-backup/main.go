@@ -27,10 +27,10 @@ import (
 
 var (
 	pdAddr   = flag.String("pd", "http://127.0.0.1:2379", "pd address")
-	filePath = flag.String("file", "backup.json", "the backup file path and name")
-	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs.")
-	certPath = flag.String("cert", "", "path of file that contains X509 certificate in PEM format..")
-	keyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format.")
+	filePath = flag.String("file", "backup.json", "backup file path and name")
+	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
+	certPath = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
+	keyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format")
 )
 
 const (

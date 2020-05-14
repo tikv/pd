@@ -34,6 +34,7 @@ DEADLOCK_DISABLE := $$(\
 BUILD_FLAGS ?=
 BUILD_TAGS ?=
 BUILD_CGO_ENABLED := 0
+PD_EDITION ?= Community
 
 ifneq ($(SWAGGER), 0)
 	BUILD_TAGS += swagger_server
@@ -54,6 +55,7 @@ LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --d
 LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
+LDFLAGS += -X "$(PD_PKG)/server.PDEdition=$(PD_EDITION)"
 
 GOVER_MAJOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\1/")
 GOVER_MINOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\2/")
@@ -70,9 +72,9 @@ dev: build tools check test
 
 ci: build check basic-test
 
-build: pd-server pd-ctl
+build: pd-server pd-ctl pd-recover
 
-tools: pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench
+tools: pd-tso-bench pd-analysis pd-heartbeat-bench
 
 pd-server: export GO111MODULE=on
 pd-server:
@@ -106,7 +108,7 @@ pd-tso-bench:
 	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
 pd-recover: export GO111MODULE=on
 pd-recover:
-	CGO_ENABLED=0 go build -o bin/pd-recover tools/pd-recover/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-recover tools/pd-recover/main.go
 pd-analysis: export GO111MODULE=on
 pd-analysis:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-analysis tools/pd-analysis/main.go

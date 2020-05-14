@@ -32,9 +32,9 @@ var (
 	regionCount       = flag.Uint64("region", 1000000, "region count")
 	keyLen            = flag.Int("keylen", 56, "key length")
 	replica           = flag.Int("replica", 3, "replica count")
-	regionUpdateRatio = flag.Float64("region-update-ratio", 0.05, "the ratio of the region need to update")
+	regionUpdateRatio = flag.Float64("region-update-ratio", 0.05, "ratio of the region need to update")
 	sample            = flag.Bool("sample", false, "sample per second")
-	heartbeatRounds   = flag.Int("heartbeat-rounds", 5, "the total rounds of hearbeat")
+	heartbeatRounds   = flag.Int("heartbeat-rounds", 5, "total rounds of hearbeat")
 )
 
 var clusterID uint64

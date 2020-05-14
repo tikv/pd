@@ -439,7 +439,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 func newConfigHotRegionCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "balance-hot-region-scheduler",
-		Short: "show evict-leader-scheduler config",
+		Short: "evict-leader-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
 	c.AddCommand(&cobra.Command{
@@ -456,7 +456,7 @@ func newConfigHotRegionCommand() *cobra.Command {
 func newConfigEvictLeaderCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "evict-leader-scheduler",
-		Short: "show evict-leader-scheduler config",
+		Short: "evict-leader-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
 	c.AddCommand(&cobra.Command{
@@ -474,7 +474,7 @@ func newConfigEvictLeaderCommand() *cobra.Command {
 func newConfigGrantLeaderCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "grant-leader-scheduler",
-		Short: "show grant-leader-scheduler config",
+		Short: "grant-leader-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
 	c.AddCommand(&cobra.Command{
@@ -493,10 +493,11 @@ func newConfigShuffleRegionCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "shuffle-region-scheduler",
 		Short: "shuffle-region-scheduler config",
+		Run:   showShuffleRegionSchedulerRolesCommandFunc,
 	}
 	c.AddCommand(&cobra.Command{
 		Use:   "show-roles",
-		Short: "show affected roles (leader,follower,learner)",
+		Short: "show affected roles (leader, follower, learner)",
 		Run:   showShuffleRegionSchedulerRolesCommandFunc,
 	}, &cobra.Command{
 		Use:   "set-roles [leader,][follower,][learner]",
@@ -594,7 +595,11 @@ func showShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []strin
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	path := path.Join(schedulerConfigPrefix, cmd.Parent().Name(), "roles")
+	p := cmd.Name()
+	if p == "show-roles" {
+		p = cmd.Parent().Name()
+	}
+	path := path.Join(schedulerConfigPrefix, p, "roles")
 	r, err := doRequest(cmd, path, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
