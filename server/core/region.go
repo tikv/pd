@@ -580,7 +580,7 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 // SetRegion sets the RegionInfo with regionID
 func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
 	if origin := r.regions.Get(region.GetID()); origin != nil {
-		if bytes.Compare(origin.GetStartKey(), region.GetStartKey()) != 0 || bytes.Compare(origin.GetEndKey(), region.GetEndKey()) != 0 {
+		if !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 			r.removeRegionFromTreeAndMap(origin)
 		}
 		if r.shouldRemoveFromSubTree(region, origin) {
@@ -612,8 +612,8 @@ func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
 	if origin := r.GetRegion(region.GetID()); origin != nil {
 		if regionOld := r.tree.find(region); regionOld != nil {
 			// Update to tree.
-			if bytes.Compare(regionOld.region.GetStartKey(), region.GetStartKey()) == 0 &&
-				bytes.Compare(regionOld.region.GetEndKey(), region.GetEndKey()) == 0 &&
+			if bytes.Equal(regionOld.region.GetStartKey(), region.GetStartKey()) &&
+				bytes.Equal(regionOld.region.GetEndKey(), region.GetEndKey()) &&
 				regionOld.region.GetID() == region.GetID() {
 				regionOld.region = region
 				treeNeedAdd = false
