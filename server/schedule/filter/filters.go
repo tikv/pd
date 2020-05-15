@@ -543,6 +543,41 @@ func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
+type engineFilter struct {
+	scope      string
+	constraint placement.LabelConstraint
+}
+
+// NewEngineFilter creates a filter that filters store for special engine.
+func NewEngineFilter(scope string, allowUses ...string) Filter {
+	var values []string
+	for _, v := range allEngineLabels {
+		if slice.NoneOf(allowUses, func(i int) bool { return allowUses[i] == v }) {
+			values = append(values, v)
+		}
+	}
+	return &engineFilter{
+		scope:      scope,
+		constraint: placement.LabelConstraint{Key: "engine", Op: "in", Values: values},
+	}
+}
+
+func (f *engineFilter) Scope() string {
+	return f.scope
+}
+
+func (f *engineFilter) Type() string {
+	return "engine-filter"
+}
+
+func (f *engineFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.constraint.MatchStore(store)
+}
+
+func (f *engineFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.constraint.MatchStore(store)
+}
+
 type specialUseFilter struct {
 	scope      string
 	constraint placement.LabelConstraint
@@ -558,7 +593,7 @@ func NewSpecialUseFilter(scope string, allowUses ...string) Filter {
 	}
 	return &specialUseFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: specialUseKey, Op: "in", Values: values},
+		constraint: placement.LabelConstraint{Key: SpecialUseKey, Op: "in", Values: values},
 	}
 }
 
@@ -582,11 +617,18 @@ func (f *specialUseFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 const (
-	specialUseKey = "specialUse"
+	// SpecialUseKey is the label used to indicate special use storage.
+	SpecialUseKey = "specialUse"
 	// SpecialUseHotRegion is the hot region value of special use label
 	SpecialUseHotRegion = "hotRegion"
 	// SpecialUseReserved is the reserved value of special use label
 	SpecialUseReserved = "reserved"
+
+	// EngineKey is the label key used to indicate engine.
+	EngineKey = "engine"
+	// EngineTiFlash is the tiflash value of the engine label.
+	EngineTiFlash = "tiflash"
 )
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
+var allEngineLabels = []string{EngineTiFlash}
