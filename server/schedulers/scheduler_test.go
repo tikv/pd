@@ -189,11 +189,13 @@ var _ = Suite(&testScatterRegionSuite{})
 type testScatterRegionSuite struct{}
 
 func (s *testScatterRegionSuite) TestSixStores(c *C) {
-	s.scatter(c, 6, 4)
+	s.scatter(c, 6, 4, false)
+	s.scatter(c, 6, 4, true)
 }
 
 func (s *testScatterRegionSuite) TestFiveStores(c *C) {
-	s.scatter(c, 5, 5)
+	s.scatter(c, 5, 5, false)
+	s.scatter(c, 5, 5, true)
 }
 
 func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
@@ -209,7 +211,7 @@ func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
 	}
 }
 
-func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
+func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 
@@ -217,6 +219,8 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64) {
 	for i := uint64(1); i <= numStores; i++ {
 		tc.AddRegionStore(i, 0)
 	}
+	tc.AddLabelsStore(numStores+1, 0, map[string]string{"engine": "tiflash"})
+	tc.EnablePlacementRules = useRules
 
 	// Add regions 1~4.
 	seq := newSequencer(3)

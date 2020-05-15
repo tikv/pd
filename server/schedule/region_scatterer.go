@@ -82,6 +82,7 @@ func NewRegionScatterer(cluster opt.Cluster) *RegionScatterer {
 		cluster: cluster,
 		filters: []filter.Filter{
 			filter.StoreStateFilter{ActionScope: regionScatterName},
+			filter.NewEngineFilter(regionScatterName),
 		},
 		selected: newSelectedStores(),
 	}
