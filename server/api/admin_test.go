@@ -52,7 +52,7 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	cluster := s.svr.GetRaftCluster()
 
 	// Update region's epoch to (100, 100).
-	region := cluster.GetRegionInfoByKey([]byte("foo")).Clone(
+	region := cluster.GetRegionByKey([]byte("foo")).Clone(
 		core.SetRegionConfVer(100),
 		core.SetRegionVersion(100),
 	)
@@ -78,7 +78,7 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 	err = cluster.HandleRegionHeartbeat(region)
 	c.Assert(err, IsNil)
 
-	region = cluster.GetRegionInfoByKey([]byte("foo"))
+	region = cluster.GetRegionByKey([]byte("foo"))
 	c.Assert(region.GetRegionEpoch().ConfVer, Equals, uint64(50))
 	c.Assert(region.GetRegionEpoch().Version, Equals, uint64(50))
 }

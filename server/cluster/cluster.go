@@ -650,42 +650,20 @@ func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
 	return nil
 }
 
-// GetRegionByKey gets region and leader peer by region key from cluster.
-func (c *RaftCluster) GetRegionByKey(regionKey []byte) (*metapb.Region, *metapb.Peer) {
-	region := c.core.SearchRegion(regionKey)
-	if region == nil {
-		return nil, nil
-	}
-	return region.GetMeta(), region.GetLeader()
+// GetRegionByKey gets regionInfo by region key from cluster.
+func (c *RaftCluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
+	return c.core.SearchRegion(regionKey)
 }
 
 // GetPrevRegionByKey gets previous region and leader peer by the region key from cluster.
-func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) (*metapb.Region, *metapb.Peer) {
-	region := c.core.SearchPrevRegion(regionKey)
-	if region == nil {
-		return nil, nil
-	}
-	return region.GetMeta(), region.GetLeader()
-}
-
-// GetRegionInfoByKey gets regionInfo by region key from cluster.
-func (c *RaftCluster) GetRegionInfoByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.SearchRegion(regionKey)
+func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) *core.RegionInfo {
+	return c.core.SearchPrevRegion(regionKey)
 }
 
 // ScanRegions scans region with start key, until the region contains endKey, or
 // total number greater than limit.
 func (c *RaftCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
 	return c.core.ScanRange(startKey, endKey, limit)
-}
-
-// GetRegionByID gets region and leader peer by regionID from cluster.
-func (c *RaftCluster) GetRegionByID(regionID uint64) (*metapb.Region, *metapb.Peer) {
-	region := c.GetRegion(regionID)
-	if region == nil {
-		return nil, nil
-	}
-	return region.GetMeta(), region.GetLeader()
 }
 
 // GetRegion searches for a region by ID.
