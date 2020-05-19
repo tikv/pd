@@ -607,7 +607,9 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 
 // AddRegion adds RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
 func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
+	// the regions which are overlapped with the specified region range.
 	var overlaps []*RegionInfo
+	// when the value is true, add the region to the tree. otherwise use the region replace the origin region in the tree.
 	treeNeedAdd := true
 	if origin := r.GetRegion(region.GetID()); origin != nil {
 		if regionOld := r.tree.find(region); regionOld != nil {
