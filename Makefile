@@ -175,6 +175,10 @@ regions-dump: export GO111MODULE=on
 regions-dump:
 	CGO_ENABLED=0 go build -o bin/regions-dump tools/regions-dump/main.go
 
+stores-dump: export GO111MODULE=on
+stores-dump:
+	CGO_ENABLED=0 go build -o bin/stores-dump tools/stores-dump/main.go
+
 clean-test:
 	rm -rf /tmp/test_pd*
 	rm -rf /tmp/pd-tests*
