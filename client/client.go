@@ -438,7 +438,7 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 }
 
 func (c *client) parseRegionResponse(res *pdpb.GetRegionResponse) *Region {
-	if res == nil {
+	if res.Region == nil {
 		return nil
 	}
 
