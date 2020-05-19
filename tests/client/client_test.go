@@ -410,8 +410,7 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 				return c.Check(r.Leader, DeepEquals, peers[0]) &&
 					c.Check(r.Meta, DeepEquals, regions[i-1])
 			}
-			return c.Check(r.Leader, IsNil) &&
-				c.Check(r, IsNil)
+			return c.Check(r, IsNil)
 		})
 	}
 	c.Succeed()
