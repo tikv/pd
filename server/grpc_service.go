@@ -416,11 +416,16 @@ func (s *Server) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) 
 	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	region, leader := rc.GetRegionByKey(request.GetRegionKey())
+	region := rc.GetRegionByKey(request.GetRegionKey())
+	if region == nil {
+		return &pdpb.GetRegionResponse{Header: s.header()}, nil
+	}
 	return &pdpb.GetRegionResponse{
-		Header: s.header(),
-		Region: region,
-		Leader: leader,
+		Header:       s.header(),
+		Region:       region.GetMeta(),
+		Leader:       region.GetLeader(),
+		DownPeers:    region.GetDownPeers(),
+		PendingPeers: region.GetPendingPeers(),
 	}, nil
 }
 
@@ -435,11 +440,16 @@ func (s *Server) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionReque
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	region, leader := rc.GetPrevRegionByKey(request.GetRegionKey())
+	region := rc.GetPrevRegionByKey(request.GetRegionKey())
+	if region == nil {
+		return &pdpb.GetRegionResponse{Header: s.header()}, nil
+	}
 	return &pdpb.GetRegionResponse{
-		Header: s.header(),
-		Region: region,
-		Leader: leader,
+		Header:       s.header(),
+		Region:       region.GetMeta(),
+		Leader:       region.GetLeader(),
+		DownPeers:    region.GetDownPeers(),
+		PendingPeers: region.GetPendingPeers(),
 	}, nil
 }
 
@@ -453,12 +463,16 @@ func (s *Server) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDR
 	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	id := request.GetRegionId()
-	region, leader := rc.GetRegionByID(id)
+	region := rc.GetRegion(request.GetRegionId())
+	if region == nil {
+		return &pdpb.GetRegionResponse{Header: s.header()}, nil
+	}
 	return &pdpb.GetRegionResponse{
-		Header: s.header(),
-		Region: region,
-		Leader: leader,
+		Header:       s.header(),
+		Region:       region.GetMeta(),
+		Leader:       region.GetLeader(),
+		DownPeers:    region.GetDownPeers(),
+		PendingPeers: region.GetPendingPeers(),
 	}, nil
 }
 

@@ -84,13 +84,13 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 // ValidRequestRegion is used to decide if the region is valid.
 func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
-	region, _ := c.GetRegionByKey(startKey)
+	region := c.GetRegionByKey(startKey)
 	if region == nil {
 		return errors.Errorf("region not found, request region: %v", core.RegionToHexMeta(reqRegion))
 	}
 	// If the request epoch is less than current region epoch, then returns an error.
 	reqRegionEpoch := reqRegion.GetRegionEpoch()
-	regionEpoch := region.GetRegionEpoch()
+	regionEpoch := region.GetMeta().GetRegionEpoch()
 	if reqRegionEpoch.GetVersion() < regionEpoch.GetVersion() ||
 		reqRegionEpoch.GetConfVer() < regionEpoch.GetConfVer() {
 		return errors.Errorf("invalid region epoch, request: %v, currenrt: %v", reqRegionEpoch, regionEpoch)
