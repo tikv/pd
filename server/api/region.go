@@ -151,7 +151,7 @@ func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	regionInfo := rc.GetRegionInfoByKey([]byte(key))
+	regionInfo := rc.GetRegionByKey([]byte(key))
 	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
 }
 

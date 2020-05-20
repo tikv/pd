@@ -27,6 +27,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// Region contains information of a region's meta and its peers.
+type Region struct {
+	Meta         *metapb.Region
+	Leader       *metapb.Peer
+	DownPeers    []*metapb.Peer
+	PendingPeers []*metapb.Peer
+}
+
 // Client is a PD (Placement Driver) client.
 // It should not be used after calling Close().
 type Client interface {
@@ -44,11 +52,11 @@ type Client interface {
 	// taking care of region change.
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
-	GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error)
+	GetRegion(ctx context.Context, key []byte) (*Region, error)
 	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
-	GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error)
+	GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
-	GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Region, *metapb.Peer, error)
+	GetRegionByID(ctx context.Context, regionID uint64) (*Region, error)
 	// ScanRegion gets a list of regions, starts from the region that contains key.
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
@@ -429,7 +437,23 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	return resp.Wait()
 }
 
-func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error) {
+func (c *client) parseRegionResponse(res *pdpb.GetRegionResponse) *Region {
+	if res.Region == nil {
+		return nil
+	}
+
+	r := &Region{
+		Meta:         res.Region,
+		Leader:       res.Leader,
+		PendingPeers: res.PendingPeers,
+	}
+	for _, s := range res.DownPeers {
+		r.DownPeers = append(r.DownPeers, s.Peer)
+	}
+	return r
+}
+
+func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -447,12 +471,12 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*metapb.Region, *me
 	if err != nil {
 		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, errors.WithStack(err)
+		return nil, errors.WithStack(err)
 	}
-	return resp.GetRegion(), resp.GetLeader(), nil
+	return c.parseRegionResponse(resp), nil
 }
 
-func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region, *metapb.Peer, error) {
+func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -470,12 +494,12 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*metapb.Region,
 	if err != nil {
 		cmdFailDurationGetPrevRegion.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, errors.WithStack(err)
+		return nil, errors.WithStack(err)
 	}
-	return resp.GetRegion(), resp.GetLeader(), nil
+	return c.parseRegionResponse(resp), nil
 }
 
-func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Region, *metapb.Peer, error) {
+func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -493,9 +517,9 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*metapb.Re
 	if err != nil {
 		cmdFailedDurationGetRegionByID.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, errors.WithStack(err)
+		return nil, errors.WithStack(err)
 	}
-	return resp.GetRegion(), resp.GetLeader(), nil
+	return c.parseRegionResponse(resp), nil
 }
 
 func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error) {
