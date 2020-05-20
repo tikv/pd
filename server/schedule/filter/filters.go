@@ -548,11 +548,13 @@ type engineFilter struct {
 	constraint placement.LabelConstraint
 }
 
-// NewEngineFilter creates a filter that filters store for special engine.
-func NewEngineFilter(scope string, allowUses ...string) Filter {
+// NewEngineFilter creates a filter that filters stores to filter out default engine stores.
+// By default, all stores that are not marked with a special engine will be filtered out.
+// Specify the special engine label if you want to include the special stores.
+func NewEngineFilter(scope string, allowSpeicalEngines ...string) Filter {
 	var values []string
-	for _, v := range allEngineLabels {
-		if slice.NoneOf(allowUses, func(i int) bool { return allowUses[i] == v }) {
+	for _, v := range allSpeicalEngineLabels {
+		if slice.NoneOf(allowSpeicalEngines, func(i int) bool { return allowSpeicalEngines[i] == v }) {
 			values = append(values, v)
 		}
 	}
@@ -583,7 +585,9 @@ type specialUseFilter struct {
 	constraint placement.LabelConstraint
 }
 
-// NewSpecialUseFilter creates a filter that filters stores for special use.
+// NewSpecialUseFilter creates a filter that filters normal stores.
+// By default, all stores that are not marked with a special use will be filtered out.
+// Specify the special use label if you want to include the special stores.
 func NewSpecialUseFilter(scope string, allowUses ...string) Filter {
 	var values []string
 	for _, v := range allSpecialUses {
@@ -631,4 +635,4 @@ const (
 )
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
-var allEngineLabels = []string{EngineTiFlash}
+var allSpeicalEngineLabels = []string{EngineTiFlash}
