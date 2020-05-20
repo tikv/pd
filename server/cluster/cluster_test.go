@@ -341,7 +341,7 @@ func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
 	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/cluster/concurrentRegionHeartbeat"), IsNil)
 	c.Assert(cluster.processRegionHeartbeat(target), IsNil)
 	wg.Wait()
-	checkRegion(c, cluster.GetRegionInfoByKey([]byte{}), target)
+	checkRegion(c, cluster.GetRegionByKey([]byte{}), target)
 }
 
 func heartbeatRegions(c *C, cluster *RaftCluster, regions []*core.RegionInfo) {
@@ -350,23 +350,23 @@ func heartbeatRegions(c *C, cluster *RaftCluster, regions []*core.RegionInfo) {
 		c.Assert(cluster.processRegionHeartbeat(r), IsNil)
 
 		checkRegion(c, cluster.GetRegion(r.GetID()), r)
-		checkRegion(c, cluster.GetRegionInfoByKey(r.GetStartKey()), r)
+		checkRegion(c, cluster.GetRegionByKey(r.GetStartKey()), r)
 
 		if len(r.GetEndKey()) > 0 {
 			end := r.GetEndKey()[0]
-			checkRegion(c, cluster.GetRegionInfoByKey([]byte{end - 1}), r)
+			checkRegion(c, cluster.GetRegionByKey([]byte{end - 1}), r)
 		}
 	}
 
 	// Check all regions after handling all heartbeats.
 	for _, r := range regions {
 		checkRegion(c, cluster.GetRegion(r.GetID()), r)
-		checkRegion(c, cluster.GetRegionInfoByKey(r.GetStartKey()), r)
+		checkRegion(c, cluster.GetRegionByKey(r.GetStartKey()), r)
 
 		if len(r.GetEndKey()) > 0 {
 			end := r.GetEndKey()[0]
-			checkRegion(c, cluster.GetRegionInfoByKey([]byte{end - 1}), r)
-			result := cluster.GetRegionInfoByKey([]byte{end + 1})
+			checkRegion(c, cluster.GetRegionByKey([]byte{end - 1}), r)
+			result := cluster.GetRegionByKey([]byte{end + 1})
 			c.Assert(result.GetID(), Not(Equals), r.GetID())
 		}
 	}
@@ -380,7 +380,7 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 	// 1: [nil, nil)
 	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
 	c.Assert(cluster.processRegionHeartbeat(region1), IsNil)
-	checkRegion(c, cluster.GetRegionInfoByKey([]byte("foo")), region1)
+	checkRegion(c, cluster.GetRegionByKey([]byte("foo")), region1)
 
 	// split 1 to 2: [nil, m) 1: [m, nil), sync 2 first.
 	region1 = region1.Clone(
@@ -389,12 +389,12 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 	)
 	region2 := core.NewRegionInfo(&metapb.Region{Id: 2, EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
 	c.Assert(cluster.processRegionHeartbeat(region2), IsNil)
-	checkRegion(c, cluster.GetRegionInfoByKey([]byte("a")), region2)
+	checkRegion(c, cluster.GetRegionByKey([]byte("a")), region2)
 	// [m, nil) is missing before r1's heartbeat.
-	c.Assert(cluster.GetRegionInfoByKey([]byte("z")), IsNil)
+	c.Assert(cluster.GetRegionByKey([]byte("z")), IsNil)
 
 	c.Assert(cluster.processRegionHeartbeat(region1), IsNil)
-	checkRegion(c, cluster.GetRegionInfoByKey([]byte("z")), region1)
+	checkRegion(c, cluster.GetRegionByKey([]byte("z")), region1)
 
 	// split 1 to 3: [m, q) 1: [q, nil), sync 1 first.
 	region1 = region1.Clone(
@@ -403,12 +403,12 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 	)
 	region3 := core.NewRegionInfo(&metapb.Region{Id: 3, StartKey: []byte("m"), EndKey: []byte("q"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
 	c.Assert(cluster.processRegionHeartbeat(region1), IsNil)
-	checkRegion(c, cluster.GetRegionInfoByKey([]byte("z")), region1)
-	checkRegion(c, cluster.GetRegionInfoByKey([]byte("a")), region2)
+	checkRegion(c, cluster.GetRegionByKey([]byte("z")), region1)
+	checkRegion(c, cluster.GetRegionByKey([]byte("a")), region2)
 	// [m, q) is missing before r3's heartbeat.
-	c.Assert(cluster.GetRegionInfoByKey([]byte("n")), IsNil)
+	c.Assert(cluster.GetRegionByKey([]byte("n")), IsNil)
 	c.Assert(cluster.processRegionHeartbeat(region3), IsNil)
-	checkRegion(c, cluster.GetRegionInfoByKey([]byte("n")), region3)
+	checkRegion(c, cluster.GetRegionByKey([]byte("n")), region3)
 }
 
 func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
