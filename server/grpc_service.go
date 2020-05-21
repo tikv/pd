@@ -235,6 +235,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	log.Info("put store ok", zap.Stringer("store", store))
 	rc.OnStoreVersionChange()
 	CheckPDVersion(s.persistOptions)
+	rc.AddStoreLimit(store.GetId())
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),

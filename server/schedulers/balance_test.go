@@ -812,7 +812,6 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	opt := mockoption.NewScheduleOptions()
-	opt.StoreBalanceRate = 65536
 	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(s.ctx, tc, mockhbstream.NewHeartbeatStream())
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -823,6 +822,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	tc.AddRegionStoreWithLeader(2, 8)
 	tc.AddRegionStoreWithLeader(3, 8)
 	tc.AddRegionStoreWithLeader(4, 16, 8)
+
 	// add 8 leader regions to store 4 and move them to store 3
 	// ensure store score without operator influence : store 4 > store 3
 	// and store score with operator influence : store 3 > store 4

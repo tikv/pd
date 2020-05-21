@@ -534,8 +534,8 @@ type ScheduleConfig struct {
 	// If the number of times a region hits the hot cache is greater than this
 	// threshold, it is considered a hot region.
 	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
-	// StoreBalanceRate is the maximum of balance rate for each store.
-	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate"`
+	// StoreLimit is the limit of scheduling for stores.
+	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
 	//
@@ -608,6 +608,10 @@ type ScheduleConfig struct {
 func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	schedulers := make(SchedulerConfigs, len(c.Schedulers))
 	copy(schedulers, c.Schedulers)
+	storeLimit := make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
+	for k, v := range c.StoreLimit {
+		storeLimit[k] = v
+	}
 	return &ScheduleConfig{
 		MaxSnapshotCount:             c.MaxSnapshotCount,
 		MaxPendingPeerCount:          c.MaxPendingPeerCount,
@@ -625,7 +629,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableCrossTableMerge:        c.EnableCrossTableMerge,
 		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
 		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
-		StoreBalanceRate:             c.StoreBalanceRate,
+		StoreLimit:                   storeLimit,
 		TolerantSizeRatio:            c.TolerantSizeRatio,
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
@@ -661,7 +665,6 @@ const (
 	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 4
-	defaultStoreBalanceRate       = 15
 	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
 	defaultHighSpaceRatio         = 0.7
@@ -671,6 +674,8 @@ const (
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
+	// defaultStoreLimit is the default rate for store limit (per minute).
+	defaultStoreLimit = 15
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -719,7 +724,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("store-limit-mode") {
 		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
-	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
@@ -836,6 +840,12 @@ func IsDeprecated(config string) bool {
 		}
 	}
 	return false
+}
+
+// StoreLimitConfig ...
+type StoreLimitConfig struct {
+	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
+	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
 }
 
 // SchedulerConfigs is a slice of customized scheduler configuration.
