@@ -548,7 +548,7 @@ type engineFilter struct {
 	constraint placement.LabelConstraint
 }
 
-// NewEngineFilter creates a filter that filters stores to filter out default engine stores.
+// NewEngineFilter creates a filter that filters out default engine stores.
 // By default, all stores that are not marked with a special engine will be filtered out.
 // Specify the special engine label if you want to include the special stores.
 func NewEngineFilter(scope string, allowSpeicalEngines ...string) Filter {
@@ -585,7 +585,7 @@ type specialUseFilter struct {
 	constraint placement.LabelConstraint
 }
 
-// NewSpecialUseFilter creates a filter that filters normal stores.
+// NewSpecialUseFilter creates a filter that filters out normal stores.
 // By default, all stores that are not marked with a special use will be filtered out.
 // Specify the special use label if you want to include the special stores.
 func NewSpecialUseFilter(scope string, allowUses ...string) Filter {
