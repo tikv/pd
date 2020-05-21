@@ -1,0 +1,14 @@
+addReviewers: true
+addAssignees: author
+numberOfReviewers: 0
+numberOfAssignees: 1
+useReviewGroups: true
+reviewGroups:
+  scheduling:
+    - nolouch
+    - disksing
+    - lhy1024
+    - shafreeck
+    - HunDunDM
+    - rleungx
+useAssigneeGroups: false
