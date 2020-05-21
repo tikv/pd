@@ -370,10 +370,10 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	c.Assert(err, IsNil)
 
 	testutil.WaitUntil(c, func(c *C) bool {
-		r, leader, err := s.client.GetRegion(context.Background(), []byte("a"))
+		r, err := s.client.GetRegion(context.Background(), []byte("a"))
 		c.Assert(err, IsNil)
-		return c.Check(r, DeepEquals, region) &&
-			c.Check(leader, DeepEquals, peers[0])
+		return c.Check(r.Meta, DeepEquals, region) &&
+			c.Check(r.Leader, DeepEquals, peers[0])
 	})
 	c.Succeed()
 }
@@ -404,14 +404,13 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 	}
 	for i := 0; i < 20; i++ {
 		testutil.WaitUntil(c, func(c *C) bool {
-			r, leader, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
+			r, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			c.Assert(err, IsNil)
 			if i > 0 && i < regionLen {
-				return c.Check(leader, DeepEquals, peers[0]) &&
-					c.Check(r, DeepEquals, regions[i-1])
+				return c.Check(r.Leader, DeepEquals, peers[0]) &&
+					c.Check(r.Meta, DeepEquals, regions[i-1])
 			}
-			return c.Check(leader, IsNil) &&
-				c.Check(r, IsNil)
+			return c.Check(r, IsNil)
 		})
 	}
 	c.Succeed()
@@ -496,10 +495,10 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 	c.Assert(err, IsNil)
 
 	testutil.WaitUntil(c, func(c *C) bool {
-		r, leader, err := s.client.GetRegionByID(context.Background(), regionID)
+		r, err := s.client.GetRegionByID(context.Background(), regionID)
 		c.Assert(err, IsNil)
-		return c.Check(r, DeepEquals, region) &&
-			c.Check(leader, DeepEquals, peers[0])
+		return c.Check(r.Meta, DeepEquals, region) &&
+			c.Check(r.Leader, DeepEquals, peers[0])
 	})
 	c.Succeed()
 }
