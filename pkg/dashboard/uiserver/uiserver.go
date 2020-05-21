@@ -18,6 +18,7 @@ import (
 	"net/http"
 
 	assetfs "github.com/elazarl/go-bindata-assetfs"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
 )
 
 var (
@@ -31,7 +32,7 @@ func Handler() http.Handler {
 			_, _ = io.WriteString(w, "Dashboard UI is not built.\n")
 		})
 	}
-	return http.FileServer(fs)
+	return uiserver.NewGzipHandler(fs)
 }
 
 // AssetFS returns the AssetFS of the dashboard UI
