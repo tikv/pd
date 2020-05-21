@@ -580,7 +580,9 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 // SetRegion sets the RegionInfo with regionID
 func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
 	if origin := r.regions.Get(region.GetID()); origin != nil {
-		r.removeRegionFromTreeAndMap(origin)
+		if !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
+			r.removeRegionFromTreeAndMap(origin)
+		}
 		if r.shouldRemoveFromSubTree(region, origin) {
 			r.removeRegionFromSubTree(origin)
 		}
@@ -605,12 +607,29 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 
 // AddRegion adds RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
 func (r *RegionsInfo) AddRegion(region *RegionInfo) []*RegionInfo {
-	// Add to tree and regions.
-	overlaps := r.tree.update(region)
-	for _, item := range overlaps {
-		r.RemoveRegion(r.GetRegion(item.GetID()))
+	// the regions which are overlapped with the specified region range.
+	var overlaps []*RegionInfo
+	// when the value is true, add the region to the tree. otherwise use the region replace the origin region in the tree.
+	treeNeedAdd := true
+	if origin := r.GetRegion(region.GetID()); origin != nil {
+		if regionOld := r.tree.find(region); regionOld != nil {
+			// Update to tree.
+			if bytes.Equal(regionOld.region.GetStartKey(), region.GetStartKey()) &&
+				bytes.Equal(regionOld.region.GetEndKey(), region.GetEndKey()) &&
+				regionOld.region.GetID() == region.GetID() {
+				regionOld.region = region
+				treeNeedAdd = false
+			}
+		}
 	}
-
+	if treeNeedAdd {
+		// Add to tree.
+		overlaps = r.tree.update(region)
+		for _, item := range overlaps {
+			r.RemoveRegion(r.GetRegion(item.GetID()))
+		}
+	}
+	// Add to regions.
 	r.regions.Put(region)
 
 	// Add to leaders and followers.
