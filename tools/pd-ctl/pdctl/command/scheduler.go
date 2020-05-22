@@ -30,7 +30,6 @@ var (
 	schedulerConfigPrefix    = "pd/api/v1/scheduler-config"
 	evictLeaderSchedulerName = "evict-leader-scheduler"
 	grantLeaderSchedulerName = "grant-leader-scheduler"
-	lastStoreDeleteInfo      = "The last store has been deleted"
 )
 
 // NewSchedulerCommand returns a scheduler command.
@@ -384,14 +383,6 @@ func NewRemoveSchedulerCommand() *cobra.Command {
 	return c
 }
 
-func setCommandUse(cmd *cobra.Command, targetUse string) {
-	cmd.Use = targetUse + " "
-}
-
-func restoreCommandUse(cmd *cobra.Command, origionCommandUse string) {
-	cmd.Use = origionCommandUse
-}
-
 func redirectReomveSchedulerToDeleteConfig(cmd *cobra.Command, schedulerName string, args []string) {
 	args = strings.Split(args[0], "-")
 	args = args[len(args)-1:]
@@ -558,33 +549,15 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 
-// convertReomveConfigToReomveScheduler make cmd can be used at removeCommandFunc
-func convertReomveConfigToReomveScheduler(cmd *cobra.Command) {
-	setCommandUse(cmd, "remove")
-}
-
-func redirectDeleteConfigToRemoveScheduler(cmd *cobra.Command, schedulerName string, args []string) {
-	args = append(args[:0], schedulerName)
-	cmdStore := cmd.Use
-	convertReomveConfigToReomveScheduler(cmd)
-	defer restoreCommandUse(cmd, cmdStore)
-	removeSchedulerCommandFunc(cmd, args)
-}
-
 func deleteStoreFromSchedulerConfig(cmd *cobra.Command, schedulerName string, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.Usage())
 		return
 	}
 	path := path.Join(schedulerConfigPrefix, "/", schedulerName, "delete", args[0])
-	resp, err := doRequest(cmd, path, http.MethodDelete)
+	_, err := doRequest(cmd, path, http.MethodDelete)
 	if err != nil {
 		cmd.Println(err)
-		return
-	}
-	// FIXME: remove the judge when the new command replace old command
-	if strings.Contains(resp, lastStoreDeleteInfo) {
-		redirectDeleteConfigToRemoveScheduler(cmd, schedulerName, args)
 		return
 	}
 	cmd.Println("Success!")
