@@ -560,7 +560,7 @@ func NewEngineFilter(scope string, allowSpeicalEngines ...string) Filter {
 	}
 	return &engineFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: "engine", Op: "in", Values: values},
+		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: values},
 	}
 }
 
@@ -573,11 +573,11 @@ func (f *engineFilter) Type() string {
 }
 
 func (f *engineFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return !f.constraint.MatchStore(store)
+	return f.constraint.MatchStore(store)
 }
 
 func (f *engineFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return !f.constraint.MatchStore(store)
+	return f.constraint.MatchStore(store)
 }
 
 type specialUseFilter struct {
