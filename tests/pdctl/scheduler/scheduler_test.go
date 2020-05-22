@@ -241,6 +241,12 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"})
 	c.Assert(strings.Contains(echo, "Success!"), IsFalse)
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"})
+	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"})
+	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
+	echo = pdctl.GetEcho([]string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"})
+	c.Assert(strings.Contains(echo, "404"), IsTrue)
 
 	// test hot region config
 	var conf map[string]interface{}
