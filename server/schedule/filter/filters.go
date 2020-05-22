@@ -551,10 +551,10 @@ type engineFilter struct {
 // NewEngineFilter creates a filter that filters out default engine stores.
 // By default, all stores that are not marked with a special engine will be filtered out.
 // Specify the special engine label if you want to include the special stores.
-func NewEngineFilter(scope string, allowSpeicalEngines ...string) Filter {
+func NewEngineFilter(scope string, allowEngines ...string) Filter {
 	var values []string
-	for _, v := range allSpeicalEngineLabels {
-		if slice.NoneOf(allowSpeicalEngines, func(i int) bool { return allowSpeicalEngines[i] == v }) {
+	for _, v := range allSpeicalEngines {
+		if slice.NoneOf(allowEngines, func(i int) bool { return allowEngines[i] == v }) {
 			values = append(values, v)
 		}
 	}
@@ -635,4 +635,4 @@ const (
 )
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
-var allSpeicalEngineLabels = []string{EngineTiFlash}
+var allSpeicalEngines = []string{EngineTiFlash}
