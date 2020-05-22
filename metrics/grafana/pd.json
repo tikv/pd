@@ -918,7 +918,7 @@
       }
     },
     {
-      "collapsed": false,
+      "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -1389,7 +1389,7 @@
       "valueName": "avg"
     },
     {
-      "collapsed": false,
+      "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -3386,7 +3386,7 @@
       "type": "row"
     },
     {
-      "collapsed": false,
+      "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -4028,7 +4028,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "HotCache Write entry numbers",
+      "title": "Hot cache Write entry numbers",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -4813,7 +4813,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "HotCache Read entry numbers",
+          "title": "Hot cache Read entry numbers",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -7195,7 +7195,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "PD Server TSO  handle time + Client Revc time",
+          "title": "PD server TSO handle time + Client revc time",
           "tooltip": {
             "msResolution": false,
             "shared": true,
