@@ -543,12 +543,51 @@ func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
+type engineFilter struct {
+	scope      string
+	constraint placement.LabelConstraint
+}
+
+// NewEngineFilter creates a filter that filters out default engine stores.
+// By default, all stores that are not marked with a special engine will be filtered out.
+// Specify the special engine label if you want to include the special stores.
+func NewEngineFilter(scope string, allowEngines ...string) Filter {
+	var values []string
+	for _, v := range allSpeicalEngines {
+		if slice.NoneOf(allowEngines, func(i int) bool { return allowEngines[i] == v }) {
+			values = append(values, v)
+		}
+	}
+	return &engineFilter{
+		scope:      scope,
+		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: values},
+	}
+}
+
+func (f *engineFilter) Scope() string {
+	return f.scope
+}
+
+func (f *engineFilter) Type() string {
+	return "engine-filter"
+}
+
+func (f *engineFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return f.constraint.MatchStore(store)
+}
+
+func (f *engineFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	return f.constraint.MatchStore(store)
+}
+
 type specialUseFilter struct {
 	scope      string
 	constraint placement.LabelConstraint
 }
 
-// NewSpecialUseFilter creates a filter that filters stores for special use.
+// NewSpecialUseFilter creates a filter that filters out normal stores.
+// By default, all stores that are not marked with a special use will be filtered out.
+// Specify the special use label if you want to include the special stores.
 func NewSpecialUseFilter(scope string, allowUses ...string) Filter {
 	var values []string
 	for _, v := range allSpecialUses {
@@ -558,7 +597,7 @@ func NewSpecialUseFilter(scope string, allowUses ...string) Filter {
 	}
 	return &specialUseFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: specialUseKey, Op: "in", Values: values},
+		constraint: placement.LabelConstraint{Key: SpecialUseKey, Op: "in", Values: values},
 	}
 }
 
@@ -582,11 +621,18 @@ func (f *specialUseFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 const (
-	specialUseKey = "specialUse"
+	// SpecialUseKey is the label used to indicate special use storage.
+	SpecialUseKey = "specialUse"
 	// SpecialUseHotRegion is the hot region value of special use label
 	SpecialUseHotRegion = "hotRegion"
 	// SpecialUseReserved is the reserved value of special use label
 	SpecialUseReserved = "reserved"
+
+	// EngineKey is the label key used to indicate engine.
+	EngineKey = "engine"
+	// EngineTiFlash is the tiflash value of the engine label.
+	EngineTiFlash = "tiflash"
 )
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
+var allSpeicalEngines = []string{EngineTiFlash}
