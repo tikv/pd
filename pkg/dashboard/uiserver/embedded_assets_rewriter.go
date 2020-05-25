@@ -19,6 +19,7 @@ func (f modifiedFileInfo) Sys() interface{} {
 	return nil
 }
 
+// InitAssetFS init the static resources with given public path prefix.
 func InitAssetFS(prefix string) {
 	rewrite := func(assetPath string) {
 		a, err := _bindata[assetPath]()
