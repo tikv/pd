@@ -61,7 +61,6 @@ func InitCommand() *cobra.Command {
 		command.NewHealthCommand(),
 		command.NewLogCommand(),
 		command.NewPluginCommand(),
-		command.NewComponentCommand(),
 		command.NewCompletionCommand(),
 	)
 	return rootCmd
