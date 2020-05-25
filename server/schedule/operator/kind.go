@@ -31,7 +31,6 @@ const (
 	OpHotRegion                    // Initiated by hot region scheduler.
 	OpAdjacent                     // Initiated by adjacent region scheduler.
 	OpReplica                      // Initiated by replica checkers.
-	OpBalance                      // Initiated by balancers.
 	OpMerge                        // Initiated by merge checkers or merge schedulers.
 	OpRange                        // Initiated by range scheduler.
 	opMax
@@ -45,7 +44,6 @@ var flagToName = map[OpKind]string{
 	OpHotRegion: "hot-region",
 	OpAdjacent:  "adjacent",
 	OpReplica:   "replica",
-	OpBalance:   "balance",
 	OpMerge:     "merge",
 	OpRange:     "range",
 }
@@ -58,7 +56,6 @@ var nameToFlag = map[string]OpKind{
 	"hot-region": OpHotRegion,
 	"adjacent":   OpAdjacent,
 	"replica":    OpReplica,
-	"balance":    OpBalance,
 	"merge":      OpMerge,
 	"range":      OpRange,
 }
