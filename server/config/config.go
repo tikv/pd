@@ -466,10 +466,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
-	c.Dashboard.PublicPathPrefix = strings.TrimRight(c.Dashboard.PublicPathPrefix, "/")
 	if c.Dashboard.PublicPathPrefix == "" {
 		c.Dashboard.PublicPathPrefix = defaultPublicPathPrefix
 	}
+	c.Dashboard.PublicPathPrefix = strings.TrimRight(c.Dashboard.PublicPathPrefix, "/")
 
 	return nil
 }
