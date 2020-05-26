@@ -43,6 +43,24 @@ func (f *RegionFit) IsSatisfied() bool {
 	return len(f.OrphanPeers) == 0
 }
 
+// IsSatisfiedLoose returns if the rules are properly satisfied.
+// It means all Rules are fulfilled and there is no orphan peers.
+func (f *RegionFit) IsSatisfiedLoose() bool {
+	if len(f.RuleFits) == 0 {
+		return false
+	}
+	for _, r := range f.RuleFits {
+		// excluded learner.
+		if r.Rule.Role == Learner {
+			continue
+		}
+		if !r.IsSatisfied() {
+			return false
+		}
+	}
+	return true
+}
+
 // GetRuleFit returns the RuleFit that contains the peer.
 func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 	for _, rf := range f.RuleFits {

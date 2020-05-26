@@ -50,7 +50,8 @@ func HealthAllowPending(cluster Cluster) func(*core.RegionInfo) bool {
 // rules is disabled, it should have enough replicas and no any learner peer.
 func IsRegionReplicated(cluster Cluster, region *core.RegionInfo) bool {
 	if cluster.IsPlacementRulesEnabled() {
-		return cluster.FitRegion(region).IsSatisfied()
+		// FIXME: remove the hack way, currently do not consider the learner.
+		return cluster.FitRegion(region).IsSatisfiedLoose()
 	}
 	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetMaxReplicas()
 }
