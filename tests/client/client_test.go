@@ -372,6 +372,9 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		r, err := s.client.GetRegion(context.Background(), []byte("a"))
 		c.Assert(err, IsNil)
+		if r == nil {
+			return false
+		}
 		return c.Check(r.Meta, DeepEquals, region) &&
 			c.Check(r.Leader, DeepEquals, peers[0])
 	})
@@ -402,6 +405,7 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 		err := s.regionHeartbeat.Send(req)
 		c.Assert(err, IsNil)
 	}
+	time.Sleep(500 * time.Millisecond)
 	for i := 0; i < 20; i++ {
 		testutil.WaitUntil(c, func(c *C) bool {
 			r, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
@@ -497,6 +501,9 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 	testutil.WaitUntil(c, func(c *C) bool {
 		r, err := s.client.GetRegionByID(context.Background(), regionID)
 		c.Assert(err, IsNil)
+		if r == nil {
+			return false
+		}
 		return c.Check(r.Meta, DeepEquals, region) &&
 			c.Check(r.Leader, DeepEquals, peers[0])
 	})

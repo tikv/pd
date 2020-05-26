@@ -51,24 +51,6 @@ var (
 			Help:      "Bucketed histogram of the batch size of handled requests.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
 		})
-
-	configCmdDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "config_client",
-			Subsystem: "cmd",
-			Name:      "handle_cmds_duration_seconds",
-			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
-			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, []string{"type"})
-
-	configCmdFailedDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "config_client",
-			Subsystem: "cmd",
-			Name:      "handle_failed_cmds_duration_seconds",
-			Help:      "Bucketed histogram of processing time (s) of failed handled cmds.",
-			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		}, []string{"type"})
 )
 
 var (
@@ -97,19 +79,6 @@ var (
 	cmdFailedDurationUpdateGCSafePoint        = cmdFailedDuration.WithLabelValues("update_gc_safe_point")
 	cmdFailedDurationUpdateServiceGCSafePoint = cmdFailedDuration.WithLabelValues("update_service_gc_safe_point")
 	requestDurationTSO                        = requestDuration.WithLabelValues("tso")
-
-	// config
-	configCmdDurationCreate = configCmdDuration.WithLabelValues("create")
-	configCmdDurationGetAll = configCmdDuration.WithLabelValues("get_all")
-	configCmdDurationGet    = configCmdDuration.WithLabelValues("get")
-	configCmdDurationUpdate = configCmdDuration.WithLabelValues("update")
-	configCmdDurationDelete = configCmdDuration.WithLabelValues("delete")
-
-	configCmdFailDurationCreate = configCmdFailedDuration.WithLabelValues("create")
-	configCmdFailDurationGetAll = configCmdFailedDuration.WithLabelValues("get_all")
-	configCmdFailDurationGet    = configCmdFailedDuration.WithLabelValues("get")
-	configCmdFailDurationUpdate = configCmdFailedDuration.WithLabelValues("update")
-	configCmdFailDurationDelete = configCmdFailedDuration.WithLabelValues("delete")
 )
 
 func init() {
@@ -117,8 +86,4 @@ func init() {
 	prometheus.MustRegister(cmdFailedDuration)
 	prometheus.MustRegister(requestDuration)
 	prometheus.MustRegister(tsoBatchSize)
-
-	// config
-	prometheus.MustRegister(configCmdDuration)
-	prometheus.MustRegister(configCmdFailedDuration)
 }

@@ -178,6 +178,30 @@ func (*testRegionKey) TestSetRegion(c *C) {
 	checkRegions(c, regions)
 	c.Assert(regions.tree.length(), Equals, 97)
 	c.Assert(len(regions.GetRegions()), Equals, 97)
+
+	// Test remove overlaps.
+	region = region.Clone(WithStartKey([]byte(fmt.Sprintf("%20d", 175))), WithNewRegionID(201))
+	c.Assert(regions.GetRegion(21), NotNil)
+	c.Assert(regions.GetRegion(18), NotNil)
+	regions.SetRegion(region)
+	checkRegions(c, regions)
+	c.Assert(regions.tree.length(), Equals, 96)
+	c.Assert(len(regions.GetRegions()), Equals, 96)
+	c.Assert(regions.GetRegion(201), NotNil)
+	c.Assert(regions.GetRegion(21), IsNil)
+	c.Assert(regions.GetRegion(18), IsNil)
+
+	// Test update keys and size of region.
+	region = region.Clone()
+	region.approximateKeys = 20
+	region.approximateSize = 30
+	regions.SetRegion(region)
+	checkRegions(c, regions)
+	c.Assert(regions.tree.length(), Equals, 96)
+	c.Assert(len(regions.GetRegions()), Equals, 96)
+	c.Assert(regions.GetRegion(201), NotNil)
+	c.Assert(regions.regions.totalKeys, Equals, int64(20))
+	c.Assert(regions.regions.totalSize, Equals, int64(30))
 }
 
 func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
