@@ -296,8 +296,6 @@ github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 h1:q2e307iGHPdTGp
 github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5/go.mod h1:jvVRKCrJTQWu0XVbaOlby/2lO20uSCHEMzzplHXte1o=
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d h1:U+PMnTlV2tu7RuMK5etusZG3Cf+rpow5hqQByeCzJ2g=
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d/go.mod h1:lXfE4PvvTW5xOjO6Mba8zDPyw8M93B6AQ7frTGnMlA8=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200526104639-b9db65c0422c h1:fcgBHpxfazScQ8OE2YUVm1bmCeTaepNkDJ2a5sC9JB8=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200526104639-b9db65c0422c/go.mod h1:c+hdTnQglVGcBvQwLZvCUYzvi1+1SYHfnWH/XlKI/BI=
 github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200526165651-52e570bf6f0a h1:FE7NgHM9ubPb7elnJUot9XBRLWDqhyXWIby5r1q1JXA=
 github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200526165651-52e570bf6f0a/go.mod h1:c+hdTnQglVGcBvQwLZvCUYzvi1+1SYHfnWH/XlKI/BI=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8 h1:USx2/E1bX46VG32FIw034Au6seQ2fY9NEILmNh/UlQg=
