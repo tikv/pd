@@ -19,11 +19,20 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+<<<<<<< HEAD
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
+=======
+	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/filter"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
+>>>>>>> added changes:
 )
 
 // Builder is used to create operators. Usage:
@@ -469,6 +478,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	return kind, nil
 }
 
+<<<<<<< HEAD
 func (b *Builder) setTargetLeaderIfNotExist() {
 	if b.targetLeaderStoreID != 0 {
 		return
@@ -519,6 +529,11 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 	b.initStepPlanPreferFuncs()
 
 	for len(b.toAdd) > 0 || len(b.toRemove) > 0 || len(b.toPromote) > 0 || len(b.toDemote) > 0 {
+=======
+func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
+	var dstStoreID uint64
+	for b.toAdd.Len() > 0 || b.toRemove.Len() > 0 || b.toPromote.Len() > 0 {
+>>>>>>> added changes:
 		plan := b.peerPlan()
 		if plan.Empty() {
 			return kind, errors.New("fail to build operator: plan is empty, maybe no valid leader")
@@ -528,14 +543,27 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			kind |= OpLeader
 		}
 		if plan.add != nil {
+			if kind&OpHotRegion == OpHotRegion {
+				dstStoreID = plan.add.GetStoreId()
+			}
 			b.execAddPeer(plan.add)
 			kind |= OpRegion
 		}
 		if plan.promote != nil {
 			b.execPromoteLearner(plan.promote)
 		}
+<<<<<<< HEAD
 		if plan.leaderBeforeRemove != 0 && plan.leaderBeforeRemove != b.currentLeaderStoreID {
 			b.execTransferLeader(plan.leaderBeforeRemove)
+=======
+		if plan.leaderRemove != 0 && plan.leaderRemove != b.currentLeader {
+			if kind&OpHotRegion == OpHotRegion && dstStoreID != 0 {
+				log.Info("directly transfer leader to target store", zap.Uint64("regionID", b.regionID), zap.Uint64("oldLeaderStore", plan.leaderRemove), zap.Uint64("newLeaderStore", dstStoreID))
+				b.execTransferLeader(dstStoreID)
+			} else {
+				b.execTransferLeader(plan.leaderRemove)
+			}
+>>>>>>> added changes:
 			kind |= OpLeader
 		}
 		if plan.demote != nil {

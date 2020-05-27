@@ -28,7 +28,7 @@ import (
 const (
 	// OperatorExpireTime is the duration that when an operator is not started
 	// after it, the operator will be considered expired.
-	OperatorExpireTime = 3 * time.Second
+	OperatorExpireTime = 15 * time.Second
 	// LeaderOperatorWaitTime is the duration that when a leader operator runs
 	// longer than it, the operator will be considered timeout.
 	LeaderOperatorWaitTime = 10 * time.Second

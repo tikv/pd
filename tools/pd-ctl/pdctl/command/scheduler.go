@@ -125,6 +125,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewBalanceLeaderSchedulerCommand())
 	c.AddCommand(NewBalanceRegionSchedulerCommand())
 	c.AddCommand(NewBalanceHotRegionSchedulerCommand())
+	c.AddCommand(NewBalanceMultiDimensionSchedulerCommand())
 	c.AddCommand(NewRandomMergeSchedulerCommand())
 	c.AddCommand(NewBalanceAdjacentRegionSchedulerCommand())
 	c.AddCommand(NewLabelSchedulerCommand())
@@ -275,6 +276,16 @@ func NewBalanceHotRegionSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "balance-hot-region-scheduler",
 		Short: "add a scheduler to balance hot regions between stores",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewBalanceMultiDimensionSchedulerCommand returns a command to add a balance-multiple-dimension-scheduler.
+func NewBalanceMultiDimensionSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-multiple-dimension-scheduler",
+		Short: "add a scheduler to balance multiple dimension imbalance",
 		Run:   addSchedulerCommandFunc,
 	}
 	return c

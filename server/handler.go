@@ -261,6 +261,11 @@ func (h *Handler) AddBalanceHotRegionScheduler() error {
 	return h.AddScheduler(schedulers.HotRegionType)
 }
 
+// AddBalanceMultipleDimensionScheduler adds a balance-multiple-dimension-scheduler.
+func (h *Handler) AddBalanceMultipleDimensionScheduler() error {
+	return h.AddScheduler(schedulers.MultipleDimensionType)
+}
+
 // AddLabelScheduler adds a label-scheduler.
 func (h *Handler) AddLabelScheduler() error {
 	return h.AddScheduler(schedulers.LabelType)

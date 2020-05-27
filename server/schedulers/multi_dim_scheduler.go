@@ -1,4 +1,4 @@
-// Copyright 2017 TiKV Project Authors.
+// Copyright 2017 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,79 +14,66 @@
 package schedulers
 
 import (
+	"bufio"
 	"fmt"
 	"math"
 	"math/rand"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/filter"
+	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/filter"
-	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
-	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(HotRegionType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(MultipleDimensionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(MultipleDimensionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := initHotRegionScheduleConfig()
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
 		conf.storage = storage
-		return newHotScheduler(opController, conf), nil
+		return newMultiDimensionScheduler(opController, conf), nil
 	})
-
-	// FIXME: remove this two schedule after the balance test move in schedulers package
-	{
-		schedule.RegisterScheduler(HotWriteRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-			return newHotWriteScheduler(opController, initHotRegionScheduleConfig()), nil
-		})
-		schedule.RegisterScheduler(HotReadRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-			return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
-		})
-
-	}
 }
 
 const (
-	// HotRegionName is balance hot region scheduler name.
-	HotRegionName = "balance-hot-region-scheduler"
-	// HotRegionType is balance hot region scheduler type.
-	HotRegionType = "hot-region"
-	// HotReadRegionType is hot read region scheduler type.
-	HotReadRegionType = "hot-read-region"
-	// HotWriteRegionType is hot write region scheduler type.
-	HotWriteRegionType = "hot-write-region"
+	// MultipleDimensionName is balance hot region scheduler name.
+	MultipleDimensionName = "balance-multiple-dimension-scheduler"
+	// MultipleDimensionType is balance hot region scheduler type.
+	MultipleDimensionType = "multiple-dimension-scheduler"
 
-	minHotScheduleInterval = time.Second
-	maxHotScheduleInterval = 20 * time.Second
+	minHotScheduleIntervalHR = time.Second
+	maxHotScheduleIntervalHR = 20 * time.Second
 
-	divisor                   = float64(1000) * 2
-	hotWriteRegionMinFlowRate = 16 * 1024
-	hotReadRegionMinFlowRate  = 128 * 1024
-	hotWriteRegionMinKeyRate  = 256
-	hotReadRegionMinKeyRate   = 512
+	divisorHR                   = float64(1000) * 2
+	hotWriteRegionMinFlowRateHR = 16 * 1024
+	hotReadRegionMinFlowRateHR  = 128 * 1024
+	hotWriteRegionMinKeyRateHR  = 256
+	hotReadRegionMinKeyRateHR   = 512
 )
 
-// schedulePeerPr the probability of schedule the hot peer.
-var schedulePeerPr = 0.66
+// schedulePeerPrHR the probability of schedule the hot peer.
+var schedulePeerPrHR = 0.66
 
-type hotScheduler struct {
+type multiDimensionScheduler struct {
 	name string
 	*BaseScheduler
 	sync.RWMutex
@@ -96,25 +83,22 @@ type hotScheduler struct {
 	r           *rand.Rand
 
 	// states across multiple `Schedule` calls
-	pendings [resourceTypeLen]map[*pendingInfluence]struct{}
-	// regionPendings stores regionID -> [opType]Operator
-	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
-	// be selected if its owner region is tracked in this attribute.
+	pendings       [resourceTypeLen]map[*pendingInfluence]struct{}
 	regionPendings map[uint64][2]*operator.Operator
 
 	// temporary states but exported to API or metrics
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
-	// pendingSums indicates the [resourceType] storeID -> pending Influence
-	// This stores the pending Influence for each store by resource type.
 	pendingSums [resourceTypeLen]map[uint64]Influence
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
+
+	isScheduled bool
 }
 
-func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
+func newMultiDimensionScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *multiDimensionScheduler {
 	base := NewBaseScheduler(opController)
-	ret := &hotScheduler{
-		name:           HotRegionName,
+	ret := &multiDimensionScheduler{
+		name:           MultipleDimensionName,
 		BaseScheduler:  base,
 		leaderLimit:    1,
 		peerLimit:      1,
@@ -122,6 +106,7 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 		regionPendings: make(map[uint64][2]*operator.Operator),
 		conf:           conf,
+		isScheduled:    false,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.pendings[ty] = map[*pendingInfluence]struct{}{}
@@ -130,62 +115,63 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 	return ret
 }
 
-func newHotReadScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
-	ret := newHotScheduler(opController, conf)
-	ret.name = ""
-	ret.types = []rwType{read}
-	return ret
-}
-
-func newHotWriteScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
-	ret := newHotScheduler(opController, conf)
-	ret.name = ""
-	ret.types = []rwType{write}
-	return ret
-}
-
-func (h *hotScheduler) GetName() string {
+func (h *multiDimensionScheduler) GetName() string {
 	return h.name
 }
 
-func (h *hotScheduler) GetType() string {
-	return HotRegionType
+func (h *multiDimensionScheduler) GetType() string {
+	return MultipleDimensionType
 }
 
-func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *multiDimensionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.conf.ServeHTTP(w, r)
 }
 
-func (h *hotScheduler) GetMinInterval() time.Duration {
-	return minHotScheduleInterval
+func (h *multiDimensionScheduler) GetMinInterval() time.Duration {
+	return minHotScheduleIntervalHR
 }
-func (h *hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
-	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
-}
-
-func (h *hotScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return h.allowBalanceLeader(cluster) || h.allowBalanceRegion(cluster)
+func (h *multiDimensionScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	return intervalGrow(h.GetMinInterval(), maxHotScheduleIntervalHR, exponentialGrowth)
 }
 
-func (h *hotScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
-	return h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetOpts().GetHotRegionScheduleLimit() &&
-		h.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+func (h *multiDimensionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+	return !h.isScheduled
 }
 
-func (h *hotScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
-	return h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetOpts().GetHotRegionScheduleLimit()
+func (h *multiDimensionScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
+	return h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetHotRegionScheduleLimit() &&
+		h.OpController.OperatorCount(operator.OpLeader) < cluster.GetLeaderScheduleLimit()
 }
 
-func (h *hotScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (h *multiDimensionScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
+	return h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetHotRegionScheduleLimit()
+}
+
+func (h *multiDimensionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
-	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
+	if !h.isScheduled {
+		return h.dispatch(h.types[1], cluster)
+	} else {
+		return nil
+	}
 }
 
-func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
+func (h *multiDimensionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 
+	log.Info("execute multiDimensionScheduler")
+
 	h.prepareForBalance(cluster)
+
+	bs := newBalanceSolverHR(h, cluster, read, transferLeader)
+	ops := bs.genScheduleRequest()
+	h.isScheduled = true
+	if len(ops) > 0 {
+		return ops
+	} else {
+		return nil
+	}
 
 	// switch typ {
 	// case read:
@@ -193,23 +179,21 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 	// case write:
 	// 	return h.balanceHotWriteRegions(cluster)
 	// }
-	return nil
+	// return nil
 }
 
-// prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
-// each store
-func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
+func (h *multiDimensionScheduler) prepareForBalance(cluster opt.Cluster) {
 	h.summaryPendingInfluence()
 
 	storesStat := cluster.GetStoresStats()
 
-	minHotDegree := cluster.GetOpts().GetHotRegionCacheHitsThreshold()
+	minHotDegree := cluster.GetHotRegionCacheHitsThreshold()
 	{ // update read statistics
 		regionRead := cluster.RegionReadStats()
 		storeByte := storesStat.GetStoresBytesReadStat()
 		storeKey := storesStat.GetStoresKeysReadStat()
-		hotRegionThreshold := getHotRegionThreshold(storesStat, read)
-		h.stLoadInfos[readLeader] = summaryStoresLoad(
+		hotRegionThreshold := getHotRegionThresholdHR(storesStat, read)
+		h.stLoadInfos[readLeader] = summaryStoresLoadHR(
 			storeByte,
 			storeKey,
 			h.pendingSums[readLeader],
@@ -223,8 +207,8 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionWrite := cluster.RegionWriteStats()
 		storeByte := storesStat.GetStoresBytesWriteStat()
 		storeKey := storesStat.GetStoresKeysWriteStat()
-		hotRegionThreshold := getHotRegionThreshold(storesStat, write)
-		h.stLoadInfos[writeLeader] = summaryStoresLoad(
+		hotRegionThreshold := getHotRegionThresholdHR(storesStat, write)
+		h.stLoadInfos[writeLeader] = summaryStoresLoadHR(
 			storeByte,
 			storeKey,
 			h.pendingSums[writeLeader],
@@ -233,7 +217,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 			hotRegionThreshold,
 			write, core.LeaderKind, mixed)
 
-		h.stLoadInfos[writePeer] = summaryStoresLoad(
+		h.stLoadInfos[writePeer] = summaryStoresLoadHR(
 			storeByte,
 			storeKey,
 			h.pendingSums[writePeer],
@@ -244,28 +228,27 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	}
 }
 
-// getHotRegionThreshold return the min rate for the rw(read/write) rate and key rate
-func getHotRegionThreshold(stats *statistics.StoresStats, typ rwType) [2]uint64 {
+func getHotRegionThresholdHR(stats *statistics.StoresStats, typ rwType) [2]uint64 {
 	var hotRegionThreshold [2]uint64
 	switch typ {
 	case write:
-		hotRegionThreshold[0] = uint64(stats.TotalBytesWriteRate() / divisor)
-		if hotRegionThreshold[0] < hotWriteRegionMinFlowRate {
-			hotRegionThreshold[0] = hotWriteRegionMinFlowRate
+		hotRegionThreshold[0] = uint64(stats.TotalBytesWriteRate() / divisorHR)
+		if hotRegionThreshold[0] < hotWriteRegionMinFlowRateHR {
+			hotRegionThreshold[0] = hotWriteRegionMinFlowRateHR
 		}
-		hotRegionThreshold[1] = uint64(stats.TotalKeysWriteRate() / divisor)
-		if hotRegionThreshold[1] < hotWriteRegionMinKeyRate {
-			hotRegionThreshold[1] = hotWriteRegionMinKeyRate
+		hotRegionThreshold[1] = uint64(stats.TotalKeysWriteRate() / divisorHR)
+		if hotRegionThreshold[1] < hotWriteRegionMinKeyRateHR {
+			hotRegionThreshold[1] = hotWriteRegionMinKeyRateHR
 		}
 		return hotRegionThreshold
 	case read:
-		hotRegionThreshold[0] = uint64(stats.TotalBytesReadRate() / divisor)
-		if hotRegionThreshold[0] < hotReadRegionMinFlowRate {
-			hotRegionThreshold[0] = hotReadRegionMinFlowRate
+		hotRegionThreshold[0] = uint64(stats.TotalBytesReadRate() / divisorHR)
+		if hotRegionThreshold[0] < hotReadRegionMinFlowRateHR {
+			hotRegionThreshold[0] = hotReadRegionMinFlowRateHR
 		}
-		hotRegionThreshold[1] = uint64(stats.TotalKeysWriteRate() / divisor)
-		if hotRegionThreshold[1] < hotReadRegionMinKeyRate {
-			hotRegionThreshold[1] = hotReadRegionMinKeyRate
+		hotRegionThreshold[1] = uint64(stats.TotalKeysWriteRate() / divisorHR)
+		if hotRegionThreshold[1] < hotReadRegionMinKeyRateHR {
+			hotRegionThreshold[1] = hotReadRegionMinKeyRateHR
 		}
 		return hotRegionThreshold
 	default:
@@ -273,18 +256,14 @@ func getHotRegionThreshold(stats *statistics.StoresStats, typ rwType) [2]uint64 
 	}
 }
 
-// summaryPendingInfluence calculate the summary of pending Influence for each store
-// and clean the region from regionInfluence if they have ended operator.
-func (h *hotScheduler) summaryPendingInfluence() {
+func (h *multiDimensionScheduler) summaryPendingInfluence() {
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		h.pendingSums[ty] = summaryPendingInfluence(h.pendings[ty], h.calcPendingWeight)
 	}
 	h.gcRegionPendings()
 }
 
-// gcRegionPendings check the region whether it need to be deleted from regionPendings depended on whether it have
-// ended operator
-func (h *hotScheduler) gcRegionPendings() {
+func (h *multiDimensionScheduler) gcRegionPendings() {
 	for regionID, pendings := range h.regionPendings {
 		empty := true
 		for ty, op := range pendings {
@@ -306,12 +285,11 @@ func (h *hotScheduler) gcRegionPendings() {
 	}
 }
 
-// summaryStoresLoad Load information of all available stores.
-// it will filtered the hot peer and calculate the current and future stat(byte/key rate,count) for each store
-func summaryStoresLoad(
+// Load information of all available stores.
+func summaryStoresLoadHR(
 	storeByteRate map[uint64]float64,
 	storeKeyRate map[uint64]float64,
-	storePendings map[uint64]Influence,
+	pendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
 	minHotDegree int,
 	hotRegionThreshold [2]uint64,
@@ -319,7 +297,6 @@ func summaryStoresLoad(
 	kind core.ResourceKind,
 	hotPeerFilterTy hotPeerFilterType,
 ) map[uint64]*storeLoadDetail {
-	// loadDetail stores the storeID -> hotPeers stat and its current and future stat(key/byte rate,count)
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
 	allByteSum := 0.0
 	allKeySum := 0.0
@@ -334,7 +311,7 @@ func summaryStoresLoad(
 		{
 			byteSum := 0.0
 			keySum := 0.0
-			for _, peer := range filterHotPeers(kind, minHotDegree, hotRegionThreshold, storeHotPeers[id], hotPeerFilterTy) {
+			for _, peer := range filterHotPeersHR(kind, minHotDegree, hotRegionThreshold, storeHotPeers[id], hotPeerFilterTy) {
 				byteSum += peer.GetByteRate()
 				keySum += peer.GetKeyRate()
 				hotPeers = append(hotPeers, peer.Clone())
@@ -364,7 +341,7 @@ func summaryStoresLoad(
 			ByteRate: byteRate,
 			KeyRate:  keyRate,
 			Count:    float64(len(hotPeers)),
-		}).ToLoadPred(storePendings[id])
+		}).ToLoadPred(pendings[id])
 
 		// Construct store load info.
 		loadDetail[id] = &storeLoadDetail{
@@ -374,7 +351,6 @@ func summaryStoresLoad(
 	}
 	storeLen := float64(len(storeByteRate))
 
-	// store expectation byte/key rate and count for each store-load detail.
 	for id, detail := range loadDetail {
 		byteExp := allByteSum / storeLen
 		keyExp := allKeySum / storeLen
@@ -399,8 +375,7 @@ func summaryStoresLoad(
 	return loadDetail
 }
 
-// filterHotPeers filter the peer whose hot degree is less than minHotDegress
-func filterHotPeers(
+func filterHotPeersHR(
 	kind core.ResourceKind,
 	minHotDegree int,
 	hotRegionThreshold [2]uint64,
@@ -411,8 +386,7 @@ func filterHotPeers(
 	for _, peer := range peers {
 		if (kind == core.LeaderKind && !peer.IsLeader()) ||
 			peer.HotDegree < minHotDegree ||
-			// As hotPeerFilterTy here is always mix currently, isHotPeerFiltered will directly return false here.
-			isHotPeerFiltered(peer, hotRegionThreshold, hotPeerFilterTy) {
+			isHotPeerFilteredHR(peer, hotRegionThreshold, hotPeerFilterTy) {
 			continue
 		}
 		ret = append(ret, peer)
@@ -420,9 +394,7 @@ func filterHotPeers(
 	return ret
 }
 
-// isHotPeerFiltered compare whether the target peer would be filtered depended on its stat and hot rate threshold
-// In case mixed, we directly return false
-func isHotPeerFiltered(peer *statistics.HotPeerStat, hotRegionThreshold [2]uint64, hotPeerFilterTy hotPeerFilterType) bool {
+func isHotPeerFilteredHR(peer *statistics.HotPeerStat, hotRegionThreshold [2]uint64, hotPeerFilterTy hotPeerFilterType) bool {
 	var isFiltered bool
 	switch hotPeerFilterTy {
 	case high:
@@ -438,7 +410,7 @@ func isHotPeerFiltered(peer *statistics.HotPeerStat, hotRegionThreshold [2]uint6
 	return isFiltered
 }
 
-func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, rwTy rwType, opTy opType) bool {
+func (h *multiDimensionScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl Influence, rwTy rwType, opTy opType) bool {
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
 	if ok {
@@ -461,15 +433,15 @@ func (h *hotScheduler) addPendingInfluence(op *operator.Operator, srcStore, dstS
 	return true
 }
 
-func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
+func (h *multiDimensionScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
 	// prefer to balance by leader
-	leaderSolver := newBalanceSolver(h, cluster, read, transferLeader)
+	leaderSolver := newBalanceSolverHR(h, cluster, read, transferLeader)
 	ops := leaderSolver.solve()
 	if len(ops) > 0 {
 		return ops
 	}
 
-	peerSolver := newBalanceSolver(h, cluster, read, movePeer)
+	peerSolver := newBalanceSolverHR(h, cluster, read, movePeer)
 	ops = peerSolver.solve()
 	if len(ops) > 0 {
 		return ops
@@ -479,12 +451,12 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 	return nil
 }
 
-func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
+func (h *multiDimensionScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
 	// prefer to balance by peer
 	s := h.r.Intn(100)
 	switch {
-	case s < int(schedulePeerPr*100):
-		peerSolver := newBalanceSolver(h, cluster, write, movePeer)
+	case s < int(schedulePeerPrHR*100):
+		peerSolver := newBalanceSolverHR(h, cluster, write, movePeer)
 		ops := peerSolver.solve()
 		if len(ops) > 0 {
 			return ops
@@ -492,7 +464,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 	default:
 	}
 
-	leaderSolver := newBalanceSolver(h, cluster, write, transferLeader)
+	leaderSolver := newBalanceSolverHR(h, cluster, write, transferLeader)
 	ops := leaderSolver.solve()
 	if len(ops) > 0 {
 		return ops
@@ -502,33 +474,33 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 	return nil
 }
 
-type balanceSolver struct {
-	sche         *hotScheduler
+type balanceSolverHR struct {
+	sche         *multiDimensionScheduler
 	cluster      opt.Cluster
 	stLoadDetail map[uint64]*storeLoadDetail
 	rwTy         rwType
 	opTy         opType
 
-	cur *solution
+	cur *solutionHR
 
 	maxSrc   *storeLoad
 	minDst   *storeLoad
 	rankStep *storeLoad
 }
 
-type solution struct {
+type solutionHR struct {
 	srcStoreID  uint64
 	srcPeerStat *statistics.HotPeerStat
 	region      *core.RegionInfo
 	dstStoreID  uint64
 
 	// progressiveRank measures the contribution for balance.
-	// The smaller the rank, the better this solution is.
-	// If rank < 0, this solution makes thing better.
+	// The smaller the rank, the better this solutionHR is.
+	// If rank < 0, this solutionHR makes thing better.
 	progressiveRank int64
 }
 
-func (bs *balanceSolver) init() {
+func (bs *balanceSolverHR) init() {
 	switch toResourceType(bs.rwTy, bs.opTy) {
 	case writePeer:
 		bs.stLoadDetail = bs.sche.stLoadInfos[writePeer]
@@ -537,7 +509,9 @@ func (bs *balanceSolver) init() {
 	case readLeader:
 		bs.stLoadDetail = bs.sche.stLoadInfos[readLeader]
 	}
-	// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
+	for _, id := range getUnhealthyStoresHR(bs.cluster) {
+		delete(bs.stLoadDetail, id)
+	}
 
 	bs.maxSrc = &storeLoad{}
 	bs.minDst = &storeLoad{
@@ -560,8 +534,132 @@ func (bs *balanceSolver) init() {
 	}
 }
 
-func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
-	solver := &balanceSolver{
+type scheduleCmd struct {
+	regionID   uint64
+	srcStoreID uint64
+	dstStoreID uint64
+}
+
+func loadScheduleRequest() []scheduleCmd {
+	ret := make([]scheduleCmd, 0)
+	schFileName := "schedule.txt"
+	file, err := os.Open(schFileName)
+	log.Info(fmt.Sprintf("Open schedule file: %s", schFileName))
+	if err != nil {
+		log.Error(fmt.Sprintf("Open schedule file %s error", schFileName))
+		return nil
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		log.Debug("read schedule rule: " + line)
+		strs := strings.Split(line, " ")
+		regionID, _ := strconv.ParseUint(strs[0], 10, 64)
+		srcStoreID, _ := strconv.ParseUint(strs[1], 10, 64)
+		dstStoreID, _ := strconv.ParseUint(strs[2], 10, 64)
+		schCmd := scheduleCmd{
+			regionID:   regionID,
+			srcStoreID: srcStoreID,
+			dstStoreID: dstStoreID,
+		}
+		ret = append(ret, schCmd)
+	}
+
+	return ret
+}
+
+func (bs *balanceSolverHR) genScheduleRequest() []*operator.Operator {
+	ret := make([]*operator.Operator, 0)
+	schCmds := loadScheduleRequest()
+	for _, cmd := range schCmds {
+		log.Info(fmt.Sprintf("parse schedule cmd: %v", cmd))
+		region := bs.cluster.GetRegion(cmd.regionID)
+		if !bs.isRegionAvailable(region) {
+			log.Error("genScheduleRequest, not found region with ID", zap.Uint64("regionID", cmd.regionID))
+			continue
+		}
+
+		var (
+			op         *operator.Operator
+			counters   []prometheus.Counter
+			err        error
+			opTy       opType
+			srcStoreID uint64 = cmd.srcStoreID
+			dstStoreID uint64 = cmd.dstStoreID
+			rwTy       rwType = read
+		)
+
+		if region.GetStoreVoter(dstStoreID) == nil { // move peer
+			opTy = movePeer
+			srcPeer := region.GetStorePeer(srcStoreID) // checked in getRegionAndSrcPeer
+			if srcPeer == nil {
+				log.Error("genScheduleRequest, GetStorePeer return null", zap.Uint64("storeID", srcStoreID), zap.Uint64("regionID", cmd.regionID))
+				continue
+			}
+			dstPeer := &metapb.Peer{StoreId: dstStoreID, IsLearner: srcPeer.IsLearner}
+			op, err = operator.CreateMovePeerOperator(
+				"move-hot-"+rwTy.String()+"-region",
+				bs.cluster,
+				region,
+				operator.OpHotRegion,
+				srcStoreID,
+				dstPeer)
+
+			counters = append(counters,
+				balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(srcStoreID, 10)+"-out"),
+				balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(dstPeer.GetStoreId(), 10)+"-in"))
+		} else { // transfer leader
+			if region.GetLeader().GetStoreId() == dstStoreID {
+				log.Info("leader is already transferred", zap.Uint64("regionID", cmd.regionID), zap.Uint64("leaderStoreID", dstStoreID))
+				continue
+			}
+			opTy = transferLeader
+			op, err = operator.CreateTransferLeaderOperator(
+				"transfer-hot-"+rwTy.String()+"-leader",
+				bs.cluster,
+				region,
+				srcStoreID,
+				dstStoreID,
+				operator.OpHotRegion)
+			counters = append(counters,
+				balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(srcStoreID, 10)+"-out"),
+				balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(dstStoreID, 10)+"-in"))
+		}
+
+		if err != nil {
+			log.Info("fail to create operator", zap.Error(err), zap.Stringer("rwType", rwTy), zap.Stringer("opType", opTy))
+			schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
+			continue
+		}
+
+		op.SetPriorityLevel(core.HighPriority)
+		op.Counters = append(op.Counters, counters...)
+		op.Counters = append(op.Counters,
+			schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
+			schedulerCounter.WithLabelValues(bs.sche.GetName(), opTy.String()))
+
+		ret = append(ret, op)
+	}
+
+	return ret
+}
+
+func getUnhealthyStoresHR(cluster opt.Cluster) []uint64 {
+	ret := make([]uint64, 0)
+	stores := cluster.GetStores()
+	for _, store := range stores {
+		if store.IsTombstone() ||
+			store.DownTime() > cluster.GetMaxStoreDownTime() {
+			ret = append(ret, store.GetID())
+		}
+	}
+	return ret
+}
+
+func newBalanceSolverHR(sche *multiDimensionScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolverHR {
+	solver := &balanceSolverHR{
 		sche:    sche,
 		cluster: cluster,
 		rwTy:    rwTy,
@@ -571,7 +669,7 @@ func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy
 	return solver
 }
 
-func (bs *balanceSolver) isValid() bool {
+func (bs *balanceSolverHR) isValid() bool {
 	if bs.cluster == nil || bs.sche == nil || bs.stLoadDetail == nil {
 		return false
 	}
@@ -588,15 +686,13 @@ func (bs *balanceSolver) isValid() bool {
 	return true
 }
 
-// solve travels all the src stores, hot peers, dst stores and select each one of them to make a best scheduling solution.
-// The comparing between solutions is based on calcProgressiveRank.
-func (bs *balanceSolver) solve() []*operator.Operator {
+func (bs *balanceSolverHR) solve() []*operator.Operator {
 	if !bs.isValid() || !bs.allowBalance() {
 		return nil
 	}
-	bs.cur = &solution{}
+	bs.cur = &solutionHR{}
 	var (
-		best  *solution
+		best  *solutionHR
 		ops   []*operator.Operator
 		infls []Influence
 	)
@@ -604,7 +700,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for srcStoreID := range bs.filterSrcStores() {
 		bs.cur.srcStoreID = srcStoreID
 
-		for _, srcPeerStat := range bs.filterHotPeers() {
+		for _, srcPeerStat := range bs.filterHotPeersHR() {
 			bs.cur.srcPeerStat = srcPeerStat
 			bs.cur.region = bs.getRegion()
 			if bs.cur.region == nil {
@@ -634,8 +730,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	return ops
 }
 
-// allowBalance check whether the operator count have exceed the hot region limit by type
-func (bs *balanceSolver) allowBalance() bool {
+func (bs *balanceSolverHR) allowBalance() bool {
 	switch bs.opTy {
 	case movePeer:
 		return bs.sche.allowBalanceRegion(bs.cluster)
@@ -646,13 +741,11 @@ func (bs *balanceSolver) allowBalance() bool {
 	}
 }
 
-// filterSrcStores compare the min rate and the ratio * expectation rate, if both key and byte rate is greater than
-// its expectation * ratio, the store would be selected as hot source store
-func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
+func (bs *balanceSolverHR) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
 	for id, detail := range bs.stLoadDetail {
 		if bs.cluster.GetStore(id) == nil {
-			log.Error("failed to get the source store", zap.Uint64("store-id", id), errs.ZapError(errs.ErrGetSourceStore))
+			log.Error("failed to get the source store", zap.Uint64("store-id", id))
 			continue
 		}
 		if len(detail.HotPeers) == 0 {
@@ -661,18 +754,16 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		if detail.LoadPred.min().ByteRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpByteRate &&
 			detail.LoadPred.min().KeyRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpKeyRate {
 			ret[id] = detail
-			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+			balanceHotRegionCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 		}
-		hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+		balanceHotRegionCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 	}
 	return ret
 }
 
-// filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
-// The returned hotPeer count in controlled by `max-peer-number`.
-func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
+func (bs *balanceSolverHR) filterHotPeersHR() []*statistics.HotPeerStat {
 	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
-	// Return at most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
+	// Return at most MaxPeerNum peers, to prevent balanceSolverHR.solve() too slow.
 	maxPeerNum := bs.sche.conf.GetMaxPeerNumber()
 
 	// filter pending region
@@ -728,7 +819,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 }
 
 // isRegionAvailable checks whether the given region is not available to schedule.
-func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
+func (bs *balanceSolverHR) isRegionAvailable(region *core.RegionInfo) bool {
 	if region == nil {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "no-region").Inc()
 		return false
@@ -758,7 +849,7 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 	return true
 }
 
-func (bs *balanceSolver) getRegion() *core.RegionInfo {
+func (bs *balanceSolverHR) getRegion() *core.RegionInfo {
 	region := bs.cluster.GetRegion(bs.cur.srcPeerStat.ID())
 	if !bs.isRegionAvailable(region) {
 		return nil
@@ -783,24 +874,33 @@ func (bs *balanceSolver) getRegion() *core.RegionInfo {
 	return region
 }
 
-// filterDstStores select the candidate store by filters
-func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
+func (bs *balanceSolverHR) filterDstStores() map[uint64]*storeLoadDetail {
 	var (
 		filters    []filter.Filter
 		candidates []*core.StoreInfo
 	)
-	srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
-	if srcStore == nil {
-		return nil
-	}
 
 	switch bs.opTy {
 	case movePeer:
+		var scoreGuard filter.Filter
+		if bs.cluster.IsPlacementRulesEnabled() {
+			return nil
+			// scoreGuard = filter.NewRuleFitFilter(bs.sche.GetName(), bs.cluster, bs.cur.region, bs.cur.srcStoreID)
+		} else {
+			srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
+			if srcStore == nil {
+				return nil
+			}
+			// scoreGuard = filter.NewDistinctScoreFilter(bs.sche.GetName(), bs.cluster.GetLocationLabels(), bs.cluster.GetRegionStores(bs.cur.region), srcStore)
+			return nil
+		}
+
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIds(), bs.cur.region.GetStoreIds()),
+			filter.NewHealthFilter(bs.sche.GetName()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
-			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
+			scoreGuard,
 		}
 
 		candidates = bs.cluster.GetStores()
@@ -808,10 +908,8 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	case transferLeader:
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
+			filter.NewHealthFilter(bs.sche.GetName()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
-		}
-		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore); leaderFilter != nil {
-			filters = append(filters, leaderFilter)
 		}
 
 		candidates = bs.cluster.GetFollowerStores(bs.cur.region)
@@ -819,29 +917,26 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	default:
 		return nil
 	}
-	return bs.pickDstStores(filters, candidates)
-}
 
-func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*core.StoreInfo) map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
-	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	for _, store := range candidates {
-		if filter.Target(bs.cluster.GetOpts(), store, filters) {
+		if filter.Target(bs.cluster, store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
-			if detail.LoadPred.max().ByteRate*dstToleranceRatio < detail.LoadPred.Future.ExpByteRate &&
-				detail.LoadPred.max().KeyRate*dstToleranceRatio < detail.LoadPred.Future.ExpKeyRate {
+			if detail.LoadPred.max().ByteRate*bs.sche.conf.GetDstToleranceRatio() < detail.LoadPred.Future.ExpByteRate &&
+				detail.LoadPred.max().KeyRate*bs.sche.conf.GetDstToleranceRatio() < detail.LoadPred.Future.ExpKeyRate {
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
-				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
+				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}
-			hotSchedulerResultCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
+			balanceHotRegionCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
+			ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 		}
 	}
 	return ret
 }
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
-// See the comments of `solution.progressiveRank` for more about progressive rank.
-func (bs *balanceSolver) calcProgressiveRank() {
+// See the comments of `solutionHR.progressiveRank` for more about progressive rank.
+func (bs *balanceSolverHR) calcProgressiveRank() {
 	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
@@ -859,8 +954,6 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			}
 			return a - b
 		}
-		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
-		// than the src store's (key/byte) rate after scheduling one peer.
 		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getSrcDecRate(srcLd.KeyRate, peer.GetKeyRate())
 		keyHot := peer.GetKeyRate() >= bs.sche.conf.GetMinHotKeyRate()
 		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / getSrcDecRate(srcLd.ByteRate, peer.GetByteRate())
@@ -881,8 +974,8 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	bs.cur.progressiveRank = rank
 }
 
-// betterThan checks if `bs.cur` is a better solution than `old`.
-func (bs *balanceSolver) betterThan(old *solution) bool {
+// betterThan checks if `bs.cur` is a better solutionHR than `old`.
+func (bs *balanceSolverHR) betterThan(old *solutionHR) bool {
 	if old == nil {
 		return true
 	}
@@ -917,8 +1010,8 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 				return false
 			}
 		} else {
-			byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetByteRate(), old.srcPeerStat.GetByteRate(), stepRank(0, 100))
-			keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetKeyRate(), old.srcPeerStat.GetKeyRate(), stepRank(0, 10))
+			byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetByteRate(), old.srcPeerStat.GetByteRate(), stepRankHR(0, 100))
+			keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetKeyRate(), old.srcPeerStat.GetKeyRate(), stepRankHR(0, 10))
 
 			switch bs.cur.progressiveRank {
 			case -2: // greatDecRatio < byteDecRatio <= minorDecRatio && keyDecRatio <= greatDecRatio
@@ -947,30 +1040,30 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 }
 
 // smaller is better
-func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
+func (bs *balanceSolverHR) compareSrcStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare source store
 		var lpCmp storeLPCmp
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
-					stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdKeyRate, stepRankHR(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRankHR(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
 				))),
 				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
-					stLdRankCmp(stLdKeyRate, stepRank(0, bs.rankStep.KeyRate)),
-					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdCount, stepRankHR(0, bs.rankStep.Count)),
+					stLdRankCmp(stLdKeyRate, stepRankHR(0, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRankHR(0, bs.rankStep.ByteRate)),
 				)),
 			)
 		} else {
 			lpCmp = sliceLPCmp(
 				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
-					stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRankHR(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdKeyRate, stepRankHR(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
 				))),
 				diffCmp(
-					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdByteRate, stepRankHR(0, bs.rankStep.ByteRate)),
 				),
 			)
 		}
@@ -983,29 +1076,29 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 }
 
 // smaller is better
-func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
+func (bs *balanceSolverHR) compareDstStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare destination store
 		var lpCmp storeLPCmp
 		if bs.rwTy == write && bs.opTy == transferLeader {
 			lpCmp = sliceLPCmp(
 				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
-					stLdRankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdKeyRate, stepRankHR(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRankHR(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
 				)),
 				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
-					stLdRankCmp(stLdKeyRate, stepRank(0, bs.rankStep.KeyRate)),
-					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdCount, stepRankHR(0, bs.rankStep.Count)),
+					stLdRankCmp(stLdKeyRate, stepRankHR(0, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRankHR(0, bs.rankStep.ByteRate)),
 				)))
 		} else {
 			lpCmp = sliceLPCmp(
 				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
-					stLdRankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
+					stLdRankCmp(stLdByteRate, stepRankHR(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdKeyRate, stepRankHR(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
 				)),
 				diffCmp(
-					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+					stLdRankCmp(stLdByteRate, stepRankHR(0, bs.rankStep.ByteRate)),
 				),
 			)
 		}
@@ -1017,13 +1110,13 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 	return 0
 }
 
-func stepRank(rk0 float64, step float64) func(float64) int64 {
+func stepRankHR(rk0 float64, step float64) func(float64) int64 {
 	return func(rate float64) int64 {
 		return int64((rate - rk0) / step)
 	}
 }
 
-func (bs *balanceSolver) isReadyToBuild() bool {
+func (bs *balanceSolverHR) isReadyToBuild() bool {
 	if bs.cur.srcStoreID == 0 || bs.cur.dstStoreID == 0 ||
 		bs.cur.srcPeerStat == nil || bs.cur.region == nil {
 		return false
@@ -1035,7 +1128,7 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 	return true
 }
 
-func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
+func (bs *balanceSolverHR) buildOperators() ([]*operator.Operator, []Influence) {
 	if !bs.isReadyToBuild() {
 		return nil, nil
 	}
@@ -1048,10 +1141,9 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	switch bs.opTy {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
-		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
-		desc := "move-hot-" + bs.rwTy.String() + "-peer"
+		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, IsLearner: srcPeer.IsLearner}
 		op, err = operator.CreateMovePeerOperator(
-			desc,
+			"move-hot-"+bs.rwTy.String()+"-region",
 			bs.cluster,
 			bs.cur.region,
 			operator.OpHotRegion,
@@ -1059,27 +1151,26 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 			dstPeer)
 
 		counters = append(counters,
-			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
-			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
+			balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(bs.cur.srcStoreID, 10)+"-out"),
+			balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(dstPeer.GetStoreId(), 10)+"-in"))
 	case transferLeader:
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
 			return nil, nil
 		}
-		desc := "transfer-hot-" + bs.rwTy.String() + "-leader"
 		op, err = operator.CreateTransferLeaderOperator(
-			desc,
+			"transfer-hot-"+bs.rwTy.String()+"-leader",
 			bs.cluster,
 			bs.cur.region,
 			bs.cur.srcStoreID,
 			bs.cur.dstStoreID,
 			operator.OpHotRegion)
 		counters = append(counters,
-			hotDirectionCounter.WithLabelValues("transfer-leader", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
-			hotDirectionCounter.WithLabelValues("transfer-leader", bs.rwTy.String(), strconv.FormatUint(bs.cur.dstStoreID, 10), "in"))
+			balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(bs.cur.srcStoreID, 10)+"-out"),
+			balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(bs.cur.dstStoreID, 10)+"-in"))
 	}
 
 	if err != nil {
-		log.Debug("fail to create operator", zap.Stringer("rwType", bs.rwTy), zap.Stringer("opType", bs.opTy), errs.ZapError(err))
+		log.Debug("fail to create operator", zap.Error(err), zap.Stringer("rwType", bs.rwTy), zap.Stringer("opType", bs.opTy))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
 		return nil, nil
 	}
@@ -1099,7 +1190,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	return []*operator.Operator{op}, []Influence{infl}
 }
 
-func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
+func (h *multiDimensionScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
 	h.RLock()
 	defer h.RUnlock()
 	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[readLeader]))
@@ -1111,7 +1202,7 @@ func (h *hotScheduler) GetHotReadStatus() *statistics.StoreHotPeersInfos {
 	}
 }
 
-func (h *hotScheduler) GetHotWriteStatus() *statistics.StoreHotPeersInfos {
+func (h *multiDimensionScheduler) GetHotWriteStatus() *statistics.StoreHotPeersInfos {
 	h.RLock()
 	defer h.RUnlock()
 	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[writeLeader]))
@@ -1128,15 +1219,15 @@ func (h *hotScheduler) GetHotWriteStatus() *statistics.StoreHotPeersInfos {
 	}
 }
 
-func (h *hotScheduler) GetWritePendingInfluence() map[uint64]Influence {
+func (h *multiDimensionScheduler) GetWritePendingInfluence() map[uint64]Influence {
 	return h.copyPendingInfluence(writePeer)
 }
 
-func (h *hotScheduler) GetReadPendingInfluence() map[uint64]Influence {
+func (h *multiDimensionScheduler) GetReadPendingInfluence() map[uint64]Influence {
 	return h.copyPendingInfluence(readLeader)
 }
 
-func (h *hotScheduler) copyPendingInfluence(ty resourceType) map[uint64]Influence {
+func (h *multiDimensionScheduler) copyPendingInfluence(ty resourceType) map[uint64]Influence {
 	h.RLock()
 	defer h.RUnlock()
 	pendingSum := h.pendingSums[ty]
@@ -1147,8 +1238,7 @@ func (h *hotScheduler) copyPendingInfluence(ty resourceType) map[uint64]Influenc
 	return ret
 }
 
-// calcPendingWeight return the calculate weight of one Operator, the value will between [0,1]
-func (h *hotScheduler) calcPendingWeight(op *operator.Operator) float64 {
+func (h *multiDimensionScheduler) calcPendingWeight(op *operator.Operator) float64 {
 	if op.CheckExpired() || op.CheckTimeout() {
 		return 0
 	}
@@ -1170,79 +1260,10 @@ func (h *hotScheduler) calcPendingWeight(op *operator.Operator) float64 {
 	}
 }
 
-func (h *hotScheduler) clearPendingInfluence() {
+func (h *multiDimensionScheduler) clearPendingInfluence() {
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		h.pendings[ty] = map[*pendingInfluence]struct{}{}
 		h.pendingSums[ty] = nil
 	}
 	h.regionPendings = make(map[uint64][2]*operator.Operator)
-}
-
-// rwType : the perspective of balance
-type rwType int
-
-const (
-	write rwType = iota
-	read
-)
-
-func (rw rwType) String() string {
-	switch rw {
-	case read:
-		return "read"
-	case write:
-		return "write"
-	default:
-		return ""
-	}
-}
-
-type hotPeerFilterType int
-
-const (
-	high hotPeerFilterType = iota
-	low
-	mixed
-)
-
-type opType int
-
-const (
-	movePeer opType = iota
-	transferLeader
-)
-
-func (ty opType) String() string {
-	switch ty {
-	case movePeer:
-		return "move-peer"
-	case transferLeader:
-		return "transfer-leader"
-	default:
-		return ""
-	}
-}
-
-type resourceType int
-
-const (
-	writePeer resourceType = iota
-	writeLeader
-	readLeader
-	resourceTypeLen
-)
-
-func toResourceType(rwTy rwType, opTy opType) resourceType {
-	switch rwTy {
-	case write:
-		switch opTy {
-		case movePeer:
-			return writePeer
-		case transferLeader:
-			return writeLeader
-		}
-	case read:
-		return readLeader
-	}
-	panic(fmt.Sprintf("invalid arguments for toResourceType: rwTy = %v, opTy = %v", rwTy, opTy))
 }
