@@ -114,7 +114,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		switch op.Status() {
 		case operator.STARTED:
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
-			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, region) {
+			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, step, region) {
 				return
 			}
 			oc.SendScheduleCommand(region, step, source)
@@ -147,7 +147,26 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 	}
 }
 
-func (oc *OperatorController) checkStaleOperator(op *operator.Operator, region *core.RegionInfo) bool {
+func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step operator.OpStep, region *core.RegionInfo) bool {
+	switch s := step.(type) {
+	case operator.RemovePeer:
+		if s.FromStore == region.GetLeader().GetStoreId() {
+			if oc.removeOperatorWithoutBury(op) {
+				if op.Cancel() {
+					log.Info("stale operator, cannot remove leader peer",
+						zap.Uint64("leader-store", region.GetLeader().GetStoreId()),
+						zap.Uint64("region-id", op.RegionID()),
+						zap.Duration("takes", op.RunningTime()),
+						zap.Reflect("operator", op),
+						zap.Reflect("latest-epoch", region.GetRegionEpoch()),
+					)
+					operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
+				}
+				oc.PromoteWaitingOperator()
+			}
+			return true
+		}
+	}
 	// When the "source" is heartbeat, the region may have a newer
 	// confver than the region that the operator holds. In this case,
 	// the operator is stale, and will not be executed even we would
@@ -156,7 +175,6 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, region *
 	latest := region.GetRegionEpoch()
 	changes := latest.GetConfVer() - origin.GetConfVer()
 	if changes > uint64(op.ConfVerChanged(region)) {
-
 		if oc.removeOperatorWithoutBury(op) {
 			if op.Cancel() {
 				log.Info("stale operator",
@@ -172,6 +190,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, region *
 		}
 		return true
 	}
+
 	return false
 }
 
