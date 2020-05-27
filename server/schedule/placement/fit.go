@@ -43,8 +43,7 @@ func (f *RegionFit) IsSatisfied() bool {
 	return len(f.OrphanPeers) == 0
 }
 
-// IsSatisfiedLoose returns if the rules are properly satisfied.
-// It means all Rules are fulfilled and there is no orphan peers.
+// IsSatisfiedLoose returns if the rules are properly satisfied excluded learner.
 func (f *RegionFit) IsSatisfiedLoose() bool {
 	if len(f.RuleFits) == 0 {
 		return false

@@ -45,13 +45,23 @@ func HealthAllowPending(cluster Cluster) func(*core.RegionInfo) bool {
 	return func(region *core.RegionInfo) bool { return IsHealthyAllowPending(cluster, region) }
 }
 
+// IsRegionReplicatedLoose checks if a region is fully replicated. When placement
+// rules is enabled, its peers should fit corresponding rules. When placement
+// rules is disabled, it should have enough replicas and may have learner peer.
+func IsRegionReplicatedLoose(cluster Cluster, region *core.RegionInfo) bool {
+	if cluster.IsPlacementRulesEnabled() {
+		// FIXME: remove the hack way, currently do not consider the learner.
+		return cluster.FitRegion(region).IsSatisfiedLoose()
+	}
+	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetMaxReplicas()
+}
+
 // IsRegionReplicated checks if a region is fully replicated. When placement
 // rules is enabled, its peers should fit corresponding rules. When placement
 // rules is disabled, it should have enough replicas and no any learner peer.
 func IsRegionReplicated(cluster Cluster, region *core.RegionInfo) bool {
 	if cluster.IsPlacementRulesEnabled() {
-		// FIXME: remove the hack way, currently do not consider the learner.
-		return cluster.FitRegion(region).IsSatisfiedLoose()
+		return cluster.FitRegion(region).IsSatisfied()
 	}
 	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetMaxReplicas()
 }
