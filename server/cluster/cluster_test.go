@@ -14,6 +14,7 @@
 package cluster
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -670,7 +671,7 @@ func newTestCluster(opt *config.PersistOptions) *testCluster {
 }
 
 func newTestRaftCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
-	rc := &RaftCluster{}
+	rc := &RaftCluster{ctx: context.TODO()}
 	rc.InitCluster(id, opt, storage, basicCluster)
 	return rc
 }

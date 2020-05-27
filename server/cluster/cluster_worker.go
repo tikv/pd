@@ -137,6 +137,11 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 		c.GetMergeChecker().RecordRegionSplit(recordRegions)
 	}
 
+	// If region splits during the scheduling process, regions with abnormal
+	// status may be left, and these regions need to be checked with higher
+	// priority.
+	c.AddSuspectRegions(recordRegions...)
+
 	resp := &pdpb.AskBatchSplitResponse{Ids: splitIDs}
 
 	return resp, nil
