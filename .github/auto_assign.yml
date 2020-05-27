@@ -1,9 +1,10 @@
-addReviewers: true
-addAssignees: author
+addReviewers: false
+addAssignees: true
 numberOfReviewers: 0
 numberOfAssignees: 1
-useReviewGroups: true
-reviewGroups:
+useReviewGroups: false
+useAssigneeGroups: true
+assigneeGroups:
   scheduling:
     - nolouch
     - disksing
@@ -11,4 +12,7 @@ reviewGroups:
     - shafreeck
     - HunDunDM
     - rleungx
-useAssigneeGroups: false
+filterLabels:
+  # Run
+  include:
+    - contribution
