@@ -3921,7 +3921,7 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "pd_scheduler_store_status{store=~\"$store\", type=\"store_write_rate_bytes\"}",
+          "expr": "pd_scheduler_store_status{store=~\"$store\", type=\"store_write_rate_keys\"}",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{address}}-store-{{store}}",
@@ -3933,7 +3933,7 @@
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "Store write rate bytes",
+      "title": "Store write rate keys",
       "tooltip": {
         "shared": true,
         "sort": 0,
