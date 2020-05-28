@@ -5,7 +5,7 @@ PR Title Format:
 2. *: what's changed
 -->
 
-### What problem does this PR solve? <!--add the issue link with summary if it exists-->
+### What problem does this PR solve? <!--add the issue link with a summary if it exists-->
 
 
 ### What is changed and how it works?
