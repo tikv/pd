@@ -40,7 +40,7 @@ func NewAPIService(srv *server.Server, redirector http.Handler) (*apiserver.Serv
 		PDEndPoint: etcdCfg.ACUrls[0].String(),
 		PathPrefix: cfg.Dashboard.PublicPathPrefix,
 	}
-	uiserver.InitAssetFS(cfg.Dashboard.PublicPathPrefix)
+	uiserver.RewriteAssetsPublicPath(cfg.Dashboard.PublicPathPrefix)
 	dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToTLSConfig()
 	if err != nil {
 		return nil, err
