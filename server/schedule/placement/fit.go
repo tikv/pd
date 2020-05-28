@@ -76,6 +76,9 @@ func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 // It returns 1 when the first fit result is better.
 func CompareRegionFit(a, b *RegionFit) int {
 	for i := range a.RuleFits {
+		if i >= len(b.RuleFits) {
+			continue
+		}
 		if cmp := compareRuleFit(a.RuleFits[i], b.RuleFits[i]); cmp != 0 {
 			return cmp
 		}
