@@ -15,6 +15,7 @@ package core
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -122,4 +123,20 @@ func (s *testStoreSuite) TestLowSpaceThreshold(c *C) {
 	threshold = store.GetSpaceThreshold(0.8, lowSpaceThreshold)
 	c.Assert(fmt.Sprintf("%.2f", threshold), Equals, fmt.Sprintf("%.2f", 100*0.2))
 	c.Assert(store.IsLowSpace(0.8), Equals, true)
+}
+
+func (s *testStoreSuite) TestRegionScore(c *C) {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = 512 * (1 << 20)  // 512 MB
+	stats.Available = 100 * (1 << 20) // 100 MB
+	stats.UsedSize = 0
+
+	store := NewStoreInfo(
+		&metapb.Store{Id: 1},
+		SetStoreStats(stats),
+		SetRegionSize(1),
+	)
+	score := store.RegionScore(0.7, 0.9, 0)
+	// Region score should never be NaN, or /store API would fail.
+	c.Assert(math.IsNaN(score), Equals, false)
 }
