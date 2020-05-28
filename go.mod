@@ -12,7 +12,6 @@ require (
 	github.com/docker/go-units v0.4.0
 	github.com/dustin/go-humanize v0.0.0-20180421182945-02af3965c54e // indirect
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
-	github.com/elazarl/go-bindata-assetfs v1.0.0 // indirect
 	github.com/ghodss/yaml v1.0.1-0.20190212211648-25d852aebe32 // indirect
 	github.com/go-openapi/spec v0.19.8 // indirect
 	github.com/go-openapi/swag v0.19.9 // indirect
@@ -38,7 +37,7 @@ require (
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
-	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200528094331-be659b11a7c8
+	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200528103452-b8b98ac907d5
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
