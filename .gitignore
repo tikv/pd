@@ -11,4 +11,3 @@ vendor
 default*
 *.bak
 .vscode/
-/tools/pd-analysis/analysis/result.txt
