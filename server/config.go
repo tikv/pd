@@ -490,7 +490,7 @@ type ScheduleConfig struct {
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
 	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "size"
-	LeaderSchedulePolicy string `toml:"leader-schedule-policy,omitempty" json:"leader-schedule-policy,string"`
+	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
