@@ -604,7 +604,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
-	defaultLeaderSchedulePolicy       = "size"
+	defaultLeaderSchedulePolicy        = "size"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {

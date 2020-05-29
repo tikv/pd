@@ -40,7 +40,7 @@ const (
 	defaultSchedulerMaxWaitingOperator = 3
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultStrictlyMatchLabel          = true
-	defaultLeaderSchedulePolicy       = "size"
+	defaultLeaderSchedulePolicy        = "size"
 )
 
 // ScheduleOptions is a mock of ScheduleOptions
@@ -250,6 +250,6 @@ func (mso *ScheduleOptions) IsNamespaceRelocationEnabled() bool {
 }
 
 // GetLeaderSchedulePolicy is to get leader schedule policy
-func (mso *ScheduleOptions) GetLeaderSchedulePolicy() core.SchedulePolicy  {
+func (mso *ScheduleOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	return core.StringToSchedulePolicy(mso.LeaderSchedulePolicy)
 }

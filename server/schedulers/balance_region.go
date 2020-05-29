@@ -238,7 +238,7 @@ func (s *balanceRegionScheduler) hasPotentialTarget(cluster schedule.Cluster, re
 			continue
 		}
 		kind := core.NewScheduleKind(core.RegionKind, core.BySize)
-		if !shouldBalance(cluster, source, store, region, kind, opInfluence,s.GetName()) {
+		if !shouldBalance(cluster, source, store, region, kind, opInfluence, s.GetName()) {
 			continue
 		}
 		return true
