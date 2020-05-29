@@ -41,10 +41,11 @@ func newLabelScheduler(opController *schedule.OperatorController) schedule.Sched
 	filters := []schedule.Filter{
 		schedule.StoreStateFilter{ActionScope: labelSchedulerName, TransferLeader: true},
 	}
+	kind := core.NewScheduleKind(core.LeaderKind, core.BySize)
 	return &labelScheduler{
 		name:          labelSchedulerName,
 		baseScheduler: newBaseScheduler(opController),
-		selector:      schedule.NewBalanceSelector(core.LeaderKind, filters),
+		selector:      schedule.NewBalanceSelector(kind, filters),
 	}
 }
 

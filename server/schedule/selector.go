@@ -22,12 +22,12 @@ import (
 // BalanceSelector selects source/target from store candidates based on their
 // resource scores.
 type BalanceSelector struct {
-	kind    core.ResourceKind
+	kind    core.ScheduleKind
 	filters []Filter
 }
 
 // NewBalanceSelector creates a BalanceSelector instance.
-func NewBalanceSelector(kind core.ResourceKind, filters []Filter) *BalanceSelector {
+func NewBalanceSelector(kind core.ScheduleKind, filters []Filter) *BalanceSelector {
 	return &BalanceSelector{
 		kind:    kind,
 		filters: filters,
@@ -37,6 +37,7 @@ func NewBalanceSelector(kind core.ResourceKind, filters []Filter) *BalanceSelect
 // SelectSource selects the store that can pass all filters and has the minimal
 // resource score.
 func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo) *core.StoreInfo {
+	s.updateConfig(opt)
 	var result *core.StoreInfo
 	for _, store := range stores {
 		if FilterSource(opt, store, s.filters) {
@@ -54,6 +55,7 @@ func (s *BalanceSelector) SelectSource(opt Options, stores []*core.StoreInfo) *c
 // SelectTarget selects the store that can pass all filters and has the maximal
 // resource score.
 func (s *BalanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, filters ...Filter) *core.StoreInfo {
+	s.updateConfig(opt)
 	filters = append(filters, s.filters...)
 	var result *core.StoreInfo
 	for _, store := range stores {
@@ -67,6 +69,12 @@ func (s *BalanceSelector) SelectTarget(opt Options, stores []*core.StoreInfo, fi
 		}
 	}
 	return result
+}
+
+func (s *BalanceSelector) updateConfig(opt Options) {
+	if s.kind.Resource == core.LeaderKind {
+		s.kind.Strategy = opt.GetLeaderScheduleStrategy()
+	}
 }
 
 // ReplicaSelector selects source/target store candidates based on their

@@ -61,7 +61,8 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, opts .
 		schedule.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 		schedule.NewCacheFilter(s.GetName(), taintStores),
 	}
-	s.selector = schedule.NewBalanceSelector(core.RegionKind, filters)
+	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
+	s.selector = schedule.NewBalanceSelector(kind, filters)
 	return s
 }
 
@@ -194,14 +195,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster schedule.Cluster, region *
 	targetID := target.GetID()
 	log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
-	if !shouldBalance(cluster, source, target, region, core.RegionKind, opInfluence) {
-		log.Debug("skip balance region",
-			zap.String("scheduler", s.GetName()), zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
-			zap.Int64("source-size", source.GetRegionSize()), zap.Float64("source-score", source.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
-			zap.Int64("source-influence", opInfluence.GetStoreInfluence(sourceID).ResourceSize(core.RegionKind)),
-			zap.Int64("target-size", target.GetRegionSize()), zap.Float64("target-score", target.RegionScore(cluster.GetHighSpaceRatio(), cluster.GetLowSpaceRatio(), 0)),
-			zap.Int64("target-influence", opInfluence.GetStoreInfluence(targetID).ResourceSize(core.RegionKind)),
-			zap.Int64("average-region-size", cluster.GetAverageRegionSize()))
+	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
+	if !shouldBalance(cluster, source, target, region, kind, opInfluence, s.GetName()) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		return nil
 	}
@@ -242,7 +237,8 @@ func (s *balanceRegionScheduler) hasPotentialTarget(cluster schedule.Cluster, re
 		if !store.IsUp() || store.DownTime() > cluster.GetMaxStoreDownTime() {
 			continue
 		}
-		if !shouldBalance(cluster, source, store, region, core.RegionKind, opInfluence) {
+		kind := core.NewScheduleKind(core.RegionKind, core.BySize)
+		if !shouldBalance(cluster, source, store, region, kind, opInfluence,s.GetName()) {
 			continue
 		}
 		return true

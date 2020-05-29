@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v3/pkg/metricutil"
 	"github.com/pingcap/pd/v3/pkg/typeutil"
+	"github.com/pingcap/pd/v3/server/core"
 	"github.com/pingcap/pd/v3/server/namespace"
 	"github.com/pingcap/pd/v3/server/schedule"
 	"github.com/pkg/errors"
@@ -488,6 +489,8 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
+	// LeaderScheduleStrategy is the option to balance leader, there are some strategics supported: ["count", "size"], default: "count"
+	LeaderScheduleStrategy string `toml:"leader-schedule-strategy,omitempty" json:"leader-schedule-strategy,string"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -556,6 +559,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
+		LeaderScheduleStrategy:       c.LeaderScheduleStrategy,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
@@ -600,6 +604,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
+	defaultLeaderScheduleStrategy      = "size"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -641,6 +646,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
+	}
+	if !meta.IsDefined("leader-schedule-strategy") {
+		adjustString(&c.LeaderScheduleStrategy, defaultLeaderScheduleStrategy)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
@@ -696,6 +704,11 @@ func IsDefaultScheduler(typ string) bool {
 		}
 	}
 	return false
+}
+
+// GetLeaderScheduleStrategy is to get leader schedule strategy
+func (c *ScheduleConfig) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	return core.StringToScheduleStrategy(c.LeaderScheduleStrategy)
 }
 
 // ReplicationConfig is the replication configuration.

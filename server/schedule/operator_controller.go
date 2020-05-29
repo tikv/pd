@@ -634,11 +634,18 @@ type StoreInfluence struct {
 	StepCost    int64
 }
 
-// ResourceSize returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceSize(kind core.ResourceKind) int64 {
-	switch kind {
+// ResourceProperty returns delta size of leader/region by influence.
+func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
+	switch kind.Resource {
 	case core.LeaderKind:
-		return s.LeaderSize
+		switch kind.Strategy {
+		case core.ByCount:
+			return s.LeaderCount
+		case core.BySize:
+			return s.LeaderSize
+		default:
+			return 0
+		}
 	case core.RegionKind:
 		return s.RegionSize
 	default:
@@ -767,6 +774,14 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
 		}
 	}
 	return ret
+}
+
+// GetLeaderScheduleStrategy is to get leader schedule strategy
+func (oc *OperatorController) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+	if oc.cluster == nil {
+		return core.BySize
+	}
+	return oc.cluster.GetLeaderScheduleStrategy()
 }
 
 // RemoveStoreLimit removes the store limit for a given store ID.

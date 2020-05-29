@@ -18,6 +18,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 // SplitRegions split a set of metapb.Region by the middle of regionKey
@@ -77,4 +78,22 @@ func NewRegion(start, end []byte) *metapb.Region {
 		EndKey:      end,
 		RegionEpoch: &metapb.RegionEpoch{},
 	}
+}
+
+// NewStoreInfoWithSizeCount is create a store with size and count.
+func NewStoreInfoWithSizeCount(id uint64, regionCount, leaderCount int, regionSize, leaderSize int64) *StoreInfo {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = uint64(1024)
+	stats.Available = uint64(1024)
+	store := NewStoreInfo(
+		&metapb.Store{
+			Id: id,
+		},
+		SetStoreStats(stats),
+		SetRegionCount(regionCount),
+		SetRegionSize(regionSize),
+		SetLeaderCount(leaderCount),
+		SetLeaderSize(leaderSize),
+	)
+	return store
 }
