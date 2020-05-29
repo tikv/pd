@@ -14,11 +14,13 @@
 package core
 
 import (
+	"math"
 	"sync"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 var _ = Suite(&testDistinctScoreSuite{})
@@ -91,4 +93,24 @@ func (s *testConcurrencySuite) TestCloneStore(c *C) {
 		}
 	}()
 	wg.Wait()
+}
+
+var _ = Suite(&testStoreSuite{})
+
+type testStoreSuite struct{}
+
+func (s *testStoreSuite) TestRegionScore(c *C) {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = 512 * (1 << 20)  // 512 MB
+	stats.Available = 100 * (1 << 20) // 100 MB
+	stats.UsedSize = 0
+
+	store := NewStoreInfo(
+		&metapb.Store{Id: 1},
+		SetStoreStats(stats),
+		SetRegionSize(1),
+	)
+	score := store.RegionScore(0.7, 0.9, 0)
+	// Region score should never be NaN, or /store API would fail.
+	c.Assert(math.IsNaN(score), Equals, false)
 }

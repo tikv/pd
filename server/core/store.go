@@ -274,7 +274,7 @@ func (s *StoreInfo) RegionScore(highSpaceRatio, lowSpaceRatio float64, delta int
 	used := float64(s.GetUsedSize()) / (1 << 20)
 	capacity := float64(s.GetCapacity()) / (1 << 20)
 
-	if s.GetRegionSize() == 0 {
+	if s.GetRegionSize() == 0 || used == 0 {
 		amplification = 1
 	} else {
 		// because of rocksdb compression, region size is larger than actual used size
