@@ -39,6 +39,7 @@ func (s *testSelectorSuite) SetUpSuite(c *C) {
 
 func (s *testSelectorSuite) TestScheduleConfig(c *C) {
 	filters := make([]Filter, 0)
+	s.tc.LeaderSchedulePolicy = core.ByCount.String()
 	testScheduleConfig := func(selector *BalanceSelector, stores []*core.StoreInfo, expectSourceID, expectTargetID uint64) {
 		c.Assert(selector.SelectSource(s.tc, stores).GetID(), Equals, expectSourceID)
 		c.Assert(selector.SelectTarget(s.tc, stores).GetID(), Equals, expectTargetID)

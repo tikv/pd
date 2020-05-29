@@ -213,6 +213,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderSchedulePolicy(c *C) 
 	s.tc.AddLeaderStore(3, 10, 100)
 	s.tc.AddLeaderStore(4, 10, 100)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
+	s.tc.LeaderSchedulePolicy = core.ByCount.String()
 	c.Assert(s.tc.LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), IsNil)
 	s.tc.LeaderSchedulePolicy = core.BySize.String()
@@ -251,6 +252,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
 	s.tc.AddLeaderStore(3, 10, 100)
 	s.tc.AddLeaderStore(4, 10, 100)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
+	s.tc.LeaderSchedulePolicy = core.ByCount.String()
 	c.Assert(s.tc.LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), IsNil)
 	c.Assert(s.tc.GetStore(1).GetLeaderCount(), Equals, 14)
@@ -276,6 +278,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	// After considering the scheduled operator, leaders of store1 and store4 are 8
 	// and 13 respectively. As the `TolerantSizeRatio` is 2.5, `shouldBalance`
 	// returns false when leader difference is not greater than 5.
+	s.tc.LeaderSchedulePolicy = core.ByCount.String()
 	c.Assert(s.tc.LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), NotNil)
 	s.tc.LeaderSchedulePolicy = core.BySize.String()
