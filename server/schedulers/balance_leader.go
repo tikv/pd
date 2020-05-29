@@ -61,7 +61,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, opts .
 		schedule.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true},
 		schedule.NewCacheFilter(s.GetName(), taintStores),
 	}
-	kind := core.NewScheduleKind(core.LeaderKind, opController.GetLeaderScheduleStrategy())
+	kind := core.NewScheduleKind(core.LeaderKind, opController.GetLeaderSchedulePolicy())
 	s.selector = schedule.NewBalanceSelector(kind, filters)
 	return s
 }
@@ -204,7 +204,7 @@ func (l *balanceLeaderScheduler) createOperator(region *core.RegionInfo, source,
 
 	sourceID := source.GetID()
 	targetID := target.GetID()
-	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetLeaderScheduleStrategy())
+	kind := core.NewScheduleKind(core.LeaderKind, cluster.GetLeaderSchedulePolicy())
 	if !shouldBalance(cluster, source, target, region, kind, opInfluence, l.GetName()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		return nil

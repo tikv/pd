@@ -489,8 +489,8 @@ type ScheduleConfig struct {
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time,omitempty" json:"max-store-down-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit,omitempty" json:"leader-schedule-limit"`
-	// LeaderScheduleStrategy is the option to balance leader, there are some strategics supported: ["count", "size"], default: "count"
-	LeaderScheduleStrategy string `toml:"leader-schedule-strategy,omitempty" json:"leader-schedule-strategy,string"`
+	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "size"
+	LeaderSchedulePolicy string `toml:"leader-schedule-policy,omitempty" json:"leader-schedule-policy,string"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit,omitempty" json:"region-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
@@ -559,7 +559,7 @@ func (c *ScheduleConfig) clone() *ScheduleConfig {
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
-		LeaderScheduleStrategy:       c.LeaderScheduleStrategy,
+		LeaderSchedulePolicy:         c.LeaderSchedulePolicy,
 		RegionScheduleLimit:          c.RegionScheduleLimit,
 		ReplicaScheduleLimit:         c.ReplicaScheduleLimit,
 		MergeScheduleLimit:           c.MergeScheduleLimit,
@@ -604,7 +604,7 @@ const (
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 3
-	defaultLeaderScheduleStrategy      = "size"
+	defaultLeaderSchedulePolicy       = "size"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -647,8 +647,8 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("scheduler-max-waiting-operator") {
 		adjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
 	}
-	if !meta.IsDefined("leader-schedule-strategy") {
-		adjustString(&c.LeaderScheduleStrategy, defaultLeaderScheduleStrategy)
+	if !meta.IsDefined("leader-schedule-policy") {
+		adjustString(&c.LeaderSchedulePolicy, defaultLeaderSchedulePolicy)
 	}
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
@@ -706,9 +706,9 @@ func IsDefaultScheduler(typ string) bool {
 	return false
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule strategy
-func (c *ScheduleConfig) GetLeaderScheduleStrategy() core.ScheduleStrategy {
-	return core.StringToScheduleStrategy(c.LeaderScheduleStrategy)
+// GetLeaderSchedulePolicy is to get leader schedule policy
+func (c *ScheduleConfig) GetLeaderSchedulePolicy() core.SchedulePolicy {
+	return core.StringToSchedulePolicy(c.LeaderSchedulePolicy)
 }
 
 // ReplicationConfig is the replication configuration.

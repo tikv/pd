@@ -68,7 +68,7 @@ region-schedule-limit = 64
 replica-schedule-limit = 64
 merge-schedule-limit = 8
 hot-region-schedule-limit = 4
-leader-schedule-strategy = "size" #  there are some strategics supported: ["count", "size"], default: "size"
+leader-schedule-policy = "size" #  there are some policies supported: ["count", "size"], default: "size"
 #enable-one-way-merge = false
 #tolerant-size-ratio = 0.0
 

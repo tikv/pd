@@ -835,9 +835,9 @@ func (c *clusterInfo) IsReplaceOfflineReplicaEnabled() bool {
 	return c.opt.IsReplaceOfflineReplicaEnabled()
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule strategy
-func (c *clusterInfo) GetLeaderScheduleStrategy() core.ScheduleStrategy {
-	return c.opt.GetLeaderScheduleStrategy()
+// GetLeaderSchedulePolicy is to get leader schedule policy
+func (c *clusterInfo) GetLeaderSchedulePolicy() core.SchedulePolicy {
+	return c.opt.GetLeaderSchedulePolicy()
 }
 
 func (c *clusterInfo) IsMakeUpReplicaEnabled() bool {

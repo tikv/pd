@@ -85,7 +85,7 @@ func shouldBalance(cluster schedule.Cluster, source, target *core.StoreInfo, reg
 }
 
 func getTolerantResource(cluster schedule.Cluster, region *core.RegionInfo, kind core.ScheduleKind) int64 {
-	if kind.Resource == core.LeaderKind && kind.Strategy == core.ByCount {
+	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
 		tolerantSizeRatio := cluster.GetTolerantSizeRatio()
 		if tolerantSizeRatio == 0 {
 			tolerantSizeRatio = leaderTolerantSizeRatio

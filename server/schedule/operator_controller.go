@@ -638,7 +638,7 @@ type StoreInfluence struct {
 func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
 	switch kind.Resource {
 	case core.LeaderKind:
-		switch kind.Strategy {
+		switch kind.Policy {
 		case core.ByCount:
 			return s.LeaderCount
 		case core.BySize:
@@ -776,12 +776,12 @@ func (oc *OperatorController) GetAllStoresLimit() map[uint64]float64 {
 	return ret
 }
 
-// GetLeaderScheduleStrategy is to get leader schedule strategy
-func (oc *OperatorController) GetLeaderScheduleStrategy() core.ScheduleStrategy {
+// GetLeaderSchedulePolicy is to get leader schedule policy
+func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	if oc.cluster == nil {
 		return core.BySize
 	}
-	return oc.cluster.GetLeaderScheduleStrategy()
+	return oc.cluster.GetLeaderSchedulePolicy()
 }
 
 // RemoveStoreLimit removes the store limit for a given store ID.
