@@ -520,7 +520,10 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 				return
 			}
 			fmt.Printf("saved rule %s/%s\n", r.GroupID, r.ID)
-		} else {
+		}
+	}
+	for _, r := range rules {
+		if r.Count == 0 {
 			_, err = doRequest(cmd, path.Join(rulePrefix, r.GroupID, r.ID), http.MethodDelete)
 			if err != nil {
 				fmt.Printf("failed to delete rule %s/%s: %v\n", r.GroupID, r.ID, err)
