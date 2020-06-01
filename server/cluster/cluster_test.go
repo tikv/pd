@@ -14,6 +14,7 @@
 package cluster
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -332,13 +333,13 @@ func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/server/cluster/concurrentRegionHeartbeat", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/cluster/concurrentRegionHeartbeat", "return(true)"), IsNil)
 	go func() {
 		defer wg.Done()
 		cluster.processRegionHeartbeat(source)
 	}()
 	time.Sleep(100 * time.Millisecond)
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/server/cluster/concurrentRegionHeartbeat"), IsNil)
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/cluster/concurrentRegionHeartbeat"), IsNil)
 	c.Assert(cluster.processRegionHeartbeat(target), IsNil)
 	wg.Wait()
 	checkRegion(c, cluster.GetRegionByKey([]byte{}), target)
@@ -670,7 +671,7 @@ func newTestCluster(opt *config.PersistOptions) *testCluster {
 }
 
 func newTestRaftCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) *RaftCluster {
-	rc := &RaftCluster{}
+	rc := &RaftCluster{ctx: context.TODO()}
 	rc.InitCluster(id, opt, storage, basicCluster)
 	return rc
 }
