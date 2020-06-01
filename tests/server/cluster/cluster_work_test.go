@@ -15,6 +15,7 @@ package cluster_test
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -126,4 +127,38 @@ func (s *clusterWorkerTestSuite) TestAskSplit(c *C) {
 	mergeChecker := rc.GetMergeChecker()
 	mergeChecker.Check(regions[0])
 	c.Assert(err, IsNil)
+}
+
+func (s *clusterWorkerTestSuite) TestSuspectRegions(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
+	rc := leaderServer.GetRaftCluster()
+	opt := rc.GetOpt()
+	opt.SetSplitMergeInterval(time.Hour)
+	regions := rc.GetRegions()
+
+	req := &pdpb.AskBatchSplitRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: clusterID,
+		},
+		Region:     regions[0].GetMeta(),
+		SplitCount: 2,
+	}
+	res, err := rc.HandleAskBatchSplit(req)
+	c.Assert(err, IsNil)
+	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionId, res.Ids[1].NewRegionId}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	suspects := rc.GetSuspectRegions()
+	sort.Slice(suspects, func(i, j int) bool { return suspects[i] < suspects[j] })
+	c.Assert(suspects, DeepEquals, ids)
 }
