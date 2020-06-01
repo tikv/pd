@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -243,6 +244,9 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 
 // GetAllStores implements gRPC PDServer.
 func (s *Server) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+	failpoint.Inject("customTimeout", func() {
+		time.Sleep(5 * time.Second)
+	})
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
