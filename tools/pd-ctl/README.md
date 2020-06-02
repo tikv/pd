@@ -113,7 +113,7 @@ Usage:
     "high-space-ratio": 0.6,
     "hot-region-cache-hits-threshold": 3,
     "hot-region-schedule-limit": 4,
-    "key-type":"table",
+    "key-type": "table",
     "leader-schedule-limit": 4,
     "leader-schedule-policy": "count",
     "low-space-ratio": 0.8,
