@@ -74,7 +74,7 @@ merge-schedule-limit = 8
 hot-region-schedule-limit = 4
 ## There are some policies supported: ["count", "size"], default: "count"
 # leader-schedule-policy = "count"
-## When the score difference between the leader or Region of the two stores is 
+## When the score difference between the leader or Region of the two stores is
 ## less than specified multiple times of the Region size, it is considered in balance by PD.
 ## If it equals 0.0, PD will automatically adjust it.
 # tolerant-size-ratio = 0.0
@@ -108,3 +108,18 @@ location-labels = []
 # [[label-property.reject-leader]]
 # key = "zone"
 # value = "cn1
+
+[dashboard]
+## Configurations below are for the TiDB Dashboard embedded in the PD.
+
+## The path of the CA certificate used to verify the TiDB server in TLS.
+# tidb-cacert-path = ""
+## The path of the certificate used to connect to TiDB server in TLS.
+# tidb-cert-path = ""
+## The path of the certificate private key.
+# tidb-key-path = ""
+
+## The public path prefix to serve Dashboard urls. It can be set when Dashboard
+## is running behind a reverse proxy. Do not configure it if you access
+## Dashboard directly.
+# public-path-prefix = "/dashboard"

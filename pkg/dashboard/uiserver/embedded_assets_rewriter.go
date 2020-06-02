@@ -15,16 +15,26 @@ package uiserver
 
 import (
 	"net/http"
+	"os"
+	"sync"
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
 )
 
-// Handler returns an http.Handler that serves the dashboard UI
-func Handler() http.Handler {
-	return uiserver.Handler(AssetFS())
-}
+var once sync.Once
 
-// AssetFS returns the AssetFS of the dashboard UI
-func AssetFS() http.FileSystem {
-	return assets
+// RewriteAssetsPublicPath init the static resources with given public path prefix.
+func RewriteAssetsPublicPath(publicPath string) {
+	once.Do(func() {
+		uiserver.RewriteAssets(publicPath, AssetFS(), func(fs http.FileSystem, f http.File, path, newContent string, bs []byte) {
+			m := fs.(vfsgen۰FS)
+			fi := f.(os.FileInfo)
+			m[path] = &vfsgen۰CompressedFileInfo{
+				name:              fi.Name(),
+				modTime:           fi.ModTime(),
+				uncompressedSize:  int64(len(newContent)),
+				compressedContent: bs,
+			}
+		})
+	})
 }

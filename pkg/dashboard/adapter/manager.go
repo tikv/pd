@@ -51,10 +51,7 @@ type Manager struct {
 
 // NewManager creates a new Manager.
 func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector) *Manager {
-	ctx, cancel := context.WithCancel(srv.Context())
 	return &Manager{
-		ctx:        ctx,
-		cancel:     cancel,
 		srv:        srv,
 		service:    s,
 		redirector: redirector,
@@ -63,7 +60,10 @@ func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector
 
 // Start monitoring the dynamic config and control the dashboard.
 func (m *Manager) Start() {
+	m.ctx, m.cancel = context.WithCancel(m.srv.Context())
 	m.wg.Add(1)
+	m.isLeader = false
+	m.members = nil
 	go m.serviceLoop()
 }
 

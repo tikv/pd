@@ -103,6 +103,27 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
+		// Check suspect regions first.
+		for _, id := range c.cluster.GetSuspectRegions() {
+			region := c.cluster.GetRegion(id)
+			if region == nil {
+				// the region could be recent split, continue to wait.
+				continue
+			}
+			if c.opController.GetOperator(id) != nil {
+				c.cluster.RemoveSuspectRegion(id)
+				continue
+			}
+			checkerIsBusy, ops := c.checkers.CheckRegion(region)
+			if checkerIsBusy {
+				continue
+			}
+			if len(ops) > 0 {
+				c.opController.AddWaitingOperator(ops...)
+			}
+			c.cluster.RemoveSuspectRegion(id)
+		}
+
 		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// Resets the scan key.
@@ -122,7 +143,7 @@ func (c *coordinator) patrolRegions() {
 			}
 
 			key = region.GetEndKey()
-			if ops != nil {
+			if len(ops) > 0 {
 				c.opController.AddWaitingOperator(ops...)
 			}
 		}

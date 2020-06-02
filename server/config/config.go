@@ -210,6 +210,8 @@ const (
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
+
+	defaultPublicPathPrefix = "/dashboard"
 )
 
 var (
@@ -463,6 +465,11 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
+
+	if c.Dashboard.PublicPathPrefix == "" {
+		c.Dashboard.PublicPathPrefix = defaultPublicPathPrefix
+	}
+	c.Dashboard.PublicPathPrefix = strings.TrimRight(c.Dashboard.PublicPathPrefix, "/")
 
 	return nil
 }
@@ -1117,9 +1124,10 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath   string `toml:"tidb-cacert-path" json:"tidb_cacert_path"`
-	TiDBCertPath string `toml:"tidb-cert-path" json:"tidb_cert_path"`
-	TiDBKeyPath  string `toml:"tidb-key-path" json:"tidb_key_path"`
+	TiDBCAPath       string `toml:"tidb-cacert-path" json:"tidb_cacert_path"`
+	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb_cert_path"`
+	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb_key_path"`
+	PublicPathPrefix string `toml:"public-path-prefix" json:"public_path_prefix"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
