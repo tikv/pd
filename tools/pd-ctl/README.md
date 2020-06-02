@@ -190,7 +190,7 @@ This option only works when key type is "table".
     >> config set enable-cross-table-merge true  // Enable cross table merge.
     ```
 
-- `key-type` is key type. There are some strategics supported: ["table", "raw", "txn"], default: "table". When key type is "raw" or "txn", pd will be allowed to merge region cross table. 
+- `key-type` is key type. There are some strategics supported: ["table", "raw", "txn"], default: "table". When key type is "raw" or "txn", PD will be allowed to merge region cross table. 
 
     ```bash
     >> config set key-type raw  // Enable cross table merge.
