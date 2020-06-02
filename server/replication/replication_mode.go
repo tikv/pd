@@ -334,8 +334,16 @@ func (m *ModeManager) tickDR() {
 
 	// canSync is true when every region has at least 1 replica in each DC.
 	canSync := downPrimary < totalPrimary && downDr < totalDr
+
 	// hasMajority is true when every region has majority peer online.
-	hasMajority := (downPrimary+downDr)*2 < totalPrimary+totalDr
+	var upPeers int
+	if downPrimary < totalPrimary {
+		upPeers += totalPrimary - downPrimary
+	}
+	if downDr < totalDr {
+		upPeers += totalDr - downDr
+	}
+	hasMajority := upPeers*2 > totalPrimary+totalDr
 
 	// If hasMajority is false, the cluster is always unavailable. Switch to async won't help.
 	if !canSync && hasMajority && m.drGetState() != drStateAsync {
