@@ -14,6 +14,8 @@
 package replication
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -127,6 +129,14 @@ func (s *testReplicationMode) TestStatus(c *C) {
 	})
 }
 
+type mockFileReplicator struct {
+	err error
+}
+
+func (rep *mockFileReplicator) ReplicateFileToAllMembers(context.Context, string, []byte) error {
+	return rep.err
+}
+
 func (s *testReplicationMode) TestStateSwitch(c *C) {
 	store := core.NewStorage(kv.NewMemoryKV())
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
@@ -139,7 +149,8 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
-	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
+	var replicator mockFileReplicator
+	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
 	c.Assert(err, IsNil)
 
 	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
@@ -171,6 +182,11 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	s.setStoreState(cluster, 1, "up")
 	s.setStoreState(cluster, 2, "up")
 	s.setStoreState(cluster, 5, "down")
+	rep.tickDR()
+	c.Assert(rep.drGetState(), Equals, drStateAsync)
+	assertStateIDUpdate()
+	rep.drSwitchToSync()
+	replicator.err = errors.New("fail to replicate")
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateAsync)
 	assertStateIDUpdate()

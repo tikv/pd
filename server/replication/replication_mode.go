@@ -287,7 +287,13 @@ func (m *ModeManager) drPersistStatus(status drAutoSyncStatus) error {
 		data, _ := json.Marshal(status)
 		if err := m.fileReplicater.ReplicateFileToAllMembers(ctx, drStatusFile, data); err != nil {
 			log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", status.State), zap.Error(err))
-			return err
+			// Throw away the error to make it possible to switch to async when
+			// primary and dr DC are disconnected. This will result in the
+			// inability to accurately determine whether data is fully
+			// synchronized when using dr DC to disaster recovery.
+			// TODO: introduce PD's leader-follower connection timeout to solve
+			// this issue. More details: https://github.com/pingcap/pd/issues/2490
+			return nil
 		}
 	}
 	return nil
