@@ -15,6 +15,7 @@ package cache
 
 import (
 	"context"
+	"sort"
 	"testing"
 	"time"
 
@@ -52,6 +53,8 @@ func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 
 	c.Assert(cache.Len(), Equals, 3)
 
+	c.Assert(sortIDs(cache.GetKeys()), DeepEquals, []uint64{1, 2, 3})
+
 	time.Sleep(2 * time.Second)
 
 	value, ok = cache.Get(1)
@@ -67,6 +70,7 @@ func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 	c.Assert(value, Equals, 3.0)
 
 	c.Assert(cache.Len(), Equals, 2)
+	c.Assert(sortIDs(cache.GetKeys()), DeepEquals, []uint64{2, 3})
 
 	cache.Remove(2)
 
@@ -79,6 +83,13 @@ func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 	c.Assert(value, Equals, 3.0)
 
 	c.Assert(cache.Len(), Equals, 1)
+	c.Assert(sortIDs(cache.GetKeys()), DeepEquals, []uint64{3})
+}
+
+func sortIDs(ids []uint64) []uint64 {
+	ids = append(ids[:0:0], ids...)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
 }
 
 func (s *testRegionCacheSuite) TestLRUCache(c *C) {
