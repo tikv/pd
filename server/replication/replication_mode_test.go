@@ -165,9 +165,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	c.Assert(rep.drGetState(), Equals, drStateSync)
 	s.setStoreState(cluster, 2, "down")
 	rep.tickDR()
-	c.Assert(rep.drGetState(), Equals, drStateAsync)
-	assertStateIDUpdate()
-	rep.drSwitchToSync()
+	c.Assert(rep.drGetState(), Equals, drStateSync) // cannot guarantee majority, keep sync.
 	s.setStoreState(cluster, 1, "up")
 	s.setStoreState(cluster, 2, "up")
 	s.setStoreState(cluster, 5, "down")
@@ -189,6 +187,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	// sync_recover -> async
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSyncRecover)
+	s.setStoreState(cluster, 1, "up")
 	s.setStoreState(cluster, 4, "down")
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateAsync)
