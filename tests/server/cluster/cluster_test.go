@@ -669,7 +669,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	}
 	c.Assert(storage.Flush(), IsNil)
 
-	raftCluster = &cluster.RaftCluster{}
+	raftCluster = cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	c.Assert(err, IsNil)

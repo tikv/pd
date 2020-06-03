@@ -14,27 +14,17 @@
 package uiserver
 
 import (
-	"io"
 	"net/http"
 
-	assetfs "github.com/elazarl/go-bindata-assetfs"
-)
-
-var (
-	fs = assetFS()
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
 )
 
 // Handler returns an http.Handler that serves the dashboard UI
 func Handler() http.Handler {
-	if fs == nil {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = io.WriteString(w, "Dashboard UI is not built.\n")
-		})
-	}
-	return http.FileServer(fs)
+	return uiserver.Handler(AssetFS())
 }
 
 // AssetFS returns the AssetFS of the dashboard UI
-func AssetFS() *assetfs.AssetFS {
-	return fs
+func AssetFS() http.FileSystem {
+	return assets
 }

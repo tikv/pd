@@ -83,6 +83,22 @@ func (c *TTL) Get(key uint64) (interface{}, bool) {
 	return item.value, true
 }
 
+// GetKeys returns all keys that are not expired.
+func (c *TTL) GetKeys() []uint64 {
+	c.RLock()
+	defer c.RUnlock()
+
+	var keys []uint64
+
+	now := time.Now()
+	for key, item := range c.items {
+		if item.expire.After(now) {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
 // Remove eliminates an item from cache.
 func (c *TTL) Remove(key uint64) {
 	c.Lock()
@@ -150,6 +166,11 @@ func NewIDTTL(ctx context.Context, gcInterval, ttl time.Duration) *TTLUint64 {
 // Put saves an ID in cache.
 func (c *TTLUint64) Put(id uint64) {
 	c.TTL.Put(id, nil)
+}
+
+// GetAll returns all ids.
+func (c *TTLUint64) GetAll() []uint64 {
+	return c.TTL.GetKeys()
 }
 
 // Exists checks if an ID exists in cache.
