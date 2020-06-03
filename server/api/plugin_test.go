@@ -3,6 +3,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"strings"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/server"
@@ -30,14 +33,27 @@ func (s *testPluginSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testPluginSuite) TestLoadPlugin(c *C) {
-	labels := map[string]string{"a": "a"}
+func (s *testPluginSuite) TestLoadandUnloadPlugin(c *C) {
+	//load
+	labels := map[string]string{"plugin-path": "./pd/plugin/scheduler_example/evict_leader.go"}
 	data, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, s.urlPrefix, data)
 	c.Assert(err, IsNil)
+
+	//unload
+	labels = map[string]string{"plugin-path": "./pd/plugin/scheduler_example/evict_leader.go"}
+	data, err = json.Marshal(labels)
+	c.Assert(err, IsNil)
+	req, err := http.NewRequest(http.MethodDelete, s.urlPrefix, strings.NewReader(string(data)))
+	c.Assert(err, IsNil)
+	resp, err := testDialClient.Do(req)
+	c.Assert(err, IsNil)
+	_ , err = ioutil.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+	err = resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 }
 
-func (s *testPluginSuite) TestUnloadPlugin(c *C) {
-	doDelete(testDialClient, s.urlPrefix)
-}
+

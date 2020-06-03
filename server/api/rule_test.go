@@ -29,42 +29,38 @@ func (s *testRuleSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testRuleSuite) TestGetAll(c *C) {
-	stat :=  []*placement.Rule{}
-	err := readJSON(testDialClient, s.urlPrefix+"/rules", &stat)
-	c.Assert(err, IsNil)
-}
-
-func (s *testRuleSuite) TestGetAllByGroup(c *C) {
-	stat :=  []*placement.Rule{}
-	err := readJSON(testDialClient, s.urlPrefix+"/rules/group/a", &stat)
-	c.Assert(err, IsNil)
-}
-
-func (s *testRuleSuite) TestGetAllByRegion(c *C) {
-	stat :=  []*placement.Rule{}
-	err := readJSON(testDialClient, s.urlPrefix+"/rules/region/10", &stat)
-	c.Assert(err, IsNil)
-}
-
-func (s *testRuleSuite) TestGetAllByKey(c *C) {
-	stat :=  []*placement.Rule{}
-	err := readJSON(testDialClient, s.urlPrefix+"/rules/key/a", &stat)
-	c.Assert(err, IsNil)
-}
-
-func (s *testRuleSuite) TestGet(c *C) {
-	stat :=  placement.Rule{}
-	err := readJSON(testDialClient, s.urlPrefix+"/rule/a/1", &stat)
-	c.Assert(err, IsNil)
-}
-
-func (s *testRuleSuite) TestSet(c *C) {
+func (s *testRuleSuite) Testrule(c *C) {
+	c.Assert(postJSON(testDialClient, s.urlPrefix, []byte(`{"enable-placement-rules":"true"}`)), IsNil)
+	//Set
 	err := postJSON(testDialClient, s.urlPrefix+"/rule", nil)
 	c.Assert(err, IsNil)
-}
 
-func (s *testRuleSuite) TestDelete(c *C) {
-	//requestStatusBody(c, testDialClient, http.MethodDelete, s.urlPrefix+"/rule/a/1")
+	//Delete
 	doDelete(testDialClient, s.urlPrefix+"/rule/a/1")
+
+	//GetAll
+	stat :=  []*placement.Rule{}
+	err = readJSON(testDialClient, s.urlPrefix+"/rules", &stat)
+	c.Assert(err, IsNil)
+
+	//GetAllByGroup
+	stat =  []*placement.Rule{}
+	err = readJSON(testDialClient, s.urlPrefix+"/rules/group/a", &stat)
+	c.Assert(err, IsNil)
+
+	//GetAllByRegion
+	stat =  []*placement.Rule{}
+	err = readJSON(testDialClient, s.urlPrefix+"/rules/region/10", &stat)
+	c.Assert(err, IsNil)
+
+	//GetAllByKey
+	stat =  []*placement.Rule{}
+	err = readJSON(testDialClient, s.urlPrefix+"/rules/key/a", &stat)
+	c.Assert(err, IsNil)
+
+	//Get
+	info :=  placement.Rule{}
+	err = readJSON(testDialClient, s.urlPrefix+"/rule/a/1", &info)
+	c.Assert(err, IsNil)
+
 }
