@@ -126,6 +126,6 @@ func (h *Redirector) ReverseProxy(w http.ResponseWriter, r *http.Request) {
 }
 
 // NewStatusAwareHandler returns a Handler that switches between different Handlers based on status.
-func (h *Redirector) NewStatusAwareHandler(handler http.Handler, stoppedHandler http.Handler) http.Handler {
-	return h.status.NewStatusAwareHandler(handler, stoppedHandler)
+func (h *Redirector) NewStatusAwareHandler(handler http.Handler) http.Handler {
+	return h.status.NewStatusAwareHandler(handler, apiserver.StoppedHandler)
 }
