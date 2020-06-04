@@ -67,7 +67,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 			}
 			redirector = adapter.NewRedirector(srv.Name(), cfg.ClusterTLSConfig)
 			assets = uiserver.Assets(cfg)
-			s := apiserver.NewService(
+			s = apiserver.NewService(
 				cfg,
 				http.HandlerFunc(redirector.ReverseProxy),
 				assets,
