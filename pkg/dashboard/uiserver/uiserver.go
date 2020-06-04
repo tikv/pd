@@ -14,17 +14,8 @@
 package uiserver
 
 import (
-	"net/http"
-
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
 )
 
 // Handler returns an http.Handler that serves the dashboard UI
-func Handler() http.Handler {
-	return uiserver.Handler(AssetFS())
-}
-
-// AssetFS returns the AssetFS of the dashboard UI
-func AssetFS() http.FileSystem {
-	return assets
-}
+var Handler = uiserver.Handler
