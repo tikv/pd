@@ -21,6 +21,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
+
 	"github.com/pingcap/pd/v4/server"
 )
 
@@ -29,7 +31,7 @@ var (
 		Name:       "dashboard",
 		Version:    "v1",
 		IsCore:     false,
-		PathPrefix: "/dashboard/",
+		PathPrefix: config.UIPathPrefix,
 	}
 )
 

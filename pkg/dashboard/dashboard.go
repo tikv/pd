@@ -21,9 +21,11 @@ import (
 	"time"
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
 
 	"github.com/pingcap/pd/v4/pkg/dashboard/adapter"
-	"github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
+	ui "github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/v4/server"
 )
 
@@ -32,14 +34,14 @@ var (
 		Name:       "dashboard-api",
 		Version:    "v1",
 		IsCore:     false,
-		PathPrefix: "/dashboard/api/",
+		PathPrefix: config.APIPathPrefix,
 	}
 
 	uiServiceGroup = server.ServiceGroup{
 		Name:       "dashboard-ui",
 		Version:    "v1",
 		IsCore:     false,
-		PathPrefix: "/dashboard/",
+		PathPrefix: config.UIPathPrefix,
 	}
 )
 
@@ -50,22 +52,28 @@ func SetCheckInterval(d time.Duration) {
 
 // GetServiceBuilders returns all ServiceBuilders required by Dashboard
 func GetServiceBuilders() []server.HandlerBuilder {
-	var s *apiserver.Service
-	var redirector *adapter.Redirector
+	var (
+		err        error
+		cfg        *config.Config
+		redirector *adapter.Redirector
+		assets     http.FileSystem
+		s          *apiserver.Service
+	)
 
 	return []server.HandlerBuilder{
 		// Dashboard API Service
 		func(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, error) {
-			tlsConfig, err := srv.GetSecurityConfig().ToTLSConfig()
-			if err != nil {
+			if cfg, err = adapter.GenDashboardConfig(srv); err != nil {
 				return nil, apiServiceGroup, err
 			}
-
-			redirector = adapter.NewRedirector(srv.Name(), tlsConfig)
-
-			if s, err = adapter.NewAPIService(srv, http.HandlerFunc(redirector.ReverseProxy)); err != nil {
-				return nil, apiServiceGroup, err
-			}
+			redirector = adapter.NewRedirector(srv.Name(), cfg.ClusterTLSConfig)
+			assets = ui.Assets(cfg)
+			s = apiserver.NewService(
+				cfg,
+				http.HandlerFunc(redirector.ReverseProxy),
+				assets,
+				adapter.GenPDDataProviderConstructor(srv),
+			)
 
 			m := adapter.NewManager(srv, s, redirector)
 			srv.AddStartCallback(m.Start)
@@ -75,8 +83,12 @@ func GetServiceBuilders() []server.HandlerBuilder {
 		},
 		// Dashboard UI
 		func(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
+			if err != nil {
+				return nil, uiServiceGroup, err
+			}
+
 			handler := s.NewStatusAwareHandler(
-				http.StripPrefix(uiServiceGroup.PathPrefix, uiserver.Handler()),
+				http.StripPrefix(uiServiceGroup.PathPrefix, uiserver.Handler(assets)),
 				http.HandlerFunc(redirector.TemporaryRedirect),
 			)
 			return handler, uiServiceGroup, nil
