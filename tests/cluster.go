@@ -46,6 +46,13 @@ const (
 	Destroy
 )
 
+var (
+	// WaitLeaderReturnDelay represents the time interval of WaitLeader sleep before returning.
+	WaitLeaderReturnDelay = 20 * time.Millisecond
+	// WaitLeaderCheckInterval represents the time interval of WaitLeader running check.
+	WaitLeaderCheckInterval = 500 * time.Millisecond
+)
+
 // TestServer is only for test.
 type TestServer struct {
 	sync.RWMutex
@@ -438,11 +445,11 @@ func (c *TestCluster) WaitLeader() string {
 		}
 		for name, num := range counter {
 			if num == running && c.GetServer(name).IsLeader() {
-				time.Sleep(20 * time.Millisecond)
+				time.Sleep(WaitLeaderReturnDelay)
 				return name
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(WaitLeaderCheckInterval)
 	}
 	return ""
 }

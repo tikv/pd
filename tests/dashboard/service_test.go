@@ -68,6 +68,8 @@ func (s *serverTestSuite) SetUpSuite(c *C) {
 func (s *serverTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 	s.httpClient.CloseIdleConnections()
+	server.EnableZap = false
+	dashboard.SetCheckInterval(time.Second)
 }
 
 func (s *serverTestSuite) checkRespCode(c *C, url string, code int) {
