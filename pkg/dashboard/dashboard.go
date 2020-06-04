@@ -22,9 +22,10 @@ import (
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
 
 	"github.com/pingcap/pd/v4/pkg/dashboard/adapter"
-	"github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
+	ui "github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/v4/server"
 )
 
@@ -66,7 +67,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 				return nil, apiServiceGroup, err
 			}
 			redirector = adapter.NewRedirector(srv.Name(), cfg.ClusterTLSConfig)
-			assets = uiserver.Assets(cfg)
+			assets = ui.Assets(cfg)
 			s = apiserver.NewService(
 				cfg,
 				http.HandlerFunc(redirector.ReverseProxy),
