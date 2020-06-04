@@ -18,15 +18,16 @@ import (
 	"os"
 	"sync"
 
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
 )
 
 var once sync.Once
 
-// RewriteAssetsPublicPath init the static resources with given public path prefix.
-func RewriteAssetsPublicPath(publicPath string) {
+// Assets returns the Assets FileSystem of the dashboard UI
+func Assets(cfg *config.Config) http.FileSystem {
 	once.Do(func() {
-		uiserver.RewriteAssets(publicPath, AssetFS(), func(fs http.FileSystem, f http.File, path, newContent string, bs []byte) {
+		uiserver.RewriteAssets(assets, cfg, func(fs http.FileSystem, f http.File, path, newContent string, bs []byte) {
 			m := fs.(vfsgen۰FS)
 			fi := f.(os.FileInfo)
 			m[path] = &vfsgen۰CompressedFileInfo{
@@ -37,4 +38,5 @@ func RewriteAssetsPublicPath(publicPath string) {
 			}
 		})
 	})
+	return assets
 }
