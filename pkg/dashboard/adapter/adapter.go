@@ -54,6 +54,7 @@ func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 
 // GenPDDataProviderConstructor generates a PDDataProviderConstructor for Dashboard API Service.
 func GenPDDataProviderConstructor(srv *server.Server) apiserver.PDDataProviderConstructor {
+	// Get RegionInfos directly from Server, so dashboard Config and httpClient are not needed.
 	return func(c *config.Config, httpClient *http.Client, etcdClient *clientv3.Client) *region.PDDataProvider {
 		return &region.PDDataProvider{
 			EtcdClient:     etcdClient,
