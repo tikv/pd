@@ -113,6 +113,7 @@ Usage:
     "high-space-ratio": 0.6,
     "hot-region-cache-hits-threshold": 3,
     "hot-region-schedule-limit": 4,
+    "key-type": "table",
     "leader-schedule-limit": 4,
     "leader-schedule-policy": "count",
     "low-space-ratio": 0.8,
@@ -187,6 +188,12 @@ This option only works when key type is "table".
 
     ```bash
     >> config set enable-cross-table-merge true  // Enable cross table merge.
+    ```
+
+- `key-type` specifies the key encoding type used by the cluster. There are some strategics supported: ["table", "raw", "txn"], default: "table". When key type is "raw" or "txn", PD will be allowed to merge region cross table. 
+
+    ```bash
+    >> config set key-type raw  // Enable cross table merge.
     ```
 
 - `patrol-region-interval` controls the execution frequency that `replicaChecker` checks the health status of Regions. A shorter interval indicates a higher execution frequency. Generally, you do not need to adjust it.

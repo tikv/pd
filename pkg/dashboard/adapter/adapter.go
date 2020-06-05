@@ -22,12 +22,11 @@ import (
 	"go.etcd.io/etcd/clientv3"
 
 	"github.com/pingcap/pd/v4/pkg/dashboard/keyvisual/input"
-	"github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/v4/server"
 )
 
-// NewAPIService uses the PD information to create a new apiserver.Service.
-func NewAPIService(srv *server.Server, redirector http.Handler) (*apiserver.Service, error) {
+// GenDashboardConfig generates a configuration for Dashboard Server.
+func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 	cfg := srv.GetConfig()
 
 	etcdCfg, err := cfg.GenEmbedEtcdConfig()
@@ -36,31 +35,30 @@ func NewAPIService(srv *server.Server, redirector http.Handler) (*apiserver.Serv
 	}
 
 	dashboardCfg := &config.Config{
-		DataDir:    cfg.DataDir,
-		PDEndPoint: etcdCfg.ACUrls[0].String(),
-		PathPrefix: cfg.Dashboard.PublicPathPrefix,
+		DataDir:          cfg.DataDir,
+		PDEndPoint:       etcdCfg.ACUrls[0].String(),
+		PublicPathPrefix: cfg.Dashboard.PublicPathPrefix,
 	}
-	uiserver.RewriteAssetsPublicPath(cfg.Dashboard.PublicPathPrefix)
-	dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToTLSConfig()
-	if err != nil {
+
+	if dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToTLSConfig(); err != nil {
 		return nil, err
 	}
-	dashboardCfg.TiDBTLSConfig, err = cfg.Dashboard.ToTiDBTLSConfig()
-	if err != nil {
+	if dashboardCfg.TiDBTLSConfig, err = cfg.Dashboard.ToTiDBTLSConfig(); err != nil {
 		return nil, err
 	}
 
-	s := apiserver.NewService(
-		dashboardCfg,
-		redirector,
-		uiserver.AssetFS(),
-		func(c *config.Config, httpClient *http.Client, etcdClient *clientv3.Client) *region.PDDataProvider {
-			return &region.PDDataProvider{
-				EtcdClient:     etcdClient,
-				PeriodicGetter: input.NewCorePeriodicGetter(srv),
-			}
-		},
-	)
+	dashboardCfg.NormalizePublicPathPrefix()
 
-	return s, nil
+	return dashboardCfg, nil
+}
+
+// GenPDDataProviderConstructor generates a PDDataProviderConstructor for Dashboard API Service.
+func GenPDDataProviderConstructor(srv *server.Server) apiserver.PDDataProviderConstructor {
+	// Get RegionInfos directly from Server, so dashboard Config and httpClient are not needed.
+	return func(c *config.Config, httpClient *http.Client, etcdClient *clientv3.Client) *region.PDDataProvider {
+		return &region.PDDataProvider{
+			EtcdClient:     etcdClient,
+			PeriodicGetter: input.NewCorePeriodicGetter(srv),
+		}
+	}
 }

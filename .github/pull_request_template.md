@@ -5,37 +5,45 @@ PR Title Format:
 2. *: what's changed
 -->
 
-### What problem does this PR solve? <!--add the issue link with a summary if it exists-->
+### What problem does this PR solve?
 
+<!-- Add the issue link with a summary if it exists. -->
 
 ### What is changed and how it works?
 
+### Check List
 
-### Check List <!--REMOVE the items that are not applicable-->
+<!-- Remove the items that are not applicable. -->
 
-Tests <!-- At least one of them must be included. -->
+Tests
 
- - Unit test
- - Integration test
- - Manual test (add detailed scripts or steps below)
- - No code
+<!-- At least one of them must be included. -->
+
+- Unit test
+- Integration test
+- Manual test (add detailed scripts or steps below)
+- No code
 
 Code changes
 
- - Has configuration change
- - Has HTTP API interfaces change (Don't forget to [add the declarative for API](https://github.com/pingcap/pd/blob/master/docs/development.md#updating-api-documentation))
- - Has persistent data change
+- Has configuration change
+- Has HTTP API interfaces change (Don't forget to [add the declarative for API](https://github.com/pingcap/pd/blob/master/docs/development.md#updating-api-documentation))
+- Has persistent data change
 
 Side effects
 
- - Possible performance regression
- - Increased code complexity
- - Breaking backward compatibility
+- Possible performance regression
+- Increased code complexity
+- Breaking backward compatibility
 
 Related changes
 
-- PR to update `pingcap/docs`/`pingcap/docs-cn`:
-- PR to update `pingcap/tidb-ansible`:
+- PR to update [`pingcap/docs`](https://github.com/pingcap/docs)/[`pingcap/docs-cn`](https://github.com/pingcap/docs-cn):
+- PR to update [`pingcap/tidb-ansible`](https://github.com/pingcap/tidb-ansible):
 - Need to cherry-pick to the release branch
 
-### Release note <!-- bugfixes or new feature need a release note -->
+### Release note
+
+<!-- A bugfix or a new feature needs a release note. If there is no need release note, just uncomment the below line. -->
+
+<!-- - No release note -->
