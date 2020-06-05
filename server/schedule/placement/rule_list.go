@@ -15,7 +15,11 @@ package placement
 
 import (
 	"bytes"
+	"encoding/hex"
 	"sort"
+	"strings"
+
+	"github.com/pkg/errors"
 )
 
 type splitPointType int
@@ -68,9 +72,9 @@ type ruleList struct {
 	ranges []rangeRules // ranges[i] contains rules apply to (ranges[i].startKey, ranges[i+1].startKey).
 }
 
-func buildRuleList(rules map[[2]string]*Rule) ruleList {
+func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 	if len(rules) == 0 {
-		return ruleList{}
+		return ruleList{}, errors.New("no rule left")
 	}
 	// collect and sort split points.
 	var points []splitPoint
@@ -105,6 +109,15 @@ func buildRuleList(rules map[[2]string]*Rule) ruleList {
 		if i == len(points)-1 || !bytes.Equal(p.key, points[i+1].key) {
 			// next key is different, push sr to rl.
 			rr := sr.rules
+			if len(rr) == 0 {
+				var endKey []byte
+				if i != len(points)-1 {
+					endKey = points[i+1].key
+				}
+				return ruleList{}, errors.Errorf("no rule for range {%s, %s}",
+					strings.ToUpper(hex.EncodeToString(p.key)),
+					strings.ToUpper(hex.EncodeToString(endKey)))
+			}
 			if i != len(points)-1 {
 				rr = append(rr[:0:0], rr...) // clone
 			}
@@ -115,7 +128,7 @@ func buildRuleList(rules map[[2]string]*Rule) ruleList {
 			})
 		}
 	}
-	return rl
+	return rl, nil
 }
 
 func (rl ruleList) getSplitKeys(start, end []byte) [][]byte {
