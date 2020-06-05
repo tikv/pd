@@ -53,24 +53,34 @@ func SetCheckInterval(d time.Duration) {
 // GetServiceBuilders returns all ServiceBuilders required by Dashboard
 func GetServiceBuilders() []server.HandlerBuilder {
 	var (
-		err        error
-		cfg        *config.Config
-		redirector *adapter.Redirector
-		assets     http.FileSystem
-		s          *apiserver.Service
+		err           error
+		cfg           *config.Config
+		internalProxy bool
+		redirector    *adapter.Redirector
+		assets        http.FileSystem
+		s             *apiserver.Service
 	)
 
+	// The order of execution must be sequential.
 	return []server.HandlerBuilder{
 		// Dashboard API Service
 		func(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, error) {
 			if cfg, err = adapter.GenDashboardConfig(srv); err != nil {
 				return nil, apiServiceGroup, err
 			}
+			internalProxy = srv.GetConfig().Dashboard.InternalProxy
 			redirector = adapter.NewRedirector(srv.Name(), cfg.ClusterTLSConfig)
 			assets = ui.Assets(cfg)
+
+			var stoppedHandler http.Handler
+			if internalProxy {
+				stoppedHandler = http.HandlerFunc(redirector.ReverseProxy)
+			} else {
+				stoppedHandler = http.HandlerFunc(redirector.TemporaryRedirect)
+			}
 			s = apiserver.NewService(
 				cfg,
-				http.HandlerFunc(redirector.ReverseProxy),
+				stoppedHandler,
 				assets,
 				adapter.GenPDDataProviderConstructor(srv),
 			)
@@ -87,10 +97,14 @@ func GetServiceBuilders() []server.HandlerBuilder {
 				return nil, uiServiceGroup, err
 			}
 
-			handler := s.NewStatusAwareHandler(
-				http.StripPrefix(uiServiceGroup.PathPrefix, uiserver.Handler(assets)),
-				http.HandlerFunc(redirector.TemporaryRedirect),
-			)
+			var handler http.Handler
+			uiHandler := http.StripPrefix(uiServiceGroup.PathPrefix, uiserver.Handler(assets))
+			if internalProxy {
+				handler = redirector.NewStatusAwareHandler(uiHandler)
+			} else {
+				handler = s.NewStatusAwareHandler(uiHandler, http.HandlerFunc(redirector.TemporaryRedirect))
+			}
+
 			return handler, uiServiceGroup, nil
 		},
 	}
