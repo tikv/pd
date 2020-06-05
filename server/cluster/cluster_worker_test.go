@@ -18,7 +18,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	// Register schedulers
+	"github.com/pingcap/pd/v4/pkg/mock/mockid"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/kv"
 	_ "github.com/pingcap/pd/v4/server/schedulers"
 )
 
@@ -27,23 +29,27 @@ var _ = Suite(&testClusterWorkerSuite{})
 type testClusterWorkerSuite struct{}
 
 func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
-	var cluster RaftCluster
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	left := &metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("b")}
 	right := &metapb.Region{Id: 2, StartKey: []byte("b"), EndKey: []byte("c")}
-	_, err := cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: left, Right: right})
+	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: left, Right: right})
 	c.Assert(err, IsNil)
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: right, Right: left})
 	c.Assert(err, NotNil)
 }
 
 func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
-	var cluster RaftCluster
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	regions := []*metapb.Region{
 		{Id: 1, StartKey: []byte(""), EndKey: []byte("a")},
 		{Id: 2, StartKey: []byte("a"), EndKey: []byte("b")},
 		{Id: 3, StartKey: []byte("b"), EndKey: []byte("c")},
 		{Id: 3, StartKey: []byte("c"), EndKey: []byte("")},
 	}
-	_, err := cluster.HandleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
+	_, err = cluster.HandleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
 	c.Assert(err, IsNil)
 }

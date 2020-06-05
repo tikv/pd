@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/pkg/component"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
@@ -99,7 +100,8 @@ type RaftCluster struct {
 	storesStats     *statistics.StoresStats
 	hotSpotCache    *statistics.HotCache
 
-	coordinator *coordinator
+	coordinator    *coordinator
+	suspectRegions *cache.TTLUint64 // suspectRegions are regions that may need fix
 
 	wg           sync.WaitGroup
 	quit         chan struct{}
@@ -193,6 +195,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
+	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
 }
 
 // Start starts a cluster.
@@ -410,6 +413,29 @@ func (c *RaftCluster) SetStorage(s *core.Storage) {
 	c.Lock()
 	defer c.Unlock()
 	c.storage = s
+}
+
+// AddSuspectRegions adds regions to suspect list.
+func (c *RaftCluster) AddSuspectRegions(ids ...uint64) {
+	c.Lock()
+	defer c.Unlock()
+	for _, id := range ids {
+		c.suspectRegions.Put(id)
+	}
+}
+
+// GetSuspectRegions gets all suspect regions.
+func (c *RaftCluster) GetSuspectRegions() []uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	return c.suspectRegions.GetAll()
+}
+
+// RemoveSuspectRegion removes region from suspect list.
+func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
+	c.Lock()
+	defer c.Unlock()
+	c.suspectRegions.Remove(id)
 }
 
 // HandleStoreHeartbeat updates the store status.

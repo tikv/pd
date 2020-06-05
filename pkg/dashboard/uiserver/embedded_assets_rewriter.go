@@ -14,44 +14,30 @@
 package uiserver
 
 import (
-	"html"
+	"net/http"
 	"os"
-	"strings"
 	"sync"
+	"time"
+
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
 )
 
 var once sync.Once
 
-type modifiedFileInfo struct {
-	os.FileInfo
-	size int64
-}
-
-func (f modifiedFileInfo) Size() int64 {
-	return f.size
-}
-
-func (f modifiedFileInfo) Sys() interface{} {
-	return nil
-}
-
-// InitAssetFS init the static resources with given public path prefix.
-func InitAssetFS(prefix string) {
+// Assets returns the Assets FileSystem of the dashboard UI
+func Assets(cfg *config.Config) http.FileSystem {
 	once.Do(func() {
-		rewrite := func(assetPath string) {
-			a, err := _bindata[assetPath]()
-			if err != nil {
-				panic("Asset " + assetPath + " not found.")
+		uiserver.RewriteAssets(assets, cfg, func(fs http.FileSystem, f http.File, path, newContent string, bs []byte) {
+			m := fs.(vfsgen۰FS)
+			fi := f.(os.FileInfo)
+			m[path] = &vfsgen۰CompressedFileInfo{
+				name:              fi.Name(),
+				modTime:           time.Now(),
+				uncompressedSize:  int64(len(newContent)),
+				compressedContent: bs,
 			}
-			tmplText := string(a.bytes)
-			updated := strings.ReplaceAll(tmplText, "__PUBLIC_PATH_PREFIX__", html.EscapeString(prefix))
-			a.bytes = []byte(updated)
-			a.info = modifiedFileInfo{a.info, int64(len(a.bytes))}
-			_bindata[assetPath] = func() (*asset, error) {
-				return a, nil
-			}
-		}
-		rewrite("build/index.html")
-		rewrite("build/diagnoseReport.html")
+		})
 	})
+	return assets
 }

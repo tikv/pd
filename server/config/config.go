@@ -29,15 +29,16 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/grpcutil"
-	"github.com/pingcap/pd/v4/pkg/metricutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/pingcap/pd/v4/pkg/grpcutil"
+	"github.com/pingcap/pd/v4/pkg/metricutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/schedule"
 )
 
 // Config is the pd server configuration.
@@ -210,8 +211,6 @@ const (
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
-
-	defaultPublicPathPrefix = "/dashboard"
 )
 
 var (
@@ -465,11 +464,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
-
-	if c.Dashboard.PublicPathPrefix == "" {
-		c.Dashboard.PublicPathPrefix = defaultPublicPathPrefix
-	}
-	c.Dashboard.PublicPathPrefix = strings.TrimRight(c.Dashboard.PublicPathPrefix, "/")
 
 	return nil
 }
@@ -1128,6 +1122,7 @@ type DashboardConfig struct {
 	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb_cert_path"`
 	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb_key_path"`
 	PublicPathPrefix string `toml:"public-path-prefix" json:"public_path_prefix"`
+	InternalProxy    bool   `toml:"internal-proxy" json:"internal_proxy"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
