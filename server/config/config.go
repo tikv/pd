@@ -1122,6 +1122,7 @@ type DashboardConfig struct {
 	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb_cert_path"`
 	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb_key_path"`
 	PublicPathPrefix string `toml:"public-path-prefix" json:"public_path_prefix"`
+	InternalProxy    bool   `toml:"internal-proxy" json:"internal_proxy"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.

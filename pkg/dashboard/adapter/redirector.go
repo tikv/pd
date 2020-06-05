@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/utils"
 )
 
 const (
@@ -36,6 +37,9 @@ type Redirector struct {
 
 	address string
 	proxy   *httputil.ReverseProxy
+	// The status of the dashboard in the cluster.
+	// It is not equal to `apiserver.Service.status`.
+	status *utils.ServiceStatus
 }
 
 // NewRedirector creates a new Redirector.
@@ -43,6 +47,7 @@ func NewRedirector(name string, tlsConfig *tls.Config) *Redirector {
 	return &Redirector{
 		name:      name,
 		tlsConfig: tlsConfig,
+		status:    utils.NewServiceStatus(),
 	}
 }
 
@@ -56,11 +61,13 @@ func (h *Redirector) SetAddress(addr string) {
 	}
 
 	if addr == "" {
+		h.status.Stop()
 		h.address = ""
 		h.proxy = nil
 		return
 	}
 
+	h.status.Start()
 	h.address = addr
 	target, _ := url.Parse(addr) // error has been handled in checkAddress
 	h.proxy = httputil.NewSingleHostReverseProxy(target)
@@ -116,4 +123,9 @@ func (h *Redirector) ReverseProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy.ServeHTTP(w, r)
+}
+
+// NewStatusAwareHandler returns a Handler that switches between different Handlers based on status.
+func (h *Redirector) NewStatusAwareHandler(handler http.Handler) http.Handler {
+	return h.status.NewStatusAwareHandler(handler, apiserver.StoppedHandler)
 }

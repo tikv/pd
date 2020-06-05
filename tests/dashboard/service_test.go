@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tests/pdctl"
 
@@ -72,6 +73,14 @@ func (s *serverTestSuite) TearDownSuite(c *C) {
 	dashboard.SetCheckInterval(time.Second)
 }
 
+func (s *serverTestSuite) TestDashboardRedirect(c *C) {
+	s.testDashboard(c, false)
+}
+
+func (s *serverTestSuite) TestDashboardProxy(c *C) {
+	s.testDashboard(c, true)
+}
+
 func (s *serverTestSuite) checkRespCode(c *C, url string, code int) {
 	resp, err := s.httpClient.Get(url) //nolint:gosec
 	c.Assert(err, IsNil)
@@ -85,20 +94,22 @@ func (s *serverTestSuite) waitForConfigSync() {
 	time.Sleep(time.Second)
 }
 
-func (s *serverTestSuite) checkServiceIsStarted(c *C, servers map[string]*tests.TestServer, leader *tests.TestServer) string {
+func (s *serverTestSuite) checkServiceIsStarted(c *C, internalProxy bool, servers map[string]*tests.TestServer, leader *tests.TestServer) string {
 	s.waitForConfigSync()
 	dashboardAddress := leader.GetServer().GetPersistOptions().GetDashboardAddress()
 	hasServiceNode := false
 	for _, srv := range servers {
 		c.Assert(srv.GetPersistOptions().GetDashboardAddress(), Equals, dashboardAddress)
 		addr := srv.GetAddr()
-		if addr == dashboardAddress {
+		if addr == dashboardAddress || internalProxy {
 			s.checkRespCode(c, fmt.Sprintf("%s/dashboard/", addr), http.StatusOK)
 			s.checkRespCode(c, fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusUnauthorized)
-			hasServiceNode = true
+			if addr == dashboardAddress {
+				hasServiceNode = true
+			}
 		} else {
 			s.checkRespCode(c, fmt.Sprintf("%s/dashboard/", addr), http.StatusTemporaryRedirect)
-			s.checkRespCode(c, fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusUnauthorized)
+			s.checkRespCode(c, fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusTemporaryRedirect)
 		}
 	}
 	c.Assert(hasServiceNode, IsTrue)
@@ -115,8 +126,10 @@ func (s *serverTestSuite) checkServiceIsStopped(c *C, servers map[string]*tests.
 	}
 }
 
-func (s *serverTestSuite) TestDashboard(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3)
+func (s *serverTestSuite) testDashboard(c *C, internalProxy bool) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) {
+		conf.Dashboard.InternalProxy = internalProxy
+	})
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
@@ -130,7 +143,7 @@ func (s *serverTestSuite) TestDashboard(c *C) {
 	leaderAddr := leader.GetAddr()
 
 	// auto select node
-	dashboardAddress1 := s.checkServiceIsStarted(c, servers, leader)
+	dashboardAddress1 := s.checkServiceIsStarted(c, internalProxy, servers, leader)
 
 	// pd-ctl set another addr
 	var dashboardAddress2 string
@@ -143,7 +156,7 @@ func (s *serverTestSuite) TestDashboard(c *C) {
 	args := []string{"-u", leaderAddr, "config", "set", "dashboard-address", dashboardAddress2}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
-	s.checkServiceIsStarted(c, servers, leader)
+	s.checkServiceIsStarted(c, internalProxy, servers, leader)
 	c.Assert(leader.GetServer().GetPersistOptions().GetDashboardAddress(), Equals, dashboardAddress2)
 
 	// pd-ctl set stop

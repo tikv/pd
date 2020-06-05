@@ -123,3 +123,7 @@ location-labels = []
 ## is running behind a reverse proxy. Do not configure it if you access
 ## Dashboard directly.
 # public-path-prefix = "/dashboard"
+
+## When enabled, request will be proxied to the instance running Dashboard
+## internally instead of result in a 307 redirection.
+# internal-proxy = false
