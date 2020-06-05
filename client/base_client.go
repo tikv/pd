@@ -47,6 +47,8 @@ type baseClient struct {
 	security SecurityOption
 
 	gRPCDialOptions []grpc.DialOption
+
+	timeout time.Duration
 }
 
 // SecurityOption records options about tls
@@ -66,6 +68,13 @@ func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
 	}
 }
 
+// WithCustomTimeoutOption configures the client with timeout option.
+func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
+	return func(c *baseClient) {
+		c.timeout = timeout
+	}
+}
+
 // newBaseClient returns a new baseClient.
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption, opts ...ClientOption) (*baseClient, error) {
 	ctx1, cancel := context.WithCancel(ctx)
@@ -75,6 +84,7 @@ func newBaseClient(ctx context.Context, urls []string, security SecurityOption, 
 		ctx:           ctx1,
 		cancel:        cancel,
 		security:      security,
+		timeout:       defaultPDTimeout,
 	}
 	c.connMu.clientConns = make(map[string]*grpc.ClientConn)
 	for _, opt := range opts {
@@ -163,7 +173,7 @@ func (c *baseClient) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	for _, u := range c.urls {
-		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, pdTimeout)
+		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, c.timeout)
 		members, err := c.getMembers(timeoutCtx, u)
 		timeoutCancel()
 		if err != nil || members.GetHeader() == nil {
