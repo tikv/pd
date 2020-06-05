@@ -195,7 +195,7 @@ func (h *ruleHandler) checkRule(r *placement.Rule) error {
 	if err != nil {
 		return errors.Wrap(err, "end key is not hex format")
 	}
-	if len(start) > 0 && bytes.Compare(end, start) <= 0 {
+	if len(end) > 0 && bytes.Compare(end, start) <= 0 {
 		return errors.New("endKey should be greater than startKey")
 	}
 

@@ -89,7 +89,6 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 }
 
 func (s *testManagerSuite) TestKeys(c *C) {
-	s.manager.DeleteRule("pd", "default")
 	rules := []*Rule{
 		{GroupID: "1", ID: "1", Role: "voter", Count: 1, StartKeyHex: "", EndKeyHex: ""},
 		{GroupID: "2", ID: "2", Role: "voter", Count: 1, StartKeyHex: "11", EndKeyHex: "ff"},
@@ -100,6 +99,7 @@ func (s *testManagerSuite) TestKeys(c *C) {
 	for _, r := range rules {
 		s.manager.SetRule(r)
 	}
+	s.manager.DeleteRule("pd", "default")
 
 	splitKeys := [][]string{
 		{"", "", "11", "22", "44", "dd", "ee", "ff"},
@@ -159,6 +159,29 @@ func (s *testManagerSuite) TestKeys(c *C) {
 			c.Assert(rules[i].EndKeyHex, Equals, keys[i*2+2])
 		}
 	}
+}
+
+func (s *testManagerSuite) TestRangeGap(c *C) {
+	// |--  default  --|
+	// cannot delete the last rule
+	err := s.manager.DeleteRule("pd", "default")
+	c.Assert(err, NotNil)
+
+	err = s.manager.SetRule(&Rule{GroupID: "pd", ID: "foo", StartKeyHex: "", EndKeyHex: "abcd", Role: "voter", Count: 1})
+	c.Assert(err, IsNil)
+	// |-- default --|
+	// |-- foo --|
+	// still cannot delete default since it will cause ("abcd", "") has no rules inside.
+	err = s.manager.DeleteRule("pd", "default")
+	c.Assert(err, NotNil)
+	err = s.manager.SetRule(&Rule{GroupID: "pd", ID: "bar", StartKeyHex: "abcd", EndKeyHex: "", Role: "voter", Count: 1})
+	c.Assert(err, IsNil)
+	// now default can be deleted.
+	err = s.manager.DeleteRule("pd", "default")
+	c.Assert(err, IsNil)
+	// cannot change range since it will cause ("abaa", "abcd") has no rules inside.
+	err = s.manager.SetRule(&Rule{GroupID: "pd", ID: "foo", StartKeyHex: "", EndKeyHex: "abaa", Role: "voter", Count: 1})
+	c.Assert(err, NotNil)
 }
 
 func (s *testManagerSuite) dhex(hk string) []byte {
