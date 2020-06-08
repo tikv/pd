@@ -1155,6 +1155,7 @@ func (c *RaftCluster) collectMetrics() {
 
 	c.coordinator.collectSchedulerMetrics()
 	c.coordinator.collectHotSpotMetrics()
+	c.coordinator.opController.CollectStoreLimitMetrics()
 	c.collectClusterMetrics()
 	c.collectHealthStatus()
 }
