@@ -22,7 +22,7 @@ var _ = Suite(&testUtilSuite{})
 
 type testUtilSuite struct{}
 
-func (s *testUtilSuite) TestVerifyLabels(c *C) {
+func (s *testUtilSuite) TestValidateLabels(c *C) {
 	tests := []struct {
 		label  string
 		hasErr bool
@@ -52,5 +52,27 @@ func (s *testUtilSuite) TestVerifyLabels(c *C) {
 	}
 	for _, t := range tests {
 		c.Assert(ValidateLabels([]*metapb.StoreLabel{{Key: t.label}}) != nil, Equals, t.hasErr)
+	}
+}
+
+func (s *testUtilSuite) TestValidateURLWithScheme(c *C) {
+	tests := []struct {
+		addr   string
+		hasErr bool
+	}{
+		{"", true},
+		{"foo", true},
+		{"/foo", true},
+		{"http", true},
+		{"http://", true},
+		{"http://foo", false},
+		{"https://foo", false},
+		{"http://127.0.0.1", false},
+		{"http://127.0.0.1/", false},
+		{"https://foo.com/bar", false},
+		{"https://foo.com/bar/", false},
+	}
+	for _, t := range tests {
+		c.Assert(ValidateURLWithScheme(t.addr) != nil, Equals, t.hasErr)
 	}
 }

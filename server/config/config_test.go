@@ -237,6 +237,71 @@ func newTestScheduleOption() (*PersistOptions, error) {
 	return opt, nil
 }
 
+func (s *testConfigSuite) TestPDServerConfig(c *C) {
+	tests := []struct {
+		cfgData          string
+		hasErr           bool
+		dashboardAddress string
+	}{
+		{
+			`
+[pd-server]
+dashboard-address = "http://127.0.0.1:2379"
+`,
+			false,
+			"http://127.0.0.1:2379",
+		},
+		{
+			`
+[pd-server]
+dashboard-address = "auto"
+`,
+			false,
+			"auto",
+		},
+		{
+			`
+[pd-server]
+dashboard-address = "none"
+`,
+			false,
+			"none",
+		},
+		{
+			"",
+			false,
+			"auto",
+		},
+		{
+			`
+[pd-server]
+dashboard-address = "127.0.0.1:2379"
+`,
+			true,
+			"",
+		},
+		{
+			`
+[pd-server]
+dashboard-address = "foo"
+`,
+			true,
+			"",
+		},
+	}
+
+	for _, t := range tests {
+		cfg := NewConfig()
+		meta, err := toml.Decode(t.cfgData, &cfg)
+		c.Assert(err, IsNil)
+		err = cfg.Adjust(&meta)
+		c.Assert(err != nil, Equals, t.hasErr)
+		if !t.hasErr {
+			c.Assert(cfg.PDServerCfg.DashboardAddress, Equals, t.dashboardAddress)
+		}
+	}
+}
+
 func (s *testConfigSuite) TestDashboardConfig(c *C) {
 	cfgData := `
 [dashboard]
