@@ -801,7 +801,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 		if !strings.HasPrefix(cfg.DashboardAddress, "http") {
 			cfg.DashboardAddress = fmt.Sprintf("%s://%s", s.GetClientScheme(), cfg.DashboardAddress)
 		}
-		if !cluster.IsClientUrl(cfg.DashboardAddress, s.client) {
+		if !cluster.IsClientURL(cfg.DashboardAddress, s.client) {
 			return errors.Errorf("%s is not the client url of any member", cfg.DashboardAddress)
 		}
 	}

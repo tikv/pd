@@ -51,6 +51,7 @@ func ValidateLabels(labels []*metapb.StoreLabel) error {
 	return nil
 }
 
+// ValidateURLWithScheme checks the format of the URL.
 func ValidateURLWithScheme(rawurl string) error {
 	u, err := url.ParseRequestURI(rawurl)
 	if err != nil {
