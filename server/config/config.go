@@ -965,6 +965,20 @@ func (c *PDServerConfig) Clone() *PDServerConfig {
 	}
 }
 
+// Validate is used to validate if some pd-server configurations are right.
+func (c *PDServerConfig) Validate() error {
+	switch c.DashboardAddress {
+	case "auto":
+	case "none":
+	default:
+		if err := ValidateURLWithScheme(c.DashboardAddress); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // StoreLabel is the config item of LabelPropertyConfig.
 type StoreLabel struct {
 	Key   string `toml:"key" json:"key"`
