@@ -948,10 +948,10 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
 	}
-	return nil
+	return c.Validate()
 }
 
-// Clone retruns a cloned PD server config.
+// Clone returns a cloned PD server config.
 func (c *PDServerConfig) Clone() *PDServerConfig {
 	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
 	copy(runtimeServices, c.RuntimeServices)
