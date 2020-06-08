@@ -200,7 +200,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage = true
-	defaultMaxResetTsGap    = 24 * time.Hour
+	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultKeyType          = "table"
 
 	defaultStrictlyMatchLabel  = false
@@ -935,7 +935,7 @@ type PDServerConfig struct {
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
-	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTsGap)
+	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
 	}
