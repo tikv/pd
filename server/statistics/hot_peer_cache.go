@@ -105,8 +105,6 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 
 // CheckRegionFlow checks the flow information of region.
 func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *StoresStats) (ret []*HotPeerStat) {
-	storeIDs := f.getAllStoreIDs(region)
-
 	totalBytes := float64(f.getTotalBytes(region))
 	totalKeys := float64(f.getTotalKeys(region))
 
@@ -116,9 +114,13 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 	byteRate := totalBytes / float64(interval)
 	keyRate := totalKeys / float64(interval)
 
+	// old region is in the front and new region is in the back
+	// which ensures it will hit the cache if moving peer or transfer leader occurs with the same replica number
+
 	var tmpItem *HotPeerStat
+	storeIDs := f.getAllStoreIDs(region)
 	for _, storeID := range storeIDs {
-		isExpired := f.isRegionExpired(region, storeID)
+		isExpired := f.isRegionExpired(region, storeID) // transfer leader or remove peer
 		oldItem := f.getOldHotPeerStat(region.GetID(), storeID)
 		if isExpired && oldItem != nil {
 			tmpItem = oldItem
@@ -141,9 +143,17 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 			isLeader:       region.GetLeader().GetStoreId() == storeID,
 		}
 
-		// use the tmpItem cached from other store
-		if oldItem == nil && tmpItem != nil {
-			oldItem = tmpItem
+		if oldItem == nil {
+			if tmpItem != nil { // use the tmpItem cached from the store where this region was in before
+				oldItem = tmpItem
+			} else { // new item is new peer after adding replica
+				for _, storeID := range storeIDs {
+					oldItem = f.getOldHotPeerStat(region.GetID(), storeID)
+					if oldItem != nil {
+						break
+					}
+				}
+			}
 		}
 
 		newItem = f.updateHotPeerStat(newItem, oldItem, storesStats)
