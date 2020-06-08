@@ -3,5 +3,6 @@ run:
 linters:
   enable:
     - misspell
+    - stylecheck
   disable:
     - errcheck
