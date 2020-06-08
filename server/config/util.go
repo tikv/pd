@@ -14,6 +14,7 @@
 package config
 
 import (
+	"net/url"
 	"regexp"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -46,6 +47,17 @@ func ValidateLabels(labels []*metapb.StoreLabel) error {
 		if err := validateFormat(label.Value, valueFormat); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func ValidateURLWithScheme(rawurl string) error {
+	u, err := url.ParseRequestURI(rawurl)
+	if err != nil {
+		return err
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return errors.Errorf("%s has no scheme", rawurl)
 	}
 	return nil
 }

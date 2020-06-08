@@ -69,7 +69,7 @@ func (h *Redirector) SetAddress(addr string) {
 
 	h.status.Start()
 	h.address = addr
-	target, _ := url.Parse(addr) // error has been handled in checkAddress
+	target, _ := url.Parse(addr) // error has been handled
 	h.proxy = httputil.NewSingleHostReverseProxy(target)
 
 	defaultDirector := h.proxy.Director
