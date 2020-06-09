@@ -948,10 +948,10 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
 	}
-	return nil
+	return c.Validate()
 }
 
-// Clone retruns a cloned PD server config.
+// Clone returns a cloned PD server config.
 func (c *PDServerConfig) Clone() *PDServerConfig {
 	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
 	copy(runtimeServices, c.RuntimeServices)
@@ -963,6 +963,20 @@ func (c *PDServerConfig) Clone() *PDServerConfig {
 		DashboardAddress: c.DashboardAddress,
 		RuntimeServices:  runtimeServices,
 	}
+}
+
+// Validate is used to validate if some pd-server configurations are right.
+func (c *PDServerConfig) Validate() error {
+	switch c.DashboardAddress {
+	case "auto":
+	case "none":
+	default:
+		if err := ValidateURLWithScheme(c.DashboardAddress); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.
