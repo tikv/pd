@@ -279,9 +279,7 @@ func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
 		}
 		if plan.add != nil {
 			b.execAddPeer(plan.add)
-			if kind&OpMerge == 0 {
-				kind |= OpRegion
-			}
+			kind |= OpRegion
 		}
 		if plan.promote != nil {
 			b.execPromoteLearner(plan.promote)
@@ -292,9 +290,7 @@ func (b *Builder) buildSteps(kind OpKind) (OpKind, error) {
 		}
 		if plan.remove != nil {
 			b.execRemovePeer(plan.remove)
-			if kind&OpMerge == 0 {
-				kind |= OpRegion
-			}
+			kind |= OpRegion
 		}
 	}
 	if b.targetLeader != 0 && b.currentLeader != b.targetLeader {
