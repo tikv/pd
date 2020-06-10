@@ -129,7 +129,7 @@ func NewScheduleOptions() *ScheduleOptions {
 	return mso
 }
 
-// SetStoreLimit is's only used to test.
+// SetStoreLimit mocks method
 func (mso *ScheduleOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
 	var sc StoreLimitConfig
 	if _, ok := mso.StoreLimit[storeID]; ok {
@@ -151,7 +151,7 @@ func (mso *ScheduleOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, r
 	mso.StoreLimit[storeID] = sc
 }
 
-// SetAllStoresLimit is's only used to test.
+// SetAllStoresLimit mocks method
 func (mso *ScheduleOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
 	switch typ {
 	case storelimit.AddPeer:

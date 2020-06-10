@@ -1710,6 +1710,11 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
 }
 
+// SetAllStoresLimit sets all store limit for a given type and rate.
+func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
+	c.opt.SetAllStoresLimit(typ, ratePerMin)
+}
+
 var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.
