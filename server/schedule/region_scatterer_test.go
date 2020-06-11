@@ -51,7 +51,7 @@ func (s *testScatterRegionSuite) TestFiveStores(c *C) {
 }
 
 func (s *testScatterRegionSuite) TestSixSpecialStores(c *C) {
-	s.scatterSpecial(c, 3, 6, 3)
+	s.scatterSpecial(c, 3, 6, 4)
 }
 
 func (s *testScatterRegionSuite) TestFiveSpecialStores(c *C) {
@@ -126,19 +126,19 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 	}
 	tc.EnablePlacementRules = true
 	c.Assert(tc.RuleManager.SetRule(&placement.Rule{
-		GroupID: "pd", ID: "learner", Role: placement.Learner, Count: 2,
+		GroupID: "pd", ID: "learner", Role: placement.Learner, Count: 3,
 		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}), IsNil)
 
 	ordinarySeq := newSequencer(numOrdinaryStores)
 	specialSeq := newSequencerWithMinID(numOrdinaryStores+1, numOrdinaryStores+numSpecialStores)
 	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
-	tc.AddRegionWithLearner(1, 1, []uint64{2, 3}, []uint64{numOrdinaryStores + 1, numOrdinaryStores + 2})
+	tc.AddRegionWithLearner(1, 1, []uint64{2, 3}, []uint64{numOrdinaryStores + 1, numOrdinaryStores + 2, numOrdinaryStores + 3})
 	for i := uint64(2); i <= numRegions; i++ {
 		tc.AddRegionWithLearner(
 			i,
 			ordinarySeq.next(),
 			[]uint64{ordinarySeq.next(), ordinarySeq.next()},
-			[]uint64{specialSeq.next(), specialSeq.next()},
+			[]uint64{specialSeq.next(), specialSeq.next(), specialSeq.next()},
 		)
 	}
 
@@ -172,7 +172,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 		c.Assert(count, Equals, numRegions*3/numOrdinaryStores)
 	}
 	for _, count := range countSpecialPeers {
-		c.Assert(count, Equals, numRegions*2/numSpecialStores)
+		c.Assert(count, Equals, numRegions*3/numSpecialStores)
 	}
 }
 
