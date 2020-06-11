@@ -68,9 +68,9 @@ func (s *selectedStores) newFilter(scope string) filter.Filter {
 
 // RegionScatterer scatters regions.
 type RegionScatterer struct {
-	name     string
-	cluster  opt.Cluster
-	context engineContext
+	name           string
+	cluster        opt.Cluster
+	context        engineContext
 	specialEngines map[string]engineContext
 }
 
@@ -78,9 +78,9 @@ type RegionScatterer struct {
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
 func NewRegionScatterer(cluster opt.Cluster) *RegionScatterer {
 	return &RegionScatterer{
-		name:    regionScatterName,
-		cluster: cluster,
-		context: newEngineContext(filter.NewSpecialEngineFilter(regionScatterName)),
+		name:           regionScatterName,
+		cluster:        cluster,
+		context:        newEngineContext(filter.NewSpecialEngineFilter(regionScatterName)),
 		specialEngines: make(map[string]engineContext),
 	}
 }
@@ -93,7 +93,7 @@ type engineContext struct {
 func newEngineContext(filters ...filter.Filter) engineContext {
 	filters = append(filters, filter.StoreStateFilter{ActionScope: regionScatterName})
 	return engineContext{
-		filters: filters,
+		filters:  filters,
 		selected: newSelectedStores(),
 	}
 }
