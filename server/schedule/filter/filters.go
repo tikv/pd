@@ -489,7 +489,7 @@ type engineFilter struct {
 func NewEngineFilter(scope string, allowedEngines ...string) Filter {
 	return &engineFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: "engine", Op: "In", Values: allowedEngines},
+		constraint: placement.LabelConstraint{Key: "engine", Op: "in", Values: allowedEngines},
 	}
 }
 

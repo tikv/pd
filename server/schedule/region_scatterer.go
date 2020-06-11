@@ -130,7 +130,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 
 	scatterWithSameEngine := func(peers []*metapb.Peer, context engineContext) {
 		stores := r.collectAvailableStores(region, context)
-		for _, peer := range region.GetPeers() {
+		for _, peer := range peers {
 			if len(stores) == 0 {
 				context.selected.reset()
 				stores = r.collectAvailableStores(region, context)
