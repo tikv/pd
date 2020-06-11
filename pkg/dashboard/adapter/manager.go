@@ -15,7 +15,6 @@ package adapter
 
 import (
 	"context"
-	"net/url"
 	"sort"
 	"sync"
 	"time"
@@ -51,10 +50,7 @@ type Manager struct {
 
 // NewManager creates a new Manager.
 func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector) *Manager {
-	ctx, cancel := context.WithCancel(srv.Context())
 	return &Manager{
-		ctx:        ctx,
-		cancel:     cancel,
 		srv:        srv,
 		service:    s,
 		redirector: redirector,
@@ -63,7 +59,10 @@ func NewManager(srv *server.Server, s *apiserver.Service, redirector *Redirector
 
 // Start monitoring the dynamic config and control the dashboard.
 func (m *Manager) Start() {
+	m.ctx, m.cancel = context.WithCancel(m.srv.Context())
 	m.wg.Add(1)
+	m.isLeader = false
+	m.members = nil
 	go m.serviceLoop()
 }
 
@@ -137,11 +136,6 @@ func (m *Manager) checkAddress() {
 		m.stopService()
 		return
 	default:
-		if _, err := url.Parse(dashboardAddress); err != nil {
-			log.Error("illegal dashboard address", zap.String("address", dashboardAddress))
-			return
-		}
-
 		if m.isLeader && m.needResetAddress(dashboardAddress) {
 			m.setNewAddress()
 			return

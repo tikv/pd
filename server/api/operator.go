@@ -291,7 +291,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 // @Summary Cancel a Region's pending operator.
 // @Param region_id path int true "A Region's Id"
 // @Produce json
-// @Success 200 {string} string "The pending operator is cancelled."
+// @Success 200 {string} string "The pending operator is canceled."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/{region_id} [delete]

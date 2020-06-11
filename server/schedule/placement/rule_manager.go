@@ -69,7 +69,11 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 		}
 		m.rules[defaultRule.Key()] = defaultRule
 	}
-	m.ruleList = buildRuleList(m.rules)
+	ruleList, err := buildRuleList(m.rules)
+	if err != nil {
+		return err
+	}
+	m.ruleList = ruleList
 	m.initialized = true
 	return nil
 }
@@ -169,8 +173,13 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 	old := m.rules[rule.Key()]
 	m.rules[rule.Key()] = rule
 
-	if err = m.store.SaveRule(rule.StoreKey(), rule); err != nil {
-		// restore
+	ruleList, err := buildRuleList(m.rules)
+	if err == nil {
+		err = m.store.SaveRule(rule.StoreKey(), rule)
+	}
+
+	// restore
+	if err != nil {
 		if old == nil {
 			delete(m.rules, rule.Key())
 		} else {
@@ -179,8 +188,8 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 		return err
 	}
 
+	m.ruleList = ruleList
 	log.Info("placement rule updated", zap.Stringer("rule", rule))
-	m.ruleList = buildRuleList(m.rules)
 	return nil
 }
 
@@ -194,13 +203,21 @@ func (m *RuleManager) DeleteRule(group, id string) error {
 		return nil
 	}
 	delete(m.rules, [2]string{group, id})
+
+	ruleList, err := buildRuleList(m.rules)
+	if err != nil {
+		// restore
+		m.rules[key] = old
+		return err
+	}
+
 	if err := m.store.DeleteRule(old.StoreKey()); err != nil {
 		// restore
 		m.rules[key] = old
 		return err
 	}
+	m.ruleList = ruleList
 	log.Info("placement rule removed", zap.Stringer("rule", old))
-	m.ruleList = buildRuleList(m.rules)
 	return nil
 }
 

@@ -50,17 +50,17 @@ type TimestampOracle struct {
 	member        string
 	client        *clientv3.Client
 	saveInterval  time.Duration
-	maxResetTsGap func() time.Duration
+	maxResetTSGap func() time.Duration
 }
 
 // NewTimestampOracle creates a new TimestampOracle.
 // TODO: remove saveInterval
-func NewTimestampOracle(client *clientv3.Client, rootPath string, member string, saveInterval time.Duration, maxResetTsGap func() time.Duration) *TimestampOracle {
+func NewTimestampOracle(client *clientv3.Client, rootPath string, member string, saveInterval time.Duration, maxResetTSGap func() time.Duration) *TimestampOracle {
 	return &TimestampOracle{
 		rootPath:      rootPath,
 		client:        client,
 		saveInterval:  saveInterval,
-		maxResetTsGap: maxResetTsGap,
+		maxResetTSGap: maxResetTSGap,
 		member:        member,
 	}
 }
@@ -161,7 +161,7 @@ func (t *TimestampOracle) ResetUserTimestamp(tso uint64) error {
 		return errors.New("the specified ts too small than now")
 	}
 
-	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.maxResetTsGap() {
+	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.maxResetTSGap() {
 		tsoCounter.WithLabelValues("err_reset_large_ts").Inc()
 		return errors.New("the specified ts too large than now")
 	}

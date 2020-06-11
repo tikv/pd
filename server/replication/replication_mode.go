@@ -287,7 +287,13 @@ func (m *ModeManager) drPersistStatus(status drAutoSyncStatus) error {
 		data, _ := json.Marshal(status)
 		if err := m.fileReplicater.ReplicateFileToAllMembers(ctx, drStatusFile, data); err != nil {
 			log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", status.State), zap.Error(err))
-			return err
+			// Throw away the error to make it possible to switch to async when
+			// primary and dr DC are disconnected. This will result in the
+			// inability to accurately determine whether data is fully
+			// synchronized when using dr DC to disaster recovery.
+			// TODO: introduce PD's leader-follower connection timeout to solve
+			// this issue. More details: https://github.com/pingcap/pd/issues/2490
+			return nil
 		}
 	}
 	return nil
@@ -329,9 +335,24 @@ func (m *ModeManager) tickDR() {
 
 	drTickCounter.Inc()
 
-	canSync := m.checkCanSync()
+	totalPrimary, totalDr := m.config.DRAutoSync.PrimaryReplicas, m.config.DRAutoSync.DRReplicas
+	downPrimary, downDr := m.checkStoreStatus()
 
-	if !canSync && m.drGetState() != drStateAsync {
+	// canSync is true when every region has at least 1 replica in each DC.
+	canSync := downPrimary < totalPrimary && downDr < totalDr
+
+	// hasMajority is true when every region has majority peer online.
+	var upPeers int
+	if downPrimary < totalPrimary {
+		upPeers += totalPrimary - downPrimary
+	}
+	if downDr < totalDr {
+		upPeers += totalDr - downDr
+	}
+	hasMajority := upPeers*2 > totalPrimary+totalDr
+
+	// If hasMajority is false, the cluster is always unavailable. Switch to async won't help.
+	if !canSync && hasMajority && m.drGetState() != drStateAsync {
 		m.drSwitchToAsync()
 	}
 
@@ -352,22 +373,21 @@ func (m *ModeManager) tickDR() {
 	}
 }
 
-func (m *ModeManager) checkCanSync() bool {
+func (m *ModeManager) checkStoreStatus() (primaryFailCount, drFailCount int) {
 	m.RLock()
 	defer m.RUnlock()
-	var countPrimary, countDR int
 	for _, s := range m.cluster.GetStores() {
 		if !s.IsTombstone() && s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration {
 			labelValue := s.GetLabelValue(m.config.DRAutoSync.LabelKey)
 			if labelValue == m.config.DRAutoSync.Primary {
-				countPrimary++
+				primaryFailCount++
 			}
 			if labelValue == m.config.DRAutoSync.DR {
-				countDR++
+				drFailCount++
 			}
 		}
 	}
-	return countPrimary < m.config.DRAutoSync.PrimaryReplicas && countDR < m.config.DRAutoSync.DRReplicas
+	return
 }
 
 var (

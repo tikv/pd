@@ -29,15 +29,16 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/grpcutil"
-	"github.com/pingcap/pd/v4/pkg/metricutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/pingcap/pd/v4/pkg/grpcutil"
+	"github.com/pingcap/pd/v4/pkg/metricutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/schedule"
 )
 
 // Config is the pd server configuration.
@@ -199,7 +200,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage = true
-	defaultMaxResetTsGap    = 24 * time.Hour
+	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultKeyType          = "table"
 
 	defaultStrictlyMatchLabel  = false
@@ -934,7 +935,7 @@ type PDServerConfig struct {
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
-	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTsGap)
+	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
 	}
@@ -947,10 +948,10 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
 	}
-	return nil
+	return c.Validate()
 }
 
-// Clone retruns a cloned PD server config.
+// Clone returns a cloned PD server config.
 func (c *PDServerConfig) Clone() *PDServerConfig {
 	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
 	copy(runtimeServices, c.RuntimeServices)
@@ -962,6 +963,20 @@ func (c *PDServerConfig) Clone() *PDServerConfig {
 		DashboardAddress: c.DashboardAddress,
 		RuntimeServices:  runtimeServices,
 	}
+}
+
+// Validate is used to validate if some pd-server configurations are right.
+func (c *PDServerConfig) Validate() error {
+	switch c.DashboardAddress {
+	case "auto":
+	case "none":
+	default:
+		if err := ValidateURLWithScheme(c.DashboardAddress); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.
@@ -1117,9 +1132,11 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath   string `toml:"tidb-cacert-path" json:"tidb_cacert_path"`
-	TiDBCertPath string `toml:"tidb-cert-path" json:"tidb_cert_path"`
-	TiDBKeyPath  string `toml:"tidb-key-path" json:"tidb_key_path"`
+	TiDBCAPath       string `toml:"tidb-cacert-path" json:"tidb_cacert_path"`
+	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb_cert_path"`
+	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb_key_path"`
+	PublicPathPrefix string `toml:"public-path-prefix" json:"public_path_prefix"`
+	InternalProxy    bool   `toml:"internal-proxy" json:"internal_proxy"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.

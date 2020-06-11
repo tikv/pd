@@ -1,23 +1,19 @@
 ---
 name: "🐛 Bug Report"
 about: Something isn't working as expected
-title: ''
-labels: 'kind/bug'
+labels: 'type/bug'
 ---
 
-Please answer these questions before submitting your issue. Thanks!
+## Bug Report
 
-1. What did you do?
-If possible, provide a recipe for reproducing the error.
+<!-- Please answer these questions before submitting your issue. Thanks! -->
 
+### What did you do?
 
-2. What did you expect to see?
+<!-- If possible, provide a recipe for reproducing the error. -->
 
+### What did you expect to see?
 
+### What did you see instead?
 
-3. What did you see instead?
-
-
-
-4. What version of PD are you using (`pd-server -V`)?
-
+### What version of PD are you using (`pd-server -V`)?

@@ -25,6 +25,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	pd "github.com/pingcap/pd/v4/client"
@@ -185,6 +186,31 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	}
 	close(quit)
 	wg.Wait()
+}
+
+func (s *clientTestSuite) TestCustomTimeout(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	var endpoints []string
+	for _, s := range cluster.GetServers() {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+	cli, err := pd.NewClientWithContext(s.ctx, endpoints, pd.SecurityOption{}, pd.WithCustomTimeoutOption(1*time.Second))
+	c.Assert(err, IsNil)
+
+	start := time.Now()
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/customTimeout", "return(true)"), IsNil)
+	_, err = cli.GetAllStores(context.TODO())
+	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/customTimeout"), IsNil)
+	c.Assert(err, NotNil)
+	c.Assert(time.Since(start), GreaterEqual, 1*time.Second)
+	c.Assert(time.Since(start), Less, 2*time.Second)
 }
 
 func (s *clientTestSuite) waitLeader(c *C, cli client, leader string) {
