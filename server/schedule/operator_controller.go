@@ -85,7 +85,7 @@ func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams o
 	}
 }
 
-// Ctx returns a ordinaryEngine which will be canceled once RaftCluster is stopped.
+// Ctx returns a context which will be canceled once RaftCluster is stopped.
 // For now, it is only used to control the lifetime of TTL cache in schedulers.
 func (oc *OperatorController) Ctx() context.Context {
 	return oc.ctx
