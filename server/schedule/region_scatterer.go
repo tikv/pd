@@ -70,7 +70,7 @@ func (s *selectedStores) newFilter(scope string) filter.Filter {
 type RegionScatterer struct {
 	name           string
 	cluster        opt.Cluster
-	context        engineContext
+	ordinaryEngine engineContext
 	specialEngines map[string]engineContext
 }
 
@@ -80,7 +80,7 @@ func NewRegionScatterer(cluster opt.Cluster) *RegionScatterer {
 	return &RegionScatterer{
 		name:           regionScatterName,
 		cluster:        cluster,
-		context:        newEngineContext(filter.NewSpecialEngineFilter(regionScatterName)),
+		ordinaryEngine: newEngineContext(filter.NewSpecialEngineFilter(regionScatterName)),
 		specialEngines: make(map[string]engineContext),
 	}
 }
@@ -152,7 +152,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 		}
 	}
 
-	scatterWithSameEngine(ordinaryPeers, r.context)
+	scatterWithSameEngine(ordinaryPeers, r.ordinaryEngine)
 	for engine, peers := range specialPeers {
 		context, ok := r.specialEngines[engine]
 		if !ok {
