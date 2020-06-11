@@ -485,19 +485,19 @@ type engineFilter struct {
 	constraint placement.LabelConstraint
 }
 
-// NewEngineFilter creates a filter that filters out default engine stores.
-// By default, all stores that are not marked with a special engine will be filtered out.
-// Specify the special engine label if you want to include the special stores.
-func NewEngineFilter(scope string, allowEngines ...string) Filter {
-	var values []string
-	for _, v := range allSpeicalEngines {
-		if slice.NoneOf(allowEngines, func(i int) bool { return allowEngines[i] == v }) {
-			values = append(values, v)
-		}
-	}
+// NewEngineFilter creates a filter that only keeps allowedEngines.
+func NewEngineFilter(scope string, allowedEngines ...string) Filter {
 	return &engineFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: values},
+		constraint: placement.LabelConstraint{Key: "engine", Op: "In", Values: allowedEngines},
+	}
+}
+
+// NewSpecialEngineFilter creates a filter that filters out special engine stores.
+func NewSpecialEngineFilter(scope string) Filter {
+	return &engineFilter{
+		scope:      scope,
+		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: allSpeicalEngines},
 	}
 }
 
