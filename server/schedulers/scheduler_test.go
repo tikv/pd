@@ -311,9 +311,9 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	sl, err := schedule.CreateScheduler(LabelType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(LabelType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	op := sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 3)
+	testutil.CheckTransferLeaderFrom(c, op[0], operator.OpLeader, 1)
 
-	// If store3 is disconnected, transfer leader to store 2 instead.
+	// If store3 is disconnected, transfer leader to store 2.
 	tc.SetStoreDisconnect(3)
 	op = sl.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
