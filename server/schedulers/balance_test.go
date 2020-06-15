@@ -357,6 +357,22 @@ func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
 	testutil.CheckTransferLeader(c, s.schedule()[0], operator.OpKind(0), 1, 3)
 }
 
+func (s *testBalanceLeaderSchedulerSuite) TestBalancePolicy(c *C) {
+	// Stores:       1    2     3    4
+	// LeaderCount: 20   66     6   20
+	// LeaderSize:  66   20    20    6
+	s.tc.AddLeaderStore(1, 20, 60)
+	s.tc.AddLeaderStore(2, 66, 20)
+	s.tc.AddLeaderStore(3, 6, 20)
+	s.tc.AddLeaderStore(4, 20, 1)
+	s.tc.AddLeaderRegion(1, 2, 1, 3, 4)
+	s.tc.AddLeaderRegion(2, 1, 2, 3, 4)
+	s.tc.LeaderSchedulePolicy = "count"
+	testutil.CheckTransferLeader(c, s.schedule()[0], operator.OpKind(0), 2, 3)
+	s.tc.LeaderSchedulePolicy = "size"
+	testutil.CheckTransferLeader(c, s.schedule()[0], operator.OpKind(0), 1, 4)
+}
+
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	// Stores:     1    2    3    4
 	// Leaders:    1    2    3   16
