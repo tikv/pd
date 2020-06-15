@@ -151,16 +151,15 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 	switch s := step.(type) {
 	case operator.RemovePeer:
 		if s.FromStore == region.GetLeader().GetStoreId() {
-			if op.Cancel() {
-				oc.buryOperator(op,
-					zap.String("reason", "stale operator, cannot remove leader per"),
-					zap.Reflect("latest-epoch", region.GetRegionEpoch()),
-					zap.Uint64("leader-store", region.GetLeader().GetStoreId()),
-				)
+			if oc.RemoveOperator(op,
+				zap.String("reason", "stale operator, cannot remove leader per"),
+				zap.Reflect("latest-epoch", region.GetRegionEpoch()),
+				zap.Uint64("leader-store", region.GetLeader().GetStoreId()),
+			) {
 				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
+				oc.PromoteWaitingOperator()
 				return true
 			}
-			oc.PromoteWaitingOperator()
 		}
 	}
 	// When the "source" is heartbeat, the region may have a newer
@@ -171,19 +170,16 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 	latest := region.GetRegionEpoch()
 	changes := latest.GetConfVer() - origin.GetConfVer()
 	if changes > uint64(op.ConfVerChanged(region)) {
-		if oc.removeOperatorWithoutBury(op) {
-			if op.Cancel() {
-				oc.buryOperator(
-					op,
-					zap.String("reason", "stale operator, confver does not meet expectations"),
-					zap.Reflect("latest-epoch", region.GetRegionEpoch()),
-					zap.Uint64("diff", changes),
-				)
-				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
-			}
+		if oc.RemoveOperator(
+			op,
+			zap.String("reason", "stale operator, confver does not meet expectations"),
+			zap.Reflect("latest-epoch", region.GetRegionEpoch()),
+			zap.Uint64("diff", changes),
+		) {
+			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
 			oc.PromoteWaitingOperator()
+			return true
 		}
-		return true
 	}
 
 	return false
