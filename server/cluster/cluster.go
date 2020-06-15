@@ -147,10 +147,14 @@ func (c *RaftCluster) LoadClusterStatus() (*Status, error) {
 	if bootstrapTime != typeutil.ZeroTime {
 		isInitialized = c.isInitialized()
 	}
+	var replicationStatus string
+	if c.replicationMode != nil {
+		replicationStatus = c.replicationMode.GetReplicationStatus().String()
+	}
 	return &Status{
 		RaftBootstrapTime: bootstrapTime,
 		IsInitialized:     isInitialized,
-		ReplicationStatus: c.replicationMode.GetReplicationStatus().String(),
+		ReplicationStatus: replicationStatus,
 	}, nil
 }
 
