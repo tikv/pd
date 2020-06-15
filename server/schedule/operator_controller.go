@@ -153,10 +153,11 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 		if s.FromStore == region.GetLeader().GetStoreId() {
 			if op.Cancel() {
 				oc.buryOperator(op,
-					zap.String("reason", "cannot remove leader per"),
+					zap.String("reason", "stale operator, cannot remove leader per"),
 					zap.Reflect("latest-epoch", region.GetRegionEpoch()),
 					zap.Uint64("leader-store", region.GetLeader().GetStoreId()),
 				)
+				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
 				return true
 			}
 			oc.PromoteWaitingOperator()
@@ -172,10 +173,9 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 	if changes > uint64(op.ConfVerChanged(region)) {
 		if oc.removeOperatorWithoutBury(op) {
 			if op.Cancel() {
-				log.Info("stale operator, confver does not meet expectations",
-					zap.Uint64("region-id", op.RegionID()),
-					zap.Duration("takes", op.RunningTime()),
-					zap.Reflect("operator", op),
+				oc.buryOperator(
+					op,
+					zap.String("reason", "stale operator, confver does not meet expectations"),
 					zap.Reflect("latest-epoch", region.GetRegionEpoch()),
 					zap.Uint64("diff", changes),
 				)
@@ -573,10 +573,10 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ..
 			zap.Reflect("operator", op),
 		}
 		fileds = append(fileds, extraFileds...)
-		log.Info("stale operator",
+		log.Info("operator caceled",
 			fileds...,
 		)
-		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
+		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}
 
 	oc.opRecords.Put(op)
