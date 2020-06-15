@@ -311,9 +311,9 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	sl, err := schedule.CreateScheduler(LabelType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(LabelType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	op := sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 3)
+	testutil.CheckTransferLeaderFrom(c, op[0], operator.OpLeader, 1)
 
-	// If store3 is disconnected, transfer leader to store 2 instead.
+	// If store3 is disconnected, transfer leader to store 2.
 	tc.SetStoreDisconnect(3)
 	op = sl.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
@@ -540,7 +540,7 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 	conf.Roles = []string{"follower"}
 	ops := sl.Schedule(tc)
 	c.Assert(ops, HasLen, 1)
-	testutil.CheckTransferPeer(c, ops[0], operator.OpRegion, 2, 4) // transfer follower
+	testutil.CheckTransferPeer(c, ops[0], operator.OpKind(0), 2, 4) // transfer follower
 	conf.Roles = []string{"learner"}
 	ops = sl.Schedule(tc)
 	c.Assert(ops, HasLen, 1)
@@ -579,7 +579,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	// balance region without label
 	ops := bs.Schedule(tc)
 	c.Assert(ops, HasLen, 1)
-	testutil.CheckTransferPeer(c, ops[0], operator.OpBalance, 1, 4)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpKind(0), 1, 4)
 
 	// cannot balance to store 4 and 5 with label
 	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "hotRegion"})
@@ -628,7 +628,7 @@ func (s *testSpecialUseSuite) TestSpecialUseReserved(c *C) {
 	// balance region without label
 	ops := bs.Schedule(tc)
 	c.Assert(ops, HasLen, 1)
-	testutil.CheckTransferPeer(c, ops[0], operator.OpBalance, 1, 4)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpKind(0), 1, 4)
 
 	// cannot balance to store 4 with label
 	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "reserved"})

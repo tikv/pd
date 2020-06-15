@@ -78,15 +78,13 @@ func init() {
 }
 
 // SchedulerType returns the type of the scheduler
-// nolint
-//lint:ignore U1000 ignore staticcheck for unused function
+//nolint
 func SchedulerType() string {
 	return EvictLeaderType
 }
 
 // SchedulerArgs returns the args for the scheduler
-// nolint
-//lint:ignore U1000 ignore staticcheck for unused function
+//nolint
 func SchedulerArgs() []string {
 	args := []string{"1"}
 	return args

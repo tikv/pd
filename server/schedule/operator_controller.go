@@ -448,15 +448,16 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			continue
 		}
 		for n, v := range storelimit.TypeNameValue {
-			if oc.storesLimit[storeID][v] == nil {
+			storeLimit := oc.storesLimit[storeID][v]
+			if storeLimit == nil {
 				continue
 			}
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
 			if stepCost == 0 {
 				continue
 			}
-			storeLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), "take", n).Set(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
-			oc.storesLimit[storeID][v].Take(stepCost)
+			storeLimit.Take(stepCost)
+			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
 	oc.updateCounts(oc.operators)
@@ -809,6 +810,7 @@ func (oc *OperatorController) SetOperator(op *operator.Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.operators[op.RegionID()] = op
+	oc.updateCounts(oc.operators)
 }
 
 // OperatorWithStatus records the operator and its status.
@@ -864,14 +866,12 @@ func (o *OperatorRecords) Put(op *operator.Operator) {
 func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
-		for n, v := range storelimit.TypeNameValue {
+		for _, v := range storelimit.TypeNameValue {
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
 			if stepCost == 0 {
 				continue
 			}
-			available := oc.getOrCreateStoreLimit(storeID, v).Available()
-			storeLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), "available", n).Set(float64(available) / float64(storelimit.RegionInfluence[v]))
-			if available < stepCost {
+			if oc.getOrCreateStoreLimit(storeID, v).Available() < stepCost {
 				return true
 			}
 		}
@@ -926,7 +926,7 @@ func (oc *OperatorController) newStoreLimit(storeID uint64, rate float64, mode s
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
 	if oc.storesLimit[storeID][limitType] == nil {
-		rate := oc.cluster.GetStoreBalanceRate() / StoreBalanceBaseTime
+		rate := oc.getDefaultStoreLimitRate()
 		oc.newStoreLimit(storeID, rate, storelimit.Auto, limitType)
 		oc.cluster.AttachAvailableFunc(storeID, limitType, func() bool {
 			oc.RLock()
@@ -972,4 +972,35 @@ func (oc *OperatorController) RemoveStoreLimit(storeID uint64) {
 		oc.cluster.AttachAvailableFunc(storeID, limitType, nil)
 	}
 	delete(oc.storesLimit, storeID)
+}
+
+// CollectStoreLimitMetrics collects the metrics about store limit
+func (oc *OperatorController) CollectStoreLimitMetrics() {
+	oc.RLock()
+	defer oc.RUnlock()
+	if oc.storesLimit == nil {
+		return
+	}
+	stores := oc.cluster.GetStores()
+	for _, store := range stores {
+		if store != nil {
+			storeID := store.GetID()
+			storeIDStr := strconv.FormatUint(storeID, 10)
+			for n, v := range storelimit.TypeNameValue {
+				var storeLimit *storelimit.StoreLimit
+				if oc.storesLimit[storeID] == nil || oc.storesLimit[storeID][v] == nil {
+					// the default store limit config
+					storeLimitRateGauge.WithLabelValues(storeIDStr, n).Set(oc.getDefaultStoreLimitRate() * StoreBalanceBaseTime)
+					continue
+				}
+				storeLimit = oc.storesLimit[storeID][v]
+				storeLimitAvailableGauge.WithLabelValues(storeIDStr, n).Set(float64(storeLimit.Available()) / float64(storelimit.RegionInfluence[v]))
+				storeLimitRateGauge.WithLabelValues(storeIDStr, n).Set(storeLimit.Rate() * StoreBalanceBaseTime)
+			}
+		}
+	}
+}
+
+func (oc *OperatorController) getDefaultStoreLimitRate() float64 {
+	return oc.cluster.GetStoreBalanceRate() / StoreBalanceBaseTime
 }

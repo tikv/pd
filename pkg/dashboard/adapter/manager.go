@@ -15,7 +15,6 @@ package adapter
 
 import (
 	"context"
-	"net/url"
 	"sort"
 	"sync"
 	"time"
@@ -137,11 +136,6 @@ func (m *Manager) checkAddress() {
 		m.stopService()
 		return
 	default:
-		if _, err := url.Parse(dashboardAddress); err != nil {
-			log.Error("illegal dashboard address", zap.String("address", dashboardAddress))
-			return
-		}
-
 		if m.isLeader && m.needResetAddress(dashboardAddress) {
 			m.setNewAddress()
 			return
