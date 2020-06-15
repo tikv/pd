@@ -112,13 +112,13 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*operator.Operator, 
 }
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Operator {
-	specialFilter := filter.NewSpecialEngineFilter(r.name)
+	ordinaryFilter := filter.NewOrdinaryEngineFilter(r.name)
 	var ordinaryPeers []*metapb.Peer
 	specialPeers := make(map[string][]*metapb.Peer)
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
-		if specialFilter.Target(r.cluster, store) {
+		if ordinaryFilter.Target(r.cluster, store) {
 			ordinaryPeers = append(ordinaryPeers, peer)
 		} else {
 			engine := store.GetLabelValue(filter.EngineKey)

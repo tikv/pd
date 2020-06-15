@@ -493,14 +493,6 @@ func NewEngineFilter(scope string, allowedEngines ...string) Filter {
 	}
 }
 
-// NewSpecialEngineFilter creates a filter that filters out special engine stores.
-func NewSpecialEngineFilter(scope string) Filter {
-	return &engineFilter{
-		scope:      scope,
-		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: allSpeicalEngines},
-	}
-}
-
 func (f *engineFilter) Scope() string {
 	return f.scope
 }
@@ -514,6 +506,35 @@ func (f *engineFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 func (f *engineFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	return f.constraint.MatchStore(store)
+}
+
+type ordinaryEngineFilter struct {
+	scope      string
+	constraint placement.LabelConstraint
+}
+
+// NewOrdinaryEngineFilter creates a filter that only keeps ordinary engine stores.
+func NewOrdinaryEngineFilter(scope string) Filter {
+	return &ordinaryEngineFilter{
+		scope:      scope,
+		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: allSpeicalEngines},
+	}
+}
+
+func (f *ordinaryEngineFilter) Scope() string {
+	return f.scope
+}
+
+func (f *ordinaryEngineFilter) Type() string {
+	return "ordinary-engine-filter"
+}
+
+func (f *ordinaryEngineFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return f.constraint.MatchStore(store)
+}
+
+func (f *ordinaryEngineFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return f.constraint.MatchStore(store)
 }
 
