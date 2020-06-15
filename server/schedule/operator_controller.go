@@ -810,6 +810,7 @@ func (oc *OperatorController) SetOperator(op *operator.Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.operators[op.RegionID()] = op
+	oc.updateCounts(oc.operators)
 }
 
 // OperatorWithStatus records the operator and its status.

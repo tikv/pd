@@ -678,7 +678,7 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 		peer := &metapb.Peer{
 			StoreId: 2,
 		}
-		op, err := operator.CreateAddPeerOperator("add-peer", cluster, region, peer, operator.OpBalance)
+		op, err := operator.CreateAddPeerOperator("add-peer", cluster, region, peer, operator.OpKind(0))
 		c.Assert(err, IsNil)
 		c.Assert(op, NotNil)
 		return op
