@@ -114,7 +114,7 @@ const (
 	defaultPDTimeout      = 3 * time.Second
 	dialTimeout           = 3 * time.Second
 	updateLeaderTimeout   = time.Second // Use a shorter timeout to recover faster from network isolation.
-	maxMergeTSORequests   = 10000
+	maxMergeTSORequests   = 10000       // should be higher if client is sending requests in burst
 	maxInitClusterRetries = 100
 )
 
@@ -197,7 +197,9 @@ func (c *client) tsLoop() {
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
 	defer loopCancel()
 
-	var requests []*tsoRequest
+	defaultSize := maxMergeTSORequests + 1
+	requests := make([]*tsoRequest, defaultSize)
+
 	var opts []opentracing.StartSpanOption
 	var stream pdpb.PD_TsoClient
 	var cancel context.CancelFunc
@@ -231,10 +233,10 @@ func (c *client) tsLoop() {
 
 		select {
 		case first := <-c.tsoRequests:
-			requests = append(requests, first)
-			pending := len(c.tsoRequests)
-			for i := 0; i < pending; i++ {
-				requests = append(requests, <-c.tsoRequests)
+			pendingPlus1 := len(c.tsoRequests) + 1
+			requests[0] = first
+			for i := 1; i < pendingPlus1; i++ {
+				requests[i] = <-c.tsoRequests
 			}
 			done := make(chan struct{})
 			dl := deadline{
@@ -248,10 +250,9 @@ func (c *client) tsLoop() {
 				cancel()
 				return
 			}
-			opts = extractSpanReference(requests, opts[:0])
-			err = c.processTSORequests(stream, requests, opts)
+			opts = extractSpanReference(requests[:pendingPlus1], opts[:0])
+			err = c.processTSORequests(stream, requests[:pendingPlus1], opts)
 			close(done)
-			requests = requests[:0]
 		case <-loopCtx.Done():
 			cancel()
 			return
@@ -377,7 +378,9 @@ func (c *client) leaderClient() pdpb.PDClient {
 var tsoReqPool = sync.Pool{
 	New: func() interface{} {
 		return &tsoRequest{
-			done: make(chan error, 1),
+			done:     make(chan error, 1),
+			physical: 0,
+			logical:  0,
 		}
 	},
 }
@@ -388,10 +391,8 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 		ctx = opentracing.ContextWithSpan(ctx, span)
 	}
 	req := tsoReqPool.Get().(*tsoRequest)
-	req.start = time.Now()
 	req.ctx = ctx
-	req.physical = 0
-	req.logical = 0
+	req.start = time.Now()
 	c.tsoRequests <- req
 
 	return req
