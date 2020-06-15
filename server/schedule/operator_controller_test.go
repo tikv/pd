@@ -543,12 +543,10 @@ func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
 		newRegionInfo(4, "x", "", 10, 10, []uint64{109, 4}, []uint64{109, 4}),
 	}
 
-	tc.AddLeaderStore(1, 10)
-	tc.AddLeaderStore(2, 10)
-	tc.AddLeaderStore(3, 10)
-	tc.AddLeaderStore(4, 10)
-	tc.AddLeaderStore(5, 10)
-	tc.AddLeaderStore(6, 10)
+	for i := uint64(1); i <= 6; i++ {
+		tc.AddLeaderStore(i, 10)
+	}
+
 	for _, region := range regions {
 		tc.PutRegion(region)
 	}

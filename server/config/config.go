@@ -824,25 +824,7 @@ func (c *ScheduleConfig) Deprecated() error {
 	return nil
 }
 
-var deprecateConfigs = []string{
-	"disable-remove-down-replica",
-	"disable-replace-offline-replica",
-	"disable-make-up-replica",
-	"disable-remove-extra-replica",
-	"disable-location-replacement",
-}
-
-// IsDeprecated returns if a config is deprecated.
-func IsDeprecated(config string) bool {
-	for _, t := range deprecateConfigs {
-		if t == config {
-			return true
-		}
-	}
-	return false
-}
-
-// StoreLimitConfig ...
+// StoreLimitConfig is a config about scheduling rate limit of different types for a store.
 type StoreLimitConfig struct {
 	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
 	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`

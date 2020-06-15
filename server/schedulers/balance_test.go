@@ -343,10 +343,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
 	// Weight:     0.5     0.9     1       2
 	// Region1:    L       F       F       F
 
-	s.tc.AddLeaderStore(1, 10)
-	s.tc.AddLeaderStore(2, 10)
-	s.tc.AddLeaderStore(3, 10)
-	s.tc.AddLeaderStore(4, 10)
+	for i := uint64(1); i <= 4; i++ {
+		s.tc.AddLeaderStore(i, 10)
+	}
 	s.tc.UpdateStoreLeaderWeight(1, 0.5)
 	s.tc.UpdateStoreLeaderWeight(2, 0.9)
 	s.tc.UpdateStoreLeaderWeight(3, 1)
@@ -411,10 +410,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	// Leaders:    9    10   10   11
 	// Region1:    -    F    F    L
 	// Region2:    L    F    F    -
-	s.tc.AddLeaderStore(1, 10)
-	s.tc.AddLeaderStore(2, 10)
-	s.tc.AddLeaderStore(3, 10)
-	s.tc.AddLeaderStore(4, 10)
+	for i := uint64(1); i <= 4; i++ {
+		s.tc.AddLeaderStore(i, 10)
+	}
 	s.tc.AddLeaderRegion(1, 4, 2, 3)
 	s.tc.AddLeaderRegion(2, 1, 2, 3)
 	// The cluster is balanced.
@@ -459,10 +457,9 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestSingleRangeBalance(c *C) {
 	// Weight:     0.5     0.9     1       2
 	// Region1:    L       F       F       F
 
-	s.tc.AddLeaderStore(1, 10)
-	s.tc.AddLeaderStore(2, 10)
-	s.tc.AddLeaderStore(3, 10)
-	s.tc.AddLeaderStore(4, 10)
+	for i := uint64(1); i <= 4; i++ {
+		s.tc.AddLeaderStore(i, 10)
+	}
 	s.tc.UpdateStoreLeaderWeight(1, 0.5)
 	s.tc.UpdateStoreLeaderWeight(2, 0.9)
 	s.tc.UpdateStoreLeaderWeight(3, 1)
@@ -500,10 +497,9 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestMultiRangeBalance(c *C) {
 	// Weight:     0.5     0.9     1       2
 	// Region1:    L       F       F       F
 
-	s.tc.AddLeaderStore(1, 10)
-	s.tc.AddLeaderStore(2, 10)
-	s.tc.AddLeaderStore(3, 10)
-	s.tc.AddLeaderStore(4, 10)
+	for i := uint64(1); i <= 4; i++ {
+		s.tc.AddLeaderStore(i, 10)
+	}
 	s.tc.UpdateStoreLeaderWeight(1, 0.5)
 	s.tc.UpdateStoreLeaderWeight(2, 0.9)
 	s.tc.UpdateStoreLeaderWeight(3, 1)
