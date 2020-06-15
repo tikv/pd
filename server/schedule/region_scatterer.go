@@ -80,7 +80,7 @@ func NewRegionScatterer(cluster opt.Cluster) *RegionScatterer {
 	return &RegionScatterer{
 		name:           regionScatterName,
 		cluster:        cluster,
-		ordinaryEngine: newEngineContext(filter.NewSpecialEngineFilter(regionScatterName)),
+		ordinaryEngine: newEngineContext(filter.NewOrdinaryEngineFilter(regionScatterName)),
 		specialEngines: make(map[string]engineContext),
 	}
 }
