@@ -121,6 +121,7 @@ type RaftCluster struct {
 type Status struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`
+	ReplicationStatus string    `json:"replication_status"`
 }
 
 // NewRaftCluster create a new cluster.
@@ -149,6 +150,7 @@ func (c *RaftCluster) LoadClusterStatus() (*Status, error) {
 	return &Status{
 		RaftBootstrapTime: bootstrapTime,
 		IsInitialized:     isInitialized,
+		ReplicationStatus: c.replicationMode.GetReplicationStatus().String(),
 	}, nil
 }
 
