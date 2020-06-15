@@ -135,8 +135,6 @@ func checkNeedDelete(c *C, ret []*HotPeerStat, storeID uint64) {
 	}
 }
 
-const interval = uint64(60)
-
 func schedule(operator operator, region *core.RegionInfo, kind FlowKind) (srcStore uint64, _ *core.RegionInfo) {
 	switch operator {
 	case transferLeader:
@@ -174,6 +172,7 @@ func pickFollower(region *core.RegionInfo) (index int, peer *metapb.Peer) {
 }
 
 func buildRegion(meta *metapb.Region, leader *metapb.Peer, kind FlowKind) *core.RegionInfo {
+	const interval = uint64(60)
 	if meta == nil {
 		peer1 := &metapb.Peer{Id: 1, StoreId: 1}
 		peer2 := &metapb.Peer{Id: 2, StoreId: 2}
