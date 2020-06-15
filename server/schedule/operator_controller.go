@@ -151,20 +151,15 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 	switch s := step.(type) {
 	case operator.RemovePeer:
 		if s.FromStore == region.GetLeader().GetStoreId() {
-			if oc.removeOperatorWithoutBury(op) {
-				if op.Cancel() {
-					log.Info("stale operator, cannot remove leader peer",
-						zap.Uint64("leader-store", region.GetLeader().GetStoreId()),
-						zap.Uint64("region-id", op.RegionID()),
-						zap.Duration("takes", op.RunningTime()),
-						zap.Reflect("operator", op),
-						zap.Reflect("latest-epoch", region.GetRegionEpoch()),
-					)
-					operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
-				}
-				oc.PromoteWaitingOperator()
+			if op.Cancel() {
+				oc.buryOperator(op,
+					zap.String("reason", "cannot remove leader per"),
+					zap.Reflect("latest-epoch", region.GetRegionEpoch()),
+					zap.Uint64("leader-store", region.GetLeader().GetStoreId()),
+				)
+				return true
 			}
-			return true
+			oc.PromoteWaitingOperator()
 		}
 	}
 	// When the "source" is heartbeat, the region may have a newer
@@ -497,7 +492,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 }
 
 // RemoveOperator removes a operator from the running operators.
-func (oc *OperatorController) RemoveOperator(op *operator.Operator) bool {
+func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFileds ...zap.Field) bool {
 	oc.Lock()
 	removed := oc.removeOperatorLocked(op)
 	oc.Unlock()
@@ -508,7 +503,7 @@ func (oc *OperatorController) RemoveOperator(op *operator.Operator) bool {
 				zap.Duration("takes", op.RunningTime()),
 				zap.Reflect("operator", op))
 		}
-		oc.buryOperator(op)
+		oc.buryOperator(op, extraFileds...)
 	}
 	return removed
 }
@@ -530,7 +525,7 @@ func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 	return false
 }
 
-func (oc *OperatorController) buryOperator(op *operator.Operator) {
+func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ...zap.Field) {
 	st := op.Status()
 
 	if !operator.IsEndStatus(st) {
@@ -570,6 +565,17 @@ func (oc *OperatorController) buryOperator(op *operator.Operator) {
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op))
+		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
+	case operator.CANCELED:
+		fileds := []zap.Field{
+			zap.Uint64("region-id", op.RegionID()),
+			zap.Duration("takes", op.RunningTime()),
+			zap.Reflect("operator", op),
+		}
+		fileds = append(fileds, extraFileds...)
+		log.Info("stale operator",
+			fileds...,
+		)
 		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 	}
 
