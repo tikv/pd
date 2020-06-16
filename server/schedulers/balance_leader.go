@@ -161,7 +161,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			sourceAddress := source.GetAddress()
 			l.counter.WithLabelValues("high-score", sourceAddress, sourceStoreLabel).Inc()
 			for j := 0; j < balanceLeaderRetryLimit; j++ {
-				if ops := l.transferLeaderOut(cluster, source,opInfluence); len(ops) > 0 {
+				if ops := l.transferLeaderOut(cluster, source, opInfluence); len(ops) > 0 {
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", sourceAddress, sourceStoreLabel))
 					return ops
 				}
