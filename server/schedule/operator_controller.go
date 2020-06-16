@@ -148,18 +148,12 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 }
 
 func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step operator.OpStep, region *core.RegionInfo) bool {
-	switch s := step.(type) {
-	case operator.RemovePeer:
-		if s.FromStore == region.GetLeader().GetStoreId() {
-			if oc.RemoveOperator(op,
-				zap.String("reason", "stale operator, cannot remove leader per"),
-				zap.Reflect("latest-epoch", region.GetRegionEpoch()),
-				zap.Uint64("leader-store", region.GetLeader().GetStoreId()),
-			) {
-				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
-				oc.PromoteWaitingOperator()
-				return true
-			}
+	err := step.CheckSafety(region)
+	if err != nil {
+		if oc.RemoveOperator(op, zap.String("reason", err.Error())) {
+			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
+			oc.PromoteWaitingOperator()
+			return true
 		}
 	}
 	// When the "source" is heartbeat, the region may have a newer
@@ -569,7 +563,7 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ..
 			zap.Reflect("operator", op),
 		}
 		fileds = append(fileds, extraFileds...)
-		log.Info("operator caceled",
+		log.Info("operator canceled",
 			fileds...,
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
