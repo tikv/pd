@@ -663,6 +663,10 @@ Usage:
 >> store limit-scene idle 100 // set rate to 100 in the idle scene
 ```
 
+> **Notice**
+>
+> When using `store limit` command, the original `region-add` and `region-remove` are deprecated, please use `add-peer` and `remove-peer`.
+
 ### `tso`
 
 Use this command to parse the physical and logical time of TSO.
