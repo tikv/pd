@@ -161,7 +161,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			sourceAddress := source.GetAddress()
 			l.counter.WithLabelValues("high-score", sourceAddress, sourceStoreLabel).Inc()
 			for j := 0; j < balanceLeaderRetryLimit; j++ {
-				if ops := l.transferLeaderOut(cluster, source); len(ops) > 0 {
+				if ops := l.transferLeaderOut(cluster, source,opInfluence); len(ops) > 0 {
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", sourceAddress, sourceStoreLabel))
 					return ops
 				}
@@ -191,7 +191,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 // transferLeaderOut transfers leader from the source store.
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
-func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *core.StoreInfo) []*operator.Operator {
+func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *core.StoreInfo, opInfluence operator.OpInfluence) []*operator.Operator {
 	sourceID := source.GetID()
 	region := cluster.RandLeaderRegion(sourceID, l.conf.Ranges, opt.HealthRegion(cluster))
 	if region == nil {
@@ -203,7 +203,10 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 	targets = filter.SelectTargetStores(targets, l.filters, cluster)
 	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
-		return targets[i].LeaderScore(leaderSchedulePolicy, 0) < targets[j].LeaderScore(leaderSchedulePolicy, 0)
+		kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
+		iOp := opInfluence.GetStoreInfluence(targets[i].GetID()).ResourceProperty(kind)
+		jOp := opInfluence.GetStoreInfluence(targets[j].GetID()).ResourceProperty(kind)
+		return targets[i].LeaderScore(leaderSchedulePolicy, iOp) < targets[j].LeaderScore(leaderSchedulePolicy, jOp)
 	})
 	for _, target := range targets {
 		if op := l.createOperator(cluster, region, source, target); len(op) > 0 {
