@@ -55,9 +55,9 @@ type Operator struct {
 	regionEpoch *metapb.RegionEpoch
 	kind        OpKind
 	steps       []OpStep
+	stepsTime   []int64 // step finish time
 	currentStep int32
 	status      OpStatusTracker
-	stepTime    int64
 	level       core.PriorityLevel
 	Counters    []prometheus.Counter
 }
@@ -75,6 +75,7 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		regionEpoch: regionEpoch,
 		kind:        kind,
 		steps:       steps,
+		stepsTime:   make([]int64, len(steps)),
 		status:      NewOpStatusTracker(),
 		level:       level,
 	}
@@ -152,11 +153,7 @@ func (o *Operator) ElapsedTime() time.Duration {
 
 // Start sets the operator to STARTED status, returns whether succeeded.
 func (o *Operator) Start() bool {
-	if o.status.To(STARTED) {
-		atomic.StoreInt64(&o.stepTime, time.Now().UnixNano())
-		return true
-	}
-	return false
+	return o.status.To(STARTED)
 }
 
 // HasStarted returns whether operator has started.
@@ -232,7 +229,6 @@ func (o *Operator) Step(i int) OpStep {
 // Check checks if current step is finished, returns next step to take action.
 // If operator is at an end status, check returns nil.
 // It's safe to be called by multiple goroutine concurrently.
-// FIXME: metrics is not thread-safe
 func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	if o.IsEnd() {
 		return nil
@@ -241,10 +237,17 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	defer func() { _ = o.CheckTimeout() }()
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
-			operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
-				Observe(time.Since(time.Unix(0, atomic.LoadInt64(&o.stepTime))).Seconds())
+			if atomic.CompareAndSwapInt64(&(o.stepsTime[step]), 0, time.Now().UnixNano()) {
+				var startTime time.Time
+				if step == 0 {
+					startTime = o.GetStartTime()
+				} else {
+					startTime = time.Unix(0, atomic.LoadInt64(&(o.stepsTime[step-1])))
+				}
+				operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
+					Observe(time.Unix(0, o.stepsTime[step]).Sub(startTime).Seconds())
+			}
 			atomic.StoreInt32(&o.currentStep, step+1)
-			atomic.StoreInt64(&o.stepTime, time.Now().UnixNano())
 		} else {
 			return o.steps[int(step)]
 		}
