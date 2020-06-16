@@ -271,6 +271,14 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds
 	return region
 }
 
+// AddRegionWithLearner adds region with specified leader, followers and learners.
+func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderID uint64, followerIDs, learnerIDs []uint64) *core.RegionInfo {
+	origin := mc.MockRegionInfo(regionID, leaderID, followerIDs, learnerIDs, nil)
+	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	mc.PutRegion(region)
+	return region
+}
+
 // AddLeaderRegionWithRange adds region with specified leader, followers and key range.
 func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, endKey string, leaderID uint64, followerIds ...uint64) {
 	o := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
@@ -508,7 +516,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 }
 
 func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIDs ...uint64) *core.RegionInfo {
-	return mc.MockRegionInfo(regionID, leaderID, followerIDs, nil)
+	return mc.MockRegionInfo(regionID, leaderID, followerIDs, []uint64{}, nil)
 }
 
 // GetOpt mocks method.
@@ -588,7 +596,7 @@ func (mc *Cluster) RemoveScheduler(name string) error {
 
 // MockRegionInfo returns a mock region
 func (mc *Cluster) MockRegionInfo(regionID uint64, leaderID uint64,
-	followerIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
+	followerIDs, learnerIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
 
 	region := &metapb.Region{
 		Id:          regionID,
@@ -600,6 +608,11 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderID uint64,
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIDs {
 		peer, _ := mc.AllocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	for _, id := range learnerIDs {
+		peer, _ := mc.AllocPeer(id)
+		peer.IsLearner = true
 		region.Peers = append(region.Peers, peer)
 	}
 	return core.NewRegionInfo(region, leader)
