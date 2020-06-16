@@ -184,14 +184,14 @@ func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, rate
 	switch typ {
 	case storelimit.AddPeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = defaultStoreLimit
+			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 		} else {
 			rate = v.StoreLimit[storeID].RemovePeer
 		}
 		sc = StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
 	case storelimit.RemovePeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = defaultStoreLimit
+			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
 		} else {
 			rate = v.StoreLimit[storeID].AddPeer
 		}

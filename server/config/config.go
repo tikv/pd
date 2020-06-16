@@ -23,12 +23,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
@@ -216,7 +218,44 @@ const (
 var (
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
+	// DefaultStoreLimit is the default limit of add peer and remove peer.
+	DefaultStoreLimit StoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
 )
+
+// StoreLimit is the default limit of adding peer and removing peer when putting stores.
+type StoreLimit struct {
+	mu sync.Mutex
+	// AddPeer is the default rate of adding peers for store limit (per minute).
+	AddPeer float64
+	// RemovePeer is the default rate of removing peers for store limit (per minute).
+	RemovePeer float64
+}
+
+// SetDefaultStoreLimit sets the default store limit for a given type.
+func (sl *StoreLimit) SetDefaultStoreLimit(typ storelimit.Type, ratePerMin float64) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	switch typ {
+	case storelimit.AddPeer:
+		sl.AddPeer = ratePerMin
+	case storelimit.RemovePeer:
+		sl.RemovePeer = ratePerMin
+	}
+}
+
+// GetDefaultStoreLimit gets the default store limit for a given type.
+func (sl *StoreLimit) GetDefaultStoreLimit(typ storelimit.Type) float64 {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	switch typ {
+	case storelimit.AddPeer:
+		return sl.AddPeer
+	case storelimit.RemovePeer:
+		return sl.RemovePeer
+	default:
+		panic("invalid type")
+	}
+}
 
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {
@@ -534,6 +573,9 @@ type ScheduleConfig struct {
 	// If the number of times a region hits the hot cache is greater than this
 	// threshold, it is considered a hot region.
 	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
+	// StoreBalanceRate is the maximum of balance rate for each store.
+	// WARN: StoreBalanceRate is deprecated.
+	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
 	// StoreLimit is the limit of scheduling for stores.
 	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
@@ -674,8 +716,6 @@ const (
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
-	// defaultStoreLimit is the default rate for store limit (per minute).
-	defaultStoreLimit = 15
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -736,6 +776,11 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 		*b[0], *b[1] = false, v // reset old flag false to make it ignored when marshal to JSON
 	}
 
+	if c.StoreBalanceRate != 0 {
+		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		c.StoreBalanceRate = 0
+	}
+
 	return c.Validate()
 }
 
@@ -771,6 +816,10 @@ func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, 
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.DisableLearner = false
+	if c.StoreBalanceRate != 0 {
+		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		c.StoreBalanceRate = 0
+	}
 	for _, b := range c.migrateConfigurationMap() {
 		// If old=false (previously disabled), set both old and new to false.
 		if *b[0] {
@@ -820,6 +869,9 @@ func (c *ScheduleConfig) Deprecated() error {
 	}
 	if c.DisableLocationReplacement {
 		return errors.New("disable-location-replacement has already been deprecated")
+	}
+	if c.StoreBalanceRate != 0 {
+		return errors.New("store-balance-rate has already been deprecated")
 	}
 	return nil
 }

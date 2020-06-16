@@ -54,7 +54,6 @@ var backgroundJobInterval = 10 * time.Second
 const (
 	clientTimeout              = 3 * time.Second
 	defaultChangedRegionsLimit = 10000
-	defaultStoreLimit          = 15
 )
 
 // Server is the interface for cluster.
@@ -1688,8 +1687,8 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
 func (c *RaftCluster) AddStoreLimit(storeID uint64) {
 	cfg := c.opt.GetScheduleConfig().Clone()
 	sc := config.StoreLimitConfig{
-		AddPeer:    defaultStoreLimit,
-		RemovePeer: defaultStoreLimit,
+		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
 	cfg.StoreLimit[storeID] = sc
 	c.opt.SetScheduleConfig(cfg)

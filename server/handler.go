@@ -422,6 +422,7 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	cfg := h.GetScheduleConfig().Clone()
 	switch limitType {
 	case storelimit.AddPeer:
+		config.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
 		for storeID := range cfg.StoreLimit {
 			sc := config.StoreLimitConfig{
 				AddPeer:    ratePerMin,
@@ -430,6 +431,7 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 			cfg.StoreLimit[storeID] = sc
 		}
 	case storelimit.RemovePeer:
+		config.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
 		for storeID := range cfg.StoreLimit {
 			sc := config.StoreLimitConfig{
 				AddPeer:    cfg.StoreLimit[storeID].AddPeer,
