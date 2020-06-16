@@ -82,7 +82,7 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	c.Assert(json.Unmarshal(output, cs), IsNil)
 	clusterStatus, err := cluster.GetClusterStatus()
 	c.Assert(err, IsNil)
-	c.Assert(ci, DeepEquals, clusterStatus)
+	c.Assert(cs, DeepEquals, clusterStatus)
 
 	// ping
 	args = []string{"-u", pdAddr, "ping"}
