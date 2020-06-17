@@ -14,14 +14,8 @@
 package adapter
 
 import (
-	"net/http"
-
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
-	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
-	"go.etcd.io/etcd/clientv3"
 
-	"github.com/pingcap/pd/v4/pkg/dashboard/keyvisual/input"
 	"github.com/pingcap/pd/v4/server"
 )
 
@@ -50,15 +44,4 @@ func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 	dashboardCfg.NormalizePublicPathPrefix()
 
 	return dashboardCfg, nil
-}
-
-// GenPDDataProviderConstructor generates a PDDataProviderConstructor for Dashboard API Service.
-func GenPDDataProviderConstructor(srv *server.Server) apiserver.PDDataProviderConstructor {
-	// Get RegionInfos directly from Server, so dashboard Config and httpClient are not needed.
-	return func(c *config.Config, httpClient *http.Client, etcdClient *clientv3.Client) *region.PDDataProvider {
-		return &region.PDDataProvider{
-			EtcdClient:     etcdClient,
-			PeriodicGetter: input.NewCorePeriodicGetter(srv),
-		}
-	}
 }
