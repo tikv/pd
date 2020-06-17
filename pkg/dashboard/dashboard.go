@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
 
 	"github.com/pingcap/pd/v4/pkg/dashboard/adapter"
+	"github.com/pingcap/pd/v4/pkg/dashboard/keyvisual"
 	ui "github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/v4/server"
 )
@@ -82,7 +83,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 				cfg,
 				stoppedHandler,
 				assets,
-				adapter.GenPDDataProviderConstructor(srv),
+				keyvisual.GenCustomDataProvider(srv),
 			)
 
 			m := adapter.NewManager(srv, s, redirector)
