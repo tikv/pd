@@ -162,7 +162,7 @@ func (al AddLearner) CheckSafety(region *core.RegionInfo) error {
 	if peer.GetId() != al.PeerID {
 		return errors.Errorf("peer id is not matched, expect %d, got %d", al.PeerID, peer.GetId())
 	}
-	if peer.IsLearner {
+	if !peer.IsLearner {
 		return errors.New("peer already is a voter")
 	}
 	return nil
@@ -424,7 +424,7 @@ func (al AddLightLearner) CheckSafety(region *core.RegionInfo) error {
 	if peer.GetId() != al.PeerID {
 		return errors.Errorf("peer id is not matched, expect %d, got %d", al.PeerID, peer.GetId())
 	}
-	if peer.IsLearner {
+	if !peer.IsLearner {
 		return errors.New("peer already is a voter")
 	}
 	return nil
