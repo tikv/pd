@@ -704,3 +704,15 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	// no space left, new operator can not be added.
 	c.Assert(controller.AddWaitingOperator(addPeerOp(0)), Equals, 0)
 }
+
+func (t *testOperatorControllerSuite) TestAutoStoreLimitMode(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	opt.StoreLimitMode = "auto"
+	tc := mockcluster.NewCluster(opt)
+	stream := mockhbstream.NewHeartbeatStreams(tc.ID, true /* no need to run */)
+	oc := NewOperatorController(t.ctx, tc, stream)
+
+	tc.AddLeaderStore(1, 10)
+	oc.SetStoreLimit(1, 10, storelimit.Auto, storelimit.RegionAdd)
+	oc.SetAllStoresLimitAuto(10, storelimit.RegionRemove)
+}

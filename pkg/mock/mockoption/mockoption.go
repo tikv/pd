@@ -43,6 +43,7 @@ const (
 	defaultLeaderSchedulePolicy        = "count"
 	defaultEnablePlacementRules        = false
 	defaultKeyType                     = "table"
+	defaultStoreLimitMode              = "manual"
 )
 
 // ScheduleOptions is a mock of ScheduleOptions
@@ -71,6 +72,7 @@ type ScheduleOptions struct {
 	TolerantSizeRatio            float64
 	LowSpaceRatio                float64
 	HighSpaceRatio               float64
+	StoreLimitMode               string
 	EnableRemoveDownReplica      bool
 	EnableReplaceOfflineReplica  bool
 	EnableMakeUpReplica          bool
@@ -110,6 +112,7 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
 	mso.HighSpaceRatio = defaultHighSpaceRatio
+	mso.StoreLimitMode = defaultStoreLimitMode
 	mso.EnableRemoveDownReplica = true
 	mso.EnableReplaceOfflineReplica = true
 	mso.EnableMakeUpReplica = true
@@ -278,4 +281,9 @@ func (mso *ScheduleOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
 // GetKeyType is to get key type.
 func (mso *ScheduleOptions) GetKeyType() core.KeyType {
 	return core.StringToKeyType(mso.KeyType)
+}
+
+// GetStoreLimitMode returns the limit mode of store.
+func (mso *ScheduleOptions) GetStoreLimitMode() string {
+	return mso.StoreLimitMode
 }
