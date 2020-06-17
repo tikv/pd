@@ -127,3 +127,6 @@ location-labels = []
 ## When enabled, request will be proxied to the instance running Dashboard
 ## internally instead of result in a 307 redirection.
 # internal-proxy = false
+
+## When not disabled, frontend will report some data for analysis
+# disable-telemetry = false
