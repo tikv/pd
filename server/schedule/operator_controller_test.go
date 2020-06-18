@@ -130,6 +130,38 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_SUCCESS)
 }
 
+func (t *testOperatorControllerSuite) TestFastFailOperator(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
+	tc.AddLeaderStore(1, 2)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	tc.AddLeaderRegion(1, 1, 2)
+	steps := []operator.OpStep{
+		operator.RemovePeer{FromStore: 2},
+		operator.AddPeer{ToStore: 3, PeerID: 4},
+	}
+	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	region := tc.GetRegion(1)
+	c.Assert(op.Start(), IsTrue)
+	oc.SetOperator(op)
+	oc.Dispatch(region, "test")
+	c.Assert(oc.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_RUNNING)
+	// change the leader
+	region = region.Clone(core.WithLeader(region.GetPeer(2)))
+	oc.Dispatch(region, DispatchFromHeartBeat)
+	c.Assert(op.Status(), Equals, operator.CANCELED)
+	c.Assert(oc.GetOperator(region.GetID()), IsNil)
+
+	// transfer leader to an illegal store.
+	op = operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 5})
+	oc.SetOperator(op)
+	oc.Dispatch(region, DispatchFromHeartBeat)
+	c.Assert(op.Status(), Equals, operator.CANCELED)
+	c.Assert(oc.GetOperator(region.GetID()), IsNil)
+}
+
 func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator"), IsNil)
 	opt := mockoption.NewScheduleOptions()
