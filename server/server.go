@@ -47,6 +47,7 @@ import (
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pingcap/pd/v4/server/member"
 	syncer "github.com/pingcap/pd/v4/server/region_syncer"
+	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/tso"
 	"github.com/pingcap/sysutil"
@@ -701,9 +702,18 @@ func (s *Server) GetConfig() *config.Config {
 	if err != nil {
 		return cfg
 	}
-	payload := make(map[string]string)
+	payload := make(map[string]interface{})
 	for i, sche := range sches {
-		payload[sche] = configs[i]
+		var config interface{}
+		err := schedule.DecodeConfig([]byte(configs[i]), &config)
+		if err != nil {
+			log.Error("failed to decode scheduler config",
+				zap.String("config", configs[i]),
+				zap.String("scheduler", sche),
+				zap.Error(err))
+			continue
+		}
+		payload[sche] = config
 	}
 	cfg.Schedule.SchedulersPayload = payload
 	return cfg

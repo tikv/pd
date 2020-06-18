@@ -70,7 +70,7 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 	builder, ok := schedulerArgsToDecoder[name]
 	if !ok {
 		return func(v interface{}) error {
-			return errors.Errorf("the config decoer do not register for %s", name)
+			return errors.Errorf("the config decoder do not register for %s", name)
 		}
 	}
 	return builder(args)
