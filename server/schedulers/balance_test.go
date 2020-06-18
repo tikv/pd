@@ -318,18 +318,28 @@ func (s *testBalanceLeaderSchedulerSuite) TestTransferLeaderOut(c *C) {
 	}
 
 	// balance leader: 4->1, 4->1, 4->2
-	for i := 0; i < 3; i++ {
-		if len(s.schedule()) != 0 {
-			if op := s.schedule()[0]; op != nil {
+	regions := make(map[uint64]struct{})
+	targets := map[uint64]uint64{
+		1: 2,
+		2: 1,
+	}
+	for i := 0; i < 20; i++ {
+		if len(s.schedule()) == 0 {
+			continue
+		}
+		if op := s.schedule()[0]; op != nil {
+			if _, ok := regions[op.RegionID()]; !ok {
 				s.oc.SetOperator(op)
+				regions[op.RegionID()] = struct{}{}
+				tr := op.Step(0).(operator.TransferLeader)
+				c.Assert(tr.FromStore, Equals, uint64(4))
+				targets[tr.ToStore] --
 			}
 		}
 	}
-
-	// Stores:     1    2    3    4
-	// Leaders:    9    9    9    9
-	if len(s.schedule()) > 0 {
-		c.Check(s.schedule()[0], IsNil)
+	c.Assert(regions, HasLen, 3)
+	for _, count := range targets {
+		c.Assert(count, Equals, uint64(0))
 	}
 }
 
