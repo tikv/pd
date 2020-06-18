@@ -156,24 +156,18 @@ func (conf *evictLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (s
 
 type evictLeaderScheduler struct {
 	*BaseScheduler
-	conf     *evictLeaderSchedulerConfig
-	selector *selector.RandomSelector
-	handler  http.Handler
+	conf    *evictLeaderSchedulerConfig
+	handler http.Handler
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConfig) schedule.Scheduler {
-	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true},
-	}
-
 	base := NewBaseScheduler(opController)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		selector:      selector.NewRandomSelector(filters),
 		handler:       handler,
 	}
 }
@@ -228,7 +222,10 @@ func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Ope
 			schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 			continue
 		}
-		target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
+
+		target := selector.NewCandidates(cluster.GetFollowerStores(region)).
+			FilterTarget(cluster, filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
+			RandomPick()
 		if target == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 			continue

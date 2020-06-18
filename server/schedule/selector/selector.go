@@ -14,8 +14,6 @@
 package selector
 
 import (
-	"math/rand"
-
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
@@ -101,49 +99,4 @@ func compareStoreScore(opt opt.Options, storeA *core.StoreInfo, scoreA float64, 
 		return -1
 	}
 	return 0
-}
-
-// RandomSelector selects source/target store randomly.
-type RandomSelector struct {
-	filters []filter.Filter
-}
-
-// NewRandomSelector creates a RandomSelector instance.
-func NewRandomSelector(filters []filter.Filter) *RandomSelector {
-	return &RandomSelector{filters: filters}
-}
-
-func (s *RandomSelector) randStore(stores []*core.StoreInfo) *core.StoreInfo {
-	if len(stores) == 0 {
-		return nil
-	}
-	return stores[rand.Int()%len(stores)]
-}
-
-// SelectSource randomly selects a source store from those can pass all filters.
-func (s *RandomSelector) SelectSource(opt opt.Options, stores []*core.StoreInfo, filters ...filter.Filter) *core.StoreInfo {
-	filters = append(filters, s.filters...)
-
-	candidates := make([]*core.StoreInfo, 0, len(stores))
-	for _, store := range stores {
-		if !filter.Source(opt, store, filters) {
-			continue
-		}
-		candidates = append(candidates, store)
-	}
-	return s.randStore(candidates)
-}
-
-// SelectTarget randomly selects a target store from those can pass all filters.
-func (s *RandomSelector) SelectTarget(opt opt.Options, stores []*core.StoreInfo, filters ...filter.Filter) *core.StoreInfo {
-	filters = append(filters, s.filters...)
-
-	candidates := make([]*core.StoreInfo, 0, len(stores))
-	for _, store := range stores {
-		if !filter.Target(opt, store, filters) {
-			continue
-		}
-		candidates = append(candidates, store)
-	}
-	return s.randStore(candidates)
 }

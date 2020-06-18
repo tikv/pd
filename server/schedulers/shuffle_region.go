@@ -60,8 +60,8 @@ func init() {
 
 type shuffleRegionScheduler struct {
 	*BaseScheduler
-	conf     *shuffleRegionSchedulerConfig
-	selector *selector.RandomSelector
+	conf    *shuffleRegionSchedulerConfig
+	filters []filter.Filter
 }
 
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
@@ -75,7 +75,7 @@ func newShuffleRegionScheduler(opController *schedule.OperatorController, conf *
 	return &shuffleRegionScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		selector:      selector.NewRandomSelector(filters),
+		filters:       filters,
 	}
 }
 
@@ -124,17 +124,11 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 }
 
 func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.RegionInfo, *metapb.Peer) {
-	stores := cluster.GetStores()
-	exclude := make(map[uint64]struct{})
-	excludeFilter := filter.NewExcludedFilter(s.GetType(), exclude, nil)
+	candidates := selector.NewCandidates(cluster.GetStores()).
+		FilterSource(cluster, s.filters...).
+		Shuffle()
 
-	for {
-		source := s.selector.SelectSource(cluster, stores, excludeFilter)
-		if source == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
-			return nil, nil
-		}
-
+	for _, source := range candidates.Stores {
 		var region *core.RegionInfo
 		if s.conf.IsRoleAllow(roleFollower) {
 			region = cluster.RandFollowerRegion(source.GetID(), s.conf.GetRanges(), opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
@@ -148,10 +142,11 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.
 		if region != nil {
 			return region, region.GetStorePeer(source.GetID())
 		}
-
-		exclude[source.GetID()] = struct{}{}
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 	}
+
+	schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
+	return nil, nil
 }
 
 func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
@@ -163,8 +158,10 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, region *co
 	}
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds())
 
-	stores := cluster.GetStores()
-	target := s.selector.SelectTarget(cluster, stores, scoreGuard, excludedFilter)
+	target := selector.NewCandidates(cluster.GetStores()).
+		FilterTarget(cluster, s.filters...).
+		FilterTarget(cluster, scoreGuard, excludedFilter).
+		RandomPick()
 	if target == nil {
 		return nil
 	}
