@@ -54,7 +54,7 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 	return region.GetLeader().GetStoreId() == tl.ToStore
 }
 
-// CheckSafety checks if the step meets the safety.
+// CheckSafety checks if the step meets the safety properties.
 func (tl TransferLeader) CheckSafety(region *core.RegionInfo) error {
 	peer := region.GetStorePeer(tl.ToStore)
 	if peer == nil {
@@ -115,11 +115,11 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to.AdjustStepCost(storelimit.RegionAdd, regionSize)
 }
 
-// CheckSafety checks if the step meets the safety.
+// CheckSafety checks if the step meets the safety properties.
 func (ap AddPeer) CheckSafety(region *core.RegionInfo) error {
 	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil && peer.GetId() != ap.PeerID {
-		return errors.Errorf("peer id is not matched, expect %d, got %d", ap.PeerID, peer.GetId())
+		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
 	}
 	return nil
 }
@@ -153,14 +153,14 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckSafety checks if the step meets the safety.
+// CheckSafety checks if the step meets the safety properties.
 func (al AddLearner) CheckSafety(region *core.RegionInfo) error {
 	peer := region.GetStorePeer(al.ToStore)
 	if peer == nil {
 		return nil
 	}
 	if peer.GetId() != al.PeerID {
-		return errors.Errorf("peer id is not matched, expect %d, got %d", al.PeerID, peer.GetId())
+		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
 	}
 	if !peer.IsLearner {
 		return errors.New("peer already is a voter")
@@ -206,7 +206,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckSafety checks if the step meets the safety.
+// CheckSafety checks if the step meets the safety properties.
 func (pl PromoteLearner) CheckSafety(region *core.RegionInfo) error {
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer == nil {
@@ -237,7 +237,7 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 	return region.GetStorePeer(rp.FromStore) == nil
 }
 
-// CheckSafety checks if the step meets the safety.
+// CheckSafety checks if the step meets the safety properties.
 func (rp RemovePeer) CheckSafety(region *core.RegionInfo) error {
 	if rp.FromStore == region.GetLeader().GetStoreId() {
 		return errors.New("cannot remove leader peer")
@@ -285,7 +285,7 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckSafety checks if the step meets the safety.
+// CheckSafety checks if the step meets the safety properties.
 func (mr MergeRegion) CheckSafety(region *core.RegionInfo) error {
 	return nil
 }
@@ -335,7 +335,7 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 	}
 }
 
-// CheckSafety checks if the step meets the safety.
+// CheckSafety checks if the step meets the safety properties.
 func (sr SplitRegion) CheckSafety(region *core.RegionInfo) error {
 	return nil
 }
@@ -369,11 +369,11 @@ func (ap AddLightPeer) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckSafety checks if the step meets the safety.
+// CheckSafety checks if the step meets the safety properties.
 func (ap AddLightPeer) CheckSafety(region *core.RegionInfo) error {
 	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil && peer.GetId() != ap.PeerID {
-		return errors.Errorf("peer id is not matched, expect %d, got %d", ap.PeerID, peer.GetId())
+		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
 	}
 	return nil
 }
@@ -415,14 +415,14 @@ func (al AddLightLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckSafety checks if the step meets the safety.
+// CheckSafety checks if the step meets the safety properties.
 func (al AddLightLearner) CheckSafety(region *core.RegionInfo) error {
 	peer := region.GetStorePeer(al.ToStore)
 	if peer == nil {
 		return nil
 	}
 	if peer.GetId() != al.PeerID {
-		return errors.Errorf("peer id is not matched, expect %d, got %d", al.PeerID, peer.GetId())
+		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
 	}
 	if !peer.IsLearner {
 		return errors.New("peer already is a voter")
