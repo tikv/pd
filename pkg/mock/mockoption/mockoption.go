@@ -18,6 +18,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 )
 
 const (
@@ -33,7 +34,6 @@ const (
 	defaultReplicaScheduleLimit        = 64
 	defaultMergeScheduleLimit          = 8
 	defaultHotRegionScheduleLimit      = 4
-	defaultStoreBalanceRate            = 60
 	defaultTolerantSizeRatio           = 2.5
 	defaultLowSpaceRatio               = 0.8
 	defaultHighSpaceRatio              = 0.6
@@ -43,8 +43,14 @@ const (
 	defaultLeaderSchedulePolicy        = "count"
 	defaultEnablePlacementRules        = false
 	defaultKeyType                     = "table"
-	defaultStoreLimitMode              = "manual"
+	defaultStoreLimit                  = 60
 )
+
+// StoreLimitConfig is a mock of StoreLimitConfig.
+type StoreLimitConfig struct {
+	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
+	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
+}
 
 // ScheduleOptions is a mock of ScheduleOptions
 // which implements Options interface
@@ -54,7 +60,7 @@ type ScheduleOptions struct {
 	ReplicaScheduleLimit         uint64
 	MergeScheduleLimit           uint64
 	HotRegionScheduleLimit       uint64
-	StoreBalanceRate             float64
+	StoreLimit                   map[uint64]StoreLimitConfig
 	MaxSnapshotCount             uint64
 	MaxPendingPeerCount          uint64
 	MaxMergeRegionSize           uint64
@@ -97,7 +103,6 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.ReplicaScheduleLimit = defaultReplicaScheduleLimit
 	mso.MergeScheduleLimit = defaultMergeScheduleLimit
 	mso.HotRegionScheduleLimit = defaultHotRegionScheduleLimit
-	mso.StoreBalanceRate = defaultStoreBalanceRate
 	mso.MaxSnapshotCount = defaultMaxSnapshotCount
 	mso.MaxMergeRegionSize = defaultMaxMergeRegionSize
 	mso.MaxMergeRegionKeys = defaultMaxMergeRegionKeys
@@ -112,7 +117,6 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
 	mso.HighSpaceRatio = defaultHighSpaceRatio
-	mso.StoreLimitMode = defaultStoreLimitMode
 	mso.EnableRemoveDownReplica = true
 	mso.EnableReplaceOfflineReplica = true
 	mso.EnableMakeUpReplica = true
@@ -120,7 +124,46 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.EnableLocationReplacement = true
 	mso.LeaderSchedulePolicy = defaultLeaderSchedulePolicy
 	mso.KeyType = defaultKeyType
+	mso.StoreLimit = make(map[uint64]StoreLimitConfig)
 	return mso
+}
+
+// SetStoreLimit mocks method
+func (mso *ScheduleOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
+	var sc StoreLimitConfig
+	if _, ok := mso.StoreLimit[storeID]; ok {
+		switch typ {
+		case storelimit.AddPeer:
+			sc = StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: mso.StoreLimit[storeID].RemovePeer}
+		case storelimit.RemovePeer:
+			sc = StoreLimitConfig{AddPeer: mso.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
+		}
+	} else {
+		switch typ {
+		case storelimit.AddPeer:
+			sc = StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: defaultStoreLimit}
+		case storelimit.RemovePeer:
+			sc = StoreLimitConfig{AddPeer: defaultStoreLimit, RemovePeer: ratePerMin}
+		}
+	}
+
+	mso.StoreLimit[storeID] = sc
+}
+
+// SetAllStoresLimit mocks method
+func (mso *ScheduleOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
+	switch typ {
+	case storelimit.AddPeer:
+		for storeID := range mso.StoreLimit {
+			sc := StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: mso.StoreLimit[storeID].RemovePeer}
+			mso.StoreLimit[storeID] = sc
+		}
+	case storelimit.RemovePeer:
+		for storeID := range mso.StoreLimit {
+			sc := StoreLimitConfig{AddPeer: mso.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
+			mso.StoreLimit[storeID] = sc
+		}
+	}
 }
 
 // GetLeaderScheduleLimit mocks method
@@ -148,9 +191,20 @@ func (mso *ScheduleOptions) GetHotRegionScheduleLimit() uint64 {
 	return mso.HotRegionScheduleLimit
 }
 
-// GetStoreBalanceRate mocks method
-func (mso *ScheduleOptions) GetStoreBalanceRate() float64 {
-	return mso.StoreBalanceRate
+// GetStoreLimitByType mocks method
+func (mso *ScheduleOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	limit, ok := mso.StoreLimit[storeID]
+	if !ok {
+		return 0
+	}
+	switch typ {
+	case storelimit.AddPeer:
+		return limit.AddPeer
+	case storelimit.RemovePeer:
+		return limit.RemovePeer
+	default:
+		panic("no such limit type")
+	}
 }
 
 // GetMaxSnapshotCount mocks method
@@ -283,7 +337,7 @@ func (mso *ScheduleOptions) GetKeyType() core.KeyType {
 	return core.StringToKeyType(mso.KeyType)
 }
 
-// GetStoreLimitMode returns the limit mode of store.
-func (mso *ScheduleOptions) GetStoreLimitMode() string {
-	return mso.StoreLimitMode
+// CheckLabelProperty mocks method
+func (mso *ScheduleOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+	return true
 }

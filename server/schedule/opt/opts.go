@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
 )
 
@@ -32,7 +33,8 @@ type Options interface {
 	GetHotRegionScheduleLimit() uint64
 
 	// store limit
-	GetStoreBalanceRate() float64
+	GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64
+	SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
@@ -63,8 +65,6 @@ type Options interface {
 	GetLeaderSchedulePolicy() core.SchedulePolicy
 	GetKeyType() core.KeyType
 
-	RemoveScheduler(name string) error
-
 	CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool
 }
 
@@ -87,6 +87,7 @@ type Cluster interface {
 
 	AllocID() (uint64, error)
 	FitRegion(*core.RegionInfo) *placement.RegionFit
+	RemoveScheduler(name string) error
 }
 
 // HeartbeatStream is an interface.

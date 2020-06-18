@@ -235,7 +235,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt)
-	c.limiter = NewStoreLimiter(c.coordinator.opController)
+	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.quit = make(chan struct{})
 
 	c.wg.Add(4)
@@ -935,8 +935,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		// set the remove peer limit of the store to unlimited
-		c.coordinator.opController.SetStoreLimit(store.GetID(), storelimit.Unlimited, storelimit.Manual, storelimit.RegionRemove)
+		c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
 	return err
 }
@@ -972,7 +971,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.coordinator.opController.RemoveStoreLimit(store.GetID())
+		c.RemoveStoreLimit(storeID)
 	}
 	return err
 }
@@ -1100,7 +1099,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 					zap.Error(err))
 				return err
 			}
-			c.coordinator.opController.RemoveStoreLimit(store.GetID())
+			c.RemoveStoreLimit(store.GetID())
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
@@ -1327,11 +1326,6 @@ func (c *RaftCluster) GetMergeScheduleLimit() uint64 {
 // GetHotRegionScheduleLimit returns the limit for hot region schedule.
 func (c *RaftCluster) GetHotRegionScheduleLimit() uint64 {
 	return c.opt.GetHotRegionScheduleLimit()
-}
-
-// GetStoreBalanceRate returns the balance rate of a store.
-func (c *RaftCluster) GetStoreBalanceRate() float64 {
-	return c.opt.GetStoreBalanceRate()
 }
 
 // GetTolerantSizeRatio gets the tolerant size ratio.
@@ -1644,6 +1638,47 @@ func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 // GetStoreLimiter returns the dynamic adjusting limiter
 func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 	return c.limiter
+}
+
+// GetStoreLimitByType returns the store limit for a given store ID and type.
+func (c *RaftCluster) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	return c.opt.GetStoreLimitByType(storeID, typ)
+}
+
+// GetAllStoresLimit returns all store limit
+func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
+	return c.opt.GetAllStoresLimit()
+}
+
+// AddStoreLimit add a store limit for a given store ID.
+func (c *RaftCluster) AddStoreLimit(storeID uint64) {
+	cfg := c.opt.GetScheduleConfig().Clone()
+	sc := config.StoreLimitConfig{
+		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	}
+	cfg.StoreLimit[storeID] = sc
+	c.opt.SetScheduleConfig(cfg)
+}
+
+// RemoveStoreLimit remove a store limit for a given store ID.
+func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
+	cfg := c.opt.GetScheduleConfig().Clone()
+	for _, limitType := range storelimit.TypeNameValue {
+		c.AttachAvailableFunc(storeID, limitType, nil)
+	}
+	delete(cfg.StoreLimit, storeID)
+	c.opt.SetScheduleConfig(cfg)
+}
+
+// SetStoreLimit sets a store limit for a given type and rate.
+func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
+	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
+}
+
+// SetAllStoresLimit sets all store limit for a given type and rate.
+func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
+	c.opt.SetAllStoresLimit(typ, ratePerMin)
 }
 
 var healthURL = "/pd/api/v1/ping"
