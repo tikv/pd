@@ -305,10 +305,10 @@ func (s *testOperatorSuite) TestStart(c *C) {
 		RemovePeer{FromStore: 2},
 	}
 	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
-	c.Assert(op.stepTime, Equals, int64(0))
+	c.Assert(op.GetStartTime().Nanosecond(), Equals, 0)
 	c.Assert(op.Status(), Equals, CREATED)
 	c.Assert(op.Start(), IsTrue)
-	c.Assert(op.stepTime, Not(Equals), 0)
+	c.Assert(op.GetStartTime().Nanosecond(), Not(Equals), 0)
 	c.Assert(op.Status(), Equals, STARTED)
 }
 
