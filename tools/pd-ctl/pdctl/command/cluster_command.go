@@ -20,6 +20,7 @@ import (
 )
 
 const clusterPrefix = "pd/api/v1/cluster"
+const clusterStatusPrefix = "pd/api/v1/cluster/status"
 
 // NewClusterCommand return a cluster subcommand of rootCmd
 func NewClusterCommand() *cobra.Command {
@@ -28,13 +29,33 @@ func NewClusterCommand() *cobra.Command {
 		Short: "show the cluster information",
 		Run:   showClusterCommandFunc,
 	}
+	cmd.AddCommand(NewClusterStatusCommand())
 	return cmd
+}
+
+// NewClusterStatusCommand return a cluster status subcommand of clusterCmd
+func NewClusterStatusCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "status",
+		Short: "show the cluster status",
+		Run:   showClusterStatusCommandFunc,
+	}
+	return r
 }
 
 func showClusterCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, clusterPrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get the cluster information: %s\n", err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func showClusterStatusCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, clusterStatusPrefix, http.MethodGet)
+	if err != nil {
+		cmd.Printf("Failed to get the cluster status: %s\n", err)
 		return
 	}
 	cmd.Println(r)
