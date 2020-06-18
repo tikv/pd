@@ -114,7 +114,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		switch op.Status() {
 		case operator.STARTED:
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
-			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, region) {
+			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, step, region) {
 				return
 			}
 			oc.SendScheduleCommand(region, step, source)
@@ -147,7 +147,15 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 	}
 }
 
-func (oc *OperatorController) checkStaleOperator(op *operator.Operator, region *core.RegionInfo) bool {
+func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step operator.OpStep, region *core.RegionInfo) bool {
+	err := step.CheckSafety(region)
+	if err != nil {
+		if oc.RemoveOperator(op, zap.String("reason", err.Error())) {
+			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
+			oc.PromoteWaitingOperator()
+			return true
+		}
+	}
 	// When the "source" is heartbeat, the region may have a newer
 	// confver than the region that the operator holds. In this case,
 	// the operator is stale, and will not be executed even we would
@@ -156,22 +164,18 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, region *
 	latest := region.GetRegionEpoch()
 	changes := latest.GetConfVer() - origin.GetConfVer()
 	if changes > uint64(op.ConfVerChanged(region)) {
-
-		if oc.removeOperatorWithoutBury(op) {
-			if op.Cancel() {
-				log.Info("stale operator",
-					zap.Uint64("region-id", op.RegionID()),
-					zap.Duration("takes", op.RunningTime()),
-					zap.Reflect("operator", op),
-					zap.Reflect("latest-epoch", region.GetRegionEpoch()),
-					zap.Uint64("diff", changes),
-				)
-				operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
-			}
+		if oc.RemoveOperator(
+			op,
+			zap.String("reason", "stale operator, confver does not meet expectations"),
+			zap.Reflect("latest-epoch", region.GetRegionEpoch()),
+			zap.Uint64("diff", changes),
+		) {
+			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
 			oc.PromoteWaitingOperator()
+			return true
 		}
-		return true
 	}
+
 	return false
 }
 
@@ -477,7 +481,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 }
 
 // RemoveOperator removes a operator from the running operators.
-func (oc *OperatorController) RemoveOperator(op *operator.Operator) bool {
+func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFileds ...zap.Field) bool {
 	oc.Lock()
 	removed := oc.removeOperatorLocked(op)
 	oc.Unlock()
@@ -488,7 +492,7 @@ func (oc *OperatorController) RemoveOperator(op *operator.Operator) bool {
 				zap.Duration("takes", op.RunningTime()),
 				zap.Reflect("operator", op))
 		}
-		oc.buryOperator(op)
+		oc.buryOperator(op, extraFileds...)
 	}
 	return removed
 }
@@ -510,7 +514,7 @@ func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 	return false
 }
 
-func (oc *OperatorController) buryOperator(op *operator.Operator) {
+func (oc *OperatorController) buryOperator(op *operator.Operator, extraFileds ...zap.Field) {
 	st := op.Status()
 
 	if !operator.IsEndStatus(st) {
@@ -551,6 +555,17 @@ func (oc *OperatorController) buryOperator(op *operator.Operator) {
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op))
 		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
+	case operator.CANCELED:
+		fileds := []zap.Field{
+			zap.Uint64("region-id", op.RegionID()),
+			zap.Duration("takes", op.RunningTime()),
+			zap.Reflect("operator", op),
+		}
+		fileds = append(fileds, extraFileds...)
+		log.Info("operator canceled",
+			fileds...,
+		)
+		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}
 
 	oc.opRecords.Put(op)
