@@ -15,11 +15,9 @@ package schedulers
 
 import (
 	"context"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server/core"
@@ -164,126 +162,6 @@ func (s *testBalanceAdjacentRegionSuite) TestNoNeedToBalance(c *C) {
 	c.Assert(sc.Schedule(tc), IsNil)
 }
 
-type sequencer struct {
-	maxID uint64
-	curID uint64
-}
-
-func newSequencer(maxID uint64) *sequencer {
-	return &sequencer{
-		maxID: maxID,
-		curID: 0,
-	}
-}
-
-func (s *sequencer) next() uint64 {
-	s.curID++
-	if s.curID > s.maxID {
-		s.curID = 1
-	}
-	return s.curID
-}
-
-var _ = Suite(&testScatterRegionSuite{})
-
-type testScatterRegionSuite struct{}
-
-func (s *testScatterRegionSuite) TestSixStores(c *C) {
-	s.scatter(c, 6, 4, false)
-	s.scatter(c, 6, 4, true)
-}
-
-func (s *testScatterRegionSuite) TestFiveStores(c *C) {
-	s.scatter(c, 5, 5, false)
-	s.scatter(c, 5, 5, true)
-}
-
-func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
-	for i := 0; i < op.Len(); i++ {
-		if rp, ok := op.Step(i).(operator.RemovePeer); ok {
-			for j := i + 1; j < op.Len(); j++ {
-				if tr, ok := op.Step(j).(operator.TransferLeader); ok {
-					c.Assert(rp.FromStore, Not(Equals), tr.FromStore)
-					c.Assert(rp.FromStore, Not(Equals), tr.ToStore)
-				}
-			}
-		}
-	}
-}
-
-func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
-	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
-
-	// Add stores 1~6.
-	for i := uint64(1); i <= numStores; i++ {
-		tc.AddRegionStore(i, 0)
-	}
-	tc.AddLabelsStore(numStores+1, 0, map[string]string{"engine": "tiflash"})
-	tc.EnablePlacementRules = useRules
-
-	// Add regions 1~4.
-	seq := newSequencer(3)
-	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
-	tc.AddLeaderRegion(1, 1, 2, 3)
-	for i := uint64(2); i <= numRegions; i++ {
-		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
-	}
-
-	scatterer := schedule.NewRegionScatterer(tc)
-
-	for i := uint64(1); i <= numRegions; i++ {
-		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region); op != nil {
-			s.checkOperator(op, c)
-			schedule.ApplyOperator(tc, op)
-		}
-	}
-
-	countPeers := make(map[uint64]uint64)
-	for i := uint64(1); i <= numRegions; i++ {
-		region := tc.GetRegion(i)
-		for _, peer := range region.GetPeers() {
-			countPeers[peer.GetStoreId()]++
-		}
-	}
-
-	// Each store should have the same number of peers.
-	for _, count := range countPeers {
-		c.Assert(count, Equals, numRegions*3/numStores)
-	}
-}
-
-func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
-	oc := schedule.NewOperatorController(ctx, tc, mockhbstream.NewHeartbeatStream())
-
-	// Add stores 1~6.
-	for i := uint64(1); i <= 5; i++ {
-		tc.AddRegionStore(i, 0)
-	}
-
-	// Add regions 1~4.
-	seq := newSequencer(3)
-	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
-	tc.AddLeaderRegion(1, 1, 2, 3)
-	for i := uint64(2); i <= 5; i++ {
-		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
-	}
-
-	scatterer := schedule.NewRegionScatterer(tc)
-
-	for i := uint64(1); i <= 5; i++ {
-		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region); op != nil {
-			c.Assert(oc.AddWaitingOperator(op), Equals, 1)
-		}
-	}
-}
-
 var _ = Suite(&testRejectLeaderSuite{})
 
 type testRejectLeaderSuite struct{}
@@ -311,9 +189,9 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	sl, err := schedule.CreateScheduler(LabelType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(LabelType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	op := sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 3)
+	testutil.CheckTransferLeaderFrom(c, op[0], operator.OpLeader, 1)
 
-	// If store3 is disconnected, transfer leader to store 2 instead.
+	// If store3 is disconnected, transfer leader to store 2.
 	tc.SetStoreDisconnect(3)
 	op = sl.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
@@ -540,7 +418,7 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 	conf.Roles = []string{"follower"}
 	ops := sl.Schedule(tc)
 	c.Assert(ops, HasLen, 1)
-	testutil.CheckTransferPeer(c, ops[0], operator.OpRegion, 2, 4) // transfer follower
+	testutil.CheckTransferPeer(c, ops[0], operator.OpKind(0), 2, 4) // transfer follower
 	conf.Roles = []string{"learner"}
 	ops = sl.Schedule(tc)
 	c.Assert(ops, HasLen, 1)
@@ -579,7 +457,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	// balance region without label
 	ops := bs.Schedule(tc)
 	c.Assert(ops, HasLen, 1)
-	testutil.CheckTransferPeer(c, ops[0], operator.OpBalance, 1, 4)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpKind(0), 1, 4)
 
 	// cannot balance to store 4 and 5 with label
 	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "hotRegion"})
@@ -628,7 +506,7 @@ func (s *testSpecialUseSuite) TestSpecialUseReserved(c *C) {
 	// balance region without label
 	ops := bs.Schedule(tc)
 	c.Assert(ops, HasLen, 1)
-	testutil.CheckTransferPeer(c, ops[0], operator.OpBalance, 1, 4)
+	testutil.CheckTransferPeer(c, ops[0], operator.OpKind(0), 1, 4)
 
 	// cannot balance to store 4 with label
 	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "reserved"})

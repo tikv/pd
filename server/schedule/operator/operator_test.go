@@ -227,9 +227,9 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 func (s *testOperatorSuite) TestOperatorKind(c *C) {
 	c.Assert((OpLeader | OpReplica).String(), Equals, "leader,replica")
 	c.Assert(OpKind(0).String(), Equals, "unknown")
-	k, err := ParseOperatorKind("balance,region,leader")
+	k, err := ParseOperatorKind("region,leader")
 	c.Assert(err, IsNil)
-	c.Assert(k, Equals, OpBalance|OpRegion|OpLeader)
+	c.Assert(k, Equals, OpRegion|OpLeader)
 	_, err = ParseOperatorKind("leader,region")
 	c.Assert(err, IsNil)
 	_, err = ParseOperatorKind("foobar")
@@ -305,10 +305,10 @@ func (s *testOperatorSuite) TestStart(c *C) {
 		RemovePeer{FromStore: 2},
 	}
 	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
-	c.Assert(op.stepTime, Equals, int64(0))
+	c.Assert(op.GetStartTime().Nanosecond(), Equals, 0)
 	c.Assert(op.Status(), Equals, CREATED)
 	c.Assert(op.Start(), IsTrue)
-	c.Assert(op.stepTime, Not(Equals), 0)
+	c.Assert(op.GetStartTime().Nanosecond(), Not(Equals), 0)
 	c.Assert(op.Status(), Equals, STARTED)
 }
 

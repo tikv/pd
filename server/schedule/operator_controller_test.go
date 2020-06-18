@@ -421,7 +421,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	c.Assert(len(stream.MsgCh()), Equals, 1)
 
 	// report the result of transferring leader
-	region := cluster.MockRegionInfo(1, 2, []uint64{1, 2},
+	region := cluster.MockRegionInfo(1, 2, []uint64{1, 2}, []uint64{},
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
@@ -429,7 +429,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	c.Assert(len(stream.MsgCh()), Equals, 2)
 
 	// report the result of removing peer
-	region = cluster.MockRegionInfo(1, 2, []uint64{2},
+	region = cluster.MockRegionInfo(1, 2, []uint64{2}, []uint64{},
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
 	controller.Dispatch(region, DispatchFromHeartBeat)
@@ -445,7 +445,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	c.Assert(len(stream.MsgCh()), Equals, 3)
 
 	// report region with an abnormal confver
-	region = cluster.MockRegionInfo(1, 1, []uint64{1, 2},
+	region = cluster.MockRegionInfo(1, 1, []uint64{1, 2}, []uint64{},
 		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
 	controller.Dispatch(region, DispatchFromHeartBeat)
 	c.Assert(op.ConfVerChanged(region), Equals, 0)
@@ -463,7 +463,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 	// so the two peers are {peerid: 1, storeid: 1}, {peerid: 2, storeid: 2}
 	// The peer on store 1 is the leader
 	epoch := &metapb.RegionEpoch{ConfVer: 0, Version: 0}
-	region := cluster.MockRegionInfo(1, 1, []uint64{2}, epoch)
+	region := cluster.MockRegionInfo(1, 1, []uint64{2}, []uint64{}, epoch)
 	// Put region into cluster, otherwise, AddOperator will fail because of
 	// missing region
 	cluster.PutRegion(region)
@@ -710,7 +710,7 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 		peer := &metapb.Peer{
 			StoreId: 2,
 		}
-		op, err := operator.CreateAddPeerOperator("add-peer", cluster, region, peer, operator.OpBalance)
+		op, err := operator.CreateAddPeerOperator("add-peer", cluster, region, peer, operator.OpKind(0))
 		c.Assert(err, IsNil)
 		c.Assert(op, NotNil)
 		return op
@@ -735,4 +735,16 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 
 	// no space left, new operator can not be added.
 	c.Assert(controller.AddWaitingOperator(addPeerOp(0)), Equals, 0)
+}
+
+func (t *testOperatorControllerSuite) TestAutoStoreLimitMode(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	opt.StoreLimitMode = "auto"
+	tc := mockcluster.NewCluster(opt)
+	stream := mockhbstream.NewHeartbeatStreams(tc.ID, true /* no need to run */)
+	oc := NewOperatorController(t.ctx, tc, stream)
+
+	tc.AddLeaderStore(1, 10)
+	oc.SetStoreLimit(1, 10, storelimit.Auto, storelimit.RegionAdd)
+	oc.SetAllStoresLimitAuto(10, storelimit.RegionRemove)
 }

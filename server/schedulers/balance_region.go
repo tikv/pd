@@ -127,7 +127,7 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
-	return s.opController.OperatorCount(operator.OpRegion) < cluster.GetRegionScheduleLimit()
+	return s.opController.OperatorCount(operator.OpRegion)-s.opController.OperatorCount(operator.OpMerge) < cluster.GetRegionScheduleLimit()
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
@@ -234,7 +234,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		}
 
 		newPeer := &metapb.Peer{StoreId: target.GetID(), IsLearner: oldPeer.IsLearner}
-		op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpBalance, oldPeer.GetStoreId(), newPeer)
+		op, err := operator.CreateMovePeerOperator("balance-region", cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil

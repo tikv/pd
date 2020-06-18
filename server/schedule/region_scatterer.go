@@ -68,22 +68,32 @@ func (s *selectedStores) newFilter(scope string) filter.Filter {
 
 // RegionScatterer scatters regions.
 type RegionScatterer struct {
-	name     string
-	cluster  opt.Cluster
-	filters  []filter.Filter
-	selected *selectedStores
+	name           string
+	cluster        opt.Cluster
+	ordinaryEngine engineContext
+	specialEngines map[string]engineContext
 }
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
 func NewRegionScatterer(cluster opt.Cluster) *RegionScatterer {
 	return &RegionScatterer{
-		name:    regionScatterName,
-		cluster: cluster,
-		filters: []filter.Filter{
-			filter.StoreStateFilter{ActionScope: regionScatterName},
-			filter.NewEngineFilter(regionScatterName),
-		},
+		name:           regionScatterName,
+		cluster:        cluster,
+		ordinaryEngine: newEngineContext(filter.NewOrdinaryEngineFilter(regionScatterName)),
+		specialEngines: make(map[string]engineContext),
+	}
+}
+
+type engineContext struct {
+	filters  []filter.Filter
+	selected *selectedStores
+}
+
+func newEngineContext(filters ...filter.Filter) engineContext {
+	filters = append(filters, filter.StoreStateFilter{ActionScope: regionScatterName})
+	return engineContext{
+		filters:  filters,
 		selected: newSelectedStores(),
 	}
 }
@@ -102,30 +112,56 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*operator.Operator, 
 }
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Operator {
-	stores := r.collectAvailableStores(region)
-	targetPeers := make(map[uint64]*metapb.Peer)
+	ordinaryFilter := filter.NewOrdinaryEngineFilter(r.name)
+	var ordinaryPeers []*metapb.Peer
+	specialPeers := make(map[string][]*metapb.Peer)
+	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
-		if len(stores) == 0 {
-			// Reset selected stores if we have no available stores.
-			r.selected.reset()
-			stores = r.collectAvailableStores(region)
+		store := r.cluster.GetStore(peer.GetStoreId())
+		if ordinaryFilter.Target(r.cluster, store) {
+			ordinaryPeers = append(ordinaryPeers, peer)
+		} else {
+			engine := store.GetLabelValue(filter.EngineKey)
+			specialPeers[engine] = append(specialPeers[engine], peer)
 		}
-
-		if r.selected.put(peer.GetStoreId()) {
-			delete(stores, peer.GetStoreId())
-			targetPeers[peer.GetStoreId()] = peer
-			continue
-		}
-		newPeer := r.selectPeerToReplace(stores, region, peer)
-		if newPeer == nil {
-			targetPeers[peer.GetStoreId()] = peer
-			continue
-		}
-		// Remove it from stores and mark it as selected.
-		delete(stores, newPeer.GetStoreId())
-		r.selected.put(newPeer.GetStoreId())
-		targetPeers[newPeer.GetStoreId()] = newPeer
 	}
+
+	targetPeers := make(map[uint64]*metapb.Peer)
+
+	scatterWithSameEngine := func(peers []*metapb.Peer, context engineContext) {
+		stores := r.collectAvailableStores(region, context)
+		for _, peer := range peers {
+			if len(stores) == 0 {
+				context.selected.reset()
+				stores = r.collectAvailableStores(region, context)
+			}
+			if context.selected.put(peer.GetStoreId()) {
+				delete(stores, peer.GetStoreId())
+				targetPeers[peer.GetStoreId()] = peer
+				continue
+			}
+			newPeer := r.selectPeerToReplace(stores, region, peer)
+			if newPeer == nil {
+				targetPeers[peer.GetStoreId()] = peer
+				continue
+			}
+			// Remove it from stores and mark it as selected.
+			delete(stores, newPeer.GetStoreId())
+			context.selected.put(newPeer.GetStoreId())
+			targetPeers[newPeer.GetStoreId()] = newPeer
+		}
+	}
+
+	scatterWithSameEngine(ordinaryPeers, r.ordinaryEngine)
+	for engine, peers := range specialPeers {
+		context, ok := r.specialEngines[engine]
+		if !ok {
+			context = newEngineContext(filter.NewEngineFilter(r.name, engine))
+			r.specialEngines[engine] = context
+		}
+		scatterWithSameEngine(peers, context)
+	}
+
 	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers)
 	if err != nil {
 		log.Debug("fail to create scatter region operator", zap.Error(err))
@@ -169,12 +205,12 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 	}
 }
 
-func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo) map[uint64]*core.StoreInfo {
+func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo, context engineContext) map[uint64]*core.StoreInfo {
 	filters := []filter.Filter{
-		r.selected.newFilter(r.name),
+		context.selected.newFilter(r.name),
 		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
 	}
-	filters = append(filters, r.filters...)
+	filters = append(filters, context.filters...)
 
 	stores := r.cluster.GetStores()
 	targets := make(map[uint64]*core.StoreInfo, len(stores))

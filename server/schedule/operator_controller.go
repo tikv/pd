@@ -825,6 +825,7 @@ func (oc *OperatorController) SetOperator(op *operator.Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.operators[op.RegionID()] = op
+	oc.updateCounts(oc.operators)
 }
 
 // OperatorWithStatus records the operator and its status.
@@ -911,7 +912,8 @@ func (oc *OperatorController) SetAllStoresLimitAuto(rate float64, limitType stor
 	for _, s := range stores {
 		sid := s.GetID()
 		if old, ok := oc.storesLimit[sid]; ok {
-			if old[limitType].Mode() == storelimit.Manual {
+			limit, ok1 := old[limitType]
+			if ok1 && limit.Mode() == storelimit.Manual {
 				continue
 			}
 		}
