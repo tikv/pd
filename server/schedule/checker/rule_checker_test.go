@@ -110,6 +110,28 @@ func (s *testRuleCheckerSuite) TestFixOrphanPeers(c *C) {
 	c.Assert(op.Step(0).(operator.RemovePeer).FromStore, Equals, uint64(4))
 }
 
+func (s *testRuleCheckerSuite) TestFixOrphanPeers2(c *C) {
+	// check orphan peers can only be handled when all rules are satisfied.
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"foo": "bar"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"foo": "bar"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"foo": "baz"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3)
+	s.ruleManager.SetRule(&placement.Rule{
+		GroupID:  "pd",
+		ID:       "r1",
+		Index:    100,
+		Override: true,
+		Role:     placement.Leader,
+		Count:    2,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "foo", Op: "in", Values: []string{"baz"}},
+		},
+	})
+	s.cluster.SetStoreDown(2)
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+}
+
 func (s *testRuleCheckerSuite) TestFixRole(c *C) {
 	s.cluster.AddLeaderStore(1, 1)
 	s.cluster.AddLeaderStore(2, 1)
@@ -197,4 +219,27 @@ func (s *testRuleCheckerSuite) TestNoBetterReplacement(c *C) {
 	})
 	op := s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, IsNil)
+}
+
+func (s *testRuleCheckerSuite) TestIssue2419(c *C) {
+	s.cluster.AddLeaderStore(1, 1)
+	s.cluster.AddLeaderStore(2, 1)
+	s.cluster.AddLeaderStore(3, 1)
+	s.cluster.AddLeaderStore(4, 1)
+	s.cluster.SetStoreOffline(3)
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	r := s.cluster.GetRegion(1)
+	r = r.Clone(core.WithAddPeer(&metapb.Peer{Id: 5, StoreId: 4, IsLearner: true}))
+	op := s.rc.Check(r)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
+	c.Assert(op.Step(0).(operator.RemovePeer).FromStore, Equals, uint64(4))
+
+	r = r.Clone(core.WithRemoveStorePeer(4))
+	op = s.rc.Check(r)
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
+	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(4))
+	c.Assert(op.Step(1).(operator.PromoteLearner).ToStore, Equals, uint64(4))
+	c.Assert(op.Step(2).(operator.RemovePeer).FromStore, Equals, uint64(3))
 }
