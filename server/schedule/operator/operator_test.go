@@ -156,7 +156,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: 0,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.RegionAdd: 1000},
+		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	})
 
 	TransferLeader{FromStore: 1, ToStore: 2}.Influence(opInfluence, region)
@@ -172,7 +172,7 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.RegionAdd: 1000},
+		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	})
 
 	RemovePeer{FromStore: 1}.Influence(opInfluence, region)
@@ -181,14 +181,14 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: -1,
 		RegionSize:  -50,
 		RegionCount: -1,
-		StepCost:    map[storelimit.Type]int64{storelimit.RegionRemove: 1000},
+		StepCost:    map[storelimit.Type]int64{storelimit.RemovePeer: 1000},
 	})
 	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
 		LeaderSize:  50,
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.RegionAdd: 1000},
+		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	})
 
 	MergeRegion{IsPassive: false}.Influence(opInfluence, region)
@@ -197,14 +197,14 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: -1,
 		RegionSize:  -50,
 		RegionCount: -1,
-		StepCost:    map[storelimit.Type]int64{storelimit.RegionRemove: 1000},
+		StepCost:    map[storelimit.Type]int64{storelimit.RemovePeer: 1000},
 	})
 	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
 		LeaderSize:  50,
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 1,
-		StepCost:    map[storelimit.Type]int64{storelimit.RegionAdd: 1000},
+		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	})
 
 	MergeRegion{IsPassive: true}.Influence(opInfluence, region)
@@ -213,23 +213,23 @@ func (s *testOperatorSuite) TestInfluence(c *C) {
 		LeaderCount: -2,
 		RegionSize:  -50,
 		RegionCount: -2,
-		StepCost:    map[storelimit.Type]int64{storelimit.RegionRemove: 1000},
+		StepCost:    map[storelimit.Type]int64{storelimit.RemovePeer: 1000},
 	})
 	c.Assert(*storeOpInfluence[2], DeepEquals, StoreInfluence{
 		LeaderSize:  50,
 		LeaderCount: 1,
 		RegionSize:  50,
 		RegionCount: 0,
-		StepCost:    map[storelimit.Type]int64{storelimit.RegionAdd: 1000},
+		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	})
 }
 
 func (s *testOperatorSuite) TestOperatorKind(c *C) {
 	c.Assert((OpLeader | OpReplica).String(), Equals, "leader,replica")
 	c.Assert(OpKind(0).String(), Equals, "unknown")
-	k, err := ParseOperatorKind("balance,region,leader")
+	k, err := ParseOperatorKind("region,leader")
 	c.Assert(err, IsNil)
-	c.Assert(k, Equals, OpBalance|OpRegion|OpLeader)
+	c.Assert(k, Equals, OpRegion|OpLeader)
 	_, err = ParseOperatorKind("leader,region")
 	c.Assert(err, IsNil)
 	_, err = ParseOperatorKind("foobar")
@@ -305,10 +305,10 @@ func (s *testOperatorSuite) TestStart(c *C) {
 		RemovePeer{FromStore: 2},
 	}
 	op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
-	c.Assert(op.stepTime, Equals, int64(0))
+	c.Assert(op.GetStartTime().Nanosecond(), Equals, 0)
 	c.Assert(op.Status(), Equals, CREATED)
 	c.Assert(op.Start(), IsTrue)
-	c.Assert(op.stepTime, Not(Equals), 0)
+	c.Assert(op.GetStartTime().Nanosecond(), Not(Equals), 0)
 	c.Assert(op.Status(), Equals, STARTED)
 }
 

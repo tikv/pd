@@ -22,5 +22,4 @@ import (
 	_ "github.com/sasha-s/go-deadlock"
 	_ "github.com/swaggo/swag/cmd/swag"
 	_ "golang.org/x/tools/cmd/goimports"
-	_ "honnef.co/go/tools/cmd/staticcheck"
 )

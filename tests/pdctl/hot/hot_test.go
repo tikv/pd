@@ -112,10 +112,10 @@ func (s *hotTestSuite) TestHot(c *C) {
 		c.Assert(hotRegion.AsLeader[hotStoreID].Stats[0].RegionID, Equals, hotRegionID)
 	}
 
-	hotReadRegionID, hotWriteRegionID, hotStoreId := uint64(3), uint64(2), uint64(1)
-	pdctl.MustPutRegion(c, cluster, hotReadRegionID, hotStoreId, []byte("b"), []byte("c"), core.SetReadBytes(1000000000), core.SetReportInterval(reportInterval))
-	pdctl.MustPutRegion(c, cluster, hotWriteRegionID, hotStoreId, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000), core.SetReportInterval(reportInterval))
+	hotReadRegionID, hotWriteRegionID, hotStoreID := uint64(3), uint64(2), uint64(1)
+	pdctl.MustPutRegion(c, cluster, hotReadRegionID, hotStoreID, []byte("b"), []byte("c"), core.SetReadBytes(1000000000), core.SetReportInterval(reportInterval))
+	pdctl.MustPutRegion(c, cluster, hotWriteRegionID, hotStoreID, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000), core.SetReportInterval(reportInterval))
 	time.Sleep(5000 * time.Millisecond)
-	testHot(hotReadRegionID, hotStoreId, "read")
-	testHot(hotWriteRegionID, hotStoreId, "write")
+	testHot(hotReadRegionID, hotStoreID, "read")
+	testHot(hotWriteRegionID, hotStoreID, "write")
 }

@@ -67,6 +67,9 @@ func (c *testCluster) addRegionStore(storeID uint64, regionCount int, regionSize
 		core.SetRegionSize(int64(regionSize)),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
+
+	c.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	c.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	c.Lock()
 	defer c.Unlock()
 	return c.putStoreLocked(newStore)
@@ -103,6 +106,9 @@ func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 		core.SetLeaderSize(int64(leaderCount)*10),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
+
+	c.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	c.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	c.Lock()
 	defer c.Unlock()
 	return c.putStoreLocked(newStore)
@@ -201,10 +207,10 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)
-	testutil.CheckTransferPeer(c, co.opController.GetOperator(1), operator.OpBalance, 4, 1)
+	testutil.CheckTransferPeer(c, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
 	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
 	waitOperator(c, co, 2)
-	testutil.CheckTransferLeader(c, co.opController.GetOperator(2), operator.OpBalance, 4, 2)
+	testutil.CheckTransferLeader(c, co.opController.GetOperator(2), operator.OpKind(0), 4, 2)
 	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -464,7 +470,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 	// Wait for schedule.
 	waitOperator(c, co, 1)
-	testutil.CheckTransferPeer(c, co.opController.GetOperator(1), operator.OpBalance, 4, 1)
+	testutil.CheckTransferPeer(c, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
 
 	region := tc.GetRegion(1).Clone()
 
@@ -907,15 +913,12 @@ func (s *testOperatorControllerSuite) TestOperatorCount(c *C) {
 }
 
 func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
-	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
-		// scheduling one time needs 60 seconds
-		// and thus it's large enough to make sure that only schedule one time
-		cfg.StoreBalanceRate = 1
-	}, nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
 	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
+	opt := tc.GetOpt()
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
 	c.Assert(tc.addRegionStore(3, 100), IsNil)
 	c.Assert(tc.addRegionStore(2, 100), IsNil)
@@ -935,9 +938,9 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 
 	// reset all stores' limit
 	// scheduling one time needs 1/10 seconds
-	oc.SetAllStoresLimit(10, storelimit.Manual, storelimit.RegionAdd)
-	oc.SetAllStoresLimit(10, storelimit.Manual, storelimit.RegionRemove)
-
+	opt.SetAllStoresLimit(storelimit.AddPeer, 600)
+	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
+	time.Sleep(1 * time.Second)
 	for i := 0; i < 10; i++ {
 		op1 := lb.Schedule(tc)[0]
 		c.Assert(op1, NotNil)
@@ -952,10 +955,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 }
 
 func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
-	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
-		// scheduling one time needs 2 seconds
-		cfg.StoreBalanceRate = 30
-	}, nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
 	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))

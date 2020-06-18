@@ -91,7 +91,7 @@ func NewStoreLimitCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "limit [<type>]|[<store_id>|<all> <limit> <type>]",
 		Short: "show or set a store's rate limit",
-		Long:  "show or set a store's rate limit, <type> can be 'region-add'(default) or 'region-remove'",
+		Long:  "show or set a store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Run:   storeLimitCommandFunc,
 	}
 	return c
@@ -146,7 +146,7 @@ func NewShowStoresCommand() *cobra.Command {
 func NewShowAllStoresLimitCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:        "limit <type>",
-		Short:      "show all stores' limit, <type> can be 'region-add'(default) or 'region-remove'",
+		Short:      "show all stores' limit, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Deprecated: "use store limit instead",
 		Run:        showAllStoresLimitCommandFunc,
 	}
@@ -169,7 +169,7 @@ func NewSetAllLimitCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:        "limit <rate> <type>",
 		Short:      "set all store's rate limit",
-		Long:       "set all store's rate limit, <type> can be 'region-add'(default) or 'region-remove'",
+		Long:       "set all store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Deprecated: "use store limit all <rate> instead",
 		Run:        setAllLimitCommandFunc,
 	}
@@ -180,7 +180,7 @@ func NewStoreLimitSceneCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "limit-scene [<type>]|[<scene> <rate> <type>]",
 		Short: "show or set the limit value for a scene",
-		Long:  "show or set the limit value for a scene, <type> can be 'region-add'(default) or 'region-remove'",
+		Long:  "show or set the limit value for a scene, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Run:   storeLimitSceneCommandFunc,
 	}
 }

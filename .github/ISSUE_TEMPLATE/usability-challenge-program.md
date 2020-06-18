@@ -2,27 +2,27 @@
 name: "🏪 Usability Challenge Program"
 about: UCP Season1 Program
 title: 'UCP: '
-labels: ''
-assignees: ''
-
+labels: 'challenge-program-2'
 ---
 
-## Description
+## UCP Issue
 
-<!-- Add the issue description here -->
+### Description
 
-## Score
+<!-- Add the issue description here. -->
 
-<!-- Add the score which the contributor will obtain once this issue is solved -->
+### Score
 
-## Mentor
+<!-- Add the score which the contributor will obtain once this issue is solved. -->
 
-<!-- Add the mentor of this issue -->
+### Mentor
 
-## Recommended Skills
+<!-- Add the mentor of this issue. -->
+
+### Recommended Skills
 
 <!-- Add the description about what kind of skills does the contributor should have to solve this issue. -->
 
-## Learning Materials
+### Learning Materials
 
 <!-- Add the description about what kind of materials does the contributor need to learn to solve this issue. -->

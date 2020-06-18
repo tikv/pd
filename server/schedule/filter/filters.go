@@ -134,11 +134,11 @@ func (f *storeLimitFilter) Type() string {
 }
 
 func (f *storeLimitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsAvailable(storelimit.RegionRemove)
+	return store.IsAvailable(storelimit.RemovePeer)
 }
 
 func (f *storeLimitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsAvailable(storelimit.RegionAdd)
+	return store.IsAvailable(storelimit.AddPeer)
 }
 
 type stateFilter struct{ scope string }
@@ -393,7 +393,7 @@ func (f StoreStateFilter) filterMoveRegion(opt opt.Options, isSource bool, store
 		return false
 	}
 
-	if (isSource && !store.IsAvailable(storelimit.RegionRemove)) || (!isSource && !store.IsAvailable(storelimit.RegionAdd)) {
+	if (isSource && !store.IsAvailable(storelimit.RemovePeer)) || (!isSource && !store.IsAvailable(storelimit.AddPeer)) {
 		return false
 	}
 
@@ -403,69 +403,6 @@ func (f StoreStateFilter) filterMoveRegion(opt opt.Options, isSource bool, store
 		return false
 	}
 	return true
-}
-
-// BlacklistType the type of BlackListStore Filter.
-type BlacklistType int
-
-// some flags about blacklist type.
-const (
-	// blacklist associated with the source.
-	BlacklistSource BlacklistType = 1 << iota
-	// blacklist associated with the target.
-	BlacklistTarget
-)
-
-// BlacklistStoreFilter filters the store according to the blacklist.
-type BlacklistStoreFilter struct {
-	scope     string
-	blacklist map[uint64]struct{}
-	flag      BlacklistType
-}
-
-// NewBlacklistStoreFilter creates a blacklist filter.
-func NewBlacklistStoreFilter(scope string, typ BlacklistType) *BlacklistStoreFilter {
-	return &BlacklistStoreFilter{
-		scope:     scope,
-		blacklist: make(map[uint64]struct{}),
-		flag:      typ,
-	}
-}
-
-// Scope returns the scheduler or the checker which the filter acts on.
-func (f *BlacklistStoreFilter) Scope() string {
-	return f.scope
-}
-
-// Type implements the Filter.
-func (f *BlacklistStoreFilter) Type() string {
-	return "blacklist-store-filter"
-}
-
-// Source implements the Filter.
-func (f *BlacklistStoreFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	if f.flag&BlacklistSource != BlacklistSource {
-		return true
-	}
-	return f.filter(store)
-}
-
-// Add adds the store to the blacklist.
-func (f *BlacklistStoreFilter) Add(storeID uint64) {
-	f.blacklist[storeID] = struct{}{}
-}
-
-// Target implements the Filter.
-func (f *BlacklistStoreFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	if f.flag&BlacklistTarget != BlacklistTarget {
-		return true
-	}
-	return f.filter(store)
-}
-
-func (f *BlacklistStoreFilter) filter(store *core.StoreInfo) bool {
-	_, ok := f.blacklist[store.GetID()]
-	return !ok
 }
 
 // labelConstraintFilter is a filter that selects stores satisfy the constraints.
@@ -548,19 +485,11 @@ type engineFilter struct {
 	constraint placement.LabelConstraint
 }
 
-// NewEngineFilter creates a filter that filters out default engine stores.
-// By default, all stores that are not marked with a special engine will be filtered out.
-// Specify the special engine label if you want to include the special stores.
-func NewEngineFilter(scope string, allowEngines ...string) Filter {
-	var values []string
-	for _, v := range allSpeicalEngines {
-		if slice.NoneOf(allowEngines, func(i int) bool { return allowEngines[i] == v }) {
-			values = append(values, v)
-		}
-	}
+// NewEngineFilter creates a filter that only keeps allowedEngines.
+func NewEngineFilter(scope string, allowedEngines ...string) Filter {
 	return &engineFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: values},
+		constraint: placement.LabelConstraint{Key: "engine", Op: "in", Values: allowedEngines},
 	}
 }
 
@@ -577,6 +506,35 @@ func (f *engineFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 func (f *engineFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	return f.constraint.MatchStore(store)
+}
+
+type ordinaryEngineFilter struct {
+	scope      string
+	constraint placement.LabelConstraint
+}
+
+// NewOrdinaryEngineFilter creates a filter that only keeps ordinary engine stores.
+func NewOrdinaryEngineFilter(scope string) Filter {
+	return &ordinaryEngineFilter{
+		scope:      scope,
+		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: allSpeicalEngines},
+	}
+}
+
+func (f *ordinaryEngineFilter) Scope() string {
+	return f.scope
+}
+
+func (f *ordinaryEngineFilter) Type() string {
+	return "ordinary-engine-filter"
+}
+
+func (f *ordinaryEngineFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return f.constraint.MatchStore(store)
+}
+
+func (f *ordinaryEngineFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return f.constraint.MatchStore(store)
 }
 

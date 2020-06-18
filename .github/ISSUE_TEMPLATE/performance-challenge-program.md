@@ -2,9 +2,7 @@
 name: "✈️ Performance Challenge Program"
 about: PCP Season1 Program
 title: 'PCP: '
-labels: ''
-assignees: ''
-
+labels: 'PCP-S1'
 ---
 
 ## PCP Issue
@@ -16,6 +14,6 @@ assignees: ''
 - Recommended Skills:
 - Mentor(s):
 
-## Description
+### Description
 
-<!-- Add issue description here -->
+<!-- Add issue description here. -->

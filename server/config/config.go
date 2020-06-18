@@ -23,21 +23,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/grpcutil"
-	"github.com/pingcap/pd/v4/pkg/metricutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/pingcap/pd/v4/pkg/grpcutil"
+	"github.com/pingcap/pd/v4/pkg/metricutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/schedule"
 )
 
 // Config is the pd server configuration.
@@ -199,7 +202,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage = true
-	defaultMaxResetTsGap    = 24 * time.Hour
+	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultKeyType          = "table"
 
 	defaultStrictlyMatchLabel  = false
@@ -210,14 +213,49 @@ const (
 
 	defaultDRWaitStoreTimeout = time.Minute
 	defaultDRWaitSyncTimeout  = time.Minute
-
-	defaultPublicPathPrefix = "/dashboard"
 )
 
 var (
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
+	// DefaultStoreLimit is the default limit of add peer and remove peer.
+	DefaultStoreLimit StoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
 )
+
+// StoreLimit is the default limit of adding peer and removing peer when putting stores.
+type StoreLimit struct {
+	mu sync.Mutex
+	// AddPeer is the default rate of adding peers for store limit (per minute).
+	AddPeer float64
+	// RemovePeer is the default rate of removing peers for store limit (per minute).
+	RemovePeer float64
+}
+
+// SetDefaultStoreLimit sets the default store limit for a given type.
+func (sl *StoreLimit) SetDefaultStoreLimit(typ storelimit.Type, ratePerMin float64) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	switch typ {
+	case storelimit.AddPeer:
+		sl.AddPeer = ratePerMin
+	case storelimit.RemovePeer:
+		sl.RemovePeer = ratePerMin
+	}
+}
+
+// GetDefaultStoreLimit gets the default store limit for a given type.
+func (sl *StoreLimit) GetDefaultStoreLimit(typ storelimit.Type) float64 {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	switch typ {
+	case storelimit.AddPeer:
+		return sl.AddPeer
+	case storelimit.RemovePeer:
+		return sl.RemovePeer
+	default:
+		panic("invalid type")
+	}
+}
 
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {
@@ -466,11 +504,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
-	if c.Dashboard.PublicPathPrefix == "" {
-		c.Dashboard.PublicPathPrefix = defaultPublicPathPrefix
-	}
-	c.Dashboard.PublicPathPrefix = strings.TrimRight(c.Dashboard.PublicPathPrefix, "/")
-
 	return nil
 }
 
@@ -541,7 +574,10 @@ type ScheduleConfig struct {
 	// threshold, it is considered a hot region.
 	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
 	// StoreBalanceRate is the maximum of balance rate for each store.
-	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate"`
+	// WARN: StoreBalanceRate is deprecated.
+	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
+	// StoreLimit is the limit of scheduling for stores.
+	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
 	//
@@ -614,6 +650,10 @@ type ScheduleConfig struct {
 func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	schedulers := make(SchedulerConfigs, len(c.Schedulers))
 	copy(schedulers, c.Schedulers)
+	storeLimit := make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
+	for k, v := range c.StoreLimit {
+		storeLimit[k] = v
+	}
 	return &ScheduleConfig{
 		MaxSnapshotCount:             c.MaxSnapshotCount,
 		MaxPendingPeerCount:          c.MaxPendingPeerCount,
@@ -631,7 +671,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableCrossTableMerge:        c.EnableCrossTableMerge,
 		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
 		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
-		StoreBalanceRate:             c.StoreBalanceRate,
+		StoreLimit:                   storeLimit,
 		TolerantSizeRatio:            c.TolerantSizeRatio,
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
@@ -667,7 +707,6 @@ const (
 	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 4
-	defaultStoreBalanceRate       = 15
 	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
 	defaultHighSpaceRatio         = 0.7
@@ -725,7 +764,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("store-limit-mode") {
 		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
-	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
@@ -736,6 +774,11 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 			return err
 		}
 		*b[0], *b[1] = false, v // reset old flag false to make it ignored when marshal to JSON
+	}
+
+	if c.StoreBalanceRate != 0 {
+		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		c.StoreBalanceRate = 0
 	}
 
 	return c.Validate()
@@ -773,6 +816,10 @@ func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, 
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.DisableLearner = false
+	if c.StoreBalanceRate != 0 {
+		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		c.StoreBalanceRate = 0
+	}
 	for _, b := range c.migrateConfigurationMap() {
 		// If old=false (previously disabled), set both old and new to false.
 		if *b[0] {
@@ -823,25 +870,16 @@ func (c *ScheduleConfig) Deprecated() error {
 	if c.DisableLocationReplacement {
 		return errors.New("disable-location-replacement has already been deprecated")
 	}
+	if c.StoreBalanceRate != 0 {
+		return errors.New("store-balance-rate has already been deprecated")
+	}
 	return nil
 }
 
-var deprecateConfigs = []string{
-	"disable-remove-down-replica",
-	"disable-replace-offline-replica",
-	"disable-make-up-replica",
-	"disable-remove-extra-replica",
-	"disable-location-replacement",
-}
-
-// IsDeprecated returns if a config is deprecated.
-func IsDeprecated(config string) bool {
-	for _, t := range deprecateConfigs {
-		if t == config {
-			return true
-		}
-	}
-	return false
+// StoreLimitConfig is a config about scheduling rate limit of different types for a store.
+type StoreLimitConfig struct {
+	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
+	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
 }
 
 // SchedulerConfigs is a slice of customized scheduler configuration.
@@ -941,7 +979,7 @@ type PDServerConfig struct {
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
-	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTsGap)
+	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
 	}
@@ -954,10 +992,10 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
 	}
-	return nil
+	return c.Validate()
 }
 
-// Clone retruns a cloned PD server config.
+// Clone returns a cloned PD server config.
 func (c *PDServerConfig) Clone() *PDServerConfig {
 	runtimeServices := make(typeutil.StringSlice, len(c.RuntimeServices))
 	copy(runtimeServices, c.RuntimeServices)
@@ -969,6 +1007,20 @@ func (c *PDServerConfig) Clone() *PDServerConfig {
 		DashboardAddress: c.DashboardAddress,
 		RuntimeServices:  runtimeServices,
 	}
+}
+
+// Validate is used to validate if some pd-server configurations are right.
+func (c *PDServerConfig) Validate() error {
+	switch c.DashboardAddress {
+	case "auto":
+	case "none":
+	default:
+		if err := ValidateURLWithScheme(c.DashboardAddress); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.
@@ -1128,6 +1180,7 @@ type DashboardConfig struct {
 	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb_cert_path"`
 	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb_key_path"`
 	PublicPathPrefix string `toml:"public-path-prefix" json:"public_path_prefix"`
+	InternalProxy    bool   `toml:"internal-proxy" json:"internal_proxy"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.

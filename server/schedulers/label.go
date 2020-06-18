@@ -66,7 +66,7 @@ type labelSchedulerConfig struct {
 type labelScheduler struct {
 	*BaseScheduler
 	conf     *labelSchedulerConfig
-	selector *selector.BalanceSelector
+	selector *selector.RandomSelector
 }
 
 // LabelScheduler is mainly based on the store's label information for scheduling.
@@ -76,11 +76,10 @@ func newLabelScheduler(opController *schedule.OperatorController, conf *labelSch
 	filters := []filter.Filter{
 		filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true},
 	}
-	kind := core.NewScheduleKind(core.LeaderKind, core.ByCount)
 	return &labelScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
 		conf:          conf,
-		selector:      selector.NewBalanceSelector(kind, filters),
+		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
