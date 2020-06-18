@@ -366,15 +366,17 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	typeValue, err := getStoreLimitType(input)
+	typeValues, err := getStoreLimitType(input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.SetStoreLimit(storeID, ratePerMin, typeValue); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
+	for _, typ := range typeValues {
+		if err := h.SetStoreLimit(storeID, ratePerMin, typ); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	h.rd.JSON(w, http.StatusOK, nil)
@@ -436,15 +438,17 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	typeValue, err := getStoreLimitType(input)
+	typeValues, err := getStoreLimitType(input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.SetAllStoresLimit(ratePerMin, typeValue); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
+	for _, typ := range typeValues {
+		if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	h.rd.JSON(w, http.StatusOK, nil)
@@ -584,19 +588,20 @@ func (filter *storeStateFilter) filter(stores []*metapb.Store) []*metapb.Store {
 	return ret
 }
 
-func getStoreLimitType(input map[string]interface{}) (storelimit.Type, error) {
+func getStoreLimitType(input map[string]interface{}) ([]storelimit.Type, error) {
 	typeNameIface, ok := input["type"]
-	typeValue := storelimit.AddPeer
 	var err error
 	if ok {
 		typeName, ok := typeNameIface.(string)
 		if !ok {
 			err = errors.New("bad format type")
-		} else {
-			return parseStoreLimitType(typeName)
+			return nil, err
 		}
+		typ, err := parseStoreLimitType(typeName)
+		return []storelimit.Type{typ}, err
 	}
-	return typeValue, err
+
+	return []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer}, err
 }
 
 func parseStoreLimitType(typeName string) (storelimit.Type, error) {

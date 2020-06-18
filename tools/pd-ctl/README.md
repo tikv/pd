@@ -644,16 +644,16 @@ Usage:
 >> store label 1 zone cn               // Set the value of the label with the "zone" key to "cn" for the store with the store id of 1
 >> store weight 1 5 10                 // Set the leader weight to 5 and region weight to 10 for the store with the store id of 1
 >> store remove-tombstone              // Remove stores that are in tombstone state
->> store limit                         // Show limits of adding peer operation for all stores
+>> store limit                         // Show limits of adding peer and removing peer operation for all stores
 >> store limit add-peer                // Show limits of adding peer operation for all stores
 >> store limit remove-peer             // Show limits of removing peer operation for all stores
->> store limit all 5                   // Limit 5 adding region operations per minute for all stores
->> store limit 1 5                     // Limit 5 adding region operations per minute for store 1
->> store limit all 5 add-peer          // Limit 5 adding region operations per minute for all stores
->> store limit 1 5 add-peer            // Limit 5 adding region operations per minute for store 1
->> store limit 1 5 remove-peer         // Limit 5 removing region operations per minute for store 1
->> store limit all 5 remove-peer       // Limit 5 removing region operations per minute for all stores
->> store limit-scene  // Show all limit scene
+>> store limit all 5                   // Limit 5 adding peer operations and 5 remove peer operations per minute for all stores
+>> store limit 1 5                     // Limit 5 adding peer operations and 5 remove peer operations per minute for store 1
+>> store limit all 5 add-peer          // Limit 5 adding peer operations per minute for all stores
+>> store limit 1 5 add-peer            // Limit 5 adding peer operations per minute for store 1
+>> store limit 1 5 remove-peer         // Limit 5 removing peer operations per minute for store 1
+>> store limit all 5 remove-peer       // Limit 5 removing peer operations per minute for all stores
+>> store limit-scene                   // Show all limit scene
 {
   "Idle": 100,
   "Low": 50,

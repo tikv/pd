@@ -715,7 +715,6 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
-	defaultStoreLimitMode              = "manual"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData) error {
@@ -760,9 +759,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("leader-schedule-policy") {
 		adjustString(&c.LeaderSchedulePolicy, defaultLeaderSchedulePolicy)
-	}
-	if !meta.IsDefined("store-limit-mode") {
-		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)

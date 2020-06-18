@@ -156,6 +156,8 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 	limit := leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.AddPeer)
 	c.Assert(limit, Equals, float64(10))
+	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
+	c.Assert(limit, Equals, float64(10))
 
 	// store limit <store_id> <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "1", "5", "remove-peer"}
@@ -171,11 +173,17 @@ func (s *storeTestSuite) TestStore(c *C) {
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	limit1 := leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.AddPeer)
+	limit2 := leaderServer.GetRaftCluster().GetStoreLimitByType(2, storelimit.AddPeer)
 	limit3 := leaderServer.GetRaftCluster().GetStoreLimitByType(3, storelimit.AddPeer)
 	c.Assert(limit1, Equals, float64(20))
-	c.Assert(limit3, Equals, float64(20))
-	limit2 := leaderServer.GetRaftCluster().GetStoreLimitByType(2, storelimit.AddPeer)
 	c.Assert(limit2, Equals, float64(20))
+	c.Assert(limit3, Equals, float64(20))
+	limit1 = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
+	limit2 = leaderServer.GetRaftCluster().GetStoreLimitByType(2, storelimit.RemovePeer)
+	limit3 = leaderServer.GetRaftCluster().GetStoreLimitByType(3, storelimit.RemovePeer)
+	c.Assert(limit1, Equals, float64(20))
+	c.Assert(limit2, Equals, float64(20))
+	c.Assert(limit3, Equals, float64(20))
 
 	// store limit all <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "25", "remove-peer"}

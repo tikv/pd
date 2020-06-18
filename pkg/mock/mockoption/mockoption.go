@@ -117,7 +117,6 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.TolerantSizeRatio = defaultTolerantSizeRatio
 	mso.LowSpaceRatio = defaultLowSpaceRatio
 	mso.HighSpaceRatio = defaultHighSpaceRatio
-	mso.StoreLimitMode = defaultStoreLimitMode
 	mso.EnableRemoveDownReplica = true
 	mso.EnableReplaceOfflineReplica = true
 	mso.EnableMakeUpReplica = true
