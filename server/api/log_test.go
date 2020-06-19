@@ -45,7 +45,7 @@ func (s *testLogSuite) TearDownSuite(c *C) {
 
 func (s *testLogSuite) TestSetLogLevel(c *C) {
 	level := "error"
-	if log.GetLevel().String() == level{
+	if log.GetLevel().String() == level {
 		level = "warn"
 	}
 	data, err := json.Marshal(level)

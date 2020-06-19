@@ -48,23 +48,23 @@ func (s *testRuleSuite) Testrule(c *C) {
 	c.Assert(postJSON(testDialClient, s.urlPrefix, []byte(`{"enable-placement-rules":"true"}`)), IsNil)
 	rule1 := map[string]interface{}{
 		"group_id": "a",
-		"id": "10",
-		"role": "voter",
-		"count": 1,
+		"id":       "10",
+		"role":     "voter",
+		"count":    1,
 	}
 	rule2 := map[string]interface{}{
 		"group_id": "a",
-		"id": "20",
-		"role": "voter",
-		"count": 2,
-		}
+		"id":       "20",
+		"role":     "voter",
+		"count":    2,
+	}
 	rule3 := map[string]interface{}{
 		"group_id": "b",
-		"id": "20",
-		"role": "voter",
-		"count": 3,
-		"region": "4",
-		"key": "123abc",
+		"id":       "20",
+		"role":     "voter",
+		"count":    3,
+		"region":   "4",
+		"key":      "123abc",
 	}
 	//Set
 	postData, err := json.Marshal(rule1)
