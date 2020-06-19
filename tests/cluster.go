@@ -469,6 +469,12 @@ func (c *TestCluster) GetCluster() *metapb.Cluster {
 	return c.servers[leader].GetCluster()
 }
 
+// GetClusterStatus returns raft cluster status.
+func (c *TestCluster) GetClusterStatus() (*cluster.Status, error) {
+	leader := c.GetLeader()
+	return c.servers[leader].GetRaftCluster().LoadClusterStatus()
+}
+
 // GetEtcdClient returns the builtin etcd client.
 func (c *TestCluster) GetEtcdClient() *clientv3.Client {
 	leader := c.GetLeader()

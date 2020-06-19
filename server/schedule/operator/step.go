@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -30,6 +31,7 @@ type OpStep interface {
 	fmt.Stringer
 	ConfVerChanged(region *core.RegionInfo) bool
 	IsFinish(region *core.RegionInfo) bool
+	CheckSafety(region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
@@ -50,6 +52,18 @@ func (tl TransferLeader) String() string {
 // IsFinish checks if current step is finished.
 func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 	return region.GetLeader().GetStoreId() == tl.ToStore
+}
+
+// CheckSafety checks if the step meets the safety properties.
+func (tl TransferLeader) CheckSafety(region *core.RegionInfo) error {
+	peer := region.GetStorePeer(tl.ToStore)
+	if peer == nil {
+		return errors.New("peer does not existed")
+	}
+	if peer.IsLearner {
+		return errors.New("peer already is a learner")
+	}
+	return nil
 }
 
 // Influence calculates the store difference that current step makes.
@@ -98,7 +112,16 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	regionSize := region.GetApproximateSize()
 	to.RegionSize += regionSize
 	to.RegionCount++
-	to.AdjustStepCost(storelimit.RegionAdd, regionSize)
+	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+}
+
+// CheckSafety checks if the step meets the safety properties.
+func (ap AddPeer) CheckSafety(region *core.RegionInfo) error {
+	peer := region.GetStorePeer(ap.ToStore)
+	if peer != nil && peer.GetId() != ap.PeerID {
+		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
+	}
+	return nil
 }
 
 // AddLearner is an OpStep that adds a region learner peer.
@@ -130,6 +153,21 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
+// CheckSafety checks if the step meets the safety properties.
+func (al AddLearner) CheckSafety(region *core.RegionInfo) error {
+	peer := region.GetStorePeer(al.ToStore)
+	if peer == nil {
+		return nil
+	}
+	if peer.GetId() != al.PeerID {
+		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
+	}
+	if !peer.IsLearner {
+		return errors.New("peer already is a voter")
+	}
+	return nil
+}
+
 // Influence calculates the store difference that current step makes.
 func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(al.ToStore)
@@ -137,7 +175,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	regionSize := region.GetApproximateSize()
 	to.RegionSize += regionSize
 	to.RegionCount++
-	to.AdjustStepCost(storelimit.RegionAdd, regionSize)
+	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
@@ -168,6 +206,15 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
+// CheckSafety checks if the step meets the safety properties.
+func (pl PromoteLearner) CheckSafety(region *core.RegionInfo) error {
+	peer := region.GetStorePeer(pl.ToStore)
+	if peer == nil {
+		return errors.New("peer does not exist")
+	}
+	return nil
+}
+
 // Influence calculates the store difference that current step makes.
 func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
@@ -190,6 +237,14 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 	return region.GetStorePeer(rp.FromStore) == nil
 }
 
+// CheckSafety checks if the step meets the safety properties.
+func (rp RemovePeer) CheckSafety(region *core.RegionInfo) error {
+	if rp.FromStore == region.GetLeader().GetStoreId() {
+		return errors.New("cannot remove leader peer")
+	}
+	return nil
+}
+
 // Influence calculates the store difference that current step makes.
 func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
@@ -197,7 +252,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	regionSize := region.GetApproximateSize()
 	from.RegionSize -= regionSize
 	from.RegionCount--
-	from.AdjustStepCost(storelimit.RegionRemove, regionSize)
+	from.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
 
 // MergeRegion is an OpStep that merge two regions.
@@ -228,6 +283,11 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 		return !bytes.Equal(region.GetStartKey(), mr.ToRegion.StartKey) || !bytes.Equal(region.GetEndKey(), mr.ToRegion.EndKey)
 	}
 	return false
+}
+
+// CheckSafety checks if the step meets the safety properties.
+func (mr MergeRegion) CheckSafety(region *core.RegionInfo) error {
+	return nil
 }
 
 // Influence calculates the store difference that current step makes.
@@ -275,6 +335,11 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 	}
 }
 
+// CheckSafety checks if the step meets the safety properties.
+func (sr SplitRegion) CheckSafety(region *core.RegionInfo) error {
+	return nil
+}
+
 // AddLightPeer is an OpStep that adds a region peer without considering the influence.
 type AddLightPeer struct {
 	ToStore, PeerID uint64
@@ -302,6 +367,15 @@ func (ap AddLightPeer) IsFinish(region *core.RegionInfo) bool {
 		return region.GetPendingVoter(p.GetId()) == nil
 	}
 	return false
+}
+
+// CheckSafety checks if the step meets the safety properties.
+func (ap AddLightPeer) CheckSafety(region *core.RegionInfo) error {
+	peer := region.GetStorePeer(ap.ToStore)
+	if peer != nil && peer.GetId() != ap.PeerID {
+		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
+	}
+	return nil
 }
 
 // Influence calculates the store difference that current step makes.
@@ -339,6 +413,21 @@ func (al AddLightLearner) IsFinish(region *core.RegionInfo) bool {
 		return region.GetPendingLearner(p.GetId()) == nil
 	}
 	return false
+}
+
+// CheckSafety checks if the step meets the safety properties.
+func (al AddLightLearner) CheckSafety(region *core.RegionInfo) error {
+	peer := region.GetStorePeer(al.ToStore)
+	if peer == nil {
+		return nil
+	}
+	if peer.GetId() != al.PeerID {
+		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
+	}
+	if !peer.IsLearner {
+		return errors.New("peer already is a voter")
+	}
+	return nil
 }
 
 // Influence calculates the store difference that current step makes.

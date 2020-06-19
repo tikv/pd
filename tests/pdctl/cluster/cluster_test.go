@@ -22,6 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server"
+	clusterpkg "github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tests/pdctl"
 )
@@ -46,6 +47,8 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	err = cluster.RunInitialServers()
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
+	err = cluster.GetServer(cluster.GetLeader()).BootstrapCluster()
+	c.Assert(err, IsNil)
 	pdAddr := cluster.GetConfig().GetClientURL()
 	i := strings.Index(pdAddr, "//")
 	pdAddr = pdAddr[i+2:]
@@ -63,13 +66,23 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	echo := pdctl.GetEcho([]string{"-u", pdAddr, "--cacert=ca.pem", "cluster"})
 	c.Assert(strings.Contains(echo, "no such file or directory"), IsTrue)
 
-	// cluster status
-	args = []string{"-u", pdAddr, "cluster", "status"}
+	// cluster info
+	args = []string{"-u", pdAddr, "cluster"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	ci = &metapb.Cluster{}
 	c.Assert(json.Unmarshal(output, ci), IsNil)
 	c.Assert(ci, DeepEquals, cluster.GetCluster())
+
+	// cluster status
+	args = []string{"-u", pdAddr, "cluster", "status"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	cs := &clusterpkg.Status{}
+	c.Assert(json.Unmarshal(output, cs), IsNil)
+	clusterStatus, err := cluster.GetClusterStatus()
+	c.Assert(err, IsNil)
+	c.Assert(cs, DeepEquals, clusterStatus)
 
 	// ping
 	args = []string{"-u", pdAddr, "ping"}

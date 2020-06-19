@@ -546,7 +546,7 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	}
 	var err error
 	for _, sc := range s {
-		var delayUntil int64 = 0
+		var delayUntil int64
 		if t > 0 {
 			delayUntil = time.Now().Unix() + t
 		}

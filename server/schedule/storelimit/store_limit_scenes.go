@@ -39,9 +39,9 @@ func DefaultScene(limitType Type) *Scene {
 
 	// change this if different type rate limit has different default scene
 	switch limitType {
-	case RegionAdd:
+	case AddPeer:
 		return defaultScene
-	case RegionRemove:
+	case RemovePeer:
 		return defaultScene
 	default:
 		return nil
