@@ -1684,11 +1684,17 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
 }
 
 // AddStoreLimit add a store limit for a given store ID.
-func (c *RaftCluster) AddStoreLimit(storeID uint64, limit config.StoreLimit) {
+func (c *RaftCluster) AddStoreLimit(storeID uint64, isTiFlashStore bool) {
 	cfg := c.opt.GetScheduleConfig().Clone()
 	sc := config.StoreLimitConfig{
-		AddPeer:    limit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: limit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	}
+	if isTiFlashStore {
+		sc = config.StoreLimitConfig{
+			AddPeer:    config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+			RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		}
 	}
 	cfg.StoreLimit[storeID] = sc
 	c.opt.SetScheduleConfig(cfg)
