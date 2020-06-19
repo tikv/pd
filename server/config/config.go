@@ -218,8 +218,10 @@ const (
 var (
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
-	// DefaultStoreLimit is the default limit of add peer and remove peer.
+	// DefaultStoreLimit is the default store limit of add peer and remove peer.
 	DefaultStoreLimit StoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
+	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
+	DefaultTiFlashStoreLimit StoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
 )
 
 // StoreLimit is the default limit of adding peer and removing peer when putting stores.

@@ -739,19 +739,24 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 	c.Assert(err, NotNil)
 	rep := leaderServer.GetConfig().Replication
 	rep.EnablePlacementRules = true
-	err = leaderServer.GetServer().SetReplicationConfig(rep)
+	svr := leaderServer.GetServer()
+	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, IsNil)
 	_, err = putStore(c, grpcPDClient, clusterID, tiflashStore)
 	c.Assert(err, IsNil)
+	// test TiFlash store limit
+	expect := map[uint64]config.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
+	c.Assert(svr.GetScheduleConfig().StoreLimit, DeepEquals, expect)
 
 	// cannot disable placement rules with TiFlash nodes
 	rep.EnablePlacementRules = false
-	err = leaderServer.GetServer().SetReplicationConfig(rep)
+	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, NotNil)
-	err = leaderServer.GetServer().GetRaftCluster().BuryStore(11, true)
+	err = svr.GetRaftCluster().BuryStore(11, true)
 	c.Assert(err, IsNil)
-	err = leaderServer.GetServer().SetReplicationConfig(rep)
+	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, IsNil)
+	c.Assert(len(svr.GetScheduleConfig().StoreLimit), Equals, 0)
 }
 
 func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {

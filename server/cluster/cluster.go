@@ -1684,11 +1684,11 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
 }
 
 // AddStoreLimit add a store limit for a given store ID.
-func (c *RaftCluster) AddStoreLimit(storeID uint64) {
+func (c *RaftCluster) AddStoreLimit(storeID uint64, limit config.StoreLimit) {
 	cfg := c.opt.GetScheduleConfig().Clone()
 	sc := config.StoreLimitConfig{
-		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		AddPeer:    limit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: limit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
 	cfg.StoreLimit[storeID] = sc
 	c.opt.SetScheduleConfig(cfg)
