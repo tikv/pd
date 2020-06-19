@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
@@ -26,21 +27,21 @@ import (
 // StoreLimiter adjust the store limit dynamically
 type StoreLimiter struct {
 	m       sync.RWMutex
-	oc      *schedule.OperatorController
+	opt     opt.Options
 	scene   map[storelimit.Type]*storelimit.Scene
 	state   *State
 	current LoadState
 }
 
 // NewStoreLimiter builds a store limiter object using the operator controller
-func NewStoreLimiter(c *schedule.OperatorController) *StoreLimiter {
+func NewStoreLimiter(opt opt.Options) *StoreLimiter {
 	defaultScene := map[storelimit.Type]*storelimit.Scene{
-		storelimit.RegionAdd:    storelimit.DefaultScene(storelimit.RegionAdd),
-		storelimit.RegionRemove: storelimit.DefaultScene(storelimit.RegionRemove),
+		storelimit.AddPeer:    storelimit.DefaultScene(storelimit.AddPeer),
+		storelimit.RemovePeer: storelimit.DefaultScene(storelimit.RemovePeer),
 	}
 
 	return &StoreLimiter{
-		oc:      c,
+		opt:     opt,
 		state:   NewState(),
 		scene:   defaultScene,
 		current: LoadStateNone,
@@ -56,17 +57,17 @@ func (s *StoreLimiter) Collect(stats *pdpb.StoreStats) {
 	s.state.Collect((*StatEntry)(stats))
 
 	state := s.state.State()
-	rateRegionAdd := s.calculateRate(storelimit.RegionAdd, state)
-	rateRegionRemove := s.calculateRate(storelimit.RegionRemove, state)
+	ratePeerAdd := s.calculateRate(storelimit.AddPeer, state)
+	ratePeerRemove := s.calculateRate(storelimit.RemovePeer, state)
 
-	if rateRegionAdd > 0 || rateRegionRemove > 0 {
-		if rateRegionAdd > 0 {
-			s.oc.SetAllStoresLimitAuto(rateRegionAdd, storelimit.RegionAdd)
-			log.Info("change store region add limit for cluster", zap.Stringer("state", state), zap.Float64("rate", rateRegionAdd))
+	if ratePeerAdd > 0 || ratePeerRemove > 0 {
+		if ratePeerAdd > 0 {
+			s.opt.SetAllStoresLimit(storelimit.AddPeer, ratePeerAdd)
+			log.Info("change store region add limit for cluster", zap.Stringer("state", state), zap.Float64("rate", ratePeerAdd))
 		}
-		if rateRegionRemove > 0 {
-			s.oc.SetAllStoresLimitAuto(rateRegionAdd, storelimit.RegionRemove)
-			log.Info("change store region remove limit for cluster", zap.Stringer("state", state), zap.Float64("rate", rateRegionRemove))
+		if ratePeerRemove > 0 {
+			s.opt.SetAllStoresLimit(storelimit.RemovePeer, ratePeerRemove)
+			log.Info("change store region remove limit for cluster", zap.Stringer("state", state), zap.Float64("rate", ratePeerRemove))
 		}
 		s.current = state
 		collectClusterStateCurrent(state)

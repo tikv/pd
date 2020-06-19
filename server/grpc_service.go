@@ -235,6 +235,11 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	log.Info("put store ok", zap.Stringer("store", store))
 	rc.OnStoreVersionChange()
 	CheckPDVersion(s.persistOptions)
+	if isTiFlashStore(store) {
+		rc.AddStoreLimit(store.GetId(), true /* isTiFlashStore*/)
+	} else {
+		rc.AddStoreLimit(store.GetId(), false /* isTiFlashStore*/)
+	}
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),

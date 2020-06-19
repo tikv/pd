@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
@@ -344,10 +343,17 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/limit [post]
 func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		return
+	}
+
+	store := rc.GetStore(storeID)
+	if store == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
 		return
 	}
 
@@ -361,21 +367,23 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "rate unset")
 		return
 	}
-	rate, ok := rateVal.(float64)
-	if !ok || rate < 0 {
+	ratePerMin, ok := rateVal.(float64)
+	if !ok || ratePerMin < 0 {
 		h.rd.JSON(w, http.StatusBadRequest, "badformat rate")
 		return
 	}
 
-	typeValue, err := getStoreLimitType(input)
+	typeValues, err := getStoreLimitType(input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.SetStoreLimit(storeID, rate/schedule.StoreBalanceBaseTime, typeValue); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
+	for _, typ := range typeValues {
+		if err := h.SetStoreLimit(storeID, ratePerMin, typ); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	h.rd.JSON(w, http.StatusOK, nil)
@@ -431,21 +439,23 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "rate unset")
 		return
 	}
-	rate, ok := rateVal.(float64)
-	if !ok || rate < 0 {
+	ratePerMin, ok := rateVal.(float64)
+	if !ok || ratePerMin < 0 {
 		h.rd.JSON(w, http.StatusBadRequest, "badformat rate")
 		return
 	}
 
-	typeValue, err := getStoreLimitType(input)
+	typeValues, err := getStoreLimitType(input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.SetAllStoresLimit(rate/schedule.StoreBalanceBaseTime, typeValue); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
+	for _, typ := range typeValues {
+		if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
 	h.rd.JSON(w, http.StatusOK, nil)
@@ -459,30 +469,8 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [get]
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
-	typeName := r.URL.Query().Get("type")
-	typeValue, err := parseStoreLimitType(typeName)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	limits, err := h.GetAllStoresLimit(typeValue)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	type LimitResp struct {
-		Rate float64 `json:"rate"`
-		Mode string  `json:"mode"`
-	}
-	resp := make(map[uint64]*LimitResp)
-	for s, l := range limits {
-		resp[s] = &LimitResp{
-			Rate: l.Rate() * schedule.StoreBalanceBaseTime,
-			Mode: l.Mode().String(),
-		}
-	}
-
-	h.rd.JSON(w, http.StatusOK, resp)
+	limits := h.GetScheduleConfig().StoreLimit
+	h.rd.JSON(w, http.StatusOK, limits)
 }
 
 // @Tags store
@@ -607,23 +595,24 @@ func (filter *storeStateFilter) filter(stores []*metapb.Store) []*metapb.Store {
 	return ret
 }
 
-func getStoreLimitType(input map[string]interface{}) (storelimit.Type, error) {
+func getStoreLimitType(input map[string]interface{}) ([]storelimit.Type, error) {
 	typeNameIface, ok := input["type"]
-	typeValue := storelimit.RegionAdd
 	var err error
 	if ok {
 		typeName, ok := typeNameIface.(string)
 		if !ok {
 			err = errors.New("bad format type")
-		} else {
-			return parseStoreLimitType(typeName)
+			return nil, err
 		}
+		typ, err := parseStoreLimitType(typeName)
+		return []storelimit.Type{typ}, err
 	}
-	return typeValue, err
+
+	return []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer}, err
 }
 
 func parseStoreLimitType(typeName string) (storelimit.Type, error) {
-	typeValue := storelimit.RegionAdd
+	typeValue := storelimit.AddPeer
 	var err error
 	if typeName != "" {
 		if value, ok := storelimit.TypeNameValue[typeName]; ok {

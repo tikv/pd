@@ -418,31 +418,31 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
-func (h *Handler) SetAllStoresLimit(rate float64, limitType storelimit.Type) error {
-	c, err := h.GetOperatorController()
+func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Type) error {
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
-	c.SetAllStoresLimit(rate, storelimit.Manual, limitType)
+	c.SetAllStoresLimit(limitType, ratePerMin)
 	return nil
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]*storelimit.StoreLimit, error) {
-	c, err := h.GetOperatorController()
+func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]config.StoreLimitConfig, error) {
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil, err
 	}
-	return c.GetAllStoresLimit(limitType), nil
+	return c.GetAllStoresLimit(), nil
 }
 
 // SetStoreLimit is used to set the limit of a store.
-func (h *Handler) SetStoreLimit(storeID uint64, rate float64, limitType storelimit.Type) error {
-	c, err := h.GetOperatorController()
+func (h *Handler) SetStoreLimit(storeID uint64, ratePerMin float64, limitType storelimit.Type) error {
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
-	c.SetStoreLimit(storeID, rate, storelimit.Manual, limitType)
+	c.SetStoreLimit(storeID, limitType, ratePerMin)
 	return nil
 }
 

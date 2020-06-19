@@ -29,4 +29,3 @@ leader-schedule-limit = 32
 region-schedule-limit = 128
 replica-schedule-limit = 32
 merge-schedule-limit = 32
-store-balance-rate = 512.0
