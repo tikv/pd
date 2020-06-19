@@ -1,10 +1,12 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"net/http"
 )
 
 var _ = Suite(&testRuleSuite{})
@@ -31,36 +33,69 @@ func (s *testRuleSuite) TearDownSuite(c *C) {
 
 func (s *testRuleSuite) Testrule(c *C) {
 	c.Assert(postJSON(testDialClient, s.urlPrefix, []byte(`{"enable-placement-rules":"true"}`)), IsNil)
+	rule1 := map[string]interface{}{
+		"group_id": "a",
+		"id": "10",
+		"role": "voter",
+		"count": 1,
+	}
+	rule2 := map[string]interface{}{
+		"group_id": "a",
+		"id": "20",
+		"role": "voter",
+		"count": 2,
+		}
+	rule3 := map[string]interface{}{
+		"group_id": "b",
+		"id": "20",
+		"role": "voter",
+		"count": 3,
+		"region": "4",
+		"key": "123abc",
+	}
 	//Set
-	err := postJSON(testDialClient, s.urlPrefix+"/rule", nil)
+	postData, err := json.Marshal(rule1)
 	c.Assert(err, IsNil)
-
-	//Delete
-	doDelete(testDialClient, s.urlPrefix+"/rule/a/1")
-
-	//GetAll
-	stat :=  []*placement.Rule{}
-	err = readJSON(testDialClient, s.urlPrefix+"/rules", &stat)
+	err = postJSON(testDialClient, s.urlPrefix+"/rule", postData)
 	c.Assert(err, IsNil)
-
-	//GetAllByGroup
-	stat =  []*placement.Rule{}
-	err = readJSON(testDialClient, s.urlPrefix+"/rules/group/a", &stat)
+	postData, err = json.Marshal(rule2)
 	c.Assert(err, IsNil)
-
-	//GetAllByRegion
-	stat =  []*placement.Rule{}
-	err = readJSON(testDialClient, s.urlPrefix+"/rules/region/10", &stat)
+	err = postJSON(testDialClient, s.urlPrefix+"/rule", postData)
 	c.Assert(err, IsNil)
-
-	//GetAllByKey
-	stat =  []*placement.Rule{}
-	err = readJSON(testDialClient, s.urlPrefix+"/rules/key/a", &stat)
+	postData, err = json.Marshal(rule3)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/rule", postData)
 	c.Assert(err, IsNil)
 
 	//Get
-	info :=  placement.Rule{}
-	err = readJSON(testDialClient, s.urlPrefix+"/rule/a/1", &info)
+	var resp placement.Rule
+	err = readJSON(testDialClient, s.urlPrefix+"/rule/pd/default", &resp)
+	c.Assert(err, IsNil)
+	c.Assert(resp.Count, Equals, 3)
+
+	//GetAll
+	var resp2 []*placement.Rule
+	err = readJSON(testDialClient, s.urlPrefix+"/rules", &resp2)
+	c.Assert(err, IsNil)
+	c.Assert(len(resp2), Equals, 4)
+
+	//GetAllByGroup
+	err = readJSON(testDialClient, s.urlPrefix+"/rules/group/a", &resp2)
+	c.Assert(err, IsNil)
+	c.Assert(len(resp2), Equals, 2)
+
+	//GetAllByRegion
+	r := newTestRegionInfo(4, 1, []byte("a"), []byte("b"))
+	mustRegionHeartbeat(c, s.svr, r)
+	err = readJSON(testDialClient, s.urlPrefix+"/rules/region/4", &resp2)
 	c.Assert(err, IsNil)
 
+	//GetAllByKey
+	err = readJSON(testDialClient, s.urlPrefix+"/rules/key/123abc", &resp2)
+	c.Assert(err, IsNil)
+
+	//Delete
+	resp3, err := doDelete(testDialClient, s.urlPrefix+"/rule/a/10")
+	c.Assert(err, IsNil)
+	c.Assert(resp3.StatusCode, Equals, http.StatusOK)
 }
