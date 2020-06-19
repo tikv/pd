@@ -59,7 +59,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
 			log.Debug("fail to fix rule peer", zap.Error(err), zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID))
-			return nil
+			break
 		}
 		if op != nil {
 			return op
@@ -201,6 +201,13 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.
 func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.RegionFit) (*operator.Operator, error) {
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
+	}
+	// remove orphan peers only when all rules are satisfied (count+role)
+	for _, rf := range fit.RuleFits {
+		if !rf.IsSatisfied() {
+			checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
+			return nil, nil
+		}
 	}
 	checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 	peer := fit.OrphanPeers[0]
