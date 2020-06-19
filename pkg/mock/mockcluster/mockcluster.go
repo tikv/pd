@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
 	"go.uber.org/zap"
 )
@@ -203,6 +204,8 @@ func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes .
 		core.SetLeaderSize(leaderSize),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
+	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	mc.PutStore(store)
 }
 
@@ -218,6 +221,8 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 		core.SetRegionSize(int64(regionCount)*10),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
+	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	mc.PutStore(store)
 }
 
@@ -253,6 +258,8 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 		core.SetRegionSize(int64(regionCount)*10),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
+	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	mc.PutStore(store)
 }
 
@@ -537,6 +544,11 @@ func (mc *Cluster) GetHotRegionScheduleLimit() uint64 {
 // GetMaxReplicas mocks method.
 func (mc *Cluster) GetMaxReplicas() int {
 	return mc.ScheduleOptions.GetMaxReplicas()
+}
+
+// GetStoreLimitByType mocks method.
+func (mc *Cluster) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	return mc.ScheduleOptions.GetStoreLimitByType(storeID, typ)
 }
 
 // CheckLabelProperty checks label property.

@@ -148,7 +148,6 @@ func (s *storeStatistics) Collect() {
 	configs["high-space-ratio"] = s.opt.GetHighSpaceRatio()
 	configs["low-space-ratio"] = s.opt.GetLowSpaceRatio()
 	configs["tolerant-size-ratio"] = s.opt.GetTolerantSizeRatio()
-	configs["store-balance-rate"] = s.opt.GetStoreBalanceRate()
 	configs["hot-region-schedule-limit"] = float64(s.opt.GetHotRegionScheduleLimit())
 	configs["hot-region-cache-hits-threshold"] = float64(s.opt.GetHotRegionCacheHitsThreshold())
 	configs["max-pending-peer-count"] = float64(s.opt.GetMaxPendingPeerCount())

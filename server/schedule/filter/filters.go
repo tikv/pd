@@ -134,11 +134,11 @@ func (f *storeLimitFilter) Type() string {
 }
 
 func (f *storeLimitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsAvailable(storelimit.RegionRemove)
+	return store.IsAvailable(storelimit.RemovePeer)
 }
 
 func (f *storeLimitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsAvailable(storelimit.RegionAdd)
+	return store.IsAvailable(storelimit.AddPeer)
 }
 
 type stateFilter struct{ scope string }
@@ -393,7 +393,7 @@ func (f StoreStateFilter) filterMoveRegion(opt opt.Options, isSource bool, store
 		return false
 	}
 
-	if (isSource && !store.IsAvailable(storelimit.RegionRemove)) || (!isSource && !store.IsAvailable(storelimit.RegionAdd)) {
+	if (isSource && !store.IsAvailable(storelimit.RemovePeer)) || (!isSource && !store.IsAvailable(storelimit.AddPeer)) {
 		return false
 	}
 
