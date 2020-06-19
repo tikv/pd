@@ -343,10 +343,17 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/limit [post]
 func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		return
+	}
+
+	store := rc.GetStore(storeID)
+	if store == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
 		return
 	}
 

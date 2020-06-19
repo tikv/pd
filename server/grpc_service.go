@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -235,7 +236,11 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	log.Info("put store ok", zap.Stringer("store", store))
 	rc.OnStoreVersionChange()
 	CheckPDVersion(s.persistOptions)
-	rc.AddStoreLimit(store.GetId())
+	if isTiFlashStore(store) {
+		rc.AddStoreLimit(store.GetId(), config.DefaultTiFlashStoreLimit)
+	} else {
+		rc.AddStoreLimit(store.GetId(), config.DefaultStoreLimit)
+	}
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
