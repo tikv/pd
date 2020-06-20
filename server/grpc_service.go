@@ -156,7 +156,16 @@ func (s *Server) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) (*pd
 	}
 
 	// We can use an allocator for all types ID allocation.
-	id, err := s.idAllocator.Alloc()
+	var (
+		id  uint64
+		err error
+	)
+	switch request.GetIdType() {
+	case pdpb.AllocIDRequest_SERVER_ID:
+		id, err = s.serverIDAllocator.Alloc()
+	default:
+		id, err = s.idAllocator.Alloc()
+	}
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
 	}

@@ -111,6 +111,9 @@ type Server struct {
 	// store, region and peer, because we just need
 	// a unique ID.
 	idAllocator *id.AllocatorImpl
+	// for serverId allocator.
+	// The space of serverId is limited, so we use an individual allocator.
+	serverIDAllocator *id.AllocatorImpl
 	// for storage operation.
 	storage *core.Storage
 	// for baiscCluster operation.
@@ -345,6 +348,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberBinaryVersion(s.member.ID(), PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
+	serverIDPath := path.Join(s.rootPath, "server_id")
+	s.serverIDAllocator = id.NewAllocatorImpl(s.client, serverIDPath, s.member.MemberValue())
 	s.tso = tso.NewTimestampOracle(
 		s.client,
 		s.rootPath,

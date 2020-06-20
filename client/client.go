@@ -698,6 +698,29 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 	})
 }
 
+func (c *client) AllocID(ctx context.Context, idType pdpb.AllocIDRequest_IDType) (uint64, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.AllocID", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationAllocID.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	resp, err := c.leaderClient().AllocID(ctx, &pdpb.AllocIDRequest{
+		Header: c.requestHeader(),
+		IdType: idType,
+	})
+	cancel()
+
+	if err != nil {
+		cmdFailedDurationAllocID.Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return 0, errors.WithStack(err)
+	}
+	return resp.GetId(), nil
+}
+
 func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
 		ClusterId: c.clusterID,

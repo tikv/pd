@@ -68,6 +68,7 @@ var (
 	cmdDurationUpdateServiceGCSafePoint = cmdDuration.WithLabelValues("update_service_gc_safe_point")
 	cmdDurationScatterRegion            = cmdDuration.WithLabelValues("scatter_region")
 	cmdDurationGetOperator              = cmdDuration.WithLabelValues("get_operator")
+	cmdDurationAllocID                  = cmdDuration.WithLabelValues("alloc_id")
 
 	cmdFailDurationGetRegion                  = cmdFailedDuration.WithLabelValues("get_region")
 	cmdFailDurationTSO                        = cmdFailedDuration.WithLabelValues("tso")
@@ -78,6 +79,7 @@ var (
 	cmdFailedDurationGetAllStores             = cmdFailedDuration.WithLabelValues("get_all_stores")
 	cmdFailedDurationUpdateGCSafePoint        = cmdFailedDuration.WithLabelValues("update_gc_safe_point")
 	cmdFailedDurationUpdateServiceGCSafePoint = cmdFailedDuration.WithLabelValues("update_service_gc_safe_point")
+	cmdFailedDurationAllocID                  = cmdFailedDuration.WithLabelValues("alloc_id")
 	requestDurationTSO                        = requestDuration.WithLabelValues("tso")
 )
 
