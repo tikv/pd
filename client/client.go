@@ -706,7 +706,7 @@ func (c *client) AllocID(ctx context.Context, idType pdpb.AllocIDRequest_IDType)
 	start := time.Now()
 	defer func() { cmdDurationAllocID.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.leaderClient().AllocID(ctx, &pdpb.AllocIDRequest{
 		Header: c.requestHeader(),
 		IdType: idType,
