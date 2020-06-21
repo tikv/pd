@@ -85,6 +85,8 @@ type Client interface {
 	ScatterRegion(ctx context.Context, regionID uint64) error
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
+	// AllocID allocates unique ID.
+	AllocID(ctx context.Context, idType pdpb.AllocIDRequest_IDType) (uint64, error)
 	// Close closes the client.
 	Close()
 }
