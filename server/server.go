@@ -347,9 +347,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), PDGitHash)
-	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
-	serverIDPath := path.Join(s.rootPath, "server_id")
-	s.serverIDAllocator = id.NewAllocatorImpl(s.client, serverIDPath, s.member.MemberValue())
+	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue(), "alloc_id")
+	s.serverIDAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue(), "alloc_server_id")
 	s.tso = tso.NewTimestampOracle(
 		s.client,
 		s.rootPath,

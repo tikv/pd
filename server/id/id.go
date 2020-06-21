@@ -42,11 +42,12 @@ type AllocatorImpl struct {
 	client   *clientv3.Client
 	rootPath string
 	member   string
+	keyName  string
 }
 
 // NewAllocatorImpl creates a new IDAllocator.
-func NewAllocatorImpl(client *clientv3.Client, rootPath string, member string) *AllocatorImpl {
-	return &AllocatorImpl{client: client, rootPath: rootPath, member: member}
+func NewAllocatorImpl(client *clientv3.Client, rootPath string, member string, keyName string) *AllocatorImpl {
+	return &AllocatorImpl{client: client, rootPath: rootPath, member: member, keyName: keyName}
 }
 
 // Alloc returns a new id.
@@ -107,11 +108,11 @@ func (alloc *AllocatorImpl) generate() (uint64, error) {
 		return 0, errors.New("generate id failed, we may not leader")
 	}
 
-	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
+	log.Info("idAllocator allocates a new id", zap.String("name", alloc.keyName), zap.Uint64("id", end))
 	idGauge.WithLabelValues("idalloc").Set(float64(end))
 	return end, nil
 }
 
 func (alloc *AllocatorImpl) getAllocIDPath() string {
-	return path.Join(alloc.rootPath, "alloc_id")
+	return path.Join(alloc.rootPath, alloc.keyName)
 }
