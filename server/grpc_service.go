@@ -224,7 +224,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	// NOTE: can be removed when placement rules feature is enabled by default.
-	if !s.GetConfig().Replication.EnablePlacementRules && isTiFlashStore(store) {
+	if !s.GetConfig().Replication.EnablePlacementRules && core.IsTiFlashStore(store) {
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 
@@ -235,11 +235,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	log.Info("put store ok", zap.Stringer("store", store))
 	rc.OnStoreVersionChange()
 	CheckPDVersion(s.persistOptions)
-	if isTiFlashStore(store) {
-		rc.AddStoreLimit(store.GetId(), true /* isTiFlashStore*/)
-	} else {
-		rc.AddStoreLimit(store.GetId(), false /* isTiFlashStore*/)
-	}
+	rc.AddStoreLimit(store)
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
