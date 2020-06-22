@@ -1720,6 +1720,11 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 	c.opt.SetAllStoresLimit(typ, ratePerMin)
 }
 
+// GetClusterVersion returns the current cluster version.
+func (c *RaftCluster) GetClusterVersion() string {
+	return c.opt.GetClusterVersion().String()
+}
+
 var healthURL = "/pd/api/v1/ping"
 
 // CheckHealth checks if members are healthy.
