@@ -780,7 +780,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 
 	if c.StoreBalanceRate != 0 {
 		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
-		DefaultTiFlashStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 		c.StoreBalanceRate = 0
 	}
 
@@ -821,7 +820,6 @@ func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.DisableLearner = false
 	if c.StoreBalanceRate != 0 {
 		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
-		DefaultTiFlashStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 		c.StoreBalanceRate = 0
 	}
 	for _, b := range c.migrateConfigurationMap() {
