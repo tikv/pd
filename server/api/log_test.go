@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2020 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server"
@@ -45,9 +46,6 @@ func (s *testLogSuite) TearDownSuite(c *C) {
 
 func (s *testLogSuite) TestSetLogLevel(c *C) {
 	level := "error"
-	if log.GetLevel().String() == level {
-		level = "warn"
-	}
 	data, err := json.Marshal(level)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, s.urlPrefix+"/log", data)

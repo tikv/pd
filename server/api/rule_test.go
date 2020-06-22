@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2020 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
-	"net/http"
 )
 
 var _ = Suite(&testRuleSuite{})
@@ -45,27 +46,15 @@ func (s *testRuleSuite) TearDownSuite(c *C) {
 }
 
 func (s *testRuleSuite) Testrule(c *C) {
+	PDServerCfg := s.svr.GetConfig().PDServerCfg
+	PDServerCfg.KeyType = "raw"
+	err := s.svr.SetPDServerConfig(PDServerCfg)
+	c.Assert(err, IsNil)
 	c.Assert(postJSON(testDialClient, s.urlPrefix, []byte(`{"enable-placement-rules":"true"}`)), IsNil)
-	rule1 := map[string]interface{}{
-		"group_id": "a",
-		"id":       "10",
-		"role":     "voter",
-		"count":    1,
-	}
-	rule2 := map[string]interface{}{
-		"group_id": "a",
-		"id":       "20",
-		"role":     "voter",
-		"count":    2,
-	}
-	rule3 := map[string]interface{}{
-		"group_id": "b",
-		"id":       "20",
-		"role":     "voter",
-		"count":    3,
-		"region":   "4",
-		"key":      "123abc",
-	}
+	rule1 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule2 := placement.Rule{GroupID: "a", ID: "20", StartKeyHex: "3333", EndKeyHex: "5555", Role: "voter", Count: 2}
+	rule3 := placement.Rule{GroupID: "b", ID: "20", StartKeyHex: "5555", EndKeyHex: "7777", Role: "voter", Count: 3}
+
 	//Set
 	postData, err := json.Marshal(rule1)
 	c.Assert(err, IsNil)
@@ -82,9 +71,9 @@ func (s *testRuleSuite) Testrule(c *C) {
 
 	//Get
 	var resp placement.Rule
-	err = readJSON(testDialClient, s.urlPrefix+"/rule/pd/default", &resp)
+	err = readJSON(testDialClient, s.urlPrefix+"/rule/a/10", &resp)
 	c.Assert(err, IsNil)
-	c.Assert(resp.Count, Equals, 3)
+	compareRule(c, &resp, &rule1)
 
 	//GetAll
 	var resp2 []*placement.Rule
@@ -93,22 +82,44 @@ func (s *testRuleSuite) Testrule(c *C) {
 	c.Assert(len(resp2), Equals, 4)
 
 	//GetAllByGroup
-	err = readJSON(testDialClient, s.urlPrefix+"/rules/group/a", &resp2)
+	err = readJSON(testDialClient, s.urlPrefix+"/rules/group/b", &resp2)
 	c.Assert(err, IsNil)
-	c.Assert(len(resp2), Equals, 2)
+	c.Assert(len(resp2), Equals, 1)
+	compareRule(c, resp2[0], &rule3)
 
 	//GetAllByRegion
-	r := newTestRegionInfo(4, 1, []byte("a"), []byte("b"))
+	r := newTestRegionInfo(4, 1, []byte([]byte{0x22, 0x22}), []byte{0x33, 0x33})
 	mustRegionHeartbeat(c, s.svr, r)
 	err = readJSON(testDialClient, s.urlPrefix+"/rules/region/4", &resp2)
 	c.Assert(err, IsNil)
+	c.Assert(len(resp2), Equals, 2)
+	if resp2[0].GroupID == "pd" {
+		compareRule(c, resp2[1], &rule1)
+	} else {
+		compareRule(c, resp2[0], &rule1)
+	}
 
 	//GetAllByKey
-	err = readJSON(testDialClient, s.urlPrefix+"/rules/key/123abc", &resp2)
+	err = readJSON(testDialClient, s.urlPrefix+"/rules/key/4444", &resp2)
 	c.Assert(err, IsNil)
+	c.Assert(len(resp2), Equals, 2)
+	if resp2[0].GroupID == "pd" {
+		compareRule(c, resp2[1], &rule2)
+	} else {
+		compareRule(c, resp2[0], &rule2)
+	}
 
 	//Delete
 	resp3, err := doDelete(testDialClient, s.urlPrefix+"/rule/a/10")
 	c.Assert(err, IsNil)
 	c.Assert(resp3.StatusCode, Equals, http.StatusOK)
+}
+
+func compareRule(c *C, r1 *placement.Rule, r2 *placement.Rule) {
+	c.Assert(r1.GroupID, Equals, r2.GroupID)
+	c.Assert(r1.ID, Equals, r2.ID)
+	c.Assert(r1.StartKeyHex, Equals, r2.StartKeyHex)
+	c.Assert(r1.EndKeyHex, Equals, r2.EndKeyHex)
+	c.Assert(r1.Role, Equals, r2.Role)
+	c.Assert(r1.Count, Equals, r2.Count)
 }
