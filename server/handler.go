@@ -419,28 +419,12 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 
 // SetAllStoresLimit is used to set limit of all stores.
 func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Type) error {
-	cfg := h.GetScheduleConfig().Clone()
-	switch limitType {
-	case storelimit.AddPeer:
-		config.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
-		for storeID := range cfg.StoreLimit {
-			sc := config.StoreLimitConfig{
-				AddPeer:    ratePerMin,
-				RemovePeer: cfg.StoreLimit[storeID].RemovePeer,
-			}
-			cfg.StoreLimit[storeID] = sc
-		}
-	case storelimit.RemovePeer:
-		config.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
-		for storeID := range cfg.StoreLimit {
-			sc := config.StoreLimitConfig{
-				AddPeer:    cfg.StoreLimit[storeID].AddPeer,
-				RemovePeer: ratePerMin,
-			}
-			cfg.StoreLimit[storeID] = sc
-		}
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
 	}
-	return h.s.SetScheduleConfig(*cfg)
+	c.SetAllStoresLimit(limitType, ratePerMin)
+	return nil
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
@@ -453,23 +437,13 @@ func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]confi
 }
 
 // SetStoreLimit is used to set the limit of a store.
-func (h *Handler) SetStoreLimit(storeID uint64, rate float64, limitType storelimit.Type) error {
-	cfg := h.GetScheduleConfig()
-	switch limitType {
-	case storelimit.AddPeer:
-		sc := config.StoreLimitConfig{
-			AddPeer:    rate,
-			RemovePeer: cfg.StoreLimit[storeID].RemovePeer,
-		}
-		cfg.StoreLimit[storeID] = sc
-	case storelimit.RemovePeer:
-		sc := config.StoreLimitConfig{
-			AddPeer:    cfg.StoreLimit[storeID].AddPeer,
-			RemovePeer: rate,
-		}
-		cfg.StoreLimit[storeID] = sc
+func (h *Handler) SetStoreLimit(storeID uint64, ratePerMin float64, limitType storelimit.Type) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
 	}
-	return h.s.SetScheduleConfig(*cfg)
+	c.SetStoreLimit(storeID, limitType, ratePerMin)
+	return nil
 }
 
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.

@@ -1684,11 +1684,17 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
 }
 
 // AddStoreLimit add a store limit for a given store ID.
-func (c *RaftCluster) AddStoreLimit(storeID uint64) {
+func (c *RaftCluster) AddStoreLimit(storeID uint64, isTiFlashStore bool) {
 	cfg := c.opt.GetScheduleConfig().Clone()
 	sc := config.StoreLimitConfig{
 		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	}
+	if isTiFlashStore {
+		sc = config.StoreLimitConfig{
+			AddPeer:    config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+			RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		}
 	}
 	cfg.StoreLimit[storeID] = sc
 	c.opt.SetScheduleConfig(cfg)
@@ -1712,6 +1718,11 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
 	c.opt.SetAllStoresLimit(typ, ratePerMin)
+}
+
+// GetClusterVersion returns the current cluster version.
+func (c *RaftCluster) GetClusterVersion() string {
+	return c.opt.GetClusterVersion().String()
 }
 
 var healthURL = "/pd/api/v1/ping"
