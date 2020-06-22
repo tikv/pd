@@ -226,7 +226,7 @@ var (
 
 // StoreLimit is the default limit of adding peer and removing peer when putting stores.
 type StoreLimit struct {
-	mu sync.Mutex
+	mu sync.RWMutex
 	// AddPeer is the default rate of adding peers for store limit (per minute).
 	AddPeer float64
 	// RemovePeer is the default rate of removing peers for store limit (per minute).
@@ -247,8 +247,8 @@ func (sl *StoreLimit) SetDefaultStoreLimit(typ storelimit.Type, ratePerMin float
 
 // GetDefaultStoreLimit gets the default store limit for a given type.
 func (sl *StoreLimit) GetDefaultStoreLimit(typ storelimit.Type) float64 {
-	sl.mu.Lock()
-	defer sl.mu.Unlock()
+	sl.mu.RLock()
+	defer sl.mu.RUnlock()
 	switch typ {
 	case storelimit.AddPeer:
 		return sl.AddPeer
@@ -780,6 +780,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 
 	if c.StoreBalanceRate != 0 {
 		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		DefaultTiFlashStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 		c.StoreBalanceRate = 0
 	}
 
@@ -820,6 +821,7 @@ func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.DisableLearner = false
 	if c.StoreBalanceRate != 0 {
 		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		DefaultTiFlashStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 		c.StoreBalanceRate = 0
 	}
 	for _, b := range c.migrateConfigurationMap() {
