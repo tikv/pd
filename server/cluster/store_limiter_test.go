@@ -14,57 +14,44 @@
 package cluster
 
 import (
-	"context"
-
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 )
 
 var _ = Suite(&testStoreLimiterSuite{})
 
 type testStoreLimiterSuite struct {
-	oc     *schedule.OperatorController
-	cancel context.CancelFunc
+	opt *mockoption.ScheduleOptions
 }
 
 func (s *testStoreLimiterSuite) SetUpSuite(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	s.cancel = cancel
-
 	// Create a server for testing
-	opt := mockoption.NewScheduleOptions()
-	cluster := mockcluster.NewCluster(opt)
-	s.oc = schedule.NewOperatorController(ctx, cluster, nil)
-}
-func (s *testStoreLimiterSuite) TearDownSuite(c *C) {
-	s.cancel()
+	s.opt = mockoption.NewScheduleOptions()
 }
 
 func (s *testStoreLimiterSuite) TestCollect(c *C) {
-	limiter := NewStoreLimiter(s.oc)
+	limiter := NewStoreLimiter(s.opt)
 
 	limiter.Collect(&pdpb.StoreStats{})
 	c.Assert(limiter.state.cst.total, Equals, int64(1))
 }
 
 func (s *testStoreLimiterSuite) TestStoreLimitScene(c *C) {
-	limiter := NewStoreLimiter(s.oc)
-	c.Assert(limiter.scene[storelimit.RegionAdd], DeepEquals, storelimit.DefaultScene(storelimit.RegionAdd))
-	c.Assert(limiter.scene[storelimit.RegionRemove], DeepEquals, storelimit.DefaultScene(storelimit.RegionRemove))
+	limiter := NewStoreLimiter(s.opt)
+	c.Assert(limiter.scene[storelimit.AddPeer], DeepEquals, storelimit.DefaultScene(storelimit.AddPeer))
+	c.Assert(limiter.scene[storelimit.RemovePeer], DeepEquals, storelimit.DefaultScene(storelimit.RemovePeer))
 }
 
 func (s *testStoreLimiterSuite) TestReplaceStoreLimitScene(c *C) {
-	limiter := NewStoreLimiter(s.oc)
+	limiter := NewStoreLimiter(s.opt)
 
-	sceneRegionAdd := &storelimit.Scene{Idle: 4, Low: 3, Normal: 2, High: 1}
-	limiter.ReplaceStoreLimitScene(sceneRegionAdd, storelimit.RegionAdd)
+	sceneAddPeer := &storelimit.Scene{Idle: 4, Low: 3, Normal: 2, High: 1}
+	limiter.ReplaceStoreLimitScene(sceneAddPeer, storelimit.AddPeer)
 
-	c.Assert(limiter.scene[storelimit.RegionAdd], DeepEquals, sceneRegionAdd)
+	c.Assert(limiter.scene[storelimit.AddPeer], DeepEquals, sceneAddPeer)
 
-	sceneRegionRemove := &storelimit.Scene{Idle: 5, Low: 4, Normal: 3, High: 2}
-	limiter.ReplaceStoreLimitScene(sceneRegionRemove, storelimit.RegionRemove)
+	sceneRemovePeer := &storelimit.Scene{Idle: 5, Low: 4, Normal: 3, High: 2}
+	limiter.ReplaceStoreLimitScene(sceneRemovePeer, storelimit.RemovePeer)
 }

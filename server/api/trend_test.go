@@ -20,7 +20,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 )
@@ -30,7 +29,7 @@ var _ = Suite(&testTrendSuite{})
 type testTrendSuite struct{}
 
 func (s *testTrendSuite) TestTrend(c *C) {
-	svr, cleanup := mustNewServer(c, func(cfg *config.Config) { cfg.Schedule.StoreBalanceRate = 60 })
+	svr, cleanup := mustNewServer(c)
 	defer cleanup()
 	mustWaitLeader(c, []*server.Server{svr})
 
