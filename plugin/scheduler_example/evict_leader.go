@@ -153,24 +153,18 @@ func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 
 type evictLeaderScheduler struct {
 	*schedulers.BaseScheduler
-	conf     *evictLeaderSchedulerConfig
-	selector *selector.RandomSelector
-	handler  http.Handler
+	conf    *evictLeaderSchedulerConfig
+	handler http.Handler
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConfig) schedule.Scheduler {
-	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true},
-	}
-
 	base := schedulers.NewBaseScheduler(opController)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		selector:      selector.NewRandomSelector(filters),
 		handler:       handler,
 	}
 }
@@ -226,7 +220,9 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		if region == nil {
 			continue
 		}
-		target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
+		target := selector.NewCandidates(cluster.GetFollowerStores(region)).
+			FilterTarget(cluster, filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
+			RandomPick()
 		if target == nil {
 			continue
 		}

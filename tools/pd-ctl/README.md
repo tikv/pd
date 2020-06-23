@@ -128,7 +128,6 @@ Usage:
     "replica-schedule-limit": 64,
     "scheduler-max-waiting-operator": 5,
     "split-merge-interval": "1h0m0s",
-    "store-balance-rate": 15,
     "store-limit-mode": "manual",
     "tolerant-size-ratio": 0
   }
@@ -645,16 +644,16 @@ Usage:
 >> store label 1 zone cn               // Set the value of the label with the "zone" key to "cn" for the store with the store id of 1
 >> store weight 1 5 10                 // Set the leader weight to 5 and region weight to 10 for the store with the store id of 1
 >> store remove-tombstone              // Remove stores that are in tombstone state
->> store limit                         // Show limits of adding region operation for all stores
->> store limit region-add              // Show limits of adding region operation for all stores
->> store limit region-remove           // Show limits of removing region operation for all stores
->> store limit all 5                   // Limit 5 adding region operations per minute for all stores
->> store limit 1 5                     // Limit 5 adding region operations per minute for store 1
->> store limit all 5 region-add        // Limit 5 adding region operations per minute for all stores
->> store limit 1 5 region-add          // Limit 5 adding region operations per minute for store 1
->> store limit 1 5 region-remove       // Limit 5 removing region operations per minute for store 1
->> store limit all 5 region-remove     // Limit 5 removing region operations per minute for all stores
->> store limit-scene  // Show all limit scene 
+>> store limit                         // Show limits of adding peer and removing peer operation for all stores
+>> store limit add-peer                // Show limits of adding peer operation for all stores
+>> store limit remove-peer             // Show limits of removing peer operation for all stores
+>> store limit all 5                   // Limit 5 adding peer operations and 5 remove peer operations per minute for all stores
+>> store limit 1 5                     // Limit 5 adding peer operations and 5 remove peer operations per minute for store 1
+>> store limit all 5 add-peer          // Limit 5 adding peer operations per minute for all stores
+>> store limit 1 5 add-peer            // Limit 5 adding peer operations per minute for store 1
+>> store limit 1 5 remove-peer         // Limit 5 removing peer operations per minute for store 1
+>> store limit all 5 remove-peer       // Limit 5 removing peer operations per minute for all stores
+>> store limit-scene                   // Show all limit scene
 {
   "Idle": 100,
   "Low": 50,
@@ -663,6 +662,10 @@ Usage:
 }
 >> store limit-scene idle 100 // set rate to 100 in the idle scene
 ```
+
+> **Notice**
+>
+> When using `store limit` command, the original `region-add` and `region-remove` are deprecated, please use `add-peer` and `remove-peer`.
 
 ### `tso`
 
@@ -675,7 +678,6 @@ Usage:
 system:  2017-10-09 05:50:59 +0800 CST
 logic:  120102
 ```
-
 
 ## Jq formatted JSON output usage
 

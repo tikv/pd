@@ -382,10 +382,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestLeaderWeight(c *C) {
 	// Weight:     0.5     0.9     1       2
 	// Region1:    L       F       F       F
 
-	s.tc.AddLeaderStore(1, 10)
-	s.tc.AddLeaderStore(2, 10)
-	s.tc.AddLeaderStore(3, 10)
-	s.tc.AddLeaderStore(4, 10)
+	for i := uint64(1); i <= 4; i++ {
+		s.tc.AddLeaderStore(i, 10)
+	}
 	s.tc.UpdateStoreLeaderWeight(1, 0.5)
 	s.tc.UpdateStoreLeaderWeight(2, 0.9)
 	s.tc.UpdateStoreLeaderWeight(3, 1)
@@ -450,10 +449,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	// Leaders:    9    10   10   11
 	// Region1:    -    F    F    L
 	// Region2:    L    F    F    -
-	s.tc.AddLeaderStore(1, 10)
-	s.tc.AddLeaderStore(2, 10)
-	s.tc.AddLeaderStore(3, 10)
-	s.tc.AddLeaderStore(4, 10)
+	for i := uint64(1); i <= 4; i++ {
+		s.tc.AddLeaderStore(i, 10)
+	}
 	s.tc.AddLeaderRegion(1, 4, 2, 3)
 	s.tc.AddLeaderRegion(2, 1, 2, 3)
 	// The cluster is balanced.
@@ -498,10 +496,9 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestSingleRangeBalance(c *C) {
 	// Weight:     0.5     0.9     1       2
 	// Region1:    L       F       F       F
 
-	s.tc.AddLeaderStore(1, 10)
-	s.tc.AddLeaderStore(2, 10)
-	s.tc.AddLeaderStore(3, 10)
-	s.tc.AddLeaderStore(4, 10)
+	for i := uint64(1); i <= 4; i++ {
+		s.tc.AddLeaderStore(i, 10)
+	}
 	s.tc.UpdateStoreLeaderWeight(1, 0.5)
 	s.tc.UpdateStoreLeaderWeight(2, 0.9)
 	s.tc.UpdateStoreLeaderWeight(3, 1)
@@ -539,10 +536,9 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestMultiRangeBalance(c *C) {
 	// Weight:     0.5     0.9     1       2
 	// Region1:    L       F       F       F
 
-	s.tc.AddLeaderStore(1, 10)
-	s.tc.AddLeaderStore(2, 10)
-	s.tc.AddLeaderStore(3, 10)
-	s.tc.AddLeaderStore(4, 10)
+	for i := uint64(1); i <= 4; i++ {
+		s.tc.AddLeaderStore(i, 10)
+	}
 	s.tc.UpdateStoreLeaderWeight(1, 0.5)
 	s.tc.UpdateStoreLeaderWeight(2, 0.9)
 	s.tc.UpdateStoreLeaderWeight(3, 1)
@@ -851,7 +847,6 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 
 func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	opt := mockoption.NewScheduleOptions()
-	opt.StoreBalanceRate = 65536
 	tc := mockcluster.NewCluster(opt)
 	oc := schedule.NewOperatorController(s.ctx, tc, mockhbstream.NewHeartbeatStream())
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -862,6 +857,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	tc.AddRegionStoreWithLeader(2, 8)
 	tc.AddRegionStoreWithLeader(3, 8)
 	tc.AddRegionStoreWithLeader(4, 16, 8)
+
 	// add 8 leader regions to store 4 and move them to store 3
 	// ensure store score without operator influence : store 4 > store 3
 	// and store score with operator influence : store 3 > store 4

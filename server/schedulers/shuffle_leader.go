@@ -65,8 +65,8 @@ type shuffleLeaderSchedulerConfig struct {
 
 type shuffleLeaderScheduler struct {
 	*BaseScheduler
-	conf     *shuffleLeaderSchedulerConfig
-	selector *selector.RandomSelector
+	conf    *shuffleLeaderSchedulerConfig
+	filters []filter.Filter
 }
 
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
@@ -80,7 +80,7 @@ func newShuffleLeaderScheduler(opController *schedule.OperatorController, conf *
 	return &shuffleLeaderScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		selector:      selector.NewRandomSelector(filters),
+		filters:       filters,
 	}
 }
 
@@ -105,8 +105,9 @@ func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	stores := cluster.GetStores()
-	targetStore := s.selector.SelectTarget(cluster, stores)
+	targetStore := selector.NewCandidates(cluster.GetStores()).
+		FilterTarget(cluster, s.filters...).
+		RandomPick()
 	if targetStore == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 		return nil

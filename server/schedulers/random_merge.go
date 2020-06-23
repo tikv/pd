@@ -67,21 +67,16 @@ type randomMergeSchedulerConfig struct {
 
 type randomMergeScheduler struct {
 	*BaseScheduler
-	conf     *randomMergeSchedulerConfig
-	selector *selector.RandomSelector
+	conf *randomMergeSchedulerConfig
 }
 
 // newRandomMergeScheduler creates an admin scheduler that randomly picks two adjacent regions
 // then merges them.
 func newRandomMergeScheduler(opController *schedule.OperatorController, conf *randomMergeSchedulerConfig) schedule.Scheduler {
-	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: conf.Name, MoveRegion: true},
-	}
 	base := NewBaseScheduler(opController)
 	return &randomMergeScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		selector:      selector.NewRandomSelector(filters),
 	}
 }
 
@@ -104,8 +99,9 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
-	stores := cluster.GetStores()
-	store := s.selector.SelectSource(cluster, stores)
+	store := selector.NewCandidates(cluster.GetStores()).
+		FilterSource(cluster, filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true}).
+		RandomPick()
 	if store == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
 		return nil

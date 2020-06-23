@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 )
 
 // PersistOptions wraps all configurations that need to persist to storage and
@@ -175,6 +176,52 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
+// SetStoreLimit sets a store limit for a given type and rate.
+func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
+	v := o.GetScheduleConfig().Clone()
+	var sc StoreLimitConfig
+	var rate float64
+	switch typ {
+	case storelimit.AddPeer:
+		if _, ok := v.StoreLimit[storeID]; !ok {
+			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+		} else {
+			rate = v.StoreLimit[storeID].RemovePeer
+		}
+		sc = StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
+	case storelimit.RemovePeer:
+		if _, ok := v.StoreLimit[storeID]; !ok {
+			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+		} else {
+			rate = v.StoreLimit[storeID].AddPeer
+		}
+		sc = StoreLimitConfig{AddPeer: rate, RemovePeer: ratePerMin}
+	}
+	v.StoreLimit[storeID] = sc
+	o.SetScheduleConfig(v)
+}
+
+// SetAllStoresLimit sets all store limit for a given type and rate.
+func (o *PersistOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
+	v := o.GetScheduleConfig().Clone()
+	switch typ {
+	case storelimit.AddPeer:
+		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
+		for storeID := range v.StoreLimit {
+			sc := StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
+			v.StoreLimit[storeID] = sc
+		}
+	case storelimit.RemovePeer:
+		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
+		for storeID := range v.StoreLimit {
+			sc := StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
+			v.StoreLimit[storeID] = sc
+		}
+	}
+
+	o.SetScheduleConfig(v)
+}
+
 // IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
 func (o *PersistOptions) IsOneWayMergeEnabled() bool {
 	return o.GetScheduleConfig().EnableOneWayMerge
@@ -220,9 +267,37 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 	return o.GetScheduleConfig().HotRegionScheduleLimit
 }
 
-// GetStoreBalanceRate returns the balance rate of a store.
-func (o *PersistOptions) GetStoreBalanceRate() float64 {
-	return o.GetScheduleConfig().StoreBalanceRate
+// GetStoreLimit returns the limit of a store.
+func (o *PersistOptions) GetStoreLimit(storeID uint64) StoreLimitConfig {
+	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
+		return limit
+	}
+	cfg := o.GetScheduleConfig().Clone()
+	sc := StoreLimitConfig{
+		AddPeer:    DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	}
+	cfg.StoreLimit[storeID] = sc
+	o.SetScheduleConfig(cfg)
+	return o.GetScheduleConfig().StoreLimit[storeID]
+}
+
+// GetStoreLimitByType returns the limit of a store with a given type.
+func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	limit := o.GetStoreLimit(storeID)
+	switch typ {
+	case storelimit.AddPeer:
+		return limit.AddPeer
+	case storelimit.RemovePeer:
+		return limit.RemovePeer
+	default:
+		panic("no such limit type")
+	}
+}
+
+// GetAllStoresLimit returns the limit of all stores.
+func (o *PersistOptions) GetAllStoresLimit() map[uint64]StoreLimitConfig {
+	return o.GetScheduleConfig().StoreLimit
 }
 
 // GetStoreLimitMode returns the limit mode of store.

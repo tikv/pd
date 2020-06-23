@@ -138,6 +138,10 @@ func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 	regionByID := getRegionByID(c, clusterID, grpcPDClient, region.GetId())
 	c.Assert(region, DeepEquals, regionByID)
 
+	r := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(30))
+	err = tc.HandleRegionHeartbeat(r)
+	c.Assert(err, IsNil)
+
 	// Get store.
 	storeID := peer.GetStoreId()
 	store := getStore(c, clusterID, grpcPDClient, storeID)
@@ -214,35 +218,42 @@ func resetStoreState(c *C, rc *cluster.RaftCluster, storeID uint64, state metapb
 	c.Assert(store, NotNil)
 	newStore := store.Clone(core.SetStoreState(state))
 	rc.GetCacheCluster().PutStore(newStore)
+	if state == metapb.StoreState_Offline {
+		rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
+	} else if state == metapb.StoreState_Tombstone {
+		rc.RemoveStoreLimit(storeID)
+	}
 }
 
 func testStateAndLimit(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient pdpb.PDClient, store *metapb.Store, beforeState metapb.StoreState, run func(*cluster.RaftCluster) error, expectStates ...metapb.StoreState) {
 	// prepare
 	storeID := store.GetId()
 	oc := rc.GetOperatorController()
-	oc.SetAllStoresLimit(1.0, storelimit.Manual, storelimit.RegionAdd)
-	oc.SetAllStoresLimit(1.0, storelimit.Manual, storelimit.RegionRemove)
+	rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+	op := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: storeID, PeerID: 3})
+	oc.AddOperator(op)
+	op = operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: storeID})
+	oc.AddOperator(op)
+
 	resetStoreState(c, rc, store.GetId(), beforeState)
-	_, isRegionAddLimitOKBefore := oc.GetAllStoresLimit(storelimit.RegionAdd)[storeID]
-	_, isRegionRemoveLimitOKBefore := oc.GetAllStoresLimit(storelimit.RegionRemove)[storeID]
+	_, isOKBefore := rc.GetAllStoresLimit()[storeID]
 	// run
 	err := run(rc)
 	// judge
-	_, isRegionAddLimitOKAfter := oc.GetAllStoresLimit(storelimit.RegionAdd)[storeID]
-	_, isRegionRemoveLimitOKAfter := oc.GetAllStoresLimit(storelimit.RegionRemove)[storeID]
+	_, isOKAfter := rc.GetAllStoresLimit()[storeID]
 	if len(expectStates) != 0 {
 		c.Assert(err, IsNil)
 		expectState := expectStates[0]
 		c.Assert(getStore(c, clusterID, grpcPDClient, storeID).GetState(), Equals, expectState)
 		if expectState == metapb.StoreState_Offline {
-			c.Assert(isRegionAddLimitOKAfter && isRegionRemoveLimitOKAfter, IsTrue)
+			c.Assert(isOKAfter, IsTrue)
 		} else if expectState == metapb.StoreState_Tombstone {
-			c.Assert(isRegionAddLimitOKAfter || isRegionRemoveLimitOKAfter, IsFalse)
+			c.Assert(isOKAfter, IsFalse)
 		}
 	} else {
 		c.Assert(err, NotNil)
-		c.Assert(isRegionAddLimitOKAfter, Equals, isRegionAddLimitOKBefore)
-		c.Assert(isRegionRemoveLimitOKAfter, Equals, isRegionRemoveLimitOKBefore)
+		c.Assert(isOKBefore, Equals, isOKAfter)
 	}
 }
 
@@ -555,7 +566,6 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
-	cfg.Schedule.StoreBalanceRate = 60
 	err = cfg.Adjust(nil)
 	c.Assert(err, IsNil)
 	opt := config.NewPersistOptions(cfg)
@@ -729,19 +739,24 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 	c.Assert(err, NotNil)
 	rep := leaderServer.GetConfig().Replication
 	rep.EnablePlacementRules = true
-	err = leaderServer.GetServer().SetReplicationConfig(rep)
+	svr := leaderServer.GetServer()
+	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, IsNil)
 	_, err = putStore(c, grpcPDClient, clusterID, tiflashStore)
 	c.Assert(err, IsNil)
+	// test TiFlash store limit
+	expect := map[uint64]config.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
+	c.Assert(svr.GetScheduleConfig().StoreLimit, DeepEquals, expect)
 
 	// cannot disable placement rules with TiFlash nodes
 	rep.EnablePlacementRules = false
-	err = leaderServer.GetServer().SetReplicationConfig(rep)
+	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, NotNil)
-	err = leaderServer.GetServer().GetRaftCluster().BuryStore(11, true)
+	err = svr.GetRaftCluster().BuryStore(11, true)
 	c.Assert(err, IsNil)
-	err = leaderServer.GetServer().SetReplicationConfig(rep)
+	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, IsNil)
+	c.Assert(len(svr.GetScheduleConfig().StoreLimit), Equals, 0)
 }
 
 func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {
@@ -899,7 +914,8 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	}
 
 	oc := rc.GetOperatorController()
-	oc.SetAllStoresLimit(1, storelimit.Manual, storelimit.RegionRemove)
+	opt := rc.GetOpt()
+	opt.SetAllStoresLimit(storelimit.RemovePeer, 1)
 	// only can add 5 remove peer operators on store 1
 	for i := uint64(1); i <= 5; i++ {
 		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
@@ -921,7 +937,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
 	// reset all store limit
-	oc.SetAllStoresLimit(1, storelimit.Manual, storelimit.RegionRemove)
+	opt.SetAllStoresLimit(storelimit.RemovePeer, 2)
 
 	// only can add 5 remove peer operators on store 2
 	for i := uint64(1); i <= 5; i++ {
@@ -934,11 +950,68 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
 	// offline store 1
+	rc.SetStoreLimit(1, storelimit.RemovePeer, storelimit.Unlimited)
 	rc.RemoveStore(1)
+
 	// can add unlimited remove peer operators on store 1
 	for i := uint64(1); i <= 30; i++ {
 		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
+}
+
+func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
+	rc := leaderServer.GetRaftCluster()
+	c.Assert(rc, NotNil)
+	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up)
+	_, err = putStore(c, grpcPDClient, clusterID, store)
+	c.Assert(err, IsNil)
+	r := &metapb.Region{
+		Id: 1,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		StartKey: []byte{byte(2)},
+		EndKey:   []byte{byte(3)},
+		Peers:    []*metapb.Peer{{Id: 11, StoreId: uint64(1)}},
+	}
+	region := core.NewRegionInfo(r, r.Peers[0], core.SetApproximateSize(10))
+
+	err = rc.HandleRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+
+	// restart PD
+	// Here we use an empty storelimit to simulate the upgrade progress.
+	opt := rc.GetOpt()
+	scheduleCfg := opt.GetScheduleConfig()
+	scheduleCfg.StoreLimit = map[uint64]config.StoreLimitConfig{}
+	c.Assert(leaderServer.GetServer().SetScheduleConfig(*scheduleCfg), IsNil)
+	err = leaderServer.Stop()
+	c.Assert(err, IsNil)
+	err = leaderServer.Run()
+	c.Assert(err, IsNil)
+
+	oc := rc.GetOperatorController()
+	// only can add 5 remove peer operators on store 1
+	for i := uint64(1); i <= 5; i++ {
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
+	}
+	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
 }

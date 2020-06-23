@@ -894,56 +894,20 @@ func (oc *OperatorController) exceedStoreLimit(ops ...*operator.Operator) bool {
 	return false
 }
 
-// SetAllStoresLimit is used to set limit of all stores.
-func (oc *OperatorController) SetAllStoresLimit(rate float64, mode storelimit.Mode, limitType storelimit.Type) {
-	oc.Lock()
-	defer oc.Unlock()
-	stores := oc.cluster.GetStores()
-	for _, s := range stores {
-		oc.newStoreLimit(s.GetID(), rate, mode, limitType)
-	}
-}
-
-// SetAllStoresLimitAuto updates the store limit in Auto mode
-func (oc *OperatorController) SetAllStoresLimitAuto(rate float64, limitType storelimit.Type) {
-	oc.Lock()
-	defer oc.Unlock()
-	stores := oc.cluster.GetStores()
-	for _, s := range stores {
-		sid := s.GetID()
-		if old, ok := oc.storesLimit[sid]; ok {
-			limit, ok1 := old[limitType]
-			if ok1 && limit.Mode() == storelimit.Manual {
-				continue
-			}
-		}
-		if oc.storesLimit[sid] == nil {
-			oc.storesLimit[sid] = make(map[storelimit.Type]*storelimit.StoreLimit)
-		}
-		oc.storesLimit[sid][limitType] = storelimit.NewStoreLimit(rate, storelimit.Auto, storelimit.RegionInfluence[limitType])
-	}
-}
-
-// SetStoreLimit is used to set the limit of a store.
-func (oc *OperatorController) SetStoreLimit(storeID uint64, rate float64, mode storelimit.Mode, limitType storelimit.Type) {
-	oc.Lock()
-	defer oc.Unlock()
-	oc.newStoreLimit(storeID, rate, mode, limitType)
-}
-
 // newStoreLimit is used to create the limit of a store.
-func (oc *OperatorController) newStoreLimit(storeID uint64, rate float64, mode storelimit.Mode, limitType storelimit.Type) {
+func (oc *OperatorController) newStoreLimit(storeID uint64, ratePerSec float64, limitType storelimit.Type) {
+	log.Info("create or update a store limit", zap.Uint64("store-id", storeID), zap.String("type", limitType.String()), zap.Float64("rate", ratePerSec))
 	if oc.storesLimit[storeID] == nil {
 		oc.storesLimit[storeID] = make(map[storelimit.Type]*storelimit.StoreLimit)
 	}
-	oc.storesLimit[storeID][limitType] = storelimit.NewStoreLimit(rate, mode, storelimit.RegionInfluence[limitType])
+	oc.storesLimit[storeID][limitType] = storelimit.NewStoreLimit(ratePerSec, storelimit.RegionInfluence[limitType])
 }
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
 	if oc.storesLimit[storeID][limitType] == nil {
-		rate := oc.getDefaultStoreLimitRate()
-		oc.newStoreLimit(storeID, rate, storelimit.Auto, limitType)
+		ratePerSec := oc.cluster.GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
+		oc.newStoreLimit(storeID, ratePerSec, limitType)
 		oc.cluster.AttachAvailableFunc(storeID, limitType, func() bool {
 			oc.RLock()
 			defer oc.RUnlock()
@@ -953,23 +917,11 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 			return oc.storesLimit[storeID][limitType].Available() >= storelimit.RegionInfluence[limitType]
 		})
 	}
-	return oc.storesLimit[storeID][limitType]
-}
-
-// GetAllStoresLimit is used to get limit of all stores.
-func (oc *OperatorController) GetAllStoresLimit(limitType storelimit.Type) map[uint64]*storelimit.StoreLimit {
-	oc.RLock()
-	defer oc.RUnlock()
-	limits := make(map[uint64]*storelimit.StoreLimit)
-	for storeID, limit := range oc.storesLimit {
-		store := oc.cluster.GetStore(storeID)
-		if !store.IsTombstone() {
-			if limit[limitType] != nil {
-				limits[storeID] = limit[limitType]
-			}
-		}
+	ratePerSec := oc.cluster.GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
+	if ratePerSec != oc.storesLimit[storeID][limitType].Rate() {
+		oc.newStoreLimit(storeID, ratePerSec, limitType)
 	}
-	return limits
+	return oc.storesLimit[storeID][limitType]
 }
 
 // GetLeaderSchedulePolicy is to get leader schedule policy.
@@ -978,16 +930,6 @@ func (oc *OperatorController) GetLeaderSchedulePolicy() core.SchedulePolicy {
 		return core.ByCount
 	}
 	return oc.cluster.GetLeaderSchedulePolicy()
-}
-
-// RemoveStoreLimit removes the store limit for a given store ID.
-func (oc *OperatorController) RemoveStoreLimit(storeID uint64) {
-	oc.Lock()
-	defer oc.Unlock()
-	for _, limitType := range storelimit.TypeNameValue {
-		oc.cluster.AttachAvailableFunc(storeID, limitType, nil)
-	}
-	delete(oc.storesLimit, storeID)
 }
 
 // CollectStoreLimitMetrics collects the metrics about store limit
@@ -1005,8 +947,8 @@ func (oc *OperatorController) CollectStoreLimitMetrics() {
 			for n, v := range storelimit.TypeNameValue {
 				var storeLimit *storelimit.StoreLimit
 				if oc.storesLimit[storeID] == nil || oc.storesLimit[storeID][v] == nil {
-					// the default store limit config
-					storeLimitRateGauge.WithLabelValues(storeIDStr, n).Set(oc.getDefaultStoreLimitRate() * StoreBalanceBaseTime)
+					// Set to 0 to represent the store limit of the specific type is not initialized.
+					storeLimitRateGauge.WithLabelValues(storeIDStr, n).Set(0)
 					continue
 				}
 				storeLimit = oc.storesLimit[storeID][v]
@@ -1015,8 +957,4 @@ func (oc *OperatorController) CollectStoreLimitMetrics() {
 			}
 		}
 	}
-}
-
-func (oc *OperatorController) getDefaultStoreLimitRate() float64 {
-	return oc.cluster.GetStoreBalanceRate() / StoreBalanceBaseTime
 }

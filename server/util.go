@@ -20,7 +20,6 @@ import (
 	"path"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
@@ -181,15 +180,4 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 	}
 
 	return nil
-}
-
-// isTiFlashStore used to judge flash store.
-// FIXME: remove the hack way
-func isTiFlashStore(store *metapb.Store) bool {
-	for _, l := range store.GetLabels() {
-		if l.GetKey() == "engine" && l.GetValue() == "tiflash" {
-			return true
-		}
-	}
-	return false
 }

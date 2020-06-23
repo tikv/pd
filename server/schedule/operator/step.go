@@ -112,7 +112,7 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	regionSize := region.GetApproximateSize()
 	to.RegionSize += regionSize
 	to.RegionCount++
-	to.AdjustStepCost(storelimit.RegionAdd, regionSize)
+	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
 // CheckSafety checks if the step meets the safety properties.
@@ -175,7 +175,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	regionSize := region.GetApproximateSize()
 	to.RegionSize += regionSize
 	to.RegionCount++
-	to.AdjustStepCost(storelimit.RegionAdd, regionSize)
+	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
@@ -252,7 +252,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	regionSize := region.GetApproximateSize()
 	from.RegionSize -= regionSize
 	from.RegionCount--
-	from.AdjustStepCost(storelimit.RegionRemove, regionSize)
+	from.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
 
 // MergeRegion is an OpStep that merge two regions.

@@ -94,7 +94,7 @@ type balanceAdjacentRegionConfig struct {
 // 2. the two regions' leader will not in the public store of this two regions
 type balanceAdjacentRegionScheduler struct {
 	*BaseScheduler
-	selector             *selector.RandomSelector
+	filters              []filter.Filter
 	lastKey              []byte
 	cacheRegions         *adjacentState
 	conf                 *balanceAdjacentRegionConfig
@@ -127,7 +127,7 @@ func newBalanceAdjacentRegionScheduler(opController *schedule.OperatorController
 	base := NewBaseScheduler(opController)
 	s := &balanceAdjacentRegionScheduler{
 		BaseScheduler: base,
-		selector:      selector.NewRandomSelector(filters),
+		filters:       filters,
 		conf:          conf,
 		lastKey:       []byte(""),
 	}
@@ -268,8 +268,7 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster opt.Cluster, re
 		log.Error("failed to get the store", zap.Uint64("store-id", storeID))
 		return true
 	}
-	s := l.selector.SelectSource(cluster, []*core.StoreInfo{store})
-	if s == nil {
+	if !filter.Source(cluster, store, l.filters) {
 		return true
 	}
 	// Skip hot regions.
@@ -294,7 +293,9 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster opt.Cluster, bef
 			storesInfo = append(storesInfo, store)
 		}
 	}
-	target := l.selector.SelectTarget(cluster, storesInfo)
+	target := selector.NewCandidates(storesInfo).
+		FilterTarget(cluster, l.filters...).
+		RandomPick()
 	if target == nil {
 		return nil
 	}
@@ -337,7 +338,10 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 		filter.NewExcludedFilter(l.GetName(), nil, excludeStores),
 		scoreGuard,
 	}
-	target := l.selector.SelectTarget(cluster, cluster.GetStores(), filters...)
+	target := selector.NewCandidates(cluster.GetStores()).
+		FilterTarget(cluster, filters...).
+		FilterTarget(cluster, l.filters...).
+		RandomPick()
 	if target == nil {
 		return nil
 	}
