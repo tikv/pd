@@ -208,7 +208,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			}
 			target = checker.SelectStoreToReplacePeerByRule(s.GetName(), cluster, region, fit, rf, oldPeer, scoreGuard, excludeFilter)
 		} else {
-			scoreGuard := filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), stores, source)
+			scoreGuard := filter.NewLocationSafeguard(s.GetName(), cluster.GetLocationLabels(), stores, source)
 			replicaChecker := checker.NewReplicaChecker(cluster, s.GetName())
 			storeID, _ := replicaChecker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
 			if storeID != 0 {
