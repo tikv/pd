@@ -333,7 +333,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestTransferLeaderOut(c *C) {
 				regions[op.RegionID()] = struct{}{}
 				tr := op.Step(0).(operator.TransferLeader)
 				c.Assert(tr.FromStore, Equals, uint64(4))
-				targets[tr.ToStore] --
+				targets[tr.ToStore]--
 			}
 		}
 	}
