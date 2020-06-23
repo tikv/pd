@@ -337,7 +337,13 @@ func (mso *ScheduleOptions) GetKeyType() core.KeyType {
 	return core.StringToKeyType(mso.KeyType)
 }
 
-// CheckLabelProperty mocks method
+// CheckLabelProperty mocks method. It checks if there is any label
+// has the same key as typ.
 func (mso *ScheduleOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
-	return true
+	for _, l := range labels {
+		if l.Key == typ {
+			return true
+		}
+	}
+	return false
 }

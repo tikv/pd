@@ -14,9 +14,11 @@ package filter
 
 import (
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
 	"github.com/pingcap/pd/v4/server/core"
@@ -79,4 +81,37 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 	c.Assert(filter.Target(tc, tc.GetStore(2)), IsTrue)
 	c.Assert(filter.Target(tc, tc.GetStore(4)), IsFalse)
 	c.Assert(filter.Source(tc, tc.GetStore(4)), IsTrue)
+}
+
+func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
+	filters := []Filter{
+		StoreStateFilter{TransferLeader: true},
+		StoreStateFilter{MoveRegion: true},
+		StoreStateFilter{TransferLeader: true, MoveRegion: true},
+		StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+	}
+	opt := mockoption.NewScheduleOptions()
+	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
+
+	check := func(n int, store *core.StoreInfo, source, target bool) {
+		c.Assert(filters[n].Source(opt, store), Equals, source)
+		c.Assert(filters[n].Target(opt, store), Equals, target)
+	}
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
+	check(2, store, true, true)
+
+	// Disconn
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
+	check(0, store, false, false)
+	check(1, store, true, false)
+	check(2, store, false, false)
+	check(3, store, true, true)
+
+	// Busy
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
+		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
+	check(0, store, true, false)
+	check(1, store, false, false)
+	check(2, store, false, false)
+	check(3, store, true, true)
 }
