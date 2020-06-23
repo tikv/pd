@@ -355,8 +355,6 @@ type StoreStateFilter struct {
 	TransferLeader bool
 	// Set true if the schedule involves any move region operation.
 	MoveRegion bool
-	// Set true if allows temproary states.
-	AllowTemporaryStates bool
 }
 
 // Scope returns the scheduler or the checker which the filter acts on.
