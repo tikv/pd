@@ -786,7 +786,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 			if srcStore == nil {
 				return nil
 			}
-			scoreGuard = filter.NewDistinctScoreFilter(bs.sche.GetName(), bs.cluster.GetLocationLabels(), bs.cluster.GetRegionStores(bs.cur.region), srcStore)
+			scoreGuard = filter.NewLocationSafeguard(bs.sche.GetName(), bs.cluster.GetLocationLabels(), bs.cluster.GetRegionStores(bs.cur.region), srcStore)
 		}
 
 		filters = []filter.Filter{

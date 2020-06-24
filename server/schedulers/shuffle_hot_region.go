@@ -172,7 +172,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 		if cluster.IsPlacementRulesEnabled() {
 			scoreGuard = filter.NewRuleFitFilter(s.GetName(), cluster, srcRegion, srcStoreID)
 		} else {
-			scoreGuard = filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore)
+			scoreGuard = filter.NewLocationSafeguard(s.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(srcRegion), srcStore)
 		}
 
 		filters := []filter.Filter{

@@ -284,12 +284,31 @@ type distinctScoreFilter struct {
 	scope     string
 	labels    []string
 	stores    []*core.StoreInfo
+	policy    string
 	safeScore float64
 }
 
-// NewDistinctScoreFilter creates a filter that filters all stores that have
+const (
+	// policies used by distinctScoreFilter.
+	// 'safeguard' ensures replacement is NOT WORSE than before.
+	// 'improve' ensures replacement is BETTER than before.
+	locationSafeguard = "safeguard"
+	locationImprove   = "improve"
+)
+
+// NewLocationSafeguard creates a filter that filters all stores that have
 // lower distinct score than specified store.
-func NewDistinctScoreFilter(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+func NewLocationSafeguard(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+	return newDistinctScoreFilter(scope, labels, stores, source, locationSafeguard)
+}
+
+// NewLocationImprover creates a filter that filters all stores that have
+// lower or equal distinct score than specified store.
+func NewLocationImprover(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+	return newDistinctScoreFilter(scope, labels, stores, source, locationImprove)
+}
+
+func newDistinctScoreFilter(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo, policy string) Filter {
 	newStores := make([]*core.StoreInfo, 0, len(stores)-1)
 	for _, s := range stores {
 		if s.GetID() == source.GetID() {
@@ -303,6 +322,7 @@ func NewDistinctScoreFilter(scope string, labels []string, stores []*core.StoreI
 		labels:    labels,
 		stores:    newStores,
 		safeScore: core.DistinctScore(labels, newStores, source),
+		policy:    policy,
 	}
 }
 
@@ -319,7 +339,15 @@ func (f *distinctScoreFilter) Source(opt opt.Options, store *core.StoreInfo) boo
 }
 
 func (f *distinctScoreFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return core.DistinctScore(f.labels, f.stores, store) >= f.safeScore
+	score := core.DistinctScore(f.labels, f.stores, store)
+	switch f.policy {
+	case locationSafeguard:
+		return score >= f.safeScore
+	case locationImprove:
+		return score > f.safeScore
+	default:
+		return false
+	}
 }
 
 // StoreStateFilter is used to determine whether a store can be selected as the

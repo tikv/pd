@@ -154,7 +154,7 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, region *co
 	if cluster.IsPlacementRulesEnabled() {
 		scoreGuard = filter.NewRuleFitFilter(s.GetName(), cluster, region, oldPeer.GetStoreId())
 	} else {
-		scoreGuard = filter.NewDistinctScoreFilter(s.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(region), cluster.GetStore(oldPeer.GetStoreId()))
+		scoreGuard = filter.NewLocationSafeguard(s.GetName(), cluster.GetLocationLabels(), cluster.GetRegionStores(region), cluster.GetStore(oldPeer.GetStoreId()))
 	}
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds())
 

@@ -325,7 +325,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 	if cluster.IsPlacementRulesEnabled() {
 		scoreGuard = filter.NewRuleFitFilter(l.GetName(), cluster, region, leaderStoreID)
 	} else {
-		scoreGuard = filter.NewDistinctScoreFilter(l.GetName(), cluster.GetLocationLabels(), stores, source)
+		scoreGuard = filter.NewLocationSafeguard(l.GetName(), cluster.GetLocationLabels(), stores, source)
 	}
 	excludeStores := region.GetStoreIds()
 	for _, storeID := range l.cacheRegions.assignedStoreIds {
