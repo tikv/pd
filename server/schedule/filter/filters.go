@@ -279,11 +279,6 @@ func (f *storageThresholdFilter) Target(opt opt.Options, store *core.StoreInfo) 
 	return !store.IsLowSpace(opt.GetLowSpaceRatio())
 }
 
-const (
-	locationSafeguard = "safeguard"
-	locationImprove   = "improve"
-)
-
 // distinctScoreFilter ensures that distinct score will not decrease.
 type distinctScoreFilter struct {
 	scope     string
@@ -292,6 +287,14 @@ type distinctScoreFilter struct {
 	policy    string
 	safeScore float64
 }
+
+const (
+	// policies used by distinctScoreFilter.
+	// 'safeguard' ensures replacement is NOT WORSE than before.
+	// 'improve' ensures replacement is BETTER than before.
+	locationSafeguard = "safeguard"
+	locationImprove   = "improve"
+)
 
 // NewLocationSafeguard creates a filter that filters all stores that have
 // lower distinct score than specified store.
