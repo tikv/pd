@@ -621,7 +621,7 @@ func (pm *peersMap) IDs() []uint64 {
 	for id := range pm.m {
 		ids = append(ids, id)
 	}
-	sort.Sort(u64Slice(ids))
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	return ids
 }
 
