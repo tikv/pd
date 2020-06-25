@@ -306,6 +306,8 @@ github.com/pingcap/sysutil v0.0.0-20200408114249-ed3bd6f7fdb1/go.mod h1:EB/852NM
 github.com/pingyu/kvproto v0.0.0-20200616092848-8037ca08f377 h1:NIAxg8kffgQuX7anNKnUiZaJyZ56hf1neAlqtuDucwU=
 github.com/pingyu/kvproto v0.0.0-20200620130450-f6224dbfde74 h1:RkXchCO6iqOiQIwWghWCAOpCVbQM9D+BsCdpEaC+wfQ=
 github.com/pingyu/kvproto v0.0.0-20200620130450-f6224dbfde74/go.mod h1:IOdRDPLyda8GX2hE/jO7gqaCV/PNFh8BZQCQZXfIOqI=
+github.com/pingyu/kvproto v0.0.0-20200625060901-6757a66da095 h1:jpWI2xl6gqsIwibVC7ZbogXK660UXGQSqRlqhCUb66c=
+github.com/pingyu/kvproto v0.0.0-20200625060901-6757a66da095/go.mod h1:IOdRDPLyda8GX2hE/jO7gqaCV/PNFh8BZQCQZXfIOqI=
 github.com/pkg/errors v0.8.0/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pkg/errors v0.8.1 h1:iURUrRGxPUNPdy5/HRSm+Yj6okJ6UtLINN0Q9M4+h3I=
 github.com/pkg/errors v0.8.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
