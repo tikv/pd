@@ -778,23 +778,16 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 	switch bs.opTy {
 	case movePeer:
-		var scoreGuard filter.Filter
-		if bs.cluster.IsPlacementRulesEnabled() {
-			scoreGuard = filter.NewRuleFitFilter(bs.sche.GetName(), bs.cluster, bs.cur.region, bs.cur.srcStoreID)
-		} else {
-			srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
-			if srcStore == nil {
-				return nil
-			}
-			scoreGuard = filter.NewLocationSafeguard(bs.sche.GetName(), bs.cluster.GetLocationLabels(), bs.cluster.GetRegionStores(bs.cur.region), srcStore)
+		srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
+		if srcStore == nil {
+			return nil
 		}
-
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIds(), bs.cur.region.GetStoreIds()),
 			filter.NewHealthFilter(bs.sche.GetName()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
-			scoreGuard,
+			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
 		}
 
 		candidates = bs.cluster.GetStores()

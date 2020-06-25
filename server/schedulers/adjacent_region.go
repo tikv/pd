@@ -315,18 +315,12 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 	}
 	// scoreGuard guarantees that the distinct score will not decrease.
 	leaderStoreID := region.GetLeader().GetStoreId()
-	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(leaderStoreID)
 	if source == nil {
 		log.Error("failed to get the source store", zap.Uint64("store-id", leaderStoreID))
 		return nil
 	}
-	var scoreGuard filter.Filter
-	if cluster.IsPlacementRulesEnabled() {
-		scoreGuard = filter.NewRuleFitFilter(l.GetName(), cluster, region, leaderStoreID)
-	} else {
-		scoreGuard = filter.NewLocationSafeguard(l.GetName(), cluster.GetLocationLabels(), stores, source)
-	}
+	scoreGuard := filter.NewPlacementSafeguard(l.GetName(), cluster, region, source)
 	excludeStores := region.GetStoreIds()
 	for _, storeID := range l.cacheRegions.assignedStoreIds {
 		if _, ok := excludeStores[storeID]; !ok {

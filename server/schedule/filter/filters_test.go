@@ -73,7 +73,7 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		for _, id := range tc.stores {
 			stores = append(stores, allStores[id-1])
 		}
-		ls := NewLocationSafeguard("", labels, stores, allStores[tc.source-1])
+		ls := newLocationSafeguard("", labels, stores, allStores[tc.source-1])
 		li := NewLocationImprover("", labels, stores, allStores[tc.source-1])
 		c.Assert(ls.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.safeGuradRes)
 		c.Assert(li.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.improverRes)
@@ -109,8 +109,33 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 		{StoreId: 5, Id: 5},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 
-	filter := NewRuleFitFilter("", tc, region, 1)
+	filter := newRuleFitFilter("", tc, region, 1)
 	c.Assert(filter.Target(tc, tc.GetStore(2)), IsTrue)
 	c.Assert(filter.Target(tc, tc.GetStore(4)), IsFalse)
 	c.Assert(filter.Source(tc, tc.GetStore(4)), IsTrue)
+}
+
+func (s *testFiltersSuite) TestPlacementGuard(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	opt.LocationLabels = []string{"zone"}
+	tc := mockcluster.NewCluster(opt)
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+		{StoreId: 1, Id: 1},
+		{StoreId: 3, Id: 3},
+		{StoreId: 5, Id: 5},
+	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	store1 := tc.GetStore(1)
+
+	c.Assert(NewPlacementSafeguard("", tc, region, store1),
+		FitsTypeOf,
+		newLocationSafeguard("", []string{"zone"}, tc.GetRegionStores(region), store1))
+	opt.EnablePlacementRules = true
+	c.Assert(NewPlacementSafeguard("", tc, region, store1),
+		FitsTypeOf,
+		newRuleFitFilter("", tc, region, 1))
 }
