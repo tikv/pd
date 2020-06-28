@@ -15,12 +15,13 @@ package api
 
 import (
 	"errors"
+	"net/http"
+	"os"
+
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/unrolled/render"
-	"net/http"
-	"os"
 )
 
 type pluginHandler struct {
