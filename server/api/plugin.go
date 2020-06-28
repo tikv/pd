@@ -15,14 +15,12 @@ package api
 
 import (
 	"errors"
-	"net/http"
-	"os"
-	"strings"
-
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/unrolled/render"
+	"net/http"
+	"os"
 )
 
 type pluginHandler struct {
@@ -71,11 +69,6 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	path := data["plugin-path"]
-	if !strings.HasPrefix(path, "./pd/plugin/") {
-		err := errors.New("plugin path must begin with ./pd/plugin/")
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	if exist, err := pathExists(path); !exist {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
