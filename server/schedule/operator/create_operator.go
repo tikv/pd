@@ -165,17 +165,3 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 		SetLightWeight().
 		Build(0)
 }
-
-type u64Slice []uint64
-
-func (s u64Slice) Len() int {
-	return len(s)
-}
-
-func (s u64Slice) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
-
-func (s u64Slice) Less(i, j int) bool {
-	return s[i] < s[j]
-}
