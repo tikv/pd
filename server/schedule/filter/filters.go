@@ -296,9 +296,9 @@ const (
 	locationImprove   = "improve"
 )
 
-// NewLocationSafeguard creates a filter that filters all stores that have
+// newLocationSafeguard creates a filter that filters all stores that have
 // lower distinct score than specified store.
-func NewLocationSafeguard(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+func newLocationSafeguard(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
 	return newDistinctScoreFilter(scope, labels, stores, source, locationSafeguard)
 }
 
@@ -477,10 +477,10 @@ type ruleFitFilter struct {
 	oldStore uint64
 }
 
-// NewRuleFitFilter creates a filter that ensures after replace a peer with new
+// newRuleFitFilter creates a filter that ensures after replace a peer with new
 // one, the isolation level will not decrease. Its function is the same as
 // distinctScoreFilter but used when placement rules is enabled.
-func NewRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldStoreID uint64) Filter {
+func newRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldStoreID uint64) Filter {
 	return &ruleFitFilter{
 		scope:    scope,
 		fitter:   fitter,
@@ -506,6 +506,15 @@ func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	region := f.region.Clone(core.WithReplacePeerStore(f.oldStore, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
+}
+
+// NewPlacementSafeguard creates a filter that ensures after replace a peer with new
+// peer, the placement restriction will not become worse.
+func NewPlacementSafeguard(scope string, cluster opt.Cluster, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+	if cluster.IsPlacementRulesEnabled() {
+		return newRuleFitFilter(scope, cluster, region, sourceStore.GetID())
+	}
+	return newLocationSafeguard(scope, cluster.GetLocationLabels(), cluster.GetRegionStores(region), sourceStore)
 }
 
 type engineFilter struct {
