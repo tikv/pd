@@ -173,18 +173,13 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 
 func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
 	// scoreGuard guarantees that the distinct score will not decrease.
-	regionStores := r.cluster.GetRegionStores(region)
 	storeID := oldPeer.GetStoreId()
 	sourceStore := r.cluster.GetStore(storeID)
 	if sourceStore == nil {
 		log.Error("failed to get the store", zap.Uint64("store-id", storeID))
+		return nil
 	}
-	var scoreGuard filter.Filter
-	if r.cluster.IsPlacementRulesEnabled() {
-		scoreGuard = filter.NewRuleFitFilter(r.name, r.cluster, region, oldPeer.GetStoreId())
-	} else {
-		scoreGuard = filter.NewLocationSafeguard(r.name, r.cluster.GetLocationLabels(), regionStores, sourceStore)
-	}
+	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster, region, sourceStore)
 
 	candidates := make([]*core.StoreInfo, 0, len(stores))
 	for _, store := range stores {

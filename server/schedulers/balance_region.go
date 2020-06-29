@@ -187,7 +187,6 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 // transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *operator.Operator {
 	// scoreGuard guarantees that the distinct score will not decrease.
-	stores := cluster.GetRegionStores(region)
 	sourceStoreID := oldPeer.GetStoreId()
 	source := cluster.GetStore(sourceStoreID)
 	if source == nil {
@@ -198,8 +197,8 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 	excludeFilter := filter.NewExcludedFilter(s.GetName(), nil, exclude)
 	for {
 		var target *core.StoreInfo
+		scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster, region, source)
 		if cluster.IsPlacementRulesEnabled() {
-			scoreGuard := filter.NewRuleFitFilter(s.GetName(), cluster, region, sourceStoreID)
 			fit := cluster.FitRegion(region)
 			rf := fit.GetRuleFit(oldPeer.GetId())
 			if rf == nil {
@@ -208,7 +207,6 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 			}
 			target = checker.SelectStoreToReplacePeerByRule(s.GetName(), cluster, region, fit, rf, oldPeer, scoreGuard, excludeFilter)
 		} else {
-			scoreGuard := filter.NewLocationSafeguard(s.GetName(), cluster.GetLocationLabels(), stores, source)
 			replicaChecker := checker.NewReplicaChecker(cluster, s.GetName())
 			storeID, _ := replicaChecker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
 			if storeID != 0 {
