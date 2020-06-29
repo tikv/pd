@@ -45,6 +45,89 @@ func (s *testRuleSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
+func (s *testRuleSuite) TestSet(c *C) {
+	PDServerCfg := s.svr.GetConfig().PDServerCfg
+	PDServerCfg.KeyType = "raw"
+	err := s.svr.SetPDServerConfig(PDServerCfg)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(testDialClient, s.urlPrefix, []byte(`{"enable-placement-rules":"true"}`)), IsNil)
+
+	testcases := []struct {
+		name         string
+		readJsonErr  bool
+		checkRuleErr bool
+		setRuleErr   bool
+	}{
+		{
+			name:         "Set rule success",
+			readJsonErr:  false,
+			checkRuleErr: false,
+			setRuleErr:   false,
+		},
+		{
+			name:         "Read Json failed",
+			readJsonErr:  true,
+			checkRuleErr: false,
+			setRuleErr:   false,
+		},
+		{
+			name:         "Check rule failed",
+			readJsonErr:  false,
+			checkRuleErr: true,
+			setRuleErr:   false,
+		},
+		{
+			name:         "Set Rule Failed",
+			readJsonErr:  false,
+			checkRuleErr: false,
+			setRuleErr:   true,
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		var postData []byte
+		var err error
+		success := false
+		var response string
+		if testcase.readJsonErr {
+			postData = []byte("foo")
+			response = `{
+  "code": "input",
+  "msg": "invalid character 'o' in literal false (expecting 'a')",
+  "data": {
+    "Offset": 2
+  }
+}
+`
+		} else if testcase.checkRuleErr {
+			rule1 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
+			postData, err = json.Marshal(rule1)
+			c.Assert(err, IsNil)
+			response = `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
+`
+		} else if testcase.setRuleErr {
+			rule2 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
+			postData, err = json.Marshal(rule2)
+			c.Assert(err, IsNil)
+			response = `"invalid count -1"
+`
+		} else {
+			success = true
+			rule := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+			postData, err = json.Marshal(rule)
+			c.Assert(err, IsNil)
+		}
+		err = postJSON(testDialClient, s.urlPrefix+"/rule", postData)
+		if success {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(err, NotNil)
+			c.Assert(err.Error(), Equals, response)
+		}
+	}
+}
+
 func (s *testRuleSuite) Testrule(c *C) {
 	PDServerCfg := s.svr.GetConfig().PDServerCfg
 	PDServerCfg.KeyType = "raw"
