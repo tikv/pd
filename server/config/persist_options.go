@@ -481,14 +481,7 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 
 // Reload reloads the configuration from the storage.
 func (o *PersistOptions) Reload(storage *core.Storage) error {
-	cfg := &Config{
-		Schedule:        *o.GetScheduleConfig().Clone(),
-		Replication:     *o.GetReplicationConfig().clone(),
-		PDServerCfg:     *o.GetPDServerConfig().Clone(),
-		ReplicationMode: *o.GetReplicationModeConfig().Clone(),
-		LabelProperty:   o.GetLabelPropertyConfig().Clone(),
-		ClusterVersion:  *o.GetClusterVersion(),
-	}
+	cfg := &Config{}
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
 		return err
