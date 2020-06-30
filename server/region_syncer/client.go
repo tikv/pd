@@ -194,7 +194,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						region       *core.RegionInfo
 						regionLeader *metapb.Peer
 					)
-					if regionLeaders[i].Id != 0 {
+					if len(regionLeaders) > 0 && regionLeaders[i].Id != 0 {
 						regionLeader = regionLeaders[i]
 					}
 					if hasStats {
