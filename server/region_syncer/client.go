@@ -186,11 +186,12 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				}
 				stats := resp.GetRegionStats()
 				regions := resp.GetRegions()
+				regionLeaders := resp.GetRegionLeaders()
 				hasStats := len(stats) == len(regions)
 				for i, r := range regions {
 					var region *core.RegionInfo
 					if hasStats {
-						region = core.NewRegionInfo(r, nil,
+						region = core.NewRegionInfo(r, regionLeaders[i],
 							core.SetWrittenBytes(stats[i].BytesWritten),
 							core.SetWrittenKeys(stats[i].KeysWritten),
 							core.SetReadBytes(stats[i].BytesRead),
