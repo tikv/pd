@@ -326,23 +326,23 @@ func (s *testRuleSuite) TestDelete(c *C) {
 
 	testcases := []struct {
 		name    string
-		groupId string
+		groupID string
 		id      string
 	}{
 		{
 			name:    "delete existed rule",
-			groupId: "g",
+			groupID: "g",
 			id:      "10",
 		},
 		{
 			name:    "delete non-existed rule",
-			groupId: "g",
+			groupID: "g",
 			id:      "15",
 		},
 	}
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
-		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.groupId, testcase.id)
+		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.groupID, testcase.id)
 		resp, err := doDelete(testDialClient, url)
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, http.StatusOK)
