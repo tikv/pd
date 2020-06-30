@@ -17,6 +17,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/grpcutil"
@@ -189,16 +190,22 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				regionLeaders := resp.GetRegionLeaders()
 				hasStats := len(stats) == len(regions)
 				for i, r := range regions {
-					var region *core.RegionInfo
+					var (
+						region       *core.RegionInfo
+						regionLeader *metapb.Peer
+					)
+					if regionLeaders[i].Id != 0 {
+						regionLeader = regionLeaders[i]
+					}
 					if hasStats {
-						region = core.NewRegionInfo(r, regionLeaders[i],
+						region = core.NewRegionInfo(r, regionLeader,
 							core.SetWrittenBytes(stats[i].BytesWritten),
 							core.SetWrittenKeys(stats[i].KeysWritten),
 							core.SetReadBytes(stats[i].BytesRead),
 							core.SetReadKeys(stats[i].KeysRead),
 						)
 					} else {
-						region = core.NewRegionInfo(r, nil)
+						region = core.NewRegionInfo(r, regionLeader)
 					}
 
 					s.server.GetBasicCluster().CheckAndPutRegion(region)

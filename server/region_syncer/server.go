@@ -187,7 +187,11 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 			for syncedIndex, r := range regions {
 				metas = append(metas, r.GetMeta())
 				stats = append(stats, r.GetStat())
-				leaders = append(leaders, r.GetLeader())
+				leader := &metapb.Peer{}
+				if r.GetLeader() != nil {
+					leader = r.GetLeader()
+				}
+				leaders = append(leaders, leader)
 				if len(metas) < maxSyncRegionBatchSize && syncedIndex < len(regions)-1 {
 					continue
 				}
@@ -224,7 +228,11 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 	for i, r := range records {
 		regions[i] = r.GetMeta()
 		stats[i] = r.GetStat()
-		leaders[i] = r.GetLeader()
+		leader := &metapb.Peer{}
+		if r.GetLeader() != nil {
+			leader = r.GetLeader()
+		}
+		leaders[i] = leader
 	}
 	resp := &pdpb.SyncRegionResponse{
 		Header:        &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
