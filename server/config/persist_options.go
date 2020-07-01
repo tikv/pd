@@ -22,6 +22,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/v4/pkg/slice"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
@@ -486,7 +487,7 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 	if err != nil {
 		return err
 	}
-	o.adjustScheduleCfg(cfg)
+	o.adjustScheduleCfg(&cfg.Schedule)
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
@@ -498,33 +499,16 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 	return nil
 }
 
-func (o *PersistOptions) adjustScheduleCfg(persistentCfg *Config) {
-	scheduleCfg := o.GetScheduleConfig().Clone()
-	for i, s := range scheduleCfg.Schedulers {
-		for _, ps := range persistentCfg.Schedule.Schedulers {
-			if s.Type == ps.Type && reflect.DeepEqual(s.Args, ps.Args) {
-				scheduleCfg.Schedulers[i].Disable = ps.Disable
-				break
-			}
+func (o *PersistOptions) adjustScheduleCfg(scheduleCfg *ScheduleConfig) {
+	// In case we add new default schedulers.
+	for _, ps := range DefaultSchedulers {
+		if slice.NoneOf(scheduleCfg.Schedulers, func(i int) bool {
+			return scheduleCfg.Schedulers[i].Type == ps.Type
+		}) {
+			scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, ps)
 		}
 	}
-	restoredSchedulers := make([]SchedulerConfig, 0, len(persistentCfg.Schedule.Schedulers))
-	for _, ps := range persistentCfg.Schedule.Schedulers {
-		needRestore := true
-		for _, s := range scheduleCfg.Schedulers {
-			if s.Type == ps.Type && reflect.DeepEqual(s.Args, ps.Args) {
-				needRestore = false
-				break
-			}
-		}
-		if needRestore {
-			restoredSchedulers = append(restoredSchedulers, ps)
-		}
-	}
-	scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, restoredSchedulers...)
-	persistentCfg.Schedule.Schedulers = scheduleCfg.Schedulers
-	persistentCfg.Schedule.MigrateDeprecatedFlags()
-	o.SetScheduleConfig(scheduleCfg)
+	scheduleCfg.MigrateDeprecatedFlags()
 }
 
 // CheckLabelProperty checks the label property.
