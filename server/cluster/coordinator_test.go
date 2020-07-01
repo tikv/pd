@@ -672,8 +672,11 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	_, err = schedule.CreateScheduler(schedulers.AdjacentRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	// suppose we add a new default enable scheduler
-	newOpt.AddSchedulerCfg(schedulers.AdjacentRegionType, []string{})
-	c.Assert(newOpt.GetSchedulers(), HasLen, 5)
+	config.DefaultSchedulers = append(config.DefaultSchedulers, config.SchedulerConfig{Type: "adjacent-region"})
+	defer func() {
+		config.DefaultSchedulers = config.DefaultSchedulers[:len(config.DefaultSchedulers)-1]
+	}()
+	c.Assert(newOpt.GetSchedulers(), HasLen, 4)
 	c.Assert(newOpt.Reload(storage), IsNil)
 	// only remains 3 items with independent config.
 	sches, _, err = storage.LoadAllScheduleConfig()
