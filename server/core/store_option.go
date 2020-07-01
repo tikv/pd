@@ -73,17 +73,17 @@ func SetStoreState(state metapb.StoreState) StoreCreateOption {
 	}
 }
 
-// SetStoreBlock stops balancer from selecting the store.
-func SetStoreBlock() StoreCreateOption {
+// PauseLeaderTransfer stops balancer from selecting the store.
+func PauseLeaderTransfer() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.blocked = true
+		store.pauseLeaderTransfer = true
 	}
 }
 
-// SetStoreUnBlock allows balancer to select the store.
-func SetStoreUnBlock() StoreCreateOption {
+// ResumeLeaderTransfer allows balancer to select the store.
+func ResumeLeaderTransfer() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.blocked = false
+		store.pauseLeaderTransfer = false
 	}
 }
 

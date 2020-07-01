@@ -128,18 +128,18 @@ func (bc *BasicCluster) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Re
 	return bc.Regions.GetAdjacentRegions(region)
 }
 
-// BlockStore stops balancer from selecting the store.
-func (bc *BasicCluster) BlockStore(storeID uint64) error {
+// PauseLeaderTransfer stops balancer from selecting the store.
+func (bc *BasicCluster) PauseLeaderTransfer(storeID uint64) error {
 	bc.Lock()
 	defer bc.Unlock()
-	return bc.Stores.BlockStore(storeID)
+	return bc.Stores.PauseLeaderTransfer(storeID)
 }
 
-// UnblockStore allows balancer to select the store.
-func (bc *BasicCluster) UnblockStore(storeID uint64) {
+// ResumeLeaderTransfer allows balancer to select the store.
+func (bc *BasicCluster) ResumeLeaderTransfer(storeID uint64) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.UnblockStore(storeID)
+	bc.Stores.ResumeLeaderTransfer(storeID)
 }
 
 // AttachAvailableFunc attaches an available function to a specific store.
@@ -391,8 +391,8 @@ type StoreSetInformer interface {
 
 // StoreSetController is used to control stores' status.
 type StoreSetController interface {
-	BlockStore(id uint64) error
-	UnblockStore(id uint64)
+	PauseLeaderTransfer(id uint64) error
+	ResumeLeaderTransfer(id uint64)
 
 	AttachAvailableFunc(id uint64, limitType storelimit.Type, f func() bool)
 }

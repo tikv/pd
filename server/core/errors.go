@@ -29,15 +29,16 @@ var (
 	// Parent for other errors
 	storeStateCode = errcode.StateCode.Child("state.store")
 
-	// StoreBlockedCode is an error due to requesting an operation that is invalid due to a store being in a blocked state
-	StoreBlockedCode = storeStateCode.Child("state.store.blocked")
+	// StorePauseLeaderTransferCode is an error due to requesting an operation that is invalid due to a store being in a state
+	// that cannot be used as transfer leader operator.
+	StorePauseLeaderTransferCode = storeStateCode.Child("state.store.pause_leader_transfer")
 
 	// StoreTombstonedCode is an invalid operation was attempted on a store which is in a removed state.
 	StoreTombstonedCode = storeStateCode.Child("state.store.tombstoned").SetHTTP(http.StatusGone)
 )
 
-var _ errcode.ErrorCode = (*StoreTombstonedErr)(nil) // assert implements interface
-var _ errcode.ErrorCode = (*StoreBlockedErr)(nil)    // assert implements interface
+var _ errcode.ErrorCode = (*StoreTombstonedErr)(nil)          // assert implements interface
+var _ errcode.ErrorCode = (*StorePauseLeaderTransferErr)(nil) // assert implements interface
 
 // StoreErr can be newtyped or embedded in your own error
 type StoreErr struct {
@@ -54,15 +55,15 @@ func (e StoreTombstonedErr) Error() string {
 // Code returns StoreTombstonedCode
 func (e StoreTombstonedErr) Code() errcode.Code { return StoreTombstonedCode }
 
-// StoreBlockedErr has a Code() of StoreBlockedCode
-type StoreBlockedErr StoreErr
+// StorePauseLeaderTransferErr has a Code() of StorePauseLeaderTransferCode
+type StorePauseLeaderTransferErr StoreErr
 
-func (e StoreBlockedErr) Error() string {
-	return fmt.Sprintf("store %v is blocked", e.StoreID)
+func (e StorePauseLeaderTransferErr) Error() string {
+	return fmt.Sprintf("store %v is paused for leader transfer", e.StoreID)
 }
 
-// Code returns StoreBlockedCode
-func (e StoreBlockedErr) Code() errcode.Code { return StoreBlockedCode }
+// Code returns StorePauseLeaderTransfer
+func (e StorePauseLeaderTransferErr) Code() errcode.Code { return StorePauseLeaderTransferCode }
 
 // ErrRegionIsStale is error info for region is stale.
 var ErrRegionIsStale = func(region *metapb.Region, origin *metapb.Region) error {
