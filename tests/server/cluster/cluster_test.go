@@ -183,14 +183,14 @@ func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient 
 	id, err := rc.AllocID()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is up will fail.
-	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up))
+	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", id)))
 	c.Assert(err, NotNil)
 
 	id, err = rc.AllocID()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is offline will fail.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Offline)
-	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up))
+	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", id)))
 	c.Assert(err, NotNil)
 
 	id, err = rc.AllocID()
@@ -198,18 +198,25 @@ func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient 
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Tombstone)
 	rc.GetStore(store.GetId())
-	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up))
+	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", id)))
 	c.Assert(err, IsNil)
 
 	id, err = rc.AllocID()
 	c.Assert(err, IsNil)
 	// Put a new store.
-	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(id, "127.0.0.1:12345", "2.1.0", metapb.StoreState_Up))
+	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(id, "127.0.0.1:12345", "2.1.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", id)))
 	c.Assert(err, IsNil)
+	s := rc.GetStore(id).GetMeta()
+	c.Assert(s.DeployPath, Equals, fmt.Sprintf("test/store%d", id))
+
+	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(id, "127.0.0.1:12345", "2.1.0", metapb.StoreState_Up, fmt.Sprintf("move/test/store%d", id)))
+	c.Assert(err, IsNil)
+	s = rc.GetStore(id).GetMeta()
+	c.Assert(s.DeployPath, Equals, fmt.Sprintf("move/test/store%d", id))
 
 	// Put an existed store with duplicated address with other old stores.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Up)
-	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(store.GetId(), "127.0.0.1:12345", "2.1.0", metapb.StoreState_Up))
+	_, err = putStore(c, grpcPDClient, clusterID, newMetaStore(store.GetId(), "127.0.0.1:12345", "2.1.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", store.GetId())))
 	c.Assert(err, NotNil)
 }
 
@@ -357,7 +364,7 @@ func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
 	// add an offline store
 	storeID, err := leaderServer.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
-	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Offline)
+	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Offline, fmt.Sprintf("test/store%d", storeID))
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
 	err = rc.PutStore(store, false)
@@ -376,8 +383,8 @@ func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
 	}
 }
 
-func newMetaStore(storeID uint64, addr, version string, state metapb.StoreState) *metapb.Store {
-	return &metapb.Store{Id: storeID, Address: addr, Version: version, State: state}
+func newMetaStore(storeID uint64, addr, version string, state metapb.StoreState, deployPath string) *metapb.Store {
+	return &metapb.Store{Id: storeID, Address: addr, Version: version, State: state, DeployPath: deployPath}
 }
 
 func (s *clusterTestSuite) TestGetPDMembers(c *C) {
@@ -419,7 +426,7 @@ func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
 	svr.SetClusterVersion("2.0.0")
 	storeID, err := leaderServer.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
-	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Up)
+	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", storeID))
 	var wg sync.WaitGroup
 	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/versionChangeConcurrency", `return(true)`), IsNil)
 	wg.Add(1)
@@ -459,7 +466,7 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 	for _, addr := range storeAddrs {
 		storeID, err := id.Alloc()
 		c.Assert(err, IsNil)
-		store := newMetaStore(storeID, addr, "2.1.0", metapb.StoreState_Up)
+		store := newMetaStore(storeID, addr, "2.1.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", storeID))
 		stores = append(stores, store)
 		_, err = putStore(c, grpcPDClient, clusterID, store)
 		c.Assert(err, IsNil)
@@ -892,7 +899,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	for _, addr := range storeAddrs {
 		storeID, err := id.Alloc()
 		c.Assert(err, IsNil)
-		store := newMetaStore(storeID, addr, "4.0.0", metapb.StoreState_Up)
+		store := newMetaStore(storeID, addr, "4.0.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", storeID))
 		_, err = putStore(c, grpcPDClient, clusterID, store)
 		c.Assert(err, IsNil)
 	}
@@ -975,7 +982,7 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
 	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
-	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up)
+	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up, "test/store1")
 	_, err = putStore(c, grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
 	r := &metapb.Region{
