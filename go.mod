@@ -2,8 +2,6 @@ module github.com/pingcap/pd/v4
 
 go 1.13
 
-replace github.com/pingcap/kvproto v0.0.0-20200616092848-8037ca08f377 => github.com/JmPotato/kvproto v0.0.0-20200630040751-338a4ea3453f
-
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
