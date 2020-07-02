@@ -368,8 +368,8 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ratePerMin, ok := rateVal.(float64)
-	if !ok || ratePerMin < 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "badformat rate")
+	if !ok || ratePerMin <= 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "invalid rate which should be larger than 0")
 		return
 	}
 
@@ -440,8 +440,8 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ratePerMin, ok := rateVal.(float64)
-	if !ok || ratePerMin < 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "badformat rate")
+	if !ok || ratePerMin <= 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "invalid rate which should be larger than 0")
 		return
 	}
 
