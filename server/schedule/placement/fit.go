@@ -250,7 +250,7 @@ func isolationScore(peers []*fitPeer, labels []string) float64 {
 	// reuse `core.DistinctScore`.
 	const replicaBaseScore = 100
 	for i, p1 := range peers {
-		for _, p2 := range peers[i:] {
+		for _, p2 := range peers[i+1:] {
 			if index := p1.store.CompareLocation(p2.store, labels); index != -1 {
 				score += math.Pow(replicaBaseScore, float64(len(labels)-index-1))
 			}

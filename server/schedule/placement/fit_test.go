@@ -27,7 +27,7 @@ var _ = Suite(&testFitSuite{})
 
 type testFitSuite struct{}
 
-func (s *testFitSuite) TestFitByLocation(c *C) {
+func (s *testFitSuite) makeStores() map[uint64]*core.StoreInfo {
 	stores := make(map[uint64]*core.StoreInfo)
 	for zone := 1; zone <= 5; zone++ {
 		for rack := 1; rack <= 5; rack++ {
@@ -44,6 +44,11 @@ func (s *testFitSuite) TestFitByLocation(c *C) {
 			}
 		}
 	}
+	return stores
+}
+
+func (s *testFitSuite) TestFitByLocation(c *C) {
+	stores := s.makeStores()
 
 	type Case struct {
 		// peers info
@@ -158,5 +163,38 @@ func (s *testFitSuite) TestFitByLocation(c *C) {
 		}
 		sort.Slice(expectedPeers, func(i, j int) bool { return expectedPeers[i] < expectedPeers[j] })
 		c.Assert(selectedIDs, DeepEquals, expectedPeers)
+	}
+}
+
+func (s *testFitSuite) TestIsolationScore(c *C) {
+	stores := s.makeStores()
+	testCases := []struct {
+		peers1 []uint64
+		Checker
+		peers2 []uint64
+	}{
+		{[]uint64{1111, 1112}, Less, []uint64{1111, 1121}},
+		{[]uint64{1111, 1211}, Less, []uint64{1111, 2111}},
+		{[]uint64{1111, 1211, 1311, 2111, 3111}, Less, []uint64{1111, 1211, 2111, 2211, 3111}},
+		{[]uint64{1111, 1211, 2111, 2211, 3111}, Equals, []uint64{1111, 2111, 2211, 3111, 3211}},
+		{[]uint64{1111, 1211, 2111, 2211, 3111}, Greater, []uint64{1111, 1121, 2111, 2211, 3111}},
+	}
+
+	makePeers := func(ids []uint64) []*fitPeer {
+		var peers []*fitPeer
+		for _, id := range ids {
+			peers = append(peers, &fitPeer{
+				Peer:  &metapb.Peer{StoreId: id},
+				store: stores[id],
+			})
+		}
+		return peers
+	}
+
+	for _, tc := range testCases {
+		peers1, peers2 := makePeers(tc.peers1), makePeers(tc.peers2)
+		score1 := isolationScore(peers1, []string{"zone", "rack", "host"})
+		score2 := isolationScore(peers2, []string{"zone", "rack", "host"})
+		c.Assert(score1, tc.Checker, score2)
 	}
 }
