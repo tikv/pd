@@ -870,6 +870,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 			core.SetStoreVersion(store.GitHash, store.Version),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
+			core.SetStoreDeployPath(store.DeployPath),
 		)
 	}
 	if err = c.checkStoreLabels(s); err != nil {
