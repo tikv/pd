@@ -206,11 +206,13 @@ func (o *PersistOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float
 	v := o.GetScheduleConfig().Clone()
 	switch typ {
 	case storelimit.AddPeer:
+		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
 			v.StoreLimit[storeID] = sc
 		}
 	case storelimit.RemovePeer:
+		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
 			v.StoreLimit[storeID] = sc
@@ -270,7 +272,14 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) StoreLimitConfig {
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
-	return StoreLimitConfig{0, 0}
+	cfg := o.GetScheduleConfig().Clone()
+	sc := StoreLimitConfig{
+		AddPeer:    DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	}
+	cfg.StoreLimit[storeID] = sc
+	o.SetScheduleConfig(cfg)
+	return o.GetScheduleConfig().StoreLimit[storeID]
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.

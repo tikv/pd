@@ -960,3 +960,58 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
 }
+
+func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
+	rc := leaderServer.GetRaftCluster()
+	c.Assert(rc, NotNil)
+	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up)
+	_, err = putStore(c, grpcPDClient, clusterID, store)
+	c.Assert(err, IsNil)
+	r := &metapb.Region{
+		Id: 1,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		StartKey: []byte{byte(2)},
+		EndKey:   []byte{byte(3)},
+		Peers:    []*metapb.Peer{{Id: 11, StoreId: uint64(1)}},
+	}
+	region := core.NewRegionInfo(r, r.Peers[0], core.SetApproximateSize(10))
+
+	err = rc.HandleRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+
+	// restart PD
+	// Here we use an empty storelimit to simulate the upgrade progress.
+	opt := rc.GetOpt()
+	scheduleCfg := opt.GetScheduleConfig()
+	scheduleCfg.StoreLimit = map[uint64]config.StoreLimitConfig{}
+	c.Assert(leaderServer.GetServer().SetScheduleConfig(*scheduleCfg), IsNil)
+	err = leaderServer.Stop()
+	c.Assert(err, IsNil)
+	err = leaderServer.Run()
+	c.Assert(err, IsNil)
+
+	oc := rc.GetOperatorController()
+	// only can add 5 remove peer operators on store 1
+	for i := uint64(1); i <= 5; i++ {
+		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+		c.Assert(oc.AddOperator(op), IsTrue)
+		c.Assert(oc.RemoveOperator(op), IsTrue)
+	}
+	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+	c.Assert(oc.AddOperator(op), IsFalse)
+	c.Assert(oc.RemoveOperator(op), IsFalse)
+}
