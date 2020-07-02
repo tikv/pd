@@ -1008,12 +1008,14 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	return err
 }
 
-// PauseLeaderTransfer stops balancer from selecting the store.
+// PauseLeaderTransfer prevents the store from been selected as source or
+// target store of TransferLeader.
 func (c *RaftCluster) PauseLeaderTransfer(storeID uint64) error {
 	return c.core.PauseLeaderTransfer(storeID)
 }
 
-// ResumeLeaderTransfer allows balancer to select the store.
+// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
+// as source or target of TransferLeader again.
 func (c *RaftCluster) ResumeLeaderTransfer(storeID uint64) {
 	c.core.ResumeLeaderTransfer(storeID)
 }

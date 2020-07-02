@@ -580,7 +580,8 @@ func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) errcode.ErrorCode {
 	return nil
 }
 
-// ResumeLeaderTransfer resumes a StoreInfo with storeID.
+// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
+// as source or target of TransferLeader again.
 func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {

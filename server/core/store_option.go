@@ -73,14 +73,16 @@ func SetStoreState(state metapb.StoreState) StoreCreateOption {
 	}
 }
 
-// PauseLeaderTransfer stops balancer from selecting the store.
+// PauseLeaderTransfer prevents the store from been selected as source or
+// target store of TransferLeader.
 func PauseLeaderTransfer() StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.pauseLeaderTransfer = true
 	}
 }
 
-// ResumeLeaderTransfer allows balancer to select the store.
+// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
+// as source or target of TransferLeader again.
 func ResumeLeaderTransfer() StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.pauseLeaderTransfer = false
