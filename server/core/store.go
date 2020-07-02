@@ -585,7 +585,7 @@ func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) errcode.ErrorCode {
 func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
-		log.Fatal("store is unblocked, but it is not found",
+		log.Fatal("try to clean a store's pause state, but it is not found",
 			zap.Uint64("store-id", storeID))
 	}
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
