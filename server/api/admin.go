@@ -53,7 +53,7 @@ func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	rc.DropCacheRegion(regionID)
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The region is removed from server cache.")
 }
 
 // FIXME: details of input json body params
@@ -91,7 +91,7 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 			h.rd.JSON(w, http.StatusForbidden, err.Error())
 		}
 	}
-	h.rd.JSON(w, http.StatusOK, "success")
+	h.rd.JSON(w, http.StatusOK, "Reset ts success.")
 }
 
 // Intentionally no swagger mark as it is supposed to be only used in

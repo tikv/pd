@@ -195,7 +195,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store is set as Offline or Tombstone.")
 }
 
 // @Tags store
@@ -230,7 +230,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's state is updated.")
 }
 
 // FIXME: details of input json body params
@@ -276,7 +276,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
 // FIXME: details of input json body params
@@ -329,7 +329,7 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
 // FIXME: details of input json body params
@@ -386,7 +386,7 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
 type storesHandler struct {
@@ -415,7 +415,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "Remove tomestone success.")
 }
 
 // FIXME: details of input json body params
@@ -458,7 +458,7 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "Set store limit success.")
 }
 
 // FIXME: details of output json body
@@ -494,7 +494,7 @@ func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.Handler.SetStoreLimitScene(scene, typeValue)
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "Set store limit scene success.")
 }
 
 // @Tags store

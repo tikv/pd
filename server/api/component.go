@@ -42,7 +42,7 @@ func newComponentHandler(svr *server.Server, rd *render.Render) *componentHandle
 // @Tags component
 // @Summary Register component address.
 // @Produce json
-// @Success 200 {string} string
+// @Success 200 {string} string "The component address is registered success successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /component [post]
@@ -66,13 +66,13 @@ func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The component address is registered success successfully.")
 }
 
 // @Tags component
 // @Summary Unregister component address.
 // @Produce json
-// @Success 200 {string} string
+// @Success 200 {string} string "The component address is unregistered success successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Router /component [delete]
 func (h *componentHandler) UnRegister(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +84,7 @@ func (h *componentHandler) UnRegister(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The component address is unregistered success successfully.")
 }
 
 // @Tags component

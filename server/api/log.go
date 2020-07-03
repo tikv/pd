@@ -67,5 +67,5 @@ func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The log level is updated.")
 }

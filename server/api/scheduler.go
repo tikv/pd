@@ -204,7 +204,7 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.r.JSON(w, http.StatusOK, nil)
+	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }
 
 func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64) error {
@@ -246,7 +246,7 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.r.JSON(w, http.StatusOK, nil)
+	h.r.JSON(w, http.StatusOK, "The scheduler is removed.")
 }
 
 func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
@@ -298,7 +298,7 @@ func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request)
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.r.JSON(w, http.StatusOK, nil)
+	h.r.JSON(w, http.StatusOK, "Pause or resume the scheduler success.")
 }
 
 type schedulerConfigHandler struct {

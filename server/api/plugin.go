@@ -78,17 +78,21 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 	switch action {
 	case cluster.PluginLoad:
 		err = h.PluginLoad(path)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, "Load plugin success.")
 	case cluster.PluginUnload:
 		err = h.PluginUnload(path)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, "Unload plugin success.")
 	default:
 		h.rd.JSON(w, http.StatusBadRequest, "unknown action")
-		return
 	}
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.rd.JSON(w, http.StatusOK, nil)
 }
 
 func pathExists(path string) (bool, error) {
