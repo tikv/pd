@@ -41,18 +41,12 @@ const (
 // Unhealthy replica management, mainly used for disaster recovery of TiKV.
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
-	name    string
 	cluster opt.Cluster
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster opt.Cluster, n ...string) *ReplicaChecker {
-	name := replicaCheckerName
-	if len(n) != 0 {
-		name = n[0]
-	}
+func NewReplicaChecker(cluster opt.Cluster) *ReplicaChecker {
 	return &ReplicaChecker{
-		name:    name,
 		cluster: cluster,
 	}
 }
@@ -85,45 +79,67 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	return nil
 }
 
-// selectStoreToAdd returns the store to add a replica.
+// selectStoreToAdd returns the store to add a replica to a region.
+// `extraFilters` is used to set up more filters based on the context that
+// calling this method.
+//
+// For example, to select a target store to replace a region's peer, we can
+// first create a tmp region instance that removed the peer, then call
+// `selectStoreToAdd` to decide the target store. Meanwhile, we need to provide
+// more constraints to ensure that the newly selected node cannot be the same
+// as the original one, and the isolation level cannot be reduced after
+// replacement.
 func (r *ReplicaChecker) selectStoreToAdd(region *core.RegionInfo, extraFilters ...filter.Filter) uint64 {
+	// The selection process uses a two-stage fashion. The first stage
+	// ignores the temporary state of the stores and selects the stores
+	// with the highest score according to the location label. The second
+	// stage considers all temporary states and capacity factors to select
+	// the most suitable target.
+	//
+	// The reason for it is to prevent the non-optimal replia placement due
+	// to the short-term state, resulting in redundant scheduling.
+
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
-		filter.NewStorageThresholdFilter(r.name),
-		filter.NewSpecialUseFilter(r.name),
+		filter.NewExcludedFilter(replicaCheckerName, nil, region.GetStoreIds()),
+		filter.NewStorageThresholdFilter(replicaCheckerName),
+		filter.NewSpecialUseFilter(replicaCheckerName),
+		filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true, AllowTemporaryStates: true},
 	}
 	if len(extraFilters) > 0 {
 		filters = append(filters, extraFilters...)
 	}
-	stateAllowTmp := filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true, AllowTemporaryStates: true}
-	state := filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true}
 
 	regionStores := r.cluster.GetRegionStores(region)
 	isolationComparer := selector.IsolationComparer(r.cluster.GetLocationLabels(), regionStores)
-	target := selector.NewCandidates(r.cluster.GetRegionStores(region)).
-		FilterTarget(r.cluster, append(filters, stateAllowTmp)...).
-		Sort(isolationComparer).Reverse().Top(isolationComparer).
-		Sort(selector.RegionScoreComparer(r.cluster)).
-		FilterTarget(r.cluster, state).PickFirst()
+	strictStateFilter := filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}
+	target := selector.NewCandidates(r.cluster.GetStores()).
+		FilterTarget(r.cluster, filters...).
+		Sort(isolationComparer).Reverse().Top(isolationComparer). // greater isolation score is better
+		Sort(selector.RegionScoreComparer(r.cluster)).            // less region score is better
+		FilterTarget(r.cluster, strictStateFilter).PickFirst()    // the filter does not ignore temp states
 	if target == nil {
 		return 0
 	}
 	return target.GetID()
 }
 
+// selectStoreToReplace returns a store to replace oldStore. The location
+// placement after scheduling should be not worse than original.
 func (r *ReplicaChecker) selectStoreToReplace(region *core.RegionInfo, oldStore uint64) uint64 {
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
-		filter.NewLocationSafeguard(r.name, r.cluster.GetLocationLabels(), r.cluster.GetRegionStores(region), r.cluster.GetStore(oldStore)),
+		filter.NewExcludedFilter(replicaCheckerName, nil, region.GetStoreIds()),
+		filter.NewLocationSafeguard(replicaCheckerName, r.cluster.GetLocationLabels(), r.cluster.GetRegionStores(region), r.cluster.GetStore(oldStore)),
 	}
 	newRegion := region.Clone(core.WithRemoveStorePeer(oldStore))
 	return r.selectStoreToAdd(newRegion, filters...)
 }
 
+// selectStoreToImprove returns a store to replace oldStore. The location
+// placement after scheduling should be better than original.
 func (r *ReplicaChecker) selectStoreToImprove(region *core.RegionInfo, oldStore uint64) uint64 {
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
-		filter.NewLocationImprover(r.name, r.cluster.GetLocationLabels(), r.cluster.GetRegionStores(region), r.cluster.GetStore(oldStore)),
+		filter.NewExcludedFilter(replicaCheckerName, nil, region.GetStoreIds()),
+		filter.NewLocationImprover(replicaCheckerName, r.cluster.GetLocationLabels(), r.cluster.GetRegionStores(region), r.cluster.GetStore(oldStore)),
 	}
 	newRegion := region.Clone(core.WithRemoveStorePeer(oldStore))
 	return r.selectStoreToAdd(newRegion, filters...)
@@ -134,7 +150,7 @@ func (r *ReplicaChecker) selectStoreToRemove(region *core.RegionInfo) uint64 {
 	regionStores := r.cluster.GetRegionStores(region)
 	isolationComparer := selector.IsolationComparer(r.cluster.GetLocationLabels(), regionStores)
 	source := selector.NewCandidates(regionStores).
-		FilterSource(r.cluster, filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true}).
+		FilterSource(r.cluster, filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
 		Sort(isolationComparer).Top(isolationComparer).
 		Sort(selector.RegionScoreComparer(r.cluster)).Reverse().
 		PickFirst()

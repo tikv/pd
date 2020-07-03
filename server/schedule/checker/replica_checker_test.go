@@ -273,12 +273,6 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	region = region.Clone(core.WithAddPeer(peer4))
 	testutil.CheckRemovePeer(c, rc.Check(region), 4)
 
-	// Test healthFilter.
-	tc.SetStoreBusy(4, true)
-	c.Assert(rc.Check(region), IsNil)
-	tc.SetStoreBusy(4, false)
-	testutil.CheckRemovePeer(c, rc.Check(region), 4)
-
 	// Test offline
 	// the number of region peers more than the maxReplicas
 	// remove the peer
