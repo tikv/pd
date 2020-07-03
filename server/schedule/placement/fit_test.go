@@ -27,7 +27,7 @@ var _ = Suite(&testFitSuite{})
 
 type testFitSuite struct{}
 
-func (s *testFitSuite) TestFitByLocation(c *C) {
+func (s *testFitSuite) makeStores() map[uint64]*core.StoreInfo {
 	stores := make(map[uint64]*core.StoreInfo)
 	for zone := 1; zone <= 5; zone++ {
 		for rack := 1; rack <= 5; rack++ {
@@ -44,6 +44,11 @@ func (s *testFitSuite) TestFitByLocation(c *C) {
 			}
 		}
 	}
+	return stores
+}
+
+func (s *testFitSuite) TestFitByLocation(c *C) {
+	stores := s.makeStores()
 
 	type Case struct {
 		// peers info
@@ -54,8 +59,7 @@ func (s *testFitSuite) TestFitByLocation(c *C) {
 		count          int          // default: len(peerStoreID)
 		role           PeerRoleType // default: Voter
 		// expect result:
-		expectedPeers          []uint64 // default: same as peerStoreID
-		expectedIsolationLevel int      // default: 0
+		expectedPeers []uint64 // default: same as peerStoreID
 	}
 
 	cases := []Case{
@@ -65,59 +69,59 @@ func (s *testFitSuite) TestFitByLocation(c *C) {
 		{peerStoreID: []uint64{1111, 1112, 1113}, count: 3, expectedPeers: []uint64{1111, 1112, 1113}},
 		{peerStoreID: []uint64{1111, 1112, 1113}, count: 5, expectedPeers: []uint64{1111, 1112, 1113}},
 		// test isolation level
-		{peerStoreID: []uint64{1111}, locationLabels: "zone,rack,host", expectedIsolationLevel: 3},
-		{peerStoreID: []uint64{1111}, locationLabels: "zone,rack", expectedIsolationLevel: 2},
-		{peerStoreID: []uint64{1111}, locationLabels: "zone", expectedIsolationLevel: 1},
-		{peerStoreID: []uint64{1111}, locationLabels: "", expectedIsolationLevel: 0},
-		{peerStoreID: []uint64{1111, 2111}, locationLabels: "zone,rack,host", expectedIsolationLevel: 3},
-		{peerStoreID: []uint64{1111, 2222, 3333}, locationLabels: "zone,rack,host", expectedIsolationLevel: 3},
-		{peerStoreID: []uint64{1111, 1211, 3111}, locationLabels: "zone,rack,host", expectedIsolationLevel: 2},
-		{peerStoreID: []uint64{1111, 1121, 3111}, locationLabels: "zone,rack,host", expectedIsolationLevel: 1},
-		{peerStoreID: []uint64{1111, 1121, 1122}, locationLabels: "zone,rack,host", expectedIsolationLevel: 0},
+		{peerStoreID: []uint64{1111}, locationLabels: "zone,rack,host"},
+		{peerStoreID: []uint64{1111}, locationLabels: "zone,rack"},
+		{peerStoreID: []uint64{1111}, locationLabels: "zone"},
+		{peerStoreID: []uint64{1111}, locationLabels: ""},
+		{peerStoreID: []uint64{1111, 2111}, locationLabels: "zone,rack,host"},
+		{peerStoreID: []uint64{1111, 2222, 3333}, locationLabels: "zone,rack,host"},
+		{peerStoreID: []uint64{1111, 1211, 3111}, locationLabels: "zone,rack,host"},
+		{peerStoreID: []uint64{1111, 1121, 3111}, locationLabels: "zone,rack,host"},
+		{peerStoreID: []uint64{1111, 1121, 1122}, locationLabels: "zone,rack,host"},
 		// test best location
 		{
-			peerStoreID:            []uint64{1111, 1112, 1113, 2111, 2222, 3222, 3333},
-			locationLabels:         "zone,rack,host",
-			count:                  3,
-			expectedPeers:          []uint64{1111, 2111, 3222},
-			expectedIsolationLevel: 3,
+			peerStoreID:    []uint64{1111, 1112, 1113, 2111, 2222, 3222, 3333},
+			locationLabels: "zone,rack,host",
+			count:          3,
+			expectedPeers:  []uint64{1111, 2111, 3222},
 		},
 		{
-			peerStoreID:            []uint64{1111, 1121, 1211, 2111, 2211},
-			locationLabels:         "zone,rack,host",
-			count:                  3,
-			expectedPeers:          []uint64{1111, 1211, 2111},
-			expectedIsolationLevel: 2,
+			peerStoreID:    []uint64{1111, 1121, 1211, 2111, 2211},
+			locationLabels: "zone,rack,host",
+			count:          3,
+			expectedPeers:  []uint64{1111, 1211, 2111},
+		},
+		{
+			peerStoreID:    []uint64{1111, 1211, 1311, 1411, 2111, 2211, 2311, 3111},
+			locationLabels: "zone,rack,host",
+			count:          5,
+			expectedPeers:  []uint64{1111, 1211, 2111, 2211, 3111},
 		},
 		// test role match
 		{
-			peerStoreID:            []uint64{1111, 1112, 1113},
-			peerRole:               []PeerRoleType{Learner, Follower, Follower},
-			count:                  1,
-			expectedPeers:          []uint64{1112},
-			expectedIsolationLevel: 0,
+			peerStoreID:   []uint64{1111, 1112, 1113},
+			peerRole:      []PeerRoleType{Learner, Follower, Follower},
+			count:         1,
+			expectedPeers: []uint64{1112},
 		},
 		{
-			peerStoreID:            []uint64{1111, 1112, 1113},
-			peerRole:               []PeerRoleType{Learner, Follower, Follower},
-			count:                  2,
-			expectedPeers:          []uint64{1112, 1113},
-			expectedIsolationLevel: 0,
+			peerStoreID:   []uint64{1111, 1112, 1113},
+			peerRole:      []PeerRoleType{Learner, Follower, Follower},
+			count:         2,
+			expectedPeers: []uint64{1112, 1113},
 		},
 		{
-			peerStoreID:            []uint64{1111, 1112, 1113},
-			peerRole:               []PeerRoleType{Learner, Follower, Follower},
-			count:                  3,
-			expectedPeers:          []uint64{1112, 1113, 1111},
-			expectedIsolationLevel: 0,
+			peerStoreID:   []uint64{1111, 1112, 1113},
+			peerRole:      []PeerRoleType{Learner, Follower, Follower},
+			count:         3,
+			expectedPeers: []uint64{1112, 1113, 1111},
 		},
 		{
-			peerStoreID:            []uint64{1111, 1112, 1121, 1122, 1131, 1132, 1141, 1142},
-			peerRole:               []PeerRoleType{Follower, Learner, Learner, Learner, Learner, Follower, Follower, Follower},
-			locationLabels:         "zone,rack,host",
-			count:                  3,
-			expectedPeers:          []uint64{1111, 1132, 1141},
-			expectedIsolationLevel: 1,
+			peerStoreID:    []uint64{1111, 1112, 1121, 1122, 1131, 1132, 1141, 1142},
+			peerRole:       []PeerRoleType{Follower, Learner, Learner, Learner, Learner, Follower, Follower, Follower},
+			locationLabels: "zone,rack,host",
+			count:          3,
+			expectedPeers:  []uint64{1111, 1132, 1141},
 		},
 	}
 
@@ -159,6 +163,38 @@ func (s *testFitSuite) TestFitByLocation(c *C) {
 		}
 		sort.Slice(expectedPeers, func(i, j int) bool { return expectedPeers[i] < expectedPeers[j] })
 		c.Assert(selectedIDs, DeepEquals, expectedPeers)
-		c.Assert(ruleFit.IsolationLevel, Equals, cc.expectedIsolationLevel)
+	}
+}
+
+func (s *testFitSuite) TestIsolationScore(c *C) {
+	stores := s.makeStores()
+	testCases := []struct {
+		peers1 []uint64
+		Checker
+		peers2 []uint64
+	}{
+		{[]uint64{1111, 1112}, Less, []uint64{1111, 1121}},
+		{[]uint64{1111, 1211}, Less, []uint64{1111, 2111}},
+		{[]uint64{1111, 1211, 1311, 2111, 3111}, Less, []uint64{1111, 1211, 2111, 2211, 3111}},
+		{[]uint64{1111, 1211, 2111, 2211, 3111}, Equals, []uint64{1111, 2111, 2211, 3111, 3211}},
+		{[]uint64{1111, 1211, 2111, 2211, 3111}, Greater, []uint64{1111, 1121, 2111, 2211, 3111}},
+	}
+
+	makePeers := func(ids []uint64) []*fitPeer {
+		var peers []*fitPeer
+		for _, id := range ids {
+			peers = append(peers, &fitPeer{
+				Peer:  &metapb.Peer{StoreId: id},
+				store: stores[id],
+			})
+		}
+		return peers
+	}
+
+	for _, tc := range testCases {
+		peers1, peers2 := makePeers(tc.peers1), makePeers(tc.peers2)
+		score1 := isolationScore(peers1, []string{"zone", "rack", "host"})
+		score2 := isolationScore(peers2, []string{"zone", "rack", "host"})
+		c.Assert(score1, tc.Checker, score2)
 	}
 }
