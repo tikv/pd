@@ -62,17 +62,20 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	opt.GetPDServerConfig().UseRegionStorage = true
 	c.Assert(opt.Persist(storage), IsNil)
 
-	// suppose we add a new default enable scheduler "adjacent-region"
-	defaultSchedulers := []string{"balance-region", "balance-leader", "hot-region", "label", "adjacent-region"}
+	// Add a new default enable scheduler "adjacent-region"
+	DefaultSchedulers = append(DefaultSchedulers, SchedulerConfig{Type: "adjacent-region"})
+	defer func() {
+		DefaultSchedulers = DefaultSchedulers[:len(DefaultSchedulers)-1]
+	}()
+
 	newOpt, err := newTestScheduleOption()
 	c.Assert(err, IsNil)
-	newOpt.AddSchedulerCfg("adjacent-region", []string{})
 	c.Assert(newOpt.Reload(storage), IsNil)
 	schedulers := newOpt.GetSchedulers()
 	c.Assert(schedulers, HasLen, 5)
 	c.Assert(newOpt.IsUseRegionStorage(), IsTrue)
 	for i, s := range schedulers {
-		c.Assert(s.Type, Equals, defaultSchedulers[i])
+		c.Assert(s.Type, Equals, DefaultSchedulers[i].Type)
 		c.Assert(s.Disable, IsFalse)
 	}
 	c.Assert(newOpt.GetMaxReplicas(), Equals, 5)
