@@ -25,6 +25,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+<<<<<<< HEAD
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -35,6 +36,14 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.etcd.io/etcd/clientv3"
+=======
+	"github.com/pingcap/pd/v4/pkg/slice"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/kv"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+>>>>>>> e91c4f43... config: improve scheduler config reload behavior (#2592)
 )
 
 // PersistOptions wraps all configurations that need to persist to storage and
@@ -578,9 +587,12 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 // Reload reloads the configuration from the storage.
 func (o *PersistOptions) Reload(storage *core.Storage) error {
 	cfg := &Config{}
+<<<<<<< HEAD
 	// pass nil to initialize cfg to default values (all items undefined)
 	cfg.Adjust(nil)
 
+=======
+>>>>>>> e91c4f43... config: improve scheduler config reload behavior (#2592)
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
 		return err

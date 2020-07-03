@@ -775,7 +775,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+<<<<<<< HEAD
 
+=======
+>>>>>>> e91c4f43... config: improve scheduler config reload behavior (#2592)
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 
 	for k, b := range c.migrateConfigurationMap() {
