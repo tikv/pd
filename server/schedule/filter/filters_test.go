@@ -75,7 +75,7 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		for _, id := range tc.stores {
 			stores = append(stores, allStores[id-1])
 		}
-		ls := newLocationSafeguard("", labels, stores, allStores[tc.source-1])
+		ls := NewLocationSafeguard("", labels, stores, allStores[tc.source-1])
 		li := NewLocationImprover("", labels, stores, allStores[tc.source-1])
 		c.Assert(ls.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.safeGuradRes)
 		c.Assert(li.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.improverRes)
@@ -168,7 +168,7 @@ func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 
 	c.Assert(NewPlacementSafeguard("", tc, region, store1),
 		FitsTypeOf,
-		newLocationSafeguard("", []string{"zone"}, tc.GetRegionStores(region), store1))
+		NewLocationSafeguard("", []string{"zone"}, tc.GetRegionStores(region), store1))
 	opt.EnablePlacementRules = true
 	c.Assert(NewPlacementSafeguard("", tc, region, store1),
 		FitsTypeOf,
