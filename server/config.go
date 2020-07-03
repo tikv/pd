@@ -653,7 +653,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
-	adjustSchedulers(&c.Schedulers, defaultSchedulers)
+	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 
 	return c.validate()
 }
@@ -689,7 +689,10 @@ type SchedulerConfig struct {
 	Disable bool     `toml:"disable" json:"disable"`
 }
 
-var defaultSchedulers = SchedulerConfigs{
+// DefaultSchedulers are the schedulers be created by default.
+// If these schedulers are not in the persistent configuration, they
+// will be created automatically when reloading.
+var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
@@ -698,7 +701,7 @@ var defaultSchedulers = SchedulerConfigs{
 
 // IsDefaultScheduler checks whether the scheduler is enable by default.
 func IsDefaultScheduler(typ string) bool {
-	for _, c := range defaultSchedulers {
+	for _, c := range DefaultSchedulers {
 		if typ == c.Type {
 			return true
 		}
