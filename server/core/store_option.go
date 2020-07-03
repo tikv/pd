@@ -64,6 +64,15 @@ func SetStoreVersion(githash, version string) StoreCreateOption {
 	}
 }
 
+// SetStoreDeployPath sets the deploy path for the store.
+func SetStoreDeployPath(deployPath string) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.DeployPath = deployPath
+		store.meta = meta
+	}
+}
+
 // SetStoreState sets the state for the store.
 func SetStoreState(state metapb.StoreState) StoreCreateOption {
 	return func(store *StoreInfo) {
