@@ -777,6 +777,31 @@ func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	return c.core.GetStoreRegions(storeID)
 }
 
+// RandNewRegion returns a random region in new region set.
+func (c *RaftCluster) RandNewRegion(storeID uint64, ranges []core.KeyRange, optPending core.RegionOption, optOther core.RegionOption, optAll core.RegionOption) *core.RegionInfo {
+	return c.core.RandNewRegion(storeID, ranges, optPending, optOther, optAll)
+}
+
+// RemoveNewRegion removes region from NewRegions.
+func (c *RaftCluster) RemoveNewRegion(regionID uint64) {
+	c.core.RemoveNewRegion(regionID)
+}
+
+// DisableNewRegion prevents the region from being selected again.
+func (c *RaftCluster) DisableNewRegion(regionID uint64) {
+	c.core.DisableNewRegion(regionID)
+}
+
+// EnableNewRegion makes that the region can be selected again.
+func (c *RaftCluster) EnableNewRegion(regionID uint64) {
+	c.core.EnableNewRegion(regionID)
+}
+
+// GetNewRegions gets all new regions.
+func (c *RaftCluster) GetNewRegions() []*core.RegionInfo {
+	return c.core.GetNewRegions()
+}
+
 // RandLeaderRegion returns a random region that has leader on the store.
 func (c *RaftCluster) RandLeaderRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
 	return c.core.RandLeaderRegion(storeID, ranges, opts...)

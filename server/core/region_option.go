@@ -196,7 +196,7 @@ func SetReportInterval(v uint64) RegionCreateOption {
 	}
 }
 
-// SetRegionConfVer sets the config version for the region.
+// SetRegionConfVer sets the config version for the reigon.
 func SetRegionConfVer(confVer uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		if region.meta.RegionEpoch == nil {

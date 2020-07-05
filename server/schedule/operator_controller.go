@@ -534,6 +534,10 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 
 	switch st {
 	case operator.SUCCESS:
+		// If success, make this region can be selected again.
+		if op.Kind() == operator.OpRegion || op.Kind() == operator.OpRegion|operator.OpLeader {
+			oc.cluster.EnableNewRegion(op.RegionID())
+		}
 		log.Info("operator finish",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),

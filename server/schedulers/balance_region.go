@@ -146,9 +146,13 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 		sourceID := source.GetID()
 
 		for i := 0; i < balanceRegionRetryLimit; i++ {
-			// Priority pick the region that has a pending peer.
-			// Pending region may means the disk is overload, remove the pending region firstly.
-			region := cluster.RandPendingRegion(sourceID, s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster))
+			// Select the new region first.
+			region := cluster.RandNewRegion(sourceID, s.conf.Ranges, opt.HealthAllowPending(cluster), opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
+			if region == nil {
+				// Then pick the region that has a pending peer in the source store.
+				// Pending region may means the disk is overload, remove the pending region secondly.
+				region = cluster.RandPendingRegion(sourceID, s.conf.Ranges, opt.HealthAllowPending(cluster), opt.ReplicatedRegion(cluster))
+			}
 			if region == nil {
 				// Then pick the region that has a follower in the source store.
 				region = cluster.RandFollowerRegion(sourceID, s.conf.Ranges, opt.HealthRegion(cluster), opt.ReplicatedRegion(cluster))
@@ -183,6 +187,7 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			oldPeer := region.GetStorePeer(sourceID)
 			if op := s.transferPeer(cluster, region, oldPeer); op != nil {
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
+				cluster.DisableNewRegion(op.RegionID())
 				return []*operator.Operator{op}
 			}
 		}

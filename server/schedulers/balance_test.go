@@ -849,6 +849,12 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.SetSelectConfig(
+		&core.SelectConfig{
+			NewRegionFirst: false,
+			NewProbability: 0.0,
+			MaxRegionCount: 1000,
+		})
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 	tc.DisableFeature(versioninfo.JointConsensus)
@@ -1148,5 +1154,110 @@ func (s *testScatterRangeLeaderSuite) TestBalanceWhenRegionNotHeartbeat(c *C) {
 			continue
 		}
 		schedule.ApplyOperator(tc, ops[0])
+	}
+}
+
+func (s *testBalanceRegionSchedulerSuite) TestBalanceNewRegion(c *C) {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(opt)
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
+	hb, err := schedule.CreateScheduler(BalanceRegionType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	c.Assert(err, IsNil)
+
+	// Add stores 1,2,3,4,5.
+	tc.AddRegionStore(1, 0)
+	tc.AddRegionStore(2, 0)
+	tc.AddRegionStore(3, 0)
+	tc.AddRegionStore(4, 0)
+	tc.AddRegionStore(5, 0)
+	var (
+		id      uint64
+		regions []*metapb.Region
+	)
+	for i := 0; i < 1020; i++ {
+		peers := []*metapb.Peer{
+			{Id: id + 1, StoreId: 1},
+			{Id: id + 2, StoreId: 2},
+			{Id: id + 3, StoreId: 3},
+		}
+		regions = append(regions, &metapb.Region{
+			Id:       id + 4,
+			Peers:    peers,
+			StartKey: []byte(fmt.Sprintf("s_%04d", i)),
+			EndKey:   []byte(fmt.Sprintf("s_%04d", i+1)),
+		})
+		id += 4
+	}
+	// empty case
+	regions[1019].EndKey = []byte("")
+	for _, meta := range regions {
+		leader := rand.Intn(4) % 3
+		regionInfo := core.NewRegionInfo(
+			meta,
+			meta.Peers[leader],
+			core.SetApproximateKeys(96),
+			core.SetApproximateSize(96),
+			// WithPendingPeers ensures that all regions have pengdingPeers.
+			core.WithPendingPeers(meta.Peers),
+		)
+
+		tc.Regions.SetRegion(regionInfo)
+	}
+	for i := 1; i <= 5; i++ {
+		tc.UpdateStoreStatus(uint64(i))
+	}
+
+	// Set the probability to 1.
+	// New regions are preferred.
+	tc.SetSelectConfig(
+		&core.SelectConfig{
+			NewRegionFirst: true,
+			NewProbability: 1.0,
+			MaxRegionCount: 1000,
+		})
+	// For each cycle, place a region into the NewRegions set (representing that it is new).
+	// Call the Schedule function and verify that this region is selected.
+	// This region is then removed from the NewRegions set before next cycle.
+	for i := 100; i < 200; i++ {
+		region := tc.Regions.GetRegion(uint64(i*4 + 4))
+		c.Assert(region, NotNil)
+		tc.RemoveRegion(region)
+		tc.PutRegion(region)
+	}
+	for i := 0; i < 100; i++ {
+		id := hb.Schedule(tc)[0].RegionID()
+		c.Assert(id, GreaterEqual, uint64(100*4+4))
+		c.Assert(id, LessEqual, uint64(200*4+4))
+	}
+
+	// The maximum number of new regions is 1000.
+	for i := 0; i < 1000; i++ {
+		region := tc.Regions.GetRegion(uint64(i*4 + 4))
+		c.Assert(region, NotNil)
+		tc.RemoveRegion(region)
+		tc.PutRegion(region)
+	}
+	c.Assert(len(tc.GetNewRegions()), Equals, 1000)
+	for i := 1000; i < 1010; i++ {
+		region := tc.Regions.GetRegion(uint64(i*4 + 4))
+		c.Assert(region, NotNil)
+		tc.RemoveRegion(region)
+		tc.PutRegion(region)
+		c.Assert(len(tc.GetNewRegions()), Equals, 1000)
+	}
+
+	tc.SetSelectConfig(
+		&core.SelectConfig{
+			NewRegionFirst: true,
+			NewProbability: 1.0,
+			MaxRegionCount: 2000,
+		})
+	c.Assert(len(tc.GetNewRegions()), Equals, 1000)
+	for i := 1010; i < 1020; i++ {
+		region := tc.Regions.GetRegion(uint64(i*4 + 4))
+		c.Assert(region, NotNil)
+		tc.RemoveRegion(region)
+		tc.PutRegion(region)
+		c.Assert(len(tc.GetNewRegions()), Equals, i-9)
 	}
 }

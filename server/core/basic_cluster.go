@@ -15,7 +15,9 @@ package core
 
 import (
 	"bytes"
+	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -25,19 +27,52 @@ import (
 	"go.uber.org/zap"
 )
 
+/* SelectConfig provides parameters for selecting regions.
+ *
+ * NewRegionFirst : Select new regions first when balancing regions if true.
+ * NewProbability : The probability of new regions being selected.
+ * MaxRegionCount : The largest size of the new regions set.
+ * TimeThreshold  : Regions with a survival time less than this value are new.
+ */
+type SelectConfig struct {
+	NewRegionFirst bool
+	NewProbability float64
+	MaxRegionCount int
+	TimeThreshold  uint64
+}
+
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
 	sync.RWMutex
-	Stores  *StoresInfo
-	Regions *RegionsInfo
+	Stores     *StoresInfo
+	Regions    *RegionsInfo
+	NewRegions *regionCache
+	SelectConf *SelectConfig
 }
 
 // NewBasicCluster creates a BasicCluster.
 func NewBasicCluster() *BasicCluster {
 	return &BasicCluster{
-		Stores:  NewStoresInfo(),
-		Regions: NewRegionsInfo(),
+		Stores:     NewStoresInfo(),
+		Regions:    NewRegionsInfo(),
+		NewRegions: newRegionCache(),
+		SelectConf: NewSelectConfig(),
 	}
+}
+
+// NewSelectConfig creates a SelectConfig.
+func NewSelectConfig() *SelectConfig {
+	return &SelectConfig{
+		NewRegionFirst: true,
+		NewProbability: 0.5,
+		MaxRegionCount: 1000,
+		TimeThreshold:  60 * 10,
+	}
+}
+
+// SetSelectConfig sets the SelectConfig for selecting regions.
+func (bc *BasicCluster) SetSelectConfig(selectConf *SelectConfig) {
+	bc.SelectConf = selectConf
 }
 
 // GetStores returns all Stores in the cluster.
@@ -73,6 +108,13 @@ func (bc *BasicCluster) GetRegions() []*RegionInfo {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Regions.GetRegions()
+}
+
+// GetNewRegions gets all RegionInfo from NewRegions.
+func (bc *BasicCluster) GetNewRegions() []*RegionInfo {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.NewRegions.getRegions()
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap.
@@ -160,6 +202,49 @@ func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regio
 }
 
 const randomRegionMaxRetry = 10
+
+// RandNewRegion returns a random region in new region set.
+func (bc *BasicCluster) RandNewRegion(storeID uint64, ranges []KeyRange, optPending RegionOption, optOther RegionOption, optAll RegionOption) *RegionInfo {
+	bc.Lock()
+	if bc.SelectConf.NewRegionFirst {
+		rand.Seed(time.Now().UnixNano())
+		p := float64(rand.Intn(100)+1) / 100.0
+		if p <= bc.SelectConf.NewProbability {
+			region := bc.NewRegions.randomRegion(storeID, ranges, optPending, optOther, optAll, bc.SelectConf.TimeThreshold)
+			bc.Unlock()
+			return region
+		}
+	}
+	bc.Unlock()
+	return nil
+}
+
+// RemoveNewRegion removes region from NewRegions.
+func (bc *BasicCluster) RemoveNewRegion(regionID uint64) {
+	bc.Lock()
+	if bc.SelectConf.NewRegionFirst {
+		bc.NewRegions.remove(regionID)
+	}
+	bc.Unlock()
+}
+
+// DisableNewRegion prevents the region from being selected again.
+func (bc *BasicCluster) DisableNewRegion(regionID uint64) {
+	bc.Lock()
+	if bc.SelectConf.NewRegionFirst {
+		bc.NewRegions.disable(regionID)
+	}
+	bc.Unlock()
+}
+
+// EnableNewRegion makes that the region can be selected again.
+func (bc *BasicCluster) EnableNewRegion(regionID uint64) {
+	bc.Lock()
+	if bc.SelectConf.NewRegionFirst {
+		bc.NewRegions.enable(regionID)
+	}
+	bc.Unlock()
+}
 
 // RandFollowerRegion returns a random region that has a follower on the store.
 func (bc *BasicCluster) RandFollowerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
@@ -323,6 +408,14 @@ func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, erro
 func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	bc.Lock()
 	defer bc.Unlock()
+	if bc.SelectConf.NewRegionFirst && region.GetApproximateSize() > 1 {
+		if bc.Regions.GetRegion(region.GetID()) == nil || bc.NewRegions.getRegion(region.GetID()) != nil {
+			bc.NewRegions.update(region)
+			if bc.NewRegions.length() > bc.SelectConf.MaxRegionCount {
+				bc.NewRegions.pop()
+			}
+		}
+	}
 	return bc.Regions.SetRegion(region)
 }
 
@@ -341,6 +434,9 @@ func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 func (bc *BasicCluster) RemoveRegion(region *RegionInfo) {
 	bc.Lock()
 	defer bc.Unlock()
+	if bc.SelectConf.NewRegionFirst {
+		bc.NewRegions.remove(region.GetID())
+	}
 	bc.Regions.RemoveRegion(region)
 }
 
@@ -376,6 +472,11 @@ func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
 // RegionSetInformer provides access to a shared informer of regions.
 type RegionSetInformer interface {
 	GetRegionCount() int
+	RandNewRegion(storeID uint64, ranges []KeyRange, optPending RegionOption, optOther RegionOption, optAll RegionOption) *RegionInfo
+	RemoveNewRegion(regionID uint64)
+	DisableNewRegion(regionID uint64)
+	EnableNewRegion(regionID uint64)
+	GetNewRegions() []*RegionInfo
 	RandFollowerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	RandLeaderRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	RandLearnerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
