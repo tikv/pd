@@ -62,7 +62,7 @@ func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Requ
 // @Accept json
 // @Param body body object true "json params"
 // @Produce json
-// @Success 200 {string} string "Reset ts success."
+// @Success 200 {string} string "Reset ts successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 403 {string} string "Reset ts is forbidden."
 // @Failure 500 {string} string "PD server failed to proceed the request."
@@ -91,7 +91,7 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 			h.rd.JSON(w, http.StatusForbidden, err.Error())
 		}
 	}
-	h.rd.JSON(w, http.StatusOK, "Reset ts success.")
+	h.rd.JSON(w, http.StatusOK, "Reset ts successfully.")
 }
 
 // Intentionally no swagger mark as it is supposed to be only used in

@@ -160,7 +160,7 @@ func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Param rule body placement.Rule true "Parameters of rule"
 // @Produce json
-// @Success 200 {string} string "Update rule success."
+// @Success 200 {string} string "Update rule successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Failure 500 {string} string "PD server failed to proceed the request."
@@ -183,7 +183,7 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, "Update rule success.")
+	h.rd.JSON(w, http.StatusOK, "Update rule successfully.")
 }
 
 func (h *ruleHandler) checkRule(r *placement.Rule) error {
@@ -221,7 +221,7 @@ func (h *ruleHandler) checkRule(r *placement.Rule) error {
 // @Param group path string true "The name of group"
 // @Param id path string true "Rule Id"
 // @Produce json
-// @Success 200 {string} string "Delete rule success."
+// @Success 200 {string} string "Delete rule successfully."
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/rule/{group}/{id} [delete]
@@ -236,5 +236,5 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, "Delete rule success.")
+	h.rd.JSON(w, http.StatusOK, "Delete rule successfully.")
 }

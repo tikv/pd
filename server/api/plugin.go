@@ -56,7 +56,7 @@ func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Param body body object true "json params"
 // @Produce json
-// @Success 200 {string} string "Unload plugin success."
+// @Success 200 {string} string "Load/Unload plugin successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /plugin [delete]
@@ -82,14 +82,14 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		h.rd.JSON(w, http.StatusOK, "Load plugin success.")
+		h.rd.JSON(w, http.StatusOK, "Load plugin successfully.")
 	case cluster.PluginUnload:
 		err = h.PluginUnload(path)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		h.rd.JSON(w, http.StatusOK, "Unload plugin success.")
+		h.rd.JSON(w, http.StatusOK, "Unload plugin successfully.")
 	default:
 		h.rd.JSON(w, http.StatusBadRequest, "unknown action")
 	}
