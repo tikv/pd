@@ -21,10 +21,10 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/checker"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -193,32 +193,19 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
 		return nil
 	}
-	exclude := make(map[uint64]struct{})
-	excludeFilter := filter.NewExcludedFilter(s.GetName(), nil, exclude)
-	for {
-		var target *core.StoreInfo
-		scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster, region, source)
-		if cluster.IsPlacementRulesEnabled() {
-			fit := cluster.FitRegion(region)
-			rf := fit.GetRuleFit(oldPeer.GetId())
-			if rf == nil {
-				schedulerCounter.WithLabelValues(s.GetName(), "skip-orphan-peer").Inc()
-				return nil
-			}
-			target = checker.SelectStoreToReplacePeerByRule(s.GetName(), cluster, region, fit, rf, oldPeer, scoreGuard, excludeFilter)
-		} else {
-			replicaChecker := checker.NewReplicaChecker(cluster, s.GetName())
-			storeID, _ := replicaChecker.SelectBestReplacementStore(region, oldPeer, scoreGuard, excludeFilter)
-			if storeID != 0 {
-				target = cluster.GetStore(storeID)
-			}
-		}
-		if target == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
-			return nil
-		}
-		exclude[target.GetID()] = struct{}{} // exclude next round.
 
+	filters := []filter.Filter{
+		filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds()),
+		filter.NewPlacementSafeguard(s.GetName(), cluster, region, source),
+		filter.NewSpecialUseFilter(s.GetName()),
+		filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
+	}
+
+	candidates := selector.NewCandidates(cluster.GetStores()).
+		FilterTarget(cluster, filters...).
+		Sort(selector.RegionScoreComparer(cluster))
+
+	for _, target := range candidates.Stores {
 		regionID := region.GetID()
 		sourceID := source.GetID()
 		targetID := target.GetID()
@@ -246,4 +233,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		)
 		return op
 	}
+
+	schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
+	return nil
 }

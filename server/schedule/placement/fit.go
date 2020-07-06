@@ -14,6 +14,7 @@
 package placement
 
 import (
+	"math"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -85,9 +86,9 @@ type RuleFit struct {
 	// different Role from configuration (the Role can be migrated to target role
 	// by scheduling).
 	PeersWithDifferentRole []*metapb.Peer
-	// IsolationLevel indicates at which level of labeling these Peers are
-	// isolated. A larger value indicates a higher isolation level.
-	IsolationLevel int
+	// IsolationScore indicates at which level of labeling these Peers are
+	// isolated. A larger value is better.
+	IsolationScore float64
 }
 
 // IsSatisfied returns if the rule is properly satisfied.
@@ -105,9 +106,9 @@ func compareRuleFit(a, b *RuleFit) int {
 		return -1
 	case len(a.PeersWithDifferentRole) < len(b.PeersWithDifferentRole):
 		return 1
-	case a.IsolationLevel < b.IsolationLevel:
+	case a.IsolationScore < b.IsolationScore:
 		return -1
-	case a.IsolationLevel > b.IsolationLevel:
+	case a.IsolationScore > b.IsolationScore:
 		return 1
 	default:
 		return 0
@@ -159,7 +160,7 @@ func fitRule(peers []*fitPeer, rule *Rule) *RuleFit {
 }
 
 func newRuleFit(rule *Rule, peers []*fitPeer) *RuleFit {
-	rf := &RuleFit{Rule: rule, IsolationLevel: isolationLevel(peers, rule.LocationLabels)}
+	rf := &RuleFit{Rule: rule, IsolationScore: isolationScore(peers, rule.LocationLabels)}
 	for _, p := range peers {
 		rf.Peers = append(rf.Peers, p.Peer)
 		if !p.matchRoleStrict(rule.Role) {
@@ -236,28 +237,24 @@ func iterPeersRecr(peers []*fitPeer, index int, out []*fitPeer, f func()) {
 	}
 }
 
-func isolationLevel(peers []*fitPeer, labels []string) int {
-	if len(labels) == 0 || len(peers) == 0 {
+func isolationScore(peers []*fitPeer, labels []string) float64 {
+	var score float64
+	if len(labels) == 0 || len(peers) <= 1 {
 		return 0
 	}
-	if len(peers) == 1 {
-		return len(labels)
-	}
-	if len(peers) == 2 {
-		for l, label := range labels {
-			if peers[0].store.GetLabelValue(label) != peers[1].store.GetLabelValue(label) {
-				return len(labels) - l
+	// NOTE: following loop is partially duplicated with `core.DistinctScore`.
+	// The reason not to call it directly is that core.DistinctScore only
+	// accepts `[]StoreInfo` not `[]*fitPeer` and I don't want alloc slice
+	// here because it is kind of hot path.
+	// After Go supports generics, we will be enable to do some refactor and
+	// reuse `core.DistinctScore`.
+	const replicaBaseScore = 100
+	for i, p1 := range peers {
+		for _, p2 := range peers[i+1:] {
+			if index := p1.store.CompareLocation(p2.store, labels); index != -1 {
+				score += math.Pow(replicaBaseScore, float64(len(labels)-index-1))
 			}
 		}
-		return 0
 	}
-
-	// TODO: brute force can be improved.
-	level := len(labels)
-	iterPeers(peers, 2, func(pair []*fitPeer) {
-		if l := isolationLevel(pair, labels); l < level {
-			level = l
-		}
-	})
-	return level
+	return score
 }

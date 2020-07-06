@@ -64,6 +64,15 @@ func SetStoreVersion(githash, version string) StoreCreateOption {
 	}
 }
 
+// SetStoreDeployPath sets the deploy path for the store.
+func SetStoreDeployPath(deployPath string) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta.DeployPath = deployPath
+		store.meta = meta
+	}
+}
+
 // SetStoreState sets the state for the store.
 func SetStoreState(state metapb.StoreState) StoreCreateOption {
 	return func(store *StoreInfo) {
@@ -73,17 +82,19 @@ func SetStoreState(state metapb.StoreState) StoreCreateOption {
 	}
 }
 
-// SetStoreBlock stops balancer from selecting the store.
-func SetStoreBlock() StoreCreateOption {
+// PauseLeaderTransfer prevents the store from been selected as source or
+// target store of TransferLeader.
+func PauseLeaderTransfer() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.blocked = true
+		store.pauseLeaderTransfer = true
 	}
 }
 
-// SetStoreUnBlock allows balancer to select the store.
-func SetStoreUnBlock() StoreCreateOption {
+// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
+// as source or target of TransferLeader again.
+func ResumeLeaderTransfer() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.blocked = false
+		store.pauseLeaderTransfer = false
 	}
 }
 

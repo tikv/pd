@@ -203,6 +203,30 @@ func (s *testRuleCheckerSuite) TestBetterReplacement(c *C) {
 	c.Assert(op, IsNil)
 }
 
+func (s *testRuleCheckerSuite) TestBetterReplacement2(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "host2"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "host": "host3"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "host1"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	s.ruleManager.SetRule(&placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "host"},
+	})
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "move-to-better-location")
+	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(4))
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 4)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+}
+
 func (s *testRuleCheckerSuite) TestNoBetterReplacement(c *C) {
 	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})

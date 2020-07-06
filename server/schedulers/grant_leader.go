@@ -141,7 +141,7 @@ func (conf *grantLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (s
 	succ, last = false, false
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.UnblockStore(id)
+		conf.cluster.ResumeLeaderTransfer(id)
 		succ = true
 		last = len(conf.StoreIDWithRanges) == 0
 	}
@@ -188,7 +188,7 @@ func (s *grantLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	defer s.conf.mu.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWithRanges {
-		if err := cluster.BlockStore(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id); err != nil {
 			res = err
 		}
 	}
@@ -199,7 +199,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
-		cluster.UnblockStore(id)
+		cluster.ResumeLeaderTransfer(id)
 	}
 }
 
@@ -249,7 +249,7 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
-			if err := handler.config.cluster.BlockStore(id); err != nil {
+			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
 				return
 			}

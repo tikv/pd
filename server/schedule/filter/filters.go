@@ -388,8 +388,8 @@ func (f StoreStateFilter) isOffline(opt opt.Options, store *core.StoreInfo) bool
 	return store.IsOffline()
 }
 
-func (f StoreStateFilter) isBlockLeaderTransfer(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsBlocked()
+func (f StoreStateFilter) pauseLeaderTransfer(opt opt.Options, store *core.StoreInfo) bool {
+	return !store.AllowLeaderTransfer()
 }
 
 func (f StoreStateFilter) isDisconnected(opt opt.Options, store *core.StoreInfo) bool {
@@ -429,7 +429,7 @@ func (f StoreStateFilter) hasRejectLeaderProperty(opts opt.Options, store *core.
 // N: the condition is expected to be true for a long time.
 // X means when the condition is true, the store CANNOT be selected.
 //
-// Condition    Down Offline Tomb Block Disconn Busy RmLimit AddLimit Snap Pending Reject
+// Condition    Down Offline Tomb Pause Disconn Busy RmLimit AddLimit Snap Pending Reject
 // IsTemporary  N    N       N    N     Y       Y    Y       Y        Y    Y       N
 //
 // LeaderSource X            X    X     X
@@ -448,11 +448,11 @@ func (f StoreStateFilter) anyConditionMatch(typ int, opt opt.Options, store *cor
 	var funcs []conditionFunc
 	switch typ {
 	case leaderSource:
-		funcs = []conditionFunc{f.isTombstone, f.isDown, f.isBlockLeaderTransfer, f.isDisconnected}
+		funcs = []conditionFunc{f.isTombstone, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
 	case regionSource:
 		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
 	case leaderTarget:
-		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isBlockLeaderTransfer,
+		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.pauseLeaderTransfer,
 			f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
 	case regionTarget:
 		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy,
