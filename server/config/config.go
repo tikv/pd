@@ -768,7 +768,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
-	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
+
+	// make a copy to avoid changing DefaultSchedules unexpectly
+	adjustSchedulers(&c.Schedulers, append(DefaultSchedulers[:0:0], DefaultSchedulers...))
 
 	for k, b := range c.migrateConfigurationMap() {
 		v, err := c.parseDeprecatedFlag(meta, k, *b[0], *b[1])
