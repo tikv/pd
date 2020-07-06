@@ -294,6 +294,7 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 				oc.buryOperator(next)
 			}
 			oc.Unlock()
+			oc.PromoteWaitingOperator()
 			return added
 		}
 		oc.wop.PutOperator(op)
