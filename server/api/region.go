@@ -15,6 +15,8 @@ package api
 
 import (
 	"container/heap"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -24,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
+	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/unrolled/render"
@@ -555,6 +558,73 @@ func (h *regionsHandler) GetTopSize(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
 		return a.GetApproximateSize() < b.GetApproximateSize()
 	})
+}
+
+// @Tags region
+// @Summary Accelerate regions scheduling a in given range, only receive hex format for keys
+// @Accept json
+// @Param body body object true "json params"
+// @Param limit query integer false "Limit count" default(256)
+// @Produce json
+// @Success 200 {string} string "Accelerate regions scheduling in a given range[startKey,endKey)"
+// @Failure 400 {string} string "The input is invalid."
+// @Router /regions/accelerate-schedule [post]
+func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	parseKey := func(name string, input map[string]interface{}) (string, string, error) {
+		k, ok := input[name]
+		if !ok {
+			return "", "", fmt.Errorf("missing %s", name)
+		}
+		rawKey, ok := k.(string)
+		if !ok {
+			return "", "", fmt.Errorf("bad format %s", name)
+		}
+		returned, err := hex.DecodeString(rawKey)
+		if err != nil {
+			return "", "", fmt.Errorf("split key %s is not in hex format", name)
+		}
+		return string(returned), rawKey, nil
+	}
+
+	startKey, rawStartKey, err := parseKey("start_key", input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	endKey, rawEndKey, err := parseKey("end_key", input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	limit := 256
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
+	}
+
+	regions := rc.ScanRegions([]byte(startKey), []byte(endKey), limit)
+	if len(regions) > 0 {
+		regionsIDList := make([]uint64, 0, len(regions))
+		for _, region := range regions {
+			regionsIDList = append(regionsIDList, region.GetID())
+		}
+		rc.AddSuspectRegions(regionsIDList...)
+	}
+	h.rd.Text(w, http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
 }
 
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
