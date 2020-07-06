@@ -200,7 +200,8 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 		return nil
 	}
 	targets := cluster.GetFollowerStores(region)
-	targets = filter.SelectTargetStores(targets, l.filters, cluster)
+	finalFilters := append(l.filters, filter.NewPlacementLeaderSafeguard(l.GetName(), cluster, region, source))
+	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
 	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
