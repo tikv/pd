@@ -96,7 +96,7 @@ func (r *ReplicaChecker) selectStoreToAdd(region *core.RegionInfo, extraFilters 
 	// stage considers all temporary states and capacity factors to select
 	// the most suitable target.
 	//
-	// The reason for it is to prevent the non-optimal replia placement due
+	// The reason for it is to prevent the non-optimal replica placement due
 	// to the short-term state, resulting in redundant scheduling.
 
 	filters := []filter.Filter{
