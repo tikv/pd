@@ -769,7 +769,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 
-	// make a copy to avoid changing DefaultSchedules unexpectly
+	// make a copy to avoid changing DefaultSchedules unexpectly.
+	// When reloading from storage, the config is passed to json.Unmarshal.
+	// Without clone, the DefaultSchedulers could be overwritten.
 	adjustSchedulers(&c.Schedulers, append(DefaultSchedulers[:0:0], DefaultSchedulers...))
 
 	for k, b := range c.migrateConfigurationMap() {
