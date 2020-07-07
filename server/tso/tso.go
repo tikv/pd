@@ -270,6 +270,10 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 	})
 
 	for i := 0; i < maxRetryCount; i++ {
+		if t.lease == nil || t.lease.IsExpired() {
+			return pdpb.Timestamp{}, errors.New("alloc timestamp failed, lease expired")
+		}
+
 		current := (*atomicObject)(atomic.LoadPointer(&t.ts))
 		if current == nil || current.physical == typeutil.ZeroTime {
 			log.Error("we haven't synced timestamp ok, wait and retry", zap.Int("retry-count", i))
@@ -287,6 +291,7 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 			time.Sleep(UpdateTimestampStep)
 			continue
 		}
+		// double check in case lease expired after the first check.
 		if t.lease == nil || t.lease.IsExpired() {
 			return pdpb.Timestamp{}, errors.New("alloc timestamp failed, lease expired")
 		}
