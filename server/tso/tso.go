@@ -273,7 +273,7 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 	for i := 0; i < maxRetryCount; i++ {
 		current := (*atomicObject)(atomic.LoadPointer(&t.ts))
 		if current == nil || current.physical == typeutil.ZeroTime {
-			return pdpb.Timestamp{}, errors.New("alloc timestamp failed, may be not leader")
+			return pdpb.Timestamp{}, errors.New("can not get timestamp, may be not leader")
 		}
 
 		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
