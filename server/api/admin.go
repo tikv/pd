@@ -110,3 +110,24 @@ func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
 	}
 	h.rd.Text(w, http.StatusOK, "")
 }
+
+func (h *adminHandler) UpdateSyncStatusTime(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	memberID, err := strconv.ParseUint(r.URL.Query().Get("member-id"), 10, 64)
+	if err != nil {
+		h.rd.Text(w, http.StatusBadRequest, "member-id is empty")
+		return
+	}
+	defer r.Body.Close()
+	cluster, err := handler.GetRaftCluster()
+	if err != nil {
+		if err == server.ErrServerNotStarted {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		} else {
+			h.rd.JSON(w, http.StatusForbidden, err.Error())
+		}
+		return
+	}
+	status := cluster.GetReplicationMode().UpdateSyncStatusTime(memberID)
+	h.rd.JSON(w, http.StatusOK, status)
+}

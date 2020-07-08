@@ -20,6 +20,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
@@ -41,7 +42,8 @@ func (s *testReplicationMode) TestInitial(c *C) {
 	store := core.NewStorage(kv.NewMemoryKV())
 	conf := config.ReplicationModeConfig{ReplicationMode: modeMajority}
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
-	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
+	rep := NewReplicationModeManager(conf, store, nil)
+	err := rep.Init(cluster)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{Mode: pb.ReplicationMode_MAJORITY})
 
@@ -54,7 +56,8 @@ func (s *testReplicationMode) TestInitial(c *C) {
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 	}}
-	rep, err = NewReplicationModeManager(conf, store, cluster, nil)
+	rep = NewReplicationModeManager(conf, store, nil)
+	err = rep.Init(cluster)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{
 		Mode: pb.ReplicationMode_DR_AUTO_SYNC,
@@ -74,7 +77,8 @@ func (s *testReplicationMode) TestStatus(c *C) {
 		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
-	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
+	rep := NewReplicationModeManager(conf, store, nil)
+	err := rep.Init(cluster)
 	c.Assert(err, IsNil)
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{
 		Mode: pb.ReplicationMode_DR_AUTO_SYNC,
@@ -112,7 +116,8 @@ func (s *testReplicationMode) TestStatus(c *C) {
 	})
 
 	// test reload
-	rep, err = NewReplicationModeManager(conf, store, cluster, nil)
+	rep = NewReplicationModeManager(conf, store, nil)
+	err = rep.Init(cluster)
 	c.Assert(err, IsNil)
 	c.Assert(rep.drAutoSync.State, Equals, drStateSyncRecover)
 
@@ -133,8 +138,18 @@ type mockFileReplicator struct {
 	err error
 }
 
-func (rep *mockFileReplicator) ReplicateFileToAllMembers(context.Context, string, []byte) error {
+func (rep *mockFileReplicator) GetDrAutoSyncStatus(ctx context.Context, member *pdpb.Member) *DrAutoSyncStatus {
+	return nil
+}
+
+func (rep *mockFileReplicator) ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error {
 	return rep.err
+}
+
+func (rep *mockFileReplicator) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	return &pdpb.GetMembersResponse{
+		Members: make([]*pdpb.Member, 0),
+	}, nil
 }
 
 func (s *testReplicationMode) TestStateSwitch(c *C) {
@@ -150,7 +165,8 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	}}
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
 	var replicator mockFileReplicator
-	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
+	rep := NewReplicationModeManager(conf, store, &replicator)
+	err := rep.Init(cluster)
 	c.Assert(err, IsNil)
 
 	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
@@ -266,7 +282,8 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 	}}
 	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
-	rep, err := NewReplicationModeManager(conf, store, cluster, nil)
+	rep := NewReplicationModeManager(conf, store, nil)
+	err := rep.Init(cluster)
 	c.Assert(err, IsNil)
 
 	prepare := func(n int, asyncRegions []int) {

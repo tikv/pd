@@ -65,7 +65,8 @@ type Server interface {
 	GetHBStreams() opt.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
-	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
+	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
+	GetDrAutoSyncStatus(ctx context.Context, member *pdpb.Member) *replication.DrAutoSyncStatus
 }
 
 // RaftCluster is used for cluster config management.
@@ -119,21 +120,22 @@ type RaftCluster struct {
 
 // Status saves some state information.
 type Status struct {
-	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
-	IsInitialized     bool      `json:"is_initialized"`
-	ReplicationStatus string    `json:"replication_status"`
+	RaftBootstrapTime time.Time                          `json:"raft_bootstrap_time,omitempty"`
+	IsInitialized     bool                               `json:"is_initialized"`
+	ReplicationStatus *replication.HTTPReplicationStatus `json:"replication_status"`
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client, replicationMode *replication.ModeManager) *RaftCluster {
 	return &RaftCluster{
-		ctx:          ctx,
-		running:      false,
-		clusterID:    clusterID,
-		clusterRoot:  root,
-		regionSyncer: regionSyncer,
-		httpClient:   httpClient,
-		etcdClient:   etcdClient,
+		ctx:             ctx,
+		running:         false,
+		clusterID:       clusterID,
+		clusterRoot:     root,
+		regionSyncer:    regionSyncer,
+		httpClient:      httpClient,
+		etcdClient:      etcdClient,
+		replicationMode: replicationMode,
 	}
 }
 
@@ -147,9 +149,9 @@ func (c *RaftCluster) LoadClusterStatus() (*Status, error) {
 	if bootstrapTime != typeutil.ZeroTime {
 		isInitialized = c.isInitialized()
 	}
-	var replicationStatus string
+	var replicationStatus *replication.HTTPReplicationStatus
 	if c.replicationMode != nil {
-		replicationStatus = c.replicationMode.GetReplicationStatus().String()
+		replicationStatus = c.replicationMode.GetReplicationStatusHTTP()
 	}
 	return &Status{
 		RaftBootstrapTime: bootstrapTime,
@@ -237,7 +239,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster, s)
+	err = c.replicationMode.Init(cluster)
 	if err != nil {
 		return err
 	}

@@ -21,10 +21,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/member"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"go.uber.org/zap"
 )
@@ -47,11 +50,13 @@ func modeToPB(m string) pb.ReplicationMode {
 // FileReplicater is the interface that can save important data to all cluster
 // nodes.
 type FileReplicater interface {
-	ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error
+	GetDrAutoSyncStatus(ctx context.Context, member *pdpb.Member) *DrAutoSyncStatus
+	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
+	GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error)
 }
 
 const drStatusFile = "DR_STATE"
-const persistFileTimeout = time.Second * 10
+const minPersistFileTimeout = time.Second * 3
 
 // ModeManager is used to control how raft logs are synchronized between
 // different tikv nodes.
@@ -62,7 +67,7 @@ type ModeManager struct {
 	cluster        opt.Cluster
 	fileReplicater FileReplicater
 
-	drAutoSync drAutoSyncStatus
+	drAutoSync DrAutoSyncStatus
 	// intermediate states of the recovery process
 	// they are accessed without locks as they are only used by background job.
 	drRecoverKey   []byte // all regions that has startKey < drRecoverKey are successfully recovered
@@ -72,24 +77,31 @@ type ModeManager struct {
 	drSampleRecoverCount int // number of regions that are recovered in sample
 	drSampleTotalRegion  int // number of regions in sample
 	drTotalRegion        int // number of all regions
+
+	drMemberSyncStatusTime map[uint64]time.Time
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
-func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, cluster opt.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
+func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, fileReplicater FileReplicater) *ModeManager {
 	m := &ModeManager{
 		config:         config,
 		storage:        storage,
-		cluster:        cluster,
 		fileReplicater: fileReplicater,
 	}
-	switch config.ReplicationMode {
+	return m
+}
+
+// Init loads drAutoSyncState to initialize the replicate mode manager
+func (m *ModeManager) Init(cluster opt.Cluster) error {
+	m.cluster = cluster
+	switch m.config.ReplicationMode {
 	case modeMajority:
 	case modeDRAutoSync:
 		if err := m.loadDRAutoSync(); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return m, nil
+	return nil
 }
 
 // UpdateConfig updates configuration online and updates internal state.
@@ -143,16 +155,60 @@ func (m *ModeManager) GetReplicationStatus() *pb.ReplicationStatus {
 	return p
 }
 
+// UpdateSyncStatusTime ...
+func (m *ModeManager) UpdateSyncStatusTime(memberID uint64) *DrAutoSyncStatus {
+	m.Lock()
+	defer m.Unlock()
+	m.drMemberSyncStatusTime[memberID] = typeutil.MonotonicRawClock.Now().Add(m.config.DRAutoSync.WaitSyncTimeout.Duration)
+	return &m.drAutoSync
+}
+
+// CheckDRAutoSyncLoop ...
+func (m *ModeManager) CheckDRAutoSyncLoop(ctx context.Context, member *member.Member) {
+	tickTime := m.config.DRAutoSync.WaitSyncTimeout.Duration / 5
+	timer := time.NewTicker(tickTime)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			m.Lock()
+			defer m.Unlock()
+			mode := m.config.ReplicationMode
+			switch mode {
+			case modeMajority:
+			case modeDRAutoSync:
+				if member.IsLeader() || m.fileReplicater == nil {
+					continue
+				}
+				leader := member.GetLeader()
+				sendTime := typeutil.MonotonicRawClock.Now()
+				reqCtx, cancel := context.WithTimeout(ctx, tickTime)
+				status := m.fileReplicater.GetDrAutoSyncStatus(reqCtx, leader)
+				cancel()
+				if status != nil {
+					status.ExpireTime = sendTime.Add(m.config.DRAutoSync.WaitSyncTimeout.Duration)
+					if err := m.storage.SaveReplicationStatus(modeDRAutoSync, status); err != nil {
+						log.Warn("failed to save replication status", zap.Error(err))
+					}
+					m.drAutoSync = *status
+				}
+			}
+		}
+	}
+}
+
 // HTTPReplicationStatus is for query status from HTTP API.
 type HTTPReplicationStatus struct {
 	Mode       string `json:"mode"`
 	DrAutoSync struct {
-		LabelKey        string  `json:"label_key"`
-		State           string  `json:"state"`
-		StateID         uint64  `json:"state_id,omitempty"`
-		TotalRegions    int     `json:"total_regions,omitempty"`
-		SyncedRegions   int     `json:"synced_regions,omitempty"`
-		RecoverProgress float32 `json:"recover_progress,omitempty"`
+		LabelKey        string    `json:"label_key"`
+		State           string    `json:"state"`
+		StateID         uint64    `json:"state_id,omitempty"`
+		TotalRegions    int       `json:"total_regions,omitempty"`
+		SyncedRegions   int       `json:"synced_regions,omitempty"`
+		RecoverProgress float32   `json:"recover_progress,omitempty"`
+		ExpireTime      time.Time `json:"expire_time,omitempty"`
 	} `json:"dr-auto-sync,omitempty"`
 }
 
@@ -171,6 +227,7 @@ func (m *ModeManager) GetReplicationStatusHTTP() *HTTPReplicationStatus {
 		status.DrAutoSync.RecoverProgress = m.drAutoSync.RecoverProgress
 		status.DrAutoSync.TotalRegions = m.drAutoSync.TotalRegions
 		status.DrAutoSync.SyncedRegions = m.drAutoSync.SyncedRegions
+		status.DrAutoSync.ExpireTime = m.drAutoSync.ExpireTime
 	}
 	return &status
 }
@@ -187,13 +244,15 @@ const (
 	drStateSyncRecover = "sync_recover"
 )
 
-type drAutoSyncStatus struct {
+// DrAutoSyncStatus ...
+type DrAutoSyncStatus struct {
 	State            string    `json:"state,omitempty"`
 	StateID          uint64    `json:"state_id,omitempty"`
 	RecoverStartTime time.Time `json:"recover_start,omitempty"`
 	TotalRegions     int       `json:"total_regions,omitempty"`
 	SyncedRegions    int       `json:"synced_regions,omitempty"`
 	RecoverProgress  float32   `json:"recover_progress,omitempty"`
+	ExpireTime       time.Time `json:"status_timeout,omitempty"`
 }
 
 func (m *ModeManager) loadDRAutoSync() error {
@@ -220,7 +279,7 @@ func (m *ModeManager) drSwitchToAsyncWithLock() error {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
-	dr := drAutoSyncStatus{State: drStateAsync, StateID: id}
+	dr := DrAutoSyncStatus{State: drStateAsync, StateID: id}
 	if err := m.drPersistStatus(dr); err != nil {
 		return err
 	}
@@ -245,7 +304,7 @@ func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
-	dr := drAutoSyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: time.Now()}
+	dr := DrAutoSyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: time.Now()}
 	if err := m.drPersistStatus(dr); err != nil {
 		return err
 	}
@@ -267,7 +326,7 @@ func (m *ModeManager) drSwitchToSync() error {
 		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
 		return err
 	}
-	dr := drAutoSyncStatus{State: drStateSync, StateID: id}
+	dr := DrAutoSyncStatus{State: drStateSync, StateID: id}
 	if err := m.drPersistStatus(dr); err != nil {
 		return err
 	}
@@ -280,20 +339,41 @@ func (m *ModeManager) drSwitchToSync() error {
 	return nil
 }
 
-func (m *ModeManager) drPersistStatus(status drAutoSyncStatus) error {
+func (m *ModeManager) drPersistStatus(status DrAutoSyncStatus) error {
 	if m.fileReplicater != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), persistFileTimeout)
-		defer cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), m.config.DRAutoSync.WaitSyncTimeout.Duration)
+		resp, err := m.fileReplicater.GetMembers(ctx, nil)
+		cancel()
+		if err != nil {
+			return err
+		}
 		data, _ := json.Marshal(status)
-		if err := m.fileReplicater.ReplicateFileToAllMembers(ctx, drStatusFile, data); err != nil {
-			log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", status.State), zap.Error(err))
-			// Throw away the error to make it possible to switch to async when
-			// primary and dr DC are disconnected. This will result in the
-			// inability to accurately determine whether data is fully
-			// synchronized when using dr DC to disaster recovery.
-			// TODO: introduce PD's leader-follower connection timeout to solve
-			// this issue. More details: https://github.com/pingcap/pd/issues/2490
-			return nil
+		var wg sync.WaitGroup
+		for _, member := range resp.Members {
+			if member.MemberId == resp.Leader.MemberId {
+				continue
+			}
+			wg.Add(1)
+			go func(member *pdpb.Member) {
+				defer wg.Done()
+				expireTime, ok := m.drMemberSyncStatusTime[member.MemberId]
+				var timeout time.Duration
+				if status.State == drStateAsync && (!ok || expireTime.After(typeutil.MonotonicRawClock.Now())) {
+					timeout = m.config.DRAutoSync.WaitSyncTimeout.Duration
+				} else {
+					timeout = minPersistFileTimeout
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), timeout)
+				defer cancel()
+				if err := m.fileReplicater.ReplicateFileToMember(ctx, member, drStatusFile, data); err != nil {
+					log.Warn("failed to replicate state",
+						zap.String("replicate-mode", modeDRAutoSync),
+						zap.String("new-state", status.State),
+						zap.String("member", member.Name),
+						zap.Error(err))
+				}
+			}(member)
+			wg.Wait()
 		}
 	}
 	return nil

@@ -16,6 +16,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -47,6 +48,7 @@ import (
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pingcap/pd/v4/server/member"
 	syncer "github.com/pingcap/pd/v4/server/region_syncer"
+	"github.com/pingcap/pd/v4/server/replication"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/tso"
@@ -360,7 +362,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	replicationMode := replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), s)
+	go replicationMode.CheckDRAutoSyncLoop(s.LoopContext(), s.member)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient, replicationMode)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
 	// Run callbacks
@@ -1190,33 +1194,61 @@ func (s *Server) reloadConfigFromKV() error {
 	return nil
 }
 
-// ReplicateFileToAllMembers is used to synchronize state among all members.
-// Each member will write `data` to a local file named `name`.
-func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, data []byte) error {
-	resp, err := s.GetMembers(ctx, nil)
-	if err != nil {
-		return err
+// ReplicateFileToMember is used to synchronize state to a specified member.
+// The member will write `data` to a local file named `name`.
+func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error {
+	clientUrls := member.GetClientUrls()
+	if len(clientUrls) == 0 {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()))
+		return errors.Errorf("failed to replicate to member %s: clientUrls is empty", member.GetName())
 	}
-	for _, member := range resp.Members {
-		clientUrls := member.GetClientUrls()
-		if len(clientUrls) == 0 {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
-			return errors.Errorf("failed to replicate to member %s: clientUrls is empty", member.GetName())
-		}
-		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
-		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
-		req.Header.Set("PD-Allow-follower-handle", "true")
-		res, err := s.httpClient.Do(req)
-		if err != nil {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
-			return errors.Errorf("failed to replicate to member %s", member.GetName())
-		}
-		if res.StatusCode != http.StatusOK {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
-			return errors.Errorf("failed to replicate to member %s", member.GetName())
-		}
+	url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
+	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+	req.Header.Set("PD-Allow-follower-handle", "true")
+	res, err := s.httpClient.Do(req)
+	if err != nil {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
+		return errors.Errorf("failed to replicate to member %s", member.GetName())
+	}
+	if res.StatusCode != http.StatusOK {
+		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
+		return errors.Errorf("failed to replicate to member %s", member.GetName())
 	}
 	return nil
+}
+
+// GetDrAutoSyncStatus ..
+func (s *Server) GetDrAutoSyncStatus(ctx context.Context, member *pdpb.Member) *replication.DrAutoSyncStatus {
+	clientUrls := member.GetClientUrls()
+	if len(clientUrls) == 0 {
+		log.Warn("failed to get dr sync status: clientUrls is empty", zap.String("member", member.GetName()))
+		return nil
+	}
+	url := clientUrls[0] + fmt.Sprintf("/pd/api/v1/admin/replication_mode/status?member-id=%d", s.member.Member().GetMemberId())
+	req, _ := http.NewRequestWithContext(ctx, "PUT", url, nil)
+	req.URL.Query()
+	res, err := s.httpClient.Do(req)
+	if err != nil {
+		log.Warn("failed to get dr sync status", zap.String("member", member.GetName()), zap.Error(err))
+		return nil
+	}
+	if res.StatusCode != http.StatusOK {
+		log.Warn("failed to get dr sync status", zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
+		return nil
+	}
+	defer res.Body.Close()
+	msg, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		log.Warn("failed to get dr sync status", zap.String("member", member.GetName()), zap.Error(err))
+		return nil
+	}
+	status := &replication.DrAutoSyncStatus{}
+	err = json.Unmarshal(msg, status)
+	if err != nil {
+		log.Warn("failed to get dr sync status", zap.String("member", member.GetName()), zap.Error(err))
+		return nil
+	}
+	return status
 }
 
 // PersistFile saves a file in DataDir.
