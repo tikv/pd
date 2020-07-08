@@ -1609,10 +1609,17 @@ func (c *RaftCluster) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 }
 
 // GetSchedulers gets all schedulers.
-func (c *RaftCluster) GetSchedulers() map[string]*scheduleController {
+func (c *RaftCluster) GetSchedulers() []string {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.getSchedulers()
+}
+
+// GetSchedulerHandlers gets all scheduler handlers.
+func (c *RaftCluster) GetSchedulerHandlers() map[string]http.Handler {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.getSchedulerHandlers()
 }
 
 // AddScheduler adds a scheduler.
@@ -1634,6 +1641,13 @@ func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.pauseOrResumeScheduler(name, t)
+}
+
+// IsSchedulerPaused checks if a scheduler is paused.
+func (c *RaftCluster) IsSchedulerPaused(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.isSchedulerPaused(name)
 }
 
 // GetStoreLimiter returns the dynamic adjusting limiter
