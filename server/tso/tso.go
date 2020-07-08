@@ -15,7 +15,6 @@ package tso
 
 import (
 	"path"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -46,7 +45,6 @@ type TimestampOracle struct {
 	ts            unsafe.Pointer
 	lastSavedTime atomic.Value
 
-	mu    sync.RWMutex
 	lease *member.LeaderLease
 
 	rootPath      string
