@@ -15,6 +15,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"net/url"
@@ -256,6 +257,21 @@ func (s *testRegionSuite) TestTopSize(c *C) {
 	mustRegionHeartbeat(c, s.svr, r3)
 	// query with limit
 	s.checkTopRegions(c, fmt.Sprintf("%s/regions/size?limit=%d", s.urlPrefix, 2), []uint64{7, 8})
+}
+
+func (s *testRegionSuite) TestAccelerateRegionsScheduleInRange(c *C) {
+	r1 := newTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
+	r2 := newTestRegionInfo(558, 14, []byte("a2"), []byte("a3"))
+	r3 := newTestRegionInfo(559, 15, []byte("a3"), []byte("a4"))
+	mustRegionHeartbeat(c, s.svr, r1)
+	mustRegionHeartbeat(c, s.svr, r2)
+	mustRegionHeartbeat(c, s.svr, r3)
+	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
+
+	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", s.urlPrefix), []byte(body))
+	c.Assert(err, IsNil)
+	idList := s.svr.GetRaftCluster().GetSuspectRegions()
+	c.Assert(len(idList), Equals, 2)
 }
 
 func (s *testRegionSuite) checkTopRegions(c *C, url string, regionIDs []uint64) {
