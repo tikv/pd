@@ -815,7 +815,6 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}
 			balanceHotRegionCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
-			ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 		}
 	}
 	return ret
