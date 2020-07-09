@@ -57,6 +57,13 @@ LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
 LDFLAGS += -X "$(PD_PKG)/server.PDEdition=$(PD_EDITION)"
 
+ifneq ($(DASHBOARD), 0)
+	LDFLAGS += -X "$(PD_PKG)/pkg/dashboard.InternalVersion=$(shell scripts/describe-dashboard-internal-version.sh)"
+	LDFLAGS += -X "$(PD_PKG)/pkg/dashboard.PDVersion=$(shell git describe --tags --dirty)"
+	LDFLAGS += -X "$(PD_PKG)/pkg/dashboard.BuildTime=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
+	LDFLAGS += -X "$(PD_PKG)/pkg/dashboard.BuildGitHash=$(shell scripts/describe-dashboard-githash.sh)"
+endif
+
 GOVER_MAJOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\1/")
 GOVER_MINOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\2/")
 GO111 := $(shell [ $(GOVER_MAJOR) -gt 1 ] || [ $(GOVER_MAJOR) -eq 1 ] && [ $(GOVER_MINOR) -ge 11 ]; echo $$?)
@@ -84,6 +91,10 @@ endif
 ifneq ($(DASHBOARD), 0)
 	make dashboard-ui
 endif
+	make pd-server-build
+
+pd-server-build: export GO111MODULE=on
+pd-server-build:
 	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o bin/pd-server cmd/pd-server/main.go
 
 pd-server-basic:
