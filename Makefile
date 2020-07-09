@@ -58,10 +58,11 @@ LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref H
 LDFLAGS += -X "$(PD_PKG)/server.PDEdition=$(PD_EDITION)"
 
 ifneq ($(DASHBOARD), 0)
-	LDFLAGS += -X "$(PD_PKG)/pkg/dashboard.InternalVersion=$(shell scripts/describe-dashboard-internal-version.sh)"
-	LDFLAGS += -X "$(PD_PKG)/pkg/dashboard.PDVersion=$(shell git describe --tags --dirty)"
-	LDFLAGS += -X "$(PD_PKG)/pkg/dashboard.BuildTime=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
-	LDFLAGS += -X "$(PD_PKG)/pkg/dashboard.BuildGitHash=$(shell scripts/describe-dashboard-githash.sh)"
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.InternalVersion=$(shell scripts/describe-dashboard-internal-version.sh)"
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.Standalone=No"
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.PDVersion=$(shell git describe --tags --dirty)"
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.BuildTime=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.BuildGitHash=$(shell scripts/describe-dashboard-githash.sh)"
 endif
 
 GOVER_MAJOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\1/")
