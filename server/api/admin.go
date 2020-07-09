@@ -113,12 +113,20 @@ func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
 
 func (h *adminHandler) UpdateSyncStatusTime(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	memberID, err := strconv.ParseUint(r.URL.Query().Get("member-id"), 10, 64)
-	if err != nil {
-		h.rd.Text(w, http.StatusBadRequest, "member-id is empty")
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	defer r.Body.Close()
+	memberIDValue, ok := input["member_id"].(string)
+	if !ok || len(memberIDValue) == 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "invalid member id")
+		return
+	}
+	memberID, err := strconv.ParseUint(memberIDValue, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, "invalid member id")
+		return
+	}
 	cluster, err := handler.GetRaftCluster()
 	if err != nil {
 		if err == server.ErrServerNotStarted {

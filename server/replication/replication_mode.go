@@ -94,6 +94,7 @@ func NewReplicationModeManager(config config.ReplicationModeConfig, storage *cor
 // Init loads drAutoSyncState to initialize the replicate mode manager
 func (m *ModeManager) Init(cluster opt.Cluster) error {
 	m.cluster = cluster
+	m.drMemberSyncStatusTime = make(map[uint64]time.Time)
 	switch m.config.ReplicationMode {
 	case modeMajority:
 	case modeDRAutoSync:
@@ -156,11 +157,13 @@ func (m *ModeManager) GetReplicationStatus() *pb.ReplicationStatus {
 }
 
 // UpdateSyncStatusTime ...
-func (m *ModeManager) UpdateSyncStatusTime(memberID uint64) *DrAutoSyncStatus {
+func (m *ModeManager) UpdateSyncStatusTime(memberID uint64) DrAutoSyncStatus {
 	m.Lock()
 	defer m.Unlock()
-	m.drMemberSyncStatusTime[memberID] = typeutil.MonotonicRawClock.Now().Add(m.config.DRAutoSync.WaitSyncTimeout.Duration)
-	return &m.drAutoSync
+	t := typeutil.MonotonicRawClock.Now().Add(m.config.DRAutoSync.WaitSyncTimeout.Duration)
+	log.Info("udpate sync status time", zap.Uint64("memberID", memberID), zap.Time("time", t))
+	m.drMemberSyncStatusTime[memberID] = t
+	return m.drAutoSync
 }
 
 // CheckDRAutoSyncLoop ...
@@ -173,27 +176,30 @@ func (m *ModeManager) CheckDRAutoSyncLoop(ctx context.Context, member *member.Me
 			return
 		case <-timer.C:
 			m.Lock()
-			defer m.Unlock()
 			mode := m.config.ReplicationMode
 			switch mode {
 			case modeMajority:
 			case modeDRAutoSync:
-				if member.IsLeader() || m.fileReplicater == nil {
-					continue
-				}
-				leader := member.GetLeader()
-				sendTime := typeutil.MonotonicRawClock.Now()
-				reqCtx, cancel := context.WithTimeout(ctx, tickTime)
-				status := m.fileReplicater.GetDrAutoSyncStatus(reqCtx, leader)
-				cancel()
-				if status != nil {
-					status.ExpireTime = sendTime.Add(m.config.DRAutoSync.WaitSyncTimeout.Duration)
-					if err := m.storage.SaveReplicationStatus(modeDRAutoSync, status); err != nil {
-						log.Warn("failed to save replication status", zap.Error(err))
+				if !member.IsLeader() && m.fileReplicater != nil {
+					leader := member.GetLeader()
+					sendTime := time.Now()
+					reqCtx, cancel := context.WithTimeout(ctx, tickTime)
+					status := m.fileReplicater.GetDrAutoSyncStatus(reqCtx, leader)
+					cancel()
+					if status != nil {
+						status.ExpireTime = sendTime.Add(m.config.DRAutoSync.WaitSyncTimeout.Duration)
+						log.Info("update sync status",
+							zap.Uint64("memberID", member.Member().MemberId),
+							zap.Uint64("leaderID", member.GetLeader().MemberId),
+							zap.Time("expireTime", status.ExpireTime))
+						if err := m.storage.SaveReplicationStatus(modeDRAutoSync, status); err != nil {
+							log.Warn("failed to save replication status", zap.Error(err))
+						}
+						m.drAutoSync = *status
 					}
-					m.drAutoSync = *status
 				}
 			}
+			m.Unlock()
 		}
 	}
 }
@@ -274,6 +280,7 @@ func (m *ModeManager) drSwitchToAsync() error {
 }
 
 func (m *ModeManager) drSwitchToAsyncWithLock() error {
+	startTime := time.Now()
 	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
@@ -288,7 +295,7 @@ func (m *ModeManager) drSwitchToAsyncWithLock() error {
 		return err
 	}
 	m.drAutoSync = dr
-	log.Info("switched to async state", zap.String("replicate-mode", modeDRAutoSync))
+	log.Info("switched to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Duration("cost", time.Now().Sub(startTime)))
 	return nil
 }
 
@@ -299,6 +306,7 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 }
 
 func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
+	startTime := time.Now()
 	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
@@ -314,13 +322,14 @@ func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 	}
 	m.drAutoSync = dr
 	m.drRecoverKey, m.drRecoverCount = nil, 0
-	log.Info("switched to sync_recover state", zap.String("replicate-mode", modeDRAutoSync))
+	log.Info("switched to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Duration("cost", time.Now().Sub(startTime)))
 	return nil
 }
 
 func (m *ModeManager) drSwitchToSync() error {
 	m.Lock()
 	defer m.Unlock()
+	startTime := time.Now()
 	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Error(err))
@@ -335,7 +344,7 @@ func (m *ModeManager) drSwitchToSync() error {
 		return err
 	}
 	m.drAutoSync = dr
-	log.Info("switched to sync state", zap.String("replicate-mode", modeDRAutoSync))
+	log.Info("switched to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Duration("cost", time.Now().Sub(startTime)))
 	return nil
 }
 
@@ -347,6 +356,7 @@ func (m *ModeManager) drPersistStatus(status DrAutoSyncStatus) error {
 		if err != nil {
 			return err
 		}
+		log.Info("GET MEMBERS", zap.Stringer("resp", resp), zap.Reflect("sync_status_time", m.drMemberSyncStatusTime))
 		data, _ := json.Marshal(status)
 		var wg sync.WaitGroup
 		for _, member := range resp.Members {
@@ -365,12 +375,29 @@ func (m *ModeManager) drPersistStatus(status DrAutoSyncStatus) error {
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
 				defer cancel()
-				if err := m.fileReplicater.ReplicateFileToMember(ctx, member, drStatusFile, data); err != nil {
-					log.Warn("failed to replicate state",
-						zap.String("replicate-mode", modeDRAutoSync),
-						zap.String("new-state", status.State),
-						zap.String("member", member.Name),
-						zap.Error(err))
+			Replicate_To_Member:
+				for {
+					select {
+					case <-ctx.Done():
+						break Replicate_To_Member
+					default:
+						if err := m.fileReplicater.ReplicateFileToMember(ctx, member, drStatusFile, data); err != nil {
+							log.Warn("failed to replicate state",
+								zap.String("replicate-mode", modeDRAutoSync),
+								zap.String("new-state", status.State),
+								zap.String("member", member.Name),
+								zap.Duration("timeout", timeout),
+								zap.Error(err))
+							time.Sleep(timeout / 10)
+						} else {
+							log.Info("replicate state to member",
+								zap.String("replicate-mode", modeDRAutoSync),
+								zap.String("new-state", status.State),
+								zap.Duration("timeout", timeout),
+								zap.Uint64("memberID", member.MemberId))
+							break Replicate_To_Member
+						}
+					}
 				}
 			}(member)
 			wg.Wait()
@@ -396,6 +423,7 @@ func (m *ModeManager) Run(quit chan struct{}) {
 	select {
 	case <-time.After(idleTimeout):
 	case <-quit:
+		m.drMemberSyncStatusTime = make(map[uint64]time.Time)
 		return
 	}
 	for {

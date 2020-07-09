@@ -363,7 +363,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
 	replicationMode := replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), s)
-	go replicationMode.CheckDRAutoSyncLoop(s.LoopContext(), s.member)
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient, replicationMode)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
@@ -472,6 +471,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
+	go s.cluster.GetReplicationMode().CheckDRAutoSyncLoop(s.serverLoopCtx, s.member)
 }
 
 func (s *Server) stopServerLoop() {
@@ -1219,27 +1219,33 @@ func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member,
 
 // GetDrAutoSyncStatus ..
 func (s *Server) GetDrAutoSyncStatus(ctx context.Context, member *pdpb.Member) *replication.DrAutoSyncStatus {
+	type statusReq struct {
+		MemberID string `json:"member_id"`
+	}
+
 	clientUrls := member.GetClientUrls()
 	if len(clientUrls) == 0 {
 		log.Warn("failed to get dr sync status: clientUrls is empty", zap.String("member", member.GetName()))
 		return nil
 	}
-	url := clientUrls[0] + fmt.Sprintf("/pd/api/v1/admin/replication_mode/status?member-id=%d", s.member.Member().GetMemberId())
-	req, _ := http.NewRequestWithContext(ctx, "PUT", url, nil)
-	req.URL.Query()
+	url := clientUrls[0] + "/pd/api/v1/admin/replication_mode/status"
+	reqBody, _ := json.Marshal(&statusReq{
+		MemberID: strconv.FormatUint(member.GetMemberId(), 10),
+	})
+	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	res, err := s.httpClient.Do(req)
 	if err != nil {
 		log.Warn("failed to get dr sync status", zap.String("member", member.GetName()), zap.Error(err))
-		return nil
-	}
-	if res.StatusCode != http.StatusOK {
-		log.Warn("failed to get dr sync status", zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
 		return nil
 	}
 	defer res.Body.Close()
 	msg, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		log.Warn("failed to get dr sync status", zap.String("member", member.GetName()), zap.Error(err))
+		return nil
+	}
+	if res.StatusCode != http.StatusOK {
+		log.Warn("failed to get dr sync status", zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode), zap.String("msg", string(msg)))
 		return nil
 	}
 	status := &replication.DrAutoSyncStatus{}

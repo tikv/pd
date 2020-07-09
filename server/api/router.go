@@ -172,7 +172,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	adminHandler := newAdminHandler(svr, rd)
 	clusterRouter.HandleFunc("/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion).Methods("DELETE")
 	clusterRouter.HandleFunc("/admin/reset-ts", adminHandler.ResetTS).Methods("POST")
-	clusterRouter.HandleFunc("/admin/replication_mode/status", adminHandler.UpdateSyncStatusTime).Methods("PUT")
+	clusterRouter.HandleFunc("/admin/replication_mode/status", adminHandler.UpdateSyncStatusTime).Methods("POST")
 	apiRouter.HandleFunc("/admin/persist-file/{file_name}", adminHandler.persistFile).Methods("POST")
 
 	logHandler := newlogHandler(svr, rd)
