@@ -196,6 +196,12 @@ func (s *storeTestSuite) TestStore(c *C) {
 	limit2 = leaderServer.GetRaftCluster().GetStoreLimitByType(2, storelimit.RemovePeer)
 	c.Assert(limit2, Equals, float64(25))
 
+	// store limit all 0
+	args = []string{"-u", pdAddr, "store", "limit", "all", "0"}
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "invalid"), IsTrue)
+
 	// store limit <type>
 	echo := pdctl.GetEcho([]string{"-u", pdAddr, "store", "limit"})
 	allAddPeerLimit := make(map[string]map[string]interface{})

@@ -86,7 +86,10 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 			},
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
-			Peers:    []*metapb.Peer{{Id: allocator.alloc(), StoreId: uint64(0)}},
+			Peers: []*metapb.Peer{
+				{Id: allocator.alloc(), StoreId: uint64(0)},
+				{Id: allocator.alloc(), StoreId: uint64(0)},
+			},
 		}
 		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
 	}
@@ -129,6 +132,13 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 		c.Assert(err, IsNil)
 	}
 
+	// change the leader of region
+	for i := 0; i < len(regions); i++ {
+		regions[i] = regions[i].Clone(core.WithLeader(regions[i].GetPeers()[1]))
+		err = rc.HandleRegionHeartbeat(regions[i])
+		c.Assert(err, IsNil)
+	}
+
 	// ensure flush to region storage, we use a duration larger than the
 	// region storage flush rate limit (3s).
 	time.Sleep(4 * time.Second)
@@ -142,6 +152,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 		r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
 		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
 		c.Assert(r.GetStat(), DeepEquals, region.GetStat())
+		c.Assert(r.GetLeader(), DeepEquals, region.GetLeader())
 	}
 
 	err = leaderServer.Stop()
@@ -155,6 +166,7 @@ func (s *serverTestSuite) TestRegionSyncer(c *C) {
 		r := leaderServer.GetRegionInfoByID(region.GetID())
 		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
 		c.Assert(r.GetStat(), DeepEquals, region.GetStat())
+		c.Assert(r.GetLeader(), DeepEquals, region.GetLeader())
 	}
 }
 

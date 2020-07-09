@@ -38,19 +38,18 @@ const (
 
 // StoreInfo contains information about a store.
 type StoreInfo struct {
-	meta  *metapb.Store
-	stats *pdpb.StoreStats
-	// Blocked means that the store is blocked from balance.
-	blocked          bool
-	leaderCount      int
-	regionCount      int
-	leaderSize       int64
-	regionSize       int64
-	pendingPeerCount int
-	lastPersistTime  time.Time
-	leaderWeight     float64
-	regionWeight     float64
-	available        map[storelimit.Type]func() bool
+	meta                *metapb.Store
+	stats               *pdpb.StoreStats
+	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
+	leaderCount         int
+	regionCount         int
+	leaderSize          int64
+	regionSize          int64
+	pendingPeerCount    int
+	lastPersistTime     time.Time
+	leaderWeight        float64
+	regionWeight        float64
+	available           map[storelimit.Type]func() bool
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -71,18 +70,18 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	meta := proto.Clone(s.meta).(*metapb.Store)
 	store := &StoreInfo{
-		meta:             meta,
-		stats:            s.stats,
-		blocked:          s.blocked,
-		leaderCount:      s.leaderCount,
-		regionCount:      s.regionCount,
-		leaderSize:       s.leaderSize,
-		regionSize:       s.regionSize,
-		pendingPeerCount: s.pendingPeerCount,
-		lastPersistTime:  s.lastPersistTime,
-		leaderWeight:     s.leaderWeight,
-		regionWeight:     s.regionWeight,
-		available:        s.available,
+		meta:                meta,
+		stats:               s.stats,
+		pauseLeaderTransfer: s.pauseLeaderTransfer,
+		leaderCount:         s.leaderCount,
+		regionCount:         s.regionCount,
+		leaderSize:          s.leaderSize,
+		regionSize:          s.regionSize,
+		pendingPeerCount:    s.pendingPeerCount,
+		lastPersistTime:     s.lastPersistTime,
+		leaderWeight:        s.leaderWeight,
+		regionWeight:        s.regionWeight,
+		available:           s.available,
 	}
 
 	for _, opt := range opts {
@@ -94,18 +93,18 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
-		meta:             s.meta,
-		stats:            s.stats,
-		blocked:          s.blocked,
-		leaderCount:      s.leaderCount,
-		regionCount:      s.regionCount,
-		leaderSize:       s.leaderSize,
-		regionSize:       s.regionSize,
-		pendingPeerCount: s.pendingPeerCount,
-		lastPersistTime:  s.lastPersistTime,
-		leaderWeight:     s.leaderWeight,
-		regionWeight:     s.regionWeight,
-		available:        s.available,
+		meta:                s.meta,
+		stats:               s.stats,
+		pauseLeaderTransfer: s.pauseLeaderTransfer,
+		leaderCount:         s.leaderCount,
+		regionCount:         s.regionCount,
+		leaderSize:          s.leaderSize,
+		regionSize:          s.regionSize,
+		pendingPeerCount:    s.pendingPeerCount,
+		lastPersistTime:     s.lastPersistTime,
+		leaderWeight:        s.leaderWeight,
+		regionWeight:        s.regionWeight,
+		available:           s.available,
 	}
 
 	for _, opt := range opts {
@@ -114,9 +113,10 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	return store
 }
 
-// IsBlocked returns if the store is blocked.
-func (s *StoreInfo) IsBlocked() bool {
-	return s.blocked
+// AllowLeaderTransfer returns if the store is allowed to be selected
+// as source or target of transfer leader.
+func (s *StoreInfo) AllowLeaderTransfer() bool {
+	return !s.pauseLeaderTransfer
 }
 
 // IsAvailable returns if the store bucket of limitation is available
@@ -566,28 +566,29 @@ func (s *StoresInfo) SetStore(store *StoreInfo) {
 	s.stores[store.GetID()] = store
 }
 
-// BlockStore blocks a StoreInfo with storeID.
-func (s *StoresInfo) BlockStore(storeID uint64) errcode.ErrorCode {
-	op := errcode.Op("store.block")
+// PauseLeaderTransfer pauses a StoreInfo with storeID.
+func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) errcode.ErrorCode {
+	op := errcode.Op("store.pause_leader_transfer")
 	store, ok := s.stores[storeID]
 	if !ok {
 		return op.AddTo(NewStoreNotFoundErr(storeID))
 	}
-	if store.IsBlocked() {
-		return op.AddTo(StoreBlockedErr{StoreID: storeID})
+	if !store.AllowLeaderTransfer() {
+		return op.AddTo(StorePauseLeaderTransferErr{StoreID: storeID})
 	}
-	s.stores[storeID] = store.Clone(SetStoreBlock())
+	s.stores[storeID] = store.Clone(PauseLeaderTransfer())
 	return nil
 }
 
-// UnblockStore unblocks a StoreInfo with storeID.
-func (s *StoresInfo) UnblockStore(storeID uint64) {
+// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
+// as source or target of TransferLeader again.
+func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
-		log.Fatal("store is unblocked, but it is not found",
+		log.Fatal("try to clean a store's pause state, but it is not found",
 			zap.Uint64("store-id", storeID))
 	}
-	s.stores[storeID] = store.Clone(SetStoreUnBlock())
+	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
 }
 
 // AttachAvailableFunc attaches f to a specific store.

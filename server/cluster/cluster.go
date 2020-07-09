@@ -496,7 +496,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
-	var saveKV, saveCache, isNew, statsChange bool
+	var saveKV, saveCache, isNew, needSync bool
 	if origin == nil {
 		log.Debug("insert new region",
 			zap.Uint64("region-id", region.GetID()),
@@ -534,7 +534,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 					zap.Uint64("to", region.GetLeader().GetStoreId()),
 				)
 			}
-			saveCache = true
+			saveCache, needSync = true, true
 		}
 		if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 {
 			saveCache = true
@@ -555,7 +555,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
 			region.GetKeysRead() != origin.GetKeysRead() {
-			saveCache, statsChange = true, true
+			saveCache, needSync = true, true
 		}
 
 		if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
@@ -646,7 +646,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 		regionEventCounter.WithLabelValues("update_kv").Inc()
 	}
-	if saveKV || statsChange {
+	if saveKV || needSync {
 		select {
 		case c.changedRegions <- region:
 		default:
@@ -902,6 +902,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 			core.SetStoreVersion(store.GitHash, store.Version),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
+			core.SetStoreDeployPath(store.DeployPath),
 		)
 	}
 	if err = c.checkStoreLabels(s); err != nil {
@@ -1008,14 +1009,16 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 	return err
 }
 
-// BlockStore stops balancer from selecting the store.
-func (c *RaftCluster) BlockStore(storeID uint64) error {
-	return c.core.BlockStore(storeID)
+// PauseLeaderTransfer prevents the store from been selected as source or
+// target store of TransferLeader.
+func (c *RaftCluster) PauseLeaderTransfer(storeID uint64) error {
+	return c.core.PauseLeaderTransfer(storeID)
 }
 
-// UnblockStore allows balancer to select the store.
-func (c *RaftCluster) UnblockStore(storeID uint64) {
-	c.core.UnblockStore(storeID)
+// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
+// as source or target of TransferLeader again.
+func (c *RaftCluster) ResumeLeaderTransfer(storeID uint64) {
+	c.core.ResumeLeaderTransfer(storeID)
 }
 
 // AttachAvailableFunc attaches an available function to a specific store.

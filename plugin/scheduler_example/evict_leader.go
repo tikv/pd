@@ -192,7 +192,7 @@ func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	defer s.conf.mu.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWitRanges {
-		if err := cluster.BlockStore(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id); err != nil {
 			res = err
 		}
 	}
@@ -203,7 +203,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
-		cluster.UnblockStore(id)
+		cluster.ResumeLeaderTransfer(id)
 	}
 }
 
@@ -256,7 +256,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
-			if err := handler.config.cluster.BlockStore(id); err != nil {
+			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
 				return
 			}
@@ -297,7 +297,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	_, exists := handler.config.StoreIDWitRanges[id]
 	if exists {
 		delete(handler.config.StoreIDWitRanges, id)
-		handler.config.cluster.UnblockStore(id)
+		handler.config.cluster.ResumeLeaderTransfer(id)
 
 		handler.config.mu.Unlock()
 		handler.config.Persist()

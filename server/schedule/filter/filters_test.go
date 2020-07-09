@@ -14,9 +14,11 @@ package filter
 
 import (
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
 	"github.com/pingcap/pd/v4/server/core"
@@ -73,7 +75,7 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		for _, id := range tc.stores {
 			stores = append(stores, allStores[id-1])
 		}
-		ls := NewLocationSafeguard("", labels, stores, allStores[tc.source-1])
+		ls := newLocationSafeguard("", labels, stores, allStores[tc.source-1])
 		li := NewLocationImprover("", labels, stores, allStores[tc.source-1])
 		c.Assert(ls.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.safeGuradRes)
 		c.Assert(li.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.improverRes)
@@ -109,8 +111,66 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 		{StoreId: 5, Id: 5},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 
-	filter := NewRuleFitFilter("", tc, region, 1)
+	filter := newRuleFitFilter("", tc, region, 1)
 	c.Assert(filter.Target(tc, tc.GetStore(2)), IsTrue)
 	c.Assert(filter.Target(tc, tc.GetStore(4)), IsFalse)
 	c.Assert(filter.Source(tc, tc.GetStore(4)), IsTrue)
+}
+
+func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
+	filters := []Filter{
+		StoreStateFilter{TransferLeader: true},
+		StoreStateFilter{MoveRegion: true},
+		StoreStateFilter{TransferLeader: true, MoveRegion: true},
+		StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+	}
+	opt := mockoption.NewScheduleOptions()
+	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
+
+	check := func(n int, store *core.StoreInfo, source, target bool) {
+		c.Assert(filters[n].Source(opt, store), Equals, source)
+		c.Assert(filters[n].Target(opt, store), Equals, target)
+	}
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
+	check(2, store, true, true)
+
+	// Disconn
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
+	check(0, store, false, false)
+	check(1, store, true, false)
+	check(2, store, false, false)
+	check(3, store, true, true)
+
+	// Busy
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
+		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
+	check(0, store, true, false)
+	check(1, store, false, false)
+	check(2, store, false, false)
+	check(3, store, true, true)
+}
+
+func (s *testFiltersSuite) TestPlacementGuard(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	opt.LocationLabels = []string{"zone"}
+	tc := mockcluster.NewCluster(opt)
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+		{StoreId: 1, Id: 1},
+		{StoreId: 3, Id: 3},
+		{StoreId: 5, Id: 5},
+	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	store1 := tc.GetStore(1)
+
+	c.Assert(NewPlacementSafeguard("", tc, region, store1),
+		FitsTypeOf,
+		newLocationSafeguard("", []string{"zone"}, tc.GetRegionStores(region), store1))
+	opt.EnablePlacementRules = true
+	c.Assert(NewPlacementSafeguard("", tc, region, store1),
+		FitsTypeOf,
+		newRuleFitFilter("", tc, region, 1))
 }

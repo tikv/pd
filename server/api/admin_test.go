@@ -119,7 +119,7 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, url, values,
 		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"success\"\n")
+			c.Assert(string(res), Equals, "\"Reset ts successfully.\"\n")
 			c.Assert(code, Equals, http.StatusOK)
 		})
 

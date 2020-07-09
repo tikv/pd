@@ -296,9 +296,9 @@ const (
 	locationImprove   = "improve"
 )
 
-// NewLocationSafeguard creates a filter that filters all stores that have
+// newLocationSafeguard creates a filter that filters all stores that have
 // lower distinct score than specified store.
-func NewLocationSafeguard(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+func newLocationSafeguard(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
 	return newDistinctScoreFilter(scope, labels, stores, source, locationSafeguard)
 }
 
@@ -358,6 +358,8 @@ type StoreStateFilter struct {
 	TransferLeader bool
 	// Set true if the schedule involves any move region operation.
 	MoveRegion bool
+	// Set true if allows temporary states.
+	AllowTemporaryStates bool
 }
 
 // Scope returns the scheduler or the checker which the filter acts on.
@@ -370,18 +372,107 @@ func (f StoreStateFilter) Type() string {
 	return "store-state-filter"
 }
 
+// conditionFunc defines condition to determine a store should be selected.
+// It should consider if the filter allows temporary states.
+type conditionFunc func(opt.Options, *core.StoreInfo) bool
+
+func (f StoreStateFilter) isTombstone(opt opt.Options, store *core.StoreInfo) bool {
+	return store.IsTombstone()
+}
+
+func (f StoreStateFilter) isDown(opt opt.Options, store *core.StoreInfo) bool {
+	return store.DownTime() > opt.GetMaxStoreDownTime()
+}
+
+func (f StoreStateFilter) isOffline(opt opt.Options, store *core.StoreInfo) bool {
+	return store.IsOffline()
+}
+
+func (f StoreStateFilter) pauseLeaderTransfer(opt opt.Options, store *core.StoreInfo) bool {
+	return !store.AllowLeaderTransfer()
+}
+
+func (f StoreStateFilter) isDisconnected(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates && store.IsDisconnected()
+}
+
+func (f StoreStateFilter) isBusy(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates && store.IsBusy()
+}
+
+func (f StoreStateFilter) exceedRemoveLimit(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer)
+}
+
+func (f StoreStateFilter) exceedAddLimit(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer)
+}
+
+func (f StoreStateFilter) tooManySnapshots(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount())
+}
+
+func (f StoreStateFilter) tooManyPendingPeers(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates &&
+		opt.GetMaxPendingPeerCount() > 0 &&
+		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount())
+}
+
+func (f StoreStateFilter) hasRejectLeaderProperty(opts opt.Options, store *core.StoreInfo) bool {
+	return opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())
+}
+
+// The condition table.
+// Y: the condition is temporary (expected to become false soon).
+// N: the condition is expected to be true for a long time.
+// X means when the condition is true, the store CANNOT be selected.
+//
+// Condition    Down Offline Tomb Pause Disconn Busy RmLimit AddLimit Snap Pending Reject
+// IsTemporary  N    N       N    N     Y       Y    Y       Y        Y    Y       N
+//
+// LeaderSource X            X    X     X
+// RegionSource                                 X    X                X
+// LeaderTarget X    X       X    X     X       X                                  X
+// RegionTarget X    X       X          X       X            X        X    X
+
+const (
+	leaderSource = iota
+	regionSource
+	leaderTarget
+	regionTarget
+)
+
+func (f StoreStateFilter) anyConditionMatch(typ int, opt opt.Options, store *core.StoreInfo) bool {
+	var funcs []conditionFunc
+	switch typ {
+	case leaderSource:
+		funcs = []conditionFunc{f.isTombstone, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
+	case regionSource:
+		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
+	case leaderTarget:
+		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.pauseLeaderTransfer,
+			f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+	case regionTarget:
+		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy,
+			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
+	}
+	for _, cf := range funcs {
+		if cf(opt, store) {
+			return true
+		}
+	}
+	return false
+}
+
 // Source returns true when the store can be selected as the schedule
 // source.
-func (f StoreStateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	if store.IsTombstone() ||
-		store.DownTime() > opt.GetMaxStoreDownTime() {
+func (f StoreStateFilter) Source(opts opt.Options, store *core.StoreInfo) bool {
+	if f.TransferLeader && f.anyConditionMatch(leaderSource, opts, store) {
 		return false
 	}
-	if f.TransferLeader && (store.IsDisconnected() || store.IsBlocked()) {
-		return false
-	}
-
-	if f.MoveRegion && !f.filterMoveRegion(opt, true, store) {
+	if f.MoveRegion && f.anyConditionMatch(regionSource, opts, store) {
 		return false
 	}
 	return true
@@ -390,44 +481,10 @@ func (f StoreStateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 // Target returns true when the store can be selected as the schedule
 // target.
 func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
-	if store.IsTombstone() ||
-		store.IsOffline() ||
-		store.DownTime() > opts.GetMaxStoreDownTime() {
+	if f.TransferLeader && f.anyConditionMatch(leaderTarget, opts, store) {
 		return false
 	}
-	if f.TransferLeader &&
-		(store.IsDisconnected() ||
-			store.IsBlocked() ||
-			store.IsBusy() ||
-			opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())) {
-		return false
-	}
-
-	if f.MoveRegion {
-		// only target consider the pending peers because pending more means the disk is slower.
-		if opts.GetMaxPendingPeerCount() > 0 && store.GetPendingPeerCount() > int(opts.GetMaxPendingPeerCount()) {
-			return false
-		}
-
-		if !f.filterMoveRegion(opts, false, store) {
-			return false
-		}
-	}
-	return true
-}
-
-func (f StoreStateFilter) filterMoveRegion(opt opt.Options, isSource bool, store *core.StoreInfo) bool {
-	if store.IsBusy() {
-		return false
-	}
-
-	if (isSource && !store.IsAvailable(storelimit.RemovePeer)) || (!isSource && !store.IsAvailable(storelimit.AddPeer)) {
-		return false
-	}
-
-	if uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount() {
+	if f.MoveRegion && f.anyConditionMatch(regionTarget, opts, store) {
 		return false
 	}
 	return true
@@ -477,10 +534,10 @@ type ruleFitFilter struct {
 	oldStore uint64
 }
 
-// NewRuleFitFilter creates a filter that ensures after replace a peer with new
+// newRuleFitFilter creates a filter that ensures after replace a peer with new
 // one, the isolation level will not decrease. Its function is the same as
 // distinctScoreFilter but used when placement rules is enabled.
-func NewRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldStoreID uint64) Filter {
+func newRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldStoreID uint64) Filter {
 	return &ruleFitFilter{
 		scope:    scope,
 		fitter:   fitter,
@@ -506,6 +563,15 @@ func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	region := f.region.Clone(core.WithReplacePeerStore(f.oldStore, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
+}
+
+// NewPlacementSafeguard creates a filter that ensures after replace a peer with new
+// peer, the placement restriction will not become worse.
+func NewPlacementSafeguard(scope string, cluster opt.Cluster, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+	if cluster.IsPlacementRulesEnabled() {
+		return newRuleFitFilter(scope, cluster, region, sourceStore.GetID())
+	}
+	return newLocationSafeguard(scope, cluster.GetLocationLabels(), cluster.GetRegionStores(region), sourceStore)
 }
 
 type engineFilter struct {

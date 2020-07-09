@@ -170,6 +170,46 @@ func (s *testTsoSuite) TestTsoCount0(c *C) {
 	c.Assert(err, NotNil)
 }
 
+func (s *testTsoSuite) TestRequestFollower(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 2)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	var followerServer *tests.TestServer
+	for _, s := range cluster.GetServers() {
+		if s.GetConfig().Name != cluster.GetLeader() {
+			followerServer = s
+		}
+	}
+	c.Assert(followerServer, NotNil)
+
+	grpcPDClient := testutil.MustNewGrpcClient(c, followerServer.GetAddr())
+	clusterID := followerServer.GetClusterID()
+	req := &pdpb.TsoRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tsoClient, err := grpcPDClient.Tso(ctx)
+	c.Assert(err, IsNil)
+	defer tsoClient.CloseSend()
+
+	start := time.Now()
+	err = tsoClient.Send(req)
+	c.Assert(err, IsNil)
+	_, err = tsoClient.Recv()
+	c.Assert(err, NotNil)
+
+	// Requesting follower should fail fast, or the unavailable time will be
+	// too long.
+	c.Assert(time.Since(start), Less, time.Second)
+}
+
 var _ = Suite(&testTimeFallBackSuite{})
 
 type testTimeFallBackSuite struct {
