@@ -23,11 +23,19 @@ import (
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/utils"
 
 	"github.com/pingcap/pd/v4/pkg/dashboard/adapter"
 	"github.com/pingcap/pd/v4/pkg/dashboard/keyvisual"
 	ui "github.com/pingcap/pd/v4/pkg/dashboard/uiserver"
 	"github.com/pingcap/pd/v4/server"
+)
+
+var (
+	InternalVersion = "Unknown"
+	PDVersion       = "Unknown"
+	BuildTime       = "Unknown"
+	BuildGitHash    = "Unknown"
 )
 
 var (
@@ -84,6 +92,13 @@ func GetServiceBuilders() []server.HandlerBuilder {
 				stoppedHandler,
 				assets,
 				keyvisual.GenCustomDataProvider(srv),
+				&utils.VersionInfo{
+					Standalone:      false,
+					InternalVersion: InternalVersion,
+					PDVersion:       PDVersion,
+					BuildTime:       BuildTime,
+					BuildGitHash:    BuildGitHash,
+				},
 			)
 
 			m := adapter.NewManager(srv, s, redirector)

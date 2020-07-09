@@ -12,6 +12,7 @@ default*
 *.bak
 .vscode/
 /.dashboard_asset_cache
+/.dashboard_build_temp
 /.tools/bin
 docs/swagger/*
 !docs/swagger/placeholder.go
