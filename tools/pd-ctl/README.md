@@ -189,7 +189,9 @@ This option only works when key type is "table".
     >> config set enable-cross-table-merge true  // Enable cross table merge.
     ```
 
-- `key-type` specifies the key encoding type used by the cluster. There are some strategics supported: ["table", "raw", "txn"], default: "table". When key type is "raw" or "txn", PD will be allowed to merge region cross table. 
+- `key-type` specifies the key encoding type used by the cluster. There are some strategics supported: ["table", "raw", "txn"], default: "table". 
+When key type is "raw" or "txn", PD will be allowed to merge region cross table, they usually used without TiDB. 
+If there is TiDB in cluster, `key-type` must be `table`.
 
     ```bash
     >> config set key-type raw  // Enable cross table merge.
