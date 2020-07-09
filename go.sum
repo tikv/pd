@@ -60,8 +60,6 @@ github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4 h1:qk/FSDDxo05w
 github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
 github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 h1:clC1lXBpe2kTj2VHdaIu9ajZQe4kcEY9j0NsnDDBZ3o=
 github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385/go.mod h1:0vRUJqYpeSZifjYj7uP3BG/gKcuzL9xWVV/Y+cK33KM=
-github.com/elazarl/go-bindata-assetfs v1.0.0 h1:G/bYguwHIzWq9ZoyUQqrjTmJbbYn3j3CKKpKinvZLFk=
-github.com/elazarl/go-bindata-assetfs v1.0.0/go.mod h1:v+YaWX3bdea5J/mo8dSETolEo7R71Vk1u8bnjau5yw4=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/erikstmartin/go-testdb v0.0.0-20160219214506-8d10e4a1bae5 h1:Yzb9+7DPaBjB8zlTR87/ElzFsnQfuHnVUVqpZZIcV5Y=
@@ -276,14 +274,8 @@ github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 h1:q2e307iGHPdTGp
 github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5/go.mod h1:jvVRKCrJTQWu0XVbaOlby/2lO20uSCHEMzzplHXte1o=
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d h1:U+PMnTlV2tu7RuMK5etusZG3Cf+rpow5hqQByeCzJ2g=
 github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d/go.mod h1:lXfE4PvvTW5xOjO6Mba8zDPyw8M93B6AQ7frTGnMlA8=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200619091231-6843d6e0b7aa h1:FWFt6j3DcCPxmKoVvHzqc/P1SjLkHYvNqCJPqP7+kOM=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200619091231-6843d6e0b7aa/go.mod h1:9yaAM77sPfa5/f6sdxr3jSkKfIz463KRHyiFHiGjdes=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200707055734-b6c9547b781d h1:x2XF09JOH8Mr5TjyXhq8DWJohVYKlhvCHcT+dDvbhLk=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200707055734-b6c9547b781d/go.mod h1:9yaAM77sPfa5/f6sdxr3jSkKfIz463KRHyiFHiGjdes=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200709133611-bdd04d48608f h1:CbHkP+9nom6GrUF0UGLtEEKzG8tGtKZAO02rQQcbLOo=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200709133611-bdd04d48608f/go.mod h1:9yaAM77sPfa5/f6sdxr3jSkKfIz463KRHyiFHiGjdes=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200709135726-f2bf712b48a5 h1:w9l+u1Y4vuCDUuWeBgrwoQ6JXV1Jv1zelLDnNdYzhtI=
-github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200709135726-f2bf712b48a5/go.mod h1:9yaAM77sPfa5/f6sdxr3jSkKfIz463KRHyiFHiGjdes=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200709165916-e2917756811f h1:PA8KxZKGHIONBSouZ8v4PchdgaZyQ1CgOQ4gcG0a0Ys=
+github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200709165916-e2917756811f/go.mod h1:9yaAM77sPfa5/f6sdxr3jSkKfIz463KRHyiFHiGjdes=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8 h1:USx2/E1bX46VG32FIw034Au6seQ2fY9NEILmNh/UlQg=
 github.com/pingcap/check v0.0.0-20190102082844-67f458068fc8/go.mod h1:B1+S9LNcuMyLH/4HMTViQOJevkGiik3wW2AN9zb2fNQ=
 github.com/pingcap/check v0.0.0-20191107115940-caf2b9e6ccf4 h1:iRtOAQ6FXkY/BGvst3CDfTva4nTqh6CL8WXvanLdbu0=
