@@ -496,12 +496,12 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	//|----------|-----------------|
 	//|    1     |     7.5MB       |
 	//|    2     |     4.9MB       |
-	//|    3     |     4.5MB       |
+	//|    3     |     3.7MB       |
 	//|    4     |       6MB       |
 	//|    5     |       0MB       |
 	tc.UpdateStorageReadBytes(1, 7.5*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(2, 4.9*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 3.7*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(4, 6*MB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(5, 0)
 
@@ -642,6 +642,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	// For test
 	hb.(*hotScheduler).conf.GreatDecRatio = 0.99
 	hb.(*hotScheduler).conf.MinorDecRatio = 1
+	hb.(*hotScheduler).conf.DstToleranceRatio = 1
 
 	for i := 0; i < 2; i++ {
 		// 0: byte rate
