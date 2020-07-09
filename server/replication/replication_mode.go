@@ -295,7 +295,7 @@ func (m *ModeManager) drSwitchToAsyncWithLock() error {
 		return err
 	}
 	m.drAutoSync = dr
-	log.Info("switched to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Duration("cost", time.Now().Sub(startTime)))
+	log.Info("switched to async state", zap.String("replicate-mode", modeDRAutoSync), zap.Duration("cost", time.Since(startTime)))
 	return nil
 }
 
@@ -322,7 +322,7 @@ func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 	}
 	m.drAutoSync = dr
 	m.drRecoverKey, m.drRecoverCount = nil, 0
-	log.Info("switched to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Duration("cost", time.Now().Sub(startTime)))
+	log.Info("switched to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), zap.Duration("cost", time.Since(startTime)))
 	return nil
 }
 
@@ -344,7 +344,7 @@ func (m *ModeManager) drSwitchToSync() error {
 		return err
 	}
 	m.drAutoSync = dr
-	log.Info("switched to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Duration("cost", time.Now().Sub(startTime)))
+	log.Info("switched to sync state", zap.String("replicate-mode", modeDRAutoSync), zap.Duration("cost", time.Since(startTime)))
 	return nil
 }
 
