@@ -401,12 +401,13 @@ func (c *coordinator) resetSchedulerMetrics() {
 
 func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
-	defer c.RUnlock()
 	// Collects hot write region metrics.
 	s, ok := c.schedulers[schedulers.HotRegionName]
 	if !ok {
+		c.RUnlock()
 		return
 	}
+	c.RUnlock()
 	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
 	pendings := s.Scheduler.(hasHotStatus).GetWritePendingInfluence()
