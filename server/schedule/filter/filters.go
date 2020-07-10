@@ -598,8 +598,7 @@ func (f *ruleLeaderFitFilter) Source(opt opt.Options, store *core.StoreInfo) boo
 }
 
 func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	oldLeaderPeer := f.region.GetLeader()
-	oldLeaderPeerReplica := *oldLeaderPeer
+	oldLeaderPeerReplica := *f.region.GetLeader()
 	oldLeaderPeerReplica.StoreId = store.GetID()
 	region := f.region.Clone(core.WithReplacePeerStore(f.oldLeaderStoreID, store.GetID()), core.WithLeader(&oldLeaderPeerReplica))
 	newFit := f.fitter.FitRegion(region)

@@ -241,7 +241,15 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster opt.Cluster, target *c
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader").Inc()
 		return nil
 	}
-	return l.createOperator(cluster, region, source, target)
+	targets := []*core.StoreInfo{
+		target,
+	}
+	finalFilters := append(l.filters, filter.NewPlacementLeaderSafeguard(l.GetName(), cluster, region, source))
+	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
+	if len(targets) < 1 {
+		return nil
+	}
+	return l.createOperator(cluster, region, source, targets[0])
 }
 
 // createOperator creates the operator according to the source and target store.
