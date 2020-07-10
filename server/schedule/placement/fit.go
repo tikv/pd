@@ -123,13 +123,25 @@ func FitRegion(stores core.StoreSetInformer, region *core.RegionInfo, rules []*R
 	if len(rules) == 0 {
 		return &regionFit
 	}
-	for _, rule := range rules {
+	f := func(rule *Rule) {
 		rf := fitRule(peers, rule)
 		regionFit.RuleFits = append(regionFit.RuleFits, rf)
 		// Remove selected.
 		peers = filterPeersBy(peers, func(p *fitPeer) bool {
 			return slice.NoneOf(rf.Peers, func(i int) bool { return rf.Peers[i].Id == p.Peer.Id })
 		})
+	}
+	var defaultRule *Rule
+	for _, rule := range rules {
+		// fit default rule at last
+		if rule.GroupID == "pd" && rule.ID == "default" {
+			defaultRule = rule
+			continue
+		}
+		f(rule)
+	}
+	if defaultRule != nil {
+		f(defaultRule)
 	}
 	for _, p := range peers {
 		regionFit.OrphanPeers = append(regionFit.OrphanPeers, p.Peer)
