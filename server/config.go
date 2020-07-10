@@ -240,7 +240,10 @@ func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
 
 func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 	if len(*v) == 0 {
-		*v = defValue
+		// Make a copy to avoid changing DefaultSchedulers unexpectedly.
+		// When reloading from storage, the config is passed to json.Unmarshal.
+		// Without clone, the DefaultSchedulers could be overwritten.
+		*v = append(defValue[:0:0], defValue...)
 	}
 }
 
@@ -653,7 +656,20 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+<<<<<<< HEAD:server/config.go
 	adjustSchedulers(&c.Schedulers, defaultSchedulers)
+=======
+
+	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
+
+	for k, b := range c.migrateConfigurationMap() {
+		v, err := c.parseDeprecatedFlag(meta, k, *b[0], *b[1])
+		if err != nil {
+			return err
+		}
+		*b[0], *b[1] = false, v // reset old flag false to make it ignored when marshal to JSON
+	}
+>>>>>>> 7a100e78... config: fix configuration reload (#2612):server/config/config.go
 
 	return c.validate()
 }
