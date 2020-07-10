@@ -56,8 +56,7 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) schedule() []*operator.
 	return s.lb.Schedule(s.tc)
 }
 
-func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderWithConflictRule(c *C) {
-	s.opt.EnablePlacementRules = true
+func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithConflictRule(c *C) {
 	rule := placement.Rule{
 		GroupID:  "test",
 		ID:       "1",
