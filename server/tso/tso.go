@@ -44,7 +44,8 @@ type TimestampOracle struct {
 	// For tso, set after pd becomes leader.
 	ts            unsafe.Pointer
 	lastSavedTime atomic.Value
-	lease         *member.LeaderLease
+
+	lease *member.LeaderLease
 
 	rootPath      string
 	member        string
@@ -255,7 +256,7 @@ func (t *TimestampOracle) ResetTimestamp() {
 	atomic.StorePointer(&t.ts, unsafe.Pointer(zero))
 }
 
-var maxRetryCount = 100
+var maxRetryCount = 10
 
 // GetRespTS is used to get a timestamp.
 func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
@@ -272,9 +273,7 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 	for i := 0; i < maxRetryCount; i++ {
 		current := (*atomicObject)(atomic.LoadPointer(&t.ts))
 		if current == nil || current.physical == typeutil.ZeroTime {
-			log.Error("we haven't synced timestamp ok, wait and retry", zap.Int("retry-count", i))
-			time.Sleep(200 * time.Millisecond)
-			continue
+			return pdpb.Timestamp{}, errors.New("can not get timestamp, may be not leader")
 		}
 
 		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
@@ -287,6 +286,7 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 			time.Sleep(UpdateTimestampStep)
 			continue
 		}
+		// In case lease expired after the first check.
 		if t.lease == nil || t.lease.IsExpired() {
 			return pdpb.Timestamp{}, errors.New("alloc timestamp failed, lease expired")
 		}
