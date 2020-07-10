@@ -28,14 +28,14 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      - name: Fetch Dashboard Go module
+      - name: Fetch Go module
         run: |
           go mod download
           DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap-incubator/tidb-dashboard)
-          DASHBOARD_RELEASE_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/release_version")
+          DASHBOARD_RELEASE_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/release-version")
           echo ::set-env name=DASHBOARD_DIR::"$DASHBOARD_DIR"
           echo ::set-env name=DASHBOARD_RELEASE_VERSION::"DASHBOARD_RELEASE_VERSION"
-      - name: Fetch UI source specified by version
+      - name: Fetch UI source specified by release version
         run: |
           rm -rf /tmp/dashboard
           mkdir -p /tmp/dashboard
