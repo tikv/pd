@@ -113,7 +113,7 @@ func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
 func (h *confHandler) updateConfig(cfg *config.Config, key string, value interface{}) error {
@@ -340,7 +340,7 @@ func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
 // @Tags config
@@ -372,7 +372,7 @@ func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
 // @Tags config
@@ -413,7 +413,7 @@ func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
 // @Tags config
@@ -430,7 +430,7 @@ func (h *confHandler) GetClusterVersion(w http.ResponseWriter, r *http.Request) 
 // @Accept json
 // @Param body body object string "json params"
 // @Produce json
-// @Success 200 {string} string
+// @Success 200 {string} string "The cluster version is updated."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /config/cluster-version [post]
@@ -450,7 +450,7 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 		apiutil.ErrorResp(h.rd, w, errcode.NewInternalErr(err))
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The cluster version is updated.")
 }
 
 // @Tags config
@@ -467,7 +467,7 @@ func (h *confHandler) GetReplicationMode(w http.ResponseWriter, r *http.Request)
 // @Accept json
 // @Param body body object string "json params"
 // @Produce json
-// @Success 200 {string} string
+// @Success 200 {string} string "The replication mode config is updated."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/replication-mode [post]
 func (h *confHandler) SetReplicationMode(w http.ResponseWriter, r *http.Request) {
@@ -480,5 +480,5 @@ func (h *confHandler) SetReplicationMode(w http.ResponseWriter, r *http.Request)
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The replication mode config is updated.")
 }

@@ -195,7 +195,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store is set as Offline or Tombstone.")
 }
 
 // @Tags store
@@ -230,7 +230,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's state is updated.")
 }
 
 // FIXME: details of input json body params
@@ -276,7 +276,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
 // FIXME: details of input json body params
@@ -329,7 +329,7 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
 // FIXME: details of input json body params
@@ -386,7 +386,7 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
 type storesHandler struct {
@@ -404,7 +404,7 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 // @Tags store
 // @Summary Remove tombstone records in the cluster.
 // @Produce json
-// @Success 200 {string} string "Remove tomestone success."
+// @Success 200 {string} string "Remove tomestone successfully."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/remove-tombstone [delete]
 func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
@@ -415,7 +415,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "Remove tomestone successfully.")
 }
 
 // FIXME: details of input json body params
@@ -424,7 +424,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 // @Accept json
 // @Param body body object true "json params"
 // @Produce json
-// @Success 200 {string} string "Set store limit success."
+// @Success 200 {string} string "Set store limit successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [post]
@@ -458,7 +458,7 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "Set store limit successfully.")
 }
 
 // FIXME: details of output json body
@@ -478,7 +478,7 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Param body body storelimit.Scene true "Store limit scene"
 // @Produce json
-// @Success 200 {string} string "Set store limit scene success."
+// @Success 200 {string} string "Set store limit scene successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit/scene [post]
@@ -494,13 +494,13 @@ func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.Handler.SetStoreLimitScene(scene, typeValue)
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "Set store limit scene successfully.")
 }
 
 // @Tags store
 // @Summary Get limit scene in the cluster.
 // @Produce json
-// @Success 200 {string} string "Set store limit scene success."
+// @Success 200 {string} string "Set store limit scene successfully."
 // @Router /stores/limit/scene [get]
 func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
 	typeName := r.URL.Query().Get("type")
