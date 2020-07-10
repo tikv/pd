@@ -76,6 +76,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderWithConflictRule(c *C
 		LocationLabels: []string{"host"},
 	}
 	c.Check(s.tc.SetRule(&rule), IsNil)
+	c.Check(s.tc.DeleteRule("pd", "default"), IsNil)
 
 	// Stores:     1    2    3    4
 	// Leaders:    1    0    0    0
