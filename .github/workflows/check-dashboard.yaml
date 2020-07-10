@@ -45,4 +45,4 @@ jobs:
           unzip source.zip
       - name: Check diff
         run: |
-          diff -qr ${DASHBOARD_DIR}/ui/ /tmp/dashboard/tidb-dashboard-v${DASHBOARD_RELEASE_VERSION}/ui/
+          diff -qr ${DASHBOARD_DIR}/ui/ /tmp/dashboard/tidb-dashboard-${DASHBOARD_RELEASE_VERSION}/ui/
