@@ -34,7 +34,7 @@ jobs:
           DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap-incubator/tidb-dashboard)
           DASHBOARD_RELEASE_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/release-version")
           echo ::set-env name=DASHBOARD_DIR::"$DASHBOARD_DIR"
-          echo ::set-env name=DASHBOARD_RELEASE_VERSION::"DASHBOARD_RELEASE_VERSION"
+          echo ::set-env name=DASHBOARD_RELEASE_VERSION::"$DASHBOARD_RELEASE_VERSION"
       - name: Fetch UI source specified by release version
         run: |
           rm -rf /tmp/dashboard
