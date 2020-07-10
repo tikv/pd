@@ -53,6 +53,7 @@ type FileReplicater interface {
 	GetDrAutoSyncStatus(ctx context.Context, member *pdpb.Member) *DrAutoSyncStatus
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error)
+	PersistFile(name string, data []byte) error
 }
 
 const drStatusFile = "DR_STATE"
@@ -192,7 +193,12 @@ func (m *ModeManager) CheckDRAutoSyncLoop(ctx context.Context, member *member.Me
 							zap.Uint64("memberID", member.Member().MemberId),
 							zap.Uint64("leaderID", member.GetLeader().MemberId),
 							zap.Time("expireTime", status.ExpireTime))
-						if err := m.storage.SaveReplicationStatus(modeDRAutoSync, status); err != nil {
+						data, err := json.Marshal(status)
+						if err != nil {
+							log.Warn("failed to save replication status", zap.Error(err))
+						}
+						err = m.fileReplicater.PersistFile(drStatusFile, data)
+						if err != nil {
 							log.Warn("failed to save replication status", zap.Error(err))
 						}
 						m.drAutoSync = *status

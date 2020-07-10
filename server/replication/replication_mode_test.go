@@ -152,6 +152,10 @@ func (rep *mockFileReplicator) GetMembers(context.Context, *pdpb.GetMembersReque
 	}, nil
 }
 
+func (rep *mockFileReplicator) PersistFile(name string, data []byte) error {
+	return nil
+}
+
 func (s *testReplicationMode) TestStateSwitch(c *C) {
 	store := core.NewStorage(kv.NewMemoryKV())
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
