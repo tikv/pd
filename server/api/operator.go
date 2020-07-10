@@ -284,7 +284,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.r.JSON(w, http.StatusOK, nil)
+	h.r.JSON(w, http.StatusOK, "The operator is created.")
 }
 
 // @Tags operator
@@ -309,7 +309,7 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.r.JSON(w, http.StatusOK, nil)
+	h.r.JSON(w, http.StatusOK, "The pending operator is canceled.")
 }
 
 func parseStoreIDs(v interface{}) (map[uint64]struct{}, bool) {
