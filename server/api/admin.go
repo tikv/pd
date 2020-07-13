@@ -19,6 +19,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/joomcode/errorx"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/unrolled/render"
@@ -85,7 +86,7 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err = handler.ResetTS(ts); err != nil {
-		if err == server.ErrServerNotStarted {
+		if errorx.IsOfType(err, server.ErrServerNotStarted) {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {
 			h.rd.JSON(w, http.StatusForbidden, err.Error())

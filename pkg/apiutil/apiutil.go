@@ -21,8 +21,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/pingcap/errcode"
-	"github.com/pingcap/log"
+	"github.com/joomcode/errorx"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -35,19 +34,10 @@ func DeferClose(c io.Closer, err *error) {
 	}
 }
 
-// JSONError lets callers check for just one error type
-type JSONError struct {
-	Err error
-}
-
-func (e JSONError) Error() string {
-	return e.Err.Error()
-}
-
 func tagJSONError(err error) error {
 	switch err.(type) {
 	case *json.SyntaxError, *json.UnmarshalTypeError:
-		return JSONError{err}
+		return ErrJSON.WrapWithNoMessage(err)
 	}
 	return err
 }
@@ -59,7 +49,7 @@ func ReadJSON(r io.ReadCloser, data interface{}) error {
 	defer DeferClose(r, &err)
 	b, err := ioutil.ReadAll(r)
 	if err != nil {
-		return errors.WithStack(err)
+		return ErrIO.Wrap(err, "failed to read")
 	}
 
 	err = json.Unmarshal(b, data)
@@ -98,32 +88,10 @@ func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.Read
 	if err == nil {
 		return nil
 	}
-	var errCode errcode.ErrorCode
-	if jsonErr, ok := errors.Cause(err).(JSONError); ok {
-		errCode = errcode.NewInvalidInputErr(jsonErr.Err)
-	} else {
-		errCode = errcode.NewInternalErr(err)
-	}
-	ErrorResp(rd, w, errCode)
-	return err
-}
-
-// ErrorResp Respond to the client about the given error, integrating with errcode.ErrorCode.
-//
-// Important: if the `err` is just an error and not an errcode.ErrorCode (given by errors.Cause),
-// then by default an error is assumed to be a 500 Internal Error.
-//
-// If the error is nil, this also responds with a 500 and logs at the error level.
-func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
-	if err == nil {
-		log.Error("nil is given to errorResp")
-		rd.JSON(w, http.StatusInternalServerError, "nil error")
-		return
-	}
-	if errCode := errcode.CodeChain(err); errCode != nil {
-		w.Header().Set("TiDB-Error-Code", errCode.Code().CodeStr().String())
-		rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
+	if errorx.IsOfType(err, ErrJSON) {
+		rd.JSON(w, http.StatusBadRequest, err.Error())
 	} else {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
+	return err
 }

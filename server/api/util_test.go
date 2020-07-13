@@ -52,7 +52,7 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 	var input []string
 	err := apiutil.ReadJSONRespondError(rd, response, body, &input)
 	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, "json: cannot unmarshal object into Go value of type []string")
+	c.Assert(err.Error(), Equals, "apiutil.json_error: json: cannot unmarshal object into Go value of type []string")
 	result := response.Result()
 	c.Assert(result.StatusCode, Equals, 400)
 
@@ -61,7 +61,7 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 		var input []string
 		err := apiutil.ReadJSONRespondError(rd, response, body, &input)
 		c.Assert(err, NotNil)
-		c.Assert(err.Error(), Equals, "unexpected end of JSON input")
+		c.Assert(err.Error(), Equals, "apiutil.json_error: unexpected end of JSON input")
 		result := response.Result()
 		c.Assert(result.StatusCode, Equals, 400)
 	}

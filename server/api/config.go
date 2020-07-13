@@ -22,7 +22,6 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
@@ -441,13 +440,13 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 	}
 	version, ok := input["cluster-version"]
 	if !ok {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set cluster-version")))
+		h.rd.JSON(w, http.StatusBadRequest, "not set cluster-version")
 		return
 	}
 
 	err := h.svr.SetClusterVersion(version)
 	if err != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInternalErr(err))
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, nil)

@@ -794,7 +794,7 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 	e := region.GetRegionEpoch()
 
 	if e.GetVersion() < o.GetVersion() || e.GetConfVer() < o.GetConfVer() {
-		return core.ErrRegionIsStale(region, origin)
+		return core.ErrRegionIsStale.New("region: %v, origin: %v", region, origin)
 	}
 
 	return nil

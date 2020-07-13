@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -43,31 +42,6 @@ import (
 var (
 	// SchedulerConfigHandlerPath is the api router path of the schedule config handler.
 	SchedulerConfigHandlerPath = "/api/v1/scheduler-config"
-
-	// ErrServerNotStarted is error info for server not started.
-	ErrServerNotStarted = errors.New("The server has not been started")
-	// ErrOperatorNotFound is error info for operator not found.
-	ErrOperatorNotFound = errors.New("operator not found")
-	// ErrAddOperator is error info for already have an operator when adding operator.
-	ErrAddOperator = errors.New("failed to add operator, maybe already have one")
-	// ErrRegionNotAdjacent is error info for region not adjacent.
-	ErrRegionNotAdjacent = errors.New("two regions are not adjacent")
-	// ErrRegionNotFound is error info for region not found.
-	ErrRegionNotFound = func(regionID uint64) error {
-		return errors.Errorf("region %v not found", regionID)
-	}
-	// ErrRegionAbnormalPeer is error info for region has abonormal peer.
-	ErrRegionAbnormalPeer = func(regionID uint64) error {
-		return errors.Errorf("region %v has abnormal peer", regionID)
-	}
-	// ErrStoreNotFound is error info for store not found.
-	ErrStoreNotFound = func(storeID uint64) error {
-		return errors.Errorf("store %v not found", storeID)
-	}
-	// ErrPluginNotFound is error info for plugin not found.
-	ErrPluginNotFound = func(pluginPath string) error {
-		return errors.Errorf("plugin is not found: %s", pluginPath)
-	}
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
@@ -143,7 +117,7 @@ func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
 		if store == nil {
-			return nil, ErrStoreNotFound(storeID)
+			return nil, NewStoreNotFoundErr(storeID)
 		}
 		stores = append(stores, store)
 	}
@@ -323,7 +297,7 @@ func (h *Handler) GetOperator(regionID uint64) (*operator.Operator, error) {
 
 	op := c.GetOperator(regionID)
 	if op == nil {
-		return nil, ErrOperatorNotFound
+		return nil, NewOperatorNotFoundErr(regionID)
 	}
 
 	return op, nil
@@ -338,7 +312,7 @@ func (h *Handler) GetOperatorStatus(regionID uint64) (*schedule.OperatorWithStat
 
 	op := c.GetOperatorStatus(regionID)
 	if op == nil {
-		return nil, ErrOperatorNotFound
+		return nil, NewOperatorNotFoundErr(regionID)
 	}
 
 	return op, nil
@@ -353,7 +327,7 @@ func (h *Handler) RemoveOperator(regionID uint64) error {
 
 	op := c.GetOperator(regionID)
 	if op == nil {
-		return ErrOperatorNotFound
+		return NewOperatorNotFoundErr(regionID)
 	}
 
 	_ = c.RemoveOperator(op)
@@ -455,7 +429,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return ErrRegionNotFound(regionID)
+		return NewRegionNotFoundErr(regionID)
 	}
 
 	newLeader := region.GetStoreVoter(storeID)
@@ -469,7 +443,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
-		return errors.WithStack(ErrAddOperator)
+		return errors.WithStack(NewAddOperatorErr)
 	}
 	return nil
 }
@@ -488,7 +462,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return ErrRegionNotFound(regionID)
+		return NewRegionNotFoundErr(regionID)
 	}
 
 	if len(storeIDs) > c.GetMaxReplicas() {
@@ -502,7 +476,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 			return core.NewStoreNotFoundErr(id)
 		}
 		if store.IsTombstone() {
-			return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: id})
+			return core.NewStoreTombstonedErr(id)
 		}
 	}
 
@@ -517,7 +491,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
-		return errors.WithStack(ErrAddOperator)
+		return errors.WithStack(NewAddOperatorErr)
 	}
 	return nil
 }
@@ -531,7 +505,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return ErrRegionNotFound(regionID)
+		return NewRegionNotFoundErr(regionID)
 	}
 
 	oldPeer := region.GetStorePeer(fromStoreID)
@@ -544,7 +518,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return core.NewStoreNotFoundErr(toStoreID)
 	}
 	if toStore.IsTombstone() {
-		return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
+		return core.NewStoreTombstonedErr(toStoreID)
 	}
 
 	newPeer := &metapb.Peer{StoreId: toStoreID, IsLearner: oldPeer.GetIsLearner()}
@@ -554,7 +528,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
-		return errors.WithStack(ErrAddOperator)
+		return errors.WithStack(NewAddOperatorErr)
 	}
 	return nil
 }
@@ -568,7 +542,7 @@ func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (
 
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return nil, nil, ErrRegionNotFound(regionID)
+		return nil, nil, NewRegionNotFoundErr(regionID)
 	}
 
 	if region.GetStorePeer(toStoreID) != nil {
@@ -580,7 +554,7 @@ func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (
 		return nil, nil, core.NewStoreNotFoundErr(toStoreID)
 	}
 	if toStore.IsTombstone() {
-		return nil, nil, errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
+		return nil, nil, core.NewStoreTombstonedErr(toStoreID)
 	}
 
 	return c, region, nil
@@ -600,7 +574,7 @@ func (h *Handler) AddAddPeerOperator(regionID uint64, toStoreID uint64) error {
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
-		return errors.WithStack(ErrAddOperator)
+		return errors.WithStack(NewAddOperatorErr)
 	}
 	return nil
 }
@@ -623,7 +597,7 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
-		return errors.WithStack(ErrAddOperator)
+		return errors.WithStack(NewAddOperatorErr)
 	}
 	return nil
 }
@@ -637,7 +611,7 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return ErrRegionNotFound(regionID)
+		return NewRegionNotFoundErr(regionID)
 	}
 
 	if region.GetStorePeer(fromStoreID) == nil {
@@ -650,7 +624,7 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
-		return errors.WithStack(ErrAddOperator)
+		return errors.WithStack(NewAddOperatorErr)
 	}
 	return nil
 }
@@ -664,26 +638,26 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return ErrRegionNotFound(regionID)
+		return NewRegionNotFoundErr(regionID)
 	}
 
 	target := c.GetRegion(targetID)
 	if target == nil {
-		return ErrRegionNotFound(targetID)
+		return NewRegionNotFoundErr(targetID)
 	}
 
 	if !opt.IsRegionHealthy(c, region) || !opt.IsRegionReplicated(c, region) {
-		return ErrRegionAbnormalPeer(regionID)
+		return NewRegionAbnormalPeerErr(regionID)
 	}
 
 	if !opt.IsRegionHealthy(c, target) || !opt.IsRegionReplicated(c, target) {
-		return ErrRegionAbnormalPeer(targetID)
+		return NewRegionAbnormalPeerErr(targetID)
 	}
 
 	// for the case first region (start key is nil) with the last region (end key is nil) but not adjacent
 	if (!bytes.Equal(region.GetStartKey(), target.GetEndKey()) || len(region.GetStartKey()) == 0) &&
 		(!bytes.Equal(region.GetEndKey(), target.GetStartKey()) || len(region.GetEndKey()) == 0) {
-		return ErrRegionNotAdjacent
+		return NewRegionNotAdjacentErr
 	}
 
 	ops, err := operator.CreateMergeRegionOperator("admin-merge-region", c, region, target, operator.OpAdmin)
@@ -692,7 +666,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return err
 	}
 	if ok := c.GetOperatorController().AddOperator(ops...); !ok {
-		return errors.WithStack(ErrAddOperator)
+		return errors.WithStack(NewAddOperatorErr)
 	}
 	return nil
 }
@@ -706,7 +680,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return ErrRegionNotFound(regionID)
+		return NewRegionNotFoundErr(regionID)
 	}
 
 	policy, ok := pdpb.CheckPolicy_value[strings.ToUpper(policyStr)]
@@ -727,7 +701,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 
 	op := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, pdpb.CheckPolicy(policy), splitKeys)
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
-		return errors.WithStack(ErrAddOperator)
+		return errors.WithStack(NewAddOperatorErr)
 	}
 	return nil
 }
@@ -741,7 +715,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
 
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return ErrRegionNotFound(regionID)
+		return NewRegionNotFoundErr(regionID)
 	}
 
 	if c.IsRegionHot(region) {
@@ -757,7 +731,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
 		return nil
 	}
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
-		return errors.WithStack(ErrAddOperator)
+		return errors.WithStack(NewAddOperatorErr)
 	}
 	return nil
 }
@@ -835,7 +809,7 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 func (h *Handler) ResetTS(ts uint64) error {
 	tsoServer := h.s.tso
 	if tsoServer == nil {
-		return ErrServerNotStarted
+		return NewServerNotStartedErr
 	}
 	return tsoServer.ResetUserTimestamp(ts)
 }
@@ -875,7 +849,7 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 		ch <- cluster.PluginUnload
 		return nil
 	}
-	return ErrPluginNotFound(pluginPath)
+	return NewPluginNotFoundErr(pluginPath)
 }
 
 // GetAddr returns the server urls for clients.

@@ -100,7 +100,7 @@ func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
 	}
 	region := cluster.GetRegion(regionID)
 	if region == nil {
-		h.rd.JSON(w, http.StatusNotFound, server.ErrRegionNotFound(regionID).Error())
+		h.rd.JSON(w, http.StatusNotFound, server.NewRegionNotFoundErr(regionID).Error())
 		return
 	}
 	rules := cluster.GetRuleManager().GetRulesForApplyRegion(region)

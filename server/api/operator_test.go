@@ -71,7 +71,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 
 	regionURL := fmt.Sprintf("%s/operators/%d", s.urlPrefix, region.GetId())
 	operator := mustReadURL(c, regionURL)
-	c.Assert(strings.Contains(operator, "operator not found"), IsTrue)
+	c.Assert(strings.Contains(operator, "operator_not_found"), IsTrue)
 
 	mustPutStore(c, s.svr, 3, metapb.StoreState_Up, nil)
 	err := postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`))
@@ -128,10 +128,10 @@ func (s *testOperatorSuite) TestMergeRegionOperator(c *C) {
 	s.svr.GetHandler().RemoveOperator(20)
 	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`))
 	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "not adjacent"), IsTrue)
+	c.Assert(strings.Contains(err.Error(), "regions_not_adjacent"), IsTrue)
 	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`))
 
-	c.Assert(strings.Contains(err.Error(), "not adjacent"), IsTrue)
+	c.Assert(strings.Contains(err.Error(), "regions_not_adjacent"), IsTrue)
 	c.Assert(err, NotNil)
 }
 

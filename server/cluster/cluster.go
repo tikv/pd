@@ -22,7 +22,6 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -944,13 +943,12 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 // RemoveStore marks a store as offline in cluster.
 // State transition: Up -> Offline.
 func (c *RaftCluster) RemoveStore(storeID uint64) error {
-	op := errcode.Op("store.remove")
 	c.Lock()
 	defer c.Unlock()
 
 	store := c.GetStore(storeID)
 	if store == nil {
-		return op.AddTo(core.NewStoreNotFoundErr(storeID))
+		return core.NewStoreNotFoundErr(storeID)
 	}
 
 	// Remove an offline store should be OK, nothing to do.
@@ -959,7 +957,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 	}
 
 	if store.IsTombstone() {
-		return op.AddTo(core.StoreTombstonedErr{StoreID: storeID})
+		return core.NewStoreTombstonedErr(storeID)
 	}
 
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline))

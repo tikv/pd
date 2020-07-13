@@ -79,13 +79,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 			name:    "Parse Json failed",
 			rawData: parseErrData,
 			success: false,
-			response: `{
-  "code": "input",
-  "msg": "invalid character 'o' in literal false (expecting 'a')",
-  "data": {
-    "Offset": 2
-  }
-}
+			response: `"apiutil.json_error: invalid character 'o' in literal false (expecting 'a')"
 `,
 		},
 		{

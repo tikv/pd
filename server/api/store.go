@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/errcode"
+	"github.com/joomcode/errorx"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
@@ -149,13 +149,13 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		h.rd.JSON(w, http.StatusBadRequest, errParse.Error())
 		return
 	}
 
 	store := rc.GetStore(storeID)
 	if store == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
+		h.rd.JSON(w, http.StatusInternalServerError, server.NewStoreNotFoundErr(storeID))
 		return
 	}
 
@@ -178,7 +178,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		h.rd.JSON(w, http.StatusBadRequest, errParse.Error())
 		return
 	}
 
@@ -191,7 +191,13 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		apiutil.ErrorResp(h.rd, w, err)
+		if errorx.IsOfType(err, core.ErrStoreNotFound) {
+			h.rd.JSON(w, http.StatusNotFound, err.Error())
+		} else if errorx.IsOfType(err, core.ErrStoreTombstoned) {
+			h.rd.JSON(w, http.StatusGone, err.Error())
+		} else {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 
@@ -213,7 +219,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		h.rd.JSON(w, http.StatusBadRequest, errParse.Error())
 		return
 	}
 
@@ -248,7 +254,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		h.rd.JSON(w, http.StatusBadRequest, errParse.Error())
 		return
 	}
 
@@ -266,7 +272,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := config.ValidateLabels(labels); err != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -294,7 +300,7 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		h.rd.JSON(w, http.StatusBadRequest, errParse.Error())
 		return
 	}
 
@@ -347,13 +353,13 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		h.rd.JSON(w, http.StatusBadRequest, errParse.Error())
 		return
 	}
 
 	store := rc.GetStore(storeID)
 	if store == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
+		h.rd.JSON(w, http.StatusInternalServerError, server.NewStoreNotFoundErr(storeID))
 		return
 	}
 
@@ -411,7 +417,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 	rc := getCluster(r.Context())
 	err := rc.RemoveTombStoneRecords()
 	if err != nil {
-		apiutil.ErrorResp(h.rd, w, err)
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -538,7 +544,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
 		if store == nil {
-			h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
+			h.rd.JSON(w, http.StatusInternalServerError, server.NewStoreNotFoundErr(storeID))
 			return
 		}
 

@@ -296,7 +296,7 @@ func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, erro
 		for _, item := range bc.Regions.GetOverlaps(region) {
 			if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() {
 				bc.RUnlock()
-				return nil, ErrRegionIsStale(region.GetMeta(), item.GetMeta())
+				return nil, ErrRegionIsStale.New("region %v, origin %v", region, origin)
 			}
 		}
 	}
@@ -308,7 +308,7 @@ func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, erro
 	o := origin.GetRegionEpoch()
 	// Region meta is stale, return an error.
 	if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
-		return origin, ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
+		return origin, ErrRegionIsStale.New("region %v, origin %v", region, origin)
 	}
 	return origin, nil
 }

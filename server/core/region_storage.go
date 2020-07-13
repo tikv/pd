@@ -140,7 +140,7 @@ func loadRegions(kv kv.Base, f func(region *RegionInfo) []*RegionInfo) error {
 		for _, s := range res {
 			region := &metapb.Region{}
 			if err := region.Unmarshal([]byte(s)); err != nil {
-				return errors.WithStack(err)
+				return ErrInvalidData.Wrap(err, "region unmarshal failed")
 			}
 
 			nextID = region.GetId() + 1

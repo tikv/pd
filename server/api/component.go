@@ -17,10 +17,8 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/errcode"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/server"
-	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
 
@@ -54,12 +52,12 @@ func (h *componentHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	component, ok := input["component"]
 	if !ok {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set component")))
+		h.rd.JSON(w, http.StatusBadRequest, "not set component")
 		return
 	}
 	addr, ok := input["addr"]
 	if !ok {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errors.New("not set addr")))
+		h.rd.JSON(w, http.StatusBadRequest, "not set addr")
 		return
 	}
 	if err := rc.GetComponentManager().Register(component, addr); err != nil {
