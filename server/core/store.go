@@ -673,9 +673,7 @@ func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCo
 	}
 }
 
-// IsTiFlashStore used to judge flash store.
-// FIXME: remove the hack way
-func IsTiFlashStore(store *metapb.Store) bool {
+func IsPlacementNeeded(store *metapb.Store) bool {
 	for _, l := range store.GetLabels() {
 		if l.GetKey() == "engine" && l.GetValue() == "tiflash" {
 			return true

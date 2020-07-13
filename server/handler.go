@@ -418,6 +418,16 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
+func (h *Handler) SetLabelStoresLimit(label config.StoreLabel, ratePerMin float64, limitType storelimit.Type) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	c.SetLabelStoresLimit(label, limitType, ratePerMin)
+	return nil
+}
+
+// SetAllStoresLimit is used to set limit of all stores.
 func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Type) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
@@ -425,6 +435,15 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	}
 	c.SetAllStoresLimit(limitType, ratePerMin)
 	return nil
+}
+
+// GetAllStoresLimit is used to get limit of all stores.
+func (h *Handler) GetLabelStoresLimit(label config.StoreLabel, limitType storelimit.Type) (map[config.StoreLabel]config.StoreLimitConfig, error) {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetLabelStoresLimit(label), nil
 }
 
 // GetAllStoresLimit is used to get limit of all stores.

@@ -775,7 +775,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range raftCluster.GetStores() {
-				if !s.IsTombstone() && core.IsTiFlashStore(s.GetMeta()) {
+				if !s.IsTombstone() && core.IsPlacementNeeded(s.GetMeta()) {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}

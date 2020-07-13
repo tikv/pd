@@ -1682,6 +1682,11 @@ func (c *RaftCluster) GetStoreLimitByType(storeID uint64, typ storelimit.Type) f
 }
 
 // GetAllStoresLimit returns all store limit
+func (c *RaftCluster) GetLabelStoresLimit(label config.StoreLabel) map[config.StoreLabel]config.StoreLimitConfig {
+	return c.opt.GetLabelStoresLimit(label)
+}
+
+// GetAllStoresLimit returns all store limit
 func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
 	return c.opt.GetAllStoresLimit()
 }
@@ -1693,12 +1698,21 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
-	if core.IsTiFlashStore(store) {
-		sc = config.StoreLimitConfig{
-			AddPeer:    config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-			RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	for _, l := range store.GetLabels() {
+		label := config.StoreLabel{Key: l.GetKey(), Value: l.GetValue()}
+		if limit, ok := config.OtherStoreLimits[label]; ok {
+			sc = config.StoreLimitConfig{
+				AddPeer:    limit.GetDefaultStoreLimit(storelimit.AddPeer),
+				RemovePeer: limit.GetDefaultStoreLimit(storelimit.RemovePeer),
+			}
 		}
 	}
+	//if core.IsTiFlashStore(store) {
+	//	sc = config.StoreLimitConfig{
+	//		AddPeer:    config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+	//		RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	//	}
+	//}
 	storeID := store.GetId()
 	cfg.StoreLimit[storeID] = sc
 	c.opt.SetScheduleConfig(cfg)
@@ -1717,6 +1731,11 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
 	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
+}
+
+// SetAllStoresLimit sets all store limit for a given type and rate.
+func (c *RaftCluster) SetLabelStoresLimit(label config.StoreLabel, typ storelimit.Type, ratePerMin float64) {
+	c.opt.SetLabelStoresLimit(label, typ, ratePerMin)
 }
 
 // SetAllStoresLimit sets all store limit for a given type and rate.

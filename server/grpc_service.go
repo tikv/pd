@@ -224,7 +224,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	// NOTE: can be removed when placement rules feature is enabled by default.
-	if !s.GetConfig().Replication.EnablePlacementRules && core.IsTiFlashStore(store) {
+	if !s.GetConfig().Replication.EnablePlacementRules && core.IsPlacementNeeded(store) {
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 

@@ -221,7 +221,10 @@ var (
 	// DefaultStoreLimit is the default store limit of add peer and remove peer.
 	DefaultStoreLimit StoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
 	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
-	DefaultTiFlashStoreLimit StoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
+	//DefaultTiFlashStoreLimit StoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
+	OtherStoreLimits = map[StoreLabel]StoreLimit{
+		StoreLabel{Key: "engine", Value: "tiflash"}: {AddPeer: 30, RemovePeer: 30},
+	}
 )
 
 // StoreLimit is the default limit of adding peer and removing peer when putting stores.
@@ -583,6 +586,7 @@ type ScheduleConfig struct {
 	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
 	// StoreLimit is the limit of scheduling for stores.
 	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
+	StoreLabelLimit map[StoreLabel]StoreLimitConfig `toml:"store-label-limit" json:"store-label-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
 	//
@@ -659,6 +663,10 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	for k, v := range c.StoreLimit {
 		storeLimit[k] = v
 	}
+	storeLabelLimit := make(map[StoreLabel]StoreLimitConfig, len(c.StoreLabelLimit))
+	for k, v := range c.StoreLabelLimit {
+		storeLabelLimit[k] = v
+	}
 	return &ScheduleConfig{
 		MaxSnapshotCount:             c.MaxSnapshotCount,
 		MaxPendingPeerCount:          c.MaxPendingPeerCount,
@@ -677,6 +685,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
 		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
 		StoreLimit:                   storeLimit,
+		StoreLabelLimit:			  storeLabelLimit,
 		TolerantSizeRatio:            c.TolerantSizeRatio,
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
