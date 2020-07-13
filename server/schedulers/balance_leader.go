@@ -253,6 +253,8 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster opt.Cluster, target *c
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
 	if len(targets) < 1 {
+		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
+		schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
 		return nil
 	}
 	return l.createOperator(cluster, region, source, targets[0])
