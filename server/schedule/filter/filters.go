@@ -590,7 +590,7 @@ func (f *ruleLeaderFitFilter) Scope() string {
 }
 
 func (f *ruleLeaderFitFilter) Type() string {
-	return "rule-fit-filter"
+	return "rule-fit-leader-filter"
 }
 
 func (f *ruleLeaderFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
