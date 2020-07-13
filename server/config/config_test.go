@@ -82,6 +82,28 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
 }
 
+func (s *testConfigSuite) TestReloadUpgrade(c *C) {
+	opt, err := newTestScheduleOption()
+	c.Assert(err, IsNil)
+
+	// Simulate an old configuration that only contains 2 fields.
+	type OldConfig struct {
+		Schedule    ScheduleConfig    `toml:"schedule" json:"schedule"`
+		Replication ReplicationConfig `toml:"replication" json:"replication"`
+	}
+	old := &OldConfig{
+		Schedule:    *opt.GetScheduleConfig(),
+		Replication: *opt.GetReplicationConfig(),
+	}
+	storage := core.NewStorage(kv.NewMemoryKV())
+	c.Assert(storage.SaveConfig(old), IsNil)
+
+	newOpt, err := newTestScheduleOption()
+	c.Assert(err, IsNil)
+	c.Assert(newOpt.Reload(storage), IsNil)
+	c.Assert(newOpt.GetPDServerConfig().KeyType, Equals, defaultKeyType) // should be set to default value.
+}
+
 func (s *testConfigSuite) TestValidation(c *C) {
 	cfg := NewConfig()
 	c.Assert(cfg.Adjust(nil), IsNil)
