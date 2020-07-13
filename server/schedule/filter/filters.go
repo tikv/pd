@@ -722,10 +722,6 @@ func (f *specialUseFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return !f.constraint.MatchStore(store)
 }
 
-type alwaysAllowedFilter struct {
-	scope string
-}
-
 const (
 	// SpecialUseKey is the label used to indicate special use storage.
 	SpecialUseKey = "specialUse"
