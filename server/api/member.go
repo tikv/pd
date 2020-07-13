@@ -261,7 +261,7 @@ func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The transfer command is submitted.")
 }
 
 // @Tags leader
@@ -278,5 +278,5 @@ func (h *leaderHandler) Transfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The transfer command is submitted.")
 }
