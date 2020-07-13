@@ -673,6 +673,7 @@ func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCo
 	}
 }
 
+// Judge if it needs placement rule.
 func IsPlacementNeeded(store *metapb.Store) bool {
 	for _, l := range store.GetLabels() {
 		if l.GetKey() == "engine" && l.GetValue() == "tiflash" {

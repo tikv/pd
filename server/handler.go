@@ -417,7 +417,7 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 	return c.GetHistory(start), nil
 }
 
-// SetAllStoresLimit is used to set limit of all stores.
+// SetLabelStoresLimit is used to set limit of stores for a label.
 func (h *Handler) SetLabelStoresLimit(label config.StoreLabel, ratePerMin float64, limitType storelimit.Type) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {

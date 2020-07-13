@@ -220,8 +220,7 @@ var (
 	defaultLocationLabels  = []string{}
 	// DefaultStoreLimit is the default store limit of add peer and remove peer.
 	DefaultStoreLimit StoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
-	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
-	//DefaultTiFlashStoreLimit StoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
+	// OtherStoreLimits are other store limits of add peer and remove peer.
 	OtherStoreLimits = map[StoreLabel]StoreLimit{
 		StoreLabel{Key: "engine", Value: "tiflash"}: {AddPeer: 30, RemovePeer: 30},
 	}
@@ -586,6 +585,7 @@ type ScheduleConfig struct {
 	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
 	// StoreLimit is the limit of scheduling for stores.
 	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
+	// StoreLabelLimit is the limit of scheduling for stores by labels.
 	StoreLabelLimit map[StoreLabel]StoreLimitConfig `toml:"store-label-limit" json:"store-label-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`

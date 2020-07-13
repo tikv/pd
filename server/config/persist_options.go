@@ -202,7 +202,7 @@ func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, rate
 	o.SetScheduleConfig(v)
 }
 
-// SetAllStoresLimit sets all store limit for a given type and rate.
+// SetLabelStoresLimit sets store limit for a given label, type and rate.
 func (o *PersistOptions) SetLabelStoresLimit(label StoreLabel, typ storelimit.Type, ratePerMin float64) {
 	v := o.GetScheduleConfig().Clone()
 	switch typ {
@@ -317,7 +317,7 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 	}
 }
 
-// GetAllStoresLimit returns the limit of all stores.
+// GetLabelStoresLimit returns the limit of stores for a label.
 func (o *PersistOptions) GetLabelStoresLimit(label StoreLabel) map[StoreLabel]StoreLimitConfig {
 	return o.GetScheduleConfig().StoreLabelLimit
 }
