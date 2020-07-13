@@ -621,7 +621,7 @@ func NewPlacementLeaderSafeguard(scope string, cluster opt.Cluster, region *core
 	if cluster.IsPlacementRulesEnabled() {
 		return newRuleLeaderFitFilter(scope, cluster, region, sourceStore.GetID())
 	}
-	return newalwaysAllowedFilter(scope)
+	return nil
 }
 
 type engineFilter struct {
@@ -724,28 +724,6 @@ func (f *specialUseFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 
 type alwaysAllowedFilter struct {
 	scope string
-}
-
-func newalwaysAllowedFilter(scope string) Filter {
-	return &alwaysAllowedFilter{
-		scope: scope,
-	}
-}
-
-func (f *alwaysAllowedFilter) Scope() string {
-	return f.scope
-}
-
-func (f *alwaysAllowedFilter) Type() string {
-	return "always-allowed-filter"
-}
-
-func (f *alwaysAllowedFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return true
-}
-
-func (f *alwaysAllowedFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return true
 }
 
 const (

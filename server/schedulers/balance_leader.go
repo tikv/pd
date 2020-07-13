@@ -200,7 +200,10 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 		return nil
 	}
 	targets := cluster.GetFollowerStores(region)
-	finalFilters := append(l.filters, filter.NewPlacementLeaderSafeguard(l.GetName(), cluster, region, source))
+	finalFilters := l.filters
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), cluster, region, source); leaderFilter != nil {
+		finalFilters = append(l.filters, leaderFilter)
+	}
 	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
 	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
@@ -244,7 +247,10 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster opt.Cluster, target *c
 	targets := []*core.StoreInfo{
 		target,
 	}
-	finalFilters := append(l.filters, filter.NewPlacementLeaderSafeguard(l.GetName(), cluster, region, source))
+	finalFilters := l.filters
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), cluster, region, source); leaderFilter != nil {
+		finalFilters = append(l.filters, leaderFilter)
+	}
 	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
 	if len(targets) < 1 {
 		return nil
