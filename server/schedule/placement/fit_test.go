@@ -150,10 +150,15 @@ func (s *testFitSuite) TestFitByLocation(c *C) {
 			rule.Count = cc.count
 		}
 		c.Log("Peers:", peers)
-		c.Log("rule:", rule)
-		ruleFit := fitRule(peers, rule)
+		c.Log("Rule:", rule)
+		w := &fitWorker{
+			bestFit: RegionFit{RuleFits: make([]*RuleFit, 1)},
+			peers:   peers,
+			rules:   []*Rule{rule},
+		}
+		w.run()
 		selectedIDs := make([]uint64, 0)
-		for _, p := range ruleFit.Peers {
+		for _, p := range w.bestFit.RuleFits[0].Peers {
 			selectedIDs = append(selectedIDs, p.GetId())
 		}
 		sort.Slice(selectedIDs, func(i, j int) bool { return selectedIDs[i] < selectedIDs[j] })
