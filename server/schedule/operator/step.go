@@ -315,6 +315,7 @@ type SplitRegion struct {
 	StartKey, EndKey []byte
 	Policy           pdpb.CheckPolicy
 	SplitKeys        [][]byte
+	Opt              []float64
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
