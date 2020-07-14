@@ -296,9 +296,9 @@ const (
 	locationImprove   = "improve"
 )
 
-// newLocationSafeguard creates a filter that filters all stores that have
+// NewLocationSafeguard creates a filter that filters all stores that have
 // lower distinct score than specified store.
-func newLocationSafeguard(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+func NewLocationSafeguard(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
 	return newDistinctScoreFilter(scope, labels, stores, source, locationSafeguard)
 }
 
@@ -611,7 +611,7 @@ func NewPlacementSafeguard(scope string, cluster opt.Cluster, region *core.Regio
 	if cluster.IsPlacementRulesEnabled() {
 		return newRuleFitFilter(scope, cluster, region, sourceStore.GetID())
 	}
-	return newLocationSafeguard(scope, cluster.GetLocationLabels(), cluster.GetRegionStores(region), sourceStore)
+	return NewLocationSafeguard(scope, cluster.GetLocationLabels(), cluster.GetRegionStores(region), sourceStore)
 }
 
 // NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with
