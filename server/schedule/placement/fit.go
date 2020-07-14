@@ -114,8 +114,14 @@ func compareRuleFit(a, b *RuleFit) int {
 	}
 }
 
+// StoreSet represents the store container.
+type StoreSet interface {
+	GetStores() []*core.StoreInfo
+	GetStore(id uint64) *core.StoreInfo
+}
+
 // FitRegion tries to fit peers of a region to the rules.
-func FitRegion(stores core.StoreSetInformer, region *core.RegionInfo, rules []*Rule) *RegionFit {
+func FitRegion(stores StoreSet, region *core.RegionInfo, rules []*Rule) *RegionFit {
 	w := newFitWorker(stores, region, rules)
 	w.run()
 	return &w.bestFit
@@ -127,7 +133,7 @@ type fitWorker struct {
 	rules   []*Rule
 }
 
-func newFitWorker(stores core.StoreSetInformer, region *core.RegionInfo, rules []*Rule) *fitWorker {
+func newFitWorker(stores StoreSet, region *core.RegionInfo, rules []*Rule) *fitWorker {
 	var peers []*fitPeer
 	for _, p := range region.GetPeers() {
 		peers = append(peers, &fitPeer{
@@ -171,18 +177,19 @@ func (w *fitWorker) fitRule(index int) bool {
 		}
 	}
 
-	if len(candidates) <= w.rules[index].Count {
-		return w.compareBest(candidates, index)
+	count := w.rules[index].Count
+	if len(candidates) < count {
+		count = len(candidates)
 	}
-	return w.enumPeers(candidates, nil, index)
+	return w.enumPeers(candidates, nil, index, count)
 }
 
 // Recursively traverses all feasible peer combinations.
 // For each combination, call `compareBest` to determine whether it is better
 // than the existing option.
 // Returns true if it replaces `bestFit` with a better alternative.
-func (w *fitWorker) enumPeers(candidates, selected []*fitPeer, index int) bool {
-	if len(selected) == w.rules[index].Count {
+func (w *fitWorker) enumPeers(candidates, selected []*fitPeer, index int, count int) bool {
+	if len(selected) == count {
 		// We collect enough peers. End recursive.
 		return w.compareBest(selected, index)
 	}
@@ -190,7 +197,7 @@ func (w *fitWorker) enumPeers(candidates, selected []*fitPeer, index int) bool {
 	var better bool
 	for i, p := range candidates {
 		p.selected = true
-		better = w.enumPeers(candidates[i+1:], append(selected, p), index) || better
+		better = w.enumPeers(candidates[i+1:], append(selected, p), index, count) || better
 		p.selected = false
 	}
 	return better

@@ -269,7 +269,7 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 }
 
 // FitRegion fits a region to the rules it matches.
-func (m *RuleManager) FitRegion(stores core.StoreSetInformer, region *core.RegionInfo) *RegionFit {
+func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *RegionFit {
 	rules := m.GetRulesForApplyRegion(region)
 	return FitRegion(stores, region, rules)
 }
