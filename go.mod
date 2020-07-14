@@ -25,7 +25,7 @@ require (
 	github.com/opentracing/opentracing-go v1.0.2
 	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
-	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200619091231-6843d6e0b7aa
+	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200710045508-523e95bc5ec9
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d

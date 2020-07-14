@@ -12,8 +12,8 @@ GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
 GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
-export GOBIN := $(GO_TOOLS_BIN_PATH)
-export PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
+PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
+SHELL := env PATH=$(PATH) GOBIN=$(GO_TOOLS_BIN_PATH) /bin/bash
 
 FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
 FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable)
@@ -57,6 +57,15 @@ LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
 LDFLAGS += -X "$(PD_PKG)/server.PDEdition=$(PD_EDITION)"
 
+ifneq ($(DASHBOARD), 0)
+	# Note: LDFLAGS must be evaluated lazily for these scripts to work correctly
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.InternalVersion=$(shell scripts/describe-dashboard.sh internal-version)"
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.Standalone=No"
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.PDVersion=$(shell git describe --tags --dirty)"
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.BuildTime=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
+	LDFLAGS += -X "github.com/pingcap-incubator/tidb-dashboard/pkg/utils/version.BuildGitHash=$(shell scripts/describe-dashboard.sh git-hash)"
+endif
+
 GOVER_MAJOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\1/")
 GOVER_MINOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\2/")
 GO111 := $(shell [ $(GOVER_MAJOR) -gt 1 ] || [ $(GOVER_MAJOR) -eq 1 ] && [ $(GOVER_MINOR) -ge 11 ]; echo $$?)
@@ -76,14 +85,16 @@ build: pd-server pd-ctl pd-recover
 
 tools: pd-tso-bench pd-analysis pd-heartbeat-bench
 
-pd-server: export GO111MODULE=on
-pd-server:
+PD_SERVER_DEP :=
 ifneq ($(SWAGGER), 0)
-	make swagger-spec
+	PD_SERVER_DEP += swagger-spec
 endif
 ifneq ($(DASHBOARD), 0)
-	make dashboard-ui
+	PD_SERVER_DEP += dashboard-ui
 endif
+
+pd-server: export GO111MODULE=on
+pd-server: ${PD_SERVER_DEP}
 	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o bin/pd-server cmd/pd-server/main.go
 
 pd-server-basic:
