@@ -22,8 +22,8 @@ import (
 	"strconv"
 
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
 

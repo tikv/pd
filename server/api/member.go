@@ -20,9 +20,9 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server"

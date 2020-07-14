@@ -17,9 +17,9 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
