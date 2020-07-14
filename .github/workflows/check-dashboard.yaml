@@ -28,21 +28,21 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      - name: Fetch Dashboard Go module
+      - name: Fetch Go module
         run: |
           go mod download
           DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap-incubator/tidb-dashboard)
-          DASHBOARD_UI_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/ui/.github_release_version")
+          DASHBOARD_RELEASE_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/release-version")
           echo ::set-env name=DASHBOARD_DIR::"$DASHBOARD_DIR"
-          echo ::set-env name=DASHBOARD_UI_VERSION::"$DASHBOARD_UI_VERSION"
-      - name: Fetch UI source specified by version
+          echo ::set-env name=DASHBOARD_RELEASE_VERSION::"$DASHBOARD_RELEASE_VERSION"
+      - name: Fetch UI source specified by release version
         run: |
           rm -rf /tmp/dashboard
           mkdir -p /tmp/dashboard
           cd /tmp/dashboard
-          DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/archive/ui_release_${DASHBOARD_UI_VERSION}.zip"
-          curl -L "${DOWNLOAD_URL}" > source.zip
+          DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/archive/v${DASHBOARD_RELEASE_VERSION}.zip"
+          curl -L "${DOWNLOAD_URL}" --fail --output source.zip
           unzip source.zip
       - name: Check diff
         run: |
-          diff -qr ${DASHBOARD_DIR}/ui/ /tmp/dashboard/tidb-dashboard-ui_release_${DASHBOARD_UI_VERSION}/ui/
+          diff -qr ${DASHBOARD_DIR}/ui/ /tmp/dashboard/tidb-dashboard-${DASHBOARD_RELEASE_VERSION}/ui/

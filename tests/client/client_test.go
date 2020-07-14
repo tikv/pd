@@ -654,11 +654,37 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(3))
 
-	// prevent backoff
+	// Minimum safepoint does not regress
 	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"b", 1000, 2)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(3))
+
+	// Update only the TTL of the minimum safepoint
+	oldMinSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint()
+	c.Assert(err, IsNil)
+	c.Assert(oldMinSsp.ServiceID, Equals, "c")
+	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", 2000, 3)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(3))
+	minSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint()
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.ServiceID, Equals, "c")
+	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
+	c.Assert(minSsp.ExpiredAt-oldMinSsp.ExpiredAt, GreaterEqual, int64(1000))
+
+	// Shrinking TTL is also allowed
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"c", 1, 3)
+	c.Assert(err, IsNil)
+	c.Assert(min, Equals, uint64(3))
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint()
+	c.Assert(err, IsNil)
+	c.Assert(minSsp.ServiceID, Equals, "c")
+	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
+	c.Assert(minSsp.ExpiredAt, Less, oldMinSsp.ExpiredAt)
 }
 
 func (s *testClientSuite) TestScatterRegion(c *C) {
