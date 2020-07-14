@@ -245,6 +245,7 @@ func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule) *R
 		cluster:        c.cluster,
 		locationLabels: rule.LocationLabels,
 		region:         region,
+		extraFilters:   []filter.Filter{filter.NewLabelConstaintFilter(c.name, rule.LabelConstraints)},
 	}
 }
 

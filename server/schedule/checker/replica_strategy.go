@@ -29,6 +29,7 @@ type ReplicaStrategy struct {
 	cluster        opt.Cluster
 	locationLabels []string
 	region         *core.RegionInfo
+	extraFilters   []filter.Filter
 }
 
 // SelectStoreToAdd returns the store to add a replica to a region.
@@ -59,6 +60,9 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	}
 	if len(extraFilters) > 0 {
 		filters = append(filters, extraFilters...)
+	}
+	if len(s.extraFilters) > 0 {
+		filters = append(filters, s.extraFilters...)
 	}
 
 	isolationComparer := selector.IsolationComparer(s.locationLabels, coLocationStores)
