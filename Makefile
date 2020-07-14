@@ -11,9 +11,9 @@ PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
-TOOL_BIN_PATH := $(shell pwd)/.tools/bin
-export GOBIN := $(TOOL_BIN_PATH)
-export PATH := $(TOOL_BIN_PATH):$(PATH)
+GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
+export GOBIN := $(GO_TOOLS_BIN_PATH)
+export PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 
 FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
 FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable)
@@ -90,14 +90,18 @@ pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 make pd-server
 
 # dependent
-swagger-spec: install-tools
+install-go-tools: export GO111MODULE=on
+install-go-tools:
+	@mkdir -p $(GO_TOOLS_BIN_PATH)
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.27.0
+	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
+
+swagger-spec: install-go-tools
 	go mod vendor
 	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
 
 dashboard-ui:
-ifneq ($(OS),Windows_NT)
 	./scripts/embed-dashboard-ui.sh
-endif
 
 # Tools
 pd-ctl: export GO111MODULE=on
@@ -116,7 +120,7 @@ pd-heartbeat-bench: export GO111MODULE=on
 pd-heartbeat-bench:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
-test: install-tools
+test: install-go-tools
 	# testing...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
@@ -129,26 +133,10 @@ basic-test:
 	GO111MODULE=on go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-# These need to be fixed before they can be ran regularly
-check-fail:
-	golangci-lint run --disable-all \
-	  --enable errcheck \
-	  $$($(PACKAGE_DIRECTORIES))
-	gosec $$($(PACKAGE_DIRECTORIES))
+check: install-go-tools check-all check-plugin
 
 check-all: static lint tidy
 	@echo "checking"
-
-install-tools: export GO111MODULE=on
-install-tools: golangci-lint-setup
-	mkdir -p $(TOOL_BIN_PATH)
-	grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
-
-golangci-lint-setup:
-	@mkdir -p $(TOOL_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(TOOL_BIN_PATH) v1.23.7
-
-check: install-tools check-all check-plugin
 
 check-plugin:
 	@echo "checking plugin"
@@ -159,7 +147,6 @@ static:
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	gofmt -s -l -d $$($(PACKAGE_DIRECTORIES)) 2>&1 | $(GOCHECKER)
 	golangci-lint run $$($(PACKAGE_DIRECTORIES))
-	staticcheck $$($(PACKAGES))
 
 lint:
 	@echo "linting"
@@ -193,13 +180,13 @@ clean-test:
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
 
-deadlock-enable: install-tools
+deadlock-enable: install-go-tools
 	@$(DEADLOCK_ENABLE)
 
 deadlock-disable:
 	@$(DEADLOCK_DISABLE)
 
-failpoint-enable: install-tools
+failpoint-enable: install-go-tools
 	# Converting failpoints...
 	@$(FAILPOINT_ENABLE)
 
