@@ -291,7 +291,10 @@ func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
 
 func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 	if len(*v) == 0 {
-		*v = defValue
+		// Make a copy to avoid changing DefaultSchedulers unexpectedly.
+		// When reloading from storage, the config is passed to json.Unmarshal.
+		// Without clone, the DefaultSchedulers could be overwritten.
+		*v = append(defValue[:0:0], defValue...)
 	}
 }
 
@@ -768,6 +771,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 
 	for k, b := range c.migrateConfigurationMap() {
