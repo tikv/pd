@@ -785,7 +785,6 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIds(), bs.cur.region.GetStoreIds()),
-			filter.NewHealthFilter(bs.sche.GetName()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
 		}
@@ -795,7 +794,6 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	case transferLeader:
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
-			filter.NewHealthFilter(bs.sche.GetName()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
 
