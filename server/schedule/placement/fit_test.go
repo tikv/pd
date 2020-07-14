@@ -110,7 +110,7 @@ func (s *testFitSuite) checkPeerMatch(peers []*metapb.Peer, expect string) bool 
 	return len(m) == 0
 }
 
-func (s *testFitSuite) TestFitSingleRule(c *C) {
+func (s *testFitSuite) TestFitRegion(c *C) {
 	stores := s.makeStores()
 
 	cases := []struct {
