@@ -200,7 +200,11 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 		return nil
 	}
 	targets := cluster.GetFollowerStores(region)
-	targets = filter.SelectTargetStores(targets, l.filters, cluster)
+	finalFilters := l.filters
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), cluster, region, source); leaderFilter != nil {
+		finalFilters = append(l.filters, leaderFilter)
+	}
+	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
 	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		return targets[i].LeaderScore(leaderSchedulePolicy, 0) < targets[j].LeaderScore(leaderSchedulePolicy, 0)
@@ -237,7 +241,20 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster opt.Cluster, target *c
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader").Inc()
 		return nil
 	}
-	return l.createOperator(cluster, region, source, target)
+	targets := []*core.StoreInfo{
+		target,
+	}
+	finalFilters := l.filters
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), cluster, region, source); leaderFilter != nil {
+		finalFilters = append(l.filters, leaderFilter)
+	}
+	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
+	if len(targets) < 1 {
+		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
+		schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
+		return nil
+	}
+	return l.createOperator(cluster, region, source, targets[0])
 }
 
 // createOperator creates the operator according to the source and target store.

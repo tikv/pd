@@ -543,6 +543,56 @@ func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
+type ruleLeaderFitFilter struct {
+	scope            string
+	fitter           RegionFitter
+	region           *core.RegionInfo
+	oldFit           *placement.RegionFit
+	oldLeaderStoreID uint64
+}
+
+// newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
+// the isolation level will not decrease.
+func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldLeaderStoreID uint64) Filter {
+	return &ruleLeaderFitFilter{
+		scope:            scope,
+		fitter:           fitter,
+		region:           region,
+		oldFit:           fitter.FitRegion(region),
+		oldLeaderStoreID: oldLeaderStoreID,
+	}
+}
+
+func (f *ruleLeaderFitFilter) Scope() string {
+	return f.scope
+}
+
+func (f *ruleLeaderFitFilter) Type() string {
+	return "rule-fit-leader-filter"
+}
+
+func (f *ruleLeaderFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return true
+}
+
+func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	oldLeaderPeerReplica := *f.region.GetLeader()
+	oldLeaderPeerReplica.StoreId = store.GetID()
+	region := f.region.Clone(core.WithReplacePeerStore(f.oldLeaderStoreID, store.GetID()), core.WithLeader(&oldLeaderPeerReplica))
+	newFit := f.fitter.FitRegion(region)
+	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
+}
+
+// NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with
+// existed peer, the placement restriction will not become worse.
+// Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
+func NewPlacementLeaderSafeguard(scope string, cluster opt.Cluster, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+	if cluster.IsPlacementRulesEnabled() {
+		return newRuleLeaderFitFilter(scope, cluster, region, sourceStore.GetID())
+	}
+	return nil
+}
+
 type engineFilter struct {
 	scope      string
 	constraint placement.LabelConstraint
