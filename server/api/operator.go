@@ -265,17 +265,17 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 				keys = append(keys, key)
 			}
 		}
-		var opt []float64
-		which, ok := input["which"].(float64)
+		var opts []float64
+		dimID, ok := input["dim_id"].(float64)
 		if ok {
 			ratio, ok2 := input["ratio"].(float64)
 			if !ok2 {
 				h.r.JSON(w, http.StatusBadRequest, "missing splitting ratio")
 				return
 			}
-			opt = append(opt, which, ratio)
+			opts = append(opts, dimID, ratio)
 		}
-		if err := h.AddSplitRegionOperator(uint64(regionID), policy, keys, opt); err != nil {
+		if err := h.AddSplitRegionOperator(uint64(regionID), policy, keys, opts); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

@@ -322,11 +322,13 @@ func removePeerCommandFunc(cmd *cobra.Command, args []string) {
 // NewSplitRegionCommand returns a command to split a region.
 func NewSplitRegionCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "split-region <region_id> [--policy=scan|approximate]",
+		Use:   "split-region <region_id> [--policy=scan|approximate|ratio]",
 		Short: "split a region",
 		Run:   splitRegionCommandFunc,
 	}
 	c.Flags().String("policy", "scan", "the policy to get region split key")
+	c.Flags().String("dim_id", "0", "the id of dimension to perform ratio splitting")
+	c.Flags().String("ratio", "0.5", "the splitting ratio")
 	return c
 }
 
@@ -342,9 +344,25 @@ func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	var dimID uint64
+	var ratio float64
 	policy := cmd.Flags().Lookup("policy").Value.String()
 	switch policy {
 	case "scan", "approximate":
+		break
+	case "ratio":
+		dimIDStr := cmd.Flags().Lookup("dim_id").Value.String()
+		dimID, err = strconv.ParseUint(dimIDStr, 10, 64)
+		if err != nil {
+			cmd.Println(err)
+			return
+		}
+		ratioStr := cmd.Flags().Lookup("ratio").Value.String()
+		ratio, err = strconv.ParseFloat(ratioStr, 64)
+		if err != nil {
+			cmd.Println(err)
+			return
+		}
 		break
 	default:
 		cmd.Println("Error: unknown policy")
@@ -355,6 +373,8 @@ func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["policy"] = policy
+	input["dim_id"] = dimID
+	input["ratio"] = ratio
 	postJSON(cmd, operatorsPrefix, input)
 }
 

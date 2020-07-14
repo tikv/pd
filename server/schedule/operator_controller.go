@@ -582,7 +582,7 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 			fields...,
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
-		
+
 		if op.Kind()&operator.OpHotRegion == operator.OpHotRegion {
 			log.Info("cancel hot region op",
 				zap.Reflect("op", op))
@@ -749,6 +749,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			SplitRegion: &pdpb.SplitRegion{
 				Policy: st.Policy,
 				Keys:   st.SplitKeys,
+				// Opts:   st.Opts,
 			},
 		}
 	case operator.ChangePeerV2Enter:

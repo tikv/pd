@@ -713,7 +713,7 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 }
 
 // AddSplitRegionOperator adds an operator to split a region.
-func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys []string, opt []float64) error {
+func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys []string, opts []float64) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
@@ -740,7 +740,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 		}
 	}
 
-	op := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, pdpb.CheckPolicy(policy), splitKeys, opt)
+	op := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, pdpb.CheckPolicy(policy), splitKeys, opts)
 	if ok := c.GetOperatorController().AddOperator(op); !ok {
 		return errors.WithStack(ErrAddOperator)
 	}
