@@ -811,18 +811,21 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	default:
 		return nil
 	}
+	return bs.pickDstStores(filters, candidates)
+}
 
+func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*core.StoreInfo) map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
+	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	for _, store := range candidates {
 		if filter.Target(bs.cluster, store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
-			if detail.LoadPred.max().ByteRate*bs.sche.conf.GetDstToleranceRatio() < detail.LoadPred.Future.ExpByteRate &&
-				detail.LoadPred.max().KeyRate*bs.sche.conf.GetDstToleranceRatio() < detail.LoadPred.Future.ExpKeyRate {
+			if detail.LoadPred.max().ByteRate*dstToleranceRatio < detail.LoadPred.Future.ExpByteRate &&
+				detail.LoadPred.max().KeyRate*dstToleranceRatio < detail.LoadPred.Future.ExpKeyRate {
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}
 			balanceHotRegionCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
-			ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 		}
 	}
 	return ret
