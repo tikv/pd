@@ -473,7 +473,7 @@ func (s *testClientSuite) TestScanRegions(c *C) {
 
 	// Wait for region heartbeats.
 	testutil.WaitUntil(c, func(c *C) bool {
-		scanRegions, _, err := s.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
+		scanRegions, err := s.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
 		return err == nil && len(scanRegions) == 10
 	})
 
@@ -481,20 +481,35 @@ func (s *testClientSuite) TestScanRegions(c *C) {
 	region3 := core.NewRegionInfo(regions[3], nil)
 	s.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
 
+	// Add down peer for region4.
+	region4 := core.NewRegionInfo(regions[4], regions[4].Peers[0], core.WithDownPeers([]*pdpb.PeerStats{{Peer: regions[4].Peers[1]}}))
+	s.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+
+	// Add pending peers for region5.
+	region5 := core.NewRegionInfo(regions[5], regions[5].Peers[0], core.WithPendingPeers([]*metapb.Peer{regions[5].Peers[1], regions[5].Peers[2]}))
+	s.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+
 	check := func(start, end []byte, limit int, expect []*metapb.Region) {
-		scanRegions, leaders, err := s.client.ScanRegions(context.Background(), start, end, limit)
+		scanRegions, err := s.client.ScanRegions(context.Background(), start, end, limit)
 		c.Assert(err, IsNil)
 		c.Assert(scanRegions, HasLen, len(expect))
-		c.Assert(leaders, HasLen, len(expect))
 		c.Log("scanRegions", scanRegions)
 		c.Log("expect", expect)
-		c.Log("scanLeaders", leaders)
 		for i := range expect {
-			c.Assert(scanRegions[i], DeepEquals, expect[i])
-			if scanRegions[i].GetId() == region3.GetID() {
-				c.Assert(leaders[i], DeepEquals, &metapb.Peer{})
+			c.Assert(scanRegions[i].Meta, DeepEquals, expect[i])
+
+			if scanRegions[i].Meta.GetId() == region3.GetID() {
+				c.Assert(scanRegions[i].Leader, DeepEquals, &metapb.Peer{})
 			} else {
-				c.Assert(leaders[i], DeepEquals, expect[i].Peers[0])
+				c.Assert(scanRegions[i].Leader, DeepEquals, expect[i].Peers[0])
+			}
+
+			if scanRegions[i].Meta.GetId() == region4.GetID() {
+				c.Assert(scanRegions[i].DownPeers, DeepEquals, []*metapb.Peer{expect[i].Peers[1]})
+			}
+
+			if scanRegions[i].Meta.GetId() == region5.GetID() {
+				c.Assert(scanRegions[i].PendingPeers, DeepEquals, []*metapb.Peer{expect[i].Peers[1], expect[i].Peers[2]})
 			}
 		}
 	}
