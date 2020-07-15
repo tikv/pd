@@ -32,7 +32,7 @@ func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 		DataDir:          cfg.DataDir,
 		PDEndPoint:       etcdCfg.ACUrls[0].String(),
 		PublicPathPrefix: cfg.Dashboard.PublicPathPrefix,
-		DisableTelemetry: cfg.Dashboard.DisableTelemetry,
+		EnableTelemetry:  cfg.Dashboard.EnableTelemetry,
 	}
 
 	if dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToTLSConfig(); err != nil {
