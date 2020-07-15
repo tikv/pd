@@ -18,7 +18,6 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"go.uber.org/zap"
 )
 
@@ -65,12 +64,12 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 		filters = append(filters, s.extraFilters...)
 	}
 
-	isolationComparer := selector.IsolationComparer(s.locationLabels, coLocationStores)
+	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	strictStateFilter := filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true}
-	target := selector.NewCandidates(s.cluster.GetStores()).
+	target := filter.NewCandidates(s.cluster.GetStores()).
 		FilterTarget(s.cluster, filters...).
 		Sort(isolationComparer).Reverse().Top(isolationComparer). // greater isolation score is better
-		Sort(selector.RegionScoreComparer(s.cluster)).            // less region score is better
+		Sort(filter.RegionScoreComparer(s.cluster)).              // less region score is better
 		FilterTarget(s.cluster, strictStateFilter).PickFirst()    // the filter does not ignore temp states
 	if target == nil {
 		return 0
@@ -107,11 +106,11 @@ func (s *ReplicaStrategy) swapStoreToFirst(stores []*core.StoreInfo, id uint64) 
 
 // SelectStoreToRemove returns the best option to remove from the region.
 func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo) uint64 {
-	isolationComparer := selector.IsolationComparer(s.locationLabels, coLocationStores)
-	source := selector.NewCandidates(coLocationStores).
+	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
+	source := filter.NewCandidates(coLocationStores).
 		FilterSource(s.cluster, filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
 		Sort(isolationComparer).Top(isolationComparer).
-		Sort(selector.RegionScoreComparer(s.cluster)).Reverse().
+		Sort(filter.RegionScoreComparer(s.cluster)).Reverse().
 		PickFirst()
 	if source == nil {
 		log.Debug("no removable store", zap.Uint64("region-id", s.region.GetID()))
