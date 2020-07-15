@@ -749,7 +749,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			SplitRegion: &pdpb.SplitRegion{
 				Policy: st.Policy,
 				Keys:   st.SplitKeys,
-				// Opts:   st.Opts,
+				Opts:   st.Opts,
 			},
 		}
 	case operator.ChangePeerV2Enter:

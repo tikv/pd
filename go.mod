@@ -55,4 +55,4 @@ require (
 )
 
 replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
-// replace github.com/pingcap/kvproto v0.0.0-20200701055533-4ef28cac01f8 => github.com/jiyingtk/kvproto v0.0.0-20200714121718-2b9e3a82ee08
+replace github.com/pingcap/kvproto v0.0.0-20200701055533-4ef28cac01f8 => github.com/jiyingtk/kvproto v0.0.0-20200714121718-2b9e3a82ee08
