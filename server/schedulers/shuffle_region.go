@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 )
 
@@ -124,7 +123,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 }
 
 func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.RegionInfo, *metapb.Peer) {
-	candidates := selector.NewCandidates(cluster.GetStores()).
+	candidates := filter.NewCandidates(cluster.GetStores()).
 		FilterSource(cluster, s.filters...).
 		Shuffle()
 
@@ -153,7 +152,7 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, region *co
 	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster, region, cluster.GetStore(oldPeer.GetStoreId()))
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds())
 
-	target := selector.NewCandidates(cluster.GetStores()).
+	target := filter.NewCandidates(cluster.GetStores()).
 		FilterTarget(cluster, s.filters...).
 		FilterTarget(cluster, scoreGuard, excludedFilter).
 		RandomPick()

@@ -499,8 +499,15 @@ func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsReque
 		if leader == nil {
 			leader = &metapb.Peer{}
 		}
-		resp.Regions = append(resp.Regions, r.GetMeta())
+		// Set RegionMetas and Leaders to make it compatible with old client.
+		resp.RegionMetas = append(resp.RegionMetas, r.GetMeta())
 		resp.Leaders = append(resp.Leaders, leader)
+		resp.Regions = append(resp.Regions, &pdpb.Region{
+			Region:       r.GetMeta(),
+			Leader:       leader,
+			DownPeers:    r.GetDownPeers(),
+			PendingPeers: r.GetPendingPeers(),
+		})
 	}
 	return resp, nil
 }
