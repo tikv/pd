@@ -31,7 +31,7 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
 	github.com/pingcap/kvproto v0.0.0-20200715040832-c3e2e0b163ee
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
-	github.com/pingcap/sysutil v0.0.0-20200710092507-275df2612ec1
+	github.com/pingcap/sysutil v0.0.0-20200715082929-4c47bcac246a
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.0.0
 	github.com/sasha-s/go-deadlock v0.2.0
