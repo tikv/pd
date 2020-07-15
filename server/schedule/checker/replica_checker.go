@@ -19,10 +19,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"go.uber.org/zap"
 )
 
@@ -77,88 +75,6 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 		return op
 	}
 	return nil
-}
-
-// selectStoreToAdd returns the store to add a replica to a region.
-// `extraFilters` is used to set up more filters based on the context that
-// calling this method.
-//
-// For example, to select a target store to replace a region's peer, we can
-// first create a tmp region instance that removed the peer, then call
-// `selectStoreToAdd` to decide the target store. Meanwhile, we need to provide
-// more constraints to ensure that the newly selected node cannot be the same
-// as the original one, and the isolation level cannot be reduced after
-// replacement.
-func (r *ReplicaChecker) selectStoreToAdd(region *core.RegionInfo, extraFilters ...filter.Filter) uint64 {
-	// The selection process uses a two-stage fashion. The first stage
-	// ignores the temporary state of the stores and selects the stores
-	// with the highest score according to the location label. The second
-	// stage considers all temporary states and capacity factors to select
-	// the most suitable target.
-	//
-	// The reason for it is to prevent the non-optimal replica placement due
-	// to the short-term state, resulting in redundant scheduling.
-
-	filters := []filter.Filter{
-		filter.NewExcludedFilter(replicaCheckerName, nil, region.GetStoreIds()),
-		filter.NewStorageThresholdFilter(replicaCheckerName),
-		filter.NewSpecialUseFilter(replicaCheckerName),
-		filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true, AllowTemporaryStates: true},
-	}
-	if len(extraFilters) > 0 {
-		filters = append(filters, extraFilters...)
-	}
-
-	regionStores := r.cluster.GetRegionStores(region)
-	isolationComparer := selector.IsolationComparer(r.cluster.GetLocationLabels(), regionStores)
-	strictStateFilter := filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}
-	target := selector.NewCandidates(r.cluster.GetStores()).
-		FilterTarget(r.cluster, filters...).
-		Sort(isolationComparer).Reverse().Top(isolationComparer). // greater isolation score is better
-		Sort(selector.RegionScoreComparer(r.cluster)).            // less region score is better
-		FilterTarget(r.cluster, strictStateFilter).PickFirst()    // the filter does not ignore temp states
-	if target == nil {
-		return 0
-	}
-	return target.GetID()
-}
-
-// selectStoreToReplace returns a store to replace oldStore. The location
-// placement after scheduling should be not worse than original.
-func (r *ReplicaChecker) selectStoreToReplace(region *core.RegionInfo, oldStore uint64) uint64 {
-	filters := []filter.Filter{
-		filter.NewExcludedFilter(replicaCheckerName, nil, region.GetStoreIds()),
-		filter.NewLocationSafeguard(replicaCheckerName, r.cluster.GetLocationLabels(), r.cluster.GetRegionStores(region), r.cluster.GetStore(oldStore)),
-	}
-	newRegion := region.Clone(core.WithRemoveStorePeer(oldStore))
-	return r.selectStoreToAdd(newRegion, filters...)
-}
-
-// selectStoreToImprove returns a store to replace oldStore. The location
-// placement after scheduling should be better than original.
-func (r *ReplicaChecker) selectStoreToImprove(region *core.RegionInfo, oldStore uint64) uint64 {
-	filters := []filter.Filter{
-		filter.NewExcludedFilter(replicaCheckerName, nil, region.GetStoreIds()),
-		filter.NewLocationImprover(replicaCheckerName, r.cluster.GetLocationLabels(), r.cluster.GetRegionStores(region), r.cluster.GetStore(oldStore)),
-	}
-	newRegion := region.Clone(core.WithRemoveStorePeer(oldStore))
-	return r.selectStoreToAdd(newRegion, filters...)
-}
-
-// selectStoreToRemove returns the best option to remove from the region.
-func (r *ReplicaChecker) selectStoreToRemove(region *core.RegionInfo) uint64 {
-	regionStores := r.cluster.GetRegionStores(region)
-	isolationComparer := selector.IsolationComparer(r.cluster.GetLocationLabels(), regionStores)
-	source := selector.NewCandidates(regionStores).
-		FilterSource(r.cluster, filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
-		Sort(isolationComparer).Top(isolationComparer).
-		Sort(selector.RegionScoreComparer(r.cluster)).Reverse().
-		PickFirst()
-	if source == nil {
-		log.Debug("no removable store", zap.Uint64("region-id", region.GetID()))
-		return 0
-	}
-	return source.GetID()
 }
 
 func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operator {
@@ -224,7 +140,8 @@ func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 		return nil
 	}
 	log.Debug("region has fewer than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
-	target := r.selectStoreToAdd(region)
+	regionStores := r.cluster.GetRegionStores(region)
+	target := r.strategy(region).SelectStoreToAdd(regionStores)
 	if target == 0 {
 		log.Debug("no store to add replica", zap.Uint64("region-id", region.GetID()))
 		checkerCounter.WithLabelValues("replica_checker", "no-target-store").Inc()
@@ -249,7 +166,8 @@ func (r *ReplicaChecker) checkRemoveExtraReplica(region *core.RegionInfo) *opera
 		return nil
 	}
 	log.Debug("region has more than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
-	old := r.selectStoreToRemove(region)
+	regionStores := r.cluster.GetRegionStores(region)
+	old := r.strategy(region).SelectStoreToRemove(regionStores)
 	if old == 0 {
 		checkerCounter.WithLabelValues("replica_checker", "no-worst-peer").Inc()
 		return nil
@@ -267,12 +185,14 @@ func (r *ReplicaChecker) checkLocationReplacement(region *core.RegionInfo) *oper
 		return nil
 	}
 
-	oldStore := r.selectStoreToRemove(region)
+	strategy := r.strategy(region)
+	regionStores := r.cluster.GetRegionStores(region)
+	oldStore := strategy.SelectStoreToRemove(regionStores)
 	if oldStore == 0 {
 		checkerCounter.WithLabelValues("replica_checker", "all-right").Inc()
 		return nil
 	}
-	newStore := r.selectStoreToImprove(region, oldStore)
+	newStore := strategy.SelectStoreToImprove(regionStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no better peer", zap.Uint64("region-id", region.GetID()))
 		checkerCounter.WithLabelValues("replica_checker", "not-better").Inc()
@@ -301,7 +221,8 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 		return op
 	}
 
-	target := r.selectStoreToReplace(region, storeID)
+	regionStores := r.cluster.GetRegionStores(region)
+	target := r.strategy(region).SelectStoreToReplace(regionStores, storeID)
 	if target == 0 {
 		reason := fmt.Sprintf("no-store-%s", status)
 		checkerCounter.WithLabelValues("replica_checker", reason).Inc()
@@ -317,4 +238,13 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 		return nil
 	}
 	return op
+}
+
+func (r *ReplicaChecker) strategy(region *core.RegionInfo) *ReplicaStrategy {
+	return &ReplicaStrategy{
+		checkerName:    replicaCheckerName,
+		cluster:        r.cluster,
+		locationLabels: r.cluster.GetLocationLabels(),
+		region:         region,
+	}
 }

@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -201,9 +200,9 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 		filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
 
-	candidates := selector.NewCandidates(cluster.GetStores()).
+	candidates := filter.NewCandidates(cluster.GetStores()).
 		FilterTarget(cluster, filters...).
-		Sort(selector.RegionScoreComparer(cluster))
+		Sort(filter.RegionScoreComparer(cluster))
 
 	for _, target := range candidates.Stores {
 		regionID := region.GetID()

@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -105,7 +104,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	targetStore := selector.NewCandidates(cluster.GetStores()).
+	targetStore := filter.NewCandidates(cluster.GetStores()).
 		FilterTarget(cluster, s.filters...).
 		RandomPick()
 	if targetStore == nil {

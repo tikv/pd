@@ -33,21 +33,6 @@ var _ = Suite(&testFiltersSuite{})
 
 type testFiltersSuite struct{}
 
-func (s *testFiltersSuite) TestPendingPeerFilter(c *C) {
-	filter := NewPendingPeerCountFilter("")
-	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
-	store := core.NewStoreInfo(&metapb.Store{Id: 1})
-	c.Assert(filter.Source(tc, store), IsTrue)
-	newStore := store.Clone(core.SetPendingPeerCount(30))
-	c.Assert(filter.Source(tc, newStore), IsFalse)
-	c.Assert(filter.Target(tc, newStore), IsFalse)
-	// set to 0 means no limit
-	opt.MaxPendingPeerCount = 0
-	c.Assert(filter.Source(tc, newStore), IsTrue)
-	c.Assert(filter.Target(tc, newStore), IsTrue)
-}
-
 func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 	labels := []string{"zone", "rack", "host"}
 	allStores := []*core.StoreInfo{
