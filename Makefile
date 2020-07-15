@@ -13,7 +13,7 @@ OVERALLS := overalls
 
 GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
-SHELL := env PATH=$(PATH) GOBIN=$(GO_TOOLS_BIN_PATH) /bin/bash
+SHELL := env PATH="$(PATH)" GOBIN="$(GO_TOOLS_BIN_PATH)" /bin/bash
 
 FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
 FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable)
@@ -77,7 +77,7 @@ GOVER_MAJOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\1/")
 GOVER_MINOR := $(shell go version | sed -E -e "s/.*go([0-9]+)[.]([0-9]+).*/\2/")
 GO111 := $(shell [ $(GOVER_MAJOR) -gt 1 ] || [ $(GOVER_MAJOR) -eq 1 ] && [ $(GOVER_MINOR) -ge 11 ]; echo $$?)
 ifeq ($(GO111), 1)
-$(error "go below 1.11 does not support modules")
+  $(error "go below 1.11 does not support modules")
 endif
 
 default: build
@@ -104,6 +104,7 @@ pd-server: export GO111MODULE=on
 pd-server: ${PD_SERVER_DEP}
 	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o bin/pd-server cmd/pd-server/main.go
 
+pd-server-basic: export GO111MODULE=on
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 make pd-server
 
@@ -114,10 +115,12 @@ install-go-tools:
 	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.27.0
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
+swagger-spec: export GO111MODULE=on
 swagger-spec: install-go-tools
 	go mod vendor
 	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
 
+dashboard-ui: export GO111MODULE=on
 dashboard-ui:
 	./scripts/embed-dashboard-ui.sh
 
