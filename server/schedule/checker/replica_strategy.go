@@ -38,7 +38,7 @@ type ReplicaStrategy struct {
 // calling this method.
 //
 // For example, to select a target store to replace a region's peer, we can use
-// the peer list without the peer to be removed as `coLocationStores`.
+// the peer list with the peer removed as `coLocationStores`.
 // Meanwhile, we need to provide more constraints to ensure that the isolation
 // level cannot be reduced after replacement.
 func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, extraFilters ...filter.Filter) uint64 {
