@@ -1214,7 +1214,7 @@ type DashboardConfig struct {
 	InternalProxy    bool   `toml:"internal-proxy" json:"internal-proxy"`
 	EnableTelemetry  bool   `toml:"enable-telemetry" json:"enable-telemetry"`
 	// WARN: DisableTelemetry is deprecated.
-	DisableTelemetryDeprecated bool `toml:"disable-telemetry" json:"disable-telemetry,omitempty"`
+	DisableTelemetry bool `toml:"disable-telemetry" json:"disable-telemetry,omitempty"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
@@ -1238,7 +1238,7 @@ func (c *DashboardConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("enable-telemetry") {
 		c.EnableTelemetry = defaultEnableTelemetry
 	}
-	c.EnableTelemetry = c.EnableTelemetry && !c.DisableTelemetryDeprecated
+	c.EnableTelemetry = c.EnableTelemetry && !c.DisableTelemetry
 }
 
 // ReplicationModeConfig is the configuration for the replication policy.
