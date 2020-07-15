@@ -128,5 +128,5 @@ location-labels = []
 ## internally instead of result in a 307 redirection.
 # internal-proxy = false
 
-## When not disabled, usage data will be sent to PingCAP for improving user experience.
-# disable-telemetry = false
+## When enabled, usage data will be sent to PingCAP for improving user experience.
+# enable-telemetry = true
