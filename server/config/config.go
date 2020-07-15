@@ -353,7 +353,7 @@ func (c *Config) Parse(arguments []string) error {
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 		if meta.IsDefined("dashboard", "disable-telemetry") {
-			msg := fmt.Sprintf("disable-telemetry in %s is deprecated", c.configFile)
+			msg := fmt.Sprintf("disable-telemetry in %s is deprecated, use enable-telemetry instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 	}
