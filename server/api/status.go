@@ -17,6 +17,7 @@ import (
 	"net/http"
 
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 	"github.com/unrolled/render"
 )
 
@@ -45,9 +46,9 @@ func newStatusHandler(svr *server.Server, rd *render.Render) *statusHandler {
 // @Router /status [get]
 func (h *statusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	version := status{
-		BuildTS:        server.PDBuildTS,
-		GitHash:        server.PDGitHash,
-		Version:        server.PDReleaseVersion,
+		BuildTS:        versioninfo.PDBuildTS,
+		GitHash:        versioninfo.PDGitHash,
+		Version:        versioninfo.PDReleaseVersion,
 		StartTimestamp: h.svr.StartTimestamp(),
 	}
 
