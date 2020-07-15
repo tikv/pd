@@ -36,6 +36,13 @@ BUILD_TAGS ?=
 BUILD_CGO_ENABLED := 0
 PD_EDITION ?= Community
 
+# Ensure PD_EDITION is set to Community or Enterprise before running build process.
+ifneq "$(PD_EDITION)" "Community"
+ifneq "$(PD_EDITION)" "Enterprise"
+  $(error Please set the correct environment variable PD_EDITION before running `make`)
+endif
+endif
+
 ifneq ($(SWAGGER), 0)
 	BUILD_TAGS += swagger_server
 endif
@@ -51,11 +58,11 @@ ifeq ("$(WITH_RACE)", "1")
 	BUILD_CGO_ENABLED := 1
 endif
 
-LDFLAGS += -X "$(PD_PKG)/server.PDReleaseVersion=$(shell git describe --tags --dirty)"
-LDFLAGS += -X "$(PD_PKG)/server.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
-LDFLAGS += -X "$(PD_PKG)/server.PDGitHash=$(shell git rev-parse HEAD)"
-LDFLAGS += -X "$(PD_PKG)/server.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
-LDFLAGS += -X "$(PD_PKG)/server.PDEdition=$(PD_EDITION)"
+LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDReleaseVersion=$(shell git describe --tags --dirty)"
+LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
+LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
+LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
+LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDEdition=$(PD_EDITION)"
 
 ifneq ($(DASHBOARD), 0)
 	# Note: LDFLAGS must be evaluated lazily for these scripts to work correctly
