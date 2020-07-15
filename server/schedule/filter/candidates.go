@@ -11,14 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package selector
+package filter
 
 import (
 	"math/rand"
 	"sort"
 
 	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 )
 
@@ -34,14 +33,14 @@ func NewCandidates(stores []*core.StoreInfo) *StoreCandidates {
 }
 
 // FilterSource keeps stores that can pass all source filters.
-func (c *StoreCandidates) FilterSource(opt opt.Options, filters ...filter.Filter) *StoreCandidates {
-	c.Stores = filter.SelectSourceStores(c.Stores, filters, opt)
+func (c *StoreCandidates) FilterSource(opt opt.Options, filters ...Filter) *StoreCandidates {
+	c.Stores = SelectSourceStores(c.Stores, filters, opt)
 	return c
 }
 
 // FilterTarget keeps stores that can pass all target filters.
-func (c *StoreCandidates) FilterTarget(opt opt.Options, filters ...filter.Filter) *StoreCandidates {
-	c.Stores = filter.SelectTargetStores(c.Stores, filters, opt)
+func (c *StoreCandidates) FilterTarget(opt opt.Options, filters ...Filter) *StoreCandidates {
+	c.Stores = SelectTargetStores(c.Stores, filters, opt)
 	return c
 }
 
