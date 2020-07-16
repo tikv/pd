@@ -14,6 +14,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
@@ -125,6 +127,9 @@ func (c *coordinator) patrolRegions() {
 			c.cluster.RemoveSuspectRegion(id)
 		}
 
+		// Check suspect key ranges
+		c.checkSuspectKeyRanges()
+
 		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// Resets the scan key.
@@ -155,6 +160,33 @@ func (c *coordinator) patrolRegions() {
 			start = time.Now()
 		}
 	}
+}
+
+// checkSuspectKeyRanges would pop one suspect key range group
+// The regions of new version key range and old version key range would be placed into
+// the suspect regions map
+func (c *coordinator) checkSuspectKeyRanges() {
+	keyRangeGroup, success := c.cluster.PopOneSuspectKeyRange()
+	if !success {
+		return
+	}
+	regionMap := map[uint64]struct{}{}
+	f := func(regions []*core.RegionInfo) {
+		for _, region := range regions {
+			regionMap[region.GetID()] = struct{}{}
+		}
+	}
+	newKeyRegions := c.cluster.ScanRegions(keyRangeGroup[0], keyRangeGroup[1], patrolScanRegionLimit)
+	f(newKeyRegions)
+	if !bytes.Equal(keyRangeGroup[0], keyRangeGroup[2]) || !bytes.Equal(keyRangeGroup[1], keyRangeGroup[3]) {
+		oldKeyRegions := c.cluster.ScanRegions(keyRangeGroup[2], keyRangeGroup[3], patrolScanRegionLimit)
+		f(oldKeyRegions)
+	}
+	var regionIDList []uint64
+	for id := range regionMap {
+		regionIDList = append(regionIDList, id)
+	}
+	c.cluster.AddSuspectRegions(regionIDList...)
 }
 
 // drivePushOperator is used to push the unfinished operator to the excutor.

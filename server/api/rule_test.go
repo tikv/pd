@@ -14,6 +14,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -55,6 +57,10 @@ func (s *testRuleSuite) TestSet(c *C) {
 	rule := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	successData, err := json.Marshal(rule)
 	c.Assert(err, IsNil)
+	oldStartKey, err := hex.DecodeString(rule.StartKeyHex)
+	c.Assert(err, IsNil)
+	oldEndKey, err := hex.DecodeString(rule.EndKeyHex)
+	c.Assert(err, IsNil)
 	parseErrData := []byte("foo")
 	rule1 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
 	checkErrData, err := json.Marshal(rule1)
@@ -62,18 +68,43 @@ func (s *testRuleSuite) TestSet(c *C) {
 	rule2 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
 	setErrData, err := json.Marshal(rule2)
 	c.Assert(err, IsNil)
+	rule3 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "follower", Count: 3}
+	updateData, err := json.Marshal(rule3)
+	c.Assert(err, IsNil)
+	newStartKey, err := hex.DecodeString(rule.StartKeyHex)
+	c.Assert(err, IsNil)
+	newEndKey, err := hex.DecodeString(rule.EndKeyHex)
+	c.Assert(err, IsNil)
 
 	testcases := []struct {
-		name     string
-		rawData  []byte
-		success  bool
-		response string
+		name        string
+		rawData     []byte
+		success     bool
+		response    string
+		newStartKey []byte
+		newEndKey   []byte
+		oldStartKey []byte
+		oldEndKey   []byte
 	}{
 		{
-			name:     "Set rule success",
-			rawData:  successData,
-			success:  true,
-			response: "",
+			name:        "Set a new rule success",
+			rawData:     successData,
+			success:     true,
+			response:    "",
+			newStartKey: oldStartKey,
+			newEndKey:   oldEndKey,
+			oldStartKey: oldStartKey,
+			oldEndKey:   oldEndKey,
+		},
+		{
+			name:        "Update an existed rule success",
+			rawData:     updateData,
+			success:     true,
+			response:    "",
+			newStartKey: newStartKey,
+			newEndKey:   newEndKey,
+			oldStartKey: oldStartKey,
+			oldEndKey:   oldEndKey,
 		},
 		{
 			name:    "Parse Json failed",
@@ -109,6 +140,12 @@ func (s *testRuleSuite) TestSet(c *C) {
 		err = postJSON(testDialClient, s.urlPrefix+"/rule", testcase.rawData)
 		if testcase.success {
 			c.Assert(err, IsNil)
+			v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+			c.Assert(got, Equals, true)
+			c.Assert(bytes.Equal(testcase.newStartKey, v[0]), Equals, true)
+			c.Assert(bytes.Equal(testcase.newEndKey, v[1]), Equals, true)
+			c.Assert(bytes.Equal(testcase.oldStartKey, v[2]), Equals, true)
+			c.Assert(bytes.Equal(testcase.oldEndKey, v[3]), Equals, true)
 		} else {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)

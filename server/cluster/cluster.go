@@ -100,8 +100,9 @@ type RaftCluster struct {
 	storesStats     *statistics.StoresStats
 	hotSpotCache    *statistics.HotCache
 
-	coordinator    *coordinator
-	suspectRegions *cache.TTLUint64 // suspectRegions are regions that may need fix
+	coordinator      *coordinator
+	suspectRegions   *cache.TTLUint64 // suspectRegions are regions that may need fix
+	suspectKeyRanges *cache.TTLString // suspect key-range regions that may need fix
 
 	wg           sync.WaitGroup
 	quit         chan struct{}
@@ -202,6 +203,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
+	c.suspectKeyRanges = cache.NewStringTTL(c.ctx, time.Minute, 3*time.Minute)
 }
 
 // Start starts a cluster.
@@ -426,7 +428,7 @@ func (c *RaftCluster) AddSuspectRegions(ids ...uint64) {
 	c.Lock()
 	defer c.Unlock()
 	for _, id := range ids {
-		c.suspectRegions.Put(id)
+		c.suspectRegions.Put(id, nil)
 	}
 }
 
@@ -434,7 +436,7 @@ func (c *RaftCluster) AddSuspectRegions(ids ...uint64) {
 func (c *RaftCluster) GetSuspectRegions() []uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.suspectRegions.GetAll()
+	return c.suspectRegions.GetAllID()
 }
 
 // RemoveSuspectRegion removes region from suspect list.
@@ -442,6 +444,32 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 	c.Lock()
 	defer c.Unlock()
 	c.suspectRegions.Remove(id)
+}
+
+// AddSuspectKeyRanges add the key ranges with the its ruleID as the key
+// The distribution for the keyRanges is like following:
+// [4][]byte: new version start key/new version end key/old version start key/old version end key
+func (c *RaftCluster) AddSuspectKeyRanges(storeID string, keyRanges [4][]byte) {
+	c.Lock()
+	defer c.Unlock()
+	c.suspectKeyRanges.Put(storeID, keyRanges)
+}
+
+// PopOneSuspectKeyRange get one suspect keyRange group
+// return value and true if pop success, return empty [4][]byte and false
+// if suspectKeyRanges couldn't pop keyRange group
+func (c *RaftCluster) PopOneSuspectKeyRange() ([4][]byte, bool) {
+	c.Lock()
+	defer c.Unlock()
+	_, value := c.suspectKeyRanges.PopOneKeyValue()
+	if value == nil {
+		return [4][]byte{}, false
+	}
+	v, ok := value.([4][]byte)
+	if !ok {
+		return [4][]byte{}, false
+	}
+	return v, true
 }
 
 // HandleStoreHeartbeat updates the store status.

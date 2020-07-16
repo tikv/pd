@@ -179,10 +179,22 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	oldRule := cluster.GetRuleManager().GetRule(rule.GroupID, rule.ID)
 	if err := cluster.GetRuleManager().SetRule(&rule); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	suspectKeyRanges := [4][]byte{
+		rule.StartKey,
+		rule.EndKey,
+		rule.StartKey,
+		rule.EndKey,
+	}
+	if oldRule != nil {
+		suspectKeyRanges[2] = oldRule.StartKey
+		suspectKeyRanges[3] = oldRule.EndKey
+	}
+	cluster.AddSuspectKeyRanges(rule.StoreKey(), suspectKeyRanges)
 	h.rd.JSON(w, http.StatusOK, "Update rule successfully.")
 }
 
