@@ -168,25 +168,31 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	c.Assert(err, IsNil)
 
 	rc.MaxReplicas = 5
-
 	rc1 := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(rc1)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
-	rc.LocationLabels = []string{"zone", "rack"}
 
+	rc.LocationLabels = []string{"zone", "rack"}
 	rc2 := map[string]string{"location-labels": "zone,rack"}
 	postData, err = json.Marshal(rc2)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 
-	rc3 := &config.ReplicationConfig{}
-	err = readJSON(testDialClient, addr, rc3)
+	rc.IsolationLabel = "zone"
+	rc3 := map[string]string{"isolation-label": "zone"}
+	postData, err = json.Marshal(rc3)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 
-	c.Assert(*rc, DeepEquals, *rc3)
+	rc4 := &config.ReplicationConfig{}
+	err = readJSON(testDialClient, addr, rc4)
+	c.Assert(err, IsNil)
+
+	c.Assert(*rc, DeepEquals, *rc4)
 }
 
 func (s *testConfigSuite) TestConfigLabelProperty(c *C) {

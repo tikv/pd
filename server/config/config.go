@@ -954,8 +954,14 @@ type ReplicationConfig struct {
 	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
 	StrictlyMatchLabel bool `toml:"strictly-match-label" json:"strictly-match-label,string"`
 
-	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not uesd any more.
+	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not used any more.
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
+
+	// IsolationLabel is used to isolate replicas explicitly and forcibly.
+	// For example, with isolation-label = zone, PD ensure that all replicas be placed in different zones.
+	// Even if a zone is down, PD will not try to make up replicas in other zone
+	// because other zones already have replicas on it.
+	IsolationLabel string `toml:"isolation-label" json:"isolation-label,string"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
@@ -966,13 +972,27 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 		LocationLabels:       locationLabels,
 		StrictlyMatchLabel:   c.StrictlyMatchLabel,
 		EnablePlacementRules: c.EnablePlacementRules,
+		IsolationLabel:       c.IsolationLabel,
 	}
 }
 
 // Validate is used to validate if some replication configurations are right.
 func (c *ReplicationConfig) Validate() error {
+	validIsolationLabel := false
 	for _, label := range c.LocationLabels {
 		err := ValidateLabels([]*metapb.StoreLabel{{Key: label}})
+		if err != nil {
+			return err
+		}
+		if !validIsolationLabel && label == c.IsolationLabel {
+			validIsolationLabel = true
+		}
+	}
+	if len(c.IsolationLabel) > 0 {
+		if !validIsolationLabel {
+			return errors.New("invalid isolation-label")
+		}
+		err := ValidateLabels([]*metapb.StoreLabel{{Key: c.IsolationLabel}})
 		if err != nil {
 			return err
 		}

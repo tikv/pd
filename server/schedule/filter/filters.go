@@ -601,3 +601,74 @@ const (
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
 var allSpeicalEngines = []string{EngineTiFlash}
+
+type isolationFilter struct {
+	scope         string
+	constraintSet [][]*placement.LabelConstraint
+}
+
+// NewIsolationFilter creates a filter that filters out stores with isolationLabel
+// For example, a region has 3 replicas in z1, z2 and z3 individually.
+// With isolationLabel = zone, if the region on z1 is down, we need to filter out z2 and z3
+// because these two zones already have one of the region's replicas on them.
+// We need to choose a store on z1 or z4 to place the new replica to meet the isolationLabel explicitly and forcibly.
+func NewIsolationFilter(scope, isolationLabel string, locationLabels []string, regionStores []*core.StoreInfo) Filter {
+	isolationFilter := &isolationFilter{
+		scope:         scope,
+		constraintSet: make([][]*placement.LabelConstraint, 0),
+	}
+	if len(isolationLabel) <= 0 || len(locationLabels) <= 0 {
+		return isolationFilter
+	}
+	// Get which level this isolationLabel at according to locationLabels
+	var isolationLevel int
+	for level, label := range locationLabels {
+		if label == isolationLabel {
+			isolationLevel = level
+			break
+		}
+	}
+	// Collect all constraints for given isolationLevel
+	for _, regionStore := range regionStores {
+		constraintList := make([]*placement.LabelConstraint, 0)
+		for i := 0; i <= isolationLevel; i++ {
+			constraintList = append(constraintList, &placement.LabelConstraint{
+				Key:    locationLabels[i],
+				Op:     "in",
+				Values: []string{regionStore.GetLabelValue(locationLabels[i])},
+			})
+		}
+		isolationFilter.constraintSet = append(isolationFilter.constraintSet, constraintList)
+	}
+	return isolationFilter
+}
+
+func (f *isolationFilter) Scope() string {
+	return f.scope
+}
+
+func (f *isolationFilter) Type() string {
+	return "isolation-filter"
+}
+
+func (f *isolationFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return true
+}
+
+func (f *isolationFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	// No isolation constraint to fit
+	if len(f.constraintSet) <= 0 {
+		return true
+	}
+	for _, constrainList := range f.constraintSet {
+		match := true
+		for _, constrain := range constrainList {
+			// Check every constrain in constrainList
+			match = constrain.MatchStore(store) && match
+		}
+		if match {
+			return false
+		}
+	}
+	return true
+}

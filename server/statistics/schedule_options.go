@@ -24,6 +24,7 @@ import (
 // TODO: merge the Options to schedule.Options
 type ScheduleOptions interface {
 	GetLocationLabels() []string
+	GetIsolationLabel() string
 
 	GetLowSpaceRatio() float64
 	GetHighSpaceRatio() float64

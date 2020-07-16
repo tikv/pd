@@ -123,6 +123,11 @@ func (o *PersistOptions) GetLocationLabels() []string {
 	return o.GetReplicationConfig().LocationLabels
 }
 
+// GetIsolationLabel returns the isolation label for each region.
+func (o *PersistOptions) GetIsolationLabel() string {
+	return o.GetReplicationConfig().IsolationLabel
+}
+
 // IsPlacementRulesEnabled returns if the placement rules is enabled.
 func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules

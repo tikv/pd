@@ -49,6 +49,7 @@ type Options interface {
 	GetLocationLabels() []string
 	GetStrictlyMatchLabel() bool
 	IsPlacementRulesEnabled() bool
+	GetIsolationLabel() string
 
 	GetHotRegionCacheHitsThreshold() int
 	GetTolerantSizeRatio() float64
