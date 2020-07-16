@@ -68,7 +68,7 @@ func (s *testFitSuite) makeRegion(def string) *core.RegionInfo {
 	return core.NewRegionInfo(&regionMeta, leader)
 }
 
-// example: "3/voter/zone=zone1,rack=rack2/zone,rack,host"
+// example: "3/voter/zone=zone1+zone2,rack=rack2/zone,rack,host"
 //       count role constraints location_labels
 func (s *testFitSuite) makeRule(def string) *Rule {
 	var rule Rule
@@ -84,7 +84,7 @@ func (s *testFitSuite) makeRule(def string) *Rule {
 		rule.LabelConstraints = append(rule.LabelConstraints, LabelConstraint{
 			Key:    kv[0],
 			Op:     "in",
-			Values: []string{kv[1]},
+			Values: strings.Split(kv[1], "+"),
 		})
 	}
 	rule.LocationLabels = strings.Split(splits[3], ",")
