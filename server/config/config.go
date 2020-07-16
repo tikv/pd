@@ -26,21 +26,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/pd/v4/pkg/grpcutil"
+	"github.com/pingcap/pd/v4/pkg/metricutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+	"github.com/pingcap/pd/v4/server/versioninfo"
+
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-
-	"github.com/pingcap/pd/v4/pkg/grpcutil"
-	"github.com/pingcap/pd/v4/pkg/metricutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/schedule"
 )
 
 // Config is the pd server configuration.
@@ -216,6 +217,7 @@ const (
 )
 
 var (
+	defaultEnableTelemetry = true
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
 	// DefaultStoreLimit is the default store limit of add peer and remove peer.
@@ -223,6 +225,16 @@ var (
 	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
 	DefaultTiFlashStoreLimit StoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
 )
+
+func init() {
+	initByLDFlags(versioninfo.PDEdition)
+}
+
+func initByLDFlags(edition string) {
+	if edition != versioninfo.CommunityEdition {
+		defaultEnableTelemetry = false
+	}
+}
 
 // StoreLimit is the default limit of adding peer and removing peer when putting stores.
 type StoreLimit struct {
@@ -322,18 +334,26 @@ func (c *Config) Parse(arguments []string) error {
 		}
 
 		// Backward compatibility for toml config
-		if c.LogFileDeprecated != "" && c.Log.File.Filename == "" {
-			c.Log.File.Filename = c.LogFileDeprecated
+		if c.LogFileDeprecated != "" {
 			msg := fmt.Sprintf("log-file in %s is deprecated, use [log.file] instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
+			if c.Log.File.Filename == "" {
+				c.Log.File.Filename = c.LogFileDeprecated
+			}
 		}
-		if c.LogLevelDeprecated != "" && c.Log.Level == "" {
-			c.Log.Level = c.LogLevelDeprecated
+		if c.LogLevelDeprecated != "" {
 			msg := fmt.Sprintf("log-level in %s is deprecated, use [log] instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
+			if c.Log.Level == "" {
+				c.Log.Level = c.LogLevelDeprecated
+			}
 		}
 		if meta.IsDefined("schedule", "disable-raft-learner") {
 			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", c.configFile)
+			c.WarningMsgs = append(c.WarningMsgs, msg)
+		}
+		if meta.IsDefined("dashboard", "disable-telemetry") {
+			msg := fmt.Sprintf("disable-telemetry in %s is deprecated, use enable-telemetry instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 	}
@@ -506,6 +526,8 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
 	}
+
+	c.Dashboard.adjust(configMetaData.Child("dashboard"))
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
@@ -1185,16 +1207,18 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath       string `toml:"tidb-cacert-path" json:"tidb_cacert_path"`
-	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb_cert_path"`
-	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb_key_path"`
-	PublicPathPrefix string `toml:"public-path-prefix" json:"public_path_prefix"`
-	InternalProxy    bool   `toml:"internal-proxy" json:"internal_proxy"`
-	DisableTelemetry bool   `toml:"disable-telemetry" json:"disable_telemetry"`
+	TiDBCAPath       string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
+	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb-cert-path"`
+	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb-key-path"`
+	PublicPathPrefix string `toml:"public-path-prefix" json:"public-path-prefix"`
+	InternalProxy    bool   `toml:"internal-proxy" json:"internal-proxy"`
+	EnableTelemetry  bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	// WARN: DisableTelemetry is deprecated.
+	DisableTelemetry bool `toml:"disable-telemetry" json:"disable-telemetry,omitempty"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
-func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
+func (c *DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 	if (len(c.TiDBCertPath) != 0 && len(c.TiDBKeyPath) != 0) || len(c.TiDBCAPath) != 0 {
 		tlsInfo := transport.TLSInfo{
 			CertFile:      c.TiDBCertPath,
@@ -1208,6 +1232,13 @@ func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 		return tlsConfig, nil
 	}
 	return nil, nil
+}
+
+func (c *DashboardConfig) adjust(meta *configMetaData) {
+	if !meta.IsDefined("enable-telemetry") {
+		c.EnableTelemetry = defaultEnableTelemetry
+	}
+	c.EnableTelemetry = c.EnableTelemetry && !c.DisableTelemetry
 }
 
 // ReplicationModeConfig is the configuration for the replication policy.

@@ -342,6 +342,27 @@ tidb-cert-path = "/path/client.pem"
 	c.Assert(cfg.Dashboard.TiDBCAPath, Equals, "/path/ca.pem")
 	c.Assert(cfg.Dashboard.TiDBKeyPath, Equals, "/path/client-key.pem")
 	c.Assert(cfg.Dashboard.TiDBCertPath, Equals, "/path/client.pem")
+
+	// Test different editions
+	tests := []struct {
+		Edition         string
+		EnableTelemetry bool
+	}{
+		{"Community", true},
+		{"Enterprise", false},
+	}
+	originalDefaultEnableTelemetry := defaultEnableTelemetry
+	for _, test := range tests {
+		defaultEnableTelemetry = true
+		initByLDFlags(test.Edition)
+		cfg = NewConfig()
+		meta, err = toml.Decode(cfgData, &cfg)
+		c.Assert(err, IsNil)
+		err = cfg.Adjust(&meta)
+		c.Assert(err, IsNil)
+		c.Assert(cfg.Dashboard.EnableTelemetry, Equals, test.EnableTelemetry)
+	}
+	defaultEnableTelemetry = originalDefaultEnableTelemetry
 }
 
 func (s *testConfigSuite) TestReplicationMode(c *C) {
