@@ -232,6 +232,7 @@ func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo, contex
 	filters := []filter.Filter{
 		context.selected.newFilter(r.name),
 		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
+		filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
 	}
 	filters = append(filters, context.filters...)
 
