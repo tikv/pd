@@ -961,7 +961,7 @@ type ReplicationConfig struct {
 	// For example, with isolation-label = zone, PD ensure that all replicas be placed in different zones.
 	// Even if a zone is down, PD will not try to make up replicas in other zone
 	// because other zones already have replicas on it.
-	IsolationLabel string `toml:"isolation-label" json:"isolation-label,string"`
+	IsolationLabel string `toml:"isolation-label" json:"isolation-label"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
