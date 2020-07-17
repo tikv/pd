@@ -74,7 +74,7 @@ type ScheduleOptions struct {
 	MaxReplicas                  int
 	LocationLabels               []string
 	StrictlyMatchLabel           bool
-	IsolationLabel               string
+	IsolationLevel               string
 	HotRegionCacheHitsThreshold  int
 	TolerantSizeRatio            float64
 	LowSpaceRatio                float64
@@ -258,9 +258,9 @@ func (mso *ScheduleOptions) GetLocationLabels() []string {
 	return mso.LocationLabels
 }
 
-// GetIsolationLabel mocks method
-func (mso *ScheduleOptions) GetIsolationLabel() string {
-	return mso.IsolationLabel
+// GetIsolationLevel mocks method
+func (mso *ScheduleOptions) GetIsolationLevel() string {
+	return mso.IsolationLevel
 }
 
 // GetStrictlyMatchLabel mocks method

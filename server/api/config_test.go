@@ -181,8 +181,8 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, IsNil)
 
-	rc.IsolationLabel = "zone"
-	rc3 := map[string]string{"isolation-label": "zone"}
+	rc.IsolationLevel = "zone"
+	rc3 := map[string]string{"isolation-level": "zone"}
 	postData, err = json.Marshal(rc3)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, addr, postData)

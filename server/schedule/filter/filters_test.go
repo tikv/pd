@@ -158,7 +158,7 @@ func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 
 	testCases := []struct {
 		region         *core.RegionInfo
-		isolationLabel string
+		isolationLevel string
 		sourceRes      []bool
 		targetRes      []bool
 	}{
@@ -194,7 +194,7 @@ func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 	}
 
 	for _, tc := range testCases {
-		filter := NewIsolationFilter("", tc.isolationLabel, testCluster.GetLocationLabels(), testCluster.GetRegionStores(tc.region))
+		filter := NewIsolationFilter("", tc.isolationLevel, testCluster.GetLocationLabels(), testCluster.GetRegionStores(tc.region))
 		for idx, store := range allStores {
 			c.Assert(filter.Source(testCluster, testCluster.GetStore(store.storeID)), Equals, tc.sourceRes[idx])
 			c.Assert(filter.Target(testCluster, testCluster.GetStore(store.storeID)), Equals, tc.targetRes[idx])

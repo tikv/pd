@@ -1439,9 +1439,9 @@ func (c *RaftCluster) GetLocationLabels() []string {
 	return c.opt.GetLocationLabels()
 }
 
-// GetIsolationLabel returns the isolation label for each region.
-func (c *RaftCluster) GetIsolationLabel() string {
-	return c.opt.GetIsolationLabel()
+// GetIsolationLevel returns the isolation label for each region.
+func (c *RaftCluster) GetIsolationLevel() string {
+	return c.opt.GetIsolationLevel()
 }
 
 // GetStrictlyMatchLabel returns if the strictly label check is enabled.

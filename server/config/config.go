@@ -957,11 +957,15 @@ type ReplicationConfig struct {
 	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not used any more.
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 
-	// IsolationLabel is used to isolate replicas explicitly and forcibly.
-	// For example, with isolation-label = zone, PD ensure that all replicas be placed in different zones.
+	// IsolationLevel is used to isolate replicas explicitly and forcibly if it's not empty.
+	// Its value must be empty or one of LocationLabels.
+	// Example:
+	// location-labels = ["zone", "rack", "host"]
+	// isolation-level = "zone"
+	// With configuration like above, PD ensure that all replicas be placed in different zones.
 	// Even if a zone is down, PD will not try to make up replicas in other zone
 	// because other zones already have replicas on it.
-	IsolationLabel string `toml:"isolation-label" json:"isolation-label"`
+	IsolationLevel string `toml:"isolation-level" json:"isolation-level"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
@@ -972,28 +976,28 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 		LocationLabels:       locationLabels,
 		StrictlyMatchLabel:   c.StrictlyMatchLabel,
 		EnablePlacementRules: c.EnablePlacementRules,
-		IsolationLabel:       c.IsolationLabel,
+		IsolationLevel:       c.IsolationLevel,
 	}
 }
 
 // Validate is used to validate if some replication configurations are right.
 func (c *ReplicationConfig) Validate() error {
-	validIsolationLabel := false
-	if len(c.IsolationLabel) <= 0 {
-		validIsolationLabel = true
+	validIsolationLevel := false
+	if len(c.IsolationLevel) <= 0 {
+		validIsolationLevel = true
 	}
 	for _, label := range c.LocationLabels {
 		err := ValidateLabels([]*metapb.StoreLabel{{Key: label}})
 		if err != nil {
 			return err
 		}
-		// IsolationLabel should be empty or one of LocationLabels
-		if !validIsolationLabel && label == c.IsolationLabel {
-			validIsolationLabel = true
+		// IsolationLevel should be empty or one of LocationLabels
+		if !validIsolationLevel && label == c.IsolationLevel {
+			validIsolationLevel = true
 		}
 	}
-	if !validIsolationLabel {
-		return errors.New("isolation-label must be one of location-labels")
+	if !validIsolationLevel {
+		return errors.New("isolation-level must be one of location-labels")
 	}
 	return nil
 }

@@ -27,7 +27,7 @@ type ReplicaStrategy struct {
 	checkerName    string // replica-checker / rule-checker
 	cluster        opt.Cluster
 	locationLabels []string
-	isolationLabel string
+	isolationLevel string
 	region         *core.RegionInfo
 	extraFilters   []filter.Filter
 }
@@ -54,7 +54,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIds()),
-		filter.NewIsolationFilter(s.checkerName, s.isolationLabel, s.locationLabels, s.cluster.GetRegionStores(s.region)),
+		filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, s.cluster.GetRegionStores(s.region)),
 		filter.NewStorageThresholdFilter(s.checkerName),
 		filter.NewSpecialUseFilter(s.checkerName),
 		filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true},
