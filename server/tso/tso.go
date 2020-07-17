@@ -273,6 +273,11 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 	for i := 0; i < maxRetryCount; i++ {
 		current := (*atomicObject)(atomic.LoadPointer(&t.ts))
 		if current == nil || current.physical == typeutil.ZeroTime {
+			// If it's leader, maybe SyncTimestamp hasn't completed yet
+			if t.lease != nil && !t.lease.IsExpired() {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
 			return pdpb.Timestamp{}, errors.New("can not get timestamp, may be not leader")
 		}
 
