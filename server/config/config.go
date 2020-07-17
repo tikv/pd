@@ -979,23 +979,21 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 // Validate is used to validate if some replication configurations are right.
 func (c *ReplicationConfig) Validate() error {
 	validIsolationLabel := false
+	if len(c.IsolationLabel) <= 0 {
+		validIsolationLabel = true
+	}
 	for _, label := range c.LocationLabels {
 		err := ValidateLabels([]*metapb.StoreLabel{{Key: label}})
 		if err != nil {
 			return err
 		}
+		// IsolationLabel should be empty or one of LocationLabels
 		if !validIsolationLabel && label == c.IsolationLabel {
 			validIsolationLabel = true
 		}
 	}
-	if len(c.IsolationLabel) > 0 {
-		if !validIsolationLabel {
-			return errors.New("invalid isolation-label")
-		}
-		err := ValidateLabels([]*metapb.StoreLabel{{Key: c.IsolationLabel}})
-		if err != nil {
-			return err
-		}
+	if !validIsolationLabel {
+		return errors.New("isolation-label must be one of location-labels")
 	}
 	return nil
 }
