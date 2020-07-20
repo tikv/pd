@@ -145,9 +145,9 @@ func (s *testRuleSuite) TestSet(c *C) {
 
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
+		s.mu.Lock()
 		err = postJSON(testDialClient, s.urlPrefix+"/rule", testcase.rawData)
 		if testcase.success {
-			s.mu.Lock()
 			c.Assert(err, IsNil)
 			v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
 			c.Assert(got, Equals, true)
@@ -156,11 +156,11 @@ func (s *testRuleSuite) TestSet(c *C) {
 				c.Assert(bytes.Compare(keyRange[0], testcase.popKeyRange[id][0]), Equals, 0)
 				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyRange[id][1]), Equals, 0)
 			}
-			s.mu.Unlock()
 		} else {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)
 		}
+		s.mu.Unlock()
 	}
 }
 
@@ -403,11 +403,11 @@ func (s *testRuleSuite) TestDelete(c *C) {
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.groupID, testcase.id)
+		s.mu.Lock()
 		resp, err := doDelete(testDialClient, url)
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, http.StatusOK)
 		if len(testcase.popKeyRange) > 0 {
-			s.mu.Lock()
 			v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
 			c.Assert(got, Equals, true)
 			c.Assert(len(v), Equals, len(testcase.popKeyRange))
@@ -415,8 +415,8 @@ func (s *testRuleSuite) TestDelete(c *C) {
 				c.Assert(bytes.Compare(keyRange[0], testcase.popKeyRange[id][0]), Equals, 0)
 				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyRange[id][1]), Equals, 0)
 			}
-			s.mu.Unlock()
 		}
+		s.mu.Unlock()
 	}
 }
 
