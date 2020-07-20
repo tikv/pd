@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/server"
@@ -32,6 +33,8 @@ type testRuleSuite struct {
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
+	// make sure different test case push and pop value into suspect KeyRange in order
+	mu sync.Mutex
 }
 
 func (s *testRuleSuite) SetUpSuite(c *C) {
@@ -144,6 +147,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 		c.Log(testcase.name)
 		err = postJSON(testDialClient, s.urlPrefix+"/rule", testcase.rawData)
 		if testcase.success {
+			s.mu.Lock()
 			c.Assert(err, IsNil)
 			v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
 			c.Assert(got, Equals, true)
@@ -152,7 +156,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 				c.Assert(bytes.Compare(keyRange[0], testcase.popKeyRange[id][0]), Equals, 0)
 				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyRange[id][1]), Equals, 0)
 			}
-
+			s.mu.Unlock()
 		} else {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)
@@ -403,6 +407,7 @@ func (s *testRuleSuite) TestDelete(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, http.StatusOK)
 		if len(testcase.popKeyRange) > 0 {
+			s.mu.Lock()
 			v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
 			c.Assert(got, Equals, true)
 			c.Assert(len(v), Equals, len(testcase.popKeyRange))
@@ -410,6 +415,7 @@ func (s *testRuleSuite) TestDelete(c *C) {
 				c.Assert(bytes.Compare(keyRange[0], testcase.popKeyRange[id][0]), Equals, 0)
 				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyRange[id][1]), Equals, 0)
 			}
+			s.mu.Unlock()
 		}
 	}
 }
