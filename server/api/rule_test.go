@@ -81,30 +81,35 @@ func (s *testRuleSuite) TestSet(c *C) {
 		rawData     []byte
 		success     bool
 		response    string
-		newStartKey []byte
-		newEndKey   []byte
-		oldStartKey []byte
-		oldEndKey   []byte
+		popKeyrange [][2][]byte
 	}{
 		{
-			name:        "Set a new rule success",
-			rawData:     successData,
-			success:     true,
-			response:    "",
-			newStartKey: oldStartKey,
-			newEndKey:   oldEndKey,
-			oldStartKey: oldStartKey,
-			oldEndKey:   oldEndKey,
+			name:     "Set a new rule success",
+			rawData:  successData,
+			success:  true,
+			response: "",
+			popKeyrange: [][2][]byte{
+				{
+					oldStartKey,
+					oldEndKey,
+				},
+			},
 		},
 		{
-			name:        "Update an existed rule success",
-			rawData:     updateData,
-			success:     true,
-			response:    "",
-			newStartKey: newStartKey,
-			newEndKey:   newEndKey,
-			oldStartKey: oldStartKey,
-			oldEndKey:   oldEndKey,
+			name:     "Update an existed rule success",
+			rawData:  updateData,
+			success:  true,
+			response: "",
+			popKeyrange: [][2][]byte{
+				{
+					newStartKey,
+					newEndKey,
+				},
+				{
+					oldStartKey,
+					oldEndKey,
+				},
+			},
 		},
 		{
 			name:    "Parse Json failed",
@@ -142,10 +147,12 @@ func (s *testRuleSuite) TestSet(c *C) {
 			c.Assert(err, IsNil)
 			v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
 			c.Assert(got, Equals, true)
-			c.Assert(bytes.Equal(testcase.newStartKey, v[0]), Equals, true)
-			c.Assert(bytes.Equal(testcase.newEndKey, v[1]), Equals, true)
-			c.Assert(bytes.Equal(testcase.oldStartKey, v[2]), Equals, true)
-			c.Assert(bytes.Equal(testcase.oldEndKey, v[3]), Equals, true)
+			c.Assert(len(v), Equals, len(testcase.popKeyrange))
+			for id, keyRange := range v {
+				c.Assert(bytes.Compare(keyRange[0], testcase.popKeyrange[id][0]), Equals, 0)
+				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyrange[id][1]), Equals, 0)
+			}
+
 		} else {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)

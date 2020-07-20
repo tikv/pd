@@ -447,27 +447,27 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 }
 
 // AddSuspectKeyRanges add the key ranges with the its ruleID as the key
-// The distribution for the keyRanges is like following:
-// [4][]byte: new version start key/new version end key/old version start key/old version end key
-func (c *RaftCluster) AddSuspectKeyRanges(storeID string, keyRanges [4][]byte) {
+// The instance of each keyRange is like following format:
+// [2][]byte: start key/ned key
+func (c *RaftCluster) AddSuspectKeyRanges(storeID string, keyRanges [][2][]byte) {
 	c.Lock()
 	defer c.Unlock()
 	c.suspectKeyRanges.Put(storeID, keyRanges)
 }
 
 // PopOneSuspectKeyRange get one suspect keyRange group
-// return value and true if pop success, return empty [4][]byte and false
-// if suspectKeyRanges couldn't pop keyRange group
-func (c *RaftCluster) PopOneSuspectKeyRange() ([4][]byte, bool) {
+// return value and true if pop success, return empty [][2][]byte and false
+// if suspectKeyRanges couldn't pop keyRange group.
+func (c *RaftCluster) PopOneSuspectKeyRange() ([][2][]byte, bool) {
 	c.Lock()
 	defer c.Unlock()
-	_, value := c.suspectKeyRanges.PopOneKeyValue()
-	if value == nil {
-		return [4][]byte{}, false
+	_, value, success := c.suspectKeyRanges.Pop()
+	if !success {
+		return [][2][]byte{}, false
 	}
-	v, ok := value.([4][]byte)
+	v, ok := value.([][2][]byte)
 	if !ok {
-		return [4][]byte{}, false
+		return [][2][]byte{}, false
 	}
 	return v, true
 }

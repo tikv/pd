@@ -107,6 +107,20 @@ func (c *ttl) remove(key interface{}) {
 	delete(c.items, key)
 }
 
+func (c *ttl) pop() (key, value interface{}, success bool) {
+	c.Lock()
+	defer c.Unlock()
+	now := time.Now()
+	for k, item := range c.items {
+		if item.expire.After(now) {
+			value := item.value
+			delete(c.items, k)
+			return k, value, true
+		}
+	}
+	return nil, nil, false
+}
+
 // Len returns current cache size.
 func (c *ttl) Len() int {
 	c.RLock()
@@ -220,17 +234,14 @@ func (c *TTLString) Put(key string, value interface{}) {
 }
 
 // PopOneKeyValue pop one key/value that is not expired
-func (c *TTLString) PopOneKeyValue() (string, interface{}) {
-	c.Lock()
-	defer c.Unlock()
-	now := time.Now()
-	for k, item := range c.items {
-		key, ok := k.(string)
-		if ok && item.expire.After(now) {
-			value := item.value
-			delete(c.items, k)
-			return key, value
-		}
+func (c *TTLString) Pop() (string, interface{}, bool) {
+	k, v, success := c.ttl.pop()
+	if !success {
+		return "", nil, false
 	}
-	return "", nil
+	key, ok := k.(string)
+	if !ok {
+		return "", nil, false
+	}
+	return key, v, true
 }

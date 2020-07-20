@@ -14,7 +14,6 @@
 package cluster
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -170,19 +169,21 @@ func (c *coordinator) checkSuspectKeyRanges() {
 	if !success {
 		return
 	}
+	if len(keyRangeGroup) < 1 {
+		return
+	}
+
 	regionMap := map[uint64]struct{}{}
 	f := func(regions []*core.RegionInfo) {
 		for _, region := range regions {
 			regionMap[region.GetID()] = struct{}{}
 		}
 	}
-	newKeyRegions := c.cluster.ScanRegions(keyRangeGroup[0], keyRangeGroup[1], patrolScanRegionLimit)
-	f(newKeyRegions)
-	if !bytes.Equal(keyRangeGroup[0], keyRangeGroup[2]) || !bytes.Equal(keyRangeGroup[1], keyRangeGroup[3]) {
-		oldKeyRegions := c.cluster.ScanRegions(keyRangeGroup[2], keyRangeGroup[3], patrolScanRegionLimit)
-		f(oldKeyRegions)
+	for _, keyRange := range keyRangeGroup {
+		newKeyRegions := c.cluster.ScanRegions(keyRange[0], keyRange[1], 1024)
+		f(newKeyRegions)
 	}
-	var regionIDList []uint64
+	regionIDList := make([]uint64, 0, 2048)
 	for id := range regionMap {
 		regionIDList = append(regionIDList, id)
 	}
