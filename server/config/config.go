@@ -954,7 +954,7 @@ type ReplicationConfig struct {
 	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
 	StrictlyMatchLabel bool `toml:"strictly-match-label" json:"strictly-match-label,string"`
 
-	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not used any more.
+	// When PlacementRules feature is enabled. MaxReplicas, LocationLabels and IsolationLabels are not used any more.
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 
 	// IsolationLevel is used to isolate replicas explicitly and forcibly if it's not empty.
@@ -982,22 +982,19 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 
 // Validate is used to validate if some replication configurations are right.
 func (c *ReplicationConfig) Validate() error {
-	validIsolationLevel := false
-	if len(c.IsolationLevel) <= 0 {
-		validIsolationLevel = true
-	}
+	foundIsolationLevel := false
 	for _, label := range c.LocationLabels {
 		err := ValidateLabels([]*metapb.StoreLabel{{Key: label}})
 		if err != nil {
 			return err
 		}
 		// IsolationLevel should be empty or one of LocationLabels
-		if !validIsolationLevel && label == c.IsolationLevel {
-			validIsolationLevel = true
+		if !foundIsolationLevel && label == c.IsolationLevel {
+			foundIsolationLevel = true
 		}
 	}
-	if !validIsolationLevel {
-		return errors.New("isolation-level must be one of location-labels")
+	if len(c.IsolationLevel) > 0 && !foundIsolationLevel {
+		return errors.New("isolation-level must be one of location-labels or empty")
 	}
 	return nil
 }

@@ -51,13 +51,15 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	//
 	// The reason for it is to prevent the non-optimal replica placement due
 	// to the short-term state, resulting in redundant scheduling.
-
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIds()),
-		filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, s.cluster.GetRegionStores(s.region)),
 		filter.NewStorageThresholdFilter(s.checkerName),
 		filter.NewSpecialUseFilter(s.checkerName),
 		filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true},
+	}
+	// IsolationLevel should only be available when PlacementRulesEnabled is false
+	if s.cluster.IsPlacementRulesEnabled() {
+		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores))
 	}
 	if len(extraFilters) > 0 {
 		filters = append(filters, extraFilters...)

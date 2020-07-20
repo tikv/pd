@@ -603,8 +603,9 @@ var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
 var allSpeicalEngines = []string{EngineTiFlash}
 
 type isolationFilter struct {
-	scope         string
-	constraintSet [][]*placement.LabelConstraint
+	scope          string
+	locationLabels []string
+	constraintSet  [][]string
 }
 
 // NewIsolationFilter creates a filter that filters out stores with isolationLevel
@@ -614,8 +615,9 @@ type isolationFilter struct {
 // We need to choose a store on z1 or z4 to place the new replica to meet the isolationLevel explicitly and forcibly.
 func NewIsolationFilter(scope, isolationLevel string, locationLabels []string, regionStores []*core.StoreInfo) Filter {
 	isolationFilter := &isolationFilter{
-		scope:         scope,
-		constraintSet: make([][]*placement.LabelConstraint, 0),
+		scope:          scope,
+		locationLabels: locationLabels,
+		constraintSet:  make([][]string, 0),
 	}
 	if len(isolationLevel) <= 0 || len(locationLabels) <= 0 {
 		return isolationFilter
@@ -630,13 +632,9 @@ func NewIsolationFilter(scope, isolationLevel string, locationLabels []string, r
 	}
 	// Collect all constraints for given isolationLevel
 	for _, regionStore := range regionStores {
-		constraintList := make([]*placement.LabelConstraint, 0)
+		constraintList := make([]string, 0)
 		for i := 0; i <= isolationLevelIdx; i++ {
-			constraintList = append(constraintList, &placement.LabelConstraint{
-				Key:    locationLabels[i],
-				Op:     "in",
-				Values: []string{regionStore.GetLabelValue(locationLabels[i])},
-			})
+			constraintList = append(constraintList, regionStore.GetLabelValue(locationLabels[i]))
 		}
 		isolationFilter.constraintSet = append(isolationFilter.constraintSet, constraintList)
 	}
@@ -662,9 +660,14 @@ func (f *isolationFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	}
 	for _, constrainList := range f.constraintSet {
 		match := true
-		for _, constrain := range constrainList {
-			// Check every constrain in constrainList
-			match = constrain.MatchStore(store) && match
+		for idx, constraint := range constrainList {
+			// Check every constraint in constrainList
+			labelConstraint := &placement.LabelConstraint{
+				Key:    f.locationLabels[idx],
+				Op:     "in",
+				Values: []string{constraint},
+			}
+			match = labelConstraint.MatchStore(store) && match
 		}
 		if match {
 			return false
