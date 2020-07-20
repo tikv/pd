@@ -390,11 +390,10 @@ func (s *testRuleSuite) TestDelete(c *C) {
 			},
 		},
 		{
-			name:    "delete non-existed rule",
-			groupID: "g",
-			id:      "15",
-			popKeyRange: [][2][]byte{
-			},
+			name:        "delete non-existed rule",
+			groupID:     "g",
+			id:          "15",
+			popKeyRange: [][2][]byte{},
 		},
 	}
 	for _, testcase := range testcases {
