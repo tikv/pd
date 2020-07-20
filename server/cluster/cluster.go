@@ -472,6 +472,13 @@ func (c *RaftCluster) PopOneSuspectKeyRange() ([][2][]byte, bool) {
 	return v, true
 }
 
+// ClearSuspectKeyRanges clear the suspect keyranges, only for unit test
+func (c *RaftCluster) ClearSuspectKeyRanges() {
+	c.Lock()
+	defer c.Unlock()
+	c.suspectKeyRanges.Clear()
+}
+
 // HandleStoreHeartbeat updates the store status.
 func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.Lock()

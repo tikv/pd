@@ -146,6 +146,8 @@ func (s *testRuleSuite) TestSet(c *C) {
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		s.mu.Lock()
+		// clear suspect keyRanges to prevent test case from others
+		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
 		err = postJSON(testDialClient, s.urlPrefix+"/rule", testcase.rawData)
 		if testcase.success {
 			c.Assert(err, IsNil)
@@ -404,6 +406,8 @@ func (s *testRuleSuite) TestDelete(c *C) {
 		c.Log(testcase.name)
 		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.groupID, testcase.id)
 		s.mu.Lock()
+		// clear suspect keyRanges to prevent test case from others
+		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
 		resp, err := doDelete(testDialClient, url)
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, http.StatusOK)
