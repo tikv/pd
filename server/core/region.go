@@ -31,6 +31,7 @@ import (
 // RegionInfo records detail region info.
 // Read-Only once created.
 type RegionInfo struct {
+	term              uint64
 	meta              *metapb.Region
 	learners          []*metapb.Peer
 	voters            []*metapb.Peer
@@ -90,6 +91,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 	}
 
 	region := &RegionInfo{
+		term:              heartbeat.GetTerm(),
 		meta:              heartbeat.GetRegion(),
 		leader:            heartbeat.GetLeader(),
 		downPeers:         heartbeat.GetDownPeers(),
@@ -139,6 +141,11 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 	classifyVoterAndLearner(region)
 	return region
+}
+
+// GetTerm returns the current term of the region
+func (r *RegionInfo) GetTerm() uint64 {
+	return r.term
 }
 
 // GetLearners returns the learners.
