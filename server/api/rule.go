@@ -246,9 +246,20 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	group, id := mux.Vars(r)["group"], mux.Vars(r)["id"]
+	rule := cluster.GetRuleManager().GetRule(group, id)
 	if err := cluster.GetRuleManager().DeleteRule(group, id); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if rule != nil {
+		suspectKeyRanges := [][2][]byte{
+			{
+				rule.StartKey,
+				rule.EndKey,
+			},
+		}
+		cluster.AddSuspectKeyRanges(rule.StoreKey(), suspectKeyRanges)
+	}
+
 	h.rd.JSON(w, http.StatusOK, "Delete rule successfully.")
 }

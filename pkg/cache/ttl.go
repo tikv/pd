@@ -107,7 +107,8 @@ func (c *ttl) remove(key interface{}) {
 	delete(c.items, key)
 }
 
-func (c *ttl) pop() (key, value interface{}, success bool) {
+// pop one key/value that is not expired. If boolean is false, it means didnt find the valid one.
+func (c *ttl) pop() (interface{}, interface{}, bool) {
 	c.Lock()
 	defer c.Unlock()
 	now := time.Now()
@@ -233,7 +234,7 @@ func (c *TTLString) Put(key string, value interface{}) {
 	c.ttl.put(key, value)
 }
 
-// PopOneKeyValue pop one key/value that is not expired
+// Pop one key/value that is not expired
 func (c *TTLString) Pop() (string, interface{}, bool) {
 	k, v, success := c.ttl.pop()
 	if !success {
