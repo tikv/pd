@@ -57,10 +57,6 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 		filter.NewSpecialUseFilter(s.checkerName),
 		filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true},
 	}
-	// IsolationLevel should only be available when PlacementRulesEnabled is false
-	if s.cluster.IsPlacementRulesEnabled() {
-		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores))
-	}
 	if len(extraFilters) > 0 {
 		filters = append(filters, extraFilters...)
 	}

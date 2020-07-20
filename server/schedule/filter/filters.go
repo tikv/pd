@@ -662,12 +662,7 @@ func (f *isolationFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 		match := true
 		for idx, constraint := range constrainList {
 			// Check every constraint in constrainList
-			labelConstraint := &placement.LabelConstraint{
-				Key:    f.locationLabels[idx],
-				Op:     "in",
-				Values: []string{constraint},
-			}
-			match = labelConstraint.MatchStore(store) && match
+			match = store.GetLabelValue(f.locationLabels[idx]) == constraint && match
 		}
 		if match {
 			return false
