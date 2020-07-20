@@ -81,14 +81,14 @@ func (s *testRuleSuite) TestSet(c *C) {
 		rawData     []byte
 		success     bool
 		response    string
-		popKeyrange [][2][]byte
+		popKeyRange [][2][]byte
 	}{
 		{
 			name:     "Set a new rule success",
 			rawData:  successData,
 			success:  true,
 			response: "",
-			popKeyrange: [][2][]byte{
+			popKeyRange: [][2][]byte{
 				{
 					oldStartKey,
 					oldEndKey,
@@ -100,7 +100,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 			rawData:  updateData,
 			success:  true,
 			response: "",
-			popKeyrange: [][2][]byte{
+			popKeyRange: [][2][]byte{
 				{
 					newStartKey,
 					newEndKey,
@@ -147,10 +147,10 @@ func (s *testRuleSuite) TestSet(c *C) {
 			c.Assert(err, IsNil)
 			v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
 			c.Assert(got, Equals, true)
-			c.Assert(len(v), Equals, len(testcase.popKeyrange))
+			c.Assert(len(v), Equals, len(testcase.popKeyRange))
 			for id, keyRange := range v {
-				c.Assert(bytes.Compare(keyRange[0], testcase.popKeyrange[id][0]), Equals, 0)
-				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyrange[id][1]), Equals, 0)
+				c.Assert(bytes.Compare(keyRange[0], testcase.popKeyRange[id][0]), Equals, 0)
+				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyRange[id][1]), Equals, 0)
 			}
 
 		} else {
@@ -367,21 +367,34 @@ func (s *testRuleSuite) TestDelete(c *C) {
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
 	c.Assert(err, IsNil)
+	oldStartKey, err := hex.DecodeString(rule.StartKeyHex)
+	c.Assert(err, IsNil)
+	oldEndKey, err := hex.DecodeString(rule.EndKeyHex)
+	c.Assert(err, IsNil)
 
 	testcases := []struct {
-		name    string
-		groupID string
-		id      string
+		name        string
+		groupID     string
+		id          string
+		popKeyRange [][2][]byte
 	}{
 		{
 			name:    "delete existed rule",
 			groupID: "g",
 			id:      "10",
+			popKeyRange: [][2][]byte{
+				{
+					oldStartKey,
+					oldEndKey,
+				},
+			},
 		},
 		{
 			name:    "delete non-existed rule",
 			groupID: "g",
 			id:      "15",
+			popKeyRange: [][2][]byte{
+			},
 		},
 	}
 	for _, testcase := range testcases {
@@ -390,6 +403,15 @@ func (s *testRuleSuite) TestDelete(c *C) {
 		resp, err := doDelete(testDialClient, url)
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, http.StatusOK)
+		if len(testcase.popKeyRange) > 0 {
+			v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+			c.Assert(got, Equals, true)
+			c.Assert(len(v), Equals, len(testcase.popKeyRange))
+			for id, keyRange := range v {
+				c.Assert(bytes.Compare(keyRange[0], testcase.popKeyRange[id][0]), Equals, 0)
+				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyRange[id][1]), Equals, 0)
+			}
+		}
 	}
 }
 
