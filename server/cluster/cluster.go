@@ -1695,6 +1695,16 @@ func (c *RaftCluster) GetStoreLimitByType(storeID uint64, typ storelimit.Type) f
 	return c.opt.GetStoreLimitByType(storeID, typ)
 }
 
+func (c *RaftCluster) GetLabelStores(label config.StoreLabel) []uint64 {
+	var stores []uint64
+	for _, s := range c.GetStores() {
+		if s.GetLabelValue(label.Key) == label.Value {
+			stores = append(stores, s.GetID())
+		}
+	}
+	return stores
+}
+
 // GetLabelStoresLimit returns store limit for a label.
 func (c *RaftCluster) GetLabelStoresLimit(label config.StoreLabel) config.StoreLimitConfig {
 	return c.opt.GetLabelStoresLimit(label)
@@ -1743,6 +1753,10 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 
 // SetLabelStoresLimit sets store limit for a given label, type and rate.
 func (c *RaftCluster) SetLabelStoresLimit(label config.StoreLabel, typ storelimit.Type, ratePerMin float64) {
+	stores := c.GetLabelStores(label)
+	for _, s := range stores {
+		c.SetStoreLimit(s, typ, ratePerMin)
+	}
 	c.opt.SetLabelStoresLimit(label, typ, ratePerMin)
 }
 
