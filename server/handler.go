@@ -430,10 +430,10 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetLabelStoresLimit(label config.StoreLabel, limitType storelimit.Type) (map[config.StoreLabel]config.StoreLimitConfig, error) {
+func (h *Handler) GetLabelStoresLimit(label config.StoreLabel, limitType storelimit.Type) (config.StoreLimitConfig, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
-		return nil, err
+		return config.StoreLimitConfig{AddPeer: config.DefaultStoreLimit.AddPeer, RemovePeer: config.DefaultStoreLimit.RemovePeer}, err
 	}
 	return c.GetLabelStoresLimit(label), nil
 }

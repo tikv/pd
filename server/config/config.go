@@ -221,9 +221,9 @@ var (
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
 	// DefaultStoreLimit is the default store limit of add peer and remove peer.
-	DefaultStoreLimit StoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
-	// OtherStoreLimits are other store limits of add peer and remove peer.
-	OtherStoreLimits = map[StoreLabel]StoreLimit{
+	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
+	// StoreLabelLimits are other store limits of add peer and remove peer.
+	StoreLabelLimits = map[StoreLabel]*StoreLimit{
 		StoreLabel{Key: "engine", Value: "tiflash"}: {AddPeer: 30, RemovePeer: 30},
 	}
 )
