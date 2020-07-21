@@ -122,6 +122,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 
 	region := &RegionInfo{
+		term:              r.term,
 		meta:              proto.Clone(r.meta).(*metapb.Region),
 		leader:            proto.Clone(r.leader).(*metapb.Peer),
 		downPeers:         downPeers,
