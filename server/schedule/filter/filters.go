@@ -664,7 +664,7 @@ func (f *isolationFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 			// Check every constraint in constrainList
 			match = store.GetLabelValue(f.locationLabels[idx]) == constraint && match
 		}
-		if match {
+		if len(constrainList) > 0 && match {
 			return false
 		}
 	}

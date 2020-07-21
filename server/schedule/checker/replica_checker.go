@@ -147,7 +147,7 @@ func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 		extraFilters = make([]filter.Filter, 0)
 	)
 	// IsolationLevel should only be available when PlacementRulesEnabled is false
-	if !r.cluster.IsPlacementRulesEnabled() {
+	if !r.cluster.IsPlacementRulesEnabled() && len(strategy.locationLabels) > 0 && len(strategy.isolationLevel) > 0 {
 		extraFilters = append(extraFilters, filter.NewIsolationFilter(replicaCheckerName, strategy.isolationLevel, strategy.locationLabels, regionStores))
 	}
 	target := strategy.SelectStoreToAdd(regionStores, extraFilters...)
