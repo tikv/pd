@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
 	"go.uber.org/zap"
 )
@@ -203,6 +204,8 @@ func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes .
 		core.SetLeaderSize(leaderSize),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
+	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	mc.PutStore(store)
 }
 
@@ -218,6 +221,8 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 		core.SetRegionSize(int64(regionCount)*10),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
+	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	mc.PutStore(store)
 }
 
@@ -253,12 +258,22 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 		core.SetRegionSize(int64(regionCount)*10),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
+	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	mc.PutStore(store)
 }
 
 // AddLeaderRegion adds region with specified leader and followers.
 func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {
 	origin := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	mc.PutRegion(region)
+	return region
+}
+
+// AddRegionWithLearner adds region with specified leader, followers and learners.
+func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderID uint64, followerIDs, learnerIDs []uint64) *core.RegionInfo {
+	origin := mc.MockRegionInfo(regionID, leaderID, followerIDs, learnerIDs, nil)
 	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
@@ -501,7 +516,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 }
 
 func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIDs ...uint64) *core.RegionInfo {
-	return mc.MockRegionInfo(regionID, leaderID, followerIDs, nil)
+	return mc.MockRegionInfo(regionID, leaderID, followerIDs, []uint64{}, nil)
 }
 
 // GetOpt mocks method.
@@ -537,6 +552,11 @@ func (mc *Cluster) GetHotRegionScheduleLimit() uint64 {
 // GetMaxReplicas mocks method.
 func (mc *Cluster) GetMaxReplicas() int {
 	return mc.ScheduleOptions.GetMaxReplicas()
+}
+
+// GetStoreLimitByType mocks method.
+func (mc *Cluster) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	return mc.ScheduleOptions.GetStoreLimitByType(storeID, typ)
 }
 
 // CheckLabelProperty checks label property.
@@ -576,7 +596,7 @@ func (mc *Cluster) RemoveScheduler(name string) error {
 
 // MockRegionInfo returns a mock region
 func (mc *Cluster) MockRegionInfo(regionID uint64, leaderID uint64,
-	followerIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
+	followerIDs, learnerIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
 
 	region := &metapb.Region{
 		Id:          regionID,
@@ -588,6 +608,11 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderID uint64,
 	region.Peers = []*metapb.Peer{leader}
 	for _, id := range followerIDs {
 		peer, _ := mc.AllocPeer(id)
+		region.Peers = append(region.Peers, peer)
+	}
+	for _, id := range learnerIDs {
+		peer, _ := mc.AllocPeer(id)
+		peer.IsLearner = true
 		region.Peers = append(region.Peers, peer)
 	}
 	return core.NewRegionInfo(region, leader)

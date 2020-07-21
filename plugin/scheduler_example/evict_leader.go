@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pingcap/pd/v4/server/schedulers"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
@@ -153,24 +152,18 @@ func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 
 type evictLeaderScheduler struct {
 	*schedulers.BaseScheduler
-	conf     *evictLeaderSchedulerConfig
-	selector *selector.RandomSelector
-	handler  http.Handler
+	conf    *evictLeaderSchedulerConfig
+	handler http.Handler
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConfig) schedule.Scheduler {
-	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true},
-	}
-
 	base := schedulers.NewBaseScheduler(opController)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		selector:      selector.NewRandomSelector(filters),
 		handler:       handler,
 	}
 }
@@ -198,7 +191,7 @@ func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	defer s.conf.mu.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWitRanges {
-		if err := cluster.BlockStore(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id); err != nil {
 			res = err
 		}
 	}
@@ -209,7 +202,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
-		cluster.UnblockStore(id)
+		cluster.ResumeLeaderTransfer(id)
 	}
 }
 
@@ -226,7 +219,9 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		if region == nil {
 			continue
 		}
-		target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
+		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
+			FilterTarget(cluster, filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
+			RandomPick()
 		if target == nil {
 			continue
 		}
@@ -260,7 +255,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
-			if err := handler.config.cluster.BlockStore(id); err != nil {
+			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
 				return
 			}
@@ -301,7 +296,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	_, exists := handler.config.StoreIDWitRanges[id]
 	if exists {
 		delete(handler.config.StoreIDWitRanges, id)
-		handler.config.cluster.UnblockStore(id)
+		handler.config.cluster.ResumeLeaderTransfer(id)
 
 		handler.config.mu.Unlock()
 		handler.config.Persist()

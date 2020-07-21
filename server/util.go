@@ -20,13 +20,13 @@ import (
 	"path"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -36,32 +36,23 @@ const (
 	requestTimeout = etcdutil.DefaultRequestTimeout
 )
 
-// Version information.
-var (
-	PDReleaseVersion = "None"
-	PDBuildTS        = "None"
-	PDGitHash        = "None"
-	PDGitBranch      = "None"
-	PDEdition        = "None"
-)
-
 // LogPDInfo prints the PD version information.
 func LogPDInfo() {
 	log.Info("Welcome to Placement Driver (PD)")
-	log.Info("PD", zap.String("release-version", PDReleaseVersion))
-	log.Info("PD", zap.String("edition", PDEdition))
-	log.Info("PD", zap.String("git-hash", PDGitHash))
-	log.Info("PD", zap.String("git-branch", PDGitBranch))
-	log.Info("PD", zap.String("utc-build-time", PDBuildTS))
+	log.Info("PD", zap.String("release-version", versioninfo.PDReleaseVersion))
+	log.Info("PD", zap.String("edition", versioninfo.PDEdition))
+	log.Info("PD", zap.String("git-hash", versioninfo.PDGitHash))
+	log.Info("PD", zap.String("git-branch", versioninfo.PDGitBranch))
+	log.Info("PD", zap.String("utc-build-time", versioninfo.PDBuildTS))
 }
 
 // PrintPDInfo prints the PD version information without log info.
 func PrintPDInfo() {
-	fmt.Println("Release Version:", PDReleaseVersion)
-	fmt.Println("Edition:", PDEdition)
-	fmt.Println("Git Commit Hash:", PDGitHash)
-	fmt.Println("Git Branch:", PDGitBranch)
-	fmt.Println("UTC Build Time: ", PDBuildTS)
+	fmt.Println("Release Version:", versioninfo.PDReleaseVersion)
+	fmt.Println("Edition:", versioninfo.PDEdition)
+	fmt.Println("Git Commit Hash:", versioninfo.PDGitHash)
+	fmt.Println("Git Branch:", versioninfo.PDGitBranch)
+	fmt.Println("UTC Build Time: ", versioninfo.PDBuildTS)
 }
 
 // PrintConfigCheckMsg prints the message about configuration checks.
@@ -79,8 +70,8 @@ func PrintConfigCheckMsg(cfg *config.Config) {
 // CheckPDVersion checks if PD needs to be upgraded.
 func CheckPDVersion(opt *config.PersistOptions) {
 	pdVersion := *cluster.MinSupportedVersion(cluster.Base)
-	if PDReleaseVersion != "None" {
-		pdVersion = *cluster.MustParseVersion(PDReleaseVersion)
+	if versioninfo.PDReleaseVersion != "None" {
+		pdVersion = *cluster.MustParseVersion(versioninfo.PDReleaseVersion)
 	}
 	clusterVersion := *opt.GetClusterVersion()
 	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))
@@ -181,15 +172,4 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 	}
 
 	return nil
-}
-
-// isTiFlashStore used to judge flash store.
-// FIXME: remove the hack way
-func isTiFlashStore(store *metapb.Store) bool {
-	for _, l := range store.GetLabels() {
-		if l.GetKey() == "engine" && l.GetValue() == "tiflash" {
-			return true
-		}
-	}
-	return false
 }

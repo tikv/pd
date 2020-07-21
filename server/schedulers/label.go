@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -65,22 +64,16 @@ type labelSchedulerConfig struct {
 
 type labelScheduler struct {
 	*BaseScheduler
-	conf     *labelSchedulerConfig
-	selector *selector.BalanceSelector
+	conf *labelSchedulerConfig
 }
 
 // LabelScheduler is mainly based on the store's label information for scheduling.
 // Now only used for reject leader schedule, that will move the leader out of
 // the store with the specific label.
 func newLabelScheduler(opController *schedule.OperatorController, conf *labelSchedulerConfig) schedule.Scheduler {
-	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true},
-	}
-	kind := core.NewScheduleKind(core.LeaderKind, core.ByCount)
 	return &labelScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
 		conf:          conf,
-		selector:      selector.NewBalanceSelector(kind, filters),
 	}
 }
 
@@ -125,7 +118,10 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 				excludeStores[p.GetStoreId()] = struct{}{}
 			}
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
-			target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region), f)
+
+			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
+				FilterTarget(cluster, filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true}, f).
+				RandomPick()
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))
 				schedulerCounter.WithLabelValues(s.GetName(), "no-target").Inc()

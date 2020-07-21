@@ -121,6 +121,7 @@ type RaftCluster struct {
 type Status struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`
+	ReplicationStatus string    `json:"replication_status"`
 }
 
 // NewRaftCluster create a new cluster.
@@ -146,9 +147,14 @@ func (c *RaftCluster) LoadClusterStatus() (*Status, error) {
 	if bootstrapTime != typeutil.ZeroTime {
 		isInitialized = c.isInitialized()
 	}
+	var replicationStatus string
+	if c.replicationMode != nil {
+		replicationStatus = c.replicationMode.GetReplicationStatus().String()
+	}
 	return &Status{
 		RaftBootstrapTime: bootstrapTime,
 		IsInitialized:     isInitialized,
+		ReplicationStatus: replicationStatus,
 	}, nil
 }
 
@@ -238,7 +244,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt)
-	c.limiter = NewStoreLimiter(c.coordinator.opController)
+	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.quit = make(chan struct{})
 
 	c.wg.Add(4)
@@ -490,7 +496,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
-	var saveKV, saveCache, isNew, statsChange bool
+	var saveKV, saveCache, isNew, needSync bool
 	if origin == nil {
 		log.Debug("insert new region",
 			zap.Uint64("region-id", region.GetID()),
@@ -528,7 +534,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 					zap.Uint64("to", region.GetLeader().GetStoreId()),
 				)
 			}
-			saveCache = true
+			saveCache, needSync = true, true
 		}
 		if len(region.GetDownPeers()) > 0 || len(region.GetPendingPeers()) > 0 {
 			saveCache = true
@@ -549,7 +555,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
 			region.GetKeysRead() != origin.GetKeysRead() {
-			saveCache, statsChange = true, true
+			saveCache, needSync = true, true
 		}
 
 		if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
@@ -640,7 +646,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 		regionEventCounter.WithLabelValues("update_kv").Inc()
 	}
-	if saveKV || statsChange {
+	if saveKV || needSync {
 		select {
 		case c.changedRegions <- region:
 		default:
@@ -896,6 +902,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 			core.SetStoreVersion(store.GitHash, store.Version),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
+			core.SetStoreDeployPath(store.DeployPath),
 		)
 	}
 	if err = c.checkStoreLabels(s); err != nil {
@@ -961,8 +968,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64) error {
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		// set the remove peer limit of the store to unlimited
-		c.coordinator.opController.SetStoreLimit(store.GetID(), storelimit.Unlimited, storelimit.Manual, storelimit.RegionRemove)
+		c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
 	return err
 }
@@ -998,19 +1004,21 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.coordinator.opController.RemoveStoreLimit(store.GetID())
+		c.RemoveStoreLimit(storeID)
 	}
 	return err
 }
 
-// BlockStore stops balancer from selecting the store.
-func (c *RaftCluster) BlockStore(storeID uint64) error {
-	return c.core.BlockStore(storeID)
+// PauseLeaderTransfer prevents the store from been selected as source or
+// target store of TransferLeader.
+func (c *RaftCluster) PauseLeaderTransfer(storeID uint64) error {
+	return c.core.PauseLeaderTransfer(storeID)
 }
 
-// UnblockStore allows balancer to select the store.
-func (c *RaftCluster) UnblockStore(storeID uint64) {
-	c.core.UnblockStore(storeID)
+// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
+// as source or target of TransferLeader again.
+func (c *RaftCluster) ResumeLeaderTransfer(storeID uint64) {
+	c.core.ResumeLeaderTransfer(storeID)
 }
 
 // AttachAvailableFunc attaches an available function to a specific store.
@@ -1126,7 +1134,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 					zap.Error(err))
 				return err
 			}
-			c.coordinator.opController.RemoveStoreLimit(store.GetID())
+			c.RemoveStoreLimit(store.GetID())
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
@@ -1356,11 +1364,6 @@ func (c *RaftCluster) GetHotRegionScheduleLimit() uint64 {
 	return c.opt.GetHotRegionScheduleLimit()
 }
 
-// GetStoreBalanceRate returns the balance rate of a store.
-func (c *RaftCluster) GetStoreBalanceRate() float64 {
-	return c.opt.GetStoreBalanceRate()
-}
-
 // GetTolerantSizeRatio gets the tolerant size ratio.
 func (c *RaftCluster) GetTolerantSizeRatio() float64 {
 	return c.opt.GetTolerantSizeRatio()
@@ -1434,6 +1437,11 @@ func (c *RaftCluster) GetMaxReplicas() int {
 // GetLocationLabels returns the location labels for each region
 func (c *RaftCluster) GetLocationLabels() []string {
 	return c.opt.GetLocationLabels()
+}
+
+// GetIsolationLevel returns the isolation label for each region.
+func (c *RaftCluster) GetIsolationLevel() string {
+	return c.opt.GetIsolationLevel()
 }
 
 // GetStrictlyMatchLabel returns if the strictly label check is enabled.
@@ -1641,10 +1649,17 @@ func (c *RaftCluster) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 }
 
 // GetSchedulers gets all schedulers.
-func (c *RaftCluster) GetSchedulers() map[string]*scheduleController {
+func (c *RaftCluster) GetSchedulers() []string {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.getSchedulers()
+}
+
+// GetSchedulerHandlers gets all scheduler handlers.
+func (c *RaftCluster) GetSchedulerHandlers() map[string]http.Handler {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.getSchedulerHandlers()
 }
 
 // AddScheduler adds a scheduler.
@@ -1668,9 +1683,69 @@ func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 	return c.coordinator.pauseOrResumeScheduler(name, t)
 }
 
+// IsSchedulerPaused checks if a scheduler is paused.
+func (c *RaftCluster) IsSchedulerPaused(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.coordinator.isSchedulerPaused(name)
+}
+
 // GetStoreLimiter returns the dynamic adjusting limiter
 func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 	return c.limiter
+}
+
+// GetStoreLimitByType returns the store limit for a given store ID and type.
+func (c *RaftCluster) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	return c.opt.GetStoreLimitByType(storeID, typ)
+}
+
+// GetAllStoresLimit returns all store limit
+func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
+	return c.opt.GetAllStoresLimit()
+}
+
+// AddStoreLimit add a store limit for a given store ID.
+func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
+	cfg := c.opt.GetScheduleConfig().Clone()
+	sc := config.StoreLimitConfig{
+		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	}
+	if core.IsTiFlashStore(store) {
+		sc = config.StoreLimitConfig{
+			AddPeer:    config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+			RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		}
+	}
+	storeID := store.GetId()
+	cfg.StoreLimit[storeID] = sc
+	c.opt.SetScheduleConfig(cfg)
+}
+
+// RemoveStoreLimit remove a store limit for a given store ID.
+func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
+	cfg := c.opt.GetScheduleConfig().Clone()
+	for _, limitType := range storelimit.TypeNameValue {
+		c.AttachAvailableFunc(storeID, limitType, nil)
+	}
+	delete(cfg.StoreLimit, storeID)
+	c.opt.SetScheduleConfig(cfg)
+}
+
+// SetStoreLimit sets a store limit for a given type and rate.
+func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
+	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
+}
+
+// SetAllStoresLimit sets all store limit for a given type and rate.
+func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
+	c.opt.SetAllStoresLimit(typ, ratePerMin)
+}
+
+// GetClusterVersion returns the current cluster version.
+func (c *RaftCluster) GetClusterVersion() string {
+	return c.opt.GetClusterVersion().String()
 }
 
 var healthURL = "/pd/api/v1/ping"

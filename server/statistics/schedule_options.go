@@ -17,17 +17,19 @@ import (
 	"time"
 
 	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 )
 
 // ScheduleOptions is an interface to access configurations.
 // TODO: merge the Options to schedule.Options
 type ScheduleOptions interface {
 	GetLocationLabels() []string
+	GetIsolationLevel() string
 
 	GetLowSpaceRatio() float64
 	GetHighSpaceRatio() float64
 	GetTolerantSizeRatio() float64
-	GetStoreBalanceRate() float64
+	GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64
 
 	GetSchedulerMaxWaitingOperator() uint64
 	GetLeaderScheduleLimit() uint64

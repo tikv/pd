@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
@@ -196,7 +195,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store is set as Offline or Tombstone.")
 }
 
 // @Tags store
@@ -231,7 +230,7 @@ func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's state is updated.")
 }
 
 // FIXME: details of input json body params
@@ -277,7 +276,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
 // FIXME: details of input json body params
@@ -330,7 +329,7 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
 // FIXME: details of input json body params
@@ -344,10 +343,17 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/limit [post]
 func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r.Context())
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		return
+	}
+
+	store := rc.GetStore(storeID)
+	if store == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
 		return
 	}
 
@@ -361,24 +367,26 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "rate unset")
 		return
 	}
-	rate, ok := rateVal.(float64)
-	if !ok || rate < 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "badformat rate")
+	ratePerMin, ok := rateVal.(float64)
+	if !ok || ratePerMin <= 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "invalid rate which should be larger than 0")
 		return
 	}
 
-	typeValue, err := getStoreLimitType(input)
+	typeValues, err := getStoreLimitType(input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.SetStoreLimit(storeID, rate/schedule.StoreBalanceBaseTime, typeValue); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
+	for _, typ := range typeValues {
+		if err := h.SetStoreLimit(storeID, ratePerMin, typ); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
 type storesHandler struct {
@@ -396,7 +404,7 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 // @Tags store
 // @Summary Remove tombstone records in the cluster.
 // @Produce json
-// @Success 200 {string} string "Remove tomestone success."
+// @Success 200 {string} string "Remove tomestone successfully."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/remove-tombstone [delete]
 func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +415,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "Remove tomestone successfully.")
 }
 
 // FIXME: details of input json body params
@@ -416,7 +424,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 // @Accept json
 // @Param body body object true "json params"
 // @Produce json
-// @Success 200 {string} string "Set store limit success."
+// @Success 200 {string} string "Set store limit successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [post]
@@ -431,24 +439,26 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "rate unset")
 		return
 	}
-	rate, ok := rateVal.(float64)
-	if !ok || rate < 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "badformat rate")
+	ratePerMin, ok := rateVal.(float64)
+	if !ok || ratePerMin <= 0 {
+		h.rd.JSON(w, http.StatusBadRequest, "invalid rate which should be larger than 0")
 		return
 	}
 
-	typeValue, err := getStoreLimitType(input)
+	typeValues, err := getStoreLimitType(input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if err := h.SetAllStoresLimit(rate/schedule.StoreBalanceBaseTime, typeValue); err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
+	for _, typ := range typeValues {
+		if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "Set store limit successfully.")
 }
 
 // FIXME: details of output json body
@@ -459,30 +469,8 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [get]
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
-	typeName := r.URL.Query().Get("type")
-	typeValue, err := parseStoreLimitType(typeName)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	limits, err := h.GetAllStoresLimit(typeValue)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	type LimitResp struct {
-		Rate float64 `json:"rate"`
-		Mode string  `json:"mode"`
-	}
-	resp := make(map[uint64]*LimitResp)
-	for s, l := range limits {
-		resp[s] = &LimitResp{
-			Rate: l.Rate() * schedule.StoreBalanceBaseTime,
-			Mode: l.Mode().String(),
-		}
-	}
-
-	h.rd.JSON(w, http.StatusOK, resp)
+	limits := h.GetScheduleConfig().StoreLimit
+	h.rd.JSON(w, http.StatusOK, limits)
 }
 
 // @Tags store
@@ -490,7 +478,7 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Param body body storelimit.Scene true "Store limit scene"
 // @Produce json
-// @Success 200 {string} string "Set store limit scene success."
+// @Success 200 {string} string "Set store limit scene successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit/scene [post]
@@ -506,13 +494,13 @@ func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.Handler.SetStoreLimitScene(scene, typeValue)
-	h.rd.JSON(w, http.StatusOK, nil)
+	h.rd.JSON(w, http.StatusOK, "Set store limit scene successfully.")
 }
 
 // @Tags store
 // @Summary Get limit scene in the cluster.
 // @Produce json
-// @Success 200 {string} string "Set store limit scene success."
+// @Success 200 {string} string "Set store limit scene successfully."
 // @Router /stores/limit/scene [get]
 func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
 	typeName := r.URL.Query().Get("type")
@@ -607,23 +595,24 @@ func (filter *storeStateFilter) filter(stores []*metapb.Store) []*metapb.Store {
 	return ret
 }
 
-func getStoreLimitType(input map[string]interface{}) (storelimit.Type, error) {
+func getStoreLimitType(input map[string]interface{}) ([]storelimit.Type, error) {
 	typeNameIface, ok := input["type"]
-	typeValue := storelimit.RegionAdd
 	var err error
 	if ok {
 		typeName, ok := typeNameIface.(string)
 		if !ok {
 			err = errors.New("bad format type")
-		} else {
-			return parseStoreLimitType(typeName)
+			return nil, err
 		}
+		typ, err := parseStoreLimitType(typeName)
+		return []storelimit.Type{typ}, err
 	}
-	return typeValue, err
+
+	return []storelimit.Type{storelimit.AddPeer, storelimit.RemovePeer}, err
 }
 
 func parseStoreLimitType(typeName string) (storelimit.Type, error) {
-	typeValue := storelimit.RegionAdd
+	typeValue := storelimit.AddPeer
 	var err error
 	if typeName != "" {
 		if value, ok := storelimit.TypeNameValue[typeName]; ok {

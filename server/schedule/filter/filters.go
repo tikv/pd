@@ -118,143 +118,6 @@ func (f *excludedFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return !ok
 }
 
-type storeLimitFilter struct{ scope string }
-
-// NewStoreLimitFilter creates a Filter that filters all stores those exceed the limit of a store.
-func NewStoreLimitFilter(scope string) Filter {
-	return &storeLimitFilter{scope: scope}
-}
-
-func (f *storeLimitFilter) Scope() string {
-	return f.scope
-}
-
-func (f *storeLimitFilter) Type() string {
-	return "store-limit-filter"
-}
-
-func (f *storeLimitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsAvailable(storelimit.RegionRemove)
-}
-
-func (f *storeLimitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsAvailable(storelimit.RegionAdd)
-}
-
-type stateFilter struct{ scope string }
-
-// NewStateFilter creates a Filter that filters all stores that are not UP.
-func NewStateFilter(scope string) Filter {
-	return &stateFilter{scope: scope}
-}
-
-func (f *stateFilter) Scope() string {
-	return f.scope
-}
-
-func (f *stateFilter) Type() string {
-	return "state-filter"
-}
-
-func (f *stateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return !store.IsTombstone()
-}
-
-func (f *stateFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsUp()
-}
-
-type healthFilter struct{ scope string }
-
-// NewHealthFilter creates a Filter that filters all stores that are Busy or Down.
-func NewHealthFilter(scope string) Filter {
-	return &healthFilter{scope: scope}
-}
-
-func (f *healthFilter) Scope() string {
-	return f.scope
-}
-
-func (f *healthFilter) Type() string {
-	return "health-filter"
-}
-
-func (f *healthFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
-	if store.IsBusy() {
-		return false
-	}
-	return store.DownTime() <= opt.GetMaxStoreDownTime()
-}
-
-func (f *healthFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return f.filter(opt, store)
-}
-
-func (f *healthFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return f.filter(opt, store)
-}
-
-type pendingPeerCountFilter struct{ scope string }
-
-// NewPendingPeerCountFilter creates a Filter that filters all stores that are
-// currently handling too many pending peers.
-func NewPendingPeerCountFilter(scope string) Filter {
-	return &pendingPeerCountFilter{scope: scope}
-}
-
-func (p *pendingPeerCountFilter) Scope() string {
-	return p.scope
-}
-
-func (p *pendingPeerCountFilter) Type() string {
-	return "pending-peer-filter"
-}
-
-func (p *pendingPeerCountFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
-	if opt.GetMaxPendingPeerCount() == 0 {
-		return true
-	}
-	return store.GetPendingPeerCount() <= int(opt.GetMaxPendingPeerCount())
-}
-
-func (p *pendingPeerCountFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return p.filter(opt, store)
-}
-
-func (p *pendingPeerCountFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return p.filter(opt, store)
-}
-
-type snapshotCountFilter struct{ scope string }
-
-// NewSnapshotCountFilter creates a Filter that filters all stores that are
-// currently handling too many snapshots.
-func NewSnapshotCountFilter(scope string) Filter {
-	return &snapshotCountFilter{scope: scope}
-}
-
-func (f *snapshotCountFilter) Scope() string {
-	return f.scope
-}
-
-func (f *snapshotCountFilter) Type() string {
-	return "snapshot-filter"
-}
-
-func (f *snapshotCountFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
-	return uint64(store.GetSendingSnapCount()) <= opt.GetMaxSnapshotCount() &&
-		uint64(store.GetReceivingSnapCount()) <= opt.GetMaxSnapshotCount() &&
-		uint64(store.GetApplyingSnapCount()) <= opt.GetMaxSnapshotCount()
-}
-
-func (f *snapshotCountFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return f.filter(opt, store)
-}
-
-func (f *snapshotCountFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return f.filter(opt, store)
-}
-
 type storageThresholdFilter struct{ scope string }
 
 // NewStorageThresholdFilter creates a Filter that filters all stores that are
@@ -284,12 +147,31 @@ type distinctScoreFilter struct {
 	scope     string
 	labels    []string
 	stores    []*core.StoreInfo
+	policy    string
 	safeScore float64
 }
 
-// NewDistinctScoreFilter creates a filter that filters all stores that have
+const (
+	// policies used by distinctScoreFilter.
+	// 'safeguard' ensures replacement is NOT WORSE than before.
+	// 'improve' ensures replacement is BETTER than before.
+	locationSafeguard = "safeguard"
+	locationImprove   = "improve"
+)
+
+// NewLocationSafeguard creates a filter that filters all stores that have
 // lower distinct score than specified store.
-func NewDistinctScoreFilter(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+func NewLocationSafeguard(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+	return newDistinctScoreFilter(scope, labels, stores, source, locationSafeguard)
+}
+
+// NewLocationImprover creates a filter that filters all stores that have
+// lower or equal distinct score than specified store.
+func NewLocationImprover(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+	return newDistinctScoreFilter(scope, labels, stores, source, locationImprove)
+}
+
+func newDistinctScoreFilter(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo, policy string) Filter {
 	newStores := make([]*core.StoreInfo, 0, len(stores)-1)
 	for _, s := range stores {
 		if s.GetID() == source.GetID() {
@@ -303,6 +185,7 @@ func NewDistinctScoreFilter(scope string, labels []string, stores []*core.StoreI
 		labels:    labels,
 		stores:    newStores,
 		safeScore: core.DistinctScore(labels, newStores, source),
+		policy:    policy,
 	}
 }
 
@@ -319,7 +202,15 @@ func (f *distinctScoreFilter) Source(opt opt.Options, store *core.StoreInfo) boo
 }
 
 func (f *distinctScoreFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return core.DistinctScore(f.labels, f.stores, store) >= f.safeScore
+	score := core.DistinctScore(f.labels, f.stores, store)
+	switch f.policy {
+	case locationSafeguard:
+		return score >= f.safeScore
+	case locationImprove:
+		return score > f.safeScore
+	default:
+		return false
+	}
 }
 
 // StoreStateFilter is used to determine whether a store can be selected as the
@@ -330,6 +221,8 @@ type StoreStateFilter struct {
 	TransferLeader bool
 	// Set true if the schedule involves any move region operation.
 	MoveRegion bool
+	// Set true if allows temporary states.
+	AllowTemporaryStates bool
 }
 
 // Scope returns the scheduler or the checker which the filter acts on.
@@ -342,18 +235,107 @@ func (f StoreStateFilter) Type() string {
 	return "store-state-filter"
 }
 
+// conditionFunc defines condition to determine a store should be selected.
+// It should consider if the filter allows temporary states.
+type conditionFunc func(opt.Options, *core.StoreInfo) bool
+
+func (f StoreStateFilter) isTombstone(opt opt.Options, store *core.StoreInfo) bool {
+	return store.IsTombstone()
+}
+
+func (f StoreStateFilter) isDown(opt opt.Options, store *core.StoreInfo) bool {
+	return store.DownTime() > opt.GetMaxStoreDownTime()
+}
+
+func (f StoreStateFilter) isOffline(opt opt.Options, store *core.StoreInfo) bool {
+	return store.IsOffline()
+}
+
+func (f StoreStateFilter) pauseLeaderTransfer(opt opt.Options, store *core.StoreInfo) bool {
+	return !store.AllowLeaderTransfer()
+}
+
+func (f StoreStateFilter) isDisconnected(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates && store.IsDisconnected()
+}
+
+func (f StoreStateFilter) isBusy(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates && store.IsBusy()
+}
+
+func (f StoreStateFilter) exceedRemoveLimit(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer)
+}
+
+func (f StoreStateFilter) exceedAddLimit(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer)
+}
+
+func (f StoreStateFilter) tooManySnapshots(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount())
+}
+
+func (f StoreStateFilter) tooManyPendingPeers(opt opt.Options, store *core.StoreInfo) bool {
+	return !f.AllowTemporaryStates &&
+		opt.GetMaxPendingPeerCount() > 0 &&
+		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount())
+}
+
+func (f StoreStateFilter) hasRejectLeaderProperty(opts opt.Options, store *core.StoreInfo) bool {
+	return opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())
+}
+
+// The condition table.
+// Y: the condition is temporary (expected to become false soon).
+// N: the condition is expected to be true for a long time.
+// X means when the condition is true, the store CANNOT be selected.
+//
+// Condition    Down Offline Tomb Pause Disconn Busy RmLimit AddLimit Snap Pending Reject
+// IsTemporary  N    N       N    N     Y       Y    Y       Y        Y    Y       N
+//
+// LeaderSource X            X    X     X
+// RegionSource                                 X    X                X
+// LeaderTarget X    X       X    X     X       X                                  X
+// RegionTarget X    X       X          X       X            X        X    X
+
+const (
+	leaderSource = iota
+	regionSource
+	leaderTarget
+	regionTarget
+)
+
+func (f StoreStateFilter) anyConditionMatch(typ int, opt opt.Options, store *core.StoreInfo) bool {
+	var funcs []conditionFunc
+	switch typ {
+	case leaderSource:
+		funcs = []conditionFunc{f.isTombstone, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
+	case regionSource:
+		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
+	case leaderTarget:
+		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.pauseLeaderTransfer,
+			f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+	case regionTarget:
+		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy,
+			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
+	}
+	for _, cf := range funcs {
+		if cf(opt, store) {
+			return true
+		}
+	}
+	return false
+}
+
 // Source returns true when the store can be selected as the schedule
 // source.
-func (f StoreStateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	if store.IsTombstone() ||
-		store.DownTime() > opt.GetMaxStoreDownTime() {
+func (f StoreStateFilter) Source(opts opt.Options, store *core.StoreInfo) bool {
+	if f.TransferLeader && f.anyConditionMatch(leaderSource, opts, store) {
 		return false
 	}
-	if f.TransferLeader && (store.IsDisconnected() || store.IsBlocked()) {
-		return false
-	}
-
-	if f.MoveRegion && !f.filterMoveRegion(opt, true, store) {
+	if f.MoveRegion && f.anyConditionMatch(regionSource, opts, store) {
 		return false
 	}
 	return true
@@ -362,44 +344,10 @@ func (f StoreStateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 // Target returns true when the store can be selected as the schedule
 // target.
 func (f StoreStateFilter) Target(opts opt.Options, store *core.StoreInfo) bool {
-	if store.IsTombstone() ||
-		store.IsOffline() ||
-		store.DownTime() > opts.GetMaxStoreDownTime() {
+	if f.TransferLeader && f.anyConditionMatch(leaderTarget, opts, store) {
 		return false
 	}
-	if f.TransferLeader &&
-		(store.IsDisconnected() ||
-			store.IsBlocked() ||
-			store.IsBusy() ||
-			opts.CheckLabelProperty(opt.RejectLeader, store.GetLabels())) {
-		return false
-	}
-
-	if f.MoveRegion {
-		// only target consider the pending peers because pending more means the disk is slower.
-		if opts.GetMaxPendingPeerCount() > 0 && store.GetPendingPeerCount() > int(opts.GetMaxPendingPeerCount()) {
-			return false
-		}
-
-		if !f.filterMoveRegion(opts, false, store) {
-			return false
-		}
-	}
-	return true
-}
-
-func (f StoreStateFilter) filterMoveRegion(opt opt.Options, isSource bool, store *core.StoreInfo) bool {
-	if store.IsBusy() {
-		return false
-	}
-
-	if (isSource && !store.IsAvailable(storelimit.RegionRemove)) || (!isSource && !store.IsAvailable(storelimit.RegionAdd)) {
-		return false
-	}
-
-	if uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.GetApplyingSnapCount()) > opt.GetMaxSnapshotCount() {
+	if f.MoveRegion && f.anyConditionMatch(regionTarget, opts, store) {
 		return false
 	}
 	return true
@@ -449,10 +397,10 @@ type ruleFitFilter struct {
 	oldStore uint64
 }
 
-// NewRuleFitFilter creates a filter that ensures after replace a peer with new
+// newRuleFitFilter creates a filter that ensures after replace a peer with new
 // one, the isolation level will not decrease. Its function is the same as
 // distinctScoreFilter but used when placement rules is enabled.
-func NewRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldStoreID uint64) Filter {
+func newRuleFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldStoreID uint64) Filter {
 	return &ruleFitFilter{
 		scope:    scope,
 		fitter:   fitter,
@@ -480,24 +428,75 @@ func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
+type ruleLeaderFitFilter struct {
+	scope            string
+	fitter           RegionFitter
+	region           *core.RegionInfo
+	oldFit           *placement.RegionFit
+	oldLeaderStoreID uint64
+}
+
+// newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
+// the isolation level will not decrease.
+func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldLeaderStoreID uint64) Filter {
+	return &ruleLeaderFitFilter{
+		scope:            scope,
+		fitter:           fitter,
+		region:           region,
+		oldFit:           fitter.FitRegion(region),
+		oldLeaderStoreID: oldLeaderStoreID,
+	}
+}
+
+func (f *ruleLeaderFitFilter) Scope() string {
+	return f.scope
+}
+
+func (f *ruleLeaderFitFilter) Type() string {
+	return "rule-fit-leader-filter"
+}
+
+func (f *ruleLeaderFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return true
+}
+
+func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	oldLeaderPeerReplica := *f.region.GetLeader()
+	oldLeaderPeerReplica.StoreId = store.GetID()
+	region := f.region.Clone(core.WithReplacePeerStore(f.oldLeaderStoreID, store.GetID()), core.WithLeader(&oldLeaderPeerReplica))
+	newFit := f.fitter.FitRegion(region)
+	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
+}
+
+// NewPlacementSafeguard creates a filter that ensures after replace a peer with new
+// peer, the placement restriction will not become worse.
+func NewPlacementSafeguard(scope string, cluster opt.Cluster, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+	if cluster.IsPlacementRulesEnabled() {
+		return newRuleFitFilter(scope, cluster, region, sourceStore.GetID())
+	}
+	return NewLocationSafeguard(scope, cluster.GetLocationLabels(), cluster.GetRegionStores(region), sourceStore)
+}
+
+// NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with
+// existed peer, the placement restriction will not become worse.
+// Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
+func NewPlacementLeaderSafeguard(scope string, cluster opt.Cluster, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+	if cluster.IsPlacementRulesEnabled() {
+		return newRuleLeaderFitFilter(scope, cluster, region, sourceStore.GetID())
+	}
+	return nil
+}
+
 type engineFilter struct {
 	scope      string
 	constraint placement.LabelConstraint
 }
 
-// NewEngineFilter creates a filter that filters out default engine stores.
-// By default, all stores that are not marked with a special engine will be filtered out.
-// Specify the special engine label if you want to include the special stores.
-func NewEngineFilter(scope string, allowEngines ...string) Filter {
-	var values []string
-	for _, v := range allSpeicalEngines {
-		if slice.NoneOf(allowEngines, func(i int) bool { return allowEngines[i] == v }) {
-			values = append(values, v)
-		}
-	}
+// NewEngineFilter creates a filter that only keeps allowedEngines.
+func NewEngineFilter(scope string, allowedEngines ...string) Filter {
 	return &engineFilter{
 		scope:      scope,
-		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: values},
+		constraint: placement.LabelConstraint{Key: "engine", Op: "in", Values: allowedEngines},
 	}
 }
 
@@ -514,6 +513,35 @@ func (f *engineFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 func (f *engineFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	return f.constraint.MatchStore(store)
+}
+
+type ordinaryEngineFilter struct {
+	scope      string
+	constraint placement.LabelConstraint
+}
+
+// NewOrdinaryEngineFilter creates a filter that only keeps ordinary engine stores.
+func NewOrdinaryEngineFilter(scope string) Filter {
+	return &ordinaryEngineFilter{
+		scope:      scope,
+		constraint: placement.LabelConstraint{Key: "engine", Op: "notIn", Values: allSpeicalEngines},
+	}
+}
+
+func (f *ordinaryEngineFilter) Scope() string {
+	return f.scope
+}
+
+func (f *ordinaryEngineFilter) Type() string {
+	return "ordinary-engine-filter"
+}
+
+func (f *ordinaryEngineFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return f.constraint.MatchStore(store)
+}
+
+func (f *ordinaryEngineFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return f.constraint.MatchStore(store)
 }
 
@@ -573,3 +601,69 @@ const (
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
 var allSpeicalEngines = []string{EngineTiFlash}
+
+type isolationFilter struct {
+	scope          string
+	locationLabels []string
+	constraintSet  [][]string
+}
+
+// NewIsolationFilter creates a filter that filters out stores with isolationLevel
+// For example, a region has 3 replicas in z1, z2 and z3 individually.
+// With isolationLevel = zone, if the region on z1 is down, we need to filter out z2 and z3
+// because these two zones already have one of the region's replicas on them.
+// We need to choose a store on z1 or z4 to place the new replica to meet the isolationLevel explicitly and forcibly.
+func NewIsolationFilter(scope, isolationLevel string, locationLabels []string, regionStores []*core.StoreInfo) Filter {
+	isolationFilter := &isolationFilter{
+		scope:          scope,
+		locationLabels: locationLabels,
+		constraintSet:  make([][]string, 0),
+	}
+	// Get which idx this isolationLevel at according to locationLabels
+	var isolationLevelIdx int
+	for level, label := range locationLabels {
+		if label == isolationLevel {
+			isolationLevelIdx = level
+			break
+		}
+	}
+	// Collect all constraints for given isolationLevel
+	for _, regionStore := range regionStores {
+		constraintList := make([]string, 0)
+		for i := 0; i <= isolationLevelIdx; i++ {
+			constraintList = append(constraintList, regionStore.GetLabelValue(locationLabels[i]))
+		}
+		isolationFilter.constraintSet = append(isolationFilter.constraintSet, constraintList)
+	}
+	return isolationFilter
+}
+
+func (f *isolationFilter) Scope() string {
+	return f.scope
+}
+
+func (f *isolationFilter) Type() string {
+	return "isolation-filter"
+}
+
+func (f *isolationFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return true
+}
+
+func (f *isolationFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	// No isolation constraint to fit
+	if len(f.constraintSet) <= 0 {
+		return true
+	}
+	for _, constrainList := range f.constraintSet {
+		match := true
+		for idx, constraint := range constrainList {
+			// Check every constraint in constrainList
+			match = store.GetLabelValue(f.locationLabels[idx]) == constraint && match
+		}
+		if len(constrainList) > 0 && match {
+			return false
+		}
+	}
+	return true
+}

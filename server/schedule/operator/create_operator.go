@@ -150,8 +150,10 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer) (*Operator, error) {
 	// randomly pick a leader.
 	var ids []uint64
-	for id := range targetPeers {
-		ids = append(ids, id)
+	for id, peer := range targetPeers {
+		if !peer.IsLearner {
+			ids = append(ids, id)
+		}
 	}
 	var leader uint64
 	if len(ids) > 0 {
@@ -162,18 +164,4 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 		SetLeader(leader).
 		SetLightWeight().
 		Build(0)
-}
-
-type u64Slice []uint64
-
-func (s u64Slice) Len() int {
-	return len(s)
-}
-
-func (s u64Slice) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
-
-func (s u64Slice) Less(i, j int) bool {
-	return s[i] < s[j]
 }

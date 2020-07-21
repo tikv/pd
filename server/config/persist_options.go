@@ -22,10 +22,12 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/v4/pkg/slice"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 )
 
 // PersistOptions wraps all configurations that need to persist to storage and
@@ -121,6 +123,11 @@ func (o *PersistOptions) GetLocationLabels() []string {
 	return o.GetReplicationConfig().LocationLabels
 }
 
+// GetIsolationLevel returns the isolation label for each region.
+func (o *PersistOptions) GetIsolationLevel() string {
+	return o.GetReplicationConfig().IsolationLevel
+}
+
 // IsPlacementRulesEnabled returns if the placement rules is enabled.
 func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
@@ -175,6 +182,52 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
+// SetStoreLimit sets a store limit for a given type and rate.
+func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
+	v := o.GetScheduleConfig().Clone()
+	var sc StoreLimitConfig
+	var rate float64
+	switch typ {
+	case storelimit.AddPeer:
+		if _, ok := v.StoreLimit[storeID]; !ok {
+			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+		} else {
+			rate = v.StoreLimit[storeID].RemovePeer
+		}
+		sc = StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
+	case storelimit.RemovePeer:
+		if _, ok := v.StoreLimit[storeID]; !ok {
+			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+		} else {
+			rate = v.StoreLimit[storeID].AddPeer
+		}
+		sc = StoreLimitConfig{AddPeer: rate, RemovePeer: ratePerMin}
+	}
+	v.StoreLimit[storeID] = sc
+	o.SetScheduleConfig(v)
+}
+
+// SetAllStoresLimit sets all store limit for a given type and rate.
+func (o *PersistOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
+	v := o.GetScheduleConfig().Clone()
+	switch typ {
+	case storelimit.AddPeer:
+		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
+		for storeID := range v.StoreLimit {
+			sc := StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
+			v.StoreLimit[storeID] = sc
+		}
+	case storelimit.RemovePeer:
+		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
+		for storeID := range v.StoreLimit {
+			sc := StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
+			v.StoreLimit[storeID] = sc
+		}
+	}
+
+	o.SetScheduleConfig(v)
+}
+
 // IsOneWayMergeEnabled returns if a region can only be merged into the next region of it.
 func (o *PersistOptions) IsOneWayMergeEnabled() bool {
 	return o.GetScheduleConfig().EnableOneWayMerge
@@ -220,9 +273,37 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 	return o.GetScheduleConfig().HotRegionScheduleLimit
 }
 
-// GetStoreBalanceRate returns the balance rate of a store.
-func (o *PersistOptions) GetStoreBalanceRate() float64 {
-	return o.GetScheduleConfig().StoreBalanceRate
+// GetStoreLimit returns the limit of a store.
+func (o *PersistOptions) GetStoreLimit(storeID uint64) StoreLimitConfig {
+	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
+		return limit
+	}
+	cfg := o.GetScheduleConfig().Clone()
+	sc := StoreLimitConfig{
+		AddPeer:    DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	}
+	cfg.StoreLimit[storeID] = sc
+	o.SetScheduleConfig(cfg)
+	return o.GetScheduleConfig().StoreLimit[storeID]
+}
+
+// GetStoreLimitByType returns the limit of a store with a given type.
+func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) float64 {
+	limit := o.GetStoreLimit(storeID)
+	switch typ {
+	case storelimit.AddPeer:
+		return limit.AddPeer
+	case storelimit.RemovePeer:
+		return limit.RemovePeer
+	default:
+		panic("no such limit type")
+	}
+}
+
+// GetAllStoresLimit returns the limit of all stores.
+func (o *PersistOptions) GetAllStoresLimit() map[uint64]StoreLimitConfig {
+	return o.GetScheduleConfig().StoreLimit
 }
 
 // GetStoreLimitMode returns the limit mode of store.
@@ -406,19 +487,15 @@ func (o *PersistOptions) Persist(storage *core.Storage) error {
 
 // Reload reloads the configuration from the storage.
 func (o *PersistOptions) Reload(storage *core.Storage) error {
-	cfg := &Config{
-		Schedule:        *o.GetScheduleConfig().Clone(),
-		Replication:     *o.GetReplicationConfig().clone(),
-		PDServerCfg:     *o.GetPDServerConfig().Clone(),
-		ReplicationMode: *o.GetReplicationModeConfig().Clone(),
-		LabelProperty:   o.GetLabelPropertyConfig().Clone(),
-		ClusterVersion:  *o.GetClusterVersion(),
-	}
+	cfg := &Config{}
+	// pass nil to initialize cfg to default values (all items undefined)
+	cfg.Adjust(nil)
+
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
 		return err
 	}
-	o.adjustScheduleCfg(cfg)
+	o.adjustScheduleCfg(&cfg.Schedule)
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
@@ -430,33 +507,16 @@ func (o *PersistOptions) Reload(storage *core.Storage) error {
 	return nil
 }
 
-func (o *PersistOptions) adjustScheduleCfg(persistentCfg *Config) {
-	scheduleCfg := o.GetScheduleConfig().Clone()
-	for i, s := range scheduleCfg.Schedulers {
-		for _, ps := range persistentCfg.Schedule.Schedulers {
-			if s.Type == ps.Type && reflect.DeepEqual(s.Args, ps.Args) {
-				scheduleCfg.Schedulers[i].Disable = ps.Disable
-				break
-			}
+func (o *PersistOptions) adjustScheduleCfg(scheduleCfg *ScheduleConfig) {
+	// In case we add new default schedulers.
+	for _, ps := range DefaultSchedulers {
+		if slice.NoneOf(scheduleCfg.Schedulers, func(i int) bool {
+			return scheduleCfg.Schedulers[i].Type == ps.Type
+		}) {
+			scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, ps)
 		}
 	}
-	restoredSchedulers := make([]SchedulerConfig, 0, len(persistentCfg.Schedule.Schedulers))
-	for _, ps := range persistentCfg.Schedule.Schedulers {
-		needRestore := true
-		for _, s := range scheduleCfg.Schedulers {
-			if s.Type == ps.Type && reflect.DeepEqual(s.Args, ps.Args) {
-				needRestore = false
-				break
-			}
-		}
-		if needRestore {
-			restoredSchedulers = append(restoredSchedulers, ps)
-		}
-	}
-	scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, restoredSchedulers...)
-	persistentCfg.Schedule.Schedulers = scheduleCfg.Schedulers
-	persistentCfg.Schedule.MigrateDeprecatedFlags()
-	o.SetScheduleConfig(scheduleCfg)
+	scheduleCfg.MigrateDeprecatedFlags()
 }
 
 // CheckLabelProperty checks the label property.

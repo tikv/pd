@@ -102,15 +102,11 @@ func (h *Handler) GetOperatorController() (*schedule.OperatorController, error) 
 
 // IsSchedulerPaused returns whether scheduler is paused.
 func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
-	c, err := h.GetRaftCluster()
+	rc, err := h.GetRaftCluster()
 	if err != nil {
-		return true, err
+		return false, err
 	}
-	sc, ok := c.GetSchedulers()[name]
-	if !ok {
-		return true, errors.Errorf("scheduler %v not found", name)
-	}
-	return sc.IsPaused(), nil
+	return rc.IsSchedulerPaused(name)
 }
 
 // GetScheduleConfig returns ScheduleConfig.
@@ -124,11 +120,7 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(c.GetSchedulers()))
-	for name := range c.GetSchedulers() {
-		names = append(names, name)
-	}
-	return names, nil
+	return c.GetSchedulers(), nil
 }
 
 // GetStores returns all stores in the cluster.
@@ -418,31 +410,31 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
-func (h *Handler) SetAllStoresLimit(rate float64, limitType storelimit.Type) error {
-	c, err := h.GetOperatorController()
+func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Type) error {
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
-	c.SetAllStoresLimit(rate, storelimit.Manual, limitType)
+	c.SetAllStoresLimit(limitType, ratePerMin)
 	return nil
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]*storelimit.StoreLimit, error) {
-	c, err := h.GetOperatorController()
+func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]config.StoreLimitConfig, error) {
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil, err
 	}
-	return c.GetAllStoresLimit(limitType), nil
+	return c.GetAllStoresLimit(), nil
 }
 
 // SetStoreLimit is used to set the limit of a store.
-func (h *Handler) SetStoreLimit(storeID uint64, rate float64, limitType storelimit.Type) error {
-	c, err := h.GetOperatorController()
+func (h *Handler) SetStoreLimit(storeID uint64, ratePerMin float64, limitType storelimit.Type) error {
+	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
-	c.SetStoreLimit(storeID, rate, storelimit.Manual, limitType)
+	c.SetStoreLimit(storeID, limitType, ratePerMin)
 	return nil
 }
 
@@ -805,7 +797,7 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 		return nil
 	}
 	mux := http.NewServeMux()
-	for name, handler := range c.GetSchedulers() {
+	for name, handler := range c.GetSchedulerHandlers() {
 		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name)
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))

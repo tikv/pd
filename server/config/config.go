@@ -23,7 +23,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/pingcap/pd/v4/pkg/grpcutil"
+	"github.com/pingcap/pd/v4/pkg/metricutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/schedule"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
@@ -34,11 +42,6 @@ import (
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-
-	"github.com/pingcap/pd/v4/pkg/grpcutil"
-	"github.com/pingcap/pd/v4/pkg/metricutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/schedule"
 )
 
 // Config is the pd server configuration.
@@ -214,9 +217,59 @@ const (
 )
 
 var (
+	defaultEnableTelemetry = true
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
+	// DefaultStoreLimit is the default store limit of add peer and remove peer.
+	DefaultStoreLimit StoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
+	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
+	DefaultTiFlashStoreLimit StoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
 )
+
+func init() {
+	initByLDFlags(versioninfo.PDEdition)
+}
+
+func initByLDFlags(edition string) {
+	if edition != versioninfo.CommunityEdition {
+		defaultEnableTelemetry = false
+	}
+}
+
+// StoreLimit is the default limit of adding peer and removing peer when putting stores.
+type StoreLimit struct {
+	mu sync.RWMutex
+	// AddPeer is the default rate of adding peers for store limit (per minute).
+	AddPeer float64
+	// RemovePeer is the default rate of removing peers for store limit (per minute).
+	RemovePeer float64
+}
+
+// SetDefaultStoreLimit sets the default store limit for a given type.
+func (sl *StoreLimit) SetDefaultStoreLimit(typ storelimit.Type, ratePerMin float64) {
+	sl.mu.Lock()
+	defer sl.mu.Unlock()
+	switch typ {
+	case storelimit.AddPeer:
+		sl.AddPeer = ratePerMin
+	case storelimit.RemovePeer:
+		sl.RemovePeer = ratePerMin
+	}
+}
+
+// GetDefaultStoreLimit gets the default store limit for a given type.
+func (sl *StoreLimit) GetDefaultStoreLimit(typ storelimit.Type) float64 {
+	sl.mu.RLock()
+	defer sl.mu.RUnlock()
+	switch typ {
+	case storelimit.AddPeer:
+		return sl.AddPeer
+	case storelimit.RemovePeer:
+		return sl.RemovePeer
+	default:
+		panic("invalid type")
+	}
+}
 
 func adjustString(v *string, defValue string) {
 	if len(*v) == 0 {
@@ -250,7 +303,10 @@ func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
 
 func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 	if len(*v) == 0 {
-		*v = defValue
+		// Make a copy to avoid changing DefaultSchedulers unexpectedly.
+		// When reloading from storage, the config is passed to json.Unmarshal.
+		// Without clone, the DefaultSchedulers could be overwritten.
+		*v = append(defValue[:0:0], defValue...)
 	}
 }
 
@@ -278,18 +334,26 @@ func (c *Config) Parse(arguments []string) error {
 		}
 
 		// Backward compatibility for toml config
-		if c.LogFileDeprecated != "" && c.Log.File.Filename == "" {
-			c.Log.File.Filename = c.LogFileDeprecated
+		if c.LogFileDeprecated != "" {
 			msg := fmt.Sprintf("log-file in %s is deprecated, use [log.file] instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
+			if c.Log.File.Filename == "" {
+				c.Log.File.Filename = c.LogFileDeprecated
+			}
 		}
-		if c.LogLevelDeprecated != "" && c.Log.Level == "" {
-			c.Log.Level = c.LogLevelDeprecated
+		if c.LogLevelDeprecated != "" {
 			msg := fmt.Sprintf("log-level in %s is deprecated, use [log] instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
+			if c.Log.Level == "" {
+				c.Log.Level = c.LogLevelDeprecated
+			}
 		}
 		if meta.IsDefined("schedule", "disable-raft-learner") {
 			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", c.configFile)
+			c.WarningMsgs = append(c.WarningMsgs, msg)
+		}
+		if meta.IsDefined("dashboard", "disable-telemetry") {
+			msg := fmt.Sprintf("disable-telemetry in %s is deprecated, use enable-telemetry instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 	}
@@ -463,6 +527,8 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		c.EnableGRPCGateway = defaultEnableGRPCGateway
 	}
 
+	c.Dashboard.adjust(configMetaData.Child("dashboard"))
+
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
 	return nil
@@ -535,7 +601,10 @@ type ScheduleConfig struct {
 	// threshold, it is considered a hot region.
 	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
 	// StoreBalanceRate is the maximum of balance rate for each store.
-	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate"`
+	// WARN: StoreBalanceRate is deprecated.
+	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
+	// StoreLimit is the limit of scheduling for stores.
+	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
 	//
@@ -593,7 +662,7 @@ type ScheduleConfig struct {
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
 	// Only used to display
-	SchedulersPayload map[string]string `toml:"schedulers-payload" json:"schedulers-payload"`
+	SchedulersPayload map[string]interface{} `toml:"schedulers-payload" json:"schedulers-payload"`
 
 	// StoreLimitMode can be auto or manual, when set to auto,
 	// PD tries to change the store limit values according to
@@ -608,6 +677,10 @@ type ScheduleConfig struct {
 func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	schedulers := make(SchedulerConfigs, len(c.Schedulers))
 	copy(schedulers, c.Schedulers)
+	storeLimit := make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
+	for k, v := range c.StoreLimit {
+		storeLimit[k] = v
+	}
 	return &ScheduleConfig{
 		MaxSnapshotCount:             c.MaxSnapshotCount,
 		MaxPendingPeerCount:          c.MaxPendingPeerCount,
@@ -625,7 +698,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		EnableCrossTableMerge:        c.EnableCrossTableMerge,
 		HotRegionScheduleLimit:       c.HotRegionScheduleLimit,
 		HotRegionCacheHitsThreshold:  c.HotRegionCacheHitsThreshold,
-		StoreBalanceRate:             c.StoreBalanceRate,
+		StoreLimit:                   storeLimit,
 		TolerantSizeRatio:            c.TolerantSizeRatio,
 		LowSpaceRatio:                c.LowSpaceRatio,
 		HighSpaceRatio:               c.HighSpaceRatio,
@@ -661,7 +734,6 @@ const (
 	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 4
-	defaultStoreBalanceRate       = 15
 	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
 	defaultHighSpaceRatio         = 0.7
@@ -719,10 +791,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("store-limit-mode") {
 		adjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
-	adjustFloat64(&c.StoreBalanceRate, defaultStoreBalanceRate)
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
-	adjustSchedulers(&c.Schedulers, defaultSchedulers)
+
+	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 
 	for k, b := range c.migrateConfigurationMap() {
 		v, err := c.parseDeprecatedFlag(meta, k, *b[0], *b[1])
@@ -730,6 +802,11 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 			return err
 		}
 		*b[0], *b[1] = false, v // reset old flag false to make it ignored when marshal to JSON
+	}
+
+	if c.StoreBalanceRate != 0 {
+		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		c.StoreBalanceRate = 0
 	}
 
 	return c.Validate()
@@ -767,6 +844,10 @@ func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, 
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.DisableLearner = false
+	if c.StoreBalanceRate != 0 {
+		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		c.StoreBalanceRate = 0
+	}
 	for _, b := range c.migrateConfigurationMap() {
 		// If old=false (previously disabled), set both old and new to false.
 		if *b[0] {
@@ -817,25 +898,16 @@ func (c *ScheduleConfig) Deprecated() error {
 	if c.DisableLocationReplacement {
 		return errors.New("disable-location-replacement has already been deprecated")
 	}
+	if c.StoreBalanceRate != 0 {
+		return errors.New("store-balance-rate has already been deprecated")
+	}
 	return nil
 }
 
-var deprecateConfigs = []string{
-	"disable-remove-down-replica",
-	"disable-replace-offline-replica",
-	"disable-make-up-replica",
-	"disable-remove-extra-replica",
-	"disable-location-replacement",
-}
-
-// IsDeprecated returns if a config is deprecated.
-func IsDeprecated(config string) bool {
-	for _, t := range deprecateConfigs {
-		if t == config {
-			return true
-		}
-	}
-	return false
+// StoreLimitConfig is a config about scheduling rate limit of different types for a store.
+type StoreLimitConfig struct {
+	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
+	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
 }
 
 // SchedulerConfigs is a slice of customized scheduler configuration.
@@ -849,7 +921,10 @@ type SchedulerConfig struct {
 	ArgsPayload string   `toml:"args-payload" json:"args-payload"`
 }
 
-var defaultSchedulers = SchedulerConfigs{
+// DefaultSchedulers are the schedulers be created by default.
+// If these schedulers are not in the persistent configuration, they
+// will be created automatically when reloading.
+var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
@@ -858,7 +933,7 @@ var defaultSchedulers = SchedulerConfigs{
 
 // IsDefaultScheduler checks whether the scheduler is enable by default.
 func IsDefaultScheduler(typ string) bool {
-	for _, c := range defaultSchedulers {
+	for _, c := range DefaultSchedulers {
 		if typ == c.Type {
 			return true
 		}
@@ -879,8 +954,18 @@ type ReplicationConfig struct {
 	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
 	StrictlyMatchLabel bool `toml:"strictly-match-label" json:"strictly-match-label,string"`
 
-	// When PlacementRules feature is enabled. MaxReplicas and LocationLabels are not uesd any more.
+	// When PlacementRules feature is enabled. MaxReplicas, LocationLabels and IsolationLabels are not used any more.
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
+
+	// IsolationLevel is used to isolate replicas explicitly and forcibly if it's not empty.
+	// Its value must be empty or one of LocationLabels.
+	// Example:
+	// location-labels = ["zone", "rack", "host"]
+	// isolation-level = "zone"
+	// With configuration like above, PD ensure that all replicas be placed in different zones.
+	// Even if a zone is down, PD will not try to make up replicas in other zone
+	// because other zones already have replicas on it.
+	IsolationLevel string `toml:"isolation-level" json:"isolation-level"`
 }
 
 func (c *ReplicationConfig) clone() *ReplicationConfig {
@@ -891,16 +976,25 @@ func (c *ReplicationConfig) clone() *ReplicationConfig {
 		LocationLabels:       locationLabels,
 		StrictlyMatchLabel:   c.StrictlyMatchLabel,
 		EnablePlacementRules: c.EnablePlacementRules,
+		IsolationLevel:       c.IsolationLevel,
 	}
 }
 
 // Validate is used to validate if some replication configurations are right.
 func (c *ReplicationConfig) Validate() error {
+	foundIsolationLevel := false
 	for _, label := range c.LocationLabels {
 		err := ValidateLabels([]*metapb.StoreLabel{{Key: label}})
 		if err != nil {
 			return err
 		}
+		// IsolationLevel should be empty or one of LocationLabels
+		if !foundIsolationLevel && label == c.IsolationLevel {
+			foundIsolationLevel = true
+		}
+	}
+	if len(c.IsolationLevel) > 0 && !foundIsolationLevel {
+		return errors.New("isolation-level must be one of location-labels or empty")
 	}
 	return nil
 }
@@ -1132,15 +1226,18 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath       string `toml:"tidb-cacert-path" json:"tidb_cacert_path"`
-	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb_cert_path"`
-	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb_key_path"`
-	PublicPathPrefix string `toml:"public-path-prefix" json:"public_path_prefix"`
-	InternalProxy    bool   `toml:"internal-proxy" json:"internal_proxy"`
+	TiDBCAPath       string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
+	TiDBCertPath     string `toml:"tidb-cert-path" json:"tidb-cert-path"`
+	TiDBKeyPath      string `toml:"tidb-key-path" json:"tidb-key-path"`
+	PublicPathPrefix string `toml:"public-path-prefix" json:"public-path-prefix"`
+	InternalProxy    bool   `toml:"internal-proxy" json:"internal-proxy"`
+	EnableTelemetry  bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	// WARN: DisableTelemetry is deprecated.
+	DisableTelemetry bool `toml:"disable-telemetry" json:"disable-telemetry,omitempty"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
-func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
+func (c *DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 	if (len(c.TiDBCertPath) != 0 && len(c.TiDBKeyPath) != 0) || len(c.TiDBCAPath) != 0 {
 		tlsInfo := transport.TLSInfo{
 			CertFile:      c.TiDBCertPath,
@@ -1154,6 +1251,13 @@ func (c DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 		return tlsConfig, nil
 	}
 	return nil, nil
+}
+
+func (c *DashboardConfig) adjust(meta *configMetaData) {
+	if !meta.IsDefined("enable-telemetry") {
+		c.EnableTelemetry = defaultEnableTelemetry
+	}
+	c.EnableTelemetry = c.EnableTelemetry && !c.DisableTelemetry
 }
 
 // ReplicationModeConfig is the configuration for the replication policy.

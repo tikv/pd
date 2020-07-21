@@ -17,7 +17,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/server"
@@ -57,7 +56,7 @@ func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
 // @Accept json
 // @Param body body object true "json params"
 // @Produce json
-// @Success 200 {string} string "Unload plugin success."
+// @Success 200 {string} string "Load/Unload plugin successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /plugin [delete]
@@ -71,11 +70,6 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	path := data["plugin-path"]
-	if !strings.HasPrefix(path, "./pd/plugin/") {
-		err := errors.New("plugin path must begin with ./pd/plugin/")
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	if exist, err := pathExists(path); !exist {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -84,17 +78,21 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 	switch action {
 	case cluster.PluginLoad:
 		err = h.PluginLoad(path)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, "Load plugin successfully.")
 	case cluster.PluginUnload:
 		err = h.PluginUnload(path)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, "Unload plugin successfully.")
 	default:
 		h.rd.JSON(w, http.StatusBadRequest, "unknown action")
-		return
 	}
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.rd.JSON(w, http.StatusOK, nil)
 }
 
 func pathExists(path string) (bool, error) {

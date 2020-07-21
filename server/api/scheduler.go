@@ -204,7 +204,7 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.r.JSON(w, http.StatusOK, nil)
+	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }
 
 func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64) error {
@@ -246,7 +246,7 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.r.JSON(w, http.StatusOK, nil)
+	h.r.JSON(w, http.StatusOK, "The scheduler is removed.")
 }
 
 func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
@@ -278,7 +278,7 @@ func (h *schedulerHandler) redirectSchedulerDelete(name, schedulerName string) e
 // @Param name path string true "The name of the scheduler."
 // @Param body body object true "json params"
 // @Produce json
-// @Success 200 {string} string "Pause or resume the scheduler success."
+// @Success 200 {string} string "Pause or resume the scheduler successfully."
 // @Failure 400 {string} string "Bad format request."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /schedulers/{name} [post]
@@ -298,7 +298,7 @@ func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request)
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.r.JSON(w, http.StatusOK, nil)
+	h.r.JSON(w, http.StatusOK, "Pause or resume the scheduler successfully.")
 }
 
 type schedulerConfigHandler struct {

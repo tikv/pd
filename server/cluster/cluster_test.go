@@ -491,15 +491,15 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 	for i, store := range stores {
 		id := store.GetID()
 		c.Assert(cache.GetStore(id), IsNil)
-		c.Assert(cache.BlockStore(id), NotNil)
+		c.Assert(cache.PauseLeaderTransfer(id), NotNil)
 		cache.SetStore(store)
 		c.Assert(cache.GetStore(id), DeepEquals, store)
 		c.Assert(cache.GetStoreCount(), Equals, i+1)
-		c.Assert(cache.BlockStore(id), IsNil)
-		c.Assert(cache.GetStore(id).IsBlocked(), IsTrue)
-		c.Assert(cache.BlockStore(id), NotNil)
-		cache.UnblockStore(id)
-		c.Assert(cache.GetStore(id).IsBlocked(), IsFalse)
+		c.Assert(cache.PauseLeaderTransfer(id), IsNil)
+		c.Assert(cache.GetStore(id).AllowLeaderTransfer(), IsFalse)
+		c.Assert(cache.PauseLeaderTransfer(id), NotNil)
+		cache.ResumeLeaderTransfer(id)
+		c.Assert(cache.GetStore(id).AllowLeaderTransfer(), IsTrue)
 	}
 	c.Assert(cache.GetStoreCount(), Equals, int(n))
 
@@ -656,7 +656,6 @@ type testCluster struct {
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
-	cfg.Schedule.StoreBalanceRate = 60
 	if err := cfg.Adjust(nil); err != nil {
 		return nil, nil, err
 	}

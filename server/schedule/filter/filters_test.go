@@ -14,9 +14,11 @@ package filter
 
 import (
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
 	"github.com/pingcap/pd/v4/server/core"
@@ -31,19 +33,38 @@ var _ = Suite(&testFiltersSuite{})
 
 type testFiltersSuite struct{}
 
-func (s *testFiltersSuite) TestPendingPeerFilter(c *C) {
-	filter := NewPendingPeerCountFilter("")
-	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
-	store := core.NewStoreInfo(&metapb.Store{Id: 1})
-	c.Assert(filter.Source(tc, store), IsTrue)
-	newStore := store.Clone(core.SetPendingPeerCount(30))
-	c.Assert(filter.Source(tc, newStore), IsFalse)
-	c.Assert(filter.Target(tc, newStore), IsFalse)
-	// set to 0 means no limit
-	opt.MaxPendingPeerCount = 0
-	c.Assert(filter.Source(tc, newStore), IsTrue)
-	c.Assert(filter.Target(tc, newStore), IsTrue)
+func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
+	labels := []string{"zone", "rack", "host"}
+	allStores := []*core.StoreInfo{
+		core.NewStoreInfoWithLabel(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}),
+		core.NewStoreInfoWithLabel(2, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"}),
+		core.NewStoreInfoWithLabel(3, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"}),
+		core.NewStoreInfoWithLabel(4, 1, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"}),
+		core.NewStoreInfoWithLabel(5, 1, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"}),
+		core.NewStoreInfoWithLabel(6, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"}),
+	}
+	testCases := []struct {
+		stores       []uint64
+		source       uint64
+		target       uint64
+		safeGuradRes bool
+		improverRes  bool
+	}{
+		{[]uint64{1, 2, 3}, 1, 4, true, true},
+		{[]uint64{1, 3, 4}, 1, 2, true, false},
+		{[]uint64{1, 4, 6}, 4, 2, false, false},
+	}
+
+	for _, tc := range testCases {
+		var stores []*core.StoreInfo
+		for _, id := range tc.stores {
+			stores = append(stores, allStores[id-1])
+		}
+		ls := NewLocationSafeguard("", labels, stores, allStores[tc.source-1])
+		li := NewLocationImprover("", labels, stores, allStores[tc.source-1])
+		c.Assert(ls.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.safeGuradRes)
+		c.Assert(li.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.improverRes)
+	}
 }
 
 func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
@@ -75,8 +96,133 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 		{StoreId: 5, Id: 5},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 
-	filter := NewRuleFitFilter("", tc, region, 1)
+	filter := newRuleFitFilter("", tc, region, 1)
 	c.Assert(filter.Target(tc, tc.GetStore(2)), IsTrue)
 	c.Assert(filter.Target(tc, tc.GetStore(4)), IsFalse)
 	c.Assert(filter.Source(tc, tc.GetStore(4)), IsTrue)
+}
+
+func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
+	filters := []Filter{
+		StoreStateFilter{TransferLeader: true},
+		StoreStateFilter{MoveRegion: true},
+		StoreStateFilter{TransferLeader: true, MoveRegion: true},
+		StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+	}
+	opt := mockoption.NewScheduleOptions()
+	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
+
+	check := func(n int, store *core.StoreInfo, source, target bool) {
+		c.Assert(filters[n].Source(opt, store), Equals, source)
+		c.Assert(filters[n].Target(opt, store), Equals, target)
+	}
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
+	check(2, store, true, true)
+
+	// Disconn
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
+	check(0, store, false, false)
+	check(1, store, true, false)
+	check(2, store, false, false)
+	check(3, store, true, true)
+
+	// Busy
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
+		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
+	check(0, store, true, false)
+	check(1, store, false, false)
+	check(2, store, false, false)
+	check(3, store, true, true)
+}
+
+func (s *testFiltersSuite) TestIsolationFilter(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	opt.LocationLabels = []string{"zone", "rack", "host"}
+	testCluster := mockcluster.NewCluster(opt)
+	allStores := []struct {
+		storeID     uint64
+		regionCount int
+		labels      map[string]string
+	}{
+		{1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}},
+		{2, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}},
+		{3, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"}},
+		{4, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"}},
+		{5, 1, map[string]string{"zone": "z1", "rack": "r3", "host": "h1"}},
+		{6, 1, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"}},
+		{7, 1, map[string]string{"zone": "z3", "rack": "r3", "host": "h1"}},
+	}
+	for _, store := range allStores {
+		testCluster.AddLabelsStore(store.storeID, store.regionCount, store.labels)
+	}
+
+	testCases := []struct {
+		region         *core.RegionInfo
+		isolationLevel string
+		sourceRes      []bool
+		targetRes      []bool
+	}{
+		{
+			core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+				{Id: 1, StoreId: 1},
+				{Id: 2, StoreId: 6},
+			}}, &metapb.Peer{StoreId: 1, Id: 1}),
+			"zone",
+			[]bool{true, true, true, true, true, true, true},
+			[]bool{false, false, false, false, false, false, true},
+		},
+		{
+			core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+				{Id: 1, StoreId: 1},
+				{Id: 2, StoreId: 4},
+				{Id: 3, StoreId: 7},
+			}}, &metapb.Peer{StoreId: 1, Id: 1}),
+			"rack",
+			[]bool{true, true, true, true, true, true, true},
+			[]bool{false, false, false, false, true, true, false},
+		},
+		{
+			core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+				{Id: 1, StoreId: 1},
+				{Id: 2, StoreId: 4},
+				{Id: 3, StoreId: 6},
+			}}, &metapb.Peer{StoreId: 1, Id: 1}),
+			"host",
+			[]bool{true, true, true, true, true, true, true},
+			[]bool{false, false, true, false, true, false, true},
+		},
+	}
+
+	for _, tc := range testCases {
+		filter := NewIsolationFilter("", tc.isolationLevel, testCluster.GetLocationLabels(), testCluster.GetRegionStores(tc.region))
+		for idx, store := range allStores {
+			c.Assert(filter.Source(testCluster, testCluster.GetStore(store.storeID)), Equals, tc.sourceRes[idx])
+			c.Assert(filter.Target(testCluster, testCluster.GetStore(store.storeID)), Equals, tc.targetRes[idx])
+		}
+	}
+}
+
+func (s *testFiltersSuite) TestPlacementGuard(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	opt.LocationLabels = []string{"zone"}
+	tc := mockcluster.NewCluster(opt)
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+		{StoreId: 1, Id: 1},
+		{StoreId: 3, Id: 3},
+		{StoreId: 5, Id: 5},
+	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	store1 := tc.GetStore(1)
+
+	c.Assert(NewPlacementSafeguard("", tc, region, store1),
+		FitsTypeOf,
+		NewLocationSafeguard("", []string{"zone"}, tc.GetRegionStores(region), store1))
+	opt.EnablePlacementRules = true
+	c.Assert(NewPlacementSafeguard("", tc, region, store1),
+		FitsTypeOf,
+		newRuleFitFilter("", tc, region, 1))
 }

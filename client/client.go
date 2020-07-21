@@ -61,7 +61,7 @@ type Client interface {
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
 	// with empty value (PeerID is 0).
-	ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error)
+	ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*Region, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -191,6 +191,17 @@ func (c *client) tsCancelLoop() {
 	}
 }
 
+func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.CancelFunc, createdCh chan struct{}) {
+	select {
+	case <-time.After(c.timeout):
+		cancel()
+	case <-createdCh:
+		return
+	case <-loopCtx.Done():
+		return
+	}
+}
+
 func (c *client) tsLoop() {
 	defer c.wg.Done()
 
@@ -199,6 +210,7 @@ func (c *client) tsLoop() {
 
 	defaultSize := maxMergeTSORequests + 1
 	requests := make([]*tsoRequest, defaultSize)
+	createdCh := make(chan struct{})
 
 	var opts []opentracing.StartSpanOption
 	var stream pdpb.PD_TsoClient
@@ -210,7 +222,11 @@ func (c *client) tsLoop() {
 		if stream == nil {
 			var ctx context.Context
 			ctx, cancel = context.WithCancel(loopCtx)
+			go c.checkStreamTimeout(loopCtx, cancel, createdCh)
 			stream, err = c.leaderClient().Tso(ctx)
+			if stream != nil {
+				createdCh <- struct{}{}
+			}
 			if err != nil {
 				select {
 				case <-loopCtx.Done():
@@ -517,7 +533,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*Region, e
 	return c.parseRegionResponse(resp), nil
 }
 
-func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*metapb.Region, []*metapb.Peer, error) {
+func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -541,9 +557,34 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 	if err != nil {
 		cmdFailedDurationScanRegions.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return nil, nil, errors.WithStack(err)
+		return nil, errors.WithStack(err)
 	}
-	return resp.GetRegions(), resp.GetLeaders(), nil
+
+	var regions []*Region
+	if len(resp.GetRegions()) == 0 {
+		// Make it compatible with old server.
+		metas, leaders := resp.GetRegionMetas(), resp.GetLeaders()
+		for i := range metas {
+			r := &Region{Meta: metas[i]}
+			if i < len(leaders) {
+				r.Leader = leaders[i]
+			}
+			regions = append(regions, r)
+		}
+	} else {
+		for _, r := range resp.GetRegions() {
+			region := &Region{
+				Meta:         r.Region,
+				Leader:       r.Leader,
+				PendingPeers: r.PendingPeers,
+			}
+			for _, p := range r.DownPeers {
+				region.DownPeers = append(region.DownPeers, p.Peer)
+			}
+			regions = append(regions, region)
+		}
+	}
+	return regions, nil
 }
 
 func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {

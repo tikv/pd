@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -59,7 +58,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
 			log.Debug("fail to fix rule peer", zap.Error(err), zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID))
-			return nil
+			break
 		}
 		if op != nil {
 			return op
@@ -90,11 +89,11 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	for _, peer := range rf.Peers {
 		if c.isDownPeer(region, peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
-			return c.replaceRulePeer(region, fit, rf, peer, downStatus)
+			return c.replaceRulePeer(region, rf, peer, downStatus)
 		}
 		if c.isOfflinePeer(region, peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
-			return c.replaceRulePeer(region, fit, rf, peer, offlineStatus)
+			return c.replaceRulePeer(region, rf, peer, offlineStatus)
 		}
 	}
 	// fix loose matched peers.
@@ -107,27 +106,29 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			return op, nil
 		}
 	}
-	return c.fixBetterLocation(region, fit, rf)
+	return c.fixBetterLocation(region, rf)
 }
 
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
 	checkerCounter.WithLabelValues("rule_checker", "add-rule-peer").Inc()
-	store := SelectStoreToAddPeerByRule(c.name, c.cluster, region, rf)
-	if store == nil {
+	ruleStores := c.getRuleFitStores(rf)
+	store := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
+	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
 		return nil, errors.New("no store to add peer")
 	}
-	peer := &metapb.Peer{StoreId: store.GetID(), IsLearner: rf.Rule.Role == placement.Learner}
+	peer := &metapb.Peer{StoreId: store, IsLearner: rf.Rule.Role == placement.Learner}
 	return operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
 }
 
-func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
-	store := SelectStoreToReplacePeerByRule(c.name, c.cluster, region, fit, rf, peer)
-	if store == nil {
+func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, rf *placement.RuleFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
+	ruleStores := c.getRuleFitStores(rf)
+	store := c.strategy(region, rf.Rule).SelectStoreToReplace(ruleStores, peer.GetStoreId())
+	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
 		return nil, errors.New("no store to replace peer")
 	}
-	newPeer := &metapb.Peer{StoreId: store.GetID(), IsLearner: rf.Rule.Role == placement.Learner}
+	newPeer := &metapb.Peer{StoreId: store, IsLearner: rf.Rule.Role == placement.Learner}
 	return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
 }
 
@@ -170,37 +171,37 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	return false
 }
 
-func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
+func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
 	if len(rf.Rule.LocationLabels) == 0 || rf.Rule.Count <= 1 {
 		return nil, nil
 	}
-	stores := getRuleFitStores(c.cluster, rf)
-	s := selector.NewReplicaSelector(stores, rf.Rule.LocationLabels, filter.StoreStateFilter{ActionScope: "rule-checker", MoveRegion: true})
-	oldPeerStore := s.SelectSource(c.cluster, stores)
-	if oldPeerStore == nil {
+
+	strategy := c.strategy(region, rf.Rule)
+	ruleStores := c.getRuleFitStores(rf)
+	oldStore := strategy.SelectStoreToRemove(ruleStores)
+	if oldStore == 0 {
 		return nil, nil
 	}
-	oldPeer := region.GetStorePeer(oldPeerStore.GetID())
-	newPeerStore := SelectStoreToReplacePeerByRule("rule-checker", c.cluster, region, fit, rf, oldPeer)
-	if newPeerStore == nil {
+	newStore := strategy.SelectStoreToImprove(ruleStores, oldStore)
+	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		return nil, nil
 	}
-	stores = getRuleFitStores(c.cluster, removePeerFromRuleFit(rf, oldPeer))
-	oldScore := core.DistinctScore(rf.Rule.LocationLabels, stores, oldPeerStore)
-	newScore := core.DistinctScore(rf.Rule.LocationLabels, stores, newPeerStore)
-	if newScore <= oldScore {
-		log.Debug("no better peer", zap.Uint64("region-id", region.GetID()), zap.Float64("new-score", newScore), zap.Float64("old-score", oldScore))
-		return nil, nil
-	}
 	checkerCounter.WithLabelValues("rule_checker", "move-to-better-location").Inc()
-	newPeer := &metapb.Peer{StoreId: newPeerStore.GetID(), IsLearner: oldPeer.IsLearner}
-	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldPeer.GetStoreId(), newPeer)
+	newPeer := &metapb.Peer{StoreId: newStore, IsLearner: rf.Rule.Role == placement.Learner}
+	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStore, newPeer)
 }
 
 func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.RegionFit) (*operator.Operator, error) {
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
+	}
+	// remove orphan peers only when all rules are satisfied (count+role)
+	for _, rf := range fit.RuleFits {
+		if !rf.IsSatisfied() {
+			checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
+			return nil, nil
+		}
 	}
 	checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 	peer := fit.OrphanPeers[0]
@@ -238,48 +239,22 @@ func (c *RuleChecker) isOfflinePeer(region *core.RegionInfo, peer *metapb.Peer) 
 	return !store.IsUp()
 }
 
-// SelectStoreToAddPeerByRule selects a store to add peer in order to fit the placement rule.
-func SelectStoreToAddPeerByRule(scope string, cluster opt.Cluster, region *core.RegionInfo, rf *placement.RuleFit, filters ...filter.Filter) *core.StoreInfo {
-	fs := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: scope, MoveRegion: true},
-		filter.NewStorageThresholdFilter(scope),
-		filter.NewLabelConstaintFilter(scope, rf.Rule.LabelConstraints),
-		filter.NewExcludedFilter(scope, nil, region.GetStoreIds()),
-		filter.NewSpecialUseFilter(scope),
+func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule) *ReplicaStrategy {
+	return &ReplicaStrategy{
+		checkerName:    c.name,
+		cluster:        c.cluster,
+		locationLabels: rule.LocationLabels,
+		region:         region,
+		extraFilters:   []filter.Filter{filter.NewLabelConstaintFilter(c.name, rule.LabelConstraints)},
 	}
-	fs = append(fs, filters...)
-	store := selector.NewReplicaSelector(getRuleFitStores(cluster, rf), rf.Rule.LocationLabels).
-		SelectTarget(cluster, cluster.GetStores(), fs...)
-	return store
 }
 
-// SelectStoreToReplacePeerByRule selects a store to replace a region peer in order to fit the placement rule.
-func SelectStoreToReplacePeerByRule(scope string, cluster opt.Cluster, region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer, filters ...filter.Filter) *core.StoreInfo {
-	rf2 := removePeerFromRuleFit(rf, peer)
-	return SelectStoreToAddPeerByRule(scope, cluster, region, rf2, filters...)
-}
-
-func getRuleFitStores(cluster opt.Cluster, fit *placement.RuleFit) []*core.StoreInfo {
+func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo {
 	var stores []*core.StoreInfo
-	for _, p := range fit.Peers {
-		if s := cluster.GetStore(p.GetStoreId()); s != nil {
+	for _, p := range rf.Peers {
+		if s := c.cluster.GetStore(p.GetStoreId()); s != nil {
 			stores = append(stores, s)
 		}
 	}
 	return stores
-}
-
-func removePeerFromRuleFit(rf *placement.RuleFit, peer *metapb.Peer) *placement.RuleFit {
-	rf2 := &placement.RuleFit{Rule: rf.Rule}
-	for _, p := range rf.Peers {
-		if p.GetId() != peer.GetId() {
-			rf2.Peers = append(rf2.Peers, p)
-		}
-	}
-	for _, p := range rf.PeersWithDifferentRole {
-		if p.GetId() != peer.GetId() {
-			rf2.PeersWithDifferentRole = append(rf2.PeersWithDifferentRole, p)
-		}
-	}
-	return rf2
 }

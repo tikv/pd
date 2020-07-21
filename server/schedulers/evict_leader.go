@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -147,7 +146,7 @@ func (conf *evictLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (s
 	succ, last = false, false
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.UnblockStore(id)
+		conf.cluster.ResumeLeaderTransfer(id)
 		succ = true
 		last = len(conf.StoreIDWithRanges) == 0
 	}
@@ -156,24 +155,18 @@ func (conf *evictLeaderSchedulerConfig) mayBeRemoveStoreFromConfig(id uint64) (s
 
 type evictLeaderScheduler struct {
 	*BaseScheduler
-	conf     *evictLeaderSchedulerConfig
-	selector *selector.RandomSelector
-	handler  http.Handler
+	conf    *evictLeaderSchedulerConfig
+	handler http.Handler
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConfig) schedule.Scheduler {
-	filters := []filter.Filter{
-		filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true},
-	}
-
 	base := NewBaseScheduler(opController)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,
 		conf:          conf,
-		selector:      selector.NewRandomSelector(filters),
 		handler:       handler,
 	}
 }
@@ -201,7 +194,7 @@ func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	defer s.conf.mu.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWithRanges {
-		if err := cluster.BlockStore(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id); err != nil {
 			res = err
 		}
 	}
@@ -212,7 +205,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
-		cluster.UnblockStore(id)
+		cluster.ResumeLeaderTransfer(id)
 	}
 }
 
@@ -228,7 +221,10 @@ func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Ope
 			schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 			continue
 		}
-		target := s.selector.SelectTarget(cluster, cluster.GetFollowerStores(region))
+
+		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
+			FilterTarget(cluster, filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
+			RandomPick()
 		if target == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 			continue
@@ -299,7 +295,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
-			if err := handler.config.cluster.BlockStore(id); err != nil {
+			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
 				return
 			}

@@ -89,6 +89,7 @@ func (s *configTestSuite) TestConfig(c *C) {
 	scheduleConfig := svr.GetScheduleConfig()
 	scheduleConfig.Schedulers = nil
 	scheduleConfig.SchedulersPayload = nil
+	scheduleConfig.StoreLimit = nil
 	c.Assert(&cfg.Schedule, DeepEquals, scheduleConfig)
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
 

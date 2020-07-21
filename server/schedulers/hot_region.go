@@ -778,23 +778,15 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 	switch bs.opTy {
 	case movePeer:
-		var scoreGuard filter.Filter
-		if bs.cluster.IsPlacementRulesEnabled() {
-			scoreGuard = filter.NewRuleFitFilter(bs.sche.GetName(), bs.cluster, bs.cur.region, bs.cur.srcStoreID)
-		} else {
-			srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
-			if srcStore == nil {
-				return nil
-			}
-			scoreGuard = filter.NewDistinctScoreFilter(bs.sche.GetName(), bs.cluster.GetLocationLabels(), bs.cluster.GetRegionStores(bs.cur.region), srcStore)
+		srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
+		if srcStore == nil {
+			return nil
 		}
-
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIds(), bs.cur.region.GetStoreIds()),
-			filter.NewHealthFilter(bs.sche.GetName()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
-			scoreGuard,
+			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
 		}
 
 		candidates = bs.cluster.GetStores()
@@ -802,7 +794,6 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	case transferLeader:
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
-			filter.NewHealthFilter(bs.sche.GetName()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
 
@@ -811,18 +802,21 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	default:
 		return nil
 	}
+	return bs.pickDstStores(filters, candidates)
+}
 
+func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*core.StoreInfo) map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
+	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	for _, store := range candidates {
 		if filter.Target(bs.cluster, store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
-			if detail.LoadPred.max().ByteRate*bs.sche.conf.GetDstToleranceRatio() < detail.LoadPred.Future.ExpByteRate &&
-				detail.LoadPred.max().KeyRate*bs.sche.conf.GetDstToleranceRatio() < detail.LoadPred.Future.ExpKeyRate {
+			if detail.LoadPred.max().ByteRate*dstToleranceRatio < detail.LoadPred.Future.ExpByteRate &&
+				detail.LoadPred.max().KeyRate*dstToleranceRatio < detail.LoadPred.Future.ExpKeyRate {
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}
 			balanceHotRegionCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
-			ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 		}
 	}
 	return ret

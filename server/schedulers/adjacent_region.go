@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -94,7 +93,7 @@ type balanceAdjacentRegionConfig struct {
 // 2. the two regions' leader will not in the public store of this two regions
 type balanceAdjacentRegionScheduler struct {
 	*BaseScheduler
-	selector             *selector.RandomSelector
+	filters              []filter.Filter
 	lastKey              []byte
 	cacheRegions         *adjacentState
 	conf                 *balanceAdjacentRegionConfig
@@ -127,7 +126,7 @@ func newBalanceAdjacentRegionScheduler(opController *schedule.OperatorController
 	base := NewBaseScheduler(opController)
 	s := &balanceAdjacentRegionScheduler{
 		BaseScheduler: base,
-		selector:      selector.NewRandomSelector(filters),
+		filters:       filters,
 		conf:          conf,
 		lastKey:       []byte(""),
 	}
@@ -268,8 +267,7 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster opt.Cluster, re
 		log.Error("failed to get the store", zap.Uint64("store-id", storeID))
 		return true
 	}
-	s := l.selector.SelectSource(cluster, []*core.StoreInfo{store})
-	if s == nil {
+	if !filter.Source(cluster, store, l.filters) {
 		return true
 	}
 	// Skip hot regions.
@@ -294,7 +292,9 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster opt.Cluster, bef
 			storesInfo = append(storesInfo, store)
 		}
 	}
-	target := l.selector.SelectTarget(cluster, storesInfo)
+	target := filter.NewCandidates(storesInfo).
+		FilterTarget(cluster, l.filters...).
+		RandomPick()
 	if target == nil {
 		return nil
 	}
@@ -314,18 +314,12 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 	}
 	// scoreGuard guarantees that the distinct score will not decrease.
 	leaderStoreID := region.GetLeader().GetStoreId()
-	stores := cluster.GetRegionStores(region)
 	source := cluster.GetStore(leaderStoreID)
 	if source == nil {
 		log.Error("failed to get the source store", zap.Uint64("store-id", leaderStoreID))
 		return nil
 	}
-	var scoreGuard filter.Filter
-	if cluster.IsPlacementRulesEnabled() {
-		scoreGuard = filter.NewRuleFitFilter(l.GetName(), cluster, region, leaderStoreID)
-	} else {
-		scoreGuard = filter.NewDistinctScoreFilter(l.GetName(), cluster.GetLocationLabels(), stores, source)
-	}
+	scoreGuard := filter.NewPlacementSafeguard(l.GetName(), cluster, region, source)
 	excludeStores := region.GetStoreIds()
 	for _, storeID := range l.cacheRegions.assignedStoreIds {
 		if _, ok := excludeStores[storeID]; !ok {
@@ -337,7 +331,10 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 		filter.NewExcludedFilter(l.GetName(), nil, excludeStores),
 		scoreGuard,
 	}
-	target := l.selector.SelectTarget(cluster, cluster.GetStores(), filters...)
+	target := filter.NewCandidates(cluster.GetStores()).
+		FilterTarget(cluster, filters...).
+		FilterTarget(cluster, l.filters...).
+		RandomPick()
 	if target == nil {
 		return nil
 	}

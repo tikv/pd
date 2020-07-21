@@ -224,7 +224,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	}
 
 	// NOTE: can be removed when placement rules feature is enabled by default.
-	if !s.GetConfig().Replication.EnablePlacementRules && isTiFlashStore(store) {
+	if !s.GetConfig().Replication.EnablePlacementRules && core.IsTiFlashStore(store) {
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 
@@ -235,6 +235,7 @@ func (s *Server) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*
 	log.Info("put store ok", zap.Stringer("store", store))
 	rc.OnStoreVersionChange()
 	CheckPDVersion(s.persistOptions)
+	rc.AddStoreLimit(store)
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
@@ -302,6 +303,7 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	return &pdpb.StoreHeartbeatResponse{
 		Header:            s.header(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
+		ClusterVersion:    rc.GetClusterVersion(),
 	}, nil
 }
 
@@ -497,8 +499,15 @@ func (s *Server) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsReque
 		if leader == nil {
 			leader = &metapb.Peer{}
 		}
-		resp.Regions = append(resp.Regions, r.GetMeta())
+		// Set RegionMetas and Leaders to make it compatible with old client.
+		resp.RegionMetas = append(resp.RegionMetas, r.GetMeta())
 		resp.Leaders = append(resp.Leaders, leader)
+		resp.Regions = append(resp.Regions, &pdpb.Region{
+			Region:       r.GetMeta(),
+			Leader:       leader,
+			DownPeers:    r.GetDownPeers(),
+			PendingPeers: r.GetPendingPeers(),
+		})
 	}
 	return resp, nil
 }
@@ -770,7 +779,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		return nil, err
 	}
 
-	if request.TTL > 0 && request.SafePoint > min.SafePoint {
+	if request.TTL > 0 && request.SafePoint >= min.SafePoint {
 		ssp := &core.ServiceSafePoint{
 			ServiceID: string(request.ServiceId),
 			ExpiredAt: time.Now().Unix() + request.TTL,
