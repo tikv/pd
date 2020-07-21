@@ -448,7 +448,7 @@ func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	rate, err := strconv.ParseFloat(args[0], 64)
-	if err != nil || rate < 0 {
+	if err != nil || rate <= 0 {
 		cmd.Println("rate should be a number that > 0.")
 		return
 	}
