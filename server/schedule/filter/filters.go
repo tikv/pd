@@ -619,9 +619,6 @@ func NewIsolationFilter(scope, isolationLevel string, locationLabels []string, r
 		locationLabels: locationLabels,
 		constraintSet:  make([][]string, 0),
 	}
-	if len(isolationLevel) <= 0 || len(locationLabels) <= 0 {
-		return isolationFilter
-	}
 	// Get which idx this isolationLevel at according to locationLabels
 	var isolationLevelIdx int
 	for level, label := range locationLabels {
