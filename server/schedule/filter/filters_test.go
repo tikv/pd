@@ -252,27 +252,18 @@ func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.LocationLabels = []string{"zone"}
 	testCluster := mockcluster.NewCluster(opt)
-	allStores := []struct {
-		storeID     uint64
-		regionCount int
-		labels      map[string]string
-	}{
-		{1, 1, map[string]string{"zone": "z1"}},
-		{2, 1, map[string]string{"zone": "z1"}},
-		{3, 1, map[string]string{"zone": "z2"}},
-		{4, 1, map[string]string{"zone": "z2"}},
-		{5, 1, map[string]string{"zone": "z3"}},
-	}
-	for _, store := range allStores {
-		testCluster.AddLabelsStore(store.storeID, store.regionCount, store.labels)
-	}
+	testCluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	testCluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	testCluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
+	testCluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2"})
+	testCluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 3, Id: 3},
 		{StoreId: 5, Id: 5},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
-
 	store := testCluster.GetStore(1)
+
 	c.Assert(NewPlacementSafeguard("", testCluster, region, store),
 		FitsTypeOf,
 		NewLocationSafeguard("", []string{"zone"}, testCluster.GetRegionStores(region), store))
