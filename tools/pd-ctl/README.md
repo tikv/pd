@@ -1,6 +1,6 @@
 # pd-ctl
 
-`pd-ctl` is a command line tool for PD, `pd-ctl` obtains the state information of the cluster and tunes the cluster.
+`pd-ctl` is a command line tool for PD, used to obtain the state information of the cluster and tune the cluster.
 
 ## Build
 
