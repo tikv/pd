@@ -50,6 +50,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/tso"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 	"github.com/pingcap/sysutil"
 	"github.com/pkg/errors"
 	"github.com/urfave/negroni"
@@ -342,8 +343,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
 	s.member.SetMemberDeployPath(s.member.ID())
-	s.member.SetMemberBinaryVersion(s.member.ID(), PDReleaseVersion)
-	s.member.SetMemberGitHash(s.member.ID(), PDGitHash)
+	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
+	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tso = tso.NewTimestampOracle(
 		s.client,

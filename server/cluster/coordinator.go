@@ -16,6 +16,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -375,10 +376,24 @@ func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
 	return nil
 }
 
-func (c *coordinator) getSchedulers() map[string]*scheduleController {
+func (c *coordinator) getSchedulers() []string {
 	c.RLock()
 	defer c.RUnlock()
-	return c.schedulers
+	names := make([]string, 0, len(c.schedulers))
+	for name := range c.schedulers {
+		names = append(names, name)
+	}
+	return names
+}
+
+func (c *coordinator) getSchedulerHandlers() map[string]http.Handler {
+	c.RLock()
+	defer c.RUnlock()
+	handlers := make(map[string]http.Handler, len(c.schedulers))
+	for name, scheduler := range c.schedulers {
+		handlers[name] = scheduler.Scheduler
+	}
+	return handlers
 }
 
 func (c *coordinator) collectSchedulerMetrics() {
@@ -401,12 +416,13 @@ func (c *coordinator) resetSchedulerMetrics() {
 
 func (c *coordinator) collectHotSpotMetrics() {
 	c.RLock()
-	defer c.RUnlock()
 	// Collects hot write region metrics.
 	s, ok := c.schedulers[schedulers.HotRegionName]
 	if !ok {
+		c.RUnlock()
 		return
 	}
+	c.RUnlock()
 	stores := c.cluster.GetStores()
 	status := s.Scheduler.(hasHotStatus).GetHotWriteStatus()
 	pendings := s.Scheduler.(hasHotStatus).GetWritePendingInfluence()
@@ -553,6 +569,19 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 		atomic.StoreInt64(&sc.delayUntil, delayUntil)
 	}
 	return err
+}
+
+func (c *coordinator) isSchedulerPaused(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return false, ErrNotBootstrapped
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return false, schedulers.ErrSchedulerNotFound
+	}
+	return s.IsPaused(), nil
 }
 
 func (c *coordinator) runScheduler(s *scheduleController) {

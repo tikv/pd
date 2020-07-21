@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -120,7 +119,7 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 			}
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 
-			target := selector.NewCandidates(cluster.GetFollowerStores(region)).
+			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
 				FilterTarget(cluster, filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true}, f).
 				RandomPick()
 			if target == nil {

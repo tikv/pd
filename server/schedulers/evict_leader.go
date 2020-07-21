@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -223,7 +222,7 @@ func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Ope
 			continue
 		}
 
-		target := selector.NewCandidates(cluster.GetFollowerStores(region)).
+		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
 			FilterTarget(cluster, filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
 			RandomPick()
 		if target == nil {

@@ -118,143 +118,6 @@ func (f *excludedFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return !ok
 }
 
-type storeLimitFilter struct{ scope string }
-
-// NewStoreLimitFilter creates a Filter that filters all stores those exceed the limit of a store.
-func NewStoreLimitFilter(scope string) Filter {
-	return &storeLimitFilter{scope: scope}
-}
-
-func (f *storeLimitFilter) Scope() string {
-	return f.scope
-}
-
-func (f *storeLimitFilter) Type() string {
-	return "store-limit-filter"
-}
-
-func (f *storeLimitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsAvailable(storelimit.RemovePeer)
-}
-
-func (f *storeLimitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsAvailable(storelimit.AddPeer)
-}
-
-type stateFilter struct{ scope string }
-
-// NewStateFilter creates a Filter that filters all stores that are not UP.
-func NewStateFilter(scope string) Filter {
-	return &stateFilter{scope: scope}
-}
-
-func (f *stateFilter) Scope() string {
-	return f.scope
-}
-
-func (f *stateFilter) Type() string {
-	return "state-filter"
-}
-
-func (f *stateFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return !store.IsTombstone()
-}
-
-func (f *stateFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return store.IsUp()
-}
-
-type healthFilter struct{ scope string }
-
-// NewHealthFilter creates a Filter that filters all stores that are Busy or Down.
-func NewHealthFilter(scope string) Filter {
-	return &healthFilter{scope: scope}
-}
-
-func (f *healthFilter) Scope() string {
-	return f.scope
-}
-
-func (f *healthFilter) Type() string {
-	return "health-filter"
-}
-
-func (f *healthFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
-	if store.IsBusy() {
-		return false
-	}
-	return store.DownTime() <= opt.GetMaxStoreDownTime()
-}
-
-func (f *healthFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return f.filter(opt, store)
-}
-
-func (f *healthFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return f.filter(opt, store)
-}
-
-type pendingPeerCountFilter struct{ scope string }
-
-// NewPendingPeerCountFilter creates a Filter that filters all stores that are
-// currently handling too many pending peers.
-func NewPendingPeerCountFilter(scope string) Filter {
-	return &pendingPeerCountFilter{scope: scope}
-}
-
-func (p *pendingPeerCountFilter) Scope() string {
-	return p.scope
-}
-
-func (p *pendingPeerCountFilter) Type() string {
-	return "pending-peer-filter"
-}
-
-func (p *pendingPeerCountFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
-	if opt.GetMaxPendingPeerCount() == 0 {
-		return true
-	}
-	return store.GetPendingPeerCount() <= int(opt.GetMaxPendingPeerCount())
-}
-
-func (p *pendingPeerCountFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return p.filter(opt, store)
-}
-
-func (p *pendingPeerCountFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return p.filter(opt, store)
-}
-
-type snapshotCountFilter struct{ scope string }
-
-// NewSnapshotCountFilter creates a Filter that filters all stores that are
-// currently handling too many snapshots.
-func NewSnapshotCountFilter(scope string) Filter {
-	return &snapshotCountFilter{scope: scope}
-}
-
-func (f *snapshotCountFilter) Scope() string {
-	return f.scope
-}
-
-func (f *snapshotCountFilter) Type() string {
-	return "snapshot-filter"
-}
-
-func (f *snapshotCountFilter) filter(opt opt.Options, store *core.StoreInfo) bool {
-	return uint64(store.GetSendingSnapCount()) <= opt.GetMaxSnapshotCount() &&
-		uint64(store.GetReceivingSnapCount()) <= opt.GetMaxSnapshotCount() &&
-		uint64(store.GetApplyingSnapCount()) <= opt.GetMaxSnapshotCount()
-}
-
-func (f *snapshotCountFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return f.filter(opt, store)
-}
-
-func (f *snapshotCountFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	return f.filter(opt, store)
-}
-
 type storageThresholdFilter struct{ scope string }
 
 // NewStorageThresholdFilter creates a Filter that filters all stores that are
@@ -296,9 +159,9 @@ const (
 	locationImprove   = "improve"
 )
 
-// newLocationSafeguard creates a filter that filters all stores that have
+// NewLocationSafeguard creates a filter that filters all stores that have
 // lower distinct score than specified store.
-func newLocationSafeguard(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
+func NewLocationSafeguard(scope string, labels []string, stores []*core.StoreInfo, source *core.StoreInfo) Filter {
 	return newDistinctScoreFilter(scope, labels, stores, source, locationSafeguard)
 }
 
@@ -565,13 +428,63 @@ func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
+type ruleLeaderFitFilter struct {
+	scope            string
+	fitter           RegionFitter
+	region           *core.RegionInfo
+	oldFit           *placement.RegionFit
+	oldLeaderStoreID uint64
+}
+
+// newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
+// the isolation level will not decrease.
+func newRuleLeaderFitFilter(scope string, fitter RegionFitter, region *core.RegionInfo, oldLeaderStoreID uint64) Filter {
+	return &ruleLeaderFitFilter{
+		scope:            scope,
+		fitter:           fitter,
+		region:           region,
+		oldFit:           fitter.FitRegion(region),
+		oldLeaderStoreID: oldLeaderStoreID,
+	}
+}
+
+func (f *ruleLeaderFitFilter) Scope() string {
+	return f.scope
+}
+
+func (f *ruleLeaderFitFilter) Type() string {
+	return "rule-fit-leader-filter"
+}
+
+func (f *ruleLeaderFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
+	return true
+}
+
+func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
+	oldLeaderPeerReplica := *f.region.GetLeader()
+	oldLeaderPeerReplica.StoreId = store.GetID()
+	region := f.region.Clone(core.WithReplacePeerStore(f.oldLeaderStoreID, store.GetID()), core.WithLeader(&oldLeaderPeerReplica))
+	newFit := f.fitter.FitRegion(region)
+	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
+}
+
 // NewPlacementSafeguard creates a filter that ensures after replace a peer with new
 // peer, the placement restriction will not become worse.
 func NewPlacementSafeguard(scope string, cluster opt.Cluster, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
 	if cluster.IsPlacementRulesEnabled() {
 		return newRuleFitFilter(scope, cluster, region, sourceStore.GetID())
 	}
-	return newLocationSafeguard(scope, cluster.GetLocationLabels(), cluster.GetRegionStores(region), sourceStore)
+	return NewLocationSafeguard(scope, cluster.GetLocationLabels(), cluster.GetRegionStores(region), sourceStore)
+}
+
+// NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with
+// existed peer, the placement restriction will not become worse.
+// Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
+func NewPlacementLeaderSafeguard(scope string, cluster opt.Cluster, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+	if cluster.IsPlacementRulesEnabled() {
+		return newRuleLeaderFitFilter(scope, cluster, region, sourceStore.GetID())
+	}
+	return nil
 }
 
 type engineFilter struct {

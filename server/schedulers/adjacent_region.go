@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -293,7 +292,7 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster opt.Cluster, bef
 			storesInfo = append(storesInfo, store)
 		}
 	}
-	target := selector.NewCandidates(storesInfo).
+	target := filter.NewCandidates(storesInfo).
 		FilterTarget(cluster, l.filters...).
 		RandomPick()
 	if target == nil {
@@ -332,7 +331,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 		filter.NewExcludedFilter(l.GetName(), nil, excludeStores),
 		scoreGuard,
 	}
-	target := selector.NewCandidates(cluster.GetStores()).
+	target := filter.NewCandidates(cluster.GetStores()).
 		FilterTarget(cluster, filters...).
 		FilterTarget(cluster, l.filters...).
 		RandomPick()

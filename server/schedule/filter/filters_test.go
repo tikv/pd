@@ -33,21 +33,6 @@ var _ = Suite(&testFiltersSuite{})
 
 type testFiltersSuite struct{}
 
-func (s *testFiltersSuite) TestPendingPeerFilter(c *C) {
-	filter := NewPendingPeerCountFilter("")
-	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
-	store := core.NewStoreInfo(&metapb.Store{Id: 1})
-	c.Assert(filter.Source(tc, store), IsTrue)
-	newStore := store.Clone(core.SetPendingPeerCount(30))
-	c.Assert(filter.Source(tc, newStore), IsFalse)
-	c.Assert(filter.Target(tc, newStore), IsFalse)
-	// set to 0 means no limit
-	opt.MaxPendingPeerCount = 0
-	c.Assert(filter.Source(tc, newStore), IsTrue)
-	c.Assert(filter.Target(tc, newStore), IsTrue)
-}
-
 func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 	labels := []string{"zone", "rack", "host"}
 	allStores := []*core.StoreInfo{
@@ -75,7 +60,7 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		for _, id := range tc.stores {
 			stores = append(stores, allStores[id-1])
 		}
-		ls := newLocationSafeguard("", labels, stores, allStores[tc.source-1])
+		ls := NewLocationSafeguard("", labels, stores, allStores[tc.source-1])
 		li := NewLocationImprover("", labels, stores, allStores[tc.source-1])
 		c.Assert(ls.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.safeGuradRes)
 		c.Assert(li.Target(mockoption.NewScheduleOptions(), allStores[tc.target-1]), Equals, tc.improverRes)
@@ -168,7 +153,7 @@ func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 
 	c.Assert(NewPlacementSafeguard("", tc, region, store1),
 		FitsTypeOf,
-		newLocationSafeguard("", []string{"zone"}, tc.GetRegionStores(region), store1))
+		NewLocationSafeguard("", []string{"zone"}, tc.GetRegionStores(region), store1))
 	opt.EnablePlacementRules = true
 	c.Assert(NewPlacementSafeguard("", tc, region, store1),
 		FitsTypeOf,

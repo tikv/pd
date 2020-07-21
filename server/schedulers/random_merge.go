@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/selector"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -99,7 +98,7 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
-	store := selector.NewCandidates(cluster.GetStores()).
+	store := filter.NewCandidates(cluster.GetStores()).
 		FilterSource(cluster, filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true}).
 		RandomPick()
 	if store == nil {

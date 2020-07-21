@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 	"github.com/unrolled/render"
 )
 
@@ -27,7 +27,7 @@ func newVersionHandler(rd *render.Render) *versionHandler {
 // @Router /version [get]
 func (h *versionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	version := &version{
-		Version: server.PDReleaseVersion,
+		Version: versioninfo.PDReleaseVersion,
 	}
 	h.rd.JSON(w, http.StatusOK, version)
 }
