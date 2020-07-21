@@ -15,6 +15,7 @@ package tso
 
 import (
 	"path"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -45,6 +46,7 @@ type TimestampOracle struct {
 	ts            unsafe.Pointer
 	lastSavedTime atomic.Value
 
+	mu    sync.RWMutex
 	lease *member.LeaderLease
 
 	rootPath      string
@@ -84,6 +86,12 @@ func (t *TimestampOracle) loadTimestamp() (time.Time, error) {
 		return typeutil.ZeroTime, nil
 	}
 	return typeutil.ParseTimestamp(data)
+}
+
+func (t *TimestampOracle) checkLease() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.lease != nil && !t.lease.IsExpired()
 }
 
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
@@ -140,7 +148,9 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 	current := &atomicObject{
 		physical: next,
 	}
+	t.mu.Lock()
 	t.lease = lease
+	t.mu.Unlock()
 	atomic.StorePointer(&t.ts, unsafe.Pointer(current))
 
 	return nil
@@ -148,7 +158,7 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 
 // ResetUserTimestamp update the physical part with specified tso.
 func (t *TimestampOracle) ResetUserTimestamp(tso uint64) error {
-	if t.lease == nil || t.lease.IsExpired() {
+	if !t.checkLease() {
 		tsoCounter.WithLabelValues("err_lease_reset_ts").Inc()
 		return errors.New("Setup timestamp failed, lease expired")
 	}
@@ -273,6 +283,11 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 	for i := 0; i < maxRetryCount; i++ {
 		current := (*atomicObject)(atomic.LoadPointer(&t.ts))
 		if current == nil || current.physical == typeutil.ZeroTime {
+			// If it's leader, maybe SyncTimestamp hasn't completed yet
+			if t.checkLease() {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
 			return pdpb.Timestamp{}, errors.New("can not get timestamp, may be not leader")
 		}
 
@@ -287,7 +302,7 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 			continue
 		}
 		// In case lease expired after the first check.
-		if t.lease == nil || t.lease.IsExpired() {
+		if !t.checkLease() {
 			return pdpb.Timestamp{}, errors.New("alloc timestamp failed, lease expired")
 		}
 		return resp, nil

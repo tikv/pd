@@ -15,7 +15,7 @@ package placement
 
 import (
 	"fmt"
-	"sort"
+	"strconv"
 	"strings"
 
 	. "github.com/pingcap/check"
@@ -27,8 +27,8 @@ var _ = Suite(&testFitSuite{})
 
 type testFitSuite struct{}
 
-func (s *testFitSuite) makeStores() map[uint64]*core.StoreInfo {
-	stores := make(map[uint64]*core.StoreInfo)
+func (s *testFitSuite) makeStores() StoreSet {
+	stores := core.NewStoresInfo()
 	for zone := 1; zone <= 5; zone++ {
 		for rack := 1; rack <= 5; rack++ {
 			for host := 1; host <= 5; host++ {
@@ -38,8 +38,9 @@ func (s *testFitSuite) makeStores() map[uint64]*core.StoreInfo {
 						"zone": fmt.Sprintf("zone%d", zone),
 						"rack": fmt.Sprintf("rack%d", rack),
 						"host": fmt.Sprintf("host%d", host),
+						"id":   fmt.Sprintf("id%d", x),
 					}
-					stores[id] = core.NewStoreInfoWithLabel(id, 0, labels)
+					stores.SetStore(core.NewStoreInfoWithLabel(id, 0, labels))
 				}
 			}
 		}
@@ -47,122 +48,110 @@ func (s *testFitSuite) makeStores() map[uint64]*core.StoreInfo {
 	return stores
 }
 
-func (s *testFitSuite) TestFitByLocation(c *C) {
-	stores := s.makeStores()
+// example: "1111_leader,1234,2111_learner"
+func (s *testFitSuite) makeRegion(def string) *core.RegionInfo {
+	var regionMeta metapb.Region
+	var leader *metapb.Peer
+	for _, peerDef := range strings.Split(def, ",") {
+		role, idStr := Follower, peerDef
+		if strings.Contains(peerDef, "_") {
+			splits := strings.Split(peerDef, "_")
+			idStr, role = splits[0], PeerRoleType(splits[1])
+		}
+		id, _ := strconv.Atoi(idStr)
+		peer := &metapb.Peer{Id: uint64(id), StoreId: uint64(id), IsLearner: role == Learner}
+		regionMeta.Peers = append(regionMeta.Peers, peer)
+		if role == Leader {
+			leader = peer
+		}
+	}
+	return core.NewRegionInfo(&regionMeta, leader)
+}
 
-	type Case struct {
-		// peers info
-		peerStoreID []uint64
-		peerRole    []PeerRoleType // default: all Followers
-		// rule
-		locationLabels string       // default: ""
-		count          int          // default: len(peerStoreID)
-		role           PeerRoleType // default: Voter
-		// expect result:
-		expectedPeers []uint64 // default: same as peerStoreID
+// example: "3/voter/zone=zone1+zone2,rack=rack2/zone,rack,host"
+//       count role constraints location_labels
+func (s *testFitSuite) makeRule(def string) *Rule {
+	var rule Rule
+	splits := strings.Split(def, "/")
+	rule.Count, _ = strconv.Atoi(splits[0])
+	rule.Role = PeerRoleType(splits[1])
+	// only support k=v type constraint
+	for _, c := range strings.Split(splits[2], ",") {
+		if c == "" {
+			break
+		}
+		kv := strings.Split(c, "=")
+		rule.LabelConstraints = append(rule.LabelConstraints, LabelConstraint{
+			Key:    kv[0],
+			Op:     "in",
+			Values: strings.Split(kv[1], "+"),
+		})
+	}
+	rule.LocationLabels = strings.Split(splits[3], ",")
+	return &rule
+}
+
+func (s *testFitSuite) checkPeerMatch(peers []*metapb.Peer, expect string) bool {
+	if len(peers) == 0 && expect == "" {
+		return true
 	}
 
-	cases := []Case{
+	m := make(map[string]struct{})
+	for _, p := range peers {
+		m[strconv.Itoa(int(p.Id))] = struct{}{}
+	}
+	expects := strings.Split(expect, ",")
+	if len(expects) != len(m) {
+		return false
+	}
+	for _, p := range expects {
+		delete(m, p)
+	}
+	return len(m) == 0
+}
+
+func (s *testFitSuite) TestFitRegion(c *C) {
+	stores := s.makeStores()
+
+	cases := []struct {
+		region   string
+		rules    []string
+		fitPeers string
+	}{
 		// test count
-		{peerStoreID: []uint64{1111, 1112, 1113}, count: 1, expectedPeers: []uint64{1111}},
-		{peerStoreID: []uint64{1111, 1112, 1113}, count: 2, expectedPeers: []uint64{1111, 1112}},
-		{peerStoreID: []uint64{1111, 1112, 1113}, count: 3, expectedPeers: []uint64{1111, 1112, 1113}},
-		{peerStoreID: []uint64{1111, 1112, 1113}, count: 5, expectedPeers: []uint64{1111, 1112, 1113}},
-		// test isolation level
-		{peerStoreID: []uint64{1111}, locationLabels: "zone,rack,host"},
-		{peerStoreID: []uint64{1111}, locationLabels: "zone,rack"},
-		{peerStoreID: []uint64{1111}, locationLabels: "zone"},
-		{peerStoreID: []uint64{1111}, locationLabels: ""},
-		{peerStoreID: []uint64{1111, 2111}, locationLabels: "zone,rack,host"},
-		{peerStoreID: []uint64{1111, 2222, 3333}, locationLabels: "zone,rack,host"},
-		{peerStoreID: []uint64{1111, 1211, 3111}, locationLabels: "zone,rack,host"},
-		{peerStoreID: []uint64{1111, 1121, 3111}, locationLabels: "zone,rack,host"},
-		{peerStoreID: []uint64{1111, 1121, 1122}, locationLabels: "zone,rack,host"},
-		// test best location
-		{
-			peerStoreID:    []uint64{1111, 1112, 1113, 2111, 2222, 3222, 3333},
-			locationLabels: "zone,rack,host",
-			count:          3,
-			expectedPeers:  []uint64{1111, 2111, 3222},
-		},
-		{
-			peerStoreID:    []uint64{1111, 1121, 1211, 2111, 2211},
-			locationLabels: "zone,rack,host",
-			count:          3,
-			expectedPeers:  []uint64{1111, 1211, 2111},
-		},
-		{
-			peerStoreID:    []uint64{1111, 1211, 1311, 1411, 2111, 2211, 2311, 3111},
-			locationLabels: "zone,rack,host",
-			count:          5,
-			expectedPeers:  []uint64{1111, 1211, 2111, 2211, 3111},
-		},
+		{"1111,1112,1113", []string{"1/voter//"}, "1111"},
+		{"1111,1112,1113", []string{"2/voter//"}, "1111,1112"},
+		{"1111,1112,1113", []string{"3/voter//"}, "1111,1112,1113"},
+		{"1111,1112,1113", []string{"5/voter//"}, "1111,1112,1113"},
+		// best location
+		{"1111,1112,1113,2111,2222,3222,3333", []string{"3/voter//zone,rack,host"}, "1111,2111,3222"},
+		{"1111,1121,1211,2111,2211", []string{"3/voter//zone,rack,host"}, "1111,1211,2111"},
+		{"1111,1211,1311,1411,2111,2211,2311,3111", []string{"5/voter//zone,rack,host"}, "1111,1211,2111,2211,3111"},
 		// test role match
-		{
-			peerStoreID:   []uint64{1111, 1112, 1113},
-			peerRole:      []PeerRoleType{Learner, Follower, Follower},
-			count:         1,
-			expectedPeers: []uint64{1112},
-		},
-		{
-			peerStoreID:   []uint64{1111, 1112, 1113},
-			peerRole:      []PeerRoleType{Learner, Follower, Follower},
-			count:         2,
-			expectedPeers: []uint64{1112, 1113},
-		},
-		{
-			peerStoreID:   []uint64{1111, 1112, 1113},
-			peerRole:      []PeerRoleType{Learner, Follower, Follower},
-			count:         3,
-			expectedPeers: []uint64{1112, 1113, 1111},
-		},
-		{
-			peerStoreID:    []uint64{1111, 1112, 1121, 1122, 1131, 1132, 1141, 1142},
-			peerRole:       []PeerRoleType{Follower, Learner, Learner, Learner, Learner, Follower, Follower, Follower},
-			locationLabels: "zone,rack,host",
-			count:          3,
-			expectedPeers:  []uint64{1111, 1132, 1141},
-		},
+		{"1111_learner,1112,1113", []string{"1/voter//"}, "1112"},
+		{"1111_learner,1112,1113", []string{"2/voter//"}, "1112,1113"},
+		{"1111_learner,1112,1113", []string{"3/voter//"}, "1111,1112,1113"},
+		{"1111,1112_learner,1121_learner,1122_learner,1131_learner,1132,1141,1142", []string{"3/follower//zone,rack,host"}, "1111,1132,1141"},
+		// test 2 rule
+		{"1111,1112,1113,1114", []string{"3/voter//", "1/voter/id=id1/"}, "1112,1113,1114/1111"},
+		{"1111,2211,3111,3112", []string{"3/voter//zone", "1/voter/rack=rack2/"}, "1111,2211,3111//3112"},
+		{"1111,2211,3111,3112", []string{"1/voter/rack=rack2/", "3/voter//zone"}, "2211/1111,3111,3112"},
 	}
 
 	for _, cc := range cases {
-		var peers []*fitPeer
-		for i := range cc.peerStoreID {
-			role := Follower
-			if i < len(cc.peerRole) {
-				role = cc.peerRole[i]
-			}
-			peers = append(peers, &fitPeer{
-				Peer:     &metapb.Peer{Id: cc.peerStoreID[i], StoreId: cc.peerStoreID[i], IsLearner: role == Learner},
-				store:    stores[cc.peerStoreID[i]],
-				isLeader: role == Leader,
-			})
+		region := s.makeRegion(cc.region)
+		var rules []*Rule
+		for _, r := range cc.rules {
+			rules = append(rules, s.makeRule(r))
 		}
-
-		rule := &Rule{Count: len(cc.peerStoreID), Role: Voter}
-		if len(cc.locationLabels) > 0 {
-			rule.LocationLabels = strings.Split(cc.locationLabels, ",")
+		rf := FitRegion(stores, region, rules)
+		expects := strings.Split(cc.fitPeers, "/")
+		for i, f := range rf.RuleFits {
+			c.Assert(s.checkPeerMatch(f.Peers, expects[i]), IsTrue)
 		}
-		if cc.role != "" {
-			rule.Role = cc.role
+		if len(rf.RuleFits) < len(expects) {
+			c.Assert(s.checkPeerMatch(rf.OrphanPeers, expects[len(rf.RuleFits)]), IsTrue)
 		}
-		if cc.count > 0 {
-			rule.Count = cc.count
-		}
-		c.Log("Peers:", peers)
-		c.Log("rule:", rule)
-		ruleFit := fitRule(peers, rule)
-		selectedIDs := make([]uint64, 0)
-		for _, p := range ruleFit.Peers {
-			selectedIDs = append(selectedIDs, p.GetId())
-		}
-		sort.Slice(selectedIDs, func(i, j int) bool { return selectedIDs[i] < selectedIDs[j] })
-		expectedPeers := cc.expectedPeers
-		if len(expectedPeers) == 0 {
-			expectedPeers = cc.peerStoreID
-		}
-		sort.Slice(expectedPeers, func(i, j int) bool { return expectedPeers[i] < expectedPeers[j] })
-		c.Assert(selectedIDs, DeepEquals, expectedPeers)
 	}
 }
 
@@ -185,7 +174,7 @@ func (s *testFitSuite) TestIsolationScore(c *C) {
 		for _, id := range ids {
 			peers = append(peers, &fitPeer{
 				Peer:  &metapb.Peer{StoreId: id},
-				store: stores[id],
+				store: stores.GetStore(id),
 			})
 		}
 		return peers

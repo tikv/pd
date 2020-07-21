@@ -27,6 +27,7 @@ type ReplicaStrategy struct {
 	checkerName    string // replica-checker / rule-checker
 	cluster        opt.Cluster
 	locationLabels []string
+	isolationLevel string
 	region         *core.RegionInfo
 	extraFilters   []filter.Filter
 }
@@ -50,7 +51,6 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	//
 	// The reason for it is to prevent the non-optimal replica placement due
 	// to the short-term state, resulting in redundant scheduling.
-
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIds()),
 		filter.NewStorageThresholdFilter(s.checkerName),
