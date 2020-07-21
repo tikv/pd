@@ -43,6 +43,7 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		core.NewStoreInfoWithLabel(5, 1, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"}),
 		core.NewStoreInfoWithLabel(6, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"}),
 	}
+
 	testCases := []struct {
 		stores       []uint64
 		source       uint64
@@ -54,7 +55,6 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 		{[]uint64{1, 3, 4}, 1, 2, true, false},
 		{[]uint64{1, 4, 6}, 4, 2, false, false},
 	}
-
 	for _, tc := range testCases {
 		var stores []*core.StoreInfo
 		for _, id := range tc.stores {
@@ -69,37 +69,65 @@ func (s *testFiltersSuite) TestDistinctScoreFilter(c *C) {
 
 func (s *testFiltersSuite) TestLabelConstraintsFilter(c *C) {
 	opt := mockoption.NewScheduleOptions()
-	tc := mockcluster.NewCluster(opt)
-	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"id": "1"})
-	store2 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"id": "2"})
-	filter1 := NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: "id", Op: "in", Values: []string{"1"}}})
-	filter2 := NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: "id", Op: "in", Values: []string{"2"}}})
-	c.Assert(filter1.Source(tc, store1), IsTrue)
-	c.Assert(filter1.Target(tc, store2), IsFalse)
-	c.Assert(filter2.Source(tc, store1), IsFalse)
-	c.Assert(filter2.Target(tc, store2), IsTrue)
+	testCluster := mockcluster.NewCluster(opt)
+	store := core.NewStoreInfoWithLabel(1, 1, map[string]string{"id": "1"})
+
+	testCases := []struct {
+		key    string
+		op     string
+		values []string
+		res    bool
+	}{
+		{"id", "in", []string{"1"}, true},
+		{"id", "in", []string{"2"}, false},
+		{"id", "in", []string{"1", "2"}, true},
+		{"id", "notIn", []string{"2", "3"}, true},
+		{"id", "notIn", []string{"1", "2"}, false},
+		{"id", "exists", []string{}, true},
+		{"_id", "exists", []string{}, false},
+		{"id", "notExists", []string{}, false},
+		{"_id", "notExists", []string{}, true},
+	}
+	for _, tc := range testCases {
+		filter := NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: tc.key, Op: placement.LabelConstraintOp(tc.op), Values: tc.values}})
+		c.Assert(filter.Source(testCluster, store), Equals, tc.res)
+	}
 }
 
 func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.EnablePlacementRules = true
 	opt.LocationLabels = []string{"zone"}
-	tc := mockcluster.NewCluster(opt)
-	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
-	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
-	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z2"})
-	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	testCluster := mockcluster.NewCluster(opt)
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 3, Id: 3},
 		{StoreId: 5, Id: 5},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 
-	filter := newRuleFitFilter("", tc, region, 1)
-	c.Assert(filter.Target(tc, tc.GetStore(2)), IsTrue)
-	c.Assert(filter.Target(tc, tc.GetStore(4)), IsFalse)
-	c.Assert(filter.Source(tc, tc.GetStore(4)), IsTrue)
+	testCases := []struct {
+		storeID     uint64
+		regionCount int
+		labels      map[string]string
+		sourceRes   bool
+		targetRes   bool
+	}{
+		{1, 1, map[string]string{"zone": "z1"}, true, true},
+		{2, 1, map[string]string{"zone": "z1"}, true, true},
+		{3, 1, map[string]string{"zone": "z2"}, true, false},
+		{4, 1, map[string]string{"zone": "z2"}, true, false},
+		{5, 1, map[string]string{"zone": "z3"}, true, false},
+		{6, 1, map[string]string{"zone": "z4"}, true, true},
+	}
+	// Init cluster
+	for _, tc := range testCases {
+		testCluster.AddLabelsStore(tc.storeID, tc.regionCount, tc.labels)
+	}
+	for _, tc := range testCases {
+		filter := newRuleFitFilter("", testCluster, region, 1)
+		c.Assert(filter.Source(testCluster, testCluster.GetStore(tc.storeID)), Equals, tc.sourceRes)
+		c.Assert(filter.Target(testCluster, testCluster.GetStore(tc.storeID)), Equals, tc.targetRes)
+	}
 }
 
 func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
@@ -112,27 +140,45 @@ func (s *testFiltersSuite) TestStoreStateFilter(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
 
-	check := func(n int, store *core.StoreInfo, source, target bool) {
-		c.Assert(filters[n].Source(opt, store), Equals, source)
-		c.Assert(filters[n].Target(opt, store), Equals, target)
+	type testCase struct {
+		filterIdx int
+		sourceRes bool
+		targetRes bool
 	}
+
+	check := func(store *core.StoreInfo, testCases []testCase) {
+		for _, tc := range testCases {
+			c.Assert(filters[tc.filterIdx].Source(opt, store), Equals, tc.sourceRes)
+			c.Assert(filters[tc.filterIdx].Target(opt, store), Equals, tc.targetRes)
+		}
+	}
+
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
-	check(2, store, true, true)
+	testCases := []testCase{
+		{2, true, true},
+	}
+	check(store, testCases)
 
 	// Disconn
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
-	check(0, store, false, false)
-	check(1, store, true, false)
-	check(2, store, false, false)
-	check(3, store, true, true)
+	testCases = []testCase{
+		{0, false, false},
+		{1, true, false},
+		{2, false, false},
+		{3, true, true},
+	}
+	check(store, testCases)
 
 	// Busy
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
 		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
-	check(0, store, true, false)
-	check(1, store, false, false)
-	check(2, store, false, false)
-	check(3, store, true, true)
+	testCases = []testCase{
+		{0, true, false},
+		{1, false, false},
+		{2, false, false},
+		{3, true, true},
+	}
+	check(store, testCases)
 }
 
 func (s *testFiltersSuite) TestIsolationFilter(c *C) {
@@ -205,24 +251,33 @@ func (s *testFiltersSuite) TestIsolationFilter(c *C) {
 func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.LocationLabels = []string{"zone"}
-	tc := mockcluster.NewCluster(opt)
-	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
-	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
-	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z2"})
-	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
+	testCluster := mockcluster.NewCluster(opt)
+	allStores := []struct {
+		storeID     uint64
+		regionCount int
+		labels      map[string]string
+	}{
+		{1, 1, map[string]string{"zone": "z1"}},
+		{2, 1, map[string]string{"zone": "z1"}},
+		{3, 1, map[string]string{"zone": "z2"}},
+		{4, 1, map[string]string{"zone": "z2"}},
+		{5, 1, map[string]string{"zone": "z3"}},
+	}
+	for _, store := range allStores {
+		testCluster.AddLabelsStore(store.storeID, store.regionCount, store.labels)
+	}
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 3, Id: 3},
 		{StoreId: 5, Id: 5},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
-	store1 := tc.GetStore(1)
 
-	c.Assert(NewPlacementSafeguard("", tc, region, store1),
+	store := testCluster.GetStore(1)
+	c.Assert(NewPlacementSafeguard("", testCluster, region, store),
 		FitsTypeOf,
-		NewLocationSafeguard("", []string{"zone"}, tc.GetRegionStores(region), store1))
+		NewLocationSafeguard("", []string{"zone"}, testCluster.GetRegionStores(region), store))
 	opt.EnablePlacementRules = true
-	c.Assert(NewPlacementSafeguard("", tc, region, store1),
+	c.Assert(NewPlacementSafeguard("", testCluster, region, store),
 		FitsTypeOf,
-		newRuleFitFilter("", tc, region, 1))
+		newRuleFitFilter("", testCluster, region, 1))
 }
