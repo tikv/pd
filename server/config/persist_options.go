@@ -215,7 +215,8 @@ func (o *PersistOptions) SetLabelStoresLimit(label StoreLabel, typ storelimit.Ty
 	case storelimit.RemovePeer:
 		StoreLabelLimits[label].SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
 	}
-
+	sll, _ := StoreLabelLimits[label]
+	v.StoreLabelLimit[label.String()] = StoreLimitConfig{AddPeer: sll.AddPeer, RemovePeer: sll.RemovePeer}
 	o.SetScheduleConfig(v)
 }
 
@@ -315,7 +316,7 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 
 // GetLabelStoresLimit returns the limit of stores for a label.
 func (o *PersistOptions) GetLabelStoresLimit(label StoreLabel) StoreLimitConfig {
-	if l, ok := o.GetScheduleConfig().StoreLabelLimit[label]; !ok {
+	if l, ok := o.GetScheduleConfig().StoreLabelLimit[label.String()]; !ok {
 		return l
 	} else {
 		return StoreLimitConfig{AddPeer: DefaultStoreLimit.AddPeer, RemovePeer: DefaultStoreLimit.RemovePeer}

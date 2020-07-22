@@ -608,7 +608,7 @@ type ScheduleConfig struct {
 	// StoreLimit is the limit of scheduling for stores.
 	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
 	// StoreLabelLimit is the limit of scheduling for stores by labels.
-	StoreLabelLimit map[StoreLabel]StoreLimitConfig `toml:"store-label-limit" json:"store-label-limit"`
+	StoreLabelLimit map[string]StoreLimitConfig `toml:"store-label-limit" json:"store-label-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
 	//
@@ -685,7 +685,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	for k, v := range c.StoreLimit {
 		storeLimit[k] = v
 	}
-	storeLabelLimit := make(map[StoreLabel]StoreLimitConfig, len(c.StoreLabelLimit))
+	storeLabelLimit := make(map[string]StoreLimitConfig, len(c.StoreLabelLimit))
 	for k, v := range c.StoreLabelLimit {
 		storeLabelLimit[k] = v
 	}
@@ -1067,6 +1067,19 @@ func (c *PDServerConfig) Validate() error {
 type StoreLabel struct {
 	Key   string `toml:"key" json:"key"`
 	Value string `toml:"value" json:"value"`
+}
+
+func (sl StoreLabel) String() string {
+	return sl.Key + "=" + sl.Value
+}
+
+func genStoreLabel(s string) (sl StoreLabel) {
+	kv := strings.Split(s, "=")
+	if len(kv) == 2 {
+		sl.Key = kv[0]
+		sl.Value = kv[1]
+	}
+	return sl
 }
 
 // LabelPropertyConfig is the config section to set properties to store labels.
