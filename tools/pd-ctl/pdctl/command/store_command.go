@@ -89,9 +89,9 @@ func NewSetStoreWeightCommand() *cobra.Command {
 // NewStoreLimitCommand returns a limit subcommand of storeCmd.
 func NewStoreLimitCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "limit [<type>]|[<store_id>|<all> <limit> <type>]",
+		Use:   "limit [<type>]|[<store_id>|<all> <limit> <type>]|[<label> <key> <value> <limit> <type>]",
 		Short: "show or set a store's rate limit",
-		Long:  "show or set a store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
+		Long:  "show or set a store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer', <key> <value> can match a label",
 		Run:   storeLimitCommandFunc,
 	}
 	return c
@@ -392,6 +392,28 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		if argsCount == 3 {
 			postInput["type"] = args[2]
+		}
+		postJSON(cmd, prefix, postInput)
+	case 4, 5:
+		if args[0] != "label" {
+			cmd.Println("No keyword label.")
+			return
+		}
+		rate, err := strconv.ParseFloat(args[3], 64)
+		if err != nil || rate < 0 {
+			cmd.Println("rate should be a number that >= 0.")
+			return
+		}
+		labelKey := args[1]
+		labelValue := args[2]
+		prefix := path.Join(storesPrefix, "limit")
+		postInput := map[string]interface{}{
+			"rate": rate,
+			"labelKey": labelKey,
+			"labelValue": labelValue,
+		}
+		if argsCount == 5 {
+			postInput["type"] = args[4]
 		}
 		postJSON(cmd, prefix, postInput)
 	default:
