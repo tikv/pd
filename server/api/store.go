@@ -434,6 +434,19 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	label := config.StoreLabel{}
+	labelKey, keyOk := input["labelKey"]
+	labelValue, valueOk := input["labelValue"]
+	if keyOk && valueOk {
+		label.Key = labelKey.(string)
+		label.Value = labelValue.(string)
+	} else if !keyOk && !valueOk {
+
+	} else {
+		h.rd.JSON(w, http.StatusBadRequest, "label key and value must match")
+		return
+	}
+
 	rateVal, ok := input["rate"]
 	if !ok {
 		h.rd.JSON(w, http.StatusBadRequest, "rate unset")
@@ -452,9 +465,16 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, typ := range typeValues {
-		if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
+		if label.Key == "" {
+			if err := h.SetLabelStoresLimit(label, ratePerMin, typ); err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		} else {
+			if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
+				h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 	}
 
@@ -469,8 +489,34 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [get]
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
-	limits := h.GetScheduleConfig().StoreLimit
-	h.rd.JSON(w, http.StatusOK, limits)
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+
+	label := config.StoreLabel{}
+	labelKey, keyOk := input["labelKey"]
+	labelValue, valueOk := input["labelValue"]
+	if keyOk && valueOk {
+		label.Key = labelKey.(string)
+		label.Value = labelValue.(string)
+	} else if !keyOk && !valueOk {
+
+	} else {
+		h.rd.JSON(w, http.StatusBadRequest, "label key and value must match")
+		return
+	}
+
+	if keyOk {
+		if limit, err := h.GetLabelStoresLimit(label, 0); err != nil {
+			return
+		} else {
+			h.rd.JSON(w, http.StatusOK, limit)
+		}
+	} else {
+		limits := h.GetScheduleConfig().StoreLimit
+		h.rd.JSON(w, http.StatusOK, limits)
+	}
 }
 
 // @Tags store
