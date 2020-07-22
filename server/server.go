@@ -99,6 +99,7 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
+	lease  *member.LeaderLease
 	member *member.Member
 	// etcd client
 	client *clientv3.Client
@@ -640,6 +641,16 @@ func (s *Server) GetMember() *member.Member {
 	return s.member
 }
 
+// GetLease returns the lease of member and only leader server's lease is not nil.
+func (s *Server) GetLease() *member.LeaderLease {
+	return s.lease
+}
+
+// SetLease changes the lease.
+func (s *Server) SetLease(lease *member.LeaderLease) {
+	s.lease = lease
+}
+
 // GetStorage returns the backend storage of server.
 func (s *Server) GetStorage() *core.Storage {
 	return s.storage
@@ -1101,6 +1112,8 @@ func (s *Server) campaignLeader() {
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 	go lease.KeepAlive(ctx)
+	s.SetLease(lease)
+	defer s.SetLease(nil)
 	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
 
 	log.Debug("sync timestamp for tso")
