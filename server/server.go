@@ -99,7 +99,10 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	lease  *member.LeaderLease
+	// leader lease
+	lease   *member.LeaderLease
+	leaseMu sync.RWMutex
+
 	member *member.Member
 	// etcd client
 	client *clientv3.Client
@@ -643,11 +646,15 @@ func (s *Server) GetMember() *member.Member {
 
 // GetLease returns the lease of member and only leader server's lease is not nil.
 func (s *Server) GetLease() *member.LeaderLease {
+	s.leaseMu.RLock()
+	defer s.leaseMu.RUnlock()
 	return s.lease
 }
 
 // SetLease changes the lease.
 func (s *Server) SetLease(lease *member.LeaderLease) {
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
 	s.lease = lease
 }
 
