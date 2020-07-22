@@ -30,6 +30,7 @@ import (
 // RegionInfo records detail region info.
 // Read-Only once created.
 type RegionInfo struct {
+<<<<<<< HEAD
 	meta            *metapb.Region
 	learners        []*metapb.Peer
 	voters          []*metapb.Peer
@@ -42,6 +43,23 @@ type RegionInfo struct {
 	readKeys        uint64
 	approximateSize int64
 	approximateKeys int64
+=======
+	term              uint64
+	meta              *metapb.Region
+	learners          []*metapb.Peer
+	voters            []*metapb.Peer
+	leader            *metapb.Peer
+	downPeers         []*pdpb.PeerStats
+	pendingPeers      []*metapb.Peer
+	writtenBytes      uint64
+	writtenKeys       uint64
+	readBytes         uint64
+	readKeys          uint64
+	approximateSize   int64
+	approximateKeys   int64
+	interval          *pdpb.TimeInterval
+	replicationStatus *replication_modepb.RegionReplicationStatus
+>>>>>>> a9cdb2d... server/core: check region term before updating cache (#2667)
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -87,6 +105,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 	}
 
 	region := &RegionInfo{
+<<<<<<< HEAD
 		meta:            heartbeat.GetRegion(),
 		leader:          heartbeat.GetLeader(),
 		downPeers:       heartbeat.GetDownPeers(),
@@ -97,6 +116,21 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		readKeys:        heartbeat.GetKeysRead(),
 		approximateSize: int64(regionSize),
 		approximateKeys: int64(heartbeat.GetApproximateKeys()),
+=======
+		term:              heartbeat.GetTerm(),
+		meta:              heartbeat.GetRegion(),
+		leader:            heartbeat.GetLeader(),
+		downPeers:         heartbeat.GetDownPeers(),
+		pendingPeers:      heartbeat.GetPendingPeers(),
+		writtenBytes:      heartbeat.GetBytesWritten(),
+		writtenKeys:       heartbeat.GetKeysWritten(),
+		readBytes:         heartbeat.GetBytesRead(),
+		readKeys:          heartbeat.GetKeysRead(),
+		approximateSize:   int64(regionSize),
+		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
+		interval:          heartbeat.GetInterval(),
+		replicationStatus: heartbeat.GetReplicationStatus(),
+>>>>>>> a9cdb2d... server/core: check region term before updating cache (#2667)
 	}
 
 	classifyVoterAndLearner(region)
@@ -115,6 +149,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 
 	region := &RegionInfo{
+<<<<<<< HEAD
 		meta:            proto.Clone(r.meta).(*metapb.Region),
 		leader:          proto.Clone(r.leader).(*metapb.Peer),
 		downPeers:       downPeers,
@@ -125,6 +160,21 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		readKeys:        r.readKeys,
 		approximateSize: r.approximateSize,
 		approximateKeys: r.approximateKeys,
+=======
+		term:              r.term,
+		meta:              proto.Clone(r.meta).(*metapb.Region),
+		leader:            proto.Clone(r.leader).(*metapb.Peer),
+		downPeers:         downPeers,
+		pendingPeers:      pendingPeers,
+		writtenBytes:      r.writtenBytes,
+		writtenKeys:       r.writtenKeys,
+		readBytes:         r.readBytes,
+		readKeys:          r.readKeys,
+		approximateSize:   r.approximateSize,
+		approximateKeys:   r.approximateKeys,
+		interval:          proto.Clone(r.interval).(*pdpb.TimeInterval),
+		replicationStatus: r.replicationStatus,
+>>>>>>> a9cdb2d... server/core: check region term before updating cache (#2667)
 	}
 
 	for _, opt := range opts {
@@ -132,6 +182,11 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 	classifyVoterAndLearner(region)
 	return region
+}
+
+// GetTerm returns the current term of the region
+func (r *RegionInfo) GetTerm() uint64 {
+	return r.term
 }
 
 // GetLearners returns the learners.
