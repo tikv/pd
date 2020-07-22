@@ -1022,3 +1022,72 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 }
+
+func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient, "127.0.0.1:0")
+	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
+	rc := leaderServer.GetRaftCluster()
+	c.Assert(rc, NotNil)
+	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	var peers []*metapb.Peer
+	id := leaderServer.GetAllocator()
+	for _, addr := range storeAddrs {
+		storeID, err := id.Alloc()
+		c.Assert(err, IsNil)
+		peerID, err := id.Alloc()
+		c.Assert(err, IsNil)
+		store := newMetaStore(storeID, addr, "3.0.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", storeID))
+		_, err = putStore(c, grpcPDClient, clusterID, store)
+		c.Assert(err, IsNil)
+		peers = append(peers, &metapb.Peer{
+			Id:      peerID,
+			StoreId: storeID,
+		})
+	}
+
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Region: &metapb.Region{
+			Id:       1,
+			Peers:    peers,
+			StartKey: []byte{byte(2)},
+			EndKey:   []byte{byte(3)},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+		},
+		Leader:          peers[0],
+		Term:            5,
+		ApproximateSize: 10,
+	}
+
+	region := core.RegionFromHeartbeat(regionReq)
+	err = rc.HandleRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+
+	// Transfer leader
+	regionReq.Term = 6
+	regionReq.Leader = peers[1]
+	region = core.RegionFromHeartbeat(regionReq)
+	err = rc.HandleRegionHeartbeat(region)
+	c.Assert(err, IsNil)
+
+	// Stale heartbeat, update check should fail
+	regionReq.Term = 5
+	regionReq.Leader = peers[0]
+	region = core.RegionFromHeartbeat(regionReq)
+	err = rc.HandleRegionHeartbeat(region)
+	c.Assert(err, NotNil)
+}
