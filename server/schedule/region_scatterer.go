@@ -32,7 +32,7 @@ const regionScatterName = "region-scatter"
 
 type selectedLeaderStores struct {
 	mu     sync.Mutex
-	stores map[uint64]uint64
+	stores map[uint64]uint64 // storeID -> hintCount
 }
 
 func (s *selectedLeaderStores) put(id uint64) {
@@ -179,8 +179,11 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 	}
 
 	scatterWithSameEngine(ordinaryPeers, r.ordinaryEngine)
-	// FIXME: target leader only consider the ordinary engine.
-	targetLeader := r.collectAvailableLeaderStores(targetPeers, r.ordinaryEngine)
+	// FIXME: target leader only considers the ordinary stores，maybe we need to consider the
+	// special engine stores if the engine supports to become a leader. But now there is only
+	// one engine, tiflash, which does not support the leader, so don't consider it for now.
+	targetLeader := r.searchLeastleaderStore(targetPeers, r.ordinaryEngine)
+
 	for engine, peers := range specialPeers {
 		context, ok := r.specialEngines[engine]
 		if !ok {
@@ -246,7 +249,7 @@ func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo, contex
 	return targets
 }
 
-func (r *RegionScatterer) collectAvailableLeaderStores(peers map[uint64]*metapb.Peer, context engineContext) uint64 {
+func (r *RegionScatterer) searchLeastleaderStore(peers map[uint64]*metapb.Peer, context engineContext) uint64 {
 	m := uint64(math.MaxUint64)
 	id := uint64(0)
 	for storeID := range peers {
