@@ -1404,6 +1404,11 @@ func (c *RaftCluster) GetMaxMergeRegionKeys() uint64 {
 	return c.opt.GetMaxMergeRegionKeys()
 }
 
+// GetSplitQPSThreshold returns the qps threshold of split region.
+func (c *RaftCluster) GetSplitQPSThreshold() uint64 {
+	return c.opt.GetSplitQPSThreshold()
+}
+
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
 func (c *RaftCluster) GetSplitMergeInterval() time.Duration {
 	return c.opt.GetSplitMergeInterval()

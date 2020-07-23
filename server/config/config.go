@@ -574,6 +574,8 @@ type ScheduleConfig struct {
 	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
+	// SplitQPSThreshold is the qps threshold for split region.
+	SplitQPSThreshold uint64 `toml:"split-qps-threshold" json:"split-qps-threshold"`
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
 	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
@@ -687,6 +689,7 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 		MaxMergeRegionSize:           c.MaxMergeRegionSize,
 		MaxMergeRegionKeys:           c.MaxMergeRegionKeys,
 		SplitMergeInterval:           c.SplitMergeInterval,
+		SplitQPSThreshold:            c.SplitQPSThreshold,
 		PatrolRegionInterval:         c.PatrolRegionInterval,
 		MaxStoreDownTime:             c.MaxStoreDownTime,
 		LeaderScheduleLimit:          c.LeaderScheduleLimit,
@@ -727,6 +730,7 @@ const (
 	defaultMaxMergeRegionSize     = 20
 	defaultMaxMergeRegionKeys     = 200000
 	defaultSplitMergeInterval     = 1 * time.Hour
+	defaultSplitQPSThreshold      = 3000
 	defaultPatrolRegionInterval   = 100 * time.Millisecond
 	defaultMaxStoreDownTime       = 30 * time.Minute
 	defaultLeaderScheduleLimit    = 4
@@ -763,6 +767,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	if !meta.IsDefined("leader-schedule-limit") {
 		adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
+	}
+	if !meta.IsDefined("split-qps-threshold") {
+		adjustUint64(&c.SplitQPSThreshold, defaultSplitQPSThreshold)
 	}
 	if !meta.IsDefined("region-schedule-limit") {
 		adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)

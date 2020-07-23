@@ -170,6 +170,11 @@ func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
 	return o.GetScheduleConfig().MaxMergeRegionKeys
 }
 
+// GetSplitQPSThreshold returns the qps threshold of split region.
+func (o *PersistOptions) GetSplitQPSThreshold() uint64 {
+	return o.GetScheduleConfig().SplitQPSThreshold
+}
+
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
 func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 	return o.GetScheduleConfig().SplitMergeInterval.Duration

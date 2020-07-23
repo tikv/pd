@@ -28,6 +28,7 @@ const (
 	defaultMaxMergeRegionSize          = 0
 	defaultMaxMergeRegionKeys          = 0
 	defaultSplitMergeInterval          = 0
+	defaultSplitQPSThreshold           = 3000
 	defaultMaxStoreDownTime            = 30 * time.Minute
 	defaultLeaderScheduleLimit         = 4
 	defaultRegionScheduleLimit         = 64
@@ -65,6 +66,7 @@ type ScheduleOptions struct {
 	MaxPendingPeerCount          uint64
 	MaxMergeRegionSize           uint64
 	MaxMergeRegionKeys           uint64
+	SplitQPSThreshold            uint64
 	SchedulerMaxWaitingOperator  uint64
 	SplitMergeInterval           time.Duration
 	EnableOneWayMerge            bool
@@ -109,6 +111,7 @@ func NewScheduleOptions() *ScheduleOptions {
 	mso.MaxMergeRegionKeys = defaultMaxMergeRegionKeys
 	mso.SchedulerMaxWaitingOperator = defaultSchedulerMaxWaitingOperator
 	mso.SplitMergeInterval = defaultSplitMergeInterval
+	mso.SplitQPSThreshold = defaultSplitQPSThreshold
 	mso.MaxStoreDownTime = defaultMaxStoreDownTime
 	mso.MaxReplicas = defaultMaxReplicas
 	mso.StrictlyMatchLabel = defaultStrictlyMatchLabel
@@ -226,6 +229,11 @@ func (mso *ScheduleOptions) GetMaxMergeRegionSize() uint64 {
 // GetMaxMergeRegionKeys mocks method
 func (mso *ScheduleOptions) GetMaxMergeRegionKeys() uint64 {
 	return mso.MaxMergeRegionKeys
+}
+
+// GetSplitQPSThreshold mocks method
+func (mso *ScheduleOptions) GetSplitQPSThreshold() uint64 {
+	return mso.SplitQPSThreshold
 }
 
 // GetSplitMergeInterval mocks method

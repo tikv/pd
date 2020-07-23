@@ -232,6 +232,13 @@ func SetReplicationStatus(status *replication_modepb.RegionReplicationStatus) Re
 	}
 }
 
+// SetQueryStats sets the region's query stats.
+func SetQueryStats(stats *pdpb.QueryStats) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.queryStats = stats
+	}
+}
+
 // WithAddPeer adds a peer for the region.
 func WithAddPeer(peer *metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {

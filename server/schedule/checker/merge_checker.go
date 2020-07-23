@@ -118,6 +118,11 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	if region.GetReadQPS()+target.GetReadQPS() > m.cluster.GetSplitQPSThreshold()*3/2 {
+		checkerCounter.WithLabelValues("merge_checker", "read-load-high").Inc()
+		return nil
+	}
+
 	log.Debug("try to merge region", zap.Stringer("from", core.RegionToHexMeta(region.GetMeta())), zap.Stringer("to", core.RegionToHexMeta(target.GetMeta())))
 	ops, err := operator.CreateMergeRegionOperator("merge-region", m.cluster, region, target, operator.OpMerge)
 	if err != nil {

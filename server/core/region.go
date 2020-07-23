@@ -46,6 +46,7 @@ type RegionInfo struct {
 	approximateKeys   int64
 	interval          *pdpb.TimeInterval
 	replicationStatus *replication_modepb.RegionReplicationStatus
+	queryStats        *pdpb.QueryStats
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -105,7 +106,6 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
 	}
-
 	classifyVoterAndLearner(region)
 	return region
 }
@@ -409,6 +409,14 @@ func (r *RegionInfo) GetRegionEpoch() *metapb.RegionEpoch {
 // GetReplicationStatus returns the region's replication status.
 func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicationStatus {
 	return r.replicationStatus
+}
+
+// GetReadQPS returns the region's qps by type.
+func (r *RegionInfo) GetReadQPS() uint64 {
+	if r.queryStats == nil {
+		return 0
+	}
+	return r.queryStats.Get + r.queryStats.Coprocessor + r.queryStats.Scan
 }
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.

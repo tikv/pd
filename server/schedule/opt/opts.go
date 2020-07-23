@@ -41,6 +41,7 @@ type Options interface {
 	GetMaxStoreDownTime() time.Duration
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
+	GetSplitQPSThreshold() uint64
 	GetSplitMergeInterval() time.Duration
 	IsOneWayMergeEnabled() bool
 	IsCrossTableMergeEnabled() bool
