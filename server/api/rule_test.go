@@ -87,8 +87,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 			rawData:  successData,
 			success:  true,
 			response: "",
-			popKeyRange: map[string]struct {
-			}{
+			popKeyRange: map[string]struct{}{
 				hex.EncodeToString(oldStartKey): struct{}{},
 				hex.EncodeToString(oldEndKey):   struct{}{},
 			},
@@ -98,8 +97,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 			rawData:  updateData,
 			success:  true,
 			response: "",
-			popKeyRange: map[string]struct {
-			}{
+			popKeyRange: map[string]struct{}{
 				hex.EncodeToString(oldStartKey): struct{}{},
 				hex.EncodeToString(oldEndKey):   struct{}{},
 				hex.EncodeToString(newStartKey): struct{}{},
