@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/server"
@@ -33,8 +32,6 @@ type testRuleSuite struct {
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
-	// make sure different test case push and pop value into suspect KeyRange in order
-	mu sync.Mutex
 }
 
 func (s *testRuleSuite) SetUpSuite(c *C) {
@@ -145,13 +142,12 @@ func (s *testRuleSuite) TestSet(c *C) {
 
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
-		s.mu.Lock()
 		// clear suspect keyRanges to prevent test case from others
 		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
 		err = postJSON(testDialClient, s.urlPrefix+"/rule", testcase.rawData)
 		if testcase.success {
 			c.Assert(err, IsNil)
-			v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+			_, v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
 			c.Assert(got, Equals, true)
 			c.Assert(len(v), Equals, len(testcase.popKeyRange))
 			for id, keyRange := range v {
@@ -162,7 +158,6 @@ func (s *testRuleSuite) TestSet(c *C) {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)
 		}
-		s.mu.Unlock()
 	}
 }
 
@@ -405,14 +400,13 @@ func (s *testRuleSuite) TestDelete(c *C) {
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.groupID, testcase.id)
-		s.mu.Lock()
 		// clear suspect keyRanges to prevent test case from others
 		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
 		resp, err := doDelete(testDialClient, url)
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, http.StatusOK)
 		if len(testcase.popKeyRange) > 0 {
-			v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+			_, v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
 			c.Assert(got, Equals, true)
 			c.Assert(len(v), Equals, len(testcase.popKeyRange))
 			for id, keyRange := range v {
@@ -420,7 +414,6 @@ func (s *testRuleSuite) TestDelete(c *C) {
 				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyRange[id][1]), Equals, 0)
 			}
 		}
-		s.mu.Unlock()
 	}
 }
 

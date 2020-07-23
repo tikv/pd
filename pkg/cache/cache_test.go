@@ -35,6 +35,19 @@ func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cache := NewIDTTL(ctx, time.Second, 2*time.Second)
+	cache.PutWithTTL(9, "9", 1*time.Second)
+	k, v, success := cache.pop()
+	c.Assert(success, Equals, true)
+	c.Assert(v, Equals, "9")
+	c.Assert(k, Equals, uint64(9))
+
+	cache.PutWithTTL(9, "9", 1*time.Second)
+	time.Sleep(5 * time.Second)
+	k, v, success = cache.pop()
+	c.Assert(success, Equals, false)
+	c.Assert(k, IsNil)
+	c.Assert(v, IsNil)
+
 	cache.PutWithTTL(1, 1, 1*time.Second)
 	cache.PutWithTTL(2, "v2", 5*time.Second)
 	cache.PutWithTTL(3, 3.0, 5*time.Second)
@@ -94,6 +107,7 @@ func sortIDs(ids []uint64) []uint64 {
 
 func (s *testRegionCacheSuite) TestLRUCache(c *C) {
 	cache := newLRU(3)
+
 	cache.Put(1, "1")
 	cache.Put(2, "2")
 	cache.Put(3, "3")

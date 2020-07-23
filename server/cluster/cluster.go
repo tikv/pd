@@ -449,27 +449,27 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 // AddSuspectKeyRanges add the key ranges with the its ruleID as the key
 // The instance of each keyRange is like following format:
 // [2][]byte: start key/ned key
-func (c *RaftCluster) AddSuspectKeyRanges(storeID string, keyRanges [][2][]byte) {
+func (c *RaftCluster) AddSuspectKeyRanges(key string, keyRanges [][2][]byte) {
 	c.Lock()
 	defer c.Unlock()
-	c.suspectKeyRanges.Put(storeID, keyRanges)
+	c.suspectKeyRanges.Put(key, keyRanges)
 }
 
 // PopOneSuspectKeyRange get one suspect keyRange group
 // return value and true if pop success, return empty [][2][]byte and false
 // if suspectKeyRanges couldn't pop keyRange group.
-func (c *RaftCluster) PopOneSuspectKeyRange() ([][2][]byte, bool) {
+func (c *RaftCluster) PopOneSuspectKeyRange() (string, [][2][]byte, bool) {
 	c.Lock()
 	defer c.Unlock()
-	_, value, success := c.suspectKeyRanges.Pop()
+	key, value, success := c.suspectKeyRanges.Pop()
 	if !success {
-		return [][2][]byte{}, false
+		return "", [][2][]byte{}, false
 	}
 	v, ok := value.([][2][]byte)
 	if !ok {
-		return [][2][]byte{}, false
+		return "", [][2][]byte{}, false
 	}
-	return v, true
+	return key, v, true
 }
 
 // ClearSuspectKeyRanges clear the suspect keyranges, only for unit test

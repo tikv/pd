@@ -14,6 +14,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -165,11 +166,11 @@ func (c *coordinator) patrolRegions() {
 // The regions of new version key range and old version key range would be placed into
 // the suspect regions map
 func (c *coordinator) checkSuspectKeyRanges() {
-	keyRangeGroup, success := c.cluster.PopOneSuspectKeyRange()
+	key, rangeGroup, success := c.cluster.PopOneSuspectKeyRange()
 	if !success {
 		return
 	}
-	if len(keyRangeGroup) < 1 {
+	if len(rangeGroup) < 1 {
 		return
 	}
 
@@ -179,10 +180,35 @@ func (c *coordinator) checkSuspectKeyRanges() {
 			regionMap[region.GetID()] = struct{}{}
 		}
 	}
-	for _, keyRange := range keyRangeGroup {
-		newKeyRegions := c.cluster.ScanRegions(keyRange[0], keyRange[1], 1024)
-		f(newKeyRegions)
+	// scan part of the regions in one keyRangeGroup and put the rest keyRange in suspect KeyRanges
+	restKeyRanges := make([][2][]byte, 0, 2)
+	for _, keyRange := range rangeGroup {
+		regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], 1024)
+		if len(regions) < 1 {
+			continue
+		}
+		// if the size equals limit which means there probably existed the rest regions.
+		// so we search the rest key range and put these key range into suspect keyRanges again.
+		if len(regions) == 1024 {
+			// search the biggest start Key in given regions
+			var biggestStartKey []byte
+			for _, region := range regions {
+				if bytes.Compare(biggestStartKey, region.GetStartKey()) > 0 {
+					biggestStartKey = region.GetStartKey()
+				}
+			}
+			restKeyRanges = append(restKeyRanges, [2][]byte{
+				biggestStartKey,
+				keyRange[1],
+			})
+		}
+
+		f(regions)
 	}
+	if len(restKeyRanges) > 0 {
+		c.cluster.AddSuspectKeyRanges(key, restKeyRanges)
+	}
+
 	regionIDList := make([]uint64, 0, 2048)
 	for id := range regionMap {
 		regionIDList = append(regionIDList, id)
