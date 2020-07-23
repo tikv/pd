@@ -18,7 +18,9 @@ import "github.com/pingcap/pd/v4/server/core"
 // RegionStatInformer provides access to a shared informer of statistics.
 type RegionStatInformer interface {
 	IsRegionHot(region *core.RegionInfo) bool
+	// RegionReadStats return the storeID -> write stat of peers on this store
 	RegionWriteStats() map[uint64][]*HotPeerStat
+	// RegionReadStats return the storeID -> read stat of peers on this store
 	RegionReadStats() map[uint64][]*HotPeerStat
 	RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo
 }

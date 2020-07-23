@@ -190,6 +190,7 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 	return nil
 }
 
+// prepareForBalance
 func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	h.summaryPendingInfluence()
 
@@ -626,6 +627,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	return ops
 }
 
+// allowBalance check whether the operator count have exceed the hot region limit by type
 func (bs *balanceSolver) allowBalance() bool {
 	switch bs.opTy {
 	case movePeer:

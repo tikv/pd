@@ -215,6 +215,7 @@ type storeLoad struct {
 	KeyRate  float64
 	Count    float64
 
+	// Exp means Expectation
 	ExpByteRate float64
 	ExpKeyRate  float64
 	ExpCount    float64
