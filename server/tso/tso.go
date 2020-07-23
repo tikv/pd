@@ -94,6 +94,12 @@ func (t *TimestampOracle) checkLease() bool {
 	return t.lease != nil && !t.lease.IsExpired()
 }
 
+func (t *TimestampOracle) setLease(lease *member.LeaderLease) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lease = lease
+}
+
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
 // otherwise, update it.
 func (t *TimestampOracle) saveTimestamp(ts time.Time) error {
@@ -119,9 +125,7 @@ func (t *TimestampOracle) saveTimestamp(ts time.Time) error {
 func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 	tsoCounter.WithLabelValues("sync").Inc()
 
-	t.mu.Lock()
-	t.lease = lease
-	t.mu.Unlock()
+	t.setLease(lease)
 
 	failpoint.Inject("delaySyncTimestamp", func() {
 		time.Sleep(time.Second)
@@ -269,10 +273,7 @@ func (t *TimestampOracle) ResetTimestamp() {
 		physical: typeutil.ZeroTime,
 	}
 	atomic.StorePointer(&t.ts, unsafe.Pointer(zero))
-
-	t.mu.Lock()
-	t.lease = nil
-	t.mu.Unlock()
+	t.setLease(nil)
 }
 
 var maxRetryCount = 10
