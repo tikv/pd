@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/keyUtil"
+	"github.com/pingcap/pd/v4/pkg/keyutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/schedule"
@@ -190,7 +190,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 			biggestStartKey,
 			keyRange[1],
 		}
-		c.cluster.AddSuspectKeyRanges(keyUtil.BuildKeyRangeKey(biggestStartKey, keyRange[1]), restKeyRange)
+		c.cluster.AddSuspectKeyRanges(keyutil.BuildKeyRangeKey(biggestStartKey, keyRange[1]), restKeyRange)
 	}
 	regionMap := map[uint64]struct{}{}
 	for _, region := range regions {
