@@ -177,7 +177,6 @@ func (c *coordinator) checkSuspectKeyRanges() {
 	}
 	// if the size equals limit which means there probably existed the rest regions.
 	// so we search the rest key range and put these key range into suspect keyRanges again.
-	restKeyRange := [2][]byte{}
 	if len(regions) == limit {
 		// search the biggest start Key in given regions
 		var biggestStartKey []byte
@@ -186,7 +185,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 				biggestStartKey = region.GetStartKey()
 			}
 		}
-		restKeyRange = [2][]byte{
+		restKeyRange := [2][]byte{
 			biggestStartKey,
 			keyRange[1],
 		}

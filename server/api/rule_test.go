@@ -88,8 +88,8 @@ func (s *testRuleSuite) TestSet(c *C) {
 			success:  true,
 			response: "",
 			popKeyRange: map[string]struct{}{
-				hex.EncodeToString(oldStartKey): struct{}{},
-				hex.EncodeToString(oldEndKey):   struct{}{},
+				hex.EncodeToString(oldStartKey): {},
+				hex.EncodeToString(oldEndKey):   {},
 			},
 		},
 		{
@@ -98,10 +98,10 @@ func (s *testRuleSuite) TestSet(c *C) {
 			success:  true,
 			response: "",
 			popKeyRange: map[string]struct{}{
-				hex.EncodeToString(oldStartKey): struct{}{},
-				hex.EncodeToString(oldEndKey):   struct{}{},
-				hex.EncodeToString(newStartKey): struct{}{},
-				hex.EncodeToString(newEndKey):   struct{}{},
+				hex.EncodeToString(oldStartKey): {},
+				hex.EncodeToString(oldEndKey):   {},
+				hex.EncodeToString(newStartKey): {},
+				hex.EncodeToString(newEndKey):   {},
 			},
 		},
 		{
@@ -384,8 +384,8 @@ func (s *testRuleSuite) TestDelete(c *C) {
 			groupID: "g",
 			id:      "10",
 			popKeyRange: map[string]struct{}{
-				hex.EncodeToString(oldStartKey): struct{}{},
-				hex.EncodeToString(oldEndKey):   struct{}{},
+				hex.EncodeToString(oldStartKey): {},
+				hex.EncodeToString(oldEndKey):   {},
 			},
 		},
 		{
