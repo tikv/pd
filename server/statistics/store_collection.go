@@ -86,7 +86,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		s.LowSpace++
 	}
 
-	// Store stats.
+	// Store rollingStats.
 	s.StorageSize += store.StorageSize()
 	s.StorageCapacity += store.GetCapacity()
 	s.RegionCount += store.GetRegionCount()

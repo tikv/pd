@@ -129,6 +129,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []
 		s.stLoadInfos[readLeader] = summaryStoresLoad(
 			storesStats.GetStoresBytesReadStat(),
 			storesStats.GetStoresKeysReadStat(),
+			storesStats.GetStoresQPSReadStat(),
 			map[uint64]Influence{},
 			cluster.RegionReadStats(),
 			minHotDegree,
@@ -140,6 +141,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ rwType, cluster opt.Cluster) []
 		s.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storesStats.GetStoresBytesWriteStat(),
 			storesStats.GetStoresKeysWriteStat(),
+			storesStats.GetStoresQPSWriteStat(),
 			map[uint64]Influence{},
 			cluster.RegionWriteStats(),
 			minHotDegree,

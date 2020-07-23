@@ -18,6 +18,7 @@ import "time"
 const (
 	byteDim int = iota
 	keyDim
+	qpsDim
 	dimLen
 )
 
@@ -34,10 +35,12 @@ type HotPeerStat struct {
 	Kind     FlowKind `json:"kind"`
 	ByteRate float64  `json:"flow_bytes"`
 	KeyRate  float64  `json:"flow_keys"`
+	QPS      float64  `json:"QPS"`
 
 	// rolling statistics, recording some recently added records.
 	rollingByteRate MovingAvg
 	rollingKeyRate  MovingAvg
+	rollingQPS      MovingAvg
 
 	// LastUpdateTime used to calculate average write
 	LastUpdateTime time.Time `json:"last_update_time"`
@@ -58,6 +61,8 @@ func (stat *HotPeerStat) ID() uint64 {
 func (stat *HotPeerStat) Less(k int, than TopNItem) bool {
 	rhs := than.(*HotPeerStat)
 	switch k {
+	case qpsDim:
+		return stat.GetQPS() < rhs.GetQPS()
 	case keyDim:
 		return stat.GetKeyRate() < rhs.GetKeyRate()
 	case byteDim:
@@ -98,6 +103,14 @@ func (stat *HotPeerStat) GetKeyRate() float64 {
 	return stat.rollingKeyRate.Get()
 }
 
+// GetQPS returns denoised QPS if possible.
+func (stat *HotPeerStat) GetQPS() float64 {
+	if stat.rollingQPS == nil {
+		return stat.QPS
+	}
+	return stat.rollingQPS.Get()
+}
+
 // Clone clones the HotPeerStat
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
@@ -105,5 +118,7 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret.rollingByteRate = nil
 	ret.KeyRate = stat.GetKeyRate()
 	ret.rollingKeyRate = nil
+	ret.QPS = stat.GetKeyRate()
+	ret.rollingQPS = nil
 	return &ret
 }

@@ -411,12 +411,20 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
-// GetReadQPS returns the region's qps by type.
-func (r *RegionInfo) GetReadQPS() uint64 {
+// GetQPSRead returns the region's read QPS.
+func (r *RegionInfo) GetQPSRead() uint64 {
 	if r.queryStats == nil {
 		return 0
 	}
 	return r.queryStats.Get + r.queryStats.Coprocessor + r.queryStats.Scan
+}
+
+// GetQPSWrite returns the region's write QPS.
+func (r *RegionInfo) GetQPSWrite() uint64 {
+	if r.queryStats == nil {
+		return 0
+	}
+	return r.queryStats.Put
 }
 
 // regionMap wraps a map[uint64]*core.RegionInfo and supports randomly pick a region.

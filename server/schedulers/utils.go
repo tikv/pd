@@ -171,12 +171,14 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 type Influence struct {
 	ByteRate float64
 	KeyRate  float64
+	QPS      float64
 	Count    float64
 }
 
 func (infl Influence) add(rhs *Influence, w float64) Influence {
 	infl.ByteRate += rhs.ByteRate * w
 	infl.KeyRate += rhs.KeyRate * w
+	infl.QPS += rhs.QPS * w
 	infl.Count += rhs.Count * w
 	return infl
 }
@@ -213,11 +215,13 @@ func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*op
 type storeLoad struct {
 	ByteRate float64
 	KeyRate  float64
+	QPS      float64
 	Count    float64
 
 	ExpByteRate float64
 	ExpKeyRate  float64
 	ExpCount    float64
+	ExpQPS      float64
 }
 
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
@@ -225,6 +229,7 @@ func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {
 	future.ByteRate += infl.ByteRate
 	future.KeyRate += infl.KeyRate
 	future.Count += infl.Count
+	future.QPS += infl.QPS
 	return &storeLoadPred{
 		Current: *load,
 		Future:  future,
@@ -242,6 +247,10 @@ func stLdKeyRate(ld *storeLoad) float64 {
 func stLdCount(ld *storeLoad) float64 {
 	return ld.Count
 }
+
+//func stLdQPS(ld *storeLoad) float64 {
+//	return ld.QPS
+//}
 
 type storeLoadCmp func(ld1, ld2 *storeLoad) int
 
@@ -296,6 +305,7 @@ func (lp *storeLoadPred) diff() *storeLoad {
 	mx, mn := lp.max(), lp.min()
 	return &storeLoad{
 		ByteRate: mx.ByteRate - mn.ByteRate,
+		QPS:      mx.QPS - mn.QPS,
 		KeyRate:  mx.KeyRate - mn.KeyRate,
 		Count:    mx.Count - mn.Count,
 	}
@@ -335,6 +345,7 @@ func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
 func minLoad(a, b *storeLoad) *storeLoad {
 	return &storeLoad{
 		ByteRate: math.Min(a.ByteRate, b.ByteRate),
+		QPS:      math.Min(a.QPS, b.QPS),
 		KeyRate:  math.Min(a.KeyRate, b.KeyRate),
 		Count:    math.Min(a.Count, b.Count),
 	}
@@ -343,6 +354,7 @@ func minLoad(a, b *storeLoad) *storeLoad {
 func maxLoad(a, b *storeLoad) *storeLoad {
 	return &storeLoad{
 		ByteRate: math.Max(a.ByteRate, b.ByteRate),
+		QPS:      math.Max(a.QPS, b.QPS),
 		KeyRate:  math.Max(a.KeyRate, b.KeyRate),
 		Count:    math.Max(a.Count, b.Count),
 	}
@@ -361,6 +373,7 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 	return &statistics.HotPeersStat{
 		TotalBytesRate: li.LoadPred.Current.ByteRate,
 		TotalKeysRate:  li.LoadPred.Current.KeyRate,
+		TotalQPS:       li.LoadPred.Current.QPS,
 		Count:          len(li.HotPeers),
 		Stats:          peers,
 	}

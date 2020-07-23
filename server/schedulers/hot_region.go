@@ -200,10 +200,12 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionRead := cluster.RegionReadStats()
 		storeByte := storesStat.GetStoresBytesReadStat()
 		storeKey := storesStat.GetStoresKeysReadStat()
+		storeQPS := storesStat.GetStoresQPSReadStat()
 		hotRegionThreshold := getHotRegionThreshold(storesStat, read)
 		h.stLoadInfos[readLeader] = summaryStoresLoad(
 			storeByte,
 			storeKey,
+			storeQPS,
 			h.pendingSums[readLeader],
 			regionRead,
 			minHotDegree,
@@ -215,10 +217,12 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		regionWrite := cluster.RegionWriteStats()
 		storeByte := storesStat.GetStoresBytesWriteStat()
 		storeKey := storesStat.GetStoresKeysWriteStat()
+		storeQPS := storesStat.GetStoresQPSWriteStat()
 		hotRegionThreshold := getHotRegionThreshold(storesStat, write)
 		h.stLoadInfos[writeLeader] = summaryStoresLoad(
 			storeByte,
 			storeKey,
+			storeQPS,
 			h.pendingSums[writeLeader],
 			regionWrite,
 			minHotDegree,
@@ -228,6 +232,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 		h.stLoadInfos[writePeer] = summaryStoresLoad(
 			storeByte,
 			storeKey,
+			storeQPS,
 			h.pendingSums[writePeer],
 			regionWrite,
 			minHotDegree,
@@ -297,6 +302,7 @@ func (h *hotScheduler) gcRegionPendings() {
 func summaryStoresLoad(
 	storeByteRate map[uint64]float64,
 	storeKeyRate map[uint64]float64,
+	storeQPS map[uint64]float64,
 	pendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
 	minHotDegree int,
@@ -308,26 +314,31 @@ func summaryStoresLoad(
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
 	allByteSum := 0.0
 	allKeySum := 0.0
+	allQPSSum := 0.0
 	allCount := 0.0
 
 	// Stores without byte rate statistics is not available to schedule.
 	for id, byteRate := range storeByteRate {
 		keyRate := storeKeyRate[id]
+		QPS := storeQPS[id]
 
 		// Find all hot peers first
 		hotPeers := make([]*statistics.HotPeerStat, 0)
 		{
 			byteSum := 0.0
 			keySum := 0.0
+			QPSSum := 0.0
 			for _, peer := range filterHotPeers(kind, minHotDegree, hotRegionThreshold, storeHotPeers[id], hotPeerFilterTy) {
 				byteSum += peer.GetByteRate()
 				keySum += peer.GetKeyRate()
+				QPSSum += peer.GetQPS()
 				hotPeers = append(hotPeers, peer.Clone())
 			}
 			// Use sum of hot peers to estimate leader-only byte rate.
 			if kind == core.LeaderKind && rwTy == write {
 				byteRate = byteSum
 				keyRate = keySum
+				QPS = QPSSum
 			}
 
 			// Metric for debug.
@@ -339,15 +350,21 @@ func summaryStoresLoad(
 				ty := "key-rate-" + rwTy.String() + "-" + kind.String()
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keySum)
 			}
+			{
+				ty := "QPS-rate-" + rwTy.String() + "-" + kind.String()
+				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(QPSSum)
+			}
 		}
 		allByteSum += byteRate
 		allKeySum += keyRate
+		allQPSSum += QPS
 		allCount += float64(len(hotPeers))
 
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
 			ByteRate: byteRate,
 			KeyRate:  keyRate,
+			QPS:      QPS,
 			Count:    float64(len(hotPeers)),
 		}).ToLoadPred(pendings[id])
 
@@ -362,9 +379,11 @@ func summaryStoresLoad(
 	for id, detail := range loadDetail {
 		byteExp := allByteSum / storeLen
 		keyExp := allKeySum / storeLen
+		QPSExp := allQPSSum / storeLen
 		countExp := allCount / storeLen
 		detail.LoadPred.Future.ExpByteRate = byteExp
 		detail.LoadPred.Future.ExpKeyRate = keyExp
+		detail.LoadPred.Future.ExpQPS = QPSExp
 		detail.LoadPred.Future.ExpCount = countExp
 		// Debug
 		{
@@ -378,6 +397,10 @@ func summaryStoresLoad(
 		{
 			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(countExp)
+		}
+		{
+			ty := "exp-QPS-rate-" + rwTy.String() + "-" + kind.String()
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(QPSExp)
 		}
 	}
 	return loadDetail
@@ -525,6 +548,7 @@ func (bs *balanceSolver) init() {
 	bs.minDst = &storeLoad{
 		ByteRate: math.MaxFloat64,
 		KeyRate:  math.MaxFloat64,
+		QPS:      math.MaxFloat64,
 		Count:    math.MaxFloat64,
 	}
 	maxCur := &storeLoad{}
@@ -538,6 +562,7 @@ func (bs *balanceSolver) init() {
 	bs.rankStep = &storeLoad{
 		ByteRate: maxCur.ByteRate * bs.sche.conf.GetByteRankStepRatio(),
 		KeyRate:  maxCur.KeyRate * bs.sche.conf.GetKeyRankStepRatio(),
+		QPS:      maxCur.QPS * bs.sche.conf.GetKeyRankStepRatio(),
 		Count:    maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
 }
@@ -639,6 +664,7 @@ func (bs *balanceSolver) allowBalance() bool {
 
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
+	ratio := bs.sche.conf.GetSrcToleranceRatio()
 	for id, detail := range bs.stLoadDetail {
 		if bs.cluster.GetStore(id) == nil {
 			log.Error("failed to get the source store", zap.Uint64("store-id", id))
@@ -647,8 +673,9 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		if detail.LoadPred.min().ByteRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpByteRate &&
-			detail.LoadPred.min().KeyRate > bs.sche.conf.GetSrcToleranceRatio()*detail.LoadPred.Future.ExpKeyRate {
+		if detail.LoadPred.min().ByteRate > ratio*detail.LoadPred.Future.ExpByteRate &&
+			detail.LoadPred.min().KeyRate > ratio*detail.LoadPred.Future.ExpKeyRate {
+			//detail.LoadPred.min().QPS > ratio*detail.LoadPred.Future.ExpQPS
 			ret[id] = detail
 			balanceHotRegionCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 		}
@@ -682,10 +709,17 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	sort.Slice(byteSort, func(i, j int) bool {
 		return byteSort[i].GetByteRate() > byteSort[j].GetByteRate()
 	})
+
 	keySort := make([]*statistics.HotPeerStat, len(ret))
 	copy(keySort, ret)
 	sort.Slice(keySort, func(i, j int) bool {
 		return keySort[i].GetKeyRate() > keySort[j].GetKeyRate()
+	})
+
+	QPSSort := make([]*statistics.HotPeerStat, len(ret))
+	copy(QPSSort, ret)
+	sort.Slice(QPSSort, func(i, j int) bool {
+		return QPSSort[i].GetQPS() > QPSSort[j].GetQPS()
 	})
 
 	union := make(map[*statistics.HotPeerStat]struct{}, maxPeerNum)
@@ -701,6 +735,14 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		for len(keySort) > 0 {
 			peer := keySort[0]
 			keySort = keySort[1:]
+			if _, ok := union[peer]; !ok {
+				union[peer] = struct{}{}
+				break
+			}
+		}
+		for len(QPSSort) > 0 {
+			peer := QPSSort[0]
+			QPSSort = QPSSort[1:]
 			if _, ok := union[peer]; !ok {
 				union[peer] = struct{}{}
 				break
@@ -807,12 +849,13 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*core.StoreInfo) map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
-	dstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
+	ratio := bs.sche.conf.GetDstToleranceRatio()
 	for _, store := range candidates {
 		if filter.Target(bs.cluster, store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
-			if detail.LoadPred.max().ByteRate*dstToleranceRatio < detail.LoadPred.Future.ExpByteRate &&
-				detail.LoadPred.max().KeyRate*dstToleranceRatio < detail.LoadPred.Future.ExpKeyRate {
+			if detail.LoadPred.max().ByteRate*ratio < detail.LoadPred.Future.ExpByteRate &&
+				detail.LoadPred.max().KeyRate*ratio < detail.LoadPred.Future.ExpKeyRate {
+				//detail.LoadPred.max().QPS*ratio < detail.LoadPred.Future.ExpQPS
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}
@@ -824,7 +867,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
-func (bs *balanceSolver) calcProgressiveRank() {
+func (bs *balanceSolver) calcProgressiveRank() { // todo add rank
 	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
@@ -863,7 +906,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
-func (bs *balanceSolver) betterThan(old *solution) bool {
+func (bs *balanceSolver) betterThan(old *solution) bool { // todo add rank
 	if old == nil {
 		return true
 	}
@@ -928,7 +971,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 }
 
 // smaller is better
-func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
+func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int { // todo add rank
 	if st1 != st2 {
 		// compare source store
 		var lpCmp storeLPCmp
@@ -964,7 +1007,7 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 }
 
 // smaller is better
-func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
+func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int { // todo add rank
 	if st1 != st2 {
 		// compare destination store
 		var lpCmp storeLPCmp
@@ -1072,6 +1115,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	infl := Influence{
 		ByteRate: bs.cur.srcPeerStat.GetByteRate(),
 		KeyRate:  bs.cur.srcPeerStat.GetKeyRate(),
+		QPS:      bs.cur.srcPeerStat.GetQPS(),
 		Count:    1,
 	}
 
