@@ -14,7 +14,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -81,18 +80,17 @@ func (s *testRuleSuite) TestSet(c *C) {
 		rawData     []byte
 		success     bool
 		response    string
-		popKeyRange [][2][]byte
+		popKeyRange map[string]struct{}
 	}{
 		{
 			name:     "Set a new rule success",
 			rawData:  successData,
 			success:  true,
 			response: "",
-			popKeyRange: [][2][]byte{
-				{
-					oldStartKey,
-					oldEndKey,
-				},
+			popKeyRange: map[string]struct {
+			}{
+				hex.EncodeToString(oldStartKey): struct{}{},
+				hex.EncodeToString(oldEndKey):   struct{}{},
 			},
 		},
 		{
@@ -100,15 +98,12 @@ func (s *testRuleSuite) TestSet(c *C) {
 			rawData:  updateData,
 			success:  true,
 			response: "",
-			popKeyRange: [][2][]byte{
-				{
-					newStartKey,
-					newEndKey,
-				},
-				{
-					oldStartKey,
-					oldEndKey,
-				},
+			popKeyRange: map[string]struct {
+			}{
+				hex.EncodeToString(oldStartKey): struct{}{},
+				hex.EncodeToString(oldEndKey):   struct{}{},
+				hex.EncodeToString(newStartKey): struct{}{},
+				hex.EncodeToString(newEndKey):   struct{}{},
 			},
 		},
 		{
@@ -147,13 +142,20 @@ func (s *testRuleSuite) TestSet(c *C) {
 		err = postJSON(testDialClient, s.urlPrefix+"/rule", testcase.rawData)
 		if testcase.success {
 			c.Assert(err, IsNil)
-			_, v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
-			c.Assert(got, Equals, true)
-			c.Assert(len(v), Equals, len(testcase.popKeyRange))
-			for id, keyRange := range v {
-				c.Assert(bytes.Compare(keyRange[0], testcase.popKeyRange[id][0]), Equals, 0)
-				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyRange[id][1]), Equals, 0)
+
+			popKeyRangeMap := map[string]struct{}{}
+			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
+				_, v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				c.Assert(got, Equals, true)
+				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
+				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
+			c.Assert(len(popKeyRangeMap), Equals, len(testcase.popKeyRange))
+			for k := range popKeyRangeMap {
+				_, ok := testcase.popKeyRange[k]
+				c.Assert(ok, Equals, true)
+			}
+
 		} else {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)
@@ -377,24 +379,23 @@ func (s *testRuleSuite) TestDelete(c *C) {
 		name        string
 		groupID     string
 		id          string
-		popKeyRange [][2][]byte
+		popKeyRange map[string]struct{}
 	}{
 		{
 			name:    "delete existed rule",
 			groupID: "g",
 			id:      "10",
-			popKeyRange: [][2][]byte{
-				{
-					oldStartKey,
-					oldEndKey,
-				},
+			popKeyRange: map[string]struct{}{
+				hex.EncodeToString(oldStartKey): struct{}{},
+				hex.EncodeToString(oldEndKey):   struct{}{},
 			},
 		},
 		{
-			name:        "delete non-existed rule",
-			groupID:     "g",
-			id:          "15",
-			popKeyRange: [][2][]byte{},
+			name:    "delete non-existed rule",
+			groupID: "g",
+			id:      "15",
+			popKeyRange: map[string]struct{}{
+			},
 		},
 	}
 	for _, testcase := range testcases {
@@ -406,12 +407,17 @@ func (s *testRuleSuite) TestDelete(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, http.StatusOK)
 		if len(testcase.popKeyRange) > 0 {
-			_, v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
-			c.Assert(got, Equals, true)
-			c.Assert(len(v), Equals, len(testcase.popKeyRange))
-			for id, keyRange := range v {
-				c.Assert(bytes.Compare(keyRange[0], testcase.popKeyRange[id][0]), Equals, 0)
-				c.Assert(bytes.Compare(keyRange[1], testcase.popKeyRange[id][1]), Equals, 0)
+			popKeyRangeMap := map[string]struct{}{}
+			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
+				_, v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				c.Assert(got, Equals, true)
+				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
+				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
+			}
+			c.Assert(len(popKeyRangeMap), Equals, len(testcase.popKeyRange))
+			for k := range popKeyRangeMap {
+				_, ok := testcase.popKeyRange[k]
+				c.Assert(ok, Equals, true)
 			}
 		}
 	}

@@ -23,9 +23,9 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/keyUtil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
@@ -166,49 +166,36 @@ func (c *coordinator) patrolRegions() {
 // The regions of new version key range and old version key range would be placed into
 // the suspect regions map
 func (c *coordinator) checkSuspectKeyRanges() {
-	key, rangeGroup, success := c.cluster.PopOneSuspectKeyRange()
+	_, keyRange, success := c.cluster.PopOneSuspectKeyRange()
 	if !success {
 		return
 	}
-	if len(rangeGroup) < 1 {
+	limit := 1024
+	regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], limit)
+	if len(regions) < 1 {
 		return
 	}
-
-	regionMap := map[uint64]struct{}{}
-	f := func(regions []*core.RegionInfo) {
+	// if the size equals limit which means there probably existed the rest regions.
+	// so we search the rest key range and put these key range into suspect keyRanges again.
+	restKeyRange := [2][]byte{}
+	if len(regions) == limit {
+		// search the biggest start Key in given regions
+		var biggestStartKey []byte
 		for _, region := range regions {
-			regionMap[region.GetID()] = struct{}{}
-		}
-	}
-	// scan part of the regions in one keyRangeGroup and put the rest keyRange in suspect KeyRanges
-	restKeyRanges := make([][2][]byte, 0, 2)
-	for _, keyRange := range rangeGroup {
-		regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], 1024)
-		if len(regions) < 1 {
-			continue
-		}
-		// if the size equals limit which means there probably existed the rest regions.
-		// so we search the rest key range and put these key range into suspect keyRanges again.
-		if len(regions) == 1024 {
-			// search the biggest start Key in given regions
-			var biggestStartKey []byte
-			for _, region := range regions {
-				if bytes.Compare(biggestStartKey, region.GetStartKey()) > 0 {
-					biggestStartKey = region.GetStartKey()
-				}
+			if bytes.Compare(biggestStartKey, region.GetStartKey()) > 0 {
+				biggestStartKey = region.GetStartKey()
 			}
-			restKeyRanges = append(restKeyRanges, [2][]byte{
-				biggestStartKey,
-				keyRange[1],
-			})
 		}
-
-		f(regions)
+		restKeyRange = [2][]byte{
+			biggestStartKey,
+			keyRange[1],
+		}
+		c.cluster.AddSuspectKeyRanges(keyUtil.BuildKeyRangeKey(biggestStartKey, keyRange[1]), restKeyRange)
 	}
-	if len(restKeyRanges) > 0 {
-		c.cluster.AddSuspectKeyRanges(key, restKeyRanges)
+	regionMap := map[uint64]struct{}{}
+	for _, region := range regions {
+		regionMap[region.GetID()] = struct{}{}
 	}
-
 	regionIDList := make([]uint64, 0, 2048)
 	for id := range regionMap {
 		regionIDList = append(regionIDList, id)
