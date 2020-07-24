@@ -210,6 +210,53 @@ func (s *testTsoSuite) TestRequestFollower(c *C) {
 	c.Assert(time.Since(start), Less, time.Second)
 }
 
+// In some cases, when a TSO request arrives, the SyncTimestamp may not finish yet.
+// This test is used to simulate this situation and verify that the retry mechanism.
+func (s *testTsoSuite) TestDeplaySyncTimestamp(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 2)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+
+	var leaderServer, nextLeaderServer *tests.TestServer
+	leaderServer = cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer, NotNil)
+	for _, s := range cluster.GetServers() {
+		if s.GetConfig().Name != cluster.GetLeader() {
+			nextLeaderServer = s
+		}
+	}
+	c.Assert(nextLeaderServer, NotNil)
+
+	grpcPDClient := testutil.MustNewGrpcClient(c, nextLeaderServer.GetAddr())
+	clusterID := nextLeaderServer.GetClusterID()
+	req := &pdpb.TsoRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/tso/delaySyncTimestamp", `return(true)`), IsNil)
+
+	// Make the old leader resign and wait for the new leader to get a lease
+	leaderServer.ResignLeader()
+	c.Assert(nextLeaderServer.WaitLease(), NotNil)
+
+	tsoClient, err := grpcPDClient.Tso(ctx)
+	c.Assert(err, IsNil)
+	defer tsoClient.CloseSend()
+	err = tsoClient.Send(req)
+	c.Assert(err, IsNil)
+	resp, err := tsoClient.Recv()
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetCount(), Equals, uint32(1))
+	failpoint.Disable("github.com/pingcap/pd/v4/server/tso/delaySyncTimestamp")
+}
+
 var _ = Suite(&testTimeFallBackSuite{})
 
 type testTimeFallBackSuite struct {
