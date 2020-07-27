@@ -139,7 +139,7 @@ func genSet(num uint64) map[uint64]int64 {
 	log.Info("genSet", zap.Uint64s("perm", perm))
 	for _, ord := range perm {
 		set[ord] = rank
-		rank -= 1
+		rank--
 	}
 	return set
 }
@@ -150,7 +150,7 @@ func (rs *rankSet) getRank(qpsStatus, keyStatus, bytesStatus rankStatus) int64 {
 		rs.num = rs.conf.GetRank()
 		rs.set = genSet(rs.num)
 	}
-	rankMetricsStatus.WithLabelValues("hot").Set(float64(rs.num))
+
 	if rank, ok := rs.set[ord]; ok {
 		return rank
 	}
@@ -944,7 +944,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 type rankStatus int
 
 const (
-	Worse rankStatus = iota
+	worse rankStatus = iota
 	noWorse
 	better
 )
@@ -976,7 +976,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			} else if ratio <= minorDecRatio {
 				return noWorse
 			}
-			return Worse
+			return worse
 		}
 
 		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getSrcDecRate(srcLd.KeyRate, peer.GetKeyRate())
@@ -985,14 +985,14 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		byteHot := peer.GetByteRate() > bs.sche.conf.GetMinHotByteRate()
 		qpsDecRatio := (dstLd.QPS + peer.GetQPS()) / getSrcDecRate(srcLd.QPS, peer.GetQPS())
 		qpsHot := peer.GetQPS() > bs.sche.conf.GetMinHotQPS()
-
+		log.Info("qps", zap.Float64("dst", dstLd.QPS), zap.Float64("peer", peer.GetQPS()), zap.Float64("src", srcLd.QPS))
 		qpsStatus := status(qpsHot, qpsDecRatio)
 		keyStatus := status(keyHot, keyDecRatio)
 		byteStatus := status(byteHot, byteDecRatio)
-
+		rankMetricsStatus.WithLabelValues("hot").Set(float64(bs.sche.rs.num))
 		if qpsStatus == better && keyStatus == better && byteStatus == better {
 			rank = -8
-		} else if qpsStatus == Worse || keyStatus == Worse || byteStatus == Worse {
+		} else if qpsStatus == worse || keyStatus == worse || byteStatus == worse {
 			rank = 0
 		} else if qpsStatus == noWorse || keyStatus == noWorse || byteStatus == noWorse {
 			rank = -1
