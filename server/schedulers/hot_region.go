@@ -97,11 +97,14 @@ type hotScheduler struct {
 	// states across multiple `Schedule` calls
 	pendings [resourceTypeLen]map[*pendingInfluence]struct{}
 	// regionPendings stores regionID -> [opType]Operator
+	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
+	// be selected if its owner region is tracked in this attribute.
 	regionPendings map[uint64][2]*operator.Operator
 
 	// temporary states but exported to API or metrics
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
-	// pendingSums indicates the [resourceTypeLen] storeID -> pending Influence
+	// pendingSums indicates the [resourceType] storeID -> pending Influence
+	// This stores the pending Influence for each store by resource type.
 	pendingSums [resourceTypeLen]map[uint64]Influence
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
@@ -407,7 +410,7 @@ func filterHotPeers(
 	for _, peer := range peers {
 		if (kind == core.LeaderKind && !peer.IsLeader()) ||
 			peer.HotDegree < minHotDegree ||
-			// hotPeerFilterTy here is always mix currently, isHotPeerFiltered will directly return false here.
+			// As hotPeerFilterTy here is always mix currently, isHotPeerFiltered will directly return false here.
 			isHotPeerFiltered(peer, hotRegionThreshold, hotPeerFilterTy) {
 			continue
 		}
@@ -866,7 +869,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			}
 			return a - b
 		}
-		// we use DecRatio(Decline Ration) to expect that the dst store's (key/byte) rate should still be less
+		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
 		// than the src store's (key/byte) rate after scheduling one peer.
 		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getSrcDecRate(srcLd.KeyRate, peer.GetKeyRate())
 		keyHot := peer.GetKeyRate() >= bs.sche.conf.GetMinHotKeyRate()
