@@ -551,11 +551,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			region.GetApproximateKeys() != origin.GetApproximateKeys() {
 			saveCache = true
 		}
-
+		log.Info("query region", zap.Uint64("leader-store-id", region.GetLeader().GetStoreId()), zap.Uint64("read", region.GetQPSRead()), zap.Uint64("write", region.GetQPSWrite()))
 		if region.GetBytesWritten() != origin.GetBytesWritten() ||
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
-			region.GetKeysRead() != origin.GetKeysRead() {
+			region.GetKeysRead() != origin.GetKeysRead() ||
+			region.GetQPSRead() != origin.GetQPSRead() ||
+			region.GetQPSWrite() != origin.GetQPSWrite() {
 			saveCache, needSync = true, true
 		}
 
