@@ -181,14 +181,14 @@ func (c *coordinator) checkSuspectKeyRanges() {
 	}
 
 	// if the last region's endkey is smaller the keyRange[1] which means there existed the remaining regions between
-	// keyRange[0] and keyRange[1] after scan regions, so we put the endkey and keyRange[1] into Suspect KeyRanges
+	// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
 	lastRegion := regions[len(regions)-1]
-	if bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
+	if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
 		restKeyRange := [2][]byte{
 			lastRegion.GetEndKey(),
 			keyRange[1],
 		}
-		c.cluster.AddSuspectKeyRanges(keyutil.BuildKeyRangeKey(lastRegion.GetEndKey(), keyRange[1]), restKeyRange)
+		c.cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(lastRegion.GetEndKey(), keyRange[1]), restKeyRange)
 	}
 	c.cluster.AddSuspectRegions(regionIDList...)
 }

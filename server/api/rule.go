@@ -189,9 +189,9 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		rule.StartKey,
 		rule.EndKey,
 	}
-	cluster.AddSuspectKeyRanges(keyutil.BuildKeyRangeKey(rule.StartKey, rule.EndKey), newSuspectKeyRange)
+	cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(rule.StartKey, rule.EndKey), newSuspectKeyRange)
 	if oldRule != nil {
-		cluster.AddSuspectKeyRanges(keyutil.BuildKeyRangeKey(oldRule.StartKey, oldRule.EndKey), [2][]byte{
+		cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(oldRule.StartKey, oldRule.EndKey), [2][]byte{
 			oldRule.StartKey,
 			oldRule.EndKey,
 		})
@@ -255,7 +255,7 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			rule.StartKey,
 			rule.EndKey,
 		}
-		cluster.AddSuspectKeyRanges(keyutil.BuildKeyRangeKey(rule.StartKey, rule.EndKey), suspectKeyRanges)
+		cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(rule.StartKey, rule.EndKey), suspectKeyRanges)
 	}
 
 	h.rd.JSON(w, http.StatusOK, "Delete rule successfully.")

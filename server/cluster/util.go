@@ -18,7 +18,7 @@ import (
 	"fmt"
 )
 
-// BuildKeyRangeKey build a key for the give startKey and endKey
+// BuildKeyRangeKey builds a key for the give startKey and endKey
 func BuildKeyRangeKey(startKey, endKey []byte) string {
 	return fmt.Sprintf("%s-%s", hex.EncodeToString(startKey), hex.EncodeToString(endKey))
 }
