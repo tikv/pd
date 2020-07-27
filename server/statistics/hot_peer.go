@@ -118,7 +118,7 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret.rollingByteRate = nil
 	ret.KeyRate = stat.GetKeyRate()
 	ret.rollingKeyRate = nil
-	ret.QPS = stat.GetKeyRate()
+	ret.QPS = stat.GetQPS()
 	ret.rollingQPS = nil
 	return &ret
 }
