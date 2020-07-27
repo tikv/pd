@@ -172,32 +172,23 @@ func (c *coordinator) checkSuspectKeyRanges() {
 	}
 	limit := 1024
 	regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], limit)
-	if len(regions) < 1 {
+	if len(regions) == 0 {
 		return
 	}
-	// if the size equals limit which means there probably existed the rest regions.
-	// so we search the rest key range and put these key range into suspect keyRanges again.
-	if len(regions) == limit {
-		// search the biggest start Key in given regions
-		var biggestStartKey []byte
-		for _, region := range regions {
-			if bytes.Compare(biggestStartKey, region.GetStartKey()) > 0 {
-				biggestStartKey = region.GetStartKey()
-			}
-		}
+	regionIDList := make([]uint64, 0, limit)
+	for _, region := range regions {
+		regionIDList = append(regionIDList, region.GetID())
+	}
+
+	// if the last region's endkey is smaller the keyRange[1] which means there existed the remaining regions between
+	// keyRange[0] and keyRange[1] after scan regions, so we put the endkey and keyRange[1] into Suspect KeyRanges
+	lastRegion := regions[len(regions)-1]
+	if bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
 		restKeyRange := [2][]byte{
-			biggestStartKey,
+			lastRegion.GetEndKey(),
 			keyRange[1],
 		}
-		c.cluster.AddSuspectKeyRanges(keyutil.BuildKeyRangeKey(biggestStartKey, keyRange[1]), restKeyRange)
-	}
-	regionMap := map[uint64]struct{}{}
-	for _, region := range regions {
-		regionMap[region.GetID()] = struct{}{}
-	}
-	regionIDList := make([]uint64, 0, 2048)
-	for id := range regionMap {
-		regionIDList = append(regionIDList, id)
+		c.cluster.AddSuspectKeyRanges(keyutil.BuildKeyRangeKey(lastRegion.GetEndKey(), keyRange[1]), restKeyRange)
 	}
 	c.cluster.AddSuspectRegions(regionIDList...)
 }
