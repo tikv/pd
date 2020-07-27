@@ -15,7 +15,6 @@ package join
 
 import (
 	"fmt"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"io/ioutil"
 	"os"
 	"path"
@@ -94,7 +93,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		s, err := ioutil.ReadFile(filePath)
 		if err != nil {
-			log.Fatal(errs.ErrIOJoinConfig.MessageTemplate(), zap.Error(errs.ErrIOJoinConfig))
+			log.Fatal("read the join config meet error", zap.Error(err))
 		}
 		cfg.InitialCluster = strings.TrimSpace(string(s))
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting

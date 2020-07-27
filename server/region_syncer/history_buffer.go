@@ -14,7 +14,6 @@
 package syncer
 
 import (
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"strconv"
 	"sync"
 
@@ -141,7 +140,7 @@ func (h *historyBuffer) reload() {
 	if v != "" {
 		h.index, err = strconv.ParseUint(v, 10, 64)
 		if err != nil {
-			log.Fatal(errs.ErrFormatParseHistoryIndex.MessageTemplate(), zap.Error(errs.ErrFormatParseHistoryIndex))
+			log.Fatal("load history index failed", zap.Error(err))
 		}
 	}
 	log.Info("start from history index", zap.Uint64("start-index", h.firstIndex()))

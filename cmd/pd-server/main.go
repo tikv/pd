@@ -23,7 +23,6 @@ import (
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/dashboard"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/pkg/metricutil"
 	"github.com/pingcap/pd/v4/pkg/swaggerserver"
@@ -54,7 +53,7 @@ func main() {
 	case flag.ErrHelp:
 		exit(0)
 	default:
-		log.Fatal(errs.ErrFormatParseCmd.MessageTemplate(), zap.Error(errs.ErrFormatParseCmd))
+		log.Fatal("parse cmd flags error", zap.Error(err))
 	}
 
 	if cfg.ConfigCheck {
@@ -67,7 +66,7 @@ func main() {
 	if err == nil {
 		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
 	} else {
-		log.Fatal(errs.ErrOtherInitLog.MessageTemplate(), zap.Error(errs.ErrOtherInitLog))
+		log.Fatal("initialize logger error", zap.Error(err))
 	}
 	// Flushing any buffered log entries
 	defer log.Sync()
@@ -75,7 +74,7 @@ func main() {
 	// The old logger
 	err = logutil.InitLogger(&cfg.Log)
 	if err != nil {
-		log.Fatal(errs.ErrOtherInitLog.MessageTemplate(), zap.Error(errs.ErrOtherInitLog))
+		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
 	server.LogPDInfo()
@@ -91,7 +90,7 @@ func main() {
 
 	err = join.PrepareJoinCluster(cfg)
 	if err != nil {
-		log.Fatal(errs.ErrIOJoinConfig.MessageTemplate(), zap.Error(errs.ErrIOJoinConfig))
+		log.Fatal("join meet error", zap.Error(err))
 	}
 
 	// Creates server.
@@ -100,7 +99,7 @@ func main() {
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
-		log.Fatal(errs.ErrFormatParseURL.MessageTemplate(), zap.Error(errs.ErrFormatParseURL))
+		log.Fatal("create server failed", zap.Error(err))
 	}
 
 	sc := make(chan os.Signal, 1)
@@ -117,7 +116,7 @@ func main() {
 	}()
 
 	if err := svr.Run(); err != nil {
-		log.Fatal(errs.ErrStorageEtcdLoad.MessageTemplate(), zap.Error(errs.ErrStorageEtcdLoad))
+		log.Fatal("run server failed", zap.Error(err))
 	}
 
 	<-ctx.Done()

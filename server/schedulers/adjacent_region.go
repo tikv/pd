@@ -15,7 +15,6 @@ package schedulers
 
 import (
 	"bytes"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"strconv"
 	"time"
 
@@ -233,7 +232,7 @@ func (l *balanceAdjacentRegionScheduler) process(cluster opt.Cluster) []*operato
 
 	defer func() {
 		if l.cacheRegions.len() < 0 {
-			log.Fatal(errs.InternalCacheRegionOverflow.MessageTemplate(), zap.String("scheduler", l.GetName()))
+			log.Fatal("cache overflow", zap.String("scheduler", l.GetName()))
 		}
 		l.cacheRegions.head = head + 1
 		l.lastKey = r2.GetStartKey()

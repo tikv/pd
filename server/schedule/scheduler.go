@@ -15,7 +15,6 @@ package schedule
 
 import (
 	"encoding/json"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"net/http"
 	"strings"
 	"time"
@@ -87,7 +86,7 @@ var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
 // func of a package.
 func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[typ]; ok {
-		log.Fatal(errs.InternalSchedulerDuplicate.MessageTemplate(), zap.String("type", typ))
+		log.Fatal("duplicated scheduler", zap.String("type", typ))
 	}
 	schedulerMap[typ] = createFn
 }
@@ -96,7 +95,7 @@ func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
 // func of package.
 func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) {
 	if _, ok := schedulerArgsToDecoder[typ]; ok {
-		log.Fatal(errs.InternalSchedulerDuplicate.MessageTemplate(), zap.String("type", typ))
+		log.Fatal("duplicated scheduler", zap.String("type", typ))
 	}
 	schedulerArgsToDecoder[typ] = builder
 }

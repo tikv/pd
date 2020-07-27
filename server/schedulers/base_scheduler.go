@@ -15,7 +15,6 @@ package schedulers
 
 import (
 	"fmt"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"net/http"
 	"time"
 
@@ -51,7 +50,7 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 	case zeroGrowth:
 		return x
 	default:
-		log.Fatal(errs.ErrInternalSchedulerConfig.MessageTemplate())
+		log.Fatal("unknown interval growth type")
 	}
 	return 0
 }

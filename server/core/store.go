@@ -15,7 +15,6 @@ package core
 
 import (
 	"fmt"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"math"
 	"strings"
 	"time"
@@ -586,7 +585,7 @@ func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) errcode.ErrorCode {
 func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 	store, ok := s.stores[storeID]
 	if !ok {
-		log.Fatal(errs.InternalStoreNotFound.MessageTemplate(),
+		log.Fatal("try to clean a store's pause state, but it is not found",
 			zap.Uint64("store-id", storeID))
 	}
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
