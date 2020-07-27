@@ -175,12 +175,12 @@ func (c *coordinator) checkSuspectKeyRanges() {
 	if len(regions) == 0 {
 		return
 	}
-	regionIDList := make([]uint64, 0, limit)
+	regionIDList := make([]uint64, 0, len(regions))
 	for _, region := range regions {
 		regionIDList = append(regionIDList, region.GetID())
 	}
 
-	// if the last region's endkey is smaller the keyRange[1] which means there existed the remaining regions between
+	// if the last region's end key is smaller the keyRange[1] which means there existed the remaining regions between
 	// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
 	lastRegion := regions[len(regions)-1]
 	if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
