@@ -91,8 +91,13 @@ func (s *ReplicaStrategy) SelectStoreToReplace(coLocationStores []*core.StoreInf
 func (s *ReplicaStrategy) SelectStoreToImprove(coLocationStores []*core.StoreInfo, old uint64) uint64 {
 	// trick to avoid creating a slice with `old` removed.
 	s.swapStoreToFirst(coLocationStores, old)
-	improver := filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, s.cluster.GetStore(old))
-	return s.SelectStoreToAdd(coLocationStores[1:], improver)
+	filters := []filter.Filter{
+		filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, s.cluster.GetStore(old)),
+	}
+	if len(s.locationLabels) > 0 && len(s.isolationLevel) > 0 {
+		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores[1:]))
+	}
+	return s.SelectStoreToAdd(coLocationStores[1:], filters...)
 }
 
 func (s *ReplicaStrategy) swapStoreToFirst(stores []*core.StoreInfo, id uint64) {

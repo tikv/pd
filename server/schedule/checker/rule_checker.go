@@ -111,8 +111,15 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
 	checkerCounter.WithLabelValues("rule_checker", "add-rule-peer").Inc()
-	ruleStores := c.getRuleFitStores(rf)
-	store := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
+	var (
+		strategy     = c.strategy(region, rf.Rule)
+		ruleStores   = c.getRuleFitStores(rf)
+		extraFilters = make([]filter.Filter, 0)
+	)
+	if len(strategy.locationLabels) > 0 && len(strategy.isolationLevel) > 0 {
+		extraFilters = append(extraFilters, filter.NewIsolationFilter(strategy.checkerName, strategy.isolationLevel, strategy.locationLabels, ruleStores))
+	}
+	store := strategy.SelectStoreToAdd(ruleStores, extraFilters...)
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
 		return nil, errors.New("no store to add peer")
@@ -243,6 +250,7 @@ func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule) *R
 	return &ReplicaStrategy{
 		checkerName:    c.name,
 		cluster:        c.cluster,
+		isolationLevel: rule.IsolationLevel,
 		locationLabels: rule.LocationLabels,
 		region:         region,
 		extraFilters:   []filter.Filter{filter.NewLabelConstaintFilter(c.name, rule.LabelConstraints)},
