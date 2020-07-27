@@ -469,6 +469,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		}
 	}
 	c.core.PutStore(newStore)
+	log.Info("query stats", zap.Uint64("id", stats.StoreId), zap.Uint64("get", stats.QueryStats.Get), zap.Uint64("put", stats.QueryStats.Put))
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 	c.storesStats.UpdateTotalKeysRate(c.core.GetStores)
