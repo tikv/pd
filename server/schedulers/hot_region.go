@@ -150,6 +150,7 @@ func (rs *rankSet) getRank(qpsStatus, keyStatus, bytesStatus rankStatus) int64 {
 		rs.num = rs.conf.GetRank()
 		rs.set = genSet(rs.num)
 	}
+	rankMetricsStatus.WithLabelValues("hot").Set(float64(rs.num))
 	if rank, ok := rs.set[ord]; ok {
 		return rank
 	}

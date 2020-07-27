@@ -44,6 +44,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MaxPeerNum:            1000,
 		SrcToleranceRatio:     1.05, // Tolerate 5% difference
 		DstToleranceRatio:     1.05, // Tolerate 5% difference
+		Rank:                  0,
 	}
 }
 
@@ -54,7 +55,7 @@ type hotRegionSchedulerConfig struct {
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
 	MinHotQPS       float64 `json:"min-hot-qps"`
-	Rank            uint64   `json:"rank"`
+	Rank            uint64  `json:"rank"`
 	MaxZombieRounds int     `json:"max-zombie-rounds"`
 	MaxPeerNum      int     `json:"max-peer-number"`
 
