@@ -16,6 +16,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -206,7 +207,7 @@ func (c *coordinator) run() {
 		log.Error("cannot load schedulers' config", zap.Int("retry-times", i), zap.Error(err))
 	}
 	if err != nil {
-		log.Fatal("cannot load schedulers' config", zap.Error(err))
+		log.Fatal(errs.ErrStorageEtcdLoad.MessageTemplate(), zap.Error(errs.ErrStorageLoad))
 	}
 
 	scheduleCfg := c.cluster.opt.GetScheduleConfig().Clone()
