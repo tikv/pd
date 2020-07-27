@@ -53,54 +53,71 @@ func (s *apiTestSuite) TestAPI(c *C) {
 
 	var jsonStr = []byte(`
 {
-    "rules": [
+    "rules":[
         {
-            "component": "tikv", 
-            "cpu_rule": {
-                "max_threshold": 0.8, 
-                "min_threshold": 0.2, 
-                "max_count": 3, 
-                "resource_type": [
-                    "resource_a", 
+            "component":"tikv",
+            "cpu_rule":{
+                "max_threshold":0.8,
+                "min_threshold":0.2,
+                "max_count":3,
+                "resource_type":[
+                    "resource_a",
                     "resource_b"
                 ]
-            }, 
-            "storage_rule": {
-                "max_threshold": 0.8, 
-                "max_count": 3, 
-                "resource_type": [
+            },
+            "storage_rule":{
+                "min_threshold":0.2,
+                "max_count":3,
+                "resource_type":[
                     "resource_a"
                 ]
-            }, 
-            "scale_out_interval_seconds": 30, 
-            "scale_in_interval_seconds": 30
-        }, 
+            },
+            "scale_out_interval_seconds":30,
+            "scale_in_interval_seconds":30
+        },
         {
-            "component": "tidb", 
-            "cpu_rule": {
-                "max_threshold": 0.8, 
-                "min_threshold": 0.2, 
-                "max_count": 2, 
-                "resource_type": [
+            "component":"tidb",
+            "cpu_rule":{
+                "max_threshold":0.8,
+                "min_threshold":0.2,
+                "max_count":2,
+                "resource_type":[
                     "resource_a"
                 ]
-            }, 
-            "scale_out_interval_seconds": 30, 
-            "scale_in_interval_seconds": 30
+            },
+            "scale_out_interval_seconds":30,
+            "scale_in_interval_seconds":30
         }
-    ], 
-    "resources": [
+    ],
+    "resource_requirements":[
         {
-            "resource_type": "resource_a", 
-            "cpu": 1, 
-            "memory": 8, 
-            "storage": 1000
-        }, 
+            "component":"tikv",
+            "requirement":4,
+            "count":8
+        },
         {
-            "resource_type": "resource_b", 
-            "cpu": 2, 
-            "memory": 4, 
-            "storage": 2000
+            "component":"tikv",
+            "requirement":8,
+            "count":2
+        },
+        {
+            "component":"tidb",
+            "requirement":2,
+            "count":2
+        }
+    ],
+    "resources":[
+        {
+            "resource_type":"resource_a",
+            "cpu":1,
+            "memory":8,
+            "storage":1000
+        },
+        {
+            "resource_type":"resource_b",
+            "cpu":2,
+            "memory":4,
+            "storage":2000
         }
     ]
 }`)

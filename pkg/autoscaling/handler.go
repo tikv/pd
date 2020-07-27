@@ -25,15 +25,16 @@ import (
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
 type Strategy struct {
-	Rules     []*Rule     `json:"rules"`
-	Resources []*Resource `json:"resources"`
+	Rules                []*Rule                `json:"rules"`
+	Resources            []*Resource            `json:"resources"`
+	ResourceRequirements []*ResourceRequirement `json:"resource_requirements"`
 }
 
 // Rule is a set of constraints for a kind of component.
 type Rule struct {
 	Component               string       `json:"component"`
-	CPURule                 *CPURule     `json:"cpu_rule"`
-	StorageRule             *StorageRule `json:"storage_rule"`
+	CPURule                 *CPURule     `json:"cpu_rule,omitempty"`
+	StorageRule             *StorageRule `json:"storage_rule,omitempty"`
 	ScaleOutIntervalSeconds uint64       `json:"scale_out_interval_seconds"`
 	ScaleInIntervalSeconds  uint64       `json:"scale_in_interval_seconds"`
 }
@@ -48,7 +49,7 @@ type CPURule struct {
 
 // StorageRule is the constraints about storage.
 type StorageRule struct {
-	MaxThreshold  float64  `json:"max_threshold"`
+	MinThreshold  float64  `json:"min_threshold"`
 	MaxCount      uint64   `json:"max_count"`
 	ResourceTypes []string `json:"resource_types"`
 }
@@ -67,6 +68,13 @@ type Plan struct {
 	Count        uint64               `json:"count"`
 	ResourceType string               `json:"resource_type"`
 	Labels       []*metapb.StoreLabel `json:"labels"`
+}
+
+// ResourceRequirement is a mechanism to control the resource.
+type ResourceRequirement struct {
+	Component   string `json:"component"`
+	Requirement uint64 `json:"requirement"`
+	Count       uint64 `json:"count"`
 }
 
 // HTTPHandler is a handler to handle the auto scaling HTTP request.
