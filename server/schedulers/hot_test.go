@@ -735,6 +735,12 @@ var _ = Suite(&testHotCacheSuite{})
 
 type testHotCacheSuite struct{}
 
+func (s *testHotCacheSuite) TestGen(c *C) {
+	for i := 0; i < 36; i++ {
+		genSet(uint64(i))
+	}
+}
+
 func (s *testHotCacheSuite) TestUpdateCache(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.HotRegionCacheHitsThreshold = 0

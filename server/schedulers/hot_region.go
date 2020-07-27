@@ -85,6 +85,78 @@ const (
 // schedulePeerPr the probability of schedule the hot peer.
 var schedulePeerPr = 0.66
 
+type rankSet struct {
+	conf *hotRegionSchedulerConfig
+	num  uint64
+	set  map[uint64]int64
+}
+
+func newRankSet(conf *hotRegionSchedulerConfig) *rankSet {
+	return &rankSet{
+		conf: conf,
+		num:  0,
+		set:  nil,
+	}
+}
+
+// qps better, key better, bytes better =>7
+// qps better, key better, bytes noWorse =>6
+// qps better, key noWorse, bytes better =>5
+// qps better, key noWorse, bytes noWorse =>4
+// qps noWorse, key better, bytes better =>3
+// qps noWorse, key better, bytes noWorse =>2
+// qps noWorse, key noWorse, bytes better =>1
+// 7,(6,5,3),(4,2,1),0
+
+func perm(n uint64, ranks []uint64) []uint64 {
+	if n > 5 {
+		log.Info("TestError")
+		return nil
+	}
+	p := [][]uint64{
+		{0, 1, 2},
+		{0, 2, 1},
+		{1, 0, 2},
+		{1, 2, 0},
+		{2, 0, 1},
+		{2, 1, 0},
+	}
+	var ret []uint64
+	for _, num := range p[n] {
+		ret = append(ret, ranks[num])
+	}
+	return ret
+}
+
+func genSet(num uint64) map[uint64]int64 {
+	set := make(map[uint64]int64)
+	twoBetter := []uint64{3, 5, 6}
+	oneBetter := []uint64{1, 2, 4}
+	twoBetterPerm := perm(num/6, twoBetter)
+	oneBetterPerm := perm(num%6, oneBetter)
+	rank := int64(-2)
+	perm := append(oneBetterPerm, twoBetterPerm...)
+	log.Info("genSet", zap.Uint64s("perm", perm))
+	for _, ord := range perm {
+		set[ord] = rank
+		rank -= 1
+	}
+	return set
+}
+
+func (rs *rankSet) getRank(qpsStatus, keyStatus, bytesStatus rankStatus) int64 {
+	ord := uint64((qpsStatus-1)*4 + (keyStatus-1)*2 + bytesStatus - 1)
+	if rs.num != rs.conf.GetRank() || rs.set == nil {
+		rs.num = rs.conf.GetRank()
+		rs.set = genSet(rs.num)
+	}
+	if rank, ok := rs.set[ord]; ok {
+		return rank
+	}
+	log.Info("TestError")
+	return 0
+}
+
 type hotScheduler struct {
 	name string
 	*BaseScheduler
@@ -103,6 +175,7 @@ type hotScheduler struct {
 	pendingSums [resourceTypeLen]map[uint64]Influence
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
+	rs   *rankSet
 }
 
 func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
@@ -116,6 +189,7 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 		regionPendings: make(map[uint64][2]*operator.Operator),
 		conf:           conf,
+		rs:             newRankSet(conf),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.pendings[ty] = map[*pendingInfluence]struct{}{}
@@ -865,9 +939,18 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 	return ret
 }
 
+// rankStatus distinguishes different kinds of rank
+type rankStatus int
+
+const (
+	Worse rankStatus = iota
+	noWorse
+	better
+)
+
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
-func (bs *balanceSolver) calcProgressiveRank() { // todo add rank
+func (bs *balanceSolver) calcProgressiveRank() {
 	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
@@ -879,27 +962,41 @@ func (bs *balanceSolver) calcProgressiveRank() { // todo add rank
 			rank = -1
 		}
 	} else {
+		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
 		getSrcDecRate := func(a, b float64) float64 {
 			if a-b <= 0 {
 				return 1
 			}
 			return a - b
 		}
+		status := func(isHot bool, ratio float64) rankStatus {
+			if isHot && ratio <= greatDecRatio {
+				return better
+			} else if ratio <= minorDecRatio {
+				return noWorse
+			}
+			return Worse
+		}
+
 		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getSrcDecRate(srcLd.KeyRate, peer.GetKeyRate())
 		keyHot := peer.GetKeyRate() >= bs.sche.conf.GetMinHotKeyRate()
 		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / getSrcDecRate(srcLd.ByteRate, peer.GetByteRate())
 		byteHot := peer.GetByteRate() > bs.sche.conf.GetMinHotByteRate()
-		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
-		switch {
-		case byteHot && byteDecRatio <= greatDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-			// Both byte rate and key rate are balanced, the best choice.
-			rank = -3
-		case byteDecRatio <= minorDecRatio && keyHot && keyDecRatio <= greatDecRatio:
-			// Byte rate is not worsened, key rate is balanced.
-			rank = -2
-		case byteHot && byteDecRatio <= greatDecRatio:
-			// Byte rate is balanced, ignore the key rate.
+		qpsDecRatio := (dstLd.QPS + peer.GetQPS()) / getSrcDecRate(srcLd.QPS, peer.GetQPS())
+		qpsHot := peer.GetQPS() > bs.sche.conf.GetMinHotQPS()
+
+		qpsStatus := status(qpsHot, qpsDecRatio)
+		keyStatus := status(keyHot, keyDecRatio)
+		byteStatus := status(byteHot, byteDecRatio)
+
+		if qpsStatus == better && keyStatus == better && byteStatus == better {
+			rank = -8
+		} else if qpsStatus == Worse || keyStatus == Worse || byteStatus == Worse {
+			rank = 0
+		} else if qpsStatus == noWorse || keyStatus == noWorse || byteStatus == noWorse {
 			rank = -1
+		} else {
+			rank = bs.sche.rs.getRank(qpsStatus, keyStatus, byteStatus)
 		}
 	}
 	bs.cur.progressiveRank = rank
