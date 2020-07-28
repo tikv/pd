@@ -96,9 +96,7 @@ PD_SERVER_DEP :=
 ifneq ($(SWAGGER), 0)
 	PD_SERVER_DEP += swagger-spec
 endif
-ifneq ($(DASHBOARD), 0)
-	PD_SERVER_DEP += dashboard-ui
-endif
+PD_SERVER_DEP += dashboard-ui
 
 pd-server: export GO111MODULE=on
 pd-server: ${PD_SERVER_DEP}
