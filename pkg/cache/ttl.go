@@ -107,7 +107,7 @@ func (c *ttlCache) remove(key interface{}) {
 	delete(c.items, key)
 }
 
-// pop one key/value that is not expired. If boolean is false, it means didnt find the valid one.
+// pop one key/value that is not expired. If boolean is false, it means that it didn't find the valid one.
 func (c *ttlCache) pop() (interface{}, interface{}, bool) {
 	c.Lock()
 	defer c.Unlock()
