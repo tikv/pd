@@ -1,3 +1,16 @@
+// Copyright 2020 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package errors
 
 import "github.com/pingcap/errors"
@@ -19,10 +32,8 @@ var (
 )
 
 var (
-	// ErrIOJoinConfig is io join config error
-	ErrIOJoinConfig = ClassIO.DefineError().TextualCode("ErrIOJoinConfig").MessageTemplate("config io error during join").Done()
-	// ErrHTTPContentConfig is http content config error
-	ErrHTTPContentConfig = ClassIO.DefineError().TextualCode("ErrIOHTTPContent").MessageTemplate("http content io error").Done()
+	// ErrIORead is io error
+	ErrIORead = ClassIO.DefineError().TextualCode("ErrIORead").MessageTemplate("io read error").Done()
 	// ErrHTTPErrorResponse is http error response error
 	ErrHTTPErrorResponse = ClassNetwork.DefineError().TextualCode("ErrHTTPErrorResponse").MessageTemplate("make http error response fail").Done()
 	// ErrHTTPRedirect is http redirect error
@@ -66,7 +77,7 @@ var (
 	// InternalOperatorOrphan is operator orphan
 	InternalOperatorOrphan = ClassInternal.DefineError().TextualCode("InternalOperatorOrphan").MessageTemplate("operator is orphan").Done()
 	// ErrInternalOperatorMerge is operator merge error
-	ErrInternalOperatorMerge = ClassInternal.DefineError().TextualCode("ErrInternalOperatorMerge").MessageTemplate("operator cannot merge").Done()
+	ErrInternalOperatorMerge = ClassInternal.DefineError().TextualCode("ErrInternalOperatorMerge").MessageTemplate("merge operator should be pair").Done()
 	// InternalOperatorNotStart is operator not start
 	InternalOperatorNotStart = ClassInternal.DefineError().TextualCode("InternalOperatorNotStart").MessageTemplate("operator not start").Done()
 	// InternalOperatorNotEnd is operator not end
