@@ -198,7 +198,7 @@ func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence)
 }
 
 // summaryPendingInfluence calculate the summary pending Influence for each store and return storeID -> Influence
-// It makes each rate(key/byte/count) become (1+w) times to the origin value while f is the function to provide w(weight)
+// It makes each key/byte rate or count become (1+w) times to the origin value while f is the function to provide w(weight)
 func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]Influence {
 	ret := map[uint64]Influence{}
 	for p := range pendings {
