@@ -147,7 +147,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
-func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer) (*Operator, error) {
+func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) (*Operator, error) {
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
@@ -158,6 +158,9 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 	var leader uint64
 	if len(ids) > 0 {
 		leader = ids[rand.Intn(len(ids))]
+	}
+	if targetLeader != 0 {
+		leader = targetLeader
 	}
 	return NewBuilder(desc, cluster, origin).
 		SetPeers(targetPeers).

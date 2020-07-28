@@ -14,6 +14,7 @@
 package schedule
 
 import (
+	"math"
 	"math/rand"
 	"sync"
 
@@ -28,6 +29,29 @@ import (
 )
 
 const regionScatterName = "region-scatter"
+
+type selectedLeaderStores struct {
+	mu     sync.Mutex
+	stores map[uint64]uint64 // storeID -> hintCount
+}
+
+func (s *selectedLeaderStores) put(id uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stores[id] = s.stores[id] + 1
+}
+
+func (s *selectedLeaderStores) get(id uint64) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stores[id]
+}
+
+func newSelectedLeaderStores() *selectedLeaderStores {
+	return &selectedLeaderStores{
+		stores: make(map[uint64]uint64),
+	}
+}
 
 type selectedStores struct {
 	mu     sync.Mutex
@@ -86,15 +110,17 @@ func NewRegionScatterer(cluster opt.Cluster) *RegionScatterer {
 }
 
 type engineContext struct {
-	filters  []filter.Filter
-	selected *selectedStores
+	filters        []filter.Filter
+	selected       *selectedStores
+	selectedLeader *selectedLeaderStores
 }
 
 func newEngineContext(filters ...filter.Filter) engineContext {
 	filters = append(filters, filter.StoreStateFilter{ActionScope: regionScatterName})
 	return engineContext{
-		filters:  filters,
-		selected: newSelectedStores(),
+		filters:        filters,
+		selected:       newSelectedStores(),
+		selectedLeader: newSelectedLeaderStores(),
 	}
 }
 
@@ -153,6 +179,11 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 	}
 
 	scatterWithSameEngine(ordinaryPeers, r.ordinaryEngine)
+	// FIXME: target leader only considers the ordinary stores，maybe we need to consider the
+	// special engine stores if the engine supports to become a leader. But now there is only
+	// one engine, tiflash, which does not support the leader, so don't consider it for now.
+	targetLeader := r.searchLeastleaderStore(targetPeers, r.ordinaryEngine)
+
 	for engine, peers := range specialPeers {
 		context, ok := r.specialEngines[engine]
 		if !ok {
@@ -162,7 +193,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 		scatterWithSameEngine(peers, context)
 	}
 
-	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers)
+	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader)
 	if err != nil {
 		log.Debug("fail to create scatter region operator", zap.Error(err))
 		return nil
@@ -209,6 +240,7 @@ func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo, contex
 	filters := []filter.Filter{
 		context.selected.newFilter(r.name),
 		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
+		filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
 	}
 	filters = append(filters, context.filters...)
 
@@ -220,4 +252,20 @@ func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo, contex
 		}
 	}
 	return targets
+}
+
+func (r *RegionScatterer) searchLeastleaderStore(peers map[uint64]*metapb.Peer, context engineContext) uint64 {
+	m := uint64(math.MaxUint64)
+	id := uint64(0)
+	for storeID := range peers {
+		count := context.selectedLeader.get(storeID)
+		if m > count {
+			m = count
+			id = storeID
+		}
+	}
+	if id != 0 {
+		context.selectedLeader.put(id)
+	}
+	return id
 }
