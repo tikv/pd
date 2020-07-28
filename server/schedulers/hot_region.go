@@ -775,13 +775,13 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		filters    []filter.Filter
 		candidates []*core.StoreInfo
 	)
+	srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
+	if srcStore == nil {
+		return nil
+	}
 
 	switch bs.opTy {
 	case movePeer:
-		srcStore := bs.cluster.GetStore(bs.cur.srcStoreID)
-		if srcStore == nil {
-			return nil
-		}
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIds(), bs.cur.region.GetStoreIds()),
@@ -795,6 +795,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
+			filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
 		}
 
 		candidates = bs.cluster.GetFollowerStores(bs.cur.region)
