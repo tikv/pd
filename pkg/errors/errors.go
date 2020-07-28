@@ -60,40 +60,38 @@ var (
 	ErrStorageEtcdSave = ClassStorage.DefineError().TextualCode("ErrStorageEtcdSave").MessageTemplate("save config to storage etcd error").Done()
 	// ErrStorageEtcdDelete is etcd storage delete error
 	ErrStorageEtcdDelete = ClassStorage.DefineError().TextualCode("ErrStorageEtcdDelete").MessageTemplate("delete config from storage etcd error").Done()
-	// InternalSchedulerDuplicate is scheduler duplicate
-	InternalSchedulerDuplicate = ClassInternal.DefineError().TextualCode("InternalSchedulerDuplicate").MessageTemplate("duplicate scheduler found").Done()
-	// InternalSchedulerNotFound is scheduler not found
-	InternalSchedulerNotFound = ClassInternal.DefineError().TextualCode("InternalSchedulerNotFound").MessageTemplate("scheduler not found").Done()
+	// ErrInternalSchedulerDuplicate is scheduler duplicate
+	ErrInternalSchedulerDuplicate = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerDuplicate").MessageTemplate("duplicate scheduler found").Done()
+	// ErrInternalSchedulerNotFound is scheduler not found
+	ErrInternalSchedulerNotFound = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerNotFound").MessageTemplate("scheduler not found").Done()
 	// ErrInternalSchedulerConfig is scheduler config error
-	ErrInternalSchedulerConfig = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerConfig").MessageTemplate("wrong scheduler config").Done()
+	ErrErrInternalSchedulerConfig = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerConfig").MessageTemplate("wrong scheduler config").Done()
 	// InternalRuleInvalid is invalid rule
-	InternalRuleInvalid = ClassInternal.DefineError().TextualCode("InternalRuleInvalid").MessageTemplate("invalid rule found").Done()
-	// InternalRuleDuplicate is duplicate rule
-	InternalRuleDuplicate = ClassInternal.DefineError().TextualCode("InternalRuleDuplicate").MessageTemplate("duplicate rule found").Done()
-	// InternalRuleMismatch is rule mismatch
-	InternalRuleMismatch = ClassInternal.DefineError().TextualCode("InternalRuleMismatch").MessageTemplate("rule key mismatch").Done()
-	// InternalOperatorNotFound is operator not found
-	InternalOperatorNotFound = ClassInternal.DefineError().TextualCode("InternalOperatorNotFound").MessageTemplate("operator not found").Done()
-	// InternalOperatorOrphan is operator orphan
-	InternalOperatorOrphan = ClassInternal.DefineError().TextualCode("InternalOperatorOrphan").MessageTemplate("operator is orphan").Done()
+	ErrInternalRuleInvalid = ClassInternal.DefineError().TextualCode("ErrInternalRuleInvalid").MessageTemplate("invalid rule found").Done()
+	// ErrInternalRuleDuplicate is duplicate rule
+	ErrInternalRuleDuplicate = ClassInternal.DefineError().TextualCode("ErrInternalRuleDuplicate").MessageTemplate("duplicate rule found").Done()
+	// ErrInternalRuleMismatch is rule mismatch
+	ErrInternalRuleMismatch = ClassInternal.DefineError().TextualCode("ErrInternalRuleMismatch").MessageTemplate("rule key mismatch").Done()
+	// ErrInternalOperatorNotFound is operator not found
+	ErrInternalOperatorNotFound = ClassInternal.DefineError().TextualCode("ErrInternalOperatorNotFound").MessageTemplate("operator not found").Done()
 	// ErrInternalOperatorMerge is operator merge error
 	ErrInternalOperatorMerge = ClassInternal.DefineError().TextualCode("ErrInternalOperatorMerge").MessageTemplate("merge operator should be pair").Done()
-	// InternalOperatorNotStart is operator not start
-	InternalOperatorNotStart = ClassInternal.DefineError().TextualCode("InternalOperatorNotStart").MessageTemplate("operator not start").Done()
-	// InternalOperatorNotEnd is operator not end
-	InternalOperatorNotEnd = ClassInternal.DefineError().TextualCode("InternalOperatorNotEnd").MessageTemplate("operator not end").Done()
-	// InternalOperatorStepUnknown is operator step unknown
-	InternalOperatorStepUnknown = ClassInternal.DefineError().TextualCode("InternalStepUnknown").MessageTemplate("operator step is unknown").Done()
-	// InternalStoreNotFound is store not found
-	InternalStoreNotFound = ClassInternal.DefineError().TextualCode("InternalStoreNotFound").MessageTemplate("store id %d not found").Done()
+	// ErrInternalOperatorNotStart is operator not start
+	ErrInternalOperatorNotStart = ClassInternal.DefineError().TextualCode("ErrInternalOperatorNotStart").MessageTemplate("operator not start").Done()
+	// ErrInternalOperatorNotEnd is operator not end
+	ErrInternalOperatorNotEnd = ClassInternal.DefineError().TextualCode("ErrInternalOperatorNotEnd").MessageTemplate("operator not end").Done()
+	// ErrInternalOperatorStepUnknown is operator step unknown
+	ErrInternalOperatorStepUnknown = ClassInternal.DefineError().TextualCode("ErrInternalStepUnknown").MessageTemplate("operator step is unknown").Done()
+	// ErrInternalStoreNotFound is store not found
+	ErrInternalStoreNotFound = ClassInternal.DefineError().TextualCode("ErrInternalStoreNotFound").MessageTemplate("store id %d not found").Done()
 	// ErrInternalClusterVersionChange is cluster version change error
-	ErrInternalClusterVersionChange = ClassInternal.DefineError().TextualCode("InternalClusterVersionChange").MessageTemplate("cluster version change same time").Done()
+	ErrInternalClusterVersionChange = ClassInternal.DefineError().TextualCode("ErrInternalClusterVersionChange").MessageTemplate("cluster version change same time").Done()
 	// ErrInternalRegionKey is region key error
 	ErrInternalRegionKey = ClassInternal.DefineError().TextualCode("ErrInternalRegionKey").MessageTemplate("wrong region key range").Done()
-	// InternalCacheRegionOverflow is cache region overflow
-	InternalCacheRegionOverflow = ClassInternal.DefineError().TextualCode("InternalCacheRegionOverflow").MessageTemplate("cache region overflow").Done()
-	// InternalVersionFeatureNotExist is version feature not exist
-	InternalVersionFeatureNotExist = ClassInternal.DefineError().TextualCode("InternalVersionFeatureNotExist").MessageTemplate("version feature not exist").Done()
+	// ErrInternalCacheRegionOverflow is cache region overflow
+	ErrInternalCacheRegionOverflow = ClassInternal.DefineError().TextualCode("ErrInternalCacheRegionOverflow").MessageTemplate("cache region overflow").Done()
+	// ErrInternalVersionFeatureNotExist is version feature not exist
+	ErrInternalVersionFeatureNotExist = ClassInternal.DefineError().TextualCode("ErrInternalVersionFeatureNotExist").MessageTemplate("version feature not exist").Done()
 	// ErrFormatParseCmd is parse cmd error
 	ErrFormatParseCmd = ClassFormat.DefineError().TextualCode("ErrFormatParseCmd").MessageTemplate("parse cmd error").Done()
 	// ErrFormatParseClusterVersion is parse cluster version error
@@ -108,10 +106,10 @@ var (
 	ErrOtherDashboardServer = ClassOther.DefineError().TextualCode("ErrOtherDashboardServer").MessageTemplate("dashboard server error").Done()
 	// ErrOtherPrometheusPush is prometheus push error
 	ErrOtherPrometheusPush = ClassOther.DefineError().TextualCode("ErrOtherPrometheusPush").MessageTemplate("push to prometheus error").Done()
-	// OtherPluginLoadActionUnknown is plugin action unknown
-	OtherPluginLoadActionUnknown = ClassOther.DefineError().TextualCode("OtherPluginLoadActionUnknown").MessageTemplate("unknown action to load plugin").Done()
-	// OtherPluginFuncNotFound is plugin func not found
-	OtherPluginFuncNotFound = ClassOther.DefineError().TextualCode("OtherPluginFuncNotFound").MessageTemplate("plugin function not found").Done()
+	// ErrOtherPluginLoadActionUnknown is plugin action unknown
+	ErrOtherPluginLoadActionUnknown = ClassOther.DefineError().TextualCode("ErrOtherPluginLoadActionUnknown").MessageTemplate("unknown action to load plugin").Done()
+	// ErrOtherPluginFuncNotFound is plugin func not found
+	ErrOtherPluginFuncNotFound = ClassOther.DefineError().TextualCode("ErrOtherPluginFuncNotFound").MessageTemplate("plugin function not found").Done()
 	// ErrOtherSystemTime is system time error
 	ErrOtherSystemTime = ClassOther.DefineError().TextualCode("ErrOtherSystemTime").MessageTemplate("system time error").Done()
 )
