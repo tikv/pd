@@ -28,7 +28,7 @@ const autoScalingPrefix = "/autoscaling"
 var (
 	autoscalingServiceGroup = server.ServiceGroup{
 		Name:       "autoscaling",
-		Version:    "v1",
+		Version:    "v1alpha",
 		IsCore:     false,
 		PathPrefix: autoScalingPrefix,
 	}
