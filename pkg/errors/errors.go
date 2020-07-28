@@ -65,7 +65,7 @@ var (
 	// ErrInternalSchedulerNotFound is scheduler not found
 	ErrInternalSchedulerNotFound = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerNotFound").MessageTemplate("scheduler not found").Done()
 	// ErrInternalSchedulerConfig is scheduler config error
-	ErrErrInternalSchedulerConfig = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerConfig").MessageTemplate("wrong scheduler config").Done()
+	ErrInternalSchedulerConfig = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerConfig").MessageTemplate("wrong scheduler config").Done()
 	// InternalRuleInvalid is invalid rule
 	ErrInternalRuleInvalid = ClassInternal.DefineError().TextualCode("ErrInternalRuleInvalid").MessageTemplate("invalid rule found").Done()
 	// ErrInternalRuleDuplicate is duplicate rule
