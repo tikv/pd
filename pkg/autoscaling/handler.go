@@ -27,7 +27,7 @@ import (
 type Strategy struct {
 	Rules                []*Rule                `json:"rules"`
 	Resources            []*Resource            `json:"resources"`
-	ResourceRequirements []*ResourceRequirement `json:"resource_requirements"`
+	ResourceExpectations []*ResourceExpectation `json:"resource_expectations"`
 }
 
 // Rule is a set of constraints for a kind of component.
@@ -57,9 +57,12 @@ type StorageRule struct {
 // Resource represents a kind of resource set including CPU, memory, storage.
 type Resource struct {
 	ResourceType string `json:"resource_type"`
-	CPU          uint64 `json:"cpu"`
-	Memory       uint64 `json:"memory"`
-	Storage      uint64 `json:"storage"`
+	// The basic unit of CPU is milli-core.
+	CPU uint64 `json:"cpu"`
+	// The basic unit of memory is byte.
+	Memory uint64 `json:"memory"`
+	// The basic unit of storage is byte.
+	Storage uint64 `json:"storage"`
 }
 
 // Plan is the final result of auto scaling, which indicates how to scale in or scale out.
@@ -70,10 +73,10 @@ type Plan struct {
 	Labels       []*metapb.StoreLabel `json:"labels"`
 }
 
-// ResourceRequirement is a mechanism to control the resource.
-type ResourceRequirement struct {
+// ResourceExpectation is expectation of resource.
+type ResourceExpectation struct {
 	Component   string `json:"component"`
-	Requirement uint64 `json:"requirement"`
+	Expectation uint64 `json:"expectation"`
 	Count       uint64 `json:"count"`
 }
 

@@ -89,20 +89,20 @@ func (s *apiTestSuite) TestAPI(c *C) {
             "scale_in_interval_seconds":30
         }
     ],
-    "resource_requirements":[
+    "resource_expectations":[
         {
             "component":"tikv",
-            "requirement":4,
+            "expectation":4,
             "count":8
         },
         {
             "component":"tikv",
-            "requirement":8,
+            "expectation":8,
             "count":2
         },
         {
             "component":"tidb",
-            "requirement":2,
+            "expectation":2,
             "count":2
         }
     ],
