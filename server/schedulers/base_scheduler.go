@@ -15,6 +15,8 @@ package schedulers
 
 import (
 	"fmt"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
+	"go.uber.org/zap"
 	"net/http"
 	"time"
 
@@ -50,7 +52,7 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 	case zeroGrowth:
 		return x
 	default:
-		log.Fatal("unknown interval growth type")
+		log.Fatal("unknown interval growth type", zap.Error(errs.ErrInternalSchedulerConfig.FastGenByArgs()))
 	}
 	return 0
 }

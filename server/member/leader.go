@@ -16,6 +16,7 @@ package member
 import (
 	"context"
 	"fmt"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"math/rand"
 	"os"
 	"path"
@@ -227,7 +228,7 @@ func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
 	data, err := leader.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatal("marshal leader meet error", zap.Stringer("leader", leader), zap.Error(err))
+		log.Fatal("marshal leader meet error", zap.Stringer("leader", leader), zap.Error(err), zap.Error(errs.ErrFormatParseURL.FastGenByArgs()))
 	}
 	m.member = leader
 	m.memberValue = string(data)
