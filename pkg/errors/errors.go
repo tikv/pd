@@ -21,7 +21,7 @@ var (
 var (
 	// ErrIOJoinConfig is io join config error
 	ErrIOJoinConfig = ClassIO.DefineError().TextualCode("ErrIOJoinConfig").MessageTemplate("config io error during join").Done()
-	// ErrHttpContentConfig is http content config error
+	// ErrHTTPContentConfig is http content config error
 	ErrHTTPContentConfig = ClassIO.DefineError().TextualCode("ErrIOHTTPContent").MessageTemplate("http content io error").Done()
 	// ErrHTTPErrorResponse is http error response error
 	ErrHTTPErrorResponse = ClassNetwork.DefineError().TextualCode("ErrHTTPErrorResponse").MessageTemplate("make http error response fail").Done()
@@ -39,19 +39,19 @@ var (
 	ErrGRPCSend = ClassNetwork.DefineError().TextualCode("ErrGRPCSend").MessageTemplate("grpc send message fail").Done()
 	// ErrStorageLoad is storage load error
 	ErrStorageLoad = ClassStorage.DefineError().TextualCode("ErrStorageLoad").MessageTemplate("load config from storage error").Done()
-	// ErrStorageLoad is storage save error
+	// ErrStorageSave is storage save error
 	ErrStorageSave = ClassStorage.DefineError().TextualCode("ErrStorageSave").MessageTemplate("save config to storage error").Done()
-	// ErrStorageLoad is storage delete error
+	// ErrStorageDelete is storage delete error
 	ErrStorageDelete = ClassStorage.DefineError().TextualCode("ErrStorageDelete").MessageTemplate("delete config from storage error").Done()
-	// ErrStorageLoad is etcd storage load error
+	// ErrStorageEtcdLoad is etcd storage load error
 	ErrStorageEtcdLoad = ClassStorage.DefineError().TextualCode("ErrStorageEtcdLoad").MessageTemplate("load config from storage etcd error").Done()
-	// ErrStorageLoad is etcd storage save error
+	// ErrStorageEtcdSave is etcd storage save error
 	ErrStorageEtcdSave = ClassStorage.DefineError().TextualCode("ErrStorageEtcdSave").MessageTemplate("save config to storage etcd error").Done()
-	// ErrStorageLoad is etcd storage delete error
+	// ErrStorageEtcdDelete is etcd storage delete error
 	ErrStorageEtcdDelete = ClassStorage.DefineError().TextualCode("ErrStorageEtcdDelete").MessageTemplate("delete config from storage etcd error").Done()
 	// InternalSchedulerDuplicate is scheduler duplicate
 	InternalSchedulerDuplicate = ClassInternal.DefineError().TextualCode("InternalSchedulerDuplicate").MessageTemplate("duplicate scheduler found").Done()
-	// InternalSchedulerDuplicate is scheduler not found
+	// InternalSchedulerNotFound is scheduler not found
 	InternalSchedulerNotFound = ClassInternal.DefineError().TextualCode("InternalSchedulerNotFound").MessageTemplate("scheduler not found").Done()
 	// ErrInternalSchedulerConfig is scheduler config error
 	ErrInternalSchedulerConfig = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerConfig").MessageTemplate("wrong scheduler config").Done()
@@ -61,7 +61,7 @@ var (
 	InternalRuleDuplicate = ClassInternal.DefineError().TextualCode("InternalRuleDuplicate").MessageTemplate("duplicate rule found").Done()
 	// InternalRuleMismatch is rule mismatch
 	InternalRuleMismatch = ClassInternal.DefineError().TextualCode("InternalRuleMismatch").MessageTemplate("rule key mismatch").Done()
-	// InternalOperatorNotfound is operator not found
+	// InternalOperatorNotFound is operator not found
 	InternalOperatorNotFound = ClassInternal.DefineError().TextualCode("InternalOperatorNotFound").MessageTemplate("operator not found").Done()
 	// InternalOperatorOrphan is operator orphan
 	InternalOperatorOrphan = ClassInternal.DefineError().TextualCode("InternalOperatorOrphan").MessageTemplate("operator is orphan").Done()
