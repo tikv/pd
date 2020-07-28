@@ -301,10 +301,15 @@ func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, erro
 	}
 	r := region.GetRegionEpoch()
 	o := origin.GetRegionEpoch()
+
+	// TiKV reports term after v3.0
+	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
+
 	// Region meta is stale, return an error.
-	if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() {
+	if r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer() || isTermBehind {
 		return origin, ErrRegionIsStale(region.GetMeta(), origin.GetMeta())
 	}
+
 	return origin, nil
 }
 
