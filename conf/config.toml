@@ -14,6 +14,9 @@ advertise-peer-urls = ""
 initial-cluster = "pd=http://127.0.0.1:2380"
 initial-cluster-state = "new"
 
+## set different tokens to prevent communication between PDs in different clusters.
+# initial-cluster-token = "pd-cluster"
+
 lease = 3
 tso-save-interval = "3s"
 
