@@ -39,7 +39,7 @@ func (logger *verifyLogger) Contain(t *testing.T, s string) {
 	if logger.w.messages == nil {
 		t.Error()
 	}
-	msg := logger.w.messages[len(logger.w.messages) - 1]
+	msg := logger.w.messages[len(logger.w.messages)-1]
 	IsContain(t, msg, s)
 }
 
