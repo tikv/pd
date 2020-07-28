@@ -83,6 +83,6 @@ func TestError(t *testing.T) {
 	log.Error(ErrFormatParseHistoryIndex.MessageTemplate(), zap.Error(ErrFormatParseHistoryIndex.FastGenByArgs()))
 	lg.Contain(t, rfc)
 	rfc = `[error="[internal:InternalStoreNotFound] store id 1 not found"]`
-	log.Error(InternalStoreNotFound.MessageTemplate(), zap.Error(InternalStoreNotFound.FastGenByArgs(1)))
+	log.Error(ErrInternalStoreNotFound.MessageTemplate(), zap.Error(ErrInternalStoreNotFound.FastGenByArgs(1)))
 	lg.Contain(t, rfc)
 }
