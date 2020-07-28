@@ -19,7 +19,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"go.uber.org/zap"
@@ -141,15 +140,8 @@ func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 		return nil
 	}
 	log.Debug("region has fewer than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
-	var (
-		strategy     = r.strategy(region)
-		regionStores = r.cluster.GetRegionStores(region)
-		extraFilters = make([]filter.Filter, 0)
-	)
-	if len(strategy.locationLabels) > 0 && len(strategy.isolationLevel) > 0 {
-		extraFilters = append(extraFilters, filter.NewIsolationFilter(strategy.checkerName, strategy.isolationLevel, strategy.locationLabels, regionStores))
-	}
-	target := strategy.SelectStoreToAdd(regionStores, extraFilters...)
+	regionStores := r.cluster.GetRegionStores(region)
+	target := r.strategy(region).SelectStoreToAdd(regionStores)
 	if target == 0 {
 		log.Debug("no store to add replica", zap.Uint64("region-id", region.GetID()))
 		checkerCounter.WithLabelValues("replica_checker", "no-target-store").Inc()

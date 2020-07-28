@@ -57,6 +57,9 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 		filter.NewSpecialUseFilter(s.checkerName),
 		filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true},
 	}
+	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
+		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores))
+	}
 	if len(extraFilters) > 0 {
 		filters = append(filters, extraFilters...)
 	}
@@ -94,7 +97,7 @@ func (s *ReplicaStrategy) SelectStoreToImprove(coLocationStores []*core.StoreInf
 	filters := []filter.Filter{
 		filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, s.cluster.GetStore(old)),
 	}
-	if len(s.locationLabels) > 0 && len(s.isolationLevel) > 0 {
+	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
 		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores[1:]))
 	}
 	return s.SelectStoreToAdd(coLocationStores[1:], filters...)
