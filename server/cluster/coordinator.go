@@ -204,7 +204,7 @@ func (c *coordinator) run() {
 		if err == nil {
 			break
 		}
-		log.Error("cannot load schedulers' config", zap.Int("retry-times", i), zap.Error(err))
+		log.Error("cannot load schedulers' config", zap.Int("retry-times", i), zap.Error(err), zap.Error(errs.ErrStorageLoad.FastGenByArgs()))
 	}
 	if err != nil {
 		log.Fatal("cannot load schedulers' config", zap.Error(err), zap.Error(errs.ErrStorageLoad.FastGenByArgs()))
@@ -223,7 +223,7 @@ func (c *coordinator) run() {
 			}
 		}
 		if len(cfg.Type) == 0 {
-			log.Error("the scheduler type not found", zap.String("scheduler-name", name))
+			log.Error("the scheduler type not found", zap.String("scheduler-name", name), zap.Error(errs.ErrInternalSchedulerConfig.FastGenByArgs()))
 			continue
 		}
 		if cfg.Disable {
@@ -232,12 +232,12 @@ func (c *coordinator) run() {
 		}
 		s, err := schedule.CreateScheduler(cfg.Type, c.opController, c.cluster.storage, schedule.ConfigJSONDecoder([]byte(data)))
 		if err != nil {
-			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Error(err))
+			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 			continue
 		}
 		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
 		if err = c.addScheduler(s); err != nil {
-			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		}
 	}
 
@@ -253,13 +253,13 @@ func (c *coordinator) run() {
 
 		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args))
 		if err != nil {
-			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err))
+			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 			continue
 		}
 
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != schedulers.ErrSchedulerExisted {
-			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		} else {
 			// Only records the valid scheduler config.
 			scheduleCfg.Schedulers[k] = schedulerCfg
@@ -271,7 +271,7 @@ func (c *coordinator) run() {
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
 	c.cluster.opt.SetScheduleConfig(scheduleCfg)
 	if err := c.cluster.opt.Persist(c.cluster.storage); err != nil {
-		log.Error("cannot persist schedule config", zap.Error(err))
+		log.Error("cannot persist schedule config", zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 	}
 
 	c.wg.Add(2)
@@ -286,26 +286,26 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	// get func: SchedulerType from plugin
 	SchedulerType, err := c.pluginInterface.GetFunction(pluginPath, "SchedulerType")
 	if err != nil {
-		log.Error("GetFunction SchedulerType error", zap.Error(err))
+		log.Error("GetFunction SchedulerType error", zap.Error(err), zap.Error(errs.ErrOtherPluginFuncNotFound.FastGenByArgs()))
 		return
 	}
 	schedulerType := SchedulerType.(func() string)
 	// get func: SchedulerArgs from plugin
 	SchedulerArgs, err := c.pluginInterface.GetFunction(pluginPath, "SchedulerArgs")
 	if err != nil {
-		log.Error("GetFunction SchedulerArgs error", zap.Error(err))
+		log.Error("GetFunction SchedulerArgs error", zap.Error(err), zap.Error(errs.ErrOtherPluginFuncNotFound.FastGenByArgs()))
 		return
 	}
 	schedulerArgs := SchedulerArgs.(func() []string)
 	// create and add user scheduler
 	s, err := schedule.CreateScheduler(schedulerType(), c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerType(), schedulerArgs()))
 	if err != nil {
-		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), zap.Error(err))
+		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		return
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 	if err = c.addScheduler(s); err != nil {
-		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		return
 	}
 
@@ -323,13 +323,13 @@ func (c *coordinator) waitPluginUnload(pluginPath, schedulerName string, ch chan
 			if action == PluginUnload {
 				err := c.removeScheduler(schedulerName)
 				if err != nil {
-					log.Error("can not remove scheduler", zap.String("scheduler-name", schedulerName), zap.Error(err))
+					log.Error("can not remove scheduler", zap.String("scheduler-name", schedulerName), zap.Error(err), zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
 				} else {
 					log.Info("unload plugin", zap.String("plugin", pluginPath))
 					return
 				}
 			} else {
-				log.Error("unknown action", zap.String("action", action))
+				log.Error("unknown action", zap.String("action", action), zap.Error(errs.ErrOtherPluginLoadActionUnknown.FastGenByArgs()))
 			}
 		case <-c.ctx.Done():
 			log.Info("unload plugin has been stopped")
@@ -531,13 +531,13 @@ func (c *coordinator) removeScheduler(name string) error {
 	var err error
 	opt := c.cluster.opt
 	if err = opt.RemoveSchedulerCfg(s.Ctx(), name); err != nil {
-		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
+		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err), zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
 	} else if err = opt.Persist(c.cluster.storage); err != nil {
-		log.Error("the option can not persist scheduler config", zap.Error(err))
+		log.Error("the option can not persist scheduler config", zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 	} else {
 		err = c.cluster.storage.RemoveScheduleConfig(name)
 		if err != nil {
-			log.Error("can not remove the scheduler config", zap.Error(err))
+			log.Error("can not remove the scheduler config", zap.Error(err), zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
 		}
 	}
 	return err
