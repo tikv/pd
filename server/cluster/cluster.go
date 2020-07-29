@@ -100,11 +100,9 @@ type RaftCluster struct {
 	storesStats     *statistics.StoresStats
 	hotSpotCache    *statistics.HotCache
 
-
 	coordinator      *coordinator
 	suspectRegions   *cache.TTLUint64 // suspectRegions are regions that may need fix
 	suspectKeyRanges *cache.TTLString // suspect key-range regions that may need fix
-
 
 	wg           sync.WaitGroup
 	quit         chan struct{}
