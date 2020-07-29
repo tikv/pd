@@ -75,9 +75,9 @@ type Plan struct {
 
 // ResourceExpectation is expectation of resource.
 type ResourceExpectation struct {
-	Component   string `json:"component"`
-	Expectation uint64 `json:"expectation"`
-	Count       uint64 `json:"count"`
+	Component      string `json:"component"`
+	CPUExpectation uint64 `json:"cpu_expectation"`
+	Count          uint64 `json:"count"`
 }
 
 // HTTPHandler is a handler to handle the auto scaling HTTP request.

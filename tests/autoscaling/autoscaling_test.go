@@ -92,17 +92,17 @@ func (s *apiTestSuite) TestAPI(c *C) {
     "resource_expectations":[
         {
             "component":"tikv",
-            "expectation":4,
+            "cpu_expectation":4,
             "count":8
         },
         {
             "component":"tikv",
-            "expectation":8,
+            "cpu_expectation":8,
             "count":2
         },
         {
             "component":"tidb",
-            "expectation":2,
+            "cpu_expectation":2,
             "count":2
         }
     ],
