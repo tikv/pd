@@ -22,6 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/pkg/codec"
+	"github.com/pingcap/pd/v4/pkg/keyutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
@@ -179,11 +180,27 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	oldRule := cluster.GetRuleManager().GetRule(rule.GroupID, rule.ID)
 	if err := cluster.GetRuleManager().SetRule(&rule); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+<<<<<<< HEAD
 	h.rd.JSON(w, http.StatusOK, nil)
+=======
+	newSuspectKeyRange := [2][]byte{
+		rule.StartKey,
+		rule.EndKey,
+	}
+	cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(rule.StartKey, rule.EndKey), newSuspectKeyRange)
+	if oldRule != nil {
+		cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(oldRule.StartKey, oldRule.EndKey), [2][]byte{
+			oldRule.StartKey,
+			oldRule.EndKey,
+		})
+	}
+	h.rd.JSON(w, http.StatusOK, "Update rule successfully.")
+>>>>>>> 11eb116... cluster: Support check regions after rule updated. (#2664)
 }
 
 func (h *ruleHandler) checkRule(r *placement.Rule) error {
@@ -232,9 +249,22 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	group, id := mux.Vars(r)["group"], mux.Vars(r)["id"]
+	rule := cluster.GetRuleManager().GetRule(group, id)
 	if err := cluster.GetRuleManager().DeleteRule(group, id); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+<<<<<<< HEAD
 	h.rd.JSON(w, http.StatusOK, nil)
+=======
+	if rule != nil {
+		suspectKeyRanges := [2][]byte{
+			rule.StartKey,
+			rule.EndKey,
+		}
+		cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(rule.StartKey, rule.EndKey), suspectKeyRanges)
+	}
+
+	h.rd.JSON(w, http.StatusOK, "Delete rule successfully.")
+>>>>>>> 11eb116... cluster: Support check regions after rule updated. (#2664)
 }
