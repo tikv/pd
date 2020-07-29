@@ -615,4 +615,3 @@ func (s *testRuleSuite) TestBatch(c *C) {
 		}
 	}
 }
-
