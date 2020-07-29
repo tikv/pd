@@ -372,13 +372,13 @@ func (m *RuleManager) delRule(t *Batch, oldRules map[[2]string]*Rule) {
 	}
 }
 
-// The operation type for Batch
+// BatchAction indicates the operation type
 type BatchAction byte
 
 const (
-	// Add a placement rule, only need to specify the field *Rule
+	// BatchAdd a placement rule, only need to specify the field *Rule
 	BatchAdd BatchAction = iota + 1
-	// Del a placement rule, only need to specify the field `GroupID`, `ID`, `MatchID`
+	// BatchDel a placement rule, only need to specify the field `GroupID`, `ID`, `MatchID`
 	BatchDel
 )
 

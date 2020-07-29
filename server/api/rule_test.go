@@ -508,15 +508,15 @@ func (s *testRuleSuite) TestBatch(c *C) {
 	}
 	opt3 := placement.Batch{
 		Action: placement.BatchAdd,
-		Rule:   &placement.Rule{GroupID: "c", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+		Rule:   &placement.Rule{GroupID: "a", ID: "14", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
 	}
 	opt4 := placement.Batch{
 		Action: placement.BatchAdd,
-		Rule:   &placement.Rule{GroupID: "d", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+		Rule:   &placement.Rule{GroupID: "a", ID: "15", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
 	}
 	opt5 := placement.Batch{
 		Action: placement.BatchDel,
-		Rule:   &placement.Rule{GroupID: "c", ID: "13"},
+		Rule:   &placement.Rule{GroupID: "a", ID: "14"},
 	}
 	opt6 := placement.Batch{
 		Action:  placement.BatchDel,
@@ -529,11 +529,11 @@ func (s *testRuleSuite) TestBatch(c *C) {
 	}
 	opt8 := placement.Batch{
 		Action: placement.BatchAdd,
-		Rule:   &placement.Rule{GroupID: "e", ID: "13", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1},
+		Rule:   &placement.Rule{GroupID: "a", ID: "16", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1},
 	}
 	opt9 := placement.Batch{
 		Action: placement.BatchAdd,
-		Rule:   &placement.Rule{GroupID: "f", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1},
+		Rule:   &placement.Rule{GroupID: "a", ID: "17", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1},
 	}
 
 	successData1, err := json.Marshal([]placement.Batch{opt1, opt2, opt3})
