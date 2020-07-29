@@ -275,12 +275,13 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 	return FitRegion(stores, region, rules)
 }
 
-func (m *RuleManager) setRule(rule *Rule) *Rule {
+func (m *RuleManager) swapRule(rule *Rule) *Rule {
 	old := m.rules[rule.Key()]
 	m.rules[rule.Key()] = rule
 	return old
 }
 
+// SetRules inserts or updates lots of Rules at once.
 func (m *RuleManager) SetRules(rules []*Rule) error {
 	for _, rule := range rules {
 		err := m.adjustRule(rule)
@@ -295,7 +296,7 @@ func (m *RuleManager) SetRules(rules []*Rule) error {
 	oldRules := make(map[[2]string]*Rule)
 
 	for _, rule := range rules {
-		oldRules[rule.Key()] = m.setRule(rule)
+		oldRules[rule.Key()] = m.swapRule(rule)
 	}
 
 	ruleList, err := buildRuleList(m.rules)

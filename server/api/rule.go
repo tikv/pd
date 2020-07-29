@@ -62,7 +62,7 @@ func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 // @Tags rule
 // @Summary Set all rules for the cluster.
 // @Produce json
-// @Param {array}placement.Rule
+// @Param rules body []placement.Rule true "Parameters of rules"
 // @Success 200 {string} string "Update rules successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 412 {string} string "Placement rules feature is disabled."
