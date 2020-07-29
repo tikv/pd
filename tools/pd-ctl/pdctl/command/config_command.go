@@ -521,10 +521,10 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	}
 
 	n := len(validRules)
-	for k := 0; k < n ; k++ {
+	for k := 0; k < n; k++ {
 		r := validRules[k]
 		if r.Count == 0 {
-			validRules[k], validRules[n - 1] = validRules[n - 1], validRules[k]
+			validRules[k], validRules[n-1] = validRules[n-1], validRules[k]
 			n--
 		}
 	}
