@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/pingcap/log"
@@ -275,35 +276,27 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 	return FitRegion(stores, region, rules)
 }
 
-func (m *RuleManager) swapRule(rule *Rule) *Rule {
-	old := m.rules[rule.Key()]
-	m.rules[rule.Key()] = rule
-	return old
-}
-
-// SetRules inserts or updates lots of Rules at once.
-func (m *RuleManager) SetRules(rules []*Rule) error {
-	for _, rule := range rules {
-		err := m.adjustRule(rule)
-		if err != nil {
-			return err
-		}
-	}
-
-	m.Lock()
-	defer m.Unlock()
-
-	oldRules := make(map[[2]string]*Rule)
-
-	for _, rule := range rules {
-		oldRules[rule.Key()] = m.swapRule(rule)
-	}
-
+func (m *RuleManager) tryBuildSave(oldRules map[[2]string]*Rule) error {
 	ruleList, err := buildRuleList(m.rules)
 	if err == nil {
-		for _, rule := range rules {
-			err = m.store.SaveRule(rule.StoreKey(), rule)
+		for key := range oldRules {
+			rule := m.rules[key]
+			if rule != nil {
+				err = m.store.SaveRule(rule.StoreKey(), rule)
+			} else {
+				r := Rule{
+					GroupID: key[0],
+					ID:      key[1],
+				}
+				err = m.store.DeleteRule(r.StoreKey())
+			}
 			if err != nil {
+				// TODO: it is not completely safe
+				// 1. in case that half of rules applied, error.. we have to cancel persisted rules
+				// but that may fail too, causing memory/disk inconsistency
+				// either rely a transaction API, or clients to request again until success
+				// 2. in case that PD is suddenly down in the loop, inconsistency again
+				// now we can only rely clients to request again
 				break
 			}
 		}
@@ -321,6 +314,107 @@ func (m *RuleManager) SetRules(rules []*Rule) error {
 	}
 
 	m.ruleList = ruleList
+	return nil
+}
+
+func (m *RuleManager) addRule(rule *Rule, oldRules map[[2]string]*Rule) {
+	old := m.rules[rule.Key()]
+	m.rules[rule.Key()] = rule
+	oldRules[rule.Key()] = old
+}
+
+// SetRules inserts or updates lots of Rules at once.
+func (m *RuleManager) SetRules(rules []*Rule) error {
+	for _, rule := range rules {
+		err := m.adjustRule(rule)
+		if err != nil {
+			return err
+		}
+	}
+
+	m.Lock()
+	defer m.Unlock()
+
+	oldRules := make(map[[2]string]*Rule)
+
+	for _, rule := range rules {
+		m.addRule(rule, oldRules)
+	}
+
+	if err := m.tryBuildSave(oldRules); err != nil {
+		return err
+	}
+
 	log.Info("placement rule updated", zap.String("rules", fmt.Sprint(rules)))
+	return nil
+}
+
+func (m *RuleManager) emptyRule(group, id string) ([2]string, *Rule) {
+	key := [2]string{group, id}
+	old, ok := m.rules[key]
+	if ok {
+		delete(m.rules, key)
+	}
+	return key, old
+}
+
+func (m *RuleManager) delRule(t *Batch, oldRules map[[2]string]*Rule) {
+	if !t.MatchID {
+		k, r := m.emptyRule(t.GroupID, t.ID)
+		oldRules[k] = r
+	} else {
+		for key := range m.rules {
+			if key[0] == t.GroupID && strings.HasPrefix(key[1], t.ID) {
+				k, r := m.emptyRule(key[0], key[1])
+				oldRules[k] = r
+			}
+		}
+	}
+}
+
+type BatchAction byte
+
+const (
+	BatchAdd BatchAction = iota + 1
+	BatchDel
+)
+
+type Batch struct {
+	*Rule
+	Action  BatchAction
+	MatchID bool
+}
+
+// Batch execute a series of actions at once.
+func (m *RuleManager) Batch(todo []Batch) error {
+	for _, t := range todo {
+		switch t.Action {
+		case BatchAdd:
+			err := m.adjustRule(t.Rule)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	m.Lock()
+	defer m.Unlock()
+
+	oldRules := make(map[[2]string]*Rule)
+
+	for _, t := range todo {
+		switch t.Action {
+		case BatchAdd:
+			m.addRule(t.Rule, oldRules)
+		case BatchDel:
+			m.delRule(&t, oldRules)
+		}
+	}
+
+	if err := m.tryBuildSave(oldRules); err != nil {
+		return err
+	}
+
+	log.Info("placement rules updated", zap.String("rules", fmt.Sprint(todo)))
 	return nil
 }
