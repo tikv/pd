@@ -795,7 +795,9 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 		filters = []filter.Filter{
 			filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
-			filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
+		}
+		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore); leaderFilter != nil {
+			filters = append(filters, leaderFilter)
 		}
 
 		candidates = bs.cluster.GetFollowerStores(bs.cur.region)

@@ -77,9 +77,6 @@ func Target(opt opt.Options, store *core.StoreInfo, filters []Filter) bool {
 	storeAddress := store.GetAddress()
 	storeID := fmt.Sprintf("%d", store.GetID())
 	for _, filter := range filters {
-		if filter == nil {
-			continue
-		}
 		if !filter.Target(opt, store) {
 			filterCounter.WithLabelValues("filter-target", storeAddress, storeID, filter.Scope(), filter.Type()).Inc()
 			return false
