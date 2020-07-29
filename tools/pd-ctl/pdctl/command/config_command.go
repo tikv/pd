@@ -512,26 +512,38 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	}
-	for _, r := range rules {
-		if r.Count > 0 {
-			b, _ := json.Marshal(r)
-			_, err = doRequest(cmd, rulePrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
-			if err != nil {
-				fmt.Printf("failed to save rule %s/%s: %v\n", r.GroupID, r.ID, err)
-				return
-			}
-			fmt.Printf("saved rule %s/%s\n", r.GroupID, r.ID)
+
+	validRules := rules[:0]
+	for _, rule := range rules {
+		if rule.Count >= 0 {
+			validRules = append(validRules, rule)
 		}
 	}
-	for _, r := range rules {
+
+	n := len(validRules)
+	for k := 0; k < n ; k++ {
+		r := validRules[k]
 		if r.Count == 0 {
-			_, err = doRequest(cmd, path.Join(rulePrefix, r.GroupID, r.ID), http.MethodDelete)
-			if err != nil {
-				fmt.Printf("failed to delete rule %s/%s: %v\n", r.GroupID, r.ID, err)
-				return
-			}
-			fmt.Printf("deleted rule %s/%s\n", r.GroupID, r.ID)
+			validRules[k], validRules[n - 1] = validRules[n - 1], validRules[k]
+			n--
 		}
+	}
+
+	b, _ := json.Marshal(validRules[:n])
+	_, err = doRequest(cmd, rulesPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
+	if err != nil {
+		fmt.Printf("failed to save rules %s: %s\n", b, err)
+		return
+	}
+	fmt.Printf("saved all rules\n")
+
+	for _, r := range validRules[n:] {
+		_, err = doRequest(cmd, path.Join(rulePrefix, r.GroupID, r.ID), http.MethodDelete)
+		if err != nil {
+			fmt.Printf("failed to delete rule %s/%s: %v\n", r.GroupID, r.ID, err)
+			return
+		}
+		fmt.Printf("deleted rule %s/%s\n", r.GroupID, r.ID)
 	}
 	cmd.Println("Success!")
 }
