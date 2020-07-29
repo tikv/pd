@@ -95,11 +95,16 @@ type hotScheduler struct {
 	r           *rand.Rand
 
 	// states across multiple `Schedule` calls
-	pendings       [resourceTypeLen]map[*pendingInfluence]struct{}
+	pendings [resourceTypeLen]map[*pendingInfluence]struct{}
+	// regionPendings stores regionID -> [opType]Operator
+	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
+	// be selected if its owner region is tracked in this attribute.
 	regionPendings map[uint64][2]*operator.Operator
 
 	// temporary states but exported to API or metrics
 	stLoadInfos [resourceTypeLen]map[uint64]*storeLoadDetail
+	// pendingSums indicates the [resourceType] storeID -> pending Influence
+	// This stores the pending Influence for each store by resource type.
 	pendingSums [resourceTypeLen]map[uint64]Influence
 	// config of hot scheduler
 	conf *hotRegionSchedulerConfig
@@ -190,6 +195,8 @@ func (h *hotScheduler) dispatch(typ rwType, cluster opt.Cluster) []*operator.Ope
 	return nil
 }
 
+// prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
+// each store
 func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	h.summaryPendingInfluence()
 
@@ -236,6 +243,7 @@ func (h *hotScheduler) prepareForBalance(cluster opt.Cluster) {
 	}
 }
 
+// getHotRegionThreshold return the min rate for the rw(read/write) rate and key rate
 func getHotRegionThreshold(stats *statistics.StoresStats, typ rwType) [2]uint64 {
 	var hotRegionThreshold [2]uint64
 	switch typ {
@@ -264,6 +272,8 @@ func getHotRegionThreshold(stats *statistics.StoresStats, typ rwType) [2]uint64 
 	}
 }
 
+// summaryPendingInfluence calculate the summary of pending Influence for each store
+// and clean the region from regionInfluence if they have ended operator.
 func (h *hotScheduler) summaryPendingInfluence() {
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		h.pendingSums[ty] = summaryPendingInfluence(h.pendings[ty], h.calcPendingWeight)
@@ -271,6 +281,8 @@ func (h *hotScheduler) summaryPendingInfluence() {
 	h.gcRegionPendings()
 }
 
+// gcRegionPendings check the region whether it need to be deleted from regionPendings depended on whether it have
+// ended operator
 func (h *hotScheduler) gcRegionPendings() {
 	for regionID, pendings := range h.regionPendings {
 		empty := true
@@ -293,11 +305,12 @@ func (h *hotScheduler) gcRegionPendings() {
 	}
 }
 
-// Load information of all available stores.
+// summaryStoresLoad Load information of all available stores.
+// it will filtered the hot peer and calculate the current and future stat(byte/key rate,count) for each store
 func summaryStoresLoad(
 	storeByteRate map[uint64]float64,
 	storeKeyRate map[uint64]float64,
-	pendings map[uint64]Influence,
+	storePendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
 	minHotDegree int,
 	hotRegionThreshold [2]uint64,
@@ -305,6 +318,7 @@ func summaryStoresLoad(
 	kind core.ResourceKind,
 	hotPeerFilterTy hotPeerFilterType,
 ) map[uint64]*storeLoadDetail {
+	// loadDetail stores the storeID -> hotPeers stat and its current and future stat(key/byte rate,count)
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
 	allByteSum := 0.0
 	allKeySum := 0.0
@@ -349,7 +363,7 @@ func summaryStoresLoad(
 			ByteRate: byteRate,
 			KeyRate:  keyRate,
 			Count:    float64(len(hotPeers)),
-		}).ToLoadPred(pendings[id])
+		}).ToLoadPred(storePendings[id])
 
 		// Construct store load info.
 		loadDetail[id] = &storeLoadDetail{
@@ -359,6 +373,7 @@ func summaryStoresLoad(
 	}
 	storeLen := float64(len(storeByteRate))
 
+	// store expectation byte/key rate and count for each store-load detail.
 	for id, detail := range loadDetail {
 		byteExp := allByteSum / storeLen
 		keyExp := allKeySum / storeLen
@@ -383,6 +398,7 @@ func summaryStoresLoad(
 	return loadDetail
 }
 
+// filterHotPeers filter the peer whose hot degree is less than minHotDegress
 func filterHotPeers(
 	kind core.ResourceKind,
 	minHotDegree int,
@@ -394,6 +410,7 @@ func filterHotPeers(
 	for _, peer := range peers {
 		if (kind == core.LeaderKind && !peer.IsLeader()) ||
 			peer.HotDegree < minHotDegree ||
+			// As hotPeerFilterTy here is always mix currently, isHotPeerFiltered will directly return false here.
 			isHotPeerFiltered(peer, hotRegionThreshold, hotPeerFilterTy) {
 			continue
 		}
@@ -402,6 +419,8 @@ func filterHotPeers(
 	return ret
 }
 
+// isHotPeerFiltered compare whether the target peer would be filtered depended on its stat and hot rate threshold
+// In case mixed, we directly return false
 func isHotPeerFiltered(peer *statistics.HotPeerStat, hotRegionThreshold [2]uint64, hotPeerFilterTy hotPeerFilterType) bool {
 	var isFiltered bool
 	switch hotPeerFilterTy {
@@ -582,6 +601,8 @@ func (bs *balanceSolver) isValid() bool {
 	return true
 }
 
+// solve travels all the src stores, hot peers, dst stores and select each one of them to make a best scheduling solution.
+// The comparing between solutions is based on calcProgressiveRank.
 func (bs *balanceSolver) solve() []*operator.Operator {
 	if !bs.isValid() || !bs.allowBalance() {
 		return nil
@@ -626,6 +647,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	return ops
 }
 
+// allowBalance check whether the operator count have exceed the hot region limit by type
 func (bs *balanceSolver) allowBalance() bool {
 	switch bs.opTy {
 	case movePeer:
@@ -637,6 +659,8 @@ func (bs *balanceSolver) allowBalance() bool {
 	}
 }
 
+// filterSrcStores compare the min rate and the ratio * expectation rate, if both key and byte rate is greater than
+// its expectation * ratio, the store would be selected as hot source store
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
 	for id, detail := range bs.stLoadDetail {
@@ -657,6 +681,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	return ret
 }
 
+// filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
+// The returned hotPeer count in controlled by `max-peer-number`.
 func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	ret := bs.stLoadDetail[bs.cur.srcStoreID].HotPeers
 	// Return at most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
@@ -770,6 +796,7 @@ func (bs *balanceSolver) getRegion() *core.RegionInfo {
 	return region
 }
 
+// filterDstStores select the candidate store by filters
 func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 	var (
 		filters    []filter.Filter
@@ -842,6 +869,8 @@ func (bs *balanceSolver) calcProgressiveRank() {
 			}
 			return a - b
 		}
+		// we use DecRatio(Decline Ratio) to expect that the dst store's (key/byte) rate should still be less
+		// than the src store's (key/byte) rate after scheduling one peer.
 		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getSrcDecRate(srcLd.KeyRate, peer.GetKeyRate())
 		keyHot := peer.GetKeyRate() >= bs.sche.conf.GetMinHotKeyRate()
 		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / getSrcDecRate(srcLd.ByteRate, peer.GetByteRate())
@@ -1126,6 +1155,7 @@ func (h *hotScheduler) copyPendingInfluence(ty resourceType) map[uint64]Influenc
 	return ret
 }
 
+// calcPendingWeight return the calculate weight of one Operator, the value will between [0,1]
 func (h *hotScheduler) calcPendingWeight(op *operator.Operator) float64 {
 	if op.CheckExpired() || op.CheckTimeout() {
 		return 0

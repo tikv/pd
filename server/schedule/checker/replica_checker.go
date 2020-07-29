@@ -245,6 +245,7 @@ func (r *ReplicaChecker) strategy(region *core.RegionInfo) *ReplicaStrategy {
 		checkerName:    replicaCheckerName,
 		cluster:        r.cluster,
 		locationLabels: r.cluster.GetLocationLabels(),
+		isolationLevel: r.cluster.GetIsolationLevel(),
 		region:         region,
 	}
 }

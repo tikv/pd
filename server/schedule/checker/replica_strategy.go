@@ -27,6 +27,7 @@ type ReplicaStrategy struct {
 	checkerName    string // replica-checker / rule-checker
 	cluster        opt.Cluster
 	locationLabels []string
+	isolationLevel string
 	region         *core.RegionInfo
 	extraFilters   []filter.Filter
 }
@@ -50,12 +51,14 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	//
 	// The reason for it is to prevent the non-optimal replica placement due
 	// to the short-term state, resulting in redundant scheduling.
-
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIds()),
 		filter.NewStorageThresholdFilter(s.checkerName),
 		filter.NewSpecialUseFilter(s.checkerName),
 		filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true},
+	}
+	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
+		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores))
 	}
 	if len(extraFilters) > 0 {
 		filters = append(filters, extraFilters...)
@@ -91,8 +94,13 @@ func (s *ReplicaStrategy) SelectStoreToReplace(coLocationStores []*core.StoreInf
 func (s *ReplicaStrategy) SelectStoreToImprove(coLocationStores []*core.StoreInfo, old uint64) uint64 {
 	// trick to avoid creating a slice with `old` removed.
 	s.swapStoreToFirst(coLocationStores, old)
-	improver := filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, s.cluster.GetStore(old))
-	return s.SelectStoreToAdd(coLocationStores[1:], improver)
+	filters := []filter.Filter{
+		filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, s.cluster.GetStore(old)),
+	}
+	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
+		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores[1:]))
+	}
+	return s.SelectStoreToAdd(coLocationStores[1:], filters...)
 }
 
 func (s *ReplicaStrategy) swapStoreToFirst(stores []*core.StoreInfo, id uint64) {

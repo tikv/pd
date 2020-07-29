@@ -2,6 +2,7 @@ package schedule
 
 import (
 	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
@@ -41,21 +42,21 @@ var _ = Suite(&testScatterRegionSuite{})
 type testScatterRegionSuite struct{}
 
 func (s *testScatterRegionSuite) TestSixStores(c *C) {
-	s.scatter(c, 6, 4, false)
-	s.scatter(c, 6, 4, true)
+	s.scatter(c, 6, 100, false)
+	s.scatter(c, 6, 100, true)
 }
 
 func (s *testScatterRegionSuite) TestFiveStores(c *C) {
-	s.scatter(c, 5, 5, false)
-	s.scatter(c, 5, 5, true)
+	s.scatter(c, 5, 100, false)
+	s.scatter(c, 5, 100, true)
 }
 
 func (s *testScatterRegionSuite) TestSixSpecialStores(c *C) {
-	s.scatterSpecial(c, 3, 6, 4)
+	s.scatterSpecial(c, 3, 6, 100)
 }
 
 func (s *testScatterRegionSuite) TestFiveSpecialStores(c *C) {
-	s.scatterSpecial(c, 5, 5, 5)
+	s.scatterSpecial(c, 5, 5, 100)
 }
 
 func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
@@ -81,11 +82,11 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 	}
 	tc.EnablePlacementRules = useRules
 
-	seq := newSequencer(numStores)
 	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	for i := uint64(2); i <= numRegions; i++ {
-		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
+		// region distributed in same stores.
+		tc.AddLeaderRegion(i, 1, 2, 3)
 	}
 
 	scatterer := NewRegionScatterer(tc)
@@ -99,16 +100,29 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 	}
 
 	countPeers := make(map[uint64]uint64)
+	countLeader := make(map[uint64]uint64)
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
 		for _, peer := range region.GetPeers() {
 			countPeers[peer.GetStoreId()]++
+			if peer.GetId() == region.GetLeader().GetId() {
+				countLeader[peer.GetStoreId()]++
+			}
 		}
 	}
 
 	// Each store should have the same number of peers.
 	for _, count := range countPeers {
-		c.Assert(count, Equals, numRegions*3/numStores)
+		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numStores))
+		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numStores))
+	}
+
+	// Each store should have the same number of leaders.
+	c.Assert(len(countPeers), Equals, int(numStores))
+	c.Assert(len(countLeader), Equals, int(numStores))
+	for _, count := range countLeader {
+		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions)/float64(numStores))
+		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions)/float64(numStores))
 	}
 }
 
@@ -129,16 +143,14 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 		GroupID: "pd", ID: "learner", Role: placement.Learner, Count: 3,
 		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}), IsNil)
 
-	ordinarySeq := newSequencer(numOrdinaryStores)
-	specialSeq := newSequencerWithMinID(numOrdinaryStores+1, numOrdinaryStores+numSpecialStores)
 	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
 	tc.AddRegionWithLearner(1, 1, []uint64{2, 3}, []uint64{numOrdinaryStores + 1, numOrdinaryStores + 2, numOrdinaryStores + 3})
 	for i := uint64(2); i <= numRegions; i++ {
 		tc.AddRegionWithLearner(
 			i,
-			ordinarySeq.next(),
-			[]uint64{ordinarySeq.next(), ordinarySeq.next()},
-			[]uint64{specialSeq.next(), specialSeq.next(), specialSeq.next()},
+			1,
+			[]uint64{2, 3},
+			[]uint64{numOrdinaryStores + 1, numOrdinaryStores + 2, numOrdinaryStores + 3},
 		)
 	}
 
@@ -154,6 +166,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 
 	countOrdinaryPeers := make(map[uint64]uint64)
 	countSpecialPeers := make(map[uint64]uint64)
+	countOrdinaryLeaders := make(map[uint64]uint64)
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
 		for _, peer := range region.GetPeers() {
@@ -164,15 +177,24 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 			} else {
 				countOrdinaryPeers[storeID]++
 			}
+			if peer.GetId() == region.GetLeader().GetId() {
+				countOrdinaryLeaders[storeID]++
+			}
 		}
 	}
 
 	// Each store should have the same number of peers.
 	for _, count := range countOrdinaryPeers {
-		c.Assert(count, Equals, numRegions*3/numOrdinaryStores)
+		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numOrdinaryStores))
+		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numOrdinaryStores))
 	}
 	for _, count := range countSpecialPeers {
-		c.Assert(count, Equals, numRegions*3/numSpecialStores)
+		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numSpecialStores))
+		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numSpecialStores))
+	}
+	for _, count := range countOrdinaryLeaders {
+		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions)/float64(numOrdinaryStores))
+		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions)/float64(numOrdinaryStores))
 	}
 }
 
