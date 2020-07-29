@@ -215,6 +215,74 @@ func (s *testRuleSuite) TestGetAll(c *C) {
 	c.Assert(len(resp2), GreaterEqual, 1)
 }
 
+func (s *testRuleSuite) TestSetAll(c *C) {
+	rule1 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule4 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
+
+	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
+	c.Assert(err, IsNil)
+
+	checkErrData, err := json.Marshal([]*placement.Rule{&rule1, &rule3})
+	c.Assert(err, IsNil)
+
+	setErrData, err := json.Marshal([]*placement.Rule{&rule1, &rule4})
+	c.Assert(err, IsNil)
+
+	testcases := []struct {
+		name     string
+		rawData  []byte
+		success  bool
+		response string
+	}{
+		{
+			name:     "Set rules successfully, with oldRules full of nil",
+			rawData:  successData,
+			success:  true,
+			response: "",
+		},
+		{
+			name:    "Parse Json failed",
+			rawData: []byte("foo"),
+			success: false,
+			response: `{
+  "code": "input",
+  "msg": "invalid character 'o' in literal false (expecting 'a')",
+  "data": {
+    "Offset": 2
+  }
+}
+`,
+		},
+		{
+			name:    "Check rule failed",
+			rawData: checkErrData,
+			success: false,
+			response: `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
+`,
+		},
+		{
+			name:    "Set Rule Failed",
+			rawData: setErrData,
+			success: false,
+			response: `"invalid count -1"
+`,
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		err := postJSON(testDialClient, s.urlPrefix+"/rules", testcase.rawData)
+		if testcase.success {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(err, NotNil)
+			c.Assert(err.Error(), Equals, testcase.response)
+		}
+	}
+}
+
 func (s *testRuleSuite) TestGetAllByGroup(c *C) {
 	rule := placement.Rule{GroupID: "c", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
