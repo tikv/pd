@@ -292,3 +292,38 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	h.rd.JSON(w, http.StatusOK, "Delete rule successfully.")
 }
+
+// @Tags rule
+// @Summary Batch operations for the cluster. Operations should be independent.
+// @Produce json
+// @Param operations body []placement.Batch true "Parameters of rule operations"
+// @Success 200 {string} string "Batch operations successfully."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /config/rules/batch [post]
+func (h *ruleHandler) Batch(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	var opts []placement.Batch
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &opts); err != nil {
+		return
+	}
+	for _, opt := range opts {
+		switch opt.Action {
+		case placement.BatchAdd:
+			if err := h.checkRule(opt.Rule); err != nil {
+				h.rd.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+	}
+	if err := cluster.GetRuleManager().Batch(opts); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "Batch operations successfully.")
+}

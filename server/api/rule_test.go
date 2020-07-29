@@ -496,3 +496,123 @@ func compareRule(c *C, r1 *placement.Rule, r2 *placement.Rule) {
 	c.Assert(r1.Role, Equals, r2.Role)
 	c.Assert(r1.Count, Equals, r2.Count)
 }
+
+func (s *testRuleSuite) TestBatch(c *C) {
+	opt1 := placement.Batch{
+		Action: placement.BatchAdd,
+		Rule:   &placement.Rule{GroupID: "a", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+	}
+	opt2 := placement.Batch{
+		Action: placement.BatchAdd,
+		Rule:   &placement.Rule{GroupID: "b", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+	}
+	opt3 := placement.Batch{
+		Action: placement.BatchAdd,
+		Rule:   &placement.Rule{GroupID: "c", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+	}
+	opt4 := placement.Batch{
+		Action: placement.BatchAdd,
+		Rule:   &placement.Rule{GroupID: "d", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+	}
+	opt5 := placement.Batch{
+		Action: placement.BatchDel,
+		Rule:   &placement.Rule{GroupID: "c", ID: "13"},
+	}
+	opt6 := placement.Batch{
+		Action:  placement.BatchDel,
+		Rule:    &placement.Rule{GroupID: "b", ID: "1"},
+		MatchID: true,
+	}
+	opt7 := placement.Batch{
+		Action: placement.BatchDel,
+		Rule:   &placement.Rule{GroupID: "a", ID: "1"},
+	}
+	opt8 := placement.Batch{
+		Action: placement.BatchAdd,
+		Rule:   &placement.Rule{GroupID: "e", ID: "13", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1},
+	}
+	opt9 := placement.Batch{
+		Action: placement.BatchAdd,
+		Rule:   &placement.Rule{GroupID: "f", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1},
+	}
+
+	successData1, err := json.Marshal([]placement.Batch{opt1, opt2, opt3})
+	c.Assert(err, IsNil)
+
+	successData2, err := json.Marshal([]placement.Batch{opt5, opt7})
+	c.Assert(err, IsNil)
+
+	successData3, err := json.Marshal([]placement.Batch{opt4, opt6})
+	c.Assert(err, IsNil)
+
+	checkErrData, err := json.Marshal([]placement.Batch{opt8})
+	c.Assert(err, IsNil)
+
+	setErrData, err := json.Marshal([]placement.Batch{opt9})
+	c.Assert(err, IsNil)
+
+	testcases := []struct {
+		name     string
+		rawData  []byte
+		success  bool
+		response string
+	}{
+		{
+			name:     "Batch adds successfully",
+			rawData:  successData1,
+			success:  true,
+			response: "",
+		},
+		{
+			name:     "Batch removes successfully",
+			rawData:  successData2,
+			success:  true,
+			response: "",
+		},
+		{
+			name:     "Batch add and remove successfully",
+			rawData:  successData3,
+			success:  true,
+			response: "",
+		},
+		{
+			name:    "Parse Json failed",
+			rawData: []byte("foo"),
+			success: false,
+			response: `{
+  "code": "input",
+  "msg": "invalid character 'o' in literal false (expecting 'a')",
+  "data": {
+    "Offset": 2
+  }
+}
+`,
+		},
+		{
+			name:    "Check rule failed",
+			rawData: checkErrData,
+			success: false,
+			response: `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
+`,
+		},
+		{
+			name:    "Set Rule Failed",
+			rawData: setErrData,
+			success: false,
+			response: `"invalid count -1"
+`,
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		err := postJSON(testDialClient, s.urlPrefix+"/rules/batch", testcase.rawData)
+		if testcase.success {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(err, NotNil)
+			c.Assert(err.Error(), Equals, testcase.response)
+		}
+	}
+}
+
