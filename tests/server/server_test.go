@@ -21,11 +21,11 @@ import (
 	"github.com/pingcap/pd/v4/pkg/tempurl"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/tests"
 	"go.uber.org/goleak"
 
 	// Register schedulers.
-	"github.com/pingcap/pd/v4/server/config"
 	_ "github.com/pingcap/pd/v4/server/schedulers"
 )
 
