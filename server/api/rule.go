@@ -185,9 +185,6 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-<<<<<<< HEAD
-	h.rd.JSON(w, http.StatusOK, nil)
-=======
 	newSuspectKeyRange := [2][]byte{
 		rule.StartKey,
 		rule.EndKey,
@@ -200,7 +197,6 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	h.rd.JSON(w, http.StatusOK, "Update rule successfully.")
->>>>>>> 11eb116... cluster: Support check regions after rule updated. (#2664)
 }
 
 func (h *ruleHandler) checkRule(r *placement.Rule) error {
@@ -254,9 +250,6 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-<<<<<<< HEAD
-	h.rd.JSON(w, http.StatusOK, nil)
-=======
 	if rule != nil {
 		suspectKeyRanges := [2][]byte{
 			rule.StartKey,
@@ -266,5 +259,4 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.rd.JSON(w, http.StatusOK, "Delete rule successfully.")
->>>>>>> 11eb116... cluster: Support check regions after rule updated. (#2664)
 }
