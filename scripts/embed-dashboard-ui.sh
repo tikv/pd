@@ -48,8 +48,9 @@ function download_embed_asset {
     echo '  - Download pre-built embedded assets from GitHub release'
 
     DOWNLOAD_URL="https://github.com/pingcap-incubator/tidb-dashboard/releases/download/v${DASHBOARD_RELEASE_VERSION}/embedded-assets-golang.zip"
+    DOWNLOAD_FILE=${CACHE_DIR}/embedded-assets-golang.zip
     echo "  - Download ${DOWNLOAD_URL}"
-    if ! curl -L "${DOWNLOAD_URL}" --fail --output embedded-assets-golang.zip; then
+    if ! curl -L "${DOWNLOAD_URL}" --fail --output "${DOWNLOAD_FILE}"; then
       echo
       echo -e "${RED}Error: Failed to download assets of TiDB Dashboard release version ${DASHBOARD_RELEASE_VERSION}.${NC}"
       if [ "${DASHBOARD_RELEASE_VERSION}" == "nightly" ]; then
@@ -64,7 +65,7 @@ function download_embed_asset {
     fi
 
     echo "  - Save archive to cache: ${CACHE_FILE}"
-    mv embedded-assets-golang.zip "${CACHE_FILE}"
+    mv "${DOWNLOAD_FILE}" "${CACHE_FILE}"
   fi
 
   echo '+ Unpack embedded asset from archive'

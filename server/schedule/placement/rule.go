@@ -53,6 +53,7 @@ type Rule struct {
 	Count            int               `json:"count"`                       // expected count of the peers
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers
 	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically
+	IsolationLevel   string            `json:"isolation_level,omitempty"`   // used to isolate replicas explicitly and forcibly
 }
 
 func (r Rule) String() string {
