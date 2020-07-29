@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/pkg/component"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
@@ -99,13 +100,11 @@ type RaftCluster struct {
 	storesStats     *statistics.StoresStats
 	hotSpotCache    *statistics.HotCache
 
-<<<<<<< HEAD
-	coordinator *coordinator
-=======
+
 	coordinator      *coordinator
 	suspectRegions   *cache.TTLUint64 // suspectRegions are regions that may need fix
 	suspectKeyRanges *cache.TTLString // suspect key-range regions that may need fix
->>>>>>> 11eb116... cluster: Support check regions after rule updated. (#2664)
+
 
 	wg           sync.WaitGroup
 	quit         chan struct{}
@@ -199,11 +198,8 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
-<<<<<<< HEAD
-=======
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
 	c.suspectKeyRanges = cache.NewStringTTL(c.ctx, time.Minute, 3*time.Minute)
->>>>>>> 11eb116... cluster: Support check regions after rule updated. (#2664)
 }
 
 // Start starts a cluster.
@@ -423,8 +419,6 @@ func (c *RaftCluster) SetStorage(s *core.Storage) {
 	c.storage = s
 }
 
-<<<<<<< HEAD
-=======
 // AddSuspectRegions adds regions to suspect list.
 func (c *RaftCluster) AddSuspectRegions(ids ...uint64) {
 	c.Lock()
@@ -481,7 +475,6 @@ func (c *RaftCluster) ClearSuspectKeyRanges() {
 	c.suspectKeyRanges.Clear()
 }
 
->>>>>>> 11eb116... cluster: Support check regions after rule updated. (#2664)
 // HandleStoreHeartbeat updates the store status.
 func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.Lock()

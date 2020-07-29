@@ -83,8 +83,6 @@ func (c *ttlCache) get(key interface{}) (interface{}, bool) {
 	return item.value, true
 }
 
-<<<<<<< HEAD
-=======
 // GetKeys returns all keys that are not expired.
 func (c *ttlCache) getKeys() []interface{} {
 	c.RLock()
@@ -101,7 +99,6 @@ func (c *ttlCache) getKeys() []interface{} {
 	return keys
 }
 
->>>>>>> 11eb116... cluster: Support check regions after rule updated. (#2664)
 // Remove eliminates an item from cache.
 func (c *ttlCache) remove(key interface{}) {
 	c.Lock()
@@ -186,8 +183,6 @@ func (c *TTLUint64) Get(id uint64) (interface{}, bool) {
 	return c.ttlCache.get(id)
 }
 
-<<<<<<< HEAD
-=======
 // Put saves an ID in cache.
 func (c *TTLUint64) Put(id uint64, value interface{}) {
 	c.ttlCache.put(id, value)
@@ -206,7 +201,6 @@ func (c *TTLUint64) GetAllID() []uint64 {
 	return ids
 }
 
->>>>>>> 11eb116... cluster: Support check regions after rule updated. (#2664)
 // Exists checks if an ID exists in cache.
 func (c *TTLUint64) Exists(id uint64) bool {
 	_, ok := c.ttlCache.get(id)

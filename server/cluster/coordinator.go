@@ -106,8 +106,6 @@ func (c *coordinator) patrolRegions() {
 			return
 		}
 
-<<<<<<< HEAD
-=======
 		// Check suspect regions first.
 		for _, id := range c.cluster.GetSuspectRegions() {
 			region := c.cluster.GetRegion(id)
@@ -132,7 +130,6 @@ func (c *coordinator) patrolRegions() {
 		// Check suspect key ranges
 		c.checkSuspectKeyRanges()
 
->>>>>>> 11eb116... cluster: Support check regions after rule updated. (#2664)
 		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// Resets the scan key.
@@ -152,7 +149,7 @@ func (c *coordinator) patrolRegions() {
 			}
 
 			key = region.GetEndKey()
-			if ops != nil {
+			if len(ops) > 0 {
 				c.opController.AddWaitingOperator(ops...)
 			}
 		}
