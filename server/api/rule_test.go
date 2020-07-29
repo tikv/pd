@@ -14,6 +14,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -55,6 +56,10 @@ func (s *testRuleSuite) TestSet(c *C) {
 	rule := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	successData, err := json.Marshal(rule)
 	c.Assert(err, IsNil)
+	oldStartKey, err := hex.DecodeString(rule.StartKeyHex)
+	c.Assert(err, IsNil)
+	oldEndKey, err := hex.DecodeString(rule.EndKeyHex)
+	c.Assert(err, IsNil)
 	parseErrData := []byte("foo")
 	rule1 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
 	checkErrData, err := json.Marshal(rule1)
@@ -62,18 +67,42 @@ func (s *testRuleSuite) TestSet(c *C) {
 	rule2 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
 	setErrData, err := json.Marshal(rule2)
 	c.Assert(err, IsNil)
+	rule3 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "follower", Count: 3}
+	updateData, err := json.Marshal(rule3)
+	c.Assert(err, IsNil)
+	newStartKey, err := hex.DecodeString(rule.StartKeyHex)
+	c.Assert(err, IsNil)
+	newEndKey, err := hex.DecodeString(rule.EndKeyHex)
+	c.Assert(err, IsNil)
 
 	testcases := []struct {
-		name     string
-		rawData  []byte
-		success  bool
-		response string
+		name        string
+		rawData     []byte
+		success     bool
+		response    string
+		popKeyRange map[string]struct{}
 	}{
 		{
-			name:     "Set rule success",
+			name:     "Set a new rule success",
 			rawData:  successData,
 			success:  true,
 			response: "",
+			popKeyRange: map[string]struct{}{
+				hex.EncodeToString(oldStartKey): {},
+				hex.EncodeToString(oldEndKey):   {},
+			},
+		},
+		{
+			name:     "Update an existed rule success",
+			rawData:  updateData,
+			success:  true,
+			response: "",
+			popKeyRange: map[string]struct{}{
+				hex.EncodeToString(oldStartKey): {},
+				hex.EncodeToString(oldEndKey):   {},
+				hex.EncodeToString(newStartKey): {},
+				hex.EncodeToString(newEndKey):   {},
+			},
 		},
 		{
 			name:    "Parse Json failed",
@@ -106,9 +135,25 @@ func (s *testRuleSuite) TestSet(c *C) {
 
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
+		// clear suspect keyRanges to prevent test case from others
+		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
 		err = postJSON(testDialClient, s.urlPrefix+"/rule", testcase.rawData)
 		if testcase.success {
 			c.Assert(err, IsNil)
+
+			popKeyRangeMap := map[string]struct{}{}
+			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
+				_, v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				c.Assert(got, Equals, true)
+				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
+				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
+			}
+			c.Assert(len(popKeyRangeMap), Equals, len(testcase.popKeyRange))
+			for k := range popKeyRangeMap {
+				_, ok := testcase.popKeyRange[k]
+				c.Assert(ok, Equals, true)
+			}
+
 		} else {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)
@@ -323,29 +368,55 @@ func (s *testRuleSuite) TestDelete(c *C) {
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
 	c.Assert(err, IsNil)
+	oldStartKey, err := hex.DecodeString(rule.StartKeyHex)
+	c.Assert(err, IsNil)
+	oldEndKey, err := hex.DecodeString(rule.EndKeyHex)
+	c.Assert(err, IsNil)
 
 	testcases := []struct {
-		name    string
-		groupID string
-		id      string
+		name        string
+		groupID     string
+		id          string
+		popKeyRange map[string]struct{}
 	}{
 		{
 			name:    "delete existed rule",
 			groupID: "g",
 			id:      "10",
+			popKeyRange: map[string]struct{}{
+				hex.EncodeToString(oldStartKey): {},
+				hex.EncodeToString(oldEndKey):   {},
+			},
 		},
 		{
-			name:    "delete non-existed rule",
-			groupID: "g",
-			id:      "15",
+			name:        "delete non-existed rule",
+			groupID:     "g",
+			id:          "15",
+			popKeyRange: map[string]struct{}{},
 		},
 	}
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.groupID, testcase.id)
+		// clear suspect keyRanges to prevent test case from others
+		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
 		resp, err := doDelete(testDialClient, url)
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, http.StatusOK)
+		if len(testcase.popKeyRange) > 0 {
+			popKeyRangeMap := map[string]struct{}{}
+			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
+				_, v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				c.Assert(got, Equals, true)
+				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
+				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
+			}
+			c.Assert(len(popKeyRangeMap), Equals, len(testcase.popKeyRange))
+			for k := range popKeyRangeMap {
+				_, ok := testcase.popKeyRange[k]
+				c.Assert(ok, Equals, true)
+			}
+		}
 	}
 }
 
