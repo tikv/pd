@@ -28,7 +28,7 @@ require (
 	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200715070228-47f5de8a6992
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
-	github.com/pingcap/errors v0.11.5-0.20190809092503-95897b64e011
+	github.com/pingcap/errors v0.11.5-0.20200729012136-4e113ddee29e
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
 	github.com/pingcap/kvproto v0.0.0-20200715040832-c3e2e0b163ee
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
@@ -51,5 +51,3 @@ require (
 	google.golang.org/grpc v1.25.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
-
-replace github.com/pingcap/errors => github.com/YuJuncen/errors v0.8.1-0.20200727030200-a512ae64de43

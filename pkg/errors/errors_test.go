@@ -79,10 +79,10 @@ func TestError(t *testing.T) {
 	lg := newZapTestLogger(conf)
 	log.ReplaceGlobals(lg.Logger, nil)
 
-	rfc := `[error="[format:ErrFormatParseHistoryIndex] parse history index error"]`
+	rfc := `[error="[PD:format:ErrFormatParseHistoryIndex] parse history index error"]`
 	log.Error(ErrFormatParseHistoryIndex.MessageTemplate(), zap.Error(ErrFormatParseHistoryIndex.FastGenByArgs()))
 	lg.Contain(t, rfc)
-	rfc = `[error="[internal:ErrInternalStoreNotFound] store id 1 not found"]`
+	rfc = `[error="[PD:internal:ErrInternalStoreNotFound] store id 1 not found"]`
 	log.Error(ErrInternalStoreNotFound.MessageTemplate(), zap.Error(ErrInternalStoreNotFound.FastGenByArgs(1)))
 	lg.Contain(t, rfc)
 }
