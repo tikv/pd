@@ -849,7 +849,7 @@ func (o *OperatorWithStatus) MarshalJSON() ([]byte, error) {
 
 // OperatorRecords remains the operator and its status for a while.
 type OperatorRecords struct {
-	ttl *cache.TTL
+	ttl *cache.TTLUint64
 }
 
 const operatorStatusRemainTime = 10 * time.Minute
@@ -857,7 +857,7 @@ const operatorStatusRemainTime = 10 * time.Minute
 // NewOperatorRecords returns a OperatorRecords.
 func NewOperatorRecords(ctx context.Context) *OperatorRecords {
 	return &OperatorRecords{
-		ttl: cache.NewTTL(ctx, time.Minute, operatorStatusRemainTime),
+		ttl: cache.NewIDTTL(ctx, time.Minute, operatorStatusRemainTime),
 	}
 }
 

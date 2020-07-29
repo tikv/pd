@@ -993,7 +993,7 @@ func (c *ReplicationConfig) Validate() error {
 			foundIsolationLevel = true
 		}
 	}
-	if len(c.IsolationLevel) > 0 && !foundIsolationLevel {
+	if c.IsolationLevel != "" && !foundIsolationLevel {
 		return errors.New("isolation-level must be one of location-labels or empty")
 	}
 	return nil
