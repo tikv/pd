@@ -96,9 +96,7 @@ PD_SERVER_DEP :=
 ifneq ($(SWAGGER), 0)
 	PD_SERVER_DEP += swagger-spec
 endif
-ifneq ($(DASHBOARD), 0)
-	PD_SERVER_DEP += dashboard-ui
-endif
+PD_SERVER_DEP += dashboard-ui
 
 pd-server: export GO111MODULE=on
 pd-server: ${PD_SERVER_DEP}
@@ -119,6 +117,7 @@ swagger-spec: export GO111MODULE=on
 swagger-spec: install-go-tools
 	go mod vendor
 	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
+	go mod tidy
 
 dashboard-ui: export GO111MODULE=on
 dashboard-ui:
