@@ -171,10 +171,10 @@ func (s *testRuleSuite) TestGetAll(c *C) {
 }
 
 func (s *testRuleSuite) TestSetAll(c *C) {
-	rule1 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
-	rule2 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
-	rule3 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
-	rule4 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
+	rule1 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule4 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
 
 	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
 	c.Assert(err, IsNil)
@@ -192,7 +192,7 @@ func (s *testRuleSuite) TestSetAll(c *C) {
 		response string
 	}{
 		{
-			name:     "Set rules successfully",
+			name:     "Set rules successfully, with oldRules full of nil",
 			rawData:  successData,
 			success:  true,
 			response: "",
