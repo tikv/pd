@@ -385,9 +385,9 @@ const (
 // Batch is for batching placement rule actions. The action type is
 // distinguished by the field `Action`.
 type Batch struct {
-	*Rule               // infomation of the placement rule
+	*Rule               // information of the placement rule to add/delete
 	Action  BatchAction `json:"action"`   // the operation type
-	MatchID bool        `json:"match_id"` // only take effect if action is deletion
+	MatchID bool        `json:"match_id"` // only take effect if action is deletion, will match the prefix of id
 }
 
 // Batch execute a series of actions at once.
