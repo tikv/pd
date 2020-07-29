@@ -197,6 +197,8 @@ func newPendingInfluence(op *operator.Operator, from, to uint64, infl Influence)
 	}
 }
 
+// summaryPendingInfluence calculate the summary pending Influence for each store and return storeID -> Influence
+// It makes each key/byte rate or count become (1+w) times to the origin value while f is the function to provide w(weight)
 func summaryPendingInfluence(pendings map[*pendingInfluence]struct{}, f func(*operator.Operator) float64) map[uint64]Influence {
 	ret := map[uint64]Influence{}
 	for p := range pendings {
@@ -215,6 +217,7 @@ type storeLoad struct {
 	KeyRate  float64
 	Count    float64
 
+	// Exp means Expectation, it is calculated from the average value from summary of byte/key rate, count.
 	ExpByteRate float64
 	ExpKeyRate  float64
 	ExpCount    float64

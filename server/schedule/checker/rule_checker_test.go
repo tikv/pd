@@ -74,6 +74,41 @@ func (s *testRuleCheckerSuite) TestAddRulePeer(c *C) {
 	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(3))
 }
 
+func (s *testRuleCheckerSuite) TestAddRulePeerWithIsolationLevel(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z1", "rack": "r3", "host": "h1"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	s.ruleManager.SetRule(&placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "rack", "host"},
+		IsolationLevel: "zone",
+	})
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3)
+	s.ruleManager.SetRule(&placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "rack", "host"},
+		IsolationLevel: "rack",
+	})
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "add-rule-peer")
+	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(4))
+}
+
 func (s *testRuleCheckerSuite) TestFixPeer(c *C) {
 	s.cluster.AddLeaderStore(1, 1)
 	s.cluster.AddLeaderStore(2, 1)
