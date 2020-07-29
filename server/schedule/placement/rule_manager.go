@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/pingcap/log"
@@ -272,4 +273,54 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *RegionFit {
 	rules := m.GetRulesForApplyRegion(region)
 	return FitRegion(stores, region, rules)
+}
+
+func (m *RuleManager) swapRule(rule *Rule) *Rule {
+	old := m.rules[rule.Key()]
+	m.rules[rule.Key()] = rule
+	return old
+}
+
+// SetRules inserts or updates lots of Rules at once.
+func (m *RuleManager) SetRules(rules []*Rule) error {
+	for _, rule := range rules {
+		err := m.adjustRule(rule)
+		if err != nil {
+			return err
+		}
+	}
+
+	m.Lock()
+	defer m.Unlock()
+
+	oldRules := make(map[[2]string]*Rule)
+
+	for _, rule := range rules {
+		oldRules[rule.Key()] = m.swapRule(rule)
+	}
+
+	ruleList, err := buildRuleList(m.rules)
+	if err == nil {
+		for _, rule := range rules {
+			err = m.store.SaveRule(rule.StoreKey(), rule)
+			if err != nil {
+				break
+			}
+		}
+	}
+
+	if err != nil {
+		for key, rule := range oldRules {
+			if rule == nil {
+				delete(m.rules, key)
+			} else {
+				m.rules[key] = rule
+			}
+		}
+		return err
+	}
+
+	m.ruleList = ruleList
+	log.Info("placement rule updated", zap.String("rules", fmt.Sprint(rules)))
+	return nil
 }

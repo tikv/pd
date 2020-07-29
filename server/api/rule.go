@@ -61,6 +61,38 @@ func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags rule
+// @Summary Set all rules for the cluster.
+// @Produce json
+// @Param rules body []placement.Rule true "Parameters of rules"
+// @Success 200 {string} string "Update rules successfully."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /config/rules [get]
+func (h *ruleHandler) SetAll(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	var rules []*placement.Rule
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &rules); err != nil {
+		return
+	}
+	for _, rule := range rules {
+		if err := h.checkRule(rule); err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if err := cluster.GetRuleManager().SetRules(rules); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "Update rules successfully.")
+}
+
+// @Tags rule
 // @Summary List all rules of cluster by group.
 // @Param group path string true "The name of group"
 // @Produce json

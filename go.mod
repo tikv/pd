@@ -51,3 +51,5 @@ require (
 	google.golang.org/grpc v1.25.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
