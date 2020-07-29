@@ -15,6 +15,7 @@ package pd
 
 import (
 	"context"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"reflect"
 	"sort"
 	"sync"
@@ -137,7 +138,7 @@ func (c *baseClient) leaderLoop() {
 		}
 
 		if err := c.updateLeader(); err != nil {
-			log.Error("[pd] failed updateLeader", zap.Error(err))
+			log.Error("[pd] failed updateLeader", zap.Error(err), zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
 		}
 	}
 }

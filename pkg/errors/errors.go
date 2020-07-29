@@ -32,8 +32,10 @@ var (
 )
 
 var (
-	// ErrIORead is io error
+	// ErrIORead is io read error
 	ErrIORead = ClassIO.DefineError().TextualCode("ErrIORead").MessageTemplate("io read error").Done()
+	// ErrIOWrite is io write error
+	ErrIOWrite = ClassIO.DefineError().TextualCode("ErrIOWrite").MessageTemplate("io write error").Done()
 	// ErrHTTPErrorResponse is http error response error
 	ErrHTTPErrorResponse = ClassNetwork.DefineError().TextualCode("ErrHTTPErrorResponse").MessageTemplate("make http error response fail").Done()
 	// ErrHTTPRedirect is http redirect error

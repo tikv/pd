@@ -14,6 +14,7 @@
 package serverapi
 
 import (
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -99,7 +100,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 
 	// Prevent more than one redirection.
 	if name := r.Header.Get(RedirectorHeader); len(name) != 0 {
-		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()))
+		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), zap.Error(errs.ErrHTTPRedirect.FastGenByArgs()))
 		http.Error(w, errRedirectToNotLeader, http.StatusInternalServerError)
 		return
 	}
@@ -145,21 +146,21 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error("request failed", zap.Error(err))
+			log.Error("request failed", zap.Error(err), zap.Error(errs.ErrHTTPRequestURL.FastGenByArgs()))
 			continue
 		}
 
 		b, err := ioutil.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			log.Error("request failed", zap.Error(err))
+			log.Error("request failed", zap.Error(err), zap.Error(errs.ErrIORead.FastGenByArgs()))
 			continue
 		}
 
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		if _, err := w.Write(b); err != nil {
-			log.Error("write failed", zap.Error(err))
+			log.Error("write failed", zap.Error(err), zap.Error(errs.ErrIOWrite.FastGenByArgs()))
 			continue
 		}
 

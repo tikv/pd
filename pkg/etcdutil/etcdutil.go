@@ -16,6 +16,7 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"net/http"
 	"time"
 
@@ -61,7 +62,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Co
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
-			log.Error("failed to get cluster from remote", zap.Error(gerr))
+			log.Error("failed to get cluster from remote", zap.Error(gerr), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 			continue
 		}
 
@@ -105,7 +106,7 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	start := time.Now()
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if err != nil {
-		log.Error("load from etcd meet error", zap.Error(err))
+		log.Error("load from etcd meet error", zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 	}
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), zap.Error(err))

@@ -16,6 +16,7 @@ package server
 import (
 	"context"
 	"fmt"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"io"
 	"strconv"
 	"sync/atomic"
@@ -393,7 +394,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		region := core.RegionFromHeartbeat(request)
 		if region.GetLeader() == nil {
-			log.Error("invalid request, the leader is nil", zap.Reflect("reqeust", request))
+			log.Error("invalid request, the leader is nil", zap.Reflect("reqeust", request), zap.Error(errs.ErrHTTPRequestURL.FastGenByArgs()))
 			continue
 		}
 		if region.GetID() == 0 {

@@ -15,6 +15,7 @@ package adapter
 
 import (
 	"context"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"sort"
 	"sync"
 	"time"
@@ -195,7 +196,7 @@ func (m *Manager) startService() {
 		return
 	}
 	if err := m.service.Start(m.ctx); err != nil {
-		log.Error("Can not start dashboard server", zap.Error(err))
+		log.Error("Can not start dashboard server", zap.Error(err), zap.Error(errs.ErrOtherDashboardServer.FastGenByArgs()))
 	} else {
 		log.Info("Dashboard server is started")
 	}
@@ -206,7 +207,7 @@ func (m *Manager) stopService() {
 		return
 	}
 	if err := m.service.Stop(context.Background()); err != nil {
-		log.Error("Stop dashboard server error", zap.Error(err))
+		log.Error("Stop dashboard server error", zap.Error(err), zap.Error(errs.ErrOtherDashboardServer.FastGenByArgs()))
 	} else {
 		log.Info("Dashboard server is stopped")
 	}

@@ -16,6 +16,7 @@ package api
 import (
 	"context"
 	"fmt"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"net/http"
 	"strconv"
 
@@ -66,12 +67,12 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 	for _, m := range members.GetMembers() {
 		binaryVersion, e := h.svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 		}
 		m.BinaryVersion = binaryVersion
 		deployPath, e := h.svr.GetMember().GetMemberDeployPath(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 		}
 		m.DeployPath = deployPath
 		if h.svr.GetMember().GetEtcdLeader() == 0 {
@@ -80,13 +81,13 @@ func (h *memberHandler) getMembers() (*pdpb.GetMembersResponse, error) {
 		}
 		leaderPriority, e := h.svr.GetMember().GetMemberLeaderPriority(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+			log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 			continue
 		}
 		m.LeaderPriority = int32(leaderPriority)
 		gitHash, e := h.svr.GetMember().GetMemberGitHash(m.GetMemberId())
 		if e != nil {
-			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), zap.Error(err))
+			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 			continue
 		}
 		m.GitHash = gitHash

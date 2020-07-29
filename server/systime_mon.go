@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"time"
 
 	"github.com/pingcap/log"
@@ -31,7 +32,7 @@ func StartMonitor(ctx context.Context, now func() time.Time, systimeErrHandler f
 		select {
 		case <-tick.C:
 			if now().UnixNano() < last {
-				log.Error("system time jump backward", zap.Int64("last", last))
+				log.Error("system time jump backward", zap.Int64("last", last), zap.Error(errs.ErrOtherSystemTime.FastGenByArgs()))
 				systimeErrHandler()
 			}
 		case <-ctx.Done():

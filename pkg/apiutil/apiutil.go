@@ -16,6 +16,8 @@ package apiutil
 import (
 	"encoding/json"
 	"fmt"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
+	"go.uber.org/zap"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -116,7 +118,7 @@ func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.Read
 // If the error is nil, this also responds with a 500 and logs at the error level.
 func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	if err == nil {
-		log.Error("nil is given to errorResp")
+		log.Error("nil is given to errorResp", zap.Error(errs.ErrHTTPErrorResponse.FastGenByArgs()))
 		rd.JSON(w, http.StatusInternalServerError, "nil error")
 		return
 	}
