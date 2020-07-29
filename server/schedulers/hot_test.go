@@ -15,6 +15,7 @@ package schedulers
 
 import (
 	"context"
+	"encoding/hex"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -26,6 +27,7 @@ import (
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pingcap/pd/v4/server/statistics"
 )
 
@@ -472,6 +474,78 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 	}
 }
 
+func (s *testHotWriteRegionSchedulerSuite) TestWithRuleEnabled(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := mockoption.NewScheduleOptions()
+	opt.EnablePlacementRules = true
+	hb, err := schedule.CreateScheduler(HotWriteRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
+	c.Assert(err, IsNil)
+	opt.HotRegionCacheHitsThreshold = 0
+	tc := mockcluster.NewCluster(opt)
+	key, err := hex.DecodeString("")
+	c.Assert(err, IsNil)
+	err = tc.SetRule(&placement.Rule{
+		GroupID:  "pd",
+		ID:       "leader",
+		Index:    1,
+		Override: true,
+		Role:     placement.Leader,
+		Count:    1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "ID",
+				Op:     placement.In,
+				Values: []string{"2", "1"},
+			},
+		},
+		StartKey: key,
+		EndKey:   key,
+	})
+	c.Assert(err, IsNil)
+	err = tc.SetRule(&placement.Rule{
+		GroupID:  "pd",
+		ID:       "voter",
+		Index:    2,
+		Override: false,
+		Role:     placement.Voter,
+		Count:    2,
+		StartKey: key,
+		EndKey:   key,
+	})
+	c.Assert(err, IsNil)
+
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+
+	tc.UpdateStorageWrittenBytes(1, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 10*MB*statistics.StoreHeartBeatReportInterval)
+
+	tc.UpdateStorageWrittenKeys(1, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenKeys(2, 10*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenKeys(3, 10*MB*statistics.StoreHeartBeatReportInterval)
+
+	addRegionInfo(tc, write, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 0.5 * MB, 1 * MB},
+		{2, []uint64{1, 2, 3}, 0.5 * MB, 1 * MB},
+		{3, []uint64{2, 1, 3}, 0.5 * MB, 1 * MB},
+		{4, []uint64{2, 1, 3}, 0.5 * MB, 1 * MB},
+		{5, []uint64{2, 1, 3}, 0.5 * MB, 1 * MB},
+		{6, []uint64{2, 1, 3}, 0.5 * MB, 1 * MB},
+		{7, []uint64{2, 1, 3}, 0.5 * MB, 1 * MB},
+	})
+
+	for i := 0; i < 100; i++ {
+		hb.(*hotScheduler).clearPendingInfluence()
+		op := hb.Schedule(tc)[0]
+		testutil.CheckTransferLeader(c, op, operator.OpHotRegion, 2, 1)
+		c.Assert(hb.Schedule(tc), HasLen, 0)
+	}
+}
+
 var _ = Suite(&testHotReadRegionSchedulerSuite{})
 
 type testHotReadRegionSchedulerSuite struct{}
@@ -899,7 +973,8 @@ func (s *testHotCacheSuite) TestByteAndKey(c *C) {
 }
 
 type testRegionInfo struct {
-	id       uint64
+	id uint64
+	// the storeID list for the peers, the leader is stored in the first store
 	peers    []uint64
 	byteRate float64
 	keyRate  float64
