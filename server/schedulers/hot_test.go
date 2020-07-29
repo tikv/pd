@@ -541,6 +541,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithRuleEnabled(c *C) {
 	for i := 0; i < 100; i++ {
 		hb.(*hotScheduler).clearPendingInfluence()
 		op := hb.Schedule(tc)[0]
+		// The targetID should always be 1 as leader is only allowed to be placed in store1 or store2 by placement rule
 		testutil.CheckTransferLeader(c, op, operator.OpHotRegion, 2, 1)
 		c.Assert(hb.Schedule(tc), HasLen, 0)
 	}
