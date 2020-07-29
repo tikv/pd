@@ -372,17 +372,22 @@ func (m *RuleManager) delRule(t *Batch, oldRules map[[2]string]*Rule) {
 	}
 }
 
+// The operation type for Batch
 type BatchAction byte
 
 const (
+	// Add a placement rule, only need to specify the field *Rule
 	BatchAdd BatchAction = iota + 1
+	// Del a placement rule, only need to specify the field `GroupID`, `ID`, `MatchID`
 	BatchDel
 )
 
+// Batch is for batching placement rule actions. The action type is
+// distinguished by the field `Action`.
 type Batch struct {
-	*Rule
-	Action  BatchAction
-	MatchID bool
+	*Rule               // infomation of the placement rule
+	Action  BatchAction `json:"action"`   // the operation type
+	MatchID bool        `json:"match_id"` // only take effect if action is deletion
 }
 
 // Batch execute a series of actions at once.
