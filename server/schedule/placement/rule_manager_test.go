@@ -99,9 +99,9 @@ func (s *testManagerSuite) TestKeys(c *C) {
 	for _, r := range rules {
 		s.manager.SetRule(r)
 		toDelete = append(toDelete, Batch{
-			Rule:    r,
-			Action:  BatchDel,
-			MatchID: false,
+			Rule:             r,
+			Action:           BatchDel,
+			DeleteByIDPrefix: false,
 		})
 	}
 	s.manager.Batch(toDelete)

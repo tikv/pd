@@ -349,48 +349,46 @@ func (m *RuleManager) SetRules(rules []*Rule) error {
 	return nil
 }
 
-func (m *RuleManager) emptyRule(group, id string) ([2]string, *Rule) {
+func (m *RuleManager) delRule(group, id string, oldRules map[[2]string]*Rule) {
 	key := [2]string{group, id}
 	old, ok := m.rules[key]
 	if ok {
 		delete(m.rules, key)
 	}
-	return key, old
+	oldRules[key] = old
 }
 
-func (m *RuleManager) delRule(t *Batch, oldRules map[[2]string]*Rule) {
-	if !t.MatchID {
-		k, r := m.emptyRule(t.GroupID, t.ID)
-		oldRules[k] = r
+func (m *RuleManager) delRuleByPrefix(t *Batch, oldRules map[[2]string]*Rule) {
+	if !t.DeleteByIDPrefix {
+		m.delRule(t.GroupID, t.ID, oldRules)
 	} else {
 		for key := range m.rules {
 			if key[0] == t.GroupID && strings.HasPrefix(key[1], t.ID) {
-				k, r := m.emptyRule(key[0], key[1])
-				oldRules[k] = r
+				m.delRule(key[0], key[1], oldRules)
 			}
 		}
 	}
 }
 
 // BatchAction indicates the operation type
-type BatchAction byte
+type BatchAction string
 
 const (
 	// BatchAdd a placement rule, only need to specify the field *Rule
-	BatchAdd BatchAction = iota + 1
+	BatchAdd BatchAction = "insert"
 	// BatchDel a placement rule, only need to specify the field `GroupID`, `ID`, `MatchID`
-	BatchDel
+	BatchDel BatchAction = "delete"
 )
 
 // Batch is for batching placement rule actions. The action type is
 // distinguished by the field `Action`.
 type Batch struct {
-	*Rule               // information of the placement rule to add/delete
-	Action  BatchAction `json:"action"`   // the operation type
-	MatchID bool        `json:"match_id"` // only take effect if action is deletion, will match the prefix of id
+	*Rule                        // information of the placement rule to add/delete
+	Action           BatchAction `json:"action"`       // the operation type
+	DeleteByIDPrefix bool        `json:"delete_by_id"` // if action == delete, delete by the prefix of id
 }
 
-// Batch execute a series of actions at once.
+// Batch executes a series of actions at once.
 func (m *RuleManager) Batch(todo []Batch) error {
 	for _, t := range todo {
 		switch t.Action {
@@ -412,7 +410,7 @@ func (m *RuleManager) Batch(todo []Batch) error {
 		case BatchAdd:
 			m.addRule(t.Rule, oldRules)
 		case BatchDel:
-			m.delRule(&t, oldRules)
+			m.delRuleByPrefix(&t, oldRules)
 		}
 	}
 
@@ -420,6 +418,6 @@ func (m *RuleManager) Batch(todo []Batch) error {
 		return err
 	}
 
-	log.Info("placement rules updated", zap.String("rules", fmt.Sprint(todo)))
+	log.Info("placement rules updated", zap.String("batch", fmt.Sprint(todo)))
 	return nil
 }
