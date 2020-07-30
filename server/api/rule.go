@@ -294,7 +294,7 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags rule
-// @Summary Batch operations for the cluster. Operations should be independent(differnt ID). If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You propabably want to request again to make rules in memory/disk consistent.
+// @Summary Batch operations for the cluster. Operations should be independent(different ID). If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You propabably want to request again to make rules in memory/disk consistent.
 // @Produce json
 // @Param operations body []placement.RuleOp true "Parameters of rule operations"
 // @Success 200 {string} string "Batch operations successfully."
