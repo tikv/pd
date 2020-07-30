@@ -349,7 +349,7 @@ func (m *RuleManager) SetRules(rules []*Rule) error {
 	return nil
 }
 
-func (m *RuleManager) delRule(group, id string, oldRules map[[2]string]*Rule) {
+func (m *RuleManager) delRuleByID(group, id string, oldRules map[[2]string]*Rule) {
 	key := [2]string{group, id}
 	old, ok := m.rules[key]
 	if ok {
@@ -358,13 +358,13 @@ func (m *RuleManager) delRule(group, id string, oldRules map[[2]string]*Rule) {
 	oldRules[key] = old
 }
 
-func (m *RuleManager) delRuleByPrefix(t *Batch, oldRules map[[2]string]*Rule) {
+func (m *RuleManager) delRule(t *Batch, oldRules map[[2]string]*Rule) {
 	if !t.DeleteByIDPrefix {
-		m.delRule(t.GroupID, t.ID, oldRules)
+		m.delRuleByID(t.GroupID, t.ID, oldRules)
 	} else {
 		for key := range m.rules {
 			if key[0] == t.GroupID && strings.HasPrefix(key[1], t.ID) {
-				m.delRule(key[0], key[1], oldRules)
+				m.delRuleByID(key[0], key[1], oldRules)
 			}
 		}
 	}
@@ -375,9 +375,9 @@ type BatchAction string
 
 const (
 	// BatchAdd a placement rule, only need to specify the field *Rule
-	BatchAdd BatchAction = "insert"
+	BatchAdd BatchAction = "add"
 	// BatchDel a placement rule, only need to specify the field `GroupID`, `ID`, `MatchID`
-	BatchDel BatchAction = "delete"
+	BatchDel BatchAction = "del"
 )
 
 // Batch is for batching placement rule actions. The action type is
@@ -385,7 +385,7 @@ const (
 type Batch struct {
 	*Rule                        // information of the placement rule to add/delete
 	Action           BatchAction `json:"action"`       // the operation type
-	DeleteByIDPrefix bool        `json:"delete_by_id"` // if action == delete, delete by the prefix of id
+	DeleteByIDPrefix bool        `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
 // Batch executes a series of actions at once.
@@ -410,7 +410,7 @@ func (m *RuleManager) Batch(todo []Batch) error {
 		case BatchAdd:
 			m.addRule(t.Rule, oldRules)
 		case BatchDel:
-			m.delRuleByPrefix(&t, oldRules)
+			m.delRule(&t, oldRules)
 		}
 	}
 
