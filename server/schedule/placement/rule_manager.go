@@ -370,7 +370,7 @@ func (m *RuleManager) delRule(t *RuleOp, oldRules map[[2]string]*Rule) {
 	}
 }
 
-// BatchAction indicates the operation type
+// RuleOpType indicates the operation type
 type RuleOpType string
 
 const (
