@@ -101,8 +101,9 @@ type RaftCluster struct {
 	storesStats     *statistics.StoresStats
 	hotSpotCache    *statistics.HotCache
 
-	coordinator    *coordinator
-	suspectRegions *cache.TTLUint64 // suspectRegions are regions that may need fix
+	coordinator      *coordinator
+	suspectRegions   *cache.TTLUint64 // suspectRegions are regions that may need fix
+	suspectKeyRanges *cache.TTLString // suspect key-range regions that may need fix
 
 	wg           sync.WaitGroup
 	quit         chan struct{}
@@ -203,6 +204,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.hotSpotCache = statistics.NewHotCache()
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
+	c.suspectKeyRanges = cache.NewStringTTL(c.ctx, time.Minute, 3*time.Minute)
 }
 
 // Start starts a cluster.
@@ -427,7 +429,7 @@ func (c *RaftCluster) AddSuspectRegions(ids ...uint64) {
 	c.Lock()
 	defer c.Unlock()
 	for _, id := range ids {
-		c.suspectRegions.Put(id)
+		c.suspectRegions.Put(id, nil)
 	}
 }
 
@@ -435,7 +437,7 @@ func (c *RaftCluster) AddSuspectRegions(ids ...uint64) {
 func (c *RaftCluster) GetSuspectRegions() []uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	return c.suspectRegions.GetAll()
+	return c.suspectRegions.GetAllID()
 }
 
 // RemoveSuspectRegion removes region from suspect list.
@@ -443,6 +445,39 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 	c.Lock()
 	defer c.Unlock()
 	c.suspectRegions.Remove(id)
+}
+
+// AddSuspectKeyRange adds the key range with the its ruleID as the key
+// The instance of each keyRange is like following format:
+// [2][]byte: start key/end key
+func (c *RaftCluster) AddSuspectKeyRange(key string, keyRanges [2][]byte) {
+	c.Lock()
+	defer c.Unlock()
+	c.suspectKeyRanges.Put(key, keyRanges)
+}
+
+// PopOneSuspectKeyRange gets one suspect keyRange group.
+// it would return value and true if pop success, or return empty [][2][]byte and false
+// if suspectKeyRanges couldn't pop keyRange group.
+func (c *RaftCluster) PopOneSuspectKeyRange() (string, [2][]byte, bool) {
+	c.Lock()
+	defer c.Unlock()
+	key, value, success := c.suspectKeyRanges.Pop()
+	if !success {
+		return "", [2][]byte{}, false
+	}
+	v, ok := value.([2][]byte)
+	if !ok {
+		return "", [2][]byte{}, false
+	}
+	return key, v, true
+}
+
+// ClearSuspectKeyRanges clears the suspect keyRanges, only for unit test
+func (c *RaftCluster) ClearSuspectKeyRanges() {
+	c.Lock()
+	defer c.Unlock()
+	c.suspectKeyRanges.Clear()
 }
 
 // HandleStoreHeartbeat updates the store status.
@@ -1438,6 +1473,11 @@ func (c *RaftCluster) GetMaxReplicas() int {
 // GetLocationLabels returns the location labels for each region
 func (c *RaftCluster) GetLocationLabels() []string {
 	return c.opt.GetLocationLabels()
+}
+
+// GetIsolationLevel returns the isolation label for each region.
+func (c *RaftCluster) GetIsolationLevel() string {
+	return c.opt.GetIsolationLevel()
 }
 
 // GetStrictlyMatchLabel returns if the strictly label check is enabled.

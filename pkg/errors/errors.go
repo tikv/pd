@@ -32,86 +32,86 @@ var (
 )
 
 var (
-	// ErrIORead is io read error
-	ErrIORead = ClassIO.DefineError().TextualCode("ErrIORead").MessageTemplate("io read error").Done()
-	// ErrIOWrite is io write error
-	ErrIOWrite = ClassIO.DefineError().TextualCode("ErrIOWrite").MessageTemplate("io write error").Done()
+	// ErrIORead is io error
+	ErrIORead = ClassIO.DefineError().TextualCode("ErrIORead").MessageTemplate("io read error").Build()
+  // ErrIOWrite is io error
+	ErrIOWrite = ClassIO.DefineError().TextualCode("ErrIOWrite").MessageTemplate("io write error").Build()
 	// ErrHTTPErrorResponse is http error response error
-	ErrHTTPErrorResponse = ClassNetwork.DefineError().TextualCode("ErrHTTPErrorResponse").MessageTemplate("make http error response fail").Done()
+	ErrHTTPErrorResponse = ClassNetwork.DefineError().TextualCode("ErrHTTPErrorResponse").MessageTemplate("make http error response fail").Build()
 	// ErrHTTPRedirect is http redirect error
-	ErrHTTPRedirect = ClassNetwork.DefineError().TextualCode("ErrHTTPRedirect").MessageTemplate("http redirect many times").Done()
+	ErrHTTPRedirect = ClassNetwork.DefineError().TextualCode("ErrHTTPRedirect").MessageTemplate("http redirect many times").Build()
 	// ErrHTTPRequestURL is http request url error
-	ErrHTTPRequestURL = ClassNetwork.DefineError().TextualCode("ErrHTTPRequestURL").MessageTemplate("wrong url in user http request").Done()
+	ErrHTTPRequestURL = ClassNetwork.DefineError().TextualCode("ErrHTTPRequestURL").MessageTemplate("wrong url in user http request").Build()
 	// ErrGRPCTso is grpc tso error
-	ErrGRPCTso = ClassNetwork.DefineError().TextualCode("ErrGRPCTso").MessageTemplate("grpc tso request fail").Done()
+	ErrGRPCTso = ClassNetwork.DefineError().TextualCode("ErrGRPCTso").MessageTemplate("grpc tso request fail").Build()
 	// ErrGRPCHeartbeat is grpc heartbeat error
-	ErrGRPCHeartbeat = ClassNetwork.DefineError().TextualCode("ErrGRPCHeartbeat").MessageTemplate("grpc heartbeat request fail").Done()
+	ErrGRPCHeartbeat = ClassNetwork.DefineError().TextualCode("ErrGRPCHeartbeat").MessageTemplate("grpc heartbeat request fail").Build()
 	// ErrGRPCClose is grpc close error
-	ErrGRPCClose = ClassNetwork.DefineError().TextualCode("ErrGRPCClose").MessageTemplate("grpc close connection fail").Done()
+	ErrGRPCClose = ClassNetwork.DefineError().TextualCode("ErrGRPCClose").MessageTemplate("grpc close connection fail").Build()
 	// ErrGRPCSend is grpc send error
-	ErrGRPCSend = ClassNetwork.DefineError().TextualCode("ErrGRPCSend").MessageTemplate("grpc send message fail").Done()
+	ErrGRPCSend = ClassNetwork.DefineError().TextualCode("ErrGRPCSend").MessageTemplate("grpc send message fail").Build()
 	// ErrStorageLoad is storage load error
-	ErrStorageLoad = ClassStorage.DefineError().TextualCode("ErrStorageLoad").MessageTemplate("load config from storage error").Done()
+	ErrStorageLoad = ClassStorage.DefineError().TextualCode("ErrStorageLoad").MessageTemplate("load config from storage error").Build()
 	// ErrStorageSave is storage save error
-	ErrStorageSave = ClassStorage.DefineError().TextualCode("ErrStorageSave").MessageTemplate("save config to storage error").Done()
+	ErrStorageSave = ClassStorage.DefineError().TextualCode("ErrStorageSave").MessageTemplate("save config to storage error").Build()
 	// ErrStorageDelete is storage delete error
-	ErrStorageDelete = ClassStorage.DefineError().TextualCode("ErrStorageDelete").MessageTemplate("delete config from storage error").Done()
+	ErrStorageDelete = ClassStorage.DefineError().TextualCode("ErrStorageDelete").MessageTemplate("delete config from storage error").Build()
 	// ErrStorageEtcdLoad is etcd storage load error
-	ErrStorageEtcdLoad = ClassStorage.DefineError().TextualCode("ErrStorageEtcdLoad").MessageTemplate("load config from storage etcd error").Done()
+	ErrStorageEtcdLoad = ClassStorage.DefineError().TextualCode("ErrStorageEtcdLoad").MessageTemplate("load config from storage etcd error").Build()
 	// ErrStorageEtcdSave is etcd storage save error
-	ErrStorageEtcdSave = ClassStorage.DefineError().TextualCode("ErrStorageEtcdSave").MessageTemplate("save config to storage etcd error").Done()
+	ErrStorageEtcdSave = ClassStorage.DefineError().TextualCode("ErrStorageEtcdSave").MessageTemplate("save config to storage etcd error").Build()
 	// ErrStorageEtcdDelete is etcd storage delete error
-	ErrStorageEtcdDelete = ClassStorage.DefineError().TextualCode("ErrStorageEtcdDelete").MessageTemplate("delete config from storage etcd error").Done()
+	ErrStorageEtcdDelete = ClassStorage.DefineError().TextualCode("ErrStorageEtcdDelete").MessageTemplate("delete config from storage etcd error").Build()
 	// ErrInternalSchedulerDuplicate is scheduler duplicate
-	ErrInternalSchedulerDuplicate = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerDuplicate").MessageTemplate("duplicate scheduler found").Done()
+	ErrInternalSchedulerDuplicate = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerDuplicate").MessageTemplate("duplicate scheduler found").Build()
 	// ErrInternalSchedulerNotFound is scheduler not found
-	ErrInternalSchedulerNotFound = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerNotFound").MessageTemplate("scheduler not found").Done()
+	ErrInternalSchedulerNotFound = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerNotFound").MessageTemplate("scheduler not found").Build()
 	// ErrInternalSchedulerConfig is scheduler config error
-	ErrInternalSchedulerConfig = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerConfig").MessageTemplate("wrong scheduler config").Done()
+	ErrInternalSchedulerConfig = ClassInternal.DefineError().TextualCode("ErrInternalSchedulerConfig").MessageTemplate("wrong scheduler config").Build()
 	// ErrInternalRuleInvalid is invalid rule
-	ErrInternalRuleInvalid = ClassInternal.DefineError().TextualCode("ErrInternalRuleInvalid").MessageTemplate("invalid rule found").Done()
+	ErrInternalRuleInvalid = ClassInternal.DefineError().TextualCode("ErrInternalRuleInvalid").MessageTemplate("invalid rule found").Build()
 	// ErrInternalRuleDuplicate is duplicate rule
-	ErrInternalRuleDuplicate = ClassInternal.DefineError().TextualCode("ErrInternalRuleDuplicate").MessageTemplate("duplicate rule found").Done()
+	ErrInternalRuleDuplicate = ClassInternal.DefineError().TextualCode("ErrInternalRuleDuplicate").MessageTemplate("duplicate rule found").Build()
 	// ErrInternalRuleMismatch is rule mismatch
-	ErrInternalRuleMismatch = ClassInternal.DefineError().TextualCode("ErrInternalRuleMismatch").MessageTemplate("rule key mismatch").Done()
+	ErrInternalRuleMismatch = ClassInternal.DefineError().TextualCode("ErrInternalRuleMismatch").MessageTemplate("rule key mismatch").Build()
 	// ErrInternalOperatorNotFound is operator not found
-	ErrInternalOperatorNotFound = ClassInternal.DefineError().TextualCode("ErrInternalOperatorNotFound").MessageTemplate("operator not found").Done()
+	ErrInternalOperatorNotFound = ClassInternal.DefineError().TextualCode("ErrInternalOperatorNotFound").MessageTemplate("operator not found").Build()
 	// ErrInternalOperatorMerge is operator merge error
-	ErrInternalOperatorMerge = ClassInternal.DefineError().TextualCode("ErrInternalOperatorMerge").MessageTemplate("merge operator should be pair").Done()
+	ErrInternalOperatorMerge = ClassInternal.DefineError().TextualCode("ErrInternalOperatorMerge").MessageTemplate("merge operator should be pair").Build()
 	// ErrInternalOperatorNotStart is operator not start
-	ErrInternalOperatorNotStart = ClassInternal.DefineError().TextualCode("ErrInternalOperatorNotStart").MessageTemplate("operator not start").Done()
+	ErrInternalOperatorNotStart = ClassInternal.DefineError().TextualCode("ErrInternalOperatorNotStart").MessageTemplate("operator not start").Build()
 	// ErrInternalOperatorNotEnd is operator not end
-	ErrInternalOperatorNotEnd = ClassInternal.DefineError().TextualCode("ErrInternalOperatorNotEnd").MessageTemplate("operator not end").Done()
+	ErrInternalOperatorNotEnd = ClassInternal.DefineError().TextualCode("ErrInternalOperatorNotEnd").MessageTemplate("operator not end").Build()
 	// ErrInternalOperatorStepUnknown is operator step unknown
-	ErrInternalOperatorStepUnknown = ClassInternal.DefineError().TextualCode("ErrInternalStepUnknown").MessageTemplate("operator step is unknown").Done()
+	ErrInternalOperatorStepUnknown = ClassInternal.DefineError().TextualCode("ErrInternalStepUnknown").MessageTemplate("operator step is unknown").Build()
 	// ErrInternalStoreNotFound is store not found
-	ErrInternalStoreNotFound = ClassInternal.DefineError().TextualCode("ErrInternalStoreNotFound").MessageTemplate("store id %d not found").Done()
+	ErrInternalStoreNotFound = ClassInternal.DefineError().TextualCode("ErrInternalStoreNotFound").MessageTemplate("store id %d not found").Build()
 	// ErrInternalClusterVersionChange is cluster version change error
-	ErrInternalClusterVersionChange = ClassInternal.DefineError().TextualCode("ErrInternalClusterVersionChange").MessageTemplate("cluster version change same time").Done()
+	ErrInternalClusterVersionChange = ClassInternal.DefineError().TextualCode("ErrInternalClusterVersionChange").MessageTemplate("cluster version change same time").Build()
 	// ErrInternalRegionKey is region key error
-	ErrInternalRegionKey = ClassInternal.DefineError().TextualCode("ErrInternalRegionKey").MessageTemplate("wrong region key range").Done()
+	ErrInternalRegionKey = ClassInternal.DefineError().TextualCode("ErrInternalRegionKey").MessageTemplate("wrong region key range").Build()
 	// ErrInternalCacheRegionOverflow is cache region overflow
-	ErrInternalCacheRegionOverflow = ClassInternal.DefineError().TextualCode("ErrInternalCacheRegionOverflow").MessageTemplate("cache region overflow").Done()
+	ErrInternalCacheRegionOverflow = ClassInternal.DefineError().TextualCode("ErrInternalCacheRegionOverflow").MessageTemplate("cache region overflow").Build()
 	// ErrInternalVersionFeatureNotExist is version feature not exist
-	ErrInternalVersionFeatureNotExist = ClassInternal.DefineError().TextualCode("ErrInternalVersionFeatureNotExist").MessageTemplate("version feature not exist").Done()
+	ErrInternalVersionFeatureNotExist = ClassInternal.DefineError().TextualCode("ErrInternalVersionFeatureNotExist").MessageTemplate("version feature not exist").Build()
 	// ErrFormatParseCmd is parse cmd error
-	ErrFormatParseCmd = ClassFormat.DefineError().TextualCode("ErrFormatParseCmd").MessageTemplate("parse cmd error").Done()
+	ErrFormatParseCmd = ClassFormat.DefineError().TextualCode("ErrFormatParseCmd").MessageTemplate("parse cmd error").Build()
 	// ErrFormatParseClusterVersion is parse cluster version error
-	ErrFormatParseClusterVersion = ClassFormat.DefineError().TextualCode("ErrFormatParseClusterVersion").MessageTemplate("parse cluster version error").Done()
+	ErrFormatParseClusterVersion = ClassFormat.DefineError().TextualCode("ErrFormatParseClusterVersion").MessageTemplate("parse cluster version error").Build()
 	// ErrFormatParseURL is parse url error
-	ErrFormatParseURL = ClassFormat.DefineError().TextualCode("ErrFormatParseURL").MessageTemplate("parse url error").Done()
+	ErrFormatParseURL = ClassFormat.DefineError().TextualCode("ErrFormatParseURL").MessageTemplate("parse url error").Build()
 	// ErrFormatParseHistoryIndex is parse history index error
-	ErrFormatParseHistoryIndex = ClassFormat.DefineError().TextualCode("ErrFormatParseHistoryIndex").MessageTemplate("parse history index error").Done()
+	ErrFormatParseHistoryIndex = ClassFormat.DefineError().TextualCode("ErrFormatParseHistoryIndex").MessageTemplate("parse history index error").Build()
 	// ErrOtherInitLog is init log error
-	ErrOtherInitLog = ClassOther.DefineError().TextualCode("ErrOtherInitLog").MessageTemplate("init log fail").Done()
+	ErrOtherInitLog = ClassOther.DefineError().TextualCode("ErrOtherInitLog").MessageTemplate("init log fail").Build()
 	// ErrOtherDashboardServer is dashboard server error
-	ErrOtherDashboardServer = ClassOther.DefineError().TextualCode("ErrOtherDashboardServer").MessageTemplate("dashboard server error").Done()
+	ErrOtherDashboardServer = ClassOther.DefineError().TextualCode("ErrOtherDashboardServer").MessageTemplate("dashboard server error").Build()
 	// ErrOtherPrometheusPush is prometheus push error
-	ErrOtherPrometheusPush = ClassOther.DefineError().TextualCode("ErrOtherPrometheusPush").MessageTemplate("push to prometheus error").Done()
+	ErrOtherPrometheusPush = ClassOther.DefineError().TextualCode("ErrOtherPrometheusPush").MessageTemplate("push to prometheus error").Build()
 	// ErrOtherPluginLoadActionUnknown is plugin action unknown
-	ErrOtherPluginLoadActionUnknown = ClassOther.DefineError().TextualCode("ErrOtherPluginLoadActionUnknown").MessageTemplate("unknown action to load plugin").Done()
+	ErrOtherPluginLoadActionUnknown = ClassOther.DefineError().TextualCode("ErrOtherPluginLoadActionUnknown").MessageTemplate("unknown action to load plugin").Build()
 	// ErrOtherPluginFuncNotFound is plugin func not found
-	ErrOtherPluginFuncNotFound = ClassOther.DefineError().TextualCode("ErrOtherPluginFuncNotFound").MessageTemplate("plugin function not found").Done()
+	ErrOtherPluginFuncNotFound = ClassOther.DefineError().TextualCode("ErrOtherPluginFuncNotFound").MessageTemplate("plugin function not found").Build()
 	// ErrOtherSystemTime is system time error
-	ErrOtherSystemTime = ClassOther.DefineError().TextualCode("ErrOtherSystemTime").MessageTemplate("system time error").Done()
+	ErrOtherSystemTime = ClassOther.DefineError().TextualCode("ErrOtherSystemTime").MessageTemplate("system time error").Build()
 )

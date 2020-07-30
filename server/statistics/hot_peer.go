@@ -26,7 +26,7 @@ type HotPeerStat struct {
 	StoreID  uint64 `json:"store_id"`
 	RegionID uint64 `json:"region_id"`
 
-	// HotDegree records the hot region update times
+	// HotDegree records the times for the region considered as hot spot during each HandleRegionHeartbeat
 	HotDegree int `json:"hot_degree"`
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int `json:"anti_count"`

@@ -376,8 +376,8 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(r)
 	case 2, 3:
 		rate, err := strconv.ParseFloat(args[1], 64)
-		if err != nil || rate < 0 {
-			cmd.Println("rate should be a number that >= 0.")
+		if err != nil || rate <= 0 {
+			cmd.Println("rate should be a number that > 0.")
 			return
 		}
 		// if the storeid is "all", set limits for all stores
@@ -448,8 +448,8 @@ func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	rate, err := strconv.ParseFloat(args[0], 64)
-	if err != nil || rate < 0 {
-		cmd.Println("rate should be a number that >= 0.")
+	if err != nil || rate <= 0 {
+		cmd.Println("rate should be a number that > 0.")
 		return
 	}
 	prefix := path.Join(storesPrefix, "limit")

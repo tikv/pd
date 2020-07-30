@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/autoscaling"
 	"github.com/pingcap/pd/v4/pkg/dashboard"
 	"github.com/pingcap/pd/v4/pkg/swaggerserver"
 	"github.com/pingcap/pd/v4/server"
@@ -33,6 +34,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/id"
 	"github.com/pingcap/pd/v4/server/join"
+	"github.com/pingcap/pd/v4/server/member"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -75,7 +77,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, swaggerserver.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, swaggerserver.NewHandler, autoscaling.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
@@ -324,6 +326,19 @@ func (s *TestServer) BootstrapCluster() error {
 	_, err := s.server.Bootstrap(context.Background(), bootstrapReq)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+// WaitLease is used to get leader lease.
+// If it exceeds the maximum number of loops, it will return nil.
+func (s *TestServer) WaitLease() *member.LeaderLease {
+	for i := 0; i < 100; i++ {
+		lease := s.server.GetLease()
+		if lease != nil {
+			return lease
+		}
+		time.Sleep(WaitLeaderCheckInterval)
 	}
 	return nil
 }

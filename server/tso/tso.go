@@ -95,6 +95,12 @@ func (t *TimestampOracle) checkLease() bool {
 	return t.lease != nil && !t.lease.IsExpired()
 }
 
+func (t *TimestampOracle) setLease(lease *member.LeaderLease) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lease = lease
+}
+
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
 // otherwise, update it.
 func (t *TimestampOracle) saveTimestamp(ts time.Time) error {
@@ -119,6 +125,12 @@ func (t *TimestampOracle) saveTimestamp(ts time.Time) error {
 // SyncTimestamp is used to synchronize the timestamp.
 func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 	tsoCounter.WithLabelValues("sync").Inc()
+
+	t.setLease(lease)
+
+	failpoint.Inject("delaySyncTimestamp", func() {
+		time.Sleep(time.Second)
+	})
 
 	last, err := t.loadTimestamp()
 	if err != nil {
@@ -149,9 +161,6 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 	current := &atomicObject{
 		physical: next,
 	}
-	t.mu.Lock()
-	t.lease = lease
-	t.mu.Unlock()
 	atomic.StorePointer(&t.ts, unsafe.Pointer(current))
 
 	return nil
@@ -265,6 +274,7 @@ func (t *TimestampOracle) ResetTimestamp() {
 		physical: typeutil.ZeroTime,
 	}
 	atomic.StorePointer(&t.ts, unsafe.Pointer(zero))
+	t.setLease(nil)
 }
 
 var maxRetryCount = 10
@@ -286,9 +296,11 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 		if current == nil || current.physical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
 			if t.checkLease() {
+				log.Info("sync hasn't completed yet, wait for a while")
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
+			log.Error("invalid timestamp", zap.Any("timestamp", current))
 			return pdpb.Timestamp{}, errors.New("can not get timestamp, may be not leader")
 		}
 
