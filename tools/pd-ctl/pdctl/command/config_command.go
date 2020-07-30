@@ -36,6 +36,7 @@ var (
 	labelPropertyPrefix   = "pd/api/v1/config/label-property"
 	clusterVersionPrefix  = "pd/api/v1/config/cluster-version"
 	rulesPrefix           = "pd/api/v1/config/rules"
+	rulesBatchPrefix      = "pd/api/v1/config/rules/batch"
 	rulePrefix            = "pd/api/v1/config/rule"
 	replicationModePrefix = "pd/api/v1/config/replication-mode"
 )
@@ -507,43 +508,30 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	}
-	var rules []*placement.Rule
-	if err = json.Unmarshal(content, &rules); err != nil {
+
+	var opts []*placement.RuleOp
+	if err = json.Unmarshal(content, &opts); err != nil {
 		cmd.Println(err)
 		return
 	}
 
-	validRules := rules[:0]
-	for _, rule := range rules {
-		if rule.Count >= 0 {
-			validRules = append(validRules, rule)
+	validOpts := opts[:0]
+	for _, Op := range opts {
+		if Op.Count > 0 {
+			Op.Action = placement.RuleOpAdd
+			validOpts = append(validOpts, Op)
+		} else if Op.Count == 0 {
+			Op.Action = placement.RuleOpDel
+			validOpts = append(validOpts, Op)
 		}
 	}
 
-	n := len(validRules)
-	for k := 0; k < n; k++ {
-		r := validRules[k]
-		if r.Count == 0 {
-			validRules[k], validRules[n-1] = validRules[n-1], validRules[k]
-			n--
-		}
-	}
-
-	b, _ := json.Marshal(validRules[:n])
-	_, err = doRequest(cmd, rulesPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
+	b, _ := json.Marshal(validOpts)
+	_, err = doRequest(cmd, rulesBatchPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
 	if err != nil {
-		fmt.Printf("failed to save rules %s: %s\n", b, err)
+		cmd.Printf("failed to save rules %s: %s\n", b, err)
 		return
 	}
-	fmt.Printf("saved all rules\n")
 
-	for _, r := range validRules[n:] {
-		_, err = doRequest(cmd, path.Join(rulePrefix, r.GroupID, r.ID), http.MethodDelete)
-		if err != nil {
-			fmt.Printf("failed to delete rule %s/%s: %v\n", r.GroupID, r.ID, err)
-			return
-		}
-		fmt.Printf("deleted rule %s/%s\n", r.GroupID, r.ID)
-	}
 	cmd.Println("Success!")
 }
