@@ -65,6 +65,7 @@ type Config struct {
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
+	InitialClusterToken string `toml:"initial-cluster-token" json:"initial-cluster-token"`
 
 	// Join to an existing pd cluster, a string of endpoints.
 	Join string `toml:"join" json:"join"`
@@ -188,6 +189,7 @@ const (
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
 	defaultInitialClusterState = embed.ClusterStateFlagNew
+	defaultInitialClusterToken = "pd-cluster"
 
 	// etcd use 100ms for heartbeat and 1s for election timeout.
 	// We can enlarge both a little to reduce the network aggression.
@@ -481,6 +483,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	adjustString(&c.InitialClusterState, defaultInitialClusterState)
+	adjustString(&c.InitialClusterToken, defaultInitialClusterToken)
 
 	if len(c.Join) > 0 {
 		if _, err := url.Parse(c.Join); err != nil {
@@ -1159,6 +1162,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.WalDir = ""
 	cfg.InitialCluster = c.InitialCluster
 	cfg.ClusterState = c.InitialClusterState
+	cfg.InitialClusterToken = c.InitialClusterToken
 	cfg.EnablePprof = true
 	cfg.PreVote = c.PreVote
 	cfg.StrictReconfigCheck = !c.DisableStrictReconfigCheck
