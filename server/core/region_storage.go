@@ -15,13 +15,13 @@ package core
 
 import (
 	"context"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"math"
 	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"

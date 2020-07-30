@@ -16,7 +16,6 @@ package api
 import (
 	"context"
 	"fmt"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"net/http"
 	"strconv"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pkg/errors"

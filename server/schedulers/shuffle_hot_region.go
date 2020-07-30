@@ -14,13 +14,13 @@
 package schedulers
 
 import (
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"math/rand"
 	"strconv"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/filter"

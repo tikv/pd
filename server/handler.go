@@ -16,7 +16,6 @@ package server
 import (
 	"bytes"
 	"encoding/hex"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"net/http"
 	"path"
 	"strconv"
@@ -28,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"

@@ -16,7 +16,6 @@ package apiutil
 import (
 	"encoding/json"
 	"fmt"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"go.uber.org/zap"
 	"io"
 	"io/ioutil"
@@ -25,6 +24,7 @@ import (
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )

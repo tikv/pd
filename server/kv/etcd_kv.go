@@ -15,12 +15,12 @@ package kv
 
 import (
 	"context"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"path"
 	"strings"
 	"time"
 
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"

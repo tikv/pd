@@ -14,13 +14,13 @@
 package serverapi
 
 import (
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/urfave/negroni"

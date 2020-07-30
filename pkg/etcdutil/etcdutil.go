@@ -16,12 +16,12 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"net/http"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver"

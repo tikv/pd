@@ -15,7 +15,6 @@ package schedulers
 
 import (
 	"fmt"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"math"
 	"math/rand"
 	"net/http"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/filter"

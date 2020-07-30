@@ -15,7 +15,6 @@ package join
 
 import (
 	"fmt"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"io/ioutil"
 	"os"
 	"path"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pkg/errors"

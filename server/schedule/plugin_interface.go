@@ -14,12 +14,12 @@
 package schedule
 
 import (
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"path/filepath"
 	"plugin"
 	"sync"
 
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"go.uber.org/zap"
 )
 

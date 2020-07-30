@@ -15,7 +15,6 @@ package core
 
 import (
 	"fmt"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"math"
 	"strings"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
