@@ -265,7 +265,7 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster opt.Cluster, re
 	storeID := region.GetLeader().GetStoreId()
 	store := cluster.GetStore(storeID)
 	if store == nil {
-		log.Error("failed to get the store", zap.Uint64("store-id", storeID))
+		log.Error("failed to get the store", zap.Uint64("store-id", storeID), zap.Error(errs.ErrInternalStoreNotFound.FastGenByArgs(storeID)))
 		return true
 	}
 	if !filter.Source(cluster, store, l.filters) {
@@ -317,7 +317,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 	leaderStoreID := region.GetLeader().GetStoreId()
 	source := cluster.GetStore(leaderStoreID)
 	if source == nil {
-		log.Error("failed to get the source store", zap.Uint64("store-id", leaderStoreID))
+		log.Error("failed to get the source store", zap.Uint64("store-id", leaderStoreID), zap.Error(errs.ErrInternalStoreNotFound.FastGenByArgs(leaderStoreID)))
 		return nil
 	}
 	scoreGuard := filter.NewPlacementSafeguard(l.GetName(), cluster, region, source)

@@ -14,6 +14,7 @@ package core
 
 import (
 	"bytes"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"math/rand"
 	"time"
 
@@ -229,7 +230,7 @@ func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 			if len(endKey) > 0 && bytes.Compare(startKey, endKey) > 0 {
 				log.Error("wrong range keys",
 					zap.String("start-key", string(HexRegionKey(startKey))),
-					zap.String("end-key", string(HexRegionKey(endKey))))
+					zap.String("end-key", string(HexRegionKey(endKey))), zap.Error(errs.ErrInternalRegionKey.FastGenByArgs()))
 			}
 			continue
 		}

@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"sync"
 
 	"github.com/pingcap/log"
@@ -84,22 +85,22 @@ func (m *RuleManager) loadRules() error {
 	_, err := m.store.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
-			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrInternalRuleInvalid.FastGenByArgs()))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if err := m.adjustRule(&r); err != nil {
-			log.Error("rule is in bad format", zap.Error(err), zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("rule is in bad format", zap.Error(err), zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrInternalRuleInvalid.FastGenByArgs()))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if _, ok := m.rules[r.Key()]; ok {
-			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrInternalRuleDuplicate.FastGenByArgs()))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if k != r.StoreKey() {
-			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrInternalRuleMismatch.FastGenByArgs()))
 			toDelete = append(toDelete, k)
 			toSave = append(toSave, &r)
 		}

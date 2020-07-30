@@ -14,6 +14,7 @@
 package schedule
 
 import (
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"math/rand"
 	"sync"
 
@@ -176,7 +177,7 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 	storeID := oldPeer.GetStoreId()
 	sourceStore := r.cluster.GetStore(storeID)
 	if sourceStore == nil {
-		log.Error("failed to get the store", zap.Uint64("store-id", storeID))
+		log.Error("failed to get the store", zap.Uint64("store-id", storeID), zap.Error(errs.ErrInternalStoreNotFound.FastGenByArgs(storeID)))
 		return nil
 	}
 	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster, region, sourceStore)

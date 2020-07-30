@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"sort"
 	"strconv"
 
@@ -189,7 +190,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 	sourceStoreID := oldPeer.GetStoreId()
 	source := cluster.GetStore(sourceStoreID)
 	if source == nil {
-		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID))
+		log.Error("failed to get the source store", zap.Uint64("store-id", sourceStoreID), zap.Error(errs.ErrInternalStoreNotFound.FastGenByArgs(sourceStoreID)))
 		return nil
 	}
 

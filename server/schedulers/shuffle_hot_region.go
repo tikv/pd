@@ -14,6 +14,7 @@
 package schedulers
 
 import (
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"math/rand"
 	"strconv"
 	"time"
@@ -165,7 +166,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 		srcStoreID := srcRegion.GetLeader().GetStoreId()
 		srcStore := cluster.GetStore(srcStoreID)
 		if srcStore == nil {
-			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
+			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID), zap.Error(errs.ErrInternalStoreNotFound.FastGenByArgs(srcStoreID)))
 		}
 
 		filters := []filter.Filter{

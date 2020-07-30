@@ -14,6 +14,7 @@
 package tso
 
 import (
+	errs "github.com/pingcap/pd/v4/pkg/errors"
 	"path"
 	"sync"
 	"sync/atomic"
@@ -132,7 +133,7 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubTimeByWallClock(next, last) < updateTimestampGuard {
-		log.Error("system time may be incorrect", zap.Time("last", last), zap.Time("next", next))
+		log.Error("system time may be incorrect", zap.Time("last", last), zap.Time("next", next), zap.Error(errs.ErrOtherSystemTime.FastGenByArgs()))
 		next = last.Add(updateTimestampGuard)
 	}
 
@@ -296,7 +297,7 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 		if resp.Logical >= maxLogical {
 			log.Error("logical part outside of max logical interval, please check ntp time",
 				zap.Reflect("response", resp),
-				zap.Int("retry-count", i))
+				zap.Int("retry-count", i), zap.Error(errs.ErrOtherSystemTime.FastGenByArgs()))
 			tsoCounter.WithLabelValues("logical_overflow").Inc()
 			time.Sleep(UpdateTimestampStep)
 			continue
