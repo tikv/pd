@@ -139,7 +139,7 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 
 	leader, rev, err := getLeader(m.client, m.GetLeaderPath())
 	if err != nil {
-		log.Error("get leader meet error", zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
+		log.Error("get leader from etcd meet error", zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}

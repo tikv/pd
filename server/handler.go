@@ -210,7 +210,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 	if err = c.AddScheduler(s, args...); err != nil {
-		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err), zap.Error(errs.ErrInternalSchedulerDuplicate.FastGenByArgs()))
+		log.Error("can not add scheduler, scheduler may be duplicate", zap.String("scheduler-name", s.GetName()), zap.Error(err), zap.Error(errs.ErrInternalSchedulerDuplicate.FastGenByArgs()))
 	} else if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 	}

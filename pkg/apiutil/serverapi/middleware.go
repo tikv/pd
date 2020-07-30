@@ -160,7 +160,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		if _, err := w.Write(b); err != nil {
-			log.Error("write failed", zap.Error(err), zap.Error(errs.ErrIOWrite.FastGenByArgs()))
+			log.Error("write to http content failed", zap.Error(err), zap.Error(errs.ErrIOWrite.FastGenByArgs()))
 			continue
 		}
 

@@ -57,7 +57,7 @@ func (p *PluginInterface) GetFunction(path string, funcName string) (plugin.Symb
 	//get func from plugin
 	f, err := p.pluginMap[path].Lookup(funcName)
 	if err != nil {
-		log.Error("Lookup func error!", zap.Error(errs.ErrOtherPluginFuncNotFound.FastGenByArgs()))
+		log.Error("Lookup plugin func error!", zap.Error(errs.ErrOtherPluginFuncNotFound.FastGenByArgs()))
 		return nil, err
 	}
 	return f, nil
