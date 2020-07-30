@@ -519,9 +519,9 @@ func (s *testRuleSuite) TestBatch(c *C) {
 		Rule:   &placement.Rule{GroupID: "a", ID: "14"},
 	}
 	opt6 := placement.Batch{
-		Action:  placement.BatchDel,
-		Rule:    &placement.Rule{GroupID: "b", ID: "1"},
-		MatchID: true,
+		Action:           placement.BatchDel,
+		Rule:             &placement.Rule{GroupID: "b", ID: "1"},
+		DeleteByIDPrefix: true,
 	}
 	opt7 := placement.Batch{
 		Action: placement.BatchDel,

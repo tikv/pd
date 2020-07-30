@@ -61,7 +61,7 @@ func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags rule
-// @Summary Set all rules for the cluster. If there is an error, modifications are promised to be cancelled in memory, but not disk. You propabably want to request again to make rules in memory/disk consistent.
+// @Summary Set all rules for the cluster. If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You propabably want to request again to make rules in memory/disk consistent.
 // @Produce json
 // @Param rules body []placement.Rule true "Parameters of rules"
 // @Success 200 {string} string "Update rules successfully."
@@ -294,7 +294,7 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags rule
-// @Summary Batch operations for the cluster. Operations should be independent(differnt ID). If there is an error, modifications are promised to be cancelled in memory, but not disk. You propabably want to request again to make rules in memory/disk consistent.
+// @Summary Batch operations for the cluster. Operations should be independent(differnt ID). If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You propabably want to request again to make rules in memory/disk consistent.
 // @Produce json
 // @Param operations body []placement.Batch true "Parameters of rule operations"
 // @Success 200 {string} string "Batch operations successfully."
