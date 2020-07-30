@@ -358,7 +358,7 @@ func (m *RuleManager) delRuleByID(group, id string, oldRules map[[2]string]*Rule
 	oldRules[key] = old
 }
 
-func (m *RuleManager) delRule(t *Batch, oldRules map[[2]string]*Rule) {
+func (m *RuleManager) delRule(t *RuleOp, oldRules map[[2]string]*Rule) {
 	if !t.DeleteByIDPrefix {
 		m.delRuleByID(t.GroupID, t.ID, oldRules)
 	} else {
@@ -371,28 +371,28 @@ func (m *RuleManager) delRule(t *Batch, oldRules map[[2]string]*Rule) {
 }
 
 // BatchAction indicates the operation type
-type BatchAction string
+type RuleOpType string
 
 const (
-	// BatchAdd a placement rule, only need to specify the field *Rule
-	BatchAdd BatchAction = "add"
-	// BatchDel a placement rule, only need to specify the field `GroupID`, `ID`, `MatchID`
-	BatchDel BatchAction = "del"
+	// RuleOpAdd a placement rule, only need to specify the field *Rule
+	RuleOpAdd RuleOpType = "add"
+	// RuleOpDel a placement rule, only need to specify the field `GroupID`, `ID`, `MatchID`
+	RuleOpDel RuleOpType = "del"
 )
 
-// Batch is for batching placement rule actions. The action type is
+// RuleOp is for batching placement rule actions. The action type is
 // distinguished by the field `Action`.
-type Batch struct {
-	*Rule                        // information of the placement rule to add/delete
-	Action           BatchAction `json:"action"`       // the operation type
-	DeleteByIDPrefix bool        `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
+type RuleOp struct {
+	*Rule                       // information of the placement rule to add/delete
+	Action           RuleOpType `json:"action"`              // the operation type
+	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
 // Batch executes a series of actions at once.
-func (m *RuleManager) Batch(todo []Batch) error {
+func (m *RuleManager) Batch(todo []RuleOp) error {
 	for _, t := range todo {
 		switch t.Action {
-		case BatchAdd:
+		case RuleOpAdd:
 			err := m.adjustRule(t.Rule)
 			if err != nil {
 				return err
@@ -407,9 +407,9 @@ func (m *RuleManager) Batch(todo []Batch) error {
 
 	for _, t := range todo {
 		switch t.Action {
-		case BatchAdd:
+		case RuleOpAdd:
 			m.addRule(t.Rule, oldRules)
-		case BatchDel:
+		case RuleOpDel:
 			m.delRule(&t, oldRules)
 		}
 	}

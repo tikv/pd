@@ -498,57 +498,57 @@ func compareRule(c *C, r1 *placement.Rule, r2 *placement.Rule) {
 }
 
 func (s *testRuleSuite) TestBatch(c *C) {
-	opt1 := placement.Batch{
-		Action: placement.BatchAdd,
+	opt1 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
 		Rule:   &placement.Rule{GroupID: "a", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
 	}
-	opt2 := placement.Batch{
-		Action: placement.BatchAdd,
+	opt2 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
 		Rule:   &placement.Rule{GroupID: "b", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
 	}
-	opt3 := placement.Batch{
-		Action: placement.BatchAdd,
+	opt3 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
 		Rule:   &placement.Rule{GroupID: "a", ID: "14", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
 	}
-	opt4 := placement.Batch{
-		Action: placement.BatchAdd,
+	opt4 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
 		Rule:   &placement.Rule{GroupID: "a", ID: "15", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
 	}
-	opt5 := placement.Batch{
-		Action: placement.BatchDel,
+	opt5 := placement.RuleOp{
+		Action: placement.RuleOpDel,
 		Rule:   &placement.Rule{GroupID: "a", ID: "14"},
 	}
-	opt6 := placement.Batch{
-		Action:           placement.BatchDel,
+	opt6 := placement.RuleOp{
+		Action:           placement.RuleOpDel,
 		Rule:             &placement.Rule{GroupID: "b", ID: "1"},
 		DeleteByIDPrefix: true,
 	}
-	opt7 := placement.Batch{
-		Action: placement.BatchDel,
+	opt7 := placement.RuleOp{
+		Action: placement.RuleOpDel,
 		Rule:   &placement.Rule{GroupID: "a", ID: "1"},
 	}
-	opt8 := placement.Batch{
-		Action: placement.BatchAdd,
+	opt8 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
 		Rule:   &placement.Rule{GroupID: "a", ID: "16", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1},
 	}
-	opt9 := placement.Batch{
-		Action: placement.BatchAdd,
+	opt9 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
 		Rule:   &placement.Rule{GroupID: "a", ID: "17", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1},
 	}
 
-	successData1, err := json.Marshal([]placement.Batch{opt1, opt2, opt3})
+	successData1, err := json.Marshal([]placement.RuleOp{opt1, opt2, opt3})
 	c.Assert(err, IsNil)
 
-	successData2, err := json.Marshal([]placement.Batch{opt5, opt7})
+	successData2, err := json.Marshal([]placement.RuleOp{opt5, opt7})
 	c.Assert(err, IsNil)
 
-	successData3, err := json.Marshal([]placement.Batch{opt4, opt6})
+	successData3, err := json.Marshal([]placement.RuleOp{opt4, opt6})
 	c.Assert(err, IsNil)
 
-	checkErrData, err := json.Marshal([]placement.Batch{opt8})
+	checkErrData, err := json.Marshal([]placement.RuleOp{opt8})
 	c.Assert(err, IsNil)
 
-	setErrData, err := json.Marshal([]placement.Batch{opt9})
+	setErrData, err := json.Marshal([]placement.RuleOp{opt9})
 	c.Assert(err, IsNil)
 
 	testcases := []struct {

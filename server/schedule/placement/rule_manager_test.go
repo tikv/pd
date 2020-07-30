@@ -95,12 +95,12 @@ func (s *testManagerSuite) TestKeys(c *C) {
 		{GroupID: "2", ID: "3", Role: "voter", Count: 1, StartKeyHex: "22", EndKeyHex: "dd"},
 	}
 
-	toDelete := []Batch{}
+	toDelete := []RuleOp{}
 	for _, r := range rules {
 		s.manager.SetRule(r)
-		toDelete = append(toDelete, Batch{
+		toDelete = append(toDelete, RuleOp{
 			Rule:             r,
-			Action:           BatchDel,
+			Action:           RuleOpDel,
 			DeleteByIDPrefix: false,
 		})
 	}

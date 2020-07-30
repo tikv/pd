@@ -296,7 +296,7 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Tags rule
 // @Summary Batch operations for the cluster. Operations should be independent(differnt ID). If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You propabably want to request again to make rules in memory/disk consistent.
 // @Produce json
-// @Param operations body []placement.Batch true "Parameters of rule operations"
+// @Param operations body []placement.RuleOp true "Parameters of rule operations"
 // @Success 200 {string} string "Batch operations successfully."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 412 {string} string "Placement rules feature is disabled."
@@ -308,13 +308,13 @@ func (h *ruleHandler) Batch(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
-	var opts []placement.Batch
+	var opts []placement.RuleOp
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &opts); err != nil {
 		return
 	}
 	for _, opt := range opts {
 		switch opt.Action {
-		case placement.BatchAdd:
+		case placement.RuleOpAdd:
 			if err := h.checkRule(opt.Rule); err != nil {
 				h.rd.JSON(w, http.StatusBadRequest, err.Error())
 				return
