@@ -92,6 +92,7 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	rulesHandler := newRulesHandler(svr, rd)
 	clusterRouter.HandleFunc("/config/rules", rulesHandler.GetAll).Methods("GET")
 	clusterRouter.HandleFunc("/config/rules", rulesHandler.SetAll).Methods("POST")
+	clusterRouter.HandleFunc("/config/rules/batch", rulesHandler.Batch).Methods("POST")
 	clusterRouter.HandleFunc("/config/rules/group/{group}", rulesHandler.GetAllByGroup).Methods("GET")
 	clusterRouter.HandleFunc("/config/rules/region/{region}", rulesHandler.GetAllByRegion).Methods("GET")
 	clusterRouter.HandleFunc("/config/rules/key/{key}", rulesHandler.GetAllByKey).Methods("GET")
