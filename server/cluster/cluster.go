@@ -30,7 +30,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/pkg/component"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/pkg/typeutil"

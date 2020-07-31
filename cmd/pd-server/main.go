@@ -24,7 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/autoscaling"
 	"github.com/pingcap/pd/v4/pkg/dashboard"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/pkg/metricutil"
 	"github.com/pingcap/pd/v4/pkg/swaggerserver"

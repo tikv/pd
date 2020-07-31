@@ -24,7 +24,7 @@ import (
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/log"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
@@ -112,7 +112,7 @@ func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.Read
 
 // ErrorResp Respond to the client about the given error, integrating with errcode.ErrorCode.
 //
-// Important: if the `err` is just an error and not an errcode.ErrorCode (given by errors.Cause),
+// Important: if the `err` is just an error and not an errcode.ErrorCode (given by errs.Cause),
 // then by default an error is assumed to be a 500 Internal Error.
 //
 // If the error is nil, this also responds with a 500 and logs at the error level.

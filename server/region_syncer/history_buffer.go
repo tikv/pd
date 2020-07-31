@@ -18,7 +18,7 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
 	"go.uber.org/zap"

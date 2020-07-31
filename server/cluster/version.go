@@ -16,7 +16,7 @@ package cluster
 import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )

@@ -20,7 +20,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/log"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/urfave/negroni"

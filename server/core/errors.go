@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	// Parent for other errors
+	// Parent for other errs
 	storeStateCode = errcode.StateCode.Child("state.store")
 
 	// StorePauseLeaderTransferCode is an error due to requesting an operation that is invalid due to a store being in a state

@@ -21,7 +21,7 @@ import (
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	errs "github.com/pingcap/pd/v4/pkg/errors"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
