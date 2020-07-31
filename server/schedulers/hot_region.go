@@ -247,6 +247,7 @@ func (h *hotScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
 
 func (h *hotScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
+	rankMetricsStatus.WithLabelValues("hot").Set(float64(h.conf.GetRank()))
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }
 
@@ -989,7 +990,6 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		qpsStatus := status(qpsHot, qpsDecRatio)
 		keyStatus := status(keyHot, keyDecRatio)
 		byteStatus := status(byteHot, byteDecRatio)
-		rankMetricsStatus.WithLabelValues("hot").Set(float64(bs.sche.rs.num))
 		if qpsStatus == better && keyStatus == better && byteStatus == better {
 			rank = -8
 		} else if qpsStatus == worse || keyStatus == worse || byteStatus == worse {
