@@ -94,7 +94,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		s, err := ioutil.ReadFile(filePath)
 		if err != nil {
-			log.Fatal("read the join config meet error", zap.Error(err), zap.Error(errs.ErrIORead.FastGenByArgs()))
+			log.Fatal("read the join config meet error", zap.Error(errs.ErrIORead.FastGenByArgs()))
 		}
 		cfg.InitialCluster = strings.TrimSpace(string(s))
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
@@ -211,14 +211,14 @@ func PrepareJoinCluster(cfg *config.Config) error {
 func isDataExist(d string) bool {
 	dir, err := os.Open(d)
 	if err != nil {
-		log.Error("failed to open directory", zap.Error(err), zap.Error(errs.ErrIORead.FastGenByArgs()))
+		log.Error("failed to open directory", zap.Error(errs.ErrIORead.FastGenByArgs()))
 		return false
 	}
 	defer dir.Close()
 
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
-		log.Error("failed to list directory", zap.Error(err), zap.Error(errs.ErrIORead.FastGenByArgs()))
+		log.Error("failed to list directory", zap.Error(errs.ErrIORead.FastGenByArgs()))
 		return false
 	}
 	return len(names) != 0

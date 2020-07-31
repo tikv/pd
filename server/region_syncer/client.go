@@ -140,7 +140,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			}
 			conn, err = s.establish(addr)
 			if err != nil {
-				log.Error("cannot establish connection with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Error(err), zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
+				log.Error("cannot establish connection with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
 				continue
 			}
 			defer conn.Close()
@@ -162,7 +162,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						return
 					}
 				}
-				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Error(err), zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
+				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
 				time.Sleep(time.Second)
 				continue
 			}
@@ -170,9 +170,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			for {
 				resp, err := stream.Recv()
 				if err != nil {
-					log.Error("region grpc sync with leader meet error", zap.Error(err), zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
+					log.Error("region grpc sync with leader meet error", zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
 					if err = stream.CloseSend(); err != nil {
-						log.Error("failed to terminate client stream, cannot close grpc connection", zap.Error(err), zap.Error(errs.ErrGRPCClose.FastGenByArgs()))
+						log.Error("failed to terminate client stream, cannot close grpc connection", zap.Error(errs.ErrGRPCClose.FastGenByArgs()))
 					}
 					time.Sleep(time.Second)
 					break

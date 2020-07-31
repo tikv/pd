@@ -106,7 +106,7 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	start := time.Now()
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if err != nil {
-		log.Error("load from etcd meet error", zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
+		log.Error("load from etcd meet error", zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 	}
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), zap.Error(err))

@@ -235,7 +235,7 @@ func (c *client) tsLoop() {
 					return
 				default:
 				}
-				log.Error("[pd] create tso stream error", zap.Error(err), zap.Error(errs.ErrGRPCTso.FastGenByArgs()))
+				log.Error("[pd] create tso stream error", zap.Error(errs.ErrGRPCTso.FastGenByArgs()))
 				c.ScheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(errors.WithStack(err))
@@ -282,7 +282,7 @@ func (c *client) tsLoop() {
 				return
 			default:
 			}
-			log.Error("[pd] getTS error", zap.Error(err), zap.Error(errs.ErrGRPCTso.FastGenByArgs()))
+			log.Error("[pd] getTS error", zap.Error(errs.ErrGRPCTso.FastGenByArgs()))
 			c.ScheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil
@@ -379,7 +379,7 @@ func (c *client) Close() {
 	defer c.connMu.Unlock()
 	for _, cc := range c.connMu.clientConns {
 		if err := cc.Close(); err != nil {
-			log.Error("[pd] failed close grpc clientConn", zap.Error(err), zap.Error(errs.ErrGRPCClose.FastGenByArgs()))
+			log.Error("[pd] failed close grpc clientConn", zap.Error(errs.ErrGRPCClose.FastGenByArgs()))
 		}
 	}
 }

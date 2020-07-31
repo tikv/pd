@@ -96,7 +96,7 @@ func (s *heartbeatStreams) run() {
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
 					log.Error("send heartbeat message fail",
-						zap.Uint64("region-id", msg.RegionId), zap.Error(err), zap.Error(errs.ErrGRPCHeartbeat.FastGenByArgs()))
+						zap.Uint64("region-id", msg.RegionId), zap.Error(errs.ErrGRPCHeartbeat.FastGenByArgs()))
 					delete(s.streams, storeID)
 					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
 				} else {

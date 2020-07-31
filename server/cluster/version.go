@@ -74,7 +74,7 @@ func ParseVersion(v string) (*semver.Version, error) {
 func MustParseVersion(v string) *semver.Version {
 	ver, err := ParseVersion(v)
 	if err != nil {
-		log.Fatal("version string is illegal", zap.Error(err), zap.Error(errs.ErrInternalVersionFeatureNotExist.FastGenByArgs()))
+		log.Fatal("version string is illegal", zap.Error(errs.ErrInternalVersionFeatureNotExist.FastGenByArgs()))
 	}
 	return ver
 }
