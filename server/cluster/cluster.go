@@ -626,7 +626,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 					log.Error("failed to delete region from storage",
 						zap.Uint64("region-id", item.GetID()),
 						zap.Stringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
-						zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
+						zap.Error(err), zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
 				}
 			}
 		}
@@ -678,7 +678,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			log.Error("failed to save region to storage",
 				zap.Uint64("region-id", region.GetID()),
 				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
-				zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+				zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		}
 		regionEventCounter.WithLabelValues("update_kv").Inc()
 	}
@@ -1136,7 +1136,7 @@ func (c *RaftCluster) checkStores() {
 			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
-					zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+					zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 			}
 		} else {
 			offlineStores = append(offlineStores, offlineStore)
@@ -1167,7 +1167,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 			if err != nil {
 				log.Error("delete store failed",
 					zap.Stringer("store", store.GetMeta()),
-					zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
+					zap.Error(err), zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
 				return err
 			}
 			c.RemoveStoreLimit(store.GetID())
@@ -1240,7 +1240,7 @@ func (c *RaftCluster) resetClusterMetrics() {
 func (c *RaftCluster) collectHealthStatus() {
 	members, err := GetMembers(c.etcdClient)
 	if err != nil {
-		log.Error("get members error", zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
+		log.Error("get members error", zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 	}
 	unhealth := CheckHealth(c.httpClient, members)
 	for _, member := range members {
@@ -1318,7 +1318,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 		}
 		err := c.opt.Persist(c.storage)
 		if err != nil {
-			log.Error("persist cluster version meet error", zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+			log.Error("persist cluster version meet error", zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		}
 		log.Info("cluster version changed",
 			zap.Stringer("old-cluster-version", clusterVersion),
@@ -1794,7 +1794,7 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
 			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s", cURL, healthURL), nil)
 			if err != nil {
-				log.Error("failed to new request", zap.Error(errs.ErrIORead.FastGenByArgs()))
+				log.Error("failed to new request", zap.Error(err), zap.Error(errs.ErrIORead.FastGenByArgs()))
 				cancel()
 				continue
 			}

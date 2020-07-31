@@ -139,7 +139,7 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 
 	leader, rev, err := getLeader(m.client, m.GetLeaderPath())
 	if err != nil {
-		log.Error("get leader from etcd meet error", zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
+		log.Error("get leader from etcd meet error", zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}
@@ -149,7 +149,7 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 			// in previous CampaignLeader. we can delete and campaign again.
 			log.Warn("the leader has not changed, delete and campaign again", zap.Stringer("old-leader", leader))
 			if err = m.deleteLeaderKey(); err != nil {
-				log.Error("delete leader key meet error", zap.Error(errs.ErrStorageEtcdDelete.FastGenByArgs()))
+				log.Error("delete leader key meet error", zap.Error(err), zap.Error(errs.ErrStorageEtcdDelete.FastGenByArgs()))
 				time.Sleep(200 * time.Millisecond)
 				return nil, 0, true
 			}
@@ -166,18 +166,18 @@ func (m *Member) CheckPriority(ctx context.Context) {
 	}
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
-		log.Error("failed to load leader priority", zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
+		log.Error("failed to load leader priority", zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 		return
 	}
 	leaderPriority, err := m.GetMemberLeaderPriority(etcdLeader)
 	if err != nil {
-		log.Error("failed to load etcd leader priority", zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
+		log.Error("failed to load etcd leader priority", zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 		return
 	}
 	if myPriority > leaderPriority {
 		err := m.MoveEtcdLeader(ctx, etcdLeader, m.ID())
 		if err != nil {
-			log.Error("failed to transfer etcd leader", zap.Error(errs.ErrStorageEtcdSave.FastGenByArgs()))
+			log.Error("failed to transfer etcd leader", zap.Error(err), zap.Error(errs.ErrStorageEtcdSave.FastGenByArgs()))
 		} else {
 			log.Info("transfer etcd leader",
 				zap.Uint64("from", etcdLeader),
@@ -228,7 +228,7 @@ func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
 	data, err := leader.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatal("marshal leader meet error", zap.Stringer("leader", leader), zap.Error(errs.ErrFormatParseURL.FastGenByArgs()))
+		log.Fatal("marshal leader meet error", zap.Stringer("leader", leader), zap.Error(err), zap.Error(errs.ErrFormatParseURL.FastGenByArgs()))
 	}
 	m.member = leader
 	m.memberValue = string(data)

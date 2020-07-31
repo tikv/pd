@@ -87,7 +87,7 @@ func (s *RegionStorage) backgroundFlush() {
 					continue
 				}
 				if err = s.FlushRegion(); err != nil {
-					log.Error("flush regions meet error", zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+					log.Error("flush regions meet error", zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 				}
 			case <-s.regionStorageCtx.Done():
 				return
@@ -179,7 +179,7 @@ func (s *RegionStorage) flush() error {
 func (s *RegionStorage) Close() error {
 	err := s.FlushRegion()
 	if err != nil {
-		log.Error("meet error before close the region storage", zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+		log.Error("meet error before close the region storage", zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 	}
 	s.regionStorageCancel()
 	return errors.WithStack(s.LeveldbKV.Close())

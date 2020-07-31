@@ -206,7 +206,7 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 				s.limit.Wait(int64(resp.Size()))
 				lastIndex += len(metas)
 				if err := stream.Send(resp); err != nil {
-					log.Error("failed to send grpc sync region response", zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
+					log.Error("failed to send grpc sync region response", zap.Error(err), zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
 				}
 				metas = metas[:0]
 				stats = stats[:0]
@@ -258,7 +258,7 @@ func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
 	for name, sender := range s.streams {
 		err := sender.Send(regions)
 		if err != nil {
-			log.Error("region syncer send data meet error", zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
+			log.Error("region syncer send data meet error", zap.Error(err), zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
 			failed = append(failed, name)
 		}
 	}

@@ -423,7 +423,7 @@ func (s *Server) Close() {
 		s.hbStreams.Close()
 	}
 	if err := s.storage.Close(); err != nil {
-		log.Error("close storage meet error", zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
+		log.Error("close storage meet error", zap.Error(err), zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
 	}
 
 	// Run callbacks
@@ -730,7 +730,7 @@ func (s *Server) GetConfig() *config.Config {
 			log.Error("failed to decode scheduler config",
 				zap.String("config", configs[i]),
 				zap.String("scheduler", sche),
-				zap.Error(errs.ErrInternalSchedulerConfig.FastGenByArgs()))
+				zap.Error(err), zap.Error(errs.ErrInternalSchedulerConfig.FastGenByArgs()))
 			continue
 		}
 		payload[sche] = config
@@ -762,7 +762,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 		log.Error("failed to update schedule config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
-			zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+			zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		return err
 	}
 	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -808,7 +808,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		log.Error("failed to update replication config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
-			zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+			zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		return err
 	}
 	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -846,7 +846,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 		log.Error("failed to update PDServer config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
-			zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+			zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		return err
 	}
 	log.Info("PD server config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -862,7 +862,7 @@ func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 		log.Error("failed to update label property config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", &old),
-			zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+			zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		return err
 	}
 	log.Info("label property config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -880,7 +880,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
-			zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+			zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		return err
 	}
 
@@ -899,7 +899,7 @@ func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 			zap.String("labelKey", labelKey),
 			zap.String("labelValue", labelValue),
 			zap.Reflect("config", s.persistOptions.GetLabelPropertyConfig()),
-			zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
+			zap.Error(err), zap.Error(errs.ErrStorageDelete.FastGenByArgs()))
 		return err
 	}
 
@@ -926,7 +926,7 @@ func (s *Server) SetClusterVersion(v string) error {
 		log.Error("failed to update cluster version",
 			zap.String("old-version", old.String()),
 			zap.String("new-version", v),
-			zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+			zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		return err
 	}
 	log.Info("cluster version is updated", zap.String("new-version", v))
@@ -1033,7 +1033,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 		log.Error("failed to update replication mode config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", &old),
-			zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+			zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 		return err
 	}
 	log.Info("replication mode config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
@@ -1051,7 +1051,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 			s.persistOptions.SetReplicationModeConfig(old)
 			revertErr := s.persistOptions.Persist(s.storage)
 			if revertErr != nil {
-				log.Error("failed to revert replication mode persistent config", zap.Error(errs.ErrStorageSave.FastGenByArgs()))
+				log.Error("failed to revert replication mode persistent config", zap.Error(err), zap.Error(errs.ErrStorageSave.FastGenByArgs()))
 			}
 		}
 		return err
@@ -1077,7 +1077,7 @@ func (s *Server) leaderLoop() {
 		if leader != nil {
 			err := s.reloadConfigFromKV()
 			if err != nil {
-				log.Error("reload config failed", zap.Error(errs.ErrStorageLoad.FastGenByArgs()))
+				log.Error("reload config failed", zap.Error(err), zap.Error(errs.ErrStorageLoad.FastGenByArgs()))
 				continue
 			}
 			syncer := s.cluster.GetRegionSyncer()
@@ -1108,7 +1108,7 @@ func (s *Server) campaignLeader() {
 	lease := member.NewLeaderLease(s.client)
 	defer lease.Close()
 	if err := s.member.CampaignLeader(lease, s.cfg.LeaderLease); err != nil {
-		log.Error("campaign leader meet error", zap.Error(errs.ErrStorageEtcdSave.FastGenByArgs()))
+		log.Error("campaign leader meet error", zap.Error(err), zap.Error(errs.ErrStorageEtcdSave.FastGenByArgs()))
 		return
 	}
 
@@ -1126,20 +1126,20 @@ func (s *Server) campaignLeader() {
 
 	log.Debug("sync timestamp for tso")
 	if err := s.tso.SyncTimestamp(lease); err != nil {
-		log.Error("failed to sync timestamp", zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
+		log.Error("failed to sync timestamp", zap.Error(err), zap.Error(errs.ErrStorageEtcdLoad.FastGenByArgs()))
 		return
 	}
 	defer s.tso.ResetTimestamp()
 
 	err := s.reloadConfigFromKV()
 	if err != nil {
-		log.Error("failed to reload configuration", zap.Error(errs.ErrStorageLoad.FastGenByArgs()))
+		log.Error("failed to reload configuration", zap.Error(err), zap.Error(errs.ErrStorageLoad.FastGenByArgs()))
 		return
 	}
 	// Try to create raft cluster.
 	err = s.createRaftCluster()
 	if err != nil {
-		log.Error("failed to create raft cluster", zap.Error(errs.ErrStorageLoad.FastGenByArgs()))
+		log.Error("failed to create raft cluster", zap.Error(err), zap.Error(errs.ErrStorageLoad.FastGenByArgs()))
 		return
 	}
 	defer s.stopRaftCluster()
@@ -1169,7 +1169,7 @@ func (s *Server) campaignLeader() {
 			}
 		case <-tsTicker.C:
 			if err = s.tso.UpdateTimestamp(); err != nil {
-				log.Error("failed to update timestamp", zap.Error(errs.ErrStorageEtcdSave.FastGenByArgs()))
+				log.Error("failed to update timestamp", zap.Error(err), zap.Error(errs.ErrStorageEtcdSave.FastGenByArgs()))
 				return
 			}
 		case <-ctx.Done():

@@ -146,21 +146,21 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error("request failed", zap.Error(errs.ErrHTTPRequestURL.FastGenByArgs()))
+			log.Error("request failed", zap.Error(err), zap.Error(errs.ErrHTTPRequestURL.FastGenByArgs()))
 			continue
 		}
 
 		b, err := ioutil.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			log.Error("request failed", zap.Error(errs.ErrIORead.FastGenByArgs()))
+			log.Error("request failed", zap.Error(err), zap.Error(errs.ErrIORead.FastGenByArgs()))
 			continue
 		}
 
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		if _, err := w.Write(b); err != nil {
-			log.Error("write to http content failed", zap.Error(errs.ErrIOWrite.FastGenByArgs()))
+			log.Error("write to http content failed", zap.Error(err), zap.Error(errs.ErrIOWrite.FastGenByArgs()))
 			continue
 		}
 

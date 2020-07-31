@@ -69,7 +69,7 @@ func prometheusPushClient(job, addr string, interval time.Duration) {
 	for {
 		err := pusher.Push()
 		if err != nil {
-			log.Error("could not push metrics to Prometheus Pushgateway", zap.Error(errs.ErrOtherPrometheusPush.FastGenByArgs()))
+			log.Error("could not push metrics to Prometheus Pushgateway", zap.Error(err), zap.Error(errs.ErrOtherPrometheusPush.FastGenByArgs()))
 		}
 
 		time.Sleep(interval)

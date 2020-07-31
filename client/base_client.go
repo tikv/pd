@@ -138,7 +138,7 @@ func (c *baseClient) leaderLoop() {
 		}
 
 		if err := c.updateLeader(); err != nil {
-			log.Error("[pd] failed updateLeader, grpc connection failed", zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
+			log.Error("[pd] failed updateLeader, grpc connection failed", zap.Error(err), zap.Error(errs.ErrGRPCSend.FastGenByArgs()))
 		}
 	}
 }
