@@ -16,19 +16,20 @@ package errors
 import "github.com/pingcap/errors"
 
 var (
-	reg = errors.NewRegistry("PD")
+	// Reg use to represent the registry of PD.
+	Reg = errors.NewRegistry("PD")
 	// ClassIO is IO error class
-	ClassIO = reg.RegisterErrorClass(1, "io")
+	ClassIO = Reg.RegisterErrorClass(1, "io")
 	// ClassNetwork is network error class
-	ClassNetwork = reg.RegisterErrorClass(2, "network")
+	ClassNetwork = Reg.RegisterErrorClass(2, "network")
 	// ClassStorage is storage error class
-	ClassStorage = reg.RegisterErrorClass(3, "storage")
+	ClassStorage = Reg.RegisterErrorClass(3, "storage")
 	// ClassInternal is internal error class
-	ClassInternal = reg.RegisterErrorClass(4, "internal")
+	ClassInternal = Reg.RegisterErrorClass(4, "internal")
 	// ClassFormat is format error class
-	ClassFormat = reg.RegisterErrorClass(5, "format")
+	ClassFormat = Reg.RegisterErrorClass(5, "format")
 	// ClassOther is other error class
-	ClassOther = reg.RegisterErrorClass(6, "other")
+	ClassOther = Reg.RegisterErrorClass(6, "other")
 )
 
 var (

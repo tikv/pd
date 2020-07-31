@@ -1,0 +1,160 @@
+[error.PD:network:ErrHTTPRequestURL]
+error = '''wrong url in user http request'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:network:ErrGRPCTso]
+error = '''grpc tso request fail'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:network:ErrGRPCHeartbeat]
+error = '''grpc heartbeat request fail'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:network:ErrGRPCClose]
+error = '''grpc close connection fail'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:network:ErrGRPCSend]
+error = '''grpc send message fail'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:network:ErrHTTPErrorResponse]
+error = '''make http error response fail'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:network:ErrHTTPRedirect]
+error = '''http redirect many times'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:storage:ErrStorageDelete]
+error = '''delete config from storage error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:storage:ErrStorageEtcdLoad]
+error = '''load config from storage etcd error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:storage:ErrStorageEtcdSave]
+error = '''save config to storage etcd error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:storage:ErrStorageEtcdDelete]
+error = '''delete config from storage etcd error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:storage:ErrStorageLoad]
+error = '''load config from storage error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:storage:ErrStorageSave]
+error = '''save config to storage error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalRuleInvalid]
+error = '''invalid rule found'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalRuleDuplicate]
+error = '''duplicate rule found'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalRuleMismatch]
+error = '''rule key mismatch'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalOperatorNotFound]
+error = '''operator not found'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalSchedulerDuplicate]
+error = '''duplicate scheduler found'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalRegionKey]
+error = '''wrong region key range'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalSchedulerNotFound]
+error = '''scheduler not found'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalOperatorMerge]
+error = '''merge operator should be pair'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalStoreNotFound]
+error = '''store id {placeholder} not found'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalSchedulerConfig]
+error = '''wrong scheduler config'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalOperatorNotStart]
+error = '''operator not start'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalOperatorNotEnd]
+error = '''operator not end'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalStepUnknown]
+error = '''operator step is unknown'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalClusterVersionChange]
+error = '''cluster version change same time'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalCacheRegionOverflow]
+error = '''cache region overflow'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:internal:ErrInternalVersionFeatureNotExist]
+error = '''version feature not exist'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:format:ErrFormatParseClusterVersion]
+error = '''parse cluster version error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:format:ErrFormatParseURL]
+error = '''parse url error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:format:ErrFormatParseHistoryIndex]
+error = '''parse history index error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:format:ErrFormatParseCmd]
+error = '''parse cmd error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:other:ErrOtherInitLog]
+error = '''init log fail'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:other:ErrOtherDashboardServer]
+error = '''dashboard server error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:other:ErrOtherPrometheusPush]
+error = '''push to prometheus error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:other:ErrOtherPluginLoadActionUnknown]
+error = '''unknown action to load plugin'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:other:ErrOtherPluginFuncNotFound]
+error = '''plugin function not found'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:other:ErrOtherSystemTime]
+error = '''system time error'''
+description = '''N/A'''
+workaround = '''N/A'''
+[error.PD:io:ErrIORead]
+error = '''io read error'''
+description = '''N/A'''
+workaround = '''N/A'''

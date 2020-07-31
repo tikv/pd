@@ -123,6 +123,10 @@ dashboard-ui: export GO111MODULE=on
 dashboard-ui:
 	./scripts/embed-dashboard-ui.sh
 
+# Generate the meta file of errors
+gen-error-meta:
+	go run tools/gen-error-meta/main.go
+
 # Tools
 pd-ctl: export GO111MODULE=on
 pd-ctl:
