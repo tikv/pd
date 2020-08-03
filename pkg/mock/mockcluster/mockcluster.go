@@ -215,7 +215,12 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	stats.Capacity = 1000 * (1 << 20)
 	stats.Available = stats.Capacity - uint64(regionCount)*10
 	store := core.NewStoreInfo(
-		&metapb.Store{Id: storeID},
+		&metapb.Store{Id: storeID, Labels: []*metapb.StoreLabel{
+			{
+				Key:   "ID",
+				Value: fmt.Sprintf("%v", storeID),
+			},
+		}},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
 		core.SetRegionSize(int64(regionCount)*10),

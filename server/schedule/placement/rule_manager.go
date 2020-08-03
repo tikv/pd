@@ -17,6 +17,8 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/pingcap/log"
@@ -272,4 +274,150 @@ func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *RegionFit {
 	rules := m.GetRulesForApplyRegion(region)
 	return FitRegion(stores, region, rules)
+}
+
+func (m *RuleManager) tryBuildSave(oldRules map[[2]string]*Rule) error {
+	ruleList, err := buildRuleList(m.rules)
+	if err == nil {
+		for key := range oldRules {
+			rule := m.rules[key]
+			if rule != nil {
+				err = m.store.SaveRule(rule.StoreKey(), rule)
+			} else {
+				r := Rule{
+					GroupID: key[0],
+					ID:      key[1],
+				}
+				err = m.store.DeleteRule(r.StoreKey())
+			}
+			if err != nil {
+				// TODO: it is not completely safe
+				// 1. in case that half of rules applied, error.. we have to cancel persisted rules
+				// but that may fail too, causing memory/disk inconsistency
+				// either rely a transaction API, or clients to request again until success
+				// 2. in case that PD is suddenly down in the loop, inconsistency again
+				// now we can only rely clients to request again
+				break
+			}
+		}
+	}
+
+	if err != nil {
+		for key, rule := range oldRules {
+			if rule == nil {
+				delete(m.rules, key)
+			} else {
+				m.rules[key] = rule
+			}
+		}
+		return err
+	}
+
+	m.ruleList = ruleList
+	return nil
+}
+
+func (m *RuleManager) addRule(rule *Rule, oldRules map[[2]string]*Rule) {
+	old := m.rules[rule.Key()]
+	m.rules[rule.Key()] = rule
+	oldRules[rule.Key()] = old
+}
+
+// SetRules inserts or updates lots of Rules at once.
+func (m *RuleManager) SetRules(rules []*Rule) error {
+	for _, rule := range rules {
+		err := m.adjustRule(rule)
+		if err != nil {
+			return err
+		}
+	}
+
+	m.Lock()
+	defer m.Unlock()
+
+	oldRules := make(map[[2]string]*Rule)
+
+	for _, rule := range rules {
+		m.addRule(rule, oldRules)
+	}
+
+	if err := m.tryBuildSave(oldRules); err != nil {
+		return err
+	}
+
+	log.Info("placement rule updated", zap.String("rules", fmt.Sprint(rules)))
+	return nil
+}
+
+func (m *RuleManager) delRuleByID(group, id string, oldRules map[[2]string]*Rule) {
+	key := [2]string{group, id}
+	old, ok := m.rules[key]
+	if ok {
+		delete(m.rules, key)
+	}
+	oldRules[key] = old
+}
+
+func (m *RuleManager) delRule(t *RuleOp, oldRules map[[2]string]*Rule) {
+	if !t.DeleteByIDPrefix {
+		m.delRuleByID(t.GroupID, t.ID, oldRules)
+	} else {
+		for key := range m.rules {
+			if key[0] == t.GroupID && strings.HasPrefix(key[1], t.ID) {
+				m.delRuleByID(key[0], key[1], oldRules)
+			}
+		}
+	}
+}
+
+// RuleOpType indicates the operation type
+type RuleOpType string
+
+const (
+	// RuleOpAdd a placement rule, only need to specify the field *Rule
+	RuleOpAdd RuleOpType = "add"
+	// RuleOpDel a placement rule, only need to specify the field `GroupID`, `ID`, `MatchID`
+	RuleOpDel RuleOpType = "del"
+)
+
+// RuleOp is for batching placement rule actions. The action type is
+// distinguished by the field `Action`.
+type RuleOp struct {
+	*Rule                       // information of the placement rule to add/delete
+	Action           RuleOpType `json:"action"`              // the operation type
+	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
+}
+
+// Batch executes a series of actions at once.
+func (m *RuleManager) Batch(todo []RuleOp) error {
+	for _, t := range todo {
+		switch t.Action {
+		case RuleOpAdd:
+			err := m.adjustRule(t.Rule)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	m.Lock()
+	defer m.Unlock()
+
+	oldRules := make(map[[2]string]*Rule)
+
+	for _, t := range todo {
+		switch t.Action {
+		case RuleOpAdd:
+			m.addRule(t.Rule, oldRules)
+		case RuleOpDel:
+			m.delRule(&t, oldRules)
+		}
+	}
+
+	if err := m.tryBuildSave(oldRules); err != nil {
+		return err
+	}
+
+	log.Info("placement rules updated", zap.String("batch", fmt.Sprint(todo)))
+	return nil
 }

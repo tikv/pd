@@ -14,6 +14,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/keyutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/schedule"
@@ -125,6 +127,9 @@ func (c *coordinator) patrolRegions() {
 			c.cluster.RemoveSuspectRegion(id)
 		}
 
+		// Check suspect key ranges
+		c.checkSuspectKeyRanges()
+
 		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// Resets the scan key.
@@ -155,6 +160,37 @@ func (c *coordinator) patrolRegions() {
 			start = time.Now()
 		}
 	}
+}
+
+// checkSuspectKeyRanges would pop one suspect key range group
+// The regions of new version key range and old version key range would be placed into
+// the suspect regions map
+func (c *coordinator) checkSuspectKeyRanges() {
+	_, keyRange, success := c.cluster.PopOneSuspectKeyRange()
+	if !success {
+		return
+	}
+	limit := 1024
+	regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], limit)
+	if len(regions) == 0 {
+		return
+	}
+	regionIDList := make([]uint64, 0, len(regions))
+	for _, region := range regions {
+		regionIDList = append(regionIDList, region.GetID())
+	}
+
+	// if the last region's end key is smaller the keyRange[1] which means there existed the remaining regions between
+	// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
+	lastRegion := regions[len(regions)-1]
+	if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
+		restKeyRange := [2][]byte{
+			lastRegion.GetEndKey(),
+			keyRange[1],
+		}
+		c.cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(lastRegion.GetEndKey(), keyRange[1]), restKeyRange)
+	}
+	c.cluster.AddSuspectRegions(regionIDList...)
 }
 
 // drivePushOperator is used to push the unfinished operator to the excutor.

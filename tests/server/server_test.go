@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/pd/v4/pkg/tempurl"
 	"github.com/pingcap/pd/v4/pkg/testutil"
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/tests"
 	"go.uber.org/goleak"
 
@@ -113,6 +114,14 @@ func (s *serverTestSuite) TestClusterID(c *C) {
 	for _, s := range cluster.GetServers() {
 		c.Assert(s.GetClusterID(), Equals, clusterID)
 	}
+
+	cluster2, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) { conf.InitialClusterToken = "foobar" })
+	defer cluster2.Destroy()
+	c.Assert(err, IsNil)
+	err = cluster2.RunInitialServers()
+	c.Assert(err, IsNil)
+	clusterID2 := cluster2.GetServer("pd1").GetClusterID()
+	c.Assert(clusterID2, Not(Equals), clusterID)
 }
 
 func (s *serverTestSuite) TestLeader(c *C) {

@@ -93,12 +93,23 @@ func (s *testManagerSuite) TestKeys(c *C) {
 		{GroupID: "1", ID: "1", Role: "voter", Count: 1, StartKeyHex: "", EndKeyHex: ""},
 		{GroupID: "2", ID: "2", Role: "voter", Count: 1, StartKeyHex: "11", EndKeyHex: "ff"},
 		{GroupID: "2", ID: "3", Role: "voter", Count: 1, StartKeyHex: "22", EndKeyHex: "dd"},
-		{GroupID: "3", ID: "4", Role: "voter", Count: 1, StartKeyHex: "44", EndKeyHex: "ee"},
-		{GroupID: "3", ID: "5", Role: "voter", Count: 1, StartKeyHex: "44", EndKeyHex: "dd"},
 	}
+
+	toDelete := []RuleOp{}
 	for _, r := range rules {
 		s.manager.SetRule(r)
+		toDelete = append(toDelete, RuleOp{
+			Rule:             r,
+			Action:           RuleOpDel,
+			DeleteByIDPrefix: false,
+		})
 	}
+	s.manager.Batch(toDelete)
+
+	rules = append(rules, &Rule{GroupID: "3", ID: "4", Role: "voter", Count: 1, StartKeyHex: "44", EndKeyHex: "ee"},
+		&Rule{GroupID: "3", ID: "5", Role: "voter", Count: 1, StartKeyHex: "44", EndKeyHex: "dd"})
+	s.manager.SetRules(rules)
+
 	s.manager.DeleteRule("pd", "default")
 
 	splitKeys := [][]string{

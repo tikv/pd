@@ -22,6 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/pkg/codec"
+	"github.com/pingcap/pd/v4/pkg/keyutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
@@ -57,6 +58,38 @@ func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 	}
 	rules := cluster.GetRuleManager().GetAllRules()
 	h.rd.JSON(w, http.StatusOK, rules)
+}
+
+// @Tags rule
+// @Summary Set all rules for the cluster. If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You propabably want to request again to make rules in memory/disk consistent.
+// @Produce json
+// @Param rules body []placement.Rule true "Parameters of rules"
+// @Success 200 {string} string "Update rules successfully."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /config/rules [get]
+func (h *ruleHandler) SetAll(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	var rules []*placement.Rule
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &rules); err != nil {
+		return
+	}
+	for _, rule := range rules {
+		if err := h.checkRule(rule); err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if err := cluster.GetRuleManager().SetRules(rules); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "Update rules successfully.")
 }
 
 // @Tags rule
@@ -179,9 +212,21 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	oldRule := cluster.GetRuleManager().GetRule(rule.GroupID, rule.ID)
 	if err := cluster.GetRuleManager().SetRule(&rule); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	newSuspectKeyRange := [2][]byte{
+		rule.StartKey,
+		rule.EndKey,
+	}
+	cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(rule.StartKey, rule.EndKey), newSuspectKeyRange)
+	if oldRule != nil {
+		cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(oldRule.StartKey, oldRule.EndKey), [2][]byte{
+			oldRule.StartKey,
+			oldRule.EndKey,
+		})
 	}
 	h.rd.JSON(w, http.StatusOK, "Update rule successfully.")
 }
@@ -232,9 +277,53 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	group, id := mux.Vars(r)["group"], mux.Vars(r)["id"]
+	rule := cluster.GetRuleManager().GetRule(group, id)
 	if err := cluster.GetRuleManager().DeleteRule(group, id); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if rule != nil {
+		suspectKeyRanges := [2][]byte{
+			rule.StartKey,
+			rule.EndKey,
+		}
+		cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(rule.StartKey, rule.EndKey), suspectKeyRanges)
+	}
+
 	h.rd.JSON(w, http.StatusOK, "Delete rule successfully.")
+}
+
+// @Tags rule
+// @Summary Batch operations for the cluster. Operations should be independent(different ID). If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You propabably want to request again to make rules in memory/disk consistent.
+// @Produce json
+// @Param operations body []placement.RuleOp true "Parameters of rule operations"
+// @Success 200 {string} string "Batch operations successfully."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /config/rules/batch [post]
+func (h *ruleHandler) Batch(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	var opts []placement.RuleOp
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &opts); err != nil {
+		return
+	}
+	for _, opt := range opts {
+		switch opt.Action {
+		case placement.RuleOpAdd:
+			if err := h.checkRule(opt.Rule); err != nil {
+				h.rd.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+	}
+	if err := cluster.GetRuleManager().Batch(opts); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "Batch operations successfully.")
 }
