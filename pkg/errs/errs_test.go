@@ -11,15 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errors
+package errs
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 	"strings"
 	"testing"
+
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 // testingWriter is a WriteSyncer that writes to the the messages.
@@ -79,10 +81,11 @@ func TestError(t *testing.T) {
 	lg := newZapTestLogger(conf)
 	log.ReplaceGlobals(lg.Logger, nil)
 
-	rfc := `[error="[PD:format:ErrFormatParseHistoryIndex] parse history index error"]`
-	log.Error(ErrFormatParseHistoryIndex.MessageTemplate(), zap.Error(ErrFormatParseHistoryIndex.FastGenByArgs()))
+	rfc := `[error="[PD:tso:ErrInvalidTimestamp] invalid timestamp"]`
+	log.Error("test", zap.Error(ErrInvalidTimestamp.FastGenByArgs()))
 	lg.Contain(t, rfc)
-	rfc = `[error="[PD:internal:ErrInternalStoreNotFound] store id 1 not found"]`
-	log.Error(ErrInternalStoreNotFound.MessageTemplate(), zap.Error(ErrInternalStoreNotFound.FastGenByArgs(1)))
+	cause := `[cause="test err"]`
+	log.Error("test", zap.Error(ErrInvalidTimestamp.FastGenByArgs()), zap.NamedError("cause", errors.New("test err")))
 	lg.Contain(t, rfc)
+	lg.Contain(t, cause)
 }
