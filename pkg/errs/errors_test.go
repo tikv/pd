@@ -11,15 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errors
+package errs
 
 import (
 	"bytes"
 	"fmt"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 	"strings"
 	"testing"
+
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 // testingWriter is a WriteSyncer that writes to the the messages.

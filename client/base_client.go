@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/pkg/grpcutil"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -137,7 +138,7 @@ func (c *baseClient) leaderLoop() {
 		}
 
 		if err := c.updateLeader(); err != nil {
-			log.Error("[pd] failed updateLeader", zap.Error(err))
+			log.Error("[pd] failed updateLeader", zap.Error(errs.ErrGRPCSend.FastGenByArgs()), zap.NamedError("cause", err))
 		}
 	}
 }
