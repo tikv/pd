@@ -86,22 +86,22 @@ func (m *RuleManager) loadRules() error {
 	_, err := m.store.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
-			log.Error("failed to unmarshal rule value", zap.Error(errs.ErrLoadRule.FastGenByArgs(k, v)))
+			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if err := m.adjustRule(&r); err != nil {
-			log.Error("rule is in bad format", zap.Error(err), zap.Error(errs.ErrLoadRule.FastGenByArgs(k, v)))
+			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()), zap.NamedError("cause", err))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if _, ok := m.rules[r.Key()]; ok {
-			log.Error("duplicated rule key", zap.Error(errs.ErrLoadRule.FastGenByArgs(k, v)))
+			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if k != r.StoreKey() {
-			log.Error("mismatch data key, need to restore", zap.Error(errs.ErrLoadRule.FastGenByArgs(k, v)))
+			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
 			toDelete = append(toDelete, k)
 			toSave = append(toSave, &r)
 		}

@@ -119,7 +119,7 @@ var (
 	// ErrRuleContent is placement rule content error
 	ErrRuleContent = ClassInternal.DefineError().TextualCode("ErrRuleContent").MessageTemplate("rule content error: %s").Build()
 	// ErrLoadRule is placement rule load error
-	ErrLoadRule = ClassInternal.DefineError().TextualCode("ErrLoadRule").MessageTemplate("load rule error, rule-key: %s, rule-value: %s").Build()
+	ErrLoadRule = ClassInternal.DefineError().TextualCode("ErrLoadRule").MessageTemplate("load rule error").Build()
 	// ErrBuildRuleList is placement rule build error
 	ErrBuildRuleList = ClassInternal.DefineError().TextualCode("ErrBuildRuleList").MessageTemplate("build rule list error, %s").Build()
 )
