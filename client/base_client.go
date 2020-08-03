@@ -138,7 +138,7 @@ func (c *baseClient) leaderLoop() {
 		}
 
 		if err := c.updateLeader(); err != nil {
-			log.Error("[pd] failed updateLeader", zap.Error(errs.ErrGRPCSend.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Error("[pd] failed updateLeader", zap.Error(errs.ErrClientUpdateLeader.FastGenByArgs()), zap.NamedError("cause", err))
 		}
 	}
 }
@@ -192,7 +192,7 @@ func (c *baseClient) updateLeader() error {
 		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
 		members, err := c.getMembers(ctx, u)
 		if err != nil {
-			log.Warn("[pd] cannot update leader", zap.String("address", u), zap.Error(err))
+			log.Warn("[pd] cannot update leader", zap.String("address", u), zap.Error(errs.ErrGRPCSend.FastGenByArgs()), zap.NamedError("cause", err))
 		}
 		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {

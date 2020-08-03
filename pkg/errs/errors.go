@@ -113,3 +113,9 @@ var (
 	// ErrOtherSystemTime is system time error
 	ErrOtherSystemTime = ClassOther.DefineError().TextualCode("ErrOtherSystemTime").MessageTemplate("system time error").Build()
 )
+
+// client
+var (
+	// ErrClientUpdateLeader is client leader update error
+	ErrClientUpdateLeader = ClassOther.DefineError().TextualCode("ErrClientUpdateLeader").MessageTemplate("client update leader error").Build()
+)
