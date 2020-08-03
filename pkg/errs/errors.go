@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errors
+package errs
 
 import "github.com/pingcap/errors"
 
@@ -29,6 +29,14 @@ var (
 	ClassFormat = reg.RegisterErrorClass(5, "format")
 	// ClassOther is other error class
 	ClassOther = reg.RegisterErrorClass(6, "other")
+)
+
+var (
+	// server/kv
+	// ErrEtcdKvSave is etcd kv save error
+	ErrEtcdKvSave = ClassStorage.DefineError().MessageTemplate("save to etcd meet error, key is %s, value is %s").Build()
+	// ErrEtcdKvDelete is etcd kv delete error
+	ErrEtcdKvRemove = ClassStorage.DefineError().MessageTemplate("remove from etcd meet error, key is %s").Build()
 )
 
 var (
