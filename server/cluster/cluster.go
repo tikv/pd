@@ -491,7 +491,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
 	if newStore.NeedPersist() && c.storage != nil {
-		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
+		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
 			log.Error("failed to persist store", zap.Uint64("store-id", newStore.GetID()))
 		} else {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
