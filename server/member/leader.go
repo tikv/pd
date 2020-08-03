@@ -16,6 +16,7 @@ package member
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"math/rand"
 	"os"
 	"path"
@@ -248,10 +249,10 @@ func (m *Member) CampaignLeader(lease *LeaderLease, leaseTimeout int64) error {
 		Then(clientv3.OpPut(leaderKey, m.memberValue, clientv3.WithLease(lease.ID))).
 		Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdLeaderSave.FastGenByArgs()
 	}
 	if !resp.Succeeded {
-		return errors.New("failed to campaign leader, other server may campaign ok")
+		return errs.ErrCampaignLeader.FastGenByArgs()
 	}
 	return nil
 }

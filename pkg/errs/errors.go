@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errors
+package errs
 
 import "github.com/pingcap/errors"
 
@@ -29,6 +29,34 @@ var (
 	ClassFormat = reg.RegisterErrorClass(5, "format")
 	// ClassOther is other error class
 	ClassOther = reg.RegisterErrorClass(6, "other")
+)
+
+// server
+var (
+	// ErrHeartBeatLeaderNil is nil leader in heartbeat
+	ErrHeartBeatLeaderNil = ClassFormat.DefineError().TextualCode("ErrHeartbeatLeaderNil").MessageTemplate("heartbeat nil leader found").Build()
+	// ErrSchedulerOperation is scheduler operation failed
+	ErrSchedulerOperation = ClassInternal.DefineError().TextualCode("ErrSchedulerOperation").MessageTemplate("scheduler %s operation failed").Build()
+	// ErrStorageClose is close storage failed
+	ErrStorageClose = ClassStorage.DefineError().TextualCode("ErrStorageClose").MessageTemplate("close storage failed").Build()
+	// ErrDecodeConfig is decode config failed
+	ErrDecodeConfig = ClassFormat.DefineError().TextualCode("ErrDecodeConfig").MessageTemplate("decode config failed").Build()
+	// ErrSavePersistOptions is save opts failed
+	ErrSavePersistOptions = ClassStorage.DefineError().TextualCode("ErrSavePersistOptions").MessageTemplate("save persist options failed").Build()
+	// ErrLoadPersistOptions is load opts failed
+	ErrLoadPersistOptions = ClassStorage.DefineError().TextualCode("ErrLoadPersistOptions").MessageTemplate("load persist options failed").Build()
+	// ErrEtcdLeaderSave is save leader to etcd error
+	ErrEtcdLeaderSave = ClassStorage.DefineError().TextualCode("ErrEtcdLeaderSave").MessageTemplate("save etcd leader failed").Build()
+	// ErrCampaignLeader is campaign leader failed
+	ErrCampaignLeader = ClassInternal.DefineError().TextualCode("ErrCampaignLeader").MessageTemplate("campaign leader failed").Build()
+	// ErrSyncTso is sync tso error
+	ErrSyncTso = ClassInternal.DefineError().TextualCode("ErrSyncTso").MessageTemplate("sync timestamp with tso failed").Build()
+	// ErrUpdateTso is update tso error
+	ErrUpdateTso = ClassInternal.DefineError().TextualCode("ErrUpdateTso").MessageTemplate("update timestamp to tso failed").Build()
+	// ErrStoreNotFound is store not found
+	ErrStoreNotFound = ClassInternal.DefineError().TextualCode("ErrStoreNotFound").MessageTemplate("store id %d not found").Build()
+	// ErrCreateCluster is create cluster error
+	ErrCreateCluster = ClassInternal.DefineError().TextualCode("ErrCreateCluster").MessageTemplate("create cluster error").Build()
 )
 
 var (
@@ -82,8 +110,6 @@ var (
 	ErrInternalOperatorNotEnd = ClassInternal.DefineError().TextualCode("ErrInternalOperatorNotEnd").MessageTemplate("operator not end").Build()
 	// ErrInternalOperatorStepUnknown is operator step unknown
 	ErrInternalOperatorStepUnknown = ClassInternal.DefineError().TextualCode("ErrInternalStepUnknown").MessageTemplate("operator step is unknown").Build()
-	// ErrInternalStoreNotFound is store not found
-	ErrInternalStoreNotFound = ClassInternal.DefineError().TextualCode("ErrInternalStoreNotFound").MessageTemplate("store id %d not found").Build()
 	// ErrInternalClusterVersionChange is cluster version change error
 	ErrInternalClusterVersionChange = ClassInternal.DefineError().TextualCode("ErrInternalClusterVersionChange").MessageTemplate("cluster version change same time").Build()
 	// ErrInternalRegionKey is region key error

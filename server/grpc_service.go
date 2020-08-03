@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pkg/errors"
@@ -393,7 +394,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		region := core.RegionFromHeartbeat(request)
 		if region.GetLeader() == nil {
-			log.Error("invalid request, the leader is nil", zap.Reflect("reqeust", request))
+			log.Error("invalid request, the leader is nil", zap.Reflect("reqeust", request), zap.Error(errs.ErrHeartBeatLeaderNil.FastGenByArgs()))
 			continue
 		}
 		if region.GetID() == 0 {

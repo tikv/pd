@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errors
+package errs
 
 import (
 	"bytes"
@@ -82,7 +82,7 @@ func TestError(t *testing.T) {
 	rfc := `[error="[PD:format:ErrFormatParseHistoryIndex] parse history index error"]`
 	log.Error(ErrFormatParseHistoryIndex.MessageTemplate(), zap.Error(ErrFormatParseHistoryIndex.FastGenByArgs()))
 	lg.Contain(t, rfc)
-	rfc = `[error="[PD:internal:ErrInternalStoreNotFound] store id 1 not found"]`
-	log.Error(ErrInternalStoreNotFound.MessageTemplate(), zap.Error(ErrInternalStoreNotFound.FastGenByArgs(1)))
+	rfc = `[error="[PD:internal:ErrStoreNotFound] store id 1 not found"]`
+	log.Error(ErrStoreNotFound.MessageTemplate(), zap.Error(ErrStoreNotFound.FastGenByArgs(1)))
 	lg.Contain(t, rfc)
 }

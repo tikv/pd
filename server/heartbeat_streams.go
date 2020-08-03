@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/core"
@@ -87,7 +88,7 @@ func (s *heartbeatStreams) run() {
 			if store == nil {
 				log.Error("failed to get store",
 					zap.Uint64("region-id", msg.RegionId),
-					zap.Uint64("store-id", storeID))
+					zap.Error(errs.ErrInternalStoreNotFound.FastGenByArgs(storeID)))
 				delete(s.streams, storeID)
 				continue
 			}
@@ -95,7 +96,7 @@ func (s *heartbeatStreams) run() {
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
 					log.Error("send heartbeat message fail",
-						zap.Uint64("region-id", msg.RegionId), zap.Error(err))
+						zap.Uint64("region-id", msg.RegionId), zap.Error(errs.ErrGRPCHeartbeat))
 					delete(s.streams, storeID)
 					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
 				} else {
@@ -111,7 +112,7 @@ func (s *heartbeatStreams) run() {
 			for storeID, stream := range s.streams {
 				store := s.cluster.GetStore(storeID)
 				if store == nil {
-					log.Error("failed to get store", zap.Uint64("store-id", storeID))
+					log.Error("failed to get store", zap.Error(errs.ErrInternalStoreNotFound.FastGenByArgs(storeID)))
 					delete(s.streams, storeID)
 					continue
 				}

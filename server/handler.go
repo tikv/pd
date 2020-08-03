@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
@@ -37,6 +38,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedulers"
 	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pkg/errors"
+	"github.com/sasha-s/go-deadlock"
 	"go.uber.org/zap"
 )
 
@@ -209,9 +211,9 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 	if err = c.AddScheduler(s, args...); err != nil {
-		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
+		log.Error("can not add scheduler", zap.Error(errs.ErrSchedulerOperation.FastGenByArgs(s.GetName())), zap.NamedError("cause", err))
 	} else if err = h.opt.Persist(c.GetStorage()); err != nil {
-		log.Error("can not persist scheduler config", zap.Error(err))
+		log.Error("can not persist scheduler config", zap.Error(errs.ErrSavePersistOptions), zap.NamedError("cause", err))
 	}
 	return err
 }
@@ -223,7 +225,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 		return err
 	}
 	if err = c.RemoveScheduler(name); err != nil {
-		log.Error("can not remove scheduler", zap.String("scheduler-name", name), zap.Error(err))
+		log.Error("can not remove scheduler", zap.Error(errs.ErrSchedulerOperation.FastGenByArgs(name)), zap.NamedError("cause", err))
 	}
 	return err
 }
@@ -238,9 +240,9 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 	}
 	if err = c.PauseOrResumeScheduler(name, t); err != nil {
 		if t == 0 {
-			log.Error("can not resume scheduler", zap.String("scheduler-name", name), zap.Error(err))
+			log.Error("can not resume scheduler", zap.Error(errs.ErrSchedulerOperation.FastGenByArgs(name)), zap.NamedError("cause", err))
 		} else {
-			log.Error("can not pause scheduler", zap.String("scheduler-name", name), zap.Error(err))
+			log.Error("can not pause scheduler", zap.Error(errs.ErrSchedulerOperation.FastGenByArgs(name)), zap.NamedError("cause", err))
 		}
 	}
 	return err
