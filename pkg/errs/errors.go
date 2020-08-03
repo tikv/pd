@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errors
+package errs
 
 import "github.com/pingcap/errors"
 
@@ -112,4 +112,14 @@ var (
 	ErrOtherPluginFuncNotFound = ClassOther.DefineError().TextualCode("ErrOtherPluginFuncNotFound").MessageTemplate("plugin function not found").Build()
 	// ErrOtherSystemTime is system time error
 	ErrOtherSystemTime = ClassOther.DefineError().TextualCode("ErrOtherSystemTime").MessageTemplate("system time error").Build()
+)
+
+// placement
+var (
+	// ErrRuleContent is placement rule content error
+	ErrRuleContent = ClassInternal.DefineError().TextualCode("ErrRuleContent").MessageTemplate("rule content error: %s").Build()
+	// ErrLoadRule is placement rule load error
+	ErrLoadRule = ClassInternal.DefineError().TextualCode("ErrLoadRule").MessageTemplate("load rule error, rule-key: %s, rule-value: %s").Build()
+	// ErrBuildRuleList is placement rule build error
+	ErrBuildRuleList = ClassInternal.DefineError().TextualCode("ErrBuildRuleList").MessageTemplate("build rule list error, %s").Build()
 )

@@ -22,8 +22,8 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -86,22 +86,22 @@ func (m *RuleManager) loadRules() error {
 	_, err := m.store.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
-			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("failed to unmarshal rule value", zap.Error(errs.ErrLoadRule.FastGenByArgs(k, v)))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if err := m.adjustRule(&r); err != nil {
-			log.Error("rule is in bad format", zap.Error(err), zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("rule is in bad format", zap.Error(err), zap.Error(errs.ErrLoadRule.FastGenByArgs(k, v)))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if _, ok := m.rules[r.Key()]; ok {
-			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("duplicated rule key", zap.Error(errs.ErrLoadRule.FastGenByArgs(k, v)))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if k != r.StoreKey() {
-			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("mismatch data key, need to restore", zap.Error(errs.ErrLoadRule.FastGenByArgs(k, v)))
 			toDelete = append(toDelete, k)
 			toSave = append(toSave, &r)
 		}
@@ -128,30 +128,30 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 	var err error
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
-		return errors.Wrap(err, "start key is not hex format")
+		return errs.ErrRuleContent.FastGenByArgs("start key is not hex format")
 	}
 	r.EndKey, err = hex.DecodeString(r.EndKeyHex)
 	if err != nil {
-		return errors.Wrap(err, "end key is not hex format")
+		return errs.ErrRuleContent.FastGenByArgs("end key is not hex format")
 	}
 	if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
-		return errors.New("endKey should be greater than startKey")
+		return errs.ErrRuleContent.FastGenByArgs("endKey should be greater than startKey")
 	}
 	if r.GroupID == "" {
-		return errors.New("group ID should not be empty")
+		return errs.ErrRuleContent.FastGenByArgs("group ID should not be empty")
 	}
 	if r.ID == "" {
-		return errors.New("ID should not be empty")
+		return errs.ErrRuleContent.FastGenByArgs("ID should not be empty")
 	}
 	if !validateRole(r.Role) {
-		return errors.Errorf("invalid role %s", r.Role)
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid role %s", r.Role))
 	}
 	if r.Count <= 0 {
-		return errors.Errorf("invalid count %v", r.Count)
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid count %d", r.Count))
 	}
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
-			return errors.Errorf("invalid op %s", c.Op)
+			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
 		}
 	}
 	return nil
