@@ -300,7 +300,7 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster opt.Cluster, bef
 	}
 	op, err := operator.CreateTransferLeaderOperator("balance-adjacent-leader", cluster, before, before.GetLeader().GetStoreId(), target.GetID(), operator.OpAdjacent)
 	if err != nil {
-		log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs("transfer leader")))
+		log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs()),zap.NamedError("cause",err))
 		return nil
 	}
 	op.SetPriorityLevel(core.LowPriority)

@@ -125,5 +125,5 @@ var (
 	// ErrInternalGrowth is unknown interval growth type error
 	ErrInternalGrowth = ClassInternal.DefineError().TextualCode("ErrInternalGrowth").MessageTemplate("unknown interval growth type error").Build()
 	// ErrCreateOperator is create operator error
-	ErrCreateOperator = ClassInternal.DefineError().TextualCode("ErrCreateOperator").MessageTemplate("fail to create %s operator").Build()
+	ErrCreateOperator = ClassInternal.DefineError().TextualCode("ErrCreateOperator").MessageTemplate("fail to create operator").Build()
 )
