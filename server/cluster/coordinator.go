@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/pkg/keyutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/server/config"
@@ -293,7 +294,7 @@ func (c *coordinator) run() {
 		}
 
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != schedulers.ErrSchedulerExisted {
+		if err = c.addScheduler(s, schedulerCfg.Args...); err != nil && err != errs.ErrSchedulerExisted {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Error(err))
 		} else {
 			// Only records the valid scheduler config.
@@ -533,7 +534,7 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	defer c.Unlock()
 
 	if _, ok := c.schedulers[scheduler.GetName()]; ok {
-		return schedulers.ErrSchedulerExisted
+		return errs.ErrSchedulerExisted
 	}
 
 	s := newScheduleController(c, scheduler)
@@ -556,7 +557,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	}
 	s, ok := c.schedulers[name]
 	if !ok {
-		return schedulers.ErrSchedulerNotFound
+		return errs.ErrSchedulerNotFound
 	}
 
 	s.Stop()
@@ -588,7 +589,7 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	if name != "all" {
 		sc, ok := c.schedulers[name]
 		if !ok {
-			return schedulers.ErrSchedulerNotFound
+			return errs.ErrSchedulerNotFound
 		}
 		s = append(s, sc)
 	} else {
@@ -615,7 +616,7 @@ func (c *coordinator) isSchedulerPaused(name string) (bool, error) {
 	}
 	s, ok := c.schedulers[name]
 	if !ok {
-		return false, schedulers.ErrSchedulerNotFound
+		return false, errs.ErrSchedulerNotFound
 	}
 	return s.IsPaused(), nil
 }

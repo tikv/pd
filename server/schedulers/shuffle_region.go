@@ -17,12 +17,12 @@ import (
 	"net/http"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -37,11 +37,11 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleRegionSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errors.WithStack(err)
+				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
 			}
 			conf.Ranges = ranges
 			conf.Roles = allRoles

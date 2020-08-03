@@ -15,12 +15,12 @@ package schedulers
 
 import (
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -36,11 +36,11 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*labelSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errors.WithStack(err)
+				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
 			}
 			conf.Ranges = ranges
 			conf.Name = LabelName
@@ -130,7 +130,7 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 
 			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, id, target.GetID(), operator.OpLeader)
 			if err != nil {
-				log.Debug("fail to create transfer label reject leader operator", zap.Error(err))
+				log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs("transfer label reject leader")))
 				return nil
 			}
 			op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))

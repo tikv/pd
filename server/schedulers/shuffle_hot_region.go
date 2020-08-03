@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
@@ -40,13 +41,13 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleHotRegionSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist
 			}
 			conf.Limit = uint64(1)
 			if len(args) == 1 {
 				limit, err := strconv.ParseUint(args[0], 10, 64)
 				if err != nil {
-					return err
+					return errs.ErrSchedulerConfig.FastGenByArgs("limit")
 				}
 				conf.Limit = limit
 			}
@@ -165,7 +166,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 		srcStoreID := srcRegion.GetLeader().GetStoreId()
 		srcStore := cluster.GetStore(srcStoreID)
 		if srcStore == nil {
-			log.Error("failed to get the source store", zap.Uint64("store-id", srcStoreID))
+			log.Error("failed", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(srcStoreID)))
 		}
 
 		filters := []filter.Filter{
@@ -196,7 +197,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 		destPeer := &metapb.Peer{StoreId: destStoreID}
 		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
 		if err != nil {
-			log.Debug("fail to create move leader operator", zap.Error(err))
+			log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs("move leader")))
 			return nil
 		}
 		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))

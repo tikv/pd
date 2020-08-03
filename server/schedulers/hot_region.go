@@ -15,6 +15,7 @@ package schedulers
 
 import (
 	"fmt"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"math"
 	"math/rand"
 	"net/http"
@@ -665,7 +666,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
 	for id, detail := range bs.stLoadDetail {
 		if bs.cluster.GetStore(id) == nil {
-			log.Error("failed to get the source store", zap.Uint64("store-id", id))
+			log.Error("failed", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(id)))
 			continue
 		}
 		if len(detail.HotPeers) == 0 {
@@ -1090,7 +1091,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	}
 
 	if err != nil {
-		log.Debug("fail to create operator", zap.Error(err), zap.Stringer("rwType", bs.rwTy), zap.Stringer("opType", bs.opTy))
+		log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs("transfer leader or move peer")))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
 		return nil, nil
 	}

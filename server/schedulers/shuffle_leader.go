@@ -15,12 +15,12 @@ package schedulers
 
 import (
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -36,11 +36,11 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleLeaderSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errors.WithStack(err)
+				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
 			}
 			conf.Ranges = ranges
 			conf.Name = ShuffleLeaderName
@@ -118,7 +118,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	}
 	op, err := operator.CreateTransferLeaderOperator(ShuffleLeaderType, cluster, region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
 	if err != nil {
-		log.Debug("fail to create shuffle leader operator", zap.Error(err))
+		log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs("shuffle leader")))
 		return nil
 	}
 	op.SetPriorityLevel(core.HighPriority)

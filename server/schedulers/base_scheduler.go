@@ -15,10 +15,12 @@ package schedulers
 
 import (
 	"fmt"
+	"go.uber.org/zap"
 	"net/http"
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 )
@@ -50,7 +52,7 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 	case zeroGrowth:
 		return x
 	default:
-		log.Fatal("unknown interval growth type")
+		log.Fatal("Type error",zap.Error(errs.ErrInternalGrowth))
 	}
 	return 0
 }

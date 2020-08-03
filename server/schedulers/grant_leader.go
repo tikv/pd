@@ -21,11 +21,11 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -41,21 +41,21 @@ func init() {
 	schedule.RegisterSliceDecoderBuilder(GrantLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 1 {
-				return errors.New("should specify the store-id")
+				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
 
 			conf, ok := v.(*grantLeaderSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist
 			}
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
-				return errors.WithStack(err)
+				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
 			ranges, err := getKeyRanges(args[1:])
 			if err != nil {
-				return errors.WithStack(err)
+				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
 			}
 			conf.StoreIDWithRanges[id] = ranges
 			return nil
@@ -81,16 +81,16 @@ type grantLeaderSchedulerConfig struct {
 
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 	if len(args) != 1 {
-		return errors.New("should specify the store-id")
+		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
 	}
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
@@ -114,8 +114,8 @@ func (conf *grantLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	conf.storage.SaveScheduleConfig(name, data)
-	return nil
+	err = conf.storage.SaveScheduleConfig(name, data)
+	return err
 }
 
 func (conf *grantLeaderSchedulerConfig) getSchedulerName() string {
@@ -221,7 +221,7 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 
 		op, err := operator.CreateTransferLeaderOperator(GrantLeaderType, cluster, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
 		if err != nil {
-			log.Debug("fail to create grant leader operator", zap.Error(err))
+			log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs("grant leader")))
 			continue
 		}
 		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
@@ -296,7 +296,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		}
 		if last {
 			if err := handler.config.cluster.RemoveScheduler(GrantLeaderName); err != nil {
-				if err == ErrSchedulerNotFound {
+				if err == errs.ErrSchedulerNotFound {
 					handler.rd.JSON(w, http.StatusNotFound, err)
 				} else {
 					handler.rd.JSON(w, http.StatusInternalServerError, err)
@@ -309,7 +309,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	handler.rd.JSON(w, http.StatusNotFound, ErrScheduleConfigNotExist)
+	handler.rd.JSON(w, http.StatusNotFound, errs.ErrScheduleConfigNotExist)
 }
 
 func newGrantLeaderHandler(config *grantLeaderSchedulerConfig) http.Handler {

@@ -17,13 +17,13 @@ import (
 	"math/rand"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/checker"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -39,11 +39,11 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*randomMergeSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errors.WithStack(err)
+				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
 			}
 			conf.Ranges = ranges
 			conf.Name = RandomMergeName
@@ -127,7 +127,7 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 
 	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpAdmin)
 	if err != nil {
-		log.Debug("fail to create merge region operator", zap.Error(err))
+		log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs("merge region")))
 		return nil
 	}
 	ops[0].Counters = append(ops[0].Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
