@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/cluster"
@@ -195,7 +196,7 @@ func (m *Manager) startService() {
 		return
 	}
 	if err := m.service.Start(m.ctx); err != nil {
-		log.Error("Can not start dashboard server", zap.Error(err))
+		log.Error("Can not start dashboard server", zap.Error(errs.ErrStartDashboard.FastGenByArgs()), zap.NamedError("cause", err))
 	} else {
 		log.Info("Dashboard server is started")
 	}
@@ -206,7 +207,7 @@ func (m *Manager) stopService() {
 		return
 	}
 	if err := m.service.Stop(context.Background()); err != nil {
-		log.Error("Stop dashboard server error", zap.Error(err))
+		log.Error("Stop dashboard server error", zap.Error(errs.ErrStopDashboard.FastGenByArgs()), zap.NamedError("cause", err))
 	} else {
 		log.Info("Dashboard server is stopped")
 	}
