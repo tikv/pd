@@ -31,11 +31,11 @@ var (
 	ClassOther = reg.RegisterErrorClass(6, "other")
 )
 
+// server/kv
 var (
-	// server/kv
 	// ErrEtcdKvSave is etcd kv save error
 	ErrEtcdKvSave = ClassStorage.DefineError().MessageTemplate("save to etcd meet error, key is %s, value is %s").Build()
-	// ErrEtcdKvDelete is etcd kv delete error
+	// ErrEtcdKvRemove is etcd kv remove error
 	ErrEtcdKvRemove = ClassStorage.DefineError().MessageTemplate("remove from etcd meet error, key is %s").Build()
 )
 
