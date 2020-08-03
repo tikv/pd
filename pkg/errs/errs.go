@@ -23,6 +23,8 @@ var (
 	ClassAdaptor = reg.RegisterErrorClass(2, "adapter")
 	// ClassMember defines member error class
 	ClassMember = reg.RegisterErrorClass(3, "member")
+	// ClassPlacement defines placement error class
+	ClassPlacement = reg.RegisterErrorClass(5, "placement")
 )
 
 // tso errors
@@ -48,4 +50,11 @@ var (
 	ErrTransferetcdLeader     = ClassMember.DefineError().TextualCode("ErrTransferetcdLeader").MessageTemplate("fail to transfer etcd leader").Build()
 	ErrWatcherCancel          = ClassMember.DefineError().TextualCode("ErrWatcherCancel").MessageTemplate("watcher canceled").Build()
 	ErrMarshalLeader          = ClassMember.DefineError().TextualCode("ErrMarshalLeader").MessageTemplate("fail to marshal leader").Build()
+)
+
+// placement errors
+var (
+	ErrRuleContent   = ClassPlacement.DefineError().TextualCode("ErrRuleContent").MessageTemplate("invalid rule content, %s").Build()
+	ErrLoadRule      = ClassPlacement.DefineError().TextualCode("ErrLoadRule").MessageTemplate("fail to load rule").Build()
+	ErrBuildRuleList = ClassPlacement.DefineError().TextualCode("ErrBuildRuleList").MessageTemplate("fail to build rule list, %s").Build()
 )
