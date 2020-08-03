@@ -515,13 +515,13 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	}
 
 	validOpts := opts[:0]
-	for _, Op := range opts {
-		if Op.Count > 0 {
-			Op.Action = placement.RuleOpAdd
-			validOpts = append(validOpts, Op)
-		} else if Op.Count == 0 {
-			Op.Action = placement.RuleOpDel
-			validOpts = append(validOpts, Op)
+	for _, op := range opts {
+		if op.Count > 0 {
+			op.Action = placement.RuleOpAdd
+			validOpts = append(validOpts, op)
+		} else if op.Count == 0 {
+			op.Action = placement.RuleOpDel
+			validOpts = append(validOpts, op)
 		}
 	}
 
