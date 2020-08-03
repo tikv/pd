@@ -52,7 +52,7 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 	case zeroGrowth:
 		return x
 	default:
-		log.Fatal("Type error",zap.Error(errs.ErrInternalGrowth))
+		log.Fatal("type error",zap.Error(errs.ErrInternalGrowth))
 	}
 	return 0
 }
