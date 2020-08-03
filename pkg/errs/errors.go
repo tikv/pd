@@ -34,9 +34,9 @@ var (
 // server/kv
 var (
 	// ErrEtcdKvSave is etcd kv save error
-	ErrEtcdKvSave = ClassStorage.DefineError().MessageTemplate("save to etcd meet error, key is %s, value is %s").Build()
+	ErrEtcdKvSave = ClassStorage.DefineError().TextualCode("ErrEtcdKvSave").MessageTemplate("save to etcd meet error, key is %s, value is %s").Build()
 	// ErrEtcdKvRemove is etcd kv remove error
-	ErrEtcdKvRemove = ClassStorage.DefineError().MessageTemplate("remove from etcd meet error, key is %s").Build()
+	ErrEtcdKvRemove = ClassStorage.DefineError().TextualCode("ErrEtcdKvRemove").MessageTemplate("remove from etcd meet error, key is %s").Build()
 )
 
 var (
