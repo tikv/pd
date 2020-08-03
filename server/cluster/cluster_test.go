@@ -48,6 +48,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 
 	n, np := uint64(3), uint64(3)
 	stores := newTestStores(n)
+	storeMetasAfterHeartbeat := make([]*metapb.Store, 0, n)
 	regions := newTestRegions(n, np)
 
 	for _, region := range regions {
@@ -74,16 +75,18 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 		s := cluster.GetStore(store.GetID())
 		c.Assert(s.GetLastHeartbeatTS().UnixNano(), Not(Equals), int64(0))
 		c.Assert(s.GetStoreStats(), DeepEquals, storeStats)
+
+		storeMetasAfterHeartbeat = append(storeMetasAfterHeartbeat, s.GetMeta())
 	}
 
 	c.Assert(cluster.GetStoreCount(), Equals, int(n))
 
-	for _, store := range stores {
+	for i, store := range stores {
 		tmp := &metapb.Store{}
 		ok, err := cluster.storage.LoadStore(store.GetID(), tmp)
 		c.Assert(ok, IsTrue)
 		c.Assert(err, IsNil)
-		c.Assert(tmp, DeepEquals, store.GetMeta())
+		c.Assert(tmp, DeepEquals, storeMetasAfterHeartbeat[i])
 	}
 }
 
