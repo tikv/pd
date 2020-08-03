@@ -111,7 +111,7 @@ var (
 // scheduler
 var (
 	// ErrGetSourceStore is the error that scheduler get source store failed.
-	ErrGetSourceStore  = ClassInternal.DefineError().TextualCode("ErrGetSourceStore").MessageTemplate("failed to get the source store, store id is %s").Build()
+	ErrGetSourceStore = ClassInternal.DefineError().TextualCode("ErrGetSourceStore").MessageTemplate("failed to get the source store, store id is %s").Build()
 	// ErrSchedulerExisted is scheduler duplicate
 	ErrSchedulerExisted = ClassInternal.DefineError().TextualCode("ErrSchedulerExisted").MessageTemplate("scheduler existed").Build()
 	// ErrSchedulerNotFound is scheduler not found
