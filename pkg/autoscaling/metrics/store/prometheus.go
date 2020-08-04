@@ -157,16 +157,17 @@ func extractInstancesFromResponse(resp *Response, instances []string) (QueryResu
 }
 
 func (prom *PrometheusStore) queryCPU(options *QueryOptions) (QueryResult, error) {
-	var query string
+	var pattern string
 	switch options.member {
 	case TiDB:
-		query = fmt.Sprintf(tidbSumCPUMetricsPattern, options.cluster, options.duration.String())
+		pattern = tidbSumCPUMetricsPattern
 	case TiKV:
-		query = fmt.Sprintf(tikvSumCPUMetricsPattern, options.cluster, options.duration.String())
+		pattern = tikvSumCPUMetricsPattern
 	default:
 		return nil, errors.Errorf("unsupported member type %v", options.member)
 	}
 
+	query := fmt.Sprintf(pattern, options.cluster, options.duration.String())
 	resp, err := prom.queryMetricsFromPrometheus(query, options.timestamp)
 	if err != nil {
 		return nil, err
