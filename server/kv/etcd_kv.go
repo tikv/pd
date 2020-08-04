@@ -89,7 +89,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
-		log.Error("save to etcd meet error", zap.Error(errs.ErrEtcdKvSave.FastGenByArgs(key, value)))
+		log.Error("save to etcd meet error", zap.Error(errs.ErrEtcdKvSave.FastGenByArgs(key, value)), zap.NamedError("cause", err))
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
@@ -104,7 +104,7 @@ func (kv *etcdKVBase) Remove(key string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
-		log.Error("remove from etcd meet error", zap.Error(errs.ErrEtcdKvRemove.FastGenByArgs(key)))
+		log.Error("remove from etcd meet error", zap.Error(errs.ErrEtcdKvRemove.FastGenByArgs(key)), zap.NamedError("cause", err))
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
