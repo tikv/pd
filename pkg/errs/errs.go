@@ -23,6 +23,8 @@ var (
 	ClassAdaptor = reg.RegisterErrorClass(2, "adapter")
 	// ClassMember defines member error class
 	ClassMember = reg.RegisterErrorClass(3, "member")
+	// ClassClient defines client error class
+	ClassClient = reg.RegisterErrorClass(4, "client")
 	// ClassPlacement defines placement error class
 	ClassPlacement = reg.RegisterErrorClass(5, "placement")
 )
@@ -50,6 +52,15 @@ var (
 	ErrTransferetcdLeader     = ClassMember.DefineError().TextualCode("ErrTransferetcdLeader").MessageTemplate("fail to transfer etcd leader").Build()
 	ErrWatcherCancel          = ClassMember.DefineError().TextualCode("ErrWatcherCancel").MessageTemplate("watcher canceled").Build()
 	ErrMarshalLeader          = ClassMember.DefineError().TextualCode("ErrMarshalLeader").MessageTemplate("fail to marshal leader").Build()
+)
+
+// client errors
+var (
+	ErrCloseGRPCConn   = ClassClient.DefineError().TextualCode("ErrCloseGRPCConn").MessageTemplate("fail to close gRPC connection").Build()
+	ErrUpdateLeader    = ClassClient.DefineError().TextualCode("ErrUpdateLeader").MessageTemplate("fail to update leader").Build()
+	ErrCreateTSOStream = ClassClient.DefineError().TextualCode("ErrCreateTSOStream").MessageTemplate("fail to create TSO stream").Build()
+	ErrGetTSO          = ClassClient.DefineError().TextualCode("ErrGetTSO").MessageTemplate("fail to get TSO").Build()
+	ErrGetClusterID    = ClassClient.DefineError().TextualCode("ErrGetClusterID").MessageTemplate("fail to get cluster id").Build()
 )
 
 // placement errors
