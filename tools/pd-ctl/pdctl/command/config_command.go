@@ -16,7 +16,6 @@ package command
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"path"
@@ -36,6 +35,7 @@ var (
 	labelPropertyPrefix   = "pd/api/v1/config/label-property"
 	clusterVersionPrefix  = "pd/api/v1/config/cluster-version"
 	rulesPrefix           = "pd/api/v1/config/rules"
+	rulesBatchPrefix      = "pd/api/v1/config/rules/batch"
 	rulePrefix            = "pd/api/v1/config/rule"
 	replicationModePrefix = "pd/api/v1/config/replication-mode"
 )
@@ -507,31 +507,30 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	}
-	var rules []*placement.Rule
-	if err = json.Unmarshal(content, &rules); err != nil {
+
+	var opts []*placement.RuleOp
+	if err = json.Unmarshal(content, &opts); err != nil {
 		cmd.Println(err)
 		return
 	}
-	for _, r := range rules {
-		if r.Count > 0 {
-			b, _ := json.Marshal(r)
-			_, err = doRequest(cmd, rulePrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
-			if err != nil {
-				fmt.Printf("failed to save rule %s/%s: %v\n", r.GroupID, r.ID, err)
-				return
-			}
-			fmt.Printf("saved rule %s/%s\n", r.GroupID, r.ID)
+
+	validOpts := opts[:0]
+	for _, op := range opts {
+		if op.Count > 0 {
+			op.Action = placement.RuleOpAdd
+			validOpts = append(validOpts, op)
+		} else if op.Count == 0 {
+			op.Action = placement.RuleOpDel
+			validOpts = append(validOpts, op)
 		}
 	}
-	for _, r := range rules {
-		if r.Count == 0 {
-			_, err = doRequest(cmd, path.Join(rulePrefix, r.GroupID, r.ID), http.MethodDelete)
-			if err != nil {
-				fmt.Printf("failed to delete rule %s/%s: %v\n", r.GroupID, r.ID, err)
-				return
-			}
-			fmt.Printf("deleted rule %s/%s\n", r.GroupID, r.ID)
-		}
+
+	b, _ := json.Marshal(validOpts)
+	_, err = doRequest(cmd, rulesBatchPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
+	if err != nil {
+		cmd.Printf("failed to save rules %s: %s\n", b, err)
+		return
 	}
+
 	cmd.Println("Success!")
 }

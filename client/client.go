@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
@@ -179,7 +180,7 @@ func (c *client) tsCancelLoop() {
 		case d := <-c.tsDeadlineCh:
 			select {
 			case <-d.timer:
-				log.Error("tso request is canceled due to timeout")
+				log.Error("tso request is canceled due to timeout", zap.Error(errs.ErrGetTSO.FastGenByArgs()))
 				d.cancel()
 			case <-d.done:
 			case <-ctx.Done():
@@ -234,7 +235,7 @@ func (c *client) tsLoop() {
 					return
 				default:
 				}
-				log.Error("[pd] create tso stream error", zap.Error(err))
+				log.Error("[pd] create tso stream error", zap.Error(errs.ErrCreateTSOStream.FastGenByArgs()), zap.NamedError("cause", err))
 				c.ScheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(errors.WithStack(err))
@@ -281,7 +282,7 @@ func (c *client) tsLoop() {
 				return
 			default:
 			}
-			log.Error("[pd] getTS error", zap.Error(err))
+			log.Error("[pd] getTS error", zap.Error(errs.ErrGetTSO.FastGenByArgs()), zap.NamedError("cause", err))
 			c.ScheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil
@@ -378,7 +379,7 @@ func (c *client) Close() {
 	defer c.connMu.Unlock()
 	for _, cc := range c.connMu.clientConns {
 		if err := cc.Close(); err != nil {
-			log.Error("[pd] failed close grpc clientConn", zap.Error(err))
+			log.Error("[pd] failed to close gRPC clientConn", zap.Error(errs.ErrCloseGRPCConn.FastGenByArgs()), zap.NamedError("cause", err))
 		}
 	}
 }

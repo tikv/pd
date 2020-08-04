@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/pkg/grpcutil"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -137,7 +138,7 @@ func (c *baseClient) leaderLoop() {
 		}
 
 		if err := c.updateLeader(); err != nil {
-			log.Error("[pd] failed updateLeader", zap.Error(err))
+			log.Error("[pd] failed updateLeader", zap.Error(errs.ErrUpdateLeader.FastGenByArgs()), zap.NamedError("cause", err))
 		}
 	}
 }
@@ -177,7 +178,7 @@ func (c *baseClient) initClusterID() error {
 		members, err := c.getMembers(timeoutCtx, u)
 		timeoutCancel()
 		if err != nil || members.GetHeader() == nil {
-			log.Warn("[pd] failed to get cluster id", zap.String("url", u), zap.Error(err))
+			log.Warn("[pd] failed to get cluster id", zap.String("url", u), zap.Error(errs.ErrGetClusterID.FastGenByArgs()), zap.NamedError("cause", err))
 			continue
 		}
 		c.clusterID = members.GetHeader().GetClusterId()
@@ -191,7 +192,7 @@ func (c *baseClient) updateLeader() error {
 		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
 		members, err := c.getMembers(ctx, u)
 		if err != nil {
-			log.Warn("[pd] cannot update leader", zap.String("address", u), zap.Error(err))
+			log.Warn("[pd] cannot update leader", zap.String("address", u), zap.Error(errs.ErrUpdateLeader.FastGenByArgs()), zap.NamedError("cause", err))
 		}
 		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
