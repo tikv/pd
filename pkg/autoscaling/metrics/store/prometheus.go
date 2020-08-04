@@ -112,7 +112,7 @@ func (prom *PrometheusStore) queryMetricsFromPrometheus(query string, timestamp 
 	}
 
 	if r.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("query error, status code:%d", r.StatusCode)
+		return nil, fmt.Errorf("query error, status code: %d", r.StatusCode)
 	}
 
 	resp := &Response{}

@@ -17,7 +17,7 @@ import "time"
 
 // Store provides interfaces to query metrics
 type Store interface {
-	// Query metrics range of duration UNTIL timestamp
+	// Query does the real query with options
 	Query(options *QueryOptions) (QueryResult, error)
 }
 
