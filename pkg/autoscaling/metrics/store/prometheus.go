@@ -28,14 +28,12 @@ import (
 )
 
 const (
-	tikvSumStorageMetricsPattern = `sum(tikv_store_size_bytes{cluster="%s", type="%s"}) by (cluster)`
-	tikvSumCPUMetricsPattern     = `sum(increase(tikv_thread_cpu_seconds_total{cluster="%s"}[%s])) by (instance)`
-	tidbSumCPUMetricsPattern     = `sum(increase(process_cpu_seconds_total{cluster="%s",job="tidb"}[%s])) by (instance)`
-	queryPath                    = "/api/v1/query"
-	statusSuccess                = "success"
+	tikvSumCPUMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total{cluster="%s"}[%s])) by (instance)`
+	tidbSumCPUMetricsPattern = `sum(increase(process_cpu_seconds_total{cluster="%s",job="tidb"}[%s])) by (instance)`
+	queryPath                = "/api/v1/query"
+	statusSuccess            = "success"
 
-	float64EqualityThreshold = 1e-9
-	httpRequestTimeout       = 5
+	httpRequestTimeout = 5
 )
 
 // Response is used to marshal the data queried from Prometheus
@@ -44,16 +42,19 @@ type Response struct {
 	Data   Data   `json:"data"`
 }
 
+// Data consists of response data from prometheus
 type Data struct {
 	ResultType string   `json:"resultType"`
 	Result     []Result `json:"result"`
 }
 
+// Result consists of value and its labels
 type Result struct {
 	Metric Metric        `json:"metric"`
 	Value  []interface{} `json:"value"`
 }
 
+// Metric consists of labels
 type Metric struct {
 	Cluster  string `json:"cluster,omitempty"`
 	Instance string `json:"instance"`
