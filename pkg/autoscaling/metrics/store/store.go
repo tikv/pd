@@ -15,11 +15,19 @@ package metrics
 
 import "time"
 
+// Store provides interfaces to query metrics
+type Store interface {
+	// Query metrics range of duration UNTIL timestamp
+	Query(options *QueryOptions) (QueryResult, error)
+}
+
 // MemberType represents different members of a TiDB cluster
 type MemberType string
 
 const (
+	// TiDB represents TiDB component of a TiDB cluster
 	TiDB = "tidb"
+	// TiKV represents TiKV component of a TiDB cluster
 	TiKV = "tikv"
 )
 
@@ -27,9 +35,8 @@ const (
 type MetricType string
 
 const (
-	CPU              = "cpu"
-	StorageAvailable = "available"
-	StorageCapacity  = "capacity"
+	// CPU represents cpu time cost
+	CPU = "cpu"
 )
 
 // QueryOptions includes parameters for later metrics query
@@ -45,13 +52,10 @@ type QueryOptions struct {
 // QueryResult stores metrics value for each instance
 type QueryResult map[string]float64
 
-// Store provides interfaces to query metrics
-type Store interface {
-	// Query metrics range of duration UNTIL timestamp
-	Query(options *QueryOptions) (QueryResult, error)
-}
-
 // NewQueryOptions constructs a new QueryOptions for metrics
+// The options will be used to query metrics of `duration` long UNTIL `timestamp`
+// which has `metric` type (CPU, Storage) for a specific `member` type in a `cluster`
+// and returns metrics value for each instance in `instances`
 func NewQueryOptions(cluster string, member MemberType, metric MetricType, instances []string, timestamp int64, duration time.Duration) *QueryOptions {
 	return &QueryOptions{
 		cluster,
