@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	promClient "github.com/prometheus/client_golang/api"
-	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 const (
@@ -136,15 +135,15 @@ func extractInstancesFromResponse(resp *Response, instances []string) (QueryResu
 		return nil, fmt.Errorf("metrics Response returns no info")
 	}
 
-	s := sets.String{}
+	s := map[string]struct{}{}
 	for _, instance := range instances {
-		s.Insert(instance)
+		s[instance] = struct{}{}
 	}
 
 	result := make(QueryResult)
 
 	for _, r := range resp.Data.Result {
-		if s.Has(r.Metric.Instance) {
+		if _, ok := s[r.Metric.Instance]; ok {
 			v, err := strconv.ParseFloat(r.Value[1].(string), 64)
 			if err != nil {
 				return nil, err
@@ -157,16 +156,17 @@ func extractInstancesFromResponse(resp *Response, instances []string) (QueryResu
 }
 
 func (prom *PrometheusStore) queryCPU(options *QueryOptions) (QueryResult, error) {
-	var query string
+	var pattern string
 	switch options.member {
 	case TiDB:
-		query = fmt.Sprintf(tidbSumCPUMetricsPattern, options.cluster, options.duration.String())
+		pattern = tidbSumCPUMetricsPattern
 	case TiKV:
-		query = fmt.Sprintf(tikvSumCPUMetricsPattern, options.cluster, options.duration.String())
+		pattern = tikvSumCPUMetricsPattern
 	default:
 		return nil, errors.Errorf("unsupported member type %v", options.member)
 	}
 
+	query := fmt.Sprintf(pattern, options.cluster, options.duration.String())
 	resp, err := prom.queryMetricsFromPrometheus(query, options.timestamp)
 	if err != nil {
 		return nil, err
