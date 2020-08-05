@@ -25,6 +25,8 @@ var (
 	ClassMember = reg.RegisterErrorClass(3, "member")
 	// ClassClient defines client error class
 	ClassClient = reg.RegisterErrorClass(4, "client")
+	// ClassPlacement defines placement error class
+	ClassPlacement = reg.RegisterErrorClass(5, "placement")
 )
 
 // tso errors
@@ -59,4 +61,11 @@ var (
 	ErrCreateTSOStream = ClassClient.DefineError().TextualCode("ErrCreateTSOStream").MessageTemplate("fail to create TSO stream").Build()
 	ErrGetTSO          = ClassClient.DefineError().TextualCode("ErrGetTSO").MessageTemplate("fail to get TSO").Build()
 	ErrGetClusterID    = ClassClient.DefineError().TextualCode("ErrGetClusterID").MessageTemplate("fail to get cluster id").Build()
+)
+
+// placement errors
+var (
+	ErrRuleContent   = ClassPlacement.DefineError().TextualCode("ErrRuleContent").MessageTemplate("invalid rule content, %s").Build()
+	ErrLoadRule      = ClassPlacement.DefineError().TextualCode("ErrLoadRule").MessageTemplate("fail to load rule").Build()
+	ErrBuildRuleList = ClassPlacement.DefineError().TextualCode("ErrBuildRuleList").MessageTemplate("fail to build rule list, %s").Build()
 )
