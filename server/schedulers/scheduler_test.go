@@ -573,7 +573,7 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 	s.tc.AddLeaderStore(3, 0)
 	s.tc.AddLeaderStore(4, 0)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	s.tc.AddLabelsStore(1, 1, map[string]string{
+	s.tc.SetStoreLabel(1, map[string]string{
 		"role": "leader",
 	})
 	c.Check(s.schedule(), IsNil)
@@ -582,5 +582,13 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 	// Leaders:    16   0    0    0
 	// Region1:    L    F    F    F
 	s.tc.UpdateLeaderCount(1, 16)
+	// Only Store1 is allowed to have region leader
 	c.Check(s.schedule(), IsNil)
+
+	// Both Store1 and Store2 are allowed to have region leader
+	s.tc.SetStoreLabel(2, map[string]string{
+		"role": "leader",
+	})
+	c.Check(len(s.schedule()), Equals, 1)
+
 }

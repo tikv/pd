@@ -16,11 +16,14 @@ package filter
 import (
 	"fmt"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/slice"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+	"go.uber.org/zap"
 )
 
 // revive:disable:unused-parameter
@@ -461,9 +464,18 @@ func (f *ruleLeaderFitFilter) Source(opt opt.Options, store *core.StoreInfo) boo
 }
 
 func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	oldLeaderPeerReplica := *f.region.GetLeader()
-	oldLeaderPeerReplica.StoreId = store.GetID()
-	region := f.region.Clone(core.WithReplacePeerStore(f.oldLeaderStoreID, store.GetID()), core.WithLeader(&oldLeaderPeerReplica))
+	var targetPeer *metapb.Peer
+	for _, peer := range f.region.GetPeers() {
+		if peer.StoreId == store.GetID() {
+			targetPeer = peer
+			break
+		}
+	}
+	if targetPeer == nil {
+		log.Info("ruleLeaderFitFilter could't find peer on target Store", zap.Uint64("newStoreID", store.GetID()))
+		return false
+	}
+	region := f.region.Clone(core.WithLeader(targetPeer))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
