@@ -85,6 +85,102 @@ const (
 // schedulePeerPr the probability of schedule the hot peer.
 var schedulePeerPr = 0.66
 
+type rankStatus struct {
+	rank  int64
+	dims  [3]dimStatus // byte,key,qps
+	order [3]uint64
+}
+
+func newRankStatus(rs *rankSet, qpsStatus, byteStatus, keyStatus dimStatus) *rankStatus { // bs.conf
+	rank := rs.getRank(qpsStatus, keyStatus, byteStatus)
+	return &rankStatus{
+		rank: rank,
+		dims: [3]dimStatus{
+			statistics.ByteDim: byteStatus,
+			statistics.KeyDim:  keyStatus,
+			statistics.QpsDim:  qpsStatus,
+		},
+		order: rs.getPerm(),
+	}
+}
+
+func (r *rankStatus) statusNum(s dimStatus) uint64 {
+	var num uint64
+	for _, dim := range r.dims {
+		if dim == s {
+			num += 1
+		}
+	}
+	return num
+}
+
+func (r *rankStatus) getDim(s dimStatus) int {
+	for i, dim := range r.dims {
+		if dim == s {
+			return i
+		}
+	}
+	return statistics.DimLen
+}
+
+func (r *rankStatus) cmp(dimRkCmps []int) bool {
+	than := func(dimRkCmp int, status dimStatus) (bool, bool) {
+		if dimRkCmp != 0 {
+			if status == noWorse {
+				// prefer smaller rate, to reduce oscillation
+				return dimRkCmp < 0, true
+			}
+			if status == better {
+				// prefer region with larger rate, to converge faster
+				return dimRkCmp > 0, true
+			}
+		}
+		return false, false
+	}
+
+	thanByOrder := func(status dimStatus) (bool, bool) {
+		for _, o := range r.order {
+			dimRkCmp := dimRkCmps[o]
+			if result, ok := than(dimRkCmp, status); ok {
+				return result, true
+			}
+		}
+		return false, false
+	}
+
+	switch r.statusNum(better) {
+	case 0:
+		if result, ok := thanByOrder(noWorse); ok {
+			return result
+		}
+	case 3:
+		if result, ok := thanByOrder(better); ok {
+			return result
+		}
+	case 2:
+		// first to compare only noWorse dim
+		if result, ok := than(dimRkCmps[r.getDim(noWorse)], noWorse); ok {
+			return result
+		}
+		// second to compare better dim
+		if result, ok := thanByOrder(better); ok {
+			return result
+		}
+	case 1:
+		// first to compare only better dim
+		if result, ok := than(dimRkCmps[r.getDim(better)], better); ok {
+			return result
+		}
+		// second to compare noWorse dim
+		if result, ok := thanByOrder(noWorse); ok {
+			return result
+		}
+	default:
+		return false
+	}
+	return false
+}
+
 type rankSet struct {
 	conf *hotRegionSchedulerConfig
 	num  uint64
@@ -107,19 +203,21 @@ func newRankSet(conf *hotRegionSchedulerConfig) *rankSet {
 // qps noWorse, key better, bytes noWorse =>2
 // qps noWorse, key noWorse, bytes better =>1
 // 7,(6,5,3),(4,2,1),0
-
-func perm(n uint64, ranks []uint64) []uint64 {
-	if n > 5 {
-		log.Info("TestError")
-		return nil
-	}
-	p := [][]uint64{
-		{0, 1, 2},
+var (
+	p = [6][3]uint64{
+		{0, 1, 2}, // ByteDim, KeyDim, QpsDim
 		{0, 2, 1},
 		{1, 0, 2},
 		{1, 2, 0},
 		{2, 0, 1},
 		{2, 1, 0},
+	}
+)
+
+func perm(n uint64, ranks []uint64) []uint64 {
+	if n > 5 {
+		log.Info("TestError")
+		return nil
 	}
 	var ret []uint64
 	for _, num := range p[n] {
@@ -130,13 +228,12 @@ func perm(n uint64, ranks []uint64) []uint64 {
 
 func genSet(num uint64) map[uint64]int64 {
 	set := make(map[uint64]int64)
-	twoBetter := []uint64{3, 5, 6}
-	oneBetter := []uint64{1, 2, 4}
-	twoBetterPerm := perm(num/6, twoBetter)
-	oneBetterPerm := perm(num%6, oneBetter)
+	twoBetter := []uint64{3, 5, 6} // key+byte , qps+byte , qps+key
+	oneBetter := []uint64{1, 2, 4} // byte , key , qps
+	twoBetterPerm := perm(num, twoBetter)
+	oneBetterPerm := perm(num, oneBetter)
 	rank := int64(-2)
 	perm := append(oneBetterPerm, twoBetterPerm...)
-	log.Info("genSet", zap.Uint64s("perm", perm))
 	for _, ord := range perm {
 		set[ord] = rank
 		rank--
@@ -144,7 +241,19 @@ func genSet(num uint64) map[uint64]int64 {
 	return set
 }
 
-func (rs *rankSet) getRank(qpsStatus, keyStatus, bytesStatus rankStatus) int64 {
+func (rs *rankSet) getRank(qpsStatus, keyStatus, bytesStatus dimStatus) int64 {
+	if qpsStatus == better && keyStatus == better && bytesStatus == better {
+		return -7
+	}
+
+	if qpsStatus == noWorse && keyStatus == noWorse && bytesStatus == noWorse {
+		return -1
+	}
+
+	if qpsStatus == worse || keyStatus == worse || bytesStatus == worse {
+		return 0
+	}
+
 	ord := uint64((qpsStatus-1)*4 + (keyStatus-1)*2 + bytesStatus - 1)
 	if rs.num != rs.conf.GetRank() || rs.set == nil {
 		rs.num = rs.conf.GetRank()
@@ -156,6 +265,10 @@ func (rs *rankSet) getRank(qpsStatus, keyStatus, bytesStatus rankStatus) int64 {
 	}
 	log.Info("TestError")
 	return 0
+}
+
+func (rs *rankSet) getPerm() [3]uint64 {
+	return p[rs.num]
 }
 
 type hotScheduler struct {
@@ -604,7 +717,7 @@ type solution struct {
 	// progressiveRank measures the contribution for balance.
 	// The smaller the rank, the better this solution is.
 	// If rank < 0, this solution makes thing better.
-	progressiveRank int64
+	progressiveRank *rankStatus
 }
 
 func (bs *balanceSolver) init() {
@@ -706,7 +819,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for dstStoreID := range bs.filterDstStores() {
 				bs.cur.dstStoreID = dstStoreID
 				bs.calcProgressiveRank()
-				if bs.cur.progressiveRank < 0 && bs.betterThan(best) {
+				if bs.cur.progressiveRank.rank < 0 && bs.betterThan(best) {
 					if newOps, newInfls := bs.buildOperators(); len(newOps) > 0 {
 						ops = newOps
 						infls = newInfls
@@ -750,8 +863,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 			continue
 		}
 		if detail.LoadPred.min().ByteRate > ratio*detail.LoadPred.Future.ExpByteRate &&
-			detail.LoadPred.min().KeyRate > ratio*detail.LoadPred.Future.ExpKeyRate {
-			//detail.LoadPred.min().QPS > ratio*detail.LoadPred.Future.ExpQPS
+			detail.LoadPred.min().KeyRate > ratio*detail.LoadPred.Future.ExpKeyRate &&
+			detail.LoadPred.min().QPS > ratio*detail.LoadPred.Future.ExpQPS {
 			ret[id] = detail
 			balanceHotRegionCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 		}
@@ -930,8 +1043,8 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 		if filter.Target(bs.cluster, store, filters) {
 			detail := bs.stLoadDetail[store.GetID()]
 			if detail.LoadPred.max().ByteRate*ratio < detail.LoadPred.Future.ExpByteRate &&
-				detail.LoadPred.max().KeyRate*ratio < detail.LoadPred.Future.ExpKeyRate {
-				//detail.LoadPred.max().QPS*ratio < detail.LoadPred.Future.ExpQPS
+				detail.LoadPred.max().KeyRate*ratio < detail.LoadPred.Future.ExpKeyRate &&
+				detail.LoadPred.max().QPS*ratio < detail.LoadPred.Future.ExpQPS {
 				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
 			}
@@ -941,11 +1054,11 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*co
 	return ret
 }
 
-// rankStatus distinguishes different kinds of rank
-type rankStatus int
+// dimStatus distinguishes different kinds of rank
+type dimStatus int
 
 const (
-	worse rankStatus = iota
+	worse dimStatus = iota
 	noWorse
 	better
 )
@@ -956,63 +1069,57 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	srcLd := bs.stLoadDetail[bs.cur.srcStoreID].LoadPred.min()
 	dstLd := bs.stLoadDetail[bs.cur.dstStoreID].LoadPred.max()
 	peer := bs.cur.srcPeerStat
-	rank := int64(0)
-	if bs.rwTy == write && bs.opTy == transferLeader {
-		// In this condition, CPU usage is the matter.
-		// Only consider about key rate.
-		if srcLd.KeyRate >= dstLd.KeyRate+peer.GetKeyRate() {
-			rank = -1
-		}
-	} else {
-		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
-		getSrcDecRate := func(a, b float64) float64 {
-			if a-b <= 0 {
-				return 1
-			}
-			return a - b
-		}
-		status := func(isHot bool, ratio float64) rankStatus {
-			if isHot && ratio <= greatDecRatio {
-				return better
-			} else if ratio <= minorDecRatio {
-				return noWorse
-			}
-			return worse
-		}
 
-		keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getSrcDecRate(srcLd.KeyRate, peer.GetKeyRate())
-		keyHot := peer.GetKeyRate() >= bs.sche.conf.GetMinHotKeyRate()
-		byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / getSrcDecRate(srcLd.ByteRate, peer.GetByteRate())
-		byteHot := peer.GetByteRate() > bs.sche.conf.GetMinHotByteRate()
-		qpsDecRatio := (dstLd.QPS + peer.GetQPS()) / getSrcDecRate(srcLd.QPS, peer.GetQPS())
-		qpsHot := peer.GetQPS() > bs.sche.conf.GetMinHotQPS()
-		log.Info("qps", zap.Float64("dst", dstLd.QPS), zap.Float64("peer", peer.GetQPS()), zap.Float64("src", srcLd.QPS))
-		qpsStatus := status(qpsHot, qpsDecRatio)
-		keyStatus := status(keyHot, keyDecRatio)
-		byteStatus := status(byteHot, byteDecRatio)
-		if qpsStatus == better && keyStatus == better && byteStatus == better {
-			rank = -8
-		} else if qpsStatus == worse || keyStatus == worse || byteStatus == worse {
-			rank = 0
-		} else if qpsStatus == noWorse || keyStatus == noWorse || byteStatus == noWorse {
-			rank = -1
-		} else {
-			rank = bs.sche.rs.getRank(qpsStatus, keyStatus, byteStatus)
+	greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
+
+	getSrcDecRate := func(a, b float64) float64 {
+		if a-b <= 0 {
+			return 1
 		}
+		return a - b
 	}
-	bs.cur.progressiveRank = rank
+	isHot := func(a, b float64) bool {
+		if a == 0 {
+			return false
+		}
+		return a >= b
+	}
+
+	status := func(isHot bool, ratio float64) dimStatus {
+		if isHot && ratio <= greatDecRatio {
+			return better
+		} else if ratio <= minorDecRatio {
+			return noWorse
+		}
+		return worse
+	}
+
+	keyDecRatio := (dstLd.KeyRate + peer.GetKeyRate()) / getSrcDecRate(srcLd.KeyRate, peer.GetKeyRate())
+	keyHot := isHot(peer.GetKeyRate(), bs.sche.conf.GetMinHotKeyRate())
+
+	byteDecRatio := (dstLd.ByteRate + peer.GetByteRate()) / getSrcDecRate(srcLd.ByteRate, peer.GetByteRate())
+	byteHot := isHot(peer.GetByteRate(), bs.sche.conf.GetMinHotByteRate())
+
+	qpsDecRatio := (dstLd.QPS + peer.GetQPS()) / getSrcDecRate(srcLd.QPS, peer.GetQPS())
+	qpsHot := isHot(peer.GetQPS(), bs.sche.conf.GetMinHotQPS())
+
+	qpsStatus := status(qpsHot, qpsDecRatio)
+	keyStatus := status(keyHot, keyDecRatio)
+	byteStatus := status(byteHot, byteDecRatio)
+
+	bs.cur.progressiveRank = newRankStatus(bs.sche.rs, qpsStatus, byteStatus, keyStatus)
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
-func (bs *balanceSolver) betterThan(old *solution) bool { // todo add rank
+func (bs *balanceSolver) betterThan(old *solution) bool {
 	if old == nil {
 		return true
 	}
 
 	switch {
-	case bs.cur.progressiveRank < old.progressiveRank:
+	case bs.cur.progressiveRank.rank < old.progressiveRank.rank:
 		return true
-	case bs.cur.progressiveRank > old.progressiveRank:
+	case bs.cur.progressiveRank.rank > old.progressiveRank.rank:
 		return false
 	}
 
@@ -1030,72 +1137,58 @@ func (bs *balanceSolver) betterThan(old *solution) bool { // todo add rank
 
 	if bs.cur.srcPeerStat != old.srcPeerStat {
 		// compare region
+		byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetByteRate(), old.srcPeerStat.GetByteRate(), stepRank(0, 100))
+		keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetKeyRate(), old.srcPeerStat.GetKeyRate(), stepRank(0, 10))
+		qpsRkCmp := rankCmp(bs.cur.srcPeerStat.GetQPS(), old.srcPeerStat.GetQPS(), stepRank(0, 10))
 
-		if bs.rwTy == write && bs.opTy == transferLeader {
-			switch {
-			case bs.cur.srcPeerStat.GetKeyRate() > old.srcPeerStat.GetKeyRate():
-				return true
-			case bs.cur.srcPeerStat.GetKeyRate() < old.srcPeerStat.GetKeyRate():
-				return false
-			}
-		} else {
-			byteRkCmp := rankCmp(bs.cur.srcPeerStat.GetByteRate(), old.srcPeerStat.GetByteRate(), stepRank(0, 100))
-			keyRkCmp := rankCmp(bs.cur.srcPeerStat.GetKeyRate(), old.srcPeerStat.GetKeyRate(), stepRank(0, 10))
-
-			switch bs.cur.progressiveRank {
-			case -2: // greatDecRatio < byteDecRatio <= minorDecRatio && keyDecRatio <= greatDecRatio
-				if keyRkCmp != 0 {
-					return keyRkCmp > 0
-				}
-				if byteRkCmp != 0 {
-					// prefer smaller byte rate, to reduce oscillation
-					return byteRkCmp < 0
-				}
-			case -3: // byteDecRatio <= greatDecRatio && keyDecRatio <= greatDecRatio
-				if keyRkCmp != 0 {
-					return keyRkCmp > 0
-				}
-				fallthrough
-			case -1: // byteDecRatio <= greatDecRatio
-				if byteRkCmp != 0 {
-					// prefer region with larger byte rate, to converge faster
-					return byteRkCmp > 0
-				}
-			}
-		}
+		return bs.cur.progressiveRank.cmp([]int{
+			statistics.ByteDim: byteRkCmp,
+			statistics.KeyDim:  keyRkCmp,
+			statistics.QpsDim:  qpsRkCmp,
+		})
 	}
 
 	return false
 }
 
+func (bs *balanceSolver) getCmps(isSrc bool) []storeLoadCmp {
+	p := bs.sche.rs.getPerm()
+	var cmps []storeLoadCmp
+	if isSrc {
+		cmps = []storeLoadCmp{
+			statistics.ByteDim: stLdRankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
+			statistics.KeyDim:  stLdRankCmp(stLdByteRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
+			statistics.QpsDim:  stLdRankCmp(stLdByteRate, stepRank(bs.minDst.QPS, bs.rankStep.QPS)),
+		}
+	} else {
+		cmps = []storeLoadCmp{
+			statistics.ByteDim: stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
+			statistics.KeyDim:  stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
+			statistics.QpsDim:  stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.QPS, bs.rankStep.QPS)),
+		}
+	}
+
+	var ret []storeLoadCmp
+	for _, num := range p {
+		ret = append(ret, cmps[num])
+	}
+	return ret
+}
+
 // smaller is better
-func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int { // todo add rank
+func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare source store
 		var lpCmp storeLPCmp
-		if bs.rwTy == write && bs.opTy == transferLeader {
-			lpCmp = sliceLPCmp(
-				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
-					stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
-				))),
-				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
-					stLdRankCmp(stLdKeyRate, stepRank(0, bs.rankStep.KeyRate)),
-					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
-				)),
-			)
-		} else {
-			lpCmp = sliceLPCmp(
-				minLPCmp(negLoadCmp(sliceLoadCmp(
-					stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
-					stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
-				))),
-				diffCmp(
-					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
-				),
-			)
-		}
+
+		lpCmp = sliceLPCmp(
+			minLPCmp(negLoadCmp(sliceLoadCmp(
+				bs.getCmps(true)...
+			))),
+			diffCmp(
+				stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)), // todo
+			),
+		)
 
 		lp1 := bs.stLoadDetail[st1].LoadPred
 		lp2 := bs.stLoadDetail[st2].LoadPred
@@ -1105,33 +1198,18 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int { // todo add rank
 }
 
 // smaller is better
-func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int { // todo add rank
+func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 	if st1 != st2 {
 		// compare destination store
 		var lpCmp storeLPCmp
-		if bs.rwTy == write && bs.opTy == transferLeader {
-			lpCmp = sliceLPCmp(
-				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
-					stLdRankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
-				)),
-				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
-					stLdRankCmp(stLdKeyRate, stepRank(0, bs.rankStep.KeyRate)),
-					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
-				)))
-		} else {
-			lpCmp = sliceLPCmp(
-				maxLPCmp(sliceLoadCmp(
-					stLdRankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
-					stLdRankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
-				)),
-				diffCmp(
-					stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
-				),
-			)
-		}
-
+		lpCmp = sliceLPCmp(
+			maxLPCmp(sliceLoadCmp(
+				bs.getCmps(false)...
+			)),
+			diffCmp(
+				stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
+			),
+		)
 		lp1 := bs.stLoadDetail[st1].LoadPred
 		lp2 := bs.stLoadDetail[st2].LoadPred
 		return lpCmp(lp1, lp2)

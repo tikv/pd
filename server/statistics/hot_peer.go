@@ -16,10 +16,10 @@ package statistics
 import "time"
 
 const (
-	byteDim int = iota
-	keyDim
-	qpsDim
-	dimLen
+	ByteDim int = iota
+	KeyDim
+	QpsDim
+	DimLen
 )
 
 // HotPeerStat records each hot peer's statistics
@@ -61,11 +61,11 @@ func (stat *HotPeerStat) ID() uint64 {
 func (stat *HotPeerStat) Less(k int, than TopNItem) bool {
 	rhs := than.(*HotPeerStat)
 	switch k {
-	case qpsDim:
+	case QpsDim:
 		return stat.GetQPS() < rhs.GetQPS()
-	case keyDim:
+	case KeyDim:
 		return stat.GetKeyRate() < rhs.GetKeyRate()
-	case byteDim:
+	case ByteDim:
 		fallthrough
 	default:
 		return stat.GetByteRate() < rhs.GetByteRate()

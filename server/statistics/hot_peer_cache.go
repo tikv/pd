@@ -34,14 +34,14 @@ const (
 )
 
 var (
-	minHotThresholds = [2][dimLen]float64{
+	minHotThresholds = [2][DimLen]float64{
 		WriteFlow: {
-			byteDim: 1 * 1024,
-			keyDim:  32,
+			ByteDim: 1 * 1024,
+			KeyDim:  32,
 		},
 		ReadFlow: {
-			byteDim: 8 * 1024,
-			keyDim:  128,
+			ByteDim: 8 * 1024,
+			KeyDim:  128,
 		},
 	}
 )
@@ -89,7 +89,7 @@ func (f *hotPeerCache) Update(item *HotPeerStat) {
 	} else {
 		peers, ok := f.peersOfStore[item.StoreID]
 		if !ok {
-			peers = NewTopN(dimLen, topNN, topNTTL)
+			peers = NewTopN(DimLen, topNN, topNTTL)
 			f.peersOfStore[item.StoreID] = peers
 		}
 		peers.Put(item)
@@ -183,10 +183,10 @@ func (f *hotPeerCache) CollectMetrics(stats *StoresStats, typ string) {
 		store := storeTag(storeID)
 		thresholds := f.calcHotThresholds(stats, storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", store, typ).Set(float64(peers.Len()))
-		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[byteDim])
-		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[keyDim])
+		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[ByteDim])
+		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[KeyDim])
 		// for compatibility
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[byteDim])
+		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[ByteDim])
 	}
 }
 
@@ -239,18 +239,18 @@ func (f *hotPeerCache) isRegionExpired(region *core.RegionInfo, storeID uint64) 
 	return false
 }
 
-func (f *hotPeerCache) calcHotThresholds(stats *StoresStats, storeID uint64) [dimLen]float64 {
+func (f *hotPeerCache) calcHotThresholds(stats *StoresStats, storeID uint64) [DimLen]float64 {
 	minThresholds := minHotThresholds[f.kind]
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < topNN {
 		return minThresholds
 	}
-	ret := [dimLen]float64{
-		byteDim: tn.GetTopNMin(byteDim).(*HotPeerStat).ByteRate,
-		keyDim:  tn.GetTopNMin(keyDim).(*HotPeerStat).KeyRate,
-		qpsDim:  tn.GetTopNMin(qpsDim).(*HotPeerStat).QPS,
+	ret := [DimLen]float64{
+		ByteDim: tn.GetTopNMin(ByteDim).(*HotPeerStat).ByteRate,
+		KeyDim:  tn.GetTopNMin(KeyDim).(*HotPeerStat).KeyRate,
+		QpsDim:  tn.GetTopNMin(QpsDim).(*HotPeerStat).QPS,
 	}
-	for k := 0; k < dimLen; k++ {
+	for k := 0; k < DimLen; k++ {
 		ret[k] = math.Max(ret[k]*hotThresholdRatio, minThresholds[k])
 	}
 	return ret
@@ -308,8 +308,8 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesStats *StoresStats) *HotPeerStat {
 	thresholds := f.calcHotThresholds(storesStats, newItem.StoreID)
-	isHot := newItem.ByteRate >= thresholds[byteDim] ||
-		newItem.KeyRate >= thresholds[keyDim] //|| newItem.QPS >= thresholds[qpsDim]
+	isHot := newItem.ByteRate >= thresholds[ByteDim] ||
+		newItem.KeyRate >= thresholds[KeyDim] || newItem.QPS >= thresholds[QpsDim]
 
 	if newItem.needDelete {
 		return newItem

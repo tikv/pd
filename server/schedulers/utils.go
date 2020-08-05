@@ -313,6 +313,7 @@ func (lp *storeLoadPred) diff() *storeLoad {
 
 type storeLPCmp func(lp1, lp2 *storeLoadPred) int
 
+// sliceLPCmp runs some compare cmp functions in order, it will directly return when lp1 and lp2 is not equal in some cpm function
 func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
 	return func(lp1, lp2 *storeLoadPred) int {
 		for _, cmp := range cmps {
