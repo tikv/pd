@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/urfave/negroni"
@@ -145,21 +146,21 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error("request failed", zap.Error(err))
+			log.Error("request failed", zap.Error(errs.ErrHTTPRequest.FastGenByArgs()), zap.NamedError("cause", err))
 			continue
 		}
 
 		b, err := ioutil.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			log.Error("request failed", zap.Error(err))
+			log.Error("read failed", zap.Error(errs.ErrReadBody.FastGenByArgs()), zap.NamedError("cause", err))
 			continue
 		}
 
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		if _, err := w.Write(b); err != nil {
-			log.Error("write failed", zap.Error(err))
+			log.Error("write failed", zap.Error(errs.ErrWriteBody.FastGenByArgs()), zap.NamedError("cause", err))
 			continue
 		}
 

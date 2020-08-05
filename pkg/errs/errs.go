@@ -27,6 +27,8 @@ var (
 	ClassClient = reg.RegisterErrorClass(4, "client")
 	// ClassPlacement defines placement error class
 	ClassPlacement = reg.RegisterErrorClass(5, "placement")
+	// ClassAPIUtil defines apiutil error class
+	ClassAPIUtil = reg.RegisterErrorClass(6, "apiutil")
 )
 
 // tso errors
@@ -68,4 +70,11 @@ var (
 	ErrRuleContent   = ClassPlacement.DefineError().TextualCode("ErrRuleContent").MessageTemplate("invalid rule content, %s").Build()
 	ErrLoadRule      = ClassPlacement.DefineError().TextualCode("ErrLoadRule").MessageTemplate("fail to load rule").Build()
 	ErrBuildRuleList = ClassPlacement.DefineError().TextualCode("ErrBuildRuleList").MessageTemplate("fail to build rule list, %s").Build()
+)
+
+// apiutil errors
+var (
+	ErrHTTPRequest = ClassAPIUtil.DefineError().TextualCode("ErrHTTPRequest").MessageTemplate("fail to do a HTTP request").Build()
+	ErrReadBody    = ClassAPIUtil.DefineError().TextualCode("ErrReadBody").MessageTemplate("fail to read a HTTP body").Build()
+	ErrWriteBody   = ClassAPIUtil.DefineError().TextualCode("ErrWriteBody").MessageTemplate("fail to write a HTTP body").Build()
 )
