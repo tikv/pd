@@ -98,7 +98,7 @@ func newRankStatus(rs *rankSet, qpsStatus, byteStatus, keyStatus dimStatus) *ran
 		dims: [3]dimStatus{
 			statistics.ByteDim: byteStatus,
 			statistics.KeyDim:  keyStatus,
-			statistics.QpsDim:  qpsStatus,
+			statistics.QPSDim:  qpsStatus,
 		},
 		order: rs.getPerm(),
 	}
@@ -205,7 +205,7 @@ func newRankSet(conf *hotRegionSchedulerConfig) *rankSet {
 // 7,(6,5,3),(4,2,1),0
 var (
 	p = [6][3]uint64{
-		{0, 1, 2}, // ByteDim, KeyDim, QpsDim
+		{0, 1, 2}, // ByteDim, KeyDim, QPSDim
 		{0, 2, 1},
 		{1, 0, 2},
 		{1, 2, 0},
@@ -1144,7 +1144,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 		return bs.cur.progressiveRank.cmp([]int{
 			statistics.ByteDim: byteRkCmp,
 			statistics.KeyDim:  keyRkCmp,
-			statistics.QpsDim:  qpsRkCmp,
+			statistics.QPSDim:  qpsRkCmp,
 		})
 	}
 
@@ -1158,13 +1158,13 @@ func (bs *balanceSolver) getCmps(isSrc bool) []storeLoadCmp {
 		cmps = []storeLoadCmp{
 			statistics.ByteDim: stLdRankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
 			statistics.KeyDim:  stLdRankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
-			statistics.QpsDim:  stLdRankCmp(stLdQPS, stepRank(bs.minDst.QPS, bs.rankStep.QPS)),
+			statistics.QPSDim:  stLdRankCmp(stLdQPS, stepRank(bs.minDst.QPS, bs.rankStep.QPS)),
 		}
 	} else {
 		cmps = []storeLoadCmp{
 			statistics.ByteDim: stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
 			statistics.KeyDim:  stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
-			statistics.QpsDim:  stLdRankCmp(stLdQPS, stepRank(bs.maxSrc.QPS, bs.rankStep.QPS)),
+			statistics.QPSDim:  stLdRankCmp(stLdQPS, stepRank(bs.maxSrc.QPS, bs.rankStep.QPS)),
 		}
 	}
 

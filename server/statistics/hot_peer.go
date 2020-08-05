@@ -20,8 +20,8 @@ const (
 	ByteDim int = iota
 	// KeyDim is dim of key
 	KeyDim
-	// QpsDim is dim of qps
-	QpsDim
+	// QPSDim is dim of qps
+	QPSDim
 	// DimLen is len of dim
 	DimLen
 )
@@ -65,7 +65,7 @@ func (stat *HotPeerStat) ID() uint64 {
 func (stat *HotPeerStat) Less(k int, than TopNItem) bool {
 	rhs := than.(*HotPeerStat)
 	switch k {
-	case QpsDim:
+	case QPSDim:
 		return stat.GetQPS() < rhs.GetQPS()
 	case KeyDim:
 		return stat.GetKeyRate() < rhs.GetKeyRate()

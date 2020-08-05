@@ -248,7 +248,7 @@ func (f *hotPeerCache) calcHotThresholds(stats *StoresStats, storeID uint64) [Di
 	ret := [DimLen]float64{
 		ByteDim: tn.GetTopNMin(ByteDim).(*HotPeerStat).ByteRate,
 		KeyDim:  tn.GetTopNMin(KeyDim).(*HotPeerStat).KeyRate,
-		QpsDim:  tn.GetTopNMin(QpsDim).(*HotPeerStat).QPS,
+		QPSDim:  tn.GetTopNMin(QPSDim).(*HotPeerStat).QPS,
 	}
 	for k := 0; k < DimLen; k++ {
 		ret[k] = math.Max(ret[k]*hotThresholdRatio, minThresholds[k])
@@ -309,7 +309,7 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesStats *StoresStats) *HotPeerStat {
 	thresholds := f.calcHotThresholds(storesStats, newItem.StoreID)
 	isHot := newItem.ByteRate >= thresholds[ByteDim] ||
-		newItem.KeyRate >= thresholds[KeyDim] || newItem.QPS >= thresholds[QpsDim]
+		newItem.KeyRate >= thresholds[KeyDim] || newItem.QPS >= thresholds[QPSDim]
 
 	if newItem.needDelete {
 		return newItem
