@@ -27,8 +27,10 @@ var (
 	ClassClient = reg.RegisterErrorClass(4, "client")
 	// ClassPlacement defines placement error class
 	ClassPlacement = reg.RegisterErrorClass(5, "placement")
+	// ClassKV defines KV error class
+	ClassKV = reg.RegisterErrorClass(6, "kv")
 	// ClassAPIUtil defines apiutil error class
-	ClassAPIUtil = reg.RegisterErrorClass(6, "apiutil")
+	ClassAPIUtil = reg.RegisterErrorClass(7, "apiutil")
 )
 
 // tso errors
@@ -70,6 +72,12 @@ var (
 	ErrRuleContent   = ClassPlacement.DefineError().TextualCode("ErrRuleContent").MessageTemplate("invalid rule content, %s").Build()
 	ErrLoadRule      = ClassPlacement.DefineError().TextualCode("ErrLoadRule").MessageTemplate("fail to load rule").Build()
 	ErrBuildRuleList = ClassPlacement.DefineError().TextualCode("ErrBuildRuleList").MessageTemplate("fail to build rule list, %s").Build()
+)
+
+// kv errors
+var (
+	ErrEtcdKvSave   = ClassKV.DefineError().TextualCode("ErrEtcdKvSave").MessageTemplate("etcd kv save error, key is %s, value is %s").Build()
+	ErrEtcdKvRemove = ClassKV.DefineError().TextualCode("ErrEtcdKvRemove").MessageTemplate("etcd kv remove error, key is %s").Build()
 )
 
 // apiutil errors
