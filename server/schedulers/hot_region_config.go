@@ -35,6 +35,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	return &hotRegionSchedulerConfig{
 		MinHotByteRate:        100,
 		MinHotKeyRate:         10,
+		MinHotQPS:             10,
 		MaxZombieRounds:       3,
 		ByteRateRankStepRatio: 0.05,
 		KeyRateRankStepRatio:  0.05,
