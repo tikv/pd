@@ -623,6 +623,7 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	return core.NewRegionInfo(region, leader)
 }
 
+// SetStoreLabel set the labels to the target store
 func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	store := mc.GetStore(storeID)
 	newLabels := make([]*metapb.StoreLabel, 0, len(labels))
