@@ -108,7 +108,7 @@ func (r *rankStatus) statusNum(s dimStatus) uint64 {
 	var num uint64
 	for _, dim := range r.dims {
 		if dim == s {
-			num += 1
+			num ++
 		}
 	}
 	return num
@@ -1157,14 +1157,14 @@ func (bs *balanceSolver) getCmps(isSrc bool) []storeLoadCmp {
 	if isSrc {
 		cmps = []storeLoadCmp{
 			statistics.ByteDim: stLdRankCmp(stLdByteRate, stepRank(bs.minDst.ByteRate, bs.rankStep.ByteRate)),
-			statistics.KeyDim:  stLdRankCmp(stLdByteRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
-			statistics.QpsDim:  stLdRankCmp(stLdByteRate, stepRank(bs.minDst.QPS, bs.rankStep.QPS)),
+			statistics.KeyDim:  stLdRankCmp(stLdKeyRate, stepRank(bs.minDst.KeyRate, bs.rankStep.KeyRate)),
+			statistics.QpsDim:  stLdRankCmp(stLdQPS, stepRank(bs.minDst.QPS, bs.rankStep.QPS)),
 		}
 	} else {
 		cmps = []storeLoadCmp{
 			statistics.ByteDim: stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.ByteRate, bs.rankStep.ByteRate)),
-			statistics.KeyDim:  stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
-			statistics.QpsDim:  stLdRankCmp(stLdByteRate, stepRank(bs.maxSrc.QPS, bs.rankStep.QPS)),
+			statistics.KeyDim:  stLdRankCmp(stLdKeyRate, stepRank(bs.maxSrc.KeyRate, bs.rankStep.KeyRate)),
+			statistics.QpsDim:  stLdRankCmp(stLdQPS, stepRank(bs.maxSrc.QPS, bs.rankStep.QPS)),
 		}
 	}
 

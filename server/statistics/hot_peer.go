@@ -16,9 +16,13 @@ package statistics
 import "time"
 
 const (
+	// ByteDim is dim of byte
 	ByteDim int = iota
+	// KeyDim is dim of key
 	KeyDim
+	// QpsDim is dim of qps
 	QpsDim
+	// DimLen is len of dim
 	DimLen
 )
 

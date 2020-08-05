@@ -107,6 +107,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest) *RegionInfo {
 		replicationStatus: heartbeat.GetReplicationStatus(),
 		queryStats:        heartbeat.QueryStats,
 	}
+
 	classifyVoterAndLearner(region)
 	return region
 }

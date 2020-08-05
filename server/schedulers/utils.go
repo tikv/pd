@@ -248,9 +248,9 @@ func stLdCount(ld *storeLoad) float64 {
 	return ld.Count
 }
 
-//func stLdQPS(ld *storeLoad) float64 {
-//	return ld.QPS
-//}
+func stLdQPS(ld *storeLoad) float64 {
+	return ld.QPS
+}
 
 type storeLoadCmp func(ld1, ld2 *storeLoad) int
 
