@@ -29,8 +29,8 @@ import (
 const (
 	tikvSumCPUUsageMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total{cluster="%s"}[%s])) by (instance)`
 	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{cluster="%s",job="tidb"}[%s])) by (instance)`
-	tikvSumCPUQuotaMetricsPattern = `tikv_server_cpu_cores_quota{cluster="%s"}[%s] by (instance)`
-	tidbSumCPUQuotaMetricsPattern = `tidb_server_maxprocs{cluster="%s"}[%s] by (instance)`
+	tikvSumCPUQuotaMetricsPattern = `tikv_server_cpu_cores_quota{cluster="%s"}`
+	tidbSumCPUQuotaMetricsPattern = `tidb_server_maxprocs{cluster="%s"}`
 	queryPath                     = "/api/v1/query"
 	statusSuccess                 = "success"
 
@@ -205,6 +205,6 @@ func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
 		return "", errors.Errorf("unspported member type %v", options.member)
 	}
 
-	query := fmt.Sprintf(pattern, options.cluster, options.duration.String())
+	query := fmt.Sprintf(pattern, options.cluster)
 	return query, nil
 }
