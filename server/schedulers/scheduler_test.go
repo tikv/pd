@@ -639,4 +639,3 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 		}
 	}
 }
-
