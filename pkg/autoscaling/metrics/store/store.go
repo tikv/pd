@@ -35,8 +35,10 @@ const (
 type MetricType string
 
 const (
-	// CPU represents cpu time cost
-	CPU = "cpu"
+	// CPUUsage represents cpu time cost
+	CPUUsage = "cpu_usage"
+	// CPUQuota represents cpu cores quota
+	CPUQuota = "cpu_quota"
 )
 
 // QueryOptions includes parameters for later metrics query

@@ -27,10 +27,12 @@ import (
 )
 
 const (
-	tikvSumCPUMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total{cluster="%s"}[%s])) by (instance)`
-	tidbSumCPUMetricsPattern = `sum(increase(process_cpu_seconds_total{cluster="%s",job="tidb"}[%s])) by (instance)`
-	queryPath                = "/api/v1/query"
-	statusSuccess            = "success"
+	tikvSumCPUUsageMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total{cluster="%s"}[%s])) by (instance)`
+	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{cluster="%s",job="tidb"}[%s])) by (instance)`
+	tikvSumCPUQuotaMetricsPattern = `tikv_server_cpu_cores_quota{cluster="%s"}[%s] by (instance)`
+	tidbSumCPUQuotaMetricsPattern = `tidb_server_maxprocs{cluster="%s"}[%s] by (instance)`
+	queryPath                     = "/api/v1/query"
+	statusSuccess                 = "success"
 
 	httpRequestTimeout = 5
 )
@@ -82,14 +84,36 @@ func NewPrometheusStore(endpoint string) (*PrometheusStore, error) {
 	return store, nil
 }
 
+type promQLBuilderFn func(*QueryOptions) (string, error)
+
+var queryBuilderFnMap = map[MetricType]promQLBuilderFn{
+	CPUQuota: buildCPUQuotaPromQL,
+	CPUUsage: buildCPUUsagePromQL,
+}
+
 // Query do the real query on Prometheus and returns metric value for each instance
 func (prom *PrometheusStore) Query(options *QueryOptions) (QueryResult, error) {
-	switch options.metric {
-	case CPU:
-		return prom.queryCPU(options)
+	builderFn, ok := queryBuilderFnMap[options.metric]
+	if !ok {
+		return nil, errors.Errorf("unsupported metric type %v", options.metric)
 	}
 
-	return nil, errors.Errorf("unsupported metric type %v", options.metric)
+	query, err := builderFn(options)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := prom.queryMetricsFromPrometheus(query, options.timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := extractInstancesFromResponse(resp, options.instances)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func (prom *PrometheusStore) queryMetricsFromPrometheus(query string, timestamp int64) (*Response, error) {
@@ -155,27 +179,32 @@ func extractInstancesFromResponse(resp *Response, instances []string) (QueryResu
 	return result, nil
 }
 
-func (prom *PrometheusStore) queryCPU(options *QueryOptions) (QueryResult, error) {
-	var pattern string
-	switch options.member {
-	case TiDB:
-		pattern = tidbSumCPUMetricsPattern
-	case TiKV:
-		pattern = tikvSumCPUMetricsPattern
-	default:
-		return nil, errors.Errorf("unsupported member type %v", options.member)
+var cpuUsagePromQLTemplate = map[MemberType]string{
+	TiDB: tidbSumCPUUsageMetricsPattern,
+	TiKV: tikvSumCPUUsageMetricsPattern,
+}
+
+var cpuQuotaPromQLTemplate = map[MemberType]string{
+	TiDB: tidbSumCPUQuotaMetricsPattern,
+	TiKV: tikvSumCPUQuotaMetricsPattern,
+}
+
+func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
+	pattern, ok := cpuQuotaPromQLTemplate[options.member]
+	if !ok {
+		return "", errors.Errorf("unspported member type %v", options.member)
 	}
 
 	query := fmt.Sprintf(pattern, options.cluster, options.duration.String())
-	resp, err := prom.queryMetricsFromPrometheus(query, options.timestamp)
-	if err != nil {
-		return nil, err
+	return query, nil
+}
+
+func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
+	pattern, ok := cpuUsagePromQLTemplate[options.member]
+	if !ok {
+		return "", errors.Errorf("unspported member type %v", options.member)
 	}
 
-	result, err := extractInstancesFromResponse(resp, options.instances)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	query := fmt.Sprintf(pattern, options.cluster, options.duration.String())
+	return query, nil
 }
