@@ -545,15 +545,13 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) schedule() []*operator.
 }
 
 func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithConflictRule(c *C) {
-	// Stores:     1    2    3    4	  5
-	// Leaders:    1    0    0    0   0
-	// Region1:    L    F    F    F   TiFlash
+	// Stores:     1    2    3
+	// Leaders:    1    0    0
+	// Region1:    L    F    F
 	s.tc.AddLeaderStore(1, 1)
 	s.tc.AddLeaderStore(2, 0)
 	s.tc.AddLeaderStore(3, 0)
-	s.tc.AddLeaderStore(4, 0)
-	s.tc.AddLeaderStore(5, 0)
-	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
+	s.tc.AddLeaderRegion(1, 1, 2, 3)
 	s.tc.SetStoreLabel(1, map[string]string{
 		"host": "a",
 	})
@@ -563,19 +561,11 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 	s.tc.SetStoreLabel(3, map[string]string{
 		"host": "c",
 	})
-	s.tc.SetStoreLabel(4, map[string]string{
-		"host": "d",
-	})
-	s.tc.SetStoreLabel(5, map[string]string{
-		"engine": "tiflash",
-		"host":   "e",
-	})
-	c.Check(s.schedule(), IsNil)
-	// Stores:     1    2    3    4   5
-	// Leaders:    16   0    0    0	  0
-	// Region1:    L    F    F    F	  TiFlash
-	s.tc.UpdateLeaderCount(1, 16)
 
+	// Stores:     1    2    3
+	// Leaders:    16   0    0
+	// Region1:    L    F    F
+	s.tc.UpdateLeaderCount(1, 16)
 	testcases := []struct {
 		name     string
 		rule     placement.Rule
@@ -649,3 +639,4 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 		}
 	}
 }
+
