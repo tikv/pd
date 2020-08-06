@@ -51,8 +51,8 @@ func (c *TransferCounter) CompileRegex(operator string) (*regexp.Regexp, error) 
 		}
 	}
 
-	for _, regionOperator := range leaderOperators {
-		if operator == regionOperator {
+	for _, leaderOperator := range leaderOperators {
+		if operator == leaderOperator {
 			r, err = regexp.Compile(".*?operator finish.*?region-id=([0-9]*).*?" + operator + ".*?store ([0-9]*) to ([0-9]*).*?")
 		}
 	}
