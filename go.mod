@@ -52,4 +52,7 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
-replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
+replace (
+	github.com/pingcap/kvproto => github.com/NingLin-P/kvproto v0.0.0-20200805073255-c5b152e10b91
+	go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
+)
