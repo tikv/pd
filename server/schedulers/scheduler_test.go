@@ -596,7 +596,7 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 			schedule: true,
 		},
 		{
-			name: "single store allowed to be placed pleader",
+			name: "single store allowed to be placed leader",
 			rule: placement.Rule{
 				GroupID:  "pd",
 				ID:       "default",
@@ -617,7 +617,7 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 			schedule: false,
 		},
 		{
-			name: "2 store allowed to be placed pleader",
+			name: "2 store allowed to be placed leader",
 			rule: placement.Rule{
 				GroupID:  "pd",
 				ID:       "default",
