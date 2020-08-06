@@ -24,7 +24,6 @@ import (
 	"time"
 )
 
-var supportOperators = []string{"balance-region", "balance-leader", "transfer-hot-read-leader", "move-hot-read-region", "transfer-hot-write-leader", "move-hot-write-region"}
 var regionOperators = []string{"balance-region", "move-hot-read-region", "move-hot-write-region"}
 var leaderOperators = []string{"balance-leader", "transfer-hot-read-leader", "transfer-hot-write-leader"}
 
