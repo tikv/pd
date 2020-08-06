@@ -166,61 +166,18 @@ func (m *RuleManager) GetRule(group, id string) *Rule {
 
 // SetRule inserts or updates a Rule.
 func (m *RuleManager) SetRule(rule *Rule) error {
-	err := m.adjustRule(rule)
-	if err != nil {
-		return err
-	}
-	m.Lock()
-	defer m.Unlock()
-	old := m.rules[rule.Key()]
-	m.rules[rule.Key()] = rule
-
-	ruleList, err := buildRuleList(m.rules)
-	if err == nil {
-		err = m.store.SaveRule(rule.StoreKey(), rule)
-	}
-
-	// restore
-	if err != nil {
-		if old == nil {
-			delete(m.rules, rule.Key())
-		} else {
-			m.rules[old.Key()] = old
-		}
-		return err
-	}
-
-	m.ruleList = ruleList
-	log.Info("placement rule updated", zap.Stringer("rule", rule))
-	return nil
+	return m.Batch([]RuleOp{{
+		Rule:   rule,
+		Action: RuleOpAdd,
+	}})
 }
 
 // DeleteRule removes a Rule.
 func (m *RuleManager) DeleteRule(group, id string) error {
-	m.Lock()
-	defer m.Unlock()
-	key := [2]string{group, id}
-	old, ok := m.rules[key]
-	if !ok {
-		return nil
-	}
-	delete(m.rules, [2]string{group, id})
-
-	ruleList, err := buildRuleList(m.rules)
-	if err != nil {
-		// restore
-		m.rules[key] = old
-		return err
-	}
-
-	if err := m.store.DeleteRule(old.StoreKey()); err != nil {
-		// restore
-		m.rules[key] = old
-		return err
-	}
-	m.ruleList = ruleList
-	log.Info("placement rule removed", zap.Stringer("rule", old))
-	return nil
+	return m.Batch([]RuleOp{{
+		Rule:   &Rule{GroupID: group, ID: id},
+		Action: RuleOpDel,
+	}})
 }
 
 // GetSplitKeys returns all split keys in the range (start, end).
@@ -325,28 +282,15 @@ func (m *RuleManager) addRule(rule *Rule, oldRules map[[2]string]*Rule) {
 
 // SetRules inserts or updates lots of Rules at once.
 func (m *RuleManager) SetRules(rules []*Rule) error {
-	for _, rule := range rules {
+	ruleOps := make([]RuleOp, len(rules))
+	for i, rule := range rules {
 		err := m.adjustRule(rule)
 		if err != nil {
 			return err
 		}
+		ruleOps[i] = RuleOp{Rule: rule, Action: RuleOpAdd}
 	}
-
-	m.Lock()
-	defer m.Unlock()
-
-	oldRules := make(map[[2]string]*Rule)
-
-	for _, rule := range rules {
-		m.addRule(rule, oldRules)
-	}
-
-	if err := m.tryBuildSave(oldRules); err != nil {
-		return err
-	}
-
-	log.Info("placement rule updated", zap.String("rules", fmt.Sprint(rules)))
-	return nil
+	return m.Batch(ruleOps)
 }
 
 func (m *RuleManager) delRuleByID(group, id string, oldRules map[[2]string]*Rule) {
