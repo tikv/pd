@@ -18,6 +18,8 @@ import (
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+
+	"github.com/pingcap/pd/v4/pkg/metautil"
 	"github.com/pingcap/pd/v4/server/core"
 )
 
@@ -265,13 +267,13 @@ type fitPeer struct {
 func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 	switch role {
 	case Voter: // Voter matches either Leader or Follower.
-		return !p.IsLearner
+		return !metautil.IsLearner(p.Peer)
 	case Leader:
 		return p.isLeader
 	case Follower:
-		return !p.IsLearner && !p.isLeader
+		return !metautil.IsLearner(p.Peer) && !p.isLeader
 	case Learner:
-		return p.IsLearner
+		return metautil.IsLearner(p.Peer)
 	}
 	return false
 }
@@ -280,7 +282,7 @@ func (p *fitPeer) matchRoleLoose(role PeerRoleType) bool {
 	// non-learner cannot become learner. All other roles can migrate to
 	// others by scheduling. For example, Leader->Follower, Learner->Leader
 	// are possible, but Voter->Learner is impossible.
-	return role != Learner || p.IsLearner
+	return role != Learner || metautil.IsLearner(p.Peer)
 }
 
 func isolationScore(peers []*fitPeer, labels []string) float64 {

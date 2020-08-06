@@ -20,6 +20,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/pingcap/pd/v4/pkg/metautil"
 	"github.com/pingcap/pd/v4/server/core"
 )
 
@@ -101,8 +103,8 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 		peers := make(map[uint64]*metapb.Peer)
 		for _, p := range target.GetPeers() {
 			peers[p.GetStoreId()] = &metapb.Peer{
-				StoreId:   p.GetStoreId(),
-				IsLearner: p.GetIsLearner(),
+				StoreId: p.GetStoreId(),
+				Role:    p.GetRole(),
 			}
 		}
 		matchOp, err := NewBuilder("", cluster, source).
@@ -139,7 +141,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 	}
 	for _, pa := range a.GetPeers() {
 		pb := b.GetStorePeer(pa.GetStoreId())
-		if pb == nil || pb.GetIsLearner() != pa.GetIsLearner() {
+		if pb == nil || metautil.IsLearner(pb) != metautil.IsLearner(pa) {
 			return false
 		}
 	}
@@ -151,7 +153,7 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
-		if !peer.IsLearner {
+		if !metautil.IsLearner(peer) {
 			ids = append(ids, id)
 		}
 	}

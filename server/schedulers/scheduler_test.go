@@ -402,7 +402,7 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 	peers := []*metapb.Peer{
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
-		{Id: 3, StoreId: 3, IsLearner: true},
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
 	}
 	region := core.NewRegionInfo(&metapb.Region{
 		Id:          1,

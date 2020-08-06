@@ -17,6 +17,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
+
+	"github.com/pingcap/pd/v4/pkg/metautil"
 )
 
 // RegionOption is used to select region.
@@ -46,7 +48,7 @@ func WithLearners(learners []*metapb.Peer) RegionCreateOption {
 		for i := range peers {
 			for _, l := range learners {
 				if peers[i].GetId() == l.GetId() {
-					peers[i] = &metapb.Peer{Id: l.GetId(), StoreId: l.GetStoreId(), IsLearner: true}
+					peers[i] = &metapb.Peer{Id: l.GetId(), StoreId: l.GetStoreId(), Role: metapb.PeerRole_Learner}
 					break
 				}
 			}
@@ -236,7 +238,7 @@ func SetReplicationStatus(status *replication_modepb.RegionReplicationStatus) Re
 func WithAddPeer(peer *metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.meta.Peers = append(region.meta.Peers, peer)
-		if peer.IsLearner {
+		if metautil.IsLearner(peer) {
 			region.learners = append(region.learners, peer)
 		} else {
 			region.voters = append(region.voters, peer)
@@ -249,7 +251,7 @@ func WithPromoteLearner(peerID uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		for _, p := range region.GetPeers() {
 			if p.GetId() == peerID {
-				p.IsLearner = false
+				p.Role = metapb.PeerRole_Voter
 			}
 		}
 	}

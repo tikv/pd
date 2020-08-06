@@ -20,10 +20,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/pd/v4/pkg/metautil"
+	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 )
 
 // OpStep describes the basic scheduling steps that can not be subdivided.
@@ -60,7 +62,7 @@ func (tl TransferLeader) CheckSafety(region *core.RegionInfo) error {
 	if peer == nil {
 		return errors.New("peer does not existed")
 	}
-	if peer.IsLearner {
+	if metautil.IsLearner(peer) {
 		return errors.New("peer already is a learner")
 	}
 	return nil
@@ -162,7 +164,7 @@ func (al AddLearner) CheckSafety(region *core.RegionInfo) error {
 	if peer.GetId() != al.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
 	}
-	if !peer.IsLearner {
+	if !metautil.IsLearner(peer) {
 		return errors.New("peer already is a voter")
 	}
 	return nil
@@ -424,7 +426,7 @@ func (al AddLightLearner) CheckSafety(region *core.RegionInfo) error {
 	if peer.GetId() != al.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
 	}
-	if !peer.IsLearner {
+	if !metautil.IsLearner(peer) {
 		return errors.New("peer already is a voter")
 	}
 	return nil

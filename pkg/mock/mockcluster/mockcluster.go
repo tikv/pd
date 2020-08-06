@@ -617,7 +617,7 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	}
 	for _, storeID := range learnerStoreIDs {
 		peer, _ := mc.AllocPeer(storeID)
-		peer.IsLearner = true
+		peer.Role = metapb.PeerRole_Learner
 		region.Peers = append(region.Peers, peer)
 	}
 	return core.NewRegionInfo(region, leader)

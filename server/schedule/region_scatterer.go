@@ -226,8 +226,8 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 
 	target := candidates[rand.Intn(len(candidates))]
 	return &metapb.Peer{
-		StoreId:   target.GetID(),
-		IsLearner: oldPeer.GetIsLearner(),
+		StoreId: target.GetID(),
+		Role:    oldPeer.GetRole(),
 	}
 }
 
