@@ -39,6 +39,7 @@ func validateRole(s PeerRoleType) bool {
 	return s == Voter || s == Leader || s == Follower || s == Learner
 }
 
+// MetaPeerRole converts placement.PeerRoleType to metapb.PeerRole.
 func (s PeerRoleType) MetaPeerRole() metapb.PeerRole {
 	if s == Learner {
 		return metapb.PeerRole_Learner

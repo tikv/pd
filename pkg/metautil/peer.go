@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
+// IsLearner judges whether the Peer's Role is Learner.
 func IsLearner(peer *metapb.Peer) bool {
 	return peer.GetRole() == metapb.PeerRole_Learner
 }
