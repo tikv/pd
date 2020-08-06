@@ -467,7 +467,7 @@ func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) boo
 	var targetPeer *metapb.Peer
 	targetPeer = f.region.GetStorePeer(store.GetID())
 	if targetPeer == nil {
-		log.Warn("ruleLeaderFitFilter could't find peer on target Store", zap.Uint64("newStoreID", store.GetID()))
+		log.Warn("ruleLeaderFitFilter could't find peer on target Store", zap.Uint64("target-store", store.GetID()))
 		return false
 	}
 	region := f.region.Clone(core.WithLeader(targetPeer))
