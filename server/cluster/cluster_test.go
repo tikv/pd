@@ -25,12 +25,14 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/pingcap/pd/v4/pkg/mock/mockid"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/id"
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 )
 
 func Test(t *testing.T) {
@@ -663,7 +665,7 @@ func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, er
 		return nil, nil, err
 	}
 	opt := config.NewPersistOptions(cfg)
-	opt.SetClusterVersion(MinSupportedVersion(Version2_0))
+	opt.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version2_0))
 	return &cfg.Schedule, opt, nil
 }
 

@@ -13,6 +13,13 @@
 
 package versioninfo
 
+import (
+	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/log"
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
+)
+
 const (
 	// CommunityEdition is the default edition for building.
 	CommunityEdition = "Community"
@@ -26,3 +33,33 @@ var (
 	PDGitBranch      = "None"
 	PDEdition        = CommunityEdition
 )
+
+// ParseVersion wraps semver.NewVersion and handles compatibility issues.
+func ParseVersion(v string) (*semver.Version, error) {
+	// for compatibility with old version which not support `version` mechanism.
+	if v == "" {
+		return semver.New(featuresDict[Base]), nil
+	}
+	if v[0] == 'v' {
+		v = v[1:]
+	}
+	ver, err := semver.NewVersion(v)
+	return ver, errors.WithStack(err)
+}
+
+// MustParseVersion wraps ParseVersion and will panic if error is not nil.
+func MustParseVersion(v string) *semver.Version {
+	ver, err := ParseVersion(v)
+	if err != nil {
+		log.Fatal("version string is illegal", zap.Error(err))
+	}
+	return ver
+}
+
+// IsCompatible checks if the clusterVersion is compatible with the specified version.
+func IsCompatible(clusterVersion, v semver.Version) bool {
+	if clusterVersion.LessThan(v) {
+		return true
+	}
+	return clusterVersion.Major == v.Major && clusterVersion.Minor == v.Minor
+}

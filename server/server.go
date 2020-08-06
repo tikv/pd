@@ -36,6 +36,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/sysutil"
+	"github.com/pkg/errors"
+	"github.com/urfave/negroni"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/pkg/types"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/grpcutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
@@ -51,14 +60,6 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/tso"
 	"github.com/pingcap/pd/v4/server/versioninfo"
-	"github.com/pingcap/sysutil"
-	"github.com/pkg/errors"
-	"github.com/urfave/negroni"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/pkg/types"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -913,7 +914,7 @@ func (s *Server) GetLabelProperty() config.LabelPropertyConfig {
 
 // SetClusterVersion sets the version of cluster.
 func (s *Server) SetClusterVersion(v string) error {
-	version, err := cluster.ParseVersion(v)
+	version, err := versioninfo.ParseVersion(v)
 	if err != nil {
 		return err
 	}

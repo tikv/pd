@@ -16,6 +16,9 @@ package cluster
 import (
 	"bytes"
 
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
+
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -23,8 +26,7 @@ import (
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedulers"
-	"github.com/pkg/errors"
-	"go.uber.org/zap"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 )
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
@@ -66,7 +68,7 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		}
 	}
 
-	if c.IsFeatureSupported(RegionMerge) {
+	if c.IsFeatureSupported(versioninfo.RegionMerge) {
 		// Disable merge for the 2 regions in a period of time.
 		c.GetMergeChecker().RecordRegionSplit([]uint64{reqRegion.GetId(), newRegionID})
 	}
@@ -132,7 +134,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	}
 
 	recordRegions = append(recordRegions, reqRegion.GetId())
-	if c.IsFeatureSupported(RegionMerge) {
+	if c.IsFeatureSupported(versioninfo.RegionMerge) {
 		// Disable merge the regions in a period of time.
 		c.GetMergeChecker().RecordRegionSplit(recordRegions)
 	}

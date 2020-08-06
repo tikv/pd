@@ -22,14 +22,14 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/etcdutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/versioninfo"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/pd/v4/pkg/etcdutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
+	"github.com/pingcap/pd/v4/server/config"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 )
 
 const (
@@ -69,9 +69,9 @@ func PrintConfigCheckMsg(cfg *config.Config) {
 
 // CheckPDVersion checks if PD needs to be upgraded.
 func CheckPDVersion(opt *config.PersistOptions) {
-	pdVersion := *cluster.MinSupportedVersion(cluster.Base)
+	pdVersion := versioninfo.MinSupportedVersion(versioninfo.Base)
 	if versioninfo.PDReleaseVersion != "None" {
-		pdVersion = *cluster.MustParseVersion(versioninfo.PDReleaseVersion)
+		pdVersion = versioninfo.MustParseVersion(versioninfo.PDReleaseVersion)
 	}
 	clusterVersion := *opt.GetClusterVersion()
 	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))

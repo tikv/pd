@@ -28,6 +28,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/pkg/component"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
@@ -44,9 +48,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
-	"github.com/pkg/errors"
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 )
 
 var backgroundJobInterval = 10 * time.Second
@@ -900,12 +902,12 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 		return errors.Errorf("invalid put store %v", store)
 	}
 
-	v, err := ParseVersion(store.GetVersion())
+	v, err := versioninfo.ParseVersion(store.GetVersion())
 	if err != nil {
 		return errors.Errorf("invalid put store %v, error: %s", store, err)
 	}
 	clusterVersion := *c.opt.GetClusterVersion()
-	if !IsCompatible(clusterVersion, *v) {
+	if !versioninfo.IsCompatible(clusterVersion, *v) {
 		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
 	}
 
@@ -1298,7 +1300,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 		if s.IsTombstone() {
 			continue
 		}
-		v := MustParseVersion(s.GetVersion())
+		v := versioninfo.MustParseVersion(s.GetVersion())
 
 		if minVersion == nil || v.LessThan(*minVersion) {
 			minVersion = v
@@ -1330,12 +1332,12 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 }
 
 // IsFeatureSupported checks if the feature is supported by current cluster.
-func (c *RaftCluster) IsFeatureSupported(f Feature) bool {
+func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
 	c.RLock()
 	defer c.RUnlock()
 	clusterVersion := *c.opt.GetClusterVersion()
-	minSupportVersion := *MinSupportedVersion(f)
-	return !clusterVersion.LessThan(minSupportVersion)
+	minSupportVersion := versioninfo.MinSupportedVersion(f)
+	return !clusterVersion.LessThan(*minSupportVersion)
 }
 
 // GetConfig gets config from cluster.
