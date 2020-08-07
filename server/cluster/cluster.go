@@ -423,8 +423,8 @@ func (c *RaftCluster) SetStorage(s *core.Storage) {
 	c.storage = s
 }
 
-// AddSuspectRegions adds regions to suspect list.
-func (c *RaftCluster) AddSuspectRegions(ids ...uint64) {
+// AddHighPriorityRegions adds regions to suspect list.
+func (c *RaftCluster) AddHighPriorityRegions(ids ...uint64) {
 	c.Lock()
 	defer c.Unlock()
 	for _, id := range ids {
@@ -432,15 +432,15 @@ func (c *RaftCluster) AddSuspectRegions(ids ...uint64) {
 	}
 }
 
-// GetSuspectRegions gets all suspect regions.
-func (c *RaftCluster) GetSuspectRegions() []uint64 {
+// AddHighPriorityRegions gets all suspect regions.
+func (c *RaftCluster) GetHighPriorityRegions() []uint64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.suspectRegions.GetAllID()
 }
 
-// RemoveSuspectRegion removes region from suspect list.
-func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
+// CancelRegionHighPrioritySchedule removes region from suspect list.
+func (c *RaftCluster) CancelRegionHighPrioritySchedule(id uint64) {
 	c.Lock()
 	defer c.Unlock()
 	c.suspectRegions.Remove(id)

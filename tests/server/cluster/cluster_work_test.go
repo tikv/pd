@@ -158,7 +158,7 @@ func (s *clusterWorkerTestSuite) TestSuspectRegions(c *C) {
 	c.Assert(err, IsNil)
 	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionId, res.Ids[1].NewRegionId}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	suspects := rc.GetSuspectRegions()
+	suspects := rc.AddHighPriorityRegions()
 	sort.Slice(suspects, func(i, j int) bool { return suspects[i] < suspects[j] })
 	c.Assert(suspects, DeepEquals, ids)
 }

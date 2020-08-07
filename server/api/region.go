@@ -622,7 +622,7 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 		for _, region := range regions {
 			regionsIDList = append(regionsIDList, region.GetID())
 		}
-		rc.AddSuspectRegions(regionsIDList...)
+		rc.AddHighPriorityRegions(regionsIDList...)
 	}
 	h.rd.Text(w, http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
 }

@@ -270,7 +270,7 @@ func (s *testRegionSuite) TestAccelerateRegionsScheduleInRange(c *C) {
 
 	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", s.urlPrefix), []byte(body))
 	c.Assert(err, IsNil)
-	idList := s.svr.GetRaftCluster().GetSuspectRegions()
+	idList := s.svr.GetRaftCluster().AddHighPriorityRegions()
 	c.Assert(len(idList), Equals, 2)
 }
 

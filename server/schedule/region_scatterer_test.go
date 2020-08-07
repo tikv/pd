@@ -7,6 +7,7 @@ import (
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
 	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
+	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
 )
@@ -195,6 +196,49 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 	for _, count := range countOrdinaryLeaders {
 		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions)/float64(numOrdinaryStores))
 		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions)/float64(numOrdinaryStores))
+	}
+}
+
+func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	// Add 5 stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	testcases := []struct {
+		name        string
+		checkRegion *core.RegionInfo
+		needFix     bool
+	}{
+		{
+			name:        "region with 4 replicas",
+			checkRegion: tc.AddLeaderRegion(1, 1, 2, 3, 4),
+			needFix:     true,
+		},
+		{
+			name:        "region with 2 replicas",
+			checkRegion: tc.AddLeaderRegion(2, 1, 2),
+			needFix:     true,
+		},
+		{
+			name:        "region with 3 replicas",
+			checkRegion: tc.AddLeaderRegion(3, 1, 2, 3),
+			needFix:     false,
+		},
+	}
+	for _, testcase := range testcases {
+		c.Logf(testcase.name)
+		scatterer := NewRegionScatterer(tc)
+		_, err := scatterer.Scatter(testcase.checkRegion)
+		if testcase.needFix {
+			c.Assert(err, NotNil)
+			c.Assert(len(tc.GetHighPriorityRegions()), Equals, 1)
+		} else {
+			c.Assert(err, IsNil)
+			c.Assert(tc.GetHighPriorityRegions(), IsNil)
+		}
+		tc.MockHighPrioritySchedule.Reset()
 	}
 }
 
