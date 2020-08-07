@@ -11,32 +11,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package prioritySchedule
+package priorityscheduling
 
 // HighPrioritySchedule control the regions whether need high priority scheduling
 type HighPrioritySchedule interface {
-	AddHighPriorityRegions(regionsIDs ...uint64)
-	GetHighPriorityRegions() []uint64
+	AddHighPriorityScheduleRegions(regionsIDs ...uint64)
+	GetHighPriorityScheduleRegions() []uint64
 	CancelRegionHighPrioritySchedule(id uint64)
 }
 
+// MockHighPrioritySchedule provide a mock HighPrioritySchedule, only used for unit test
 type MockHighPrioritySchedule struct {
 	ids map[uint64]struct{}
 }
 
+// NewMockHighPrioritySchedule return a mock HighPrioritySchedule
 func NewMockHighPrioritySchedule() *MockHighPrioritySchedule {
 	return &MockHighPrioritySchedule{
 		ids: map[uint64]struct{}{},
 	}
 }
 
-func (mh *MockHighPrioritySchedule) AddHighPriorityRegions(regionsIDs ...uint64) {
+// AddHighPriorityScheduleRegions implements the HighPrioritySchedule.AddHighPriorityScheduleRegions
+func (mh *MockHighPrioritySchedule) AddHighPriorityScheduleRegions(regionsIDs ...uint64) {
 	for _, id := range regionsIDs {
 		mh.ids[id] = struct{}{}
 	}
 }
 
-func (mh *MockHighPrioritySchedule) GetHighPriorityRegions() []uint64 {
+// GetHighPriorityScheduleRegions implements the HighPrioritySchedule.GetHighPriorityScheduleRegions
+func (mh *MockHighPrioritySchedule) GetHighPriorityScheduleRegions() []uint64 {
 	if len(mh.ids) < 1 {
 		return nil
 	}
@@ -47,10 +51,12 @@ func (mh *MockHighPrioritySchedule) GetHighPriorityRegions() []uint64 {
 	return returned
 }
 
+// CancelRegionHighPrioritySchedule implements the HighPrioritySchedule.CancelRegionHighPrioritySchedule
 func (mh *MockHighPrioritySchedule) CancelRegionHighPrioritySchedule(id uint64) {
 	delete(mh.ids, id)
 }
 
+// Reset is only used for unit test
 func (mh *MockHighPrioritySchedule) Reset() {
 	mh.ids = map[uint64]struct{}{}
 }

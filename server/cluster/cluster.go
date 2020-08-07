@@ -423,8 +423,8 @@ func (c *RaftCluster) SetStorage(s *core.Storage) {
 	c.storage = s
 }
 
-// AddHighPriorityRegions adds regions to suspect list.
-func (c *RaftCluster) AddHighPriorityRegions(ids ...uint64) {
+// AddHighPriorityScheduleRegions adds regions to suspect list.
+func (c *RaftCluster) AddHighPriorityScheduleRegions(ids ...uint64) {
 	c.Lock()
 	defer c.Unlock()
 	for _, id := range ids {
@@ -432,8 +432,8 @@ func (c *RaftCluster) AddHighPriorityRegions(ids ...uint64) {
 	}
 }
 
-// AddHighPriorityRegions gets all suspect regions.
-func (c *RaftCluster) GetHighPriorityRegions() []uint64 {
+// GetHighPriorityScheduleRegions gets all suspect regions.
+func (c *RaftCluster) GetHighPriorityScheduleRegions() []uint64 {
 	c.RLock()
 	defer c.RUnlock()
 	return c.suspectRegions.GetAllID()

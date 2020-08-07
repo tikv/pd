@@ -107,7 +107,7 @@ func (c *coordinator) patrolRegions() {
 		}
 
 		// Check suspect regions first.
-		for _, id := range c.cluster.GetHighPriorityRegions() {
+		for _, id := range c.cluster.GetHighPriorityScheduleRegions() {
 			region := c.cluster.GetRegion(id)
 			if region == nil {
 				// the region could be recent split, continue to wait.
@@ -190,7 +190,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 		}
 		c.cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(lastRegion.GetEndKey(), keyRange[1]), restKeyRange)
 	}
-	c.cluster.AddHighPriorityRegions(regionIDList...)
+	c.cluster.AddHighPriorityScheduleRegions(regionIDList...)
 }
 
 // drivePushOperator is used to push the unfinished operator to the excutor.

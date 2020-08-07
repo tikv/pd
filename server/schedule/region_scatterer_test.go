@@ -233,10 +233,10 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 		_, err := scatterer.Scatter(testcase.checkRegion)
 		if testcase.needFix {
 			c.Assert(err, NotNil)
-			c.Assert(len(tc.GetHighPriorityRegions()), Equals, 1)
+			c.Assert(len(tc.GetHighPriorityScheduleRegions()), Equals, 1)
 		} else {
 			c.Assert(err, IsNil)
-			c.Assert(tc.GetHighPriorityRegions(), IsNil)
+			c.Assert(tc.GetHighPriorityScheduleRegions(), IsNil)
 		}
 		tc.MockHighPrioritySchedule.Reset()
 	}

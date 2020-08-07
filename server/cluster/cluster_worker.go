@@ -140,7 +140,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	// If region splits during the scheduling process, regions with abnormal
 	// status may be left, and these regions need to be checked with higher
 	// priority.
-	c.AddHighPriorityRegions(recordRegions...)
+	c.AddHighPriorityScheduleRegions(recordRegions...)
 
 	resp := &pdpb.AskBatchSplitResponse{Ids: splitIDs}
 

@@ -20,7 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
-	"github.com/pingcap/pd/v4/server/schedule/prioritySchedule"
+	"github.com/pingcap/pd/v4/server/schedule/priorityscheduling"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
 )
@@ -86,7 +86,7 @@ type Cluster interface {
 	statistics.RegionStatInformer
 	statistics.StoreStatInformer
 	Options
-	prioritySchedule.HighPrioritySchedule
+	priorityscheduling.HighPrioritySchedule
 
 	AllocID() (uint64, error)
 	FitRegion(*core.RegionInfo) *placement.RegionFit
