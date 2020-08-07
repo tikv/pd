@@ -21,8 +21,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"go.uber.org/zap"
-
 	"github.com/pingcap/pd/v4/pkg/mock/mockid"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
 	"github.com/pingcap/pd/v4/server/core"
@@ -31,6 +29,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pingcap/pd/v4/server/versioninfo"
+	"go.uber.org/zap"
 )
 
 // Cluster is used to mock clusterInfo for test use.
