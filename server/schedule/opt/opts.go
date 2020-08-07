@@ -18,10 +18,12 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 )
 
 // Options for schedulers.
@@ -89,6 +91,7 @@ type Cluster interface {
 	AllocID() (uint64, error)
 	FitRegion(*core.RegionInfo) *placement.RegionFit
 	RemoveScheduler(name string) error
+	IsFeatureSupported(f versioninfo.Feature) bool
 }
 
 // HeartbeatStream is an interface.
