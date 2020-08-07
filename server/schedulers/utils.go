@@ -217,11 +217,6 @@ type storeLoad struct {
 	KeyRate  float64
 	QPS      float64
 	Count    float64
-
-	ExpByteRate float64
-	ExpKeyRate  float64
-	ExpCount    float64
-	ExpQPS      float64
 }
 
 func (load *storeLoad) ToLoadPred(infl Influence) *storeLoadPred {

@@ -108,7 +108,7 @@ func (r *rankStatus) statusNum(s dimStatus) uint64 {
 	var num uint64
 	for _, dim := range r.dims {
 		if dim == s {
-			num ++
+			num++
 		}
 	}
 	return num
@@ -563,35 +563,6 @@ func summaryStoresLoad(
 			HotPeers: hotPeers,
 		}
 	}
-	storeLen := float64(len(storeByteRate))
-
-	for id, detail := range loadDetail {
-		byteExp := allByteSum / storeLen
-		keyExp := allKeySum / storeLen
-		QPSExp := allQPSSum / storeLen
-		countExp := allCount / storeLen
-		detail.LoadPred.Future.ExpByteRate = byteExp
-		detail.LoadPred.Future.ExpKeyRate = keyExp
-		detail.LoadPred.Future.ExpQPS = QPSExp
-		detail.LoadPred.Future.ExpCount = countExp
-		// Debug
-		{
-			ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(byteExp)
-		}
-		{
-			ty := "exp-key-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(keyExp)
-		}
-		{
-			ty := "exp-count-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(countExp)
-		}
-		{
-			ty := "exp-QPS-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(QPSExp)
-		}
-	}
 	return loadDetail
 }
 
@@ -853,7 +824,6 @@ func (bs *balanceSolver) allowBalance() bool {
 
 func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
-	ratio := bs.sche.conf.GetSrcToleranceRatio()
 	for id, detail := range bs.stLoadDetail {
 		if bs.cluster.GetStore(id) == nil {
 			log.Error("failed to get the source store", zap.Uint64("store-id", id))
@@ -862,13 +832,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
-		if detail.LoadPred.min().ByteRate > ratio*detail.LoadPred.Future.ExpByteRate &&
-			detail.LoadPred.min().KeyRate > ratio*detail.LoadPred.Future.ExpKeyRate &&
-			detail.LoadPred.min().QPS > ratio*detail.LoadPred.Future.ExpQPS {
-			ret[id] = detail
-			balanceHotRegionCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
-		}
-		balanceHotRegionCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+		ret[id] = detail
 	}
 	return ret
 }
@@ -1038,17 +1002,9 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*storeLoadDetail {
 
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*core.StoreInfo) map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail, len(candidates))
-	ratio := bs.sche.conf.GetDstToleranceRatio()
 	for _, store := range candidates {
 		if filter.Target(bs.cluster, store, filters) {
-			detail := bs.stLoadDetail[store.GetID()]
-			if detail.LoadPred.max().ByteRate*ratio < detail.LoadPred.Future.ExpByteRate &&
-				detail.LoadPred.max().KeyRate*ratio < detail.LoadPred.Future.ExpKeyRate &&
-				detail.LoadPred.max().QPS*ratio < detail.LoadPred.Future.ExpQPS {
-				ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
-				balanceHotRegionCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(store.GetID(), 10)).Inc()
-			}
-			balanceHotRegionCounter.WithLabelValues("dst-store-fail", strconv.FormatUint(store.GetID(), 10)).Inc()
+			ret[store.GetID()] = bs.stLoadDetail[store.GetID()]
 		}
 	}
 	return ret
