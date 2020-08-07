@@ -80,7 +80,7 @@ func (r *Rule) groupIndex() int {
 	return 0
 }
 
-// RuleGroups defines properties of a rule group.
+// RuleGroup defines properties of a rule group.
 type RuleGroup struct {
 	ID       string `json:"id,omitempty"`
 	Index    int    `json:"index,omitempty"`
