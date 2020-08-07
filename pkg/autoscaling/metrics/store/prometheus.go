@@ -195,7 +195,7 @@ func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
 		return "", errors.Errorf("unspported member type %v", options.member)
 	}
 
-	query := fmt.Sprintf(pattern, options.cluster, options.duration.String())
+	query := fmt.Sprintf(pattern, options.cluster)
 	return query, nil
 }
 
@@ -205,6 +205,6 @@ func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
 		return "", errors.Errorf("unspported member type %v", options.member)
 	}
 
-	query := fmt.Sprintf(pattern, options.cluster)
+	query := fmt.Sprintf(pattern, options.cluster, options.duration.String())
 	return query, nil
 }
