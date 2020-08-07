@@ -236,19 +236,19 @@ func (s *Storage) DeleteRule(ruleKey string) error {
 }
 
 // LoadRules loads placement rules from storage.
-func (s *Storage) LoadRules(f func(k, v string)) (bool, error) {
+func (s *Storage) LoadRules(f func(k, v string)) error {
 	nextKey := rulesPath + "/"
 	endKey := clientv3.GetPrefixRangeEnd(nextKey)
 	for {
 		keys, values, err := s.LoadRange(nextKey, endKey, minKVRangeLimit)
 		if err != nil {
-			return false, err
+			return err
 		}
 		for i := range keys {
 			f(strings.TrimPrefix(keys[i], rulesPath+"/"), values[i])
 		}
 		if len(keys) < minKVRangeLimit {
-			return true, nil
+			return nil
 		}
 		nextKey = keys[len(keys)-1] + "\x00"
 	}
