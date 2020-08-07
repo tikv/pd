@@ -215,7 +215,12 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	stats.Capacity = 1000 * (1 << 20)
 	stats.Available = stats.Capacity - uint64(regionCount)*10
 	store := core.NewStoreInfo(
-		&metapb.Store{Id: storeID},
+		&metapb.Store{Id: storeID, Labels: []*metapb.StoreLabel{
+			{
+				Key:   "ID",
+				Value: fmt.Sprintf("%v", storeID),
+			},
+		}},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
 		core.SetRegionSize(int64(regionCount)*10),
@@ -616,4 +621,15 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 		region.Peers = append(region.Peers, peer)
 	}
 	return core.NewRegionInfo(region, leader)
+}
+
+// SetStoreLabel set the labels to the target store
+func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
+	store := mc.GetStore(storeID)
+	newLabels := make([]*metapb.StoreLabel, 0, len(labels))
+	for k, v := range labels {
+		newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
+	}
+	newStore := store.Clone(core.SetStoreLabels(newLabels))
+	mc.PutStore(newStore)
 }

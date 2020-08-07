@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/tsoutil"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
@@ -144,7 +145,7 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 	// If the current system time minus the saved etcd timestamp is less than `updateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubTimeByWallClock(next, last) < updateTimestampGuard {
-		log.Error("system time may be incorrect", zap.Time("last", last), zap.Time("next", next))
+		log.Error("system time may be incorrect", zap.Time("last", last), zap.Time("next", next), zap.Error(errs.ErrIncorrectSystemTime.FastGenByArgs()))
 		next = last.Add(updateTimestampGuard)
 	}
 
@@ -299,7 +300,7 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
-			log.Error("invalid timestamp", zap.Any("timestamp", current))
+			log.Error("invalid timestamp", zap.Any("timestamp", current), zap.Error(errs.ErrInvalidTimestamp.FastGenByArgs()))
 			return pdpb.Timestamp{}, errors.New("can not get timestamp, may be not leader")
 		}
 
@@ -308,7 +309,7 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 		if resp.Logical >= maxLogical {
 			log.Error("logical part outside of max logical interval, please check ntp time",
 				zap.Reflect("response", resp),
-				zap.Int("retry-count", i))
+				zap.Int("retry-count", i), zap.Error(errs.ErrLogicOverflow.FastGenByArgs()))
 			tsoCounter.WithLabelValues("logical_overflow").Inc()
 			time.Sleep(UpdateTimestampStep)
 			continue

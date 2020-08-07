@@ -18,11 +18,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/errs"
 	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -85,22 +86,22 @@ func (m *RuleManager) loadRules() error {
 	_, err := m.store.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
-			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if err := m.adjustRule(&r); err != nil {
-			log.Error("rule is in bad format", zap.Error(err), zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()), zap.NamedError("cause", err))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if _, ok := m.rules[r.Key()]; ok {
-			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if k != r.StoreKey() {
-			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
 			toDelete = append(toDelete, k)
 			toSave = append(toSave, &r)
 		}
@@ -127,30 +128,30 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 	var err error
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
-		return errors.Wrap(err, "start key is not hex format")
+		return errs.ErrRuleContent.FastGenByArgs("start key is not hex format")
 	}
 	r.EndKey, err = hex.DecodeString(r.EndKeyHex)
 	if err != nil {
-		return errors.Wrap(err, "end key is not hex format")
+		return errs.ErrRuleContent.FastGenByArgs("end key is not hex format")
 	}
 	if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
-		return errors.New("endKey should be greater than startKey")
+		return errs.ErrRuleContent.FastGenByArgs("endKey should be greater than startKey")
 	}
 	if r.GroupID == "" {
-		return errors.New("group ID should not be empty")
+		return errs.ErrRuleContent.FastGenByArgs("group ID should not be empty")
 	}
 	if r.ID == "" {
-		return errors.New("ID should not be empty")
+		return errs.ErrRuleContent.FastGenByArgs("ID should not be empty")
 	}
 	if !validateRole(r.Role) {
-		return errors.Errorf("invalid role %s", r.Role)
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid role %s", r.Role))
 	}
 	if r.Count <= 0 {
-		return errors.Errorf("invalid count %v", r.Count)
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid count %d", r.Count))
 	}
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
-			return errors.Errorf("invalid op %s", c.Op)
+			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
 		}
 	}
 	return nil
@@ -165,61 +166,18 @@ func (m *RuleManager) GetRule(group, id string) *Rule {
 
 // SetRule inserts or updates a Rule.
 func (m *RuleManager) SetRule(rule *Rule) error {
-	err := m.adjustRule(rule)
-	if err != nil {
-		return err
-	}
-	m.Lock()
-	defer m.Unlock()
-	old := m.rules[rule.Key()]
-	m.rules[rule.Key()] = rule
-
-	ruleList, err := buildRuleList(m.rules)
-	if err == nil {
-		err = m.store.SaveRule(rule.StoreKey(), rule)
-	}
-
-	// restore
-	if err != nil {
-		if old == nil {
-			delete(m.rules, rule.Key())
-		} else {
-			m.rules[old.Key()] = old
-		}
-		return err
-	}
-
-	m.ruleList = ruleList
-	log.Info("placement rule updated", zap.Stringer("rule", rule))
-	return nil
+	return m.Batch([]RuleOp{{
+		Rule:   rule,
+		Action: RuleOpAdd,
+	}})
 }
 
 // DeleteRule removes a Rule.
 func (m *RuleManager) DeleteRule(group, id string) error {
-	m.Lock()
-	defer m.Unlock()
-	key := [2]string{group, id}
-	old, ok := m.rules[key]
-	if !ok {
-		return nil
-	}
-	delete(m.rules, [2]string{group, id})
-
-	ruleList, err := buildRuleList(m.rules)
-	if err != nil {
-		// restore
-		m.rules[key] = old
-		return err
-	}
-
-	if err := m.store.DeleteRule(old.StoreKey()); err != nil {
-		// restore
-		m.rules[key] = old
-		return err
-	}
-	m.ruleList = ruleList
-	log.Info("placement rule removed", zap.Stringer("rule", old))
-	return nil
+	return m.Batch([]RuleOp{{
+		Rule:   &Rule{GroupID: group, ID: id},
+		Action: RuleOpDel,
+	}})
 }
 
 // GetSplitKeys returns all split keys in the range (start, end).
@@ -275,35 +233,27 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 	return FitRegion(stores, region, rules)
 }
 
-func (m *RuleManager) swapRule(rule *Rule) *Rule {
-	old := m.rules[rule.Key()]
-	m.rules[rule.Key()] = rule
-	return old
-}
-
-// SetRules inserts or updates lots of Rules at once.
-func (m *RuleManager) SetRules(rules []*Rule) error {
-	for _, rule := range rules {
-		err := m.adjustRule(rule)
-		if err != nil {
-			return err
-		}
-	}
-
-	m.Lock()
-	defer m.Unlock()
-
-	oldRules := make(map[[2]string]*Rule)
-
-	for _, rule := range rules {
-		oldRules[rule.Key()] = m.swapRule(rule)
-	}
-
+func (m *RuleManager) tryBuildSave(oldRules map[[2]string]*Rule) error {
 	ruleList, err := buildRuleList(m.rules)
 	if err == nil {
-		for _, rule := range rules {
-			err = m.store.SaveRule(rule.StoreKey(), rule)
+		for key := range oldRules {
+			rule := m.rules[key]
+			if rule != nil {
+				err = m.store.SaveRule(rule.StoreKey(), rule)
+			} else {
+				r := Rule{
+					GroupID: key[0],
+					ID:      key[1],
+				}
+				err = m.store.DeleteRule(r.StoreKey())
+			}
 			if err != nil {
+				// TODO: it is not completely safe
+				// 1. in case that half of rules applied, error.. we have to cancel persisted rules
+				// but that may fail too, causing memory/disk inconsistency
+				// either rely a transaction API, or clients to request again until success
+				// 2. in case that PD is suddenly down in the loop, inconsistency again
+				// now we can only rely clients to request again
 				break
 			}
 		}
@@ -321,6 +271,97 @@ func (m *RuleManager) SetRules(rules []*Rule) error {
 	}
 
 	m.ruleList = ruleList
-	log.Info("placement rule updated", zap.String("rules", fmt.Sprint(rules)))
+	return nil
+}
+
+func (m *RuleManager) addRule(rule *Rule, oldRules map[[2]string]*Rule) {
+	old := m.rules[rule.Key()]
+	m.rules[rule.Key()] = rule
+	oldRules[rule.Key()] = old
+}
+
+// SetRules inserts or updates lots of Rules at once.
+func (m *RuleManager) SetRules(rules []*Rule) error {
+	ruleOps := make([]RuleOp, len(rules))
+	for i, rule := range rules {
+		err := m.adjustRule(rule)
+		if err != nil {
+			return err
+		}
+		ruleOps[i] = RuleOp{Rule: rule, Action: RuleOpAdd}
+	}
+	return m.Batch(ruleOps)
+}
+
+func (m *RuleManager) delRuleByID(group, id string, oldRules map[[2]string]*Rule) {
+	key := [2]string{group, id}
+	old, ok := m.rules[key]
+	if ok {
+		delete(m.rules, key)
+	}
+	oldRules[key] = old
+}
+
+func (m *RuleManager) delRule(t *RuleOp, oldRules map[[2]string]*Rule) {
+	if !t.DeleteByIDPrefix {
+		m.delRuleByID(t.GroupID, t.ID, oldRules)
+	} else {
+		for key := range m.rules {
+			if key[0] == t.GroupID && strings.HasPrefix(key[1], t.ID) {
+				m.delRuleByID(key[0], key[1], oldRules)
+			}
+		}
+	}
+}
+
+// RuleOpType indicates the operation type
+type RuleOpType string
+
+const (
+	// RuleOpAdd a placement rule, only need to specify the field *Rule
+	RuleOpAdd RuleOpType = "add"
+	// RuleOpDel a placement rule, only need to specify the field `GroupID`, `ID`, `MatchID`
+	RuleOpDel RuleOpType = "del"
+)
+
+// RuleOp is for batching placement rule actions. The action type is
+// distinguished by the field `Action`.
+type RuleOp struct {
+	*Rule                       // information of the placement rule to add/delete
+	Action           RuleOpType `json:"action"`              // the operation type
+	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
+}
+
+// Batch executes a series of actions at once.
+func (m *RuleManager) Batch(todo []RuleOp) error {
+	for _, t := range todo {
+		switch t.Action {
+		case RuleOpAdd:
+			err := m.adjustRule(t.Rule)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	m.Lock()
+	defer m.Unlock()
+
+	oldRules := make(map[[2]string]*Rule)
+
+	for _, t := range todo {
+		switch t.Action {
+		case RuleOpAdd:
+			m.addRule(t.Rule, oldRules)
+		case RuleOpDel:
+			m.delRule(&t, oldRules)
+		}
+	}
+
+	if err := m.tryBuildSave(oldRules); err != nil {
+		return err
+	}
+
+	log.Info("placement rules updated", zap.String("batch", fmt.Sprint(todo)))
 	return nil
 }

@@ -545,42 +545,97 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) schedule() []*operator.
 }
 
 func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithConflictRule(c *C) {
-	rule := placement.Rule{
-		GroupID:  "test",
-		ID:       "1",
-		Index:    1,
-		StartKey: []byte(""),
-		EndKey:   []byte(""),
-		Role:     placement.Leader,
-		Count:    1,
-		LabelConstraints: []placement.LabelConstraint{
-			{
-				Key:    "role",
-				Op:     placement.In,
-				Values: []string{"leader"},
-			},
-		},
-		LocationLabels: []string{"host"},
-	}
-	c.Check(s.tc.SetRule(&rule), IsNil)
-	c.Check(s.tc.DeleteRule("pd", "default"), IsNil)
-
-	// Stores:     1    2    3    4
-	// Leaders:    1    0    0    0
-	// Region1:    L    F    F    F
+	// Stores:     1    2    3
+	// Leaders:    1    0    0
+	// Region1:    L    F    F
 	s.tc.AddLeaderStore(1, 1)
 	s.tc.AddLeaderStore(2, 0)
 	s.tc.AddLeaderStore(3, 0)
-	s.tc.AddLeaderStore(4, 0)
-	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	s.tc.AddLabelsStore(1, 1, map[string]string{
-		"role": "leader",
+	s.tc.AddLeaderRegion(1, 1, 2, 3)
+	s.tc.SetStoreLabel(1, map[string]string{
+		"host": "a",
 	})
-	c.Check(s.schedule(), IsNil)
+	s.tc.SetStoreLabel(2, map[string]string{
+		"host": "b",
+	})
+	s.tc.SetStoreLabel(3, map[string]string{
+		"host": "c",
+	})
 
-	// Stores:     1    2    3    4
-	// Leaders:    16   0    0    0
-	// Region1:    L    F    F    F
+	// Stores:     1    2    3
+	// Leaders:    16   0    0
+	// Region1:    L    F    F
 	s.tc.UpdateLeaderCount(1, 16)
-	c.Check(s.schedule(), IsNil)
+	testcases := []struct {
+		name     string
+		rule     placement.Rule
+		schedule bool
+	}{
+		{
+			name: "default Rule",
+			rule: placement.Rule{
+				GroupID:        "pd",
+				ID:             "default",
+				Index:          1,
+				StartKey:       []byte(""),
+				EndKey:         []byte(""),
+				Role:           placement.Voter,
+				Count:          3,
+				LocationLabels: []string{"host"},
+			},
+			schedule: true,
+		},
+		{
+			name: "single store allowed to be placed leader",
+			rule: placement.Rule{
+				GroupID:  "pd",
+				ID:       "default",
+				Index:    1,
+				StartKey: []byte(""),
+				EndKey:   []byte(""),
+				Role:     placement.Leader,
+				Count:    1,
+				LabelConstraints: []placement.LabelConstraint{
+					{
+						Key:    "host",
+						Op:     placement.In,
+						Values: []string{"a"},
+					},
+				},
+				LocationLabels: []string{"host"},
+			},
+			schedule: false,
+		},
+		{
+			name: "2 store allowed to be placed leader",
+			rule: placement.Rule{
+				GroupID:  "pd",
+				ID:       "default",
+				Index:    1,
+				StartKey: []byte(""),
+				EndKey:   []byte(""),
+				Role:     placement.Leader,
+				Count:    1,
+				LabelConstraints: []placement.LabelConstraint{
+					{
+						Key:    "host",
+						Op:     placement.In,
+						Values: []string{"a", "b"},
+					},
+				},
+				LocationLabels: []string{"host"},
+			},
+			schedule: true,
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Logf(testcase.name)
+		c.Check(s.tc.SetRule(&testcase.rule), IsNil)
+		if testcase.schedule {
+			c.Check(len(s.schedule()), Equals, 1)
+		} else {
+			c.Check(s.schedule(), IsNil)
+		}
+	}
 }
