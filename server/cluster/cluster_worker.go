@@ -16,9 +16,6 @@ package cluster
 import (
 	"bytes"
 
-	"github.com/pkg/errors"
-	"go.uber.org/zap"
-
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -27,6 +24,8 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedulers"
 	"github.com/pingcap/pd/v4/server/versioninfo"
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.

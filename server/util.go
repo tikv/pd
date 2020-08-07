@@ -22,14 +22,13 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
-
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/versioninfo"
+	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 const (

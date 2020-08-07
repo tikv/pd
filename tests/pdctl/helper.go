@@ -26,8 +26,6 @@ import (
 	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/spf13/cobra"
-
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/api"
 	"github.com/pingcap/pd/v4/server/core"
@@ -35,6 +33,7 @@ import (
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl"
 	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl/command"
+	"github.com/spf13/cobra"
 )
 
 // InitCommand is used to initialize command.

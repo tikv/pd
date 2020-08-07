@@ -28,10 +28,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
-
 	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/pkg/component"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
@@ -49,6 +45,9 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/pingcap/pd/v4/server/versioninfo"
+	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 var backgroundJobInterval = 10 * time.Second
