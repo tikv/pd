@@ -62,21 +62,21 @@ type Metric struct {
 	Job      string `json:"job,omitempty"`
 }
 
-// PrometheusStore query metrics from Prometheus
-type PrometheusStore struct {
+// PrometheusQuerier query metrics from Prometheus
+type PrometheusQuerier struct {
 	// Prometheus API Endpoint Address
 	endpoint string
 	client   promClient.Client
 }
 
-// NewPrometheusStore returns a PrometheusStore
-func NewPrometheusStore(endpoint string) (*PrometheusStore, error) {
+// NewPrometheusQuerier returns a PrometheusQuerier
+func NewPrometheusQuerier(endpoint string) (*PrometheusQuerier, error) {
 	client, err := promClient.NewClient(promClient.Config{Address: endpoint})
 	if err != nil {
 		return nil, err
 	}
 
-	store := &PrometheusStore{
+	store := &PrometheusQuerier{
 		endpoint,
 		client,
 	}
@@ -92,7 +92,7 @@ var queryBuilderFnMap = map[MetricType]promQLBuilderFn{
 }
 
 // Query do the real query on Prometheus and returns metric value for each instance
-func (prom *PrometheusStore) Query(options *QueryOptions) (QueryResult, error) {
+func (prom *PrometheusQuerier) Query(options *QueryOptions) (QueryResult, error) {
 	builderFn, ok := queryBuilderFnMap[options.metric]
 	if !ok {
 		return nil, errors.Errorf("unsupported metric type %v", options.metric)
@@ -116,7 +116,7 @@ func (prom *PrometheusStore) Query(options *QueryOptions) (QueryResult, error) {
 	return result, nil
 }
 
-func (prom *PrometheusStore) queryMetricsFromPrometheus(query string, timestamp int64) (*Response, error) {
+func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestamp int64) (*Response, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*httpRequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s", prom.endpoint, queryPath), nil)

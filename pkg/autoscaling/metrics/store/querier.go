@@ -15,8 +15,8 @@ package metrics
 
 import "time"
 
-// Store provides interfaces to query metrics
-type Store interface {
+// Querier provides interfaces to query metrics
+type Querier interface {
 	// Query does the real query with options
 	Query(options *QueryOptions) (QueryResult, error)
 }
