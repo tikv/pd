@@ -53,13 +53,13 @@ func (s *apiTestSuite) TestAPI(c *C) {
 
 	var jsonStr = []byte(`
 {
+    "max_cpu_quota":40000,
     "rules":[
         {
             "component":"tikv",
             "cpu_rule":{
                 "max_threshold":0.8,
                 "min_threshold":0.2,
-                "max_count":3,
                 "resource_type":[
                     "resource_a",
                     "resource_b"
@@ -67,7 +67,6 @@ func (s *apiTestSuite) TestAPI(c *C) {
             },
             "storage_rule":{
                 "min_threshold":0.2,
-                "max_count":3,
                 "resource_type":[
                     "resource_a"
                 ]
@@ -89,35 +88,20 @@ func (s *apiTestSuite) TestAPI(c *C) {
             "scale_in_interval_seconds":30
         }
     ],
-    "resource_expectations":[
-        {
-            "component":"tikv",
-            "cpu_expectation":4,
-            "count":8
-        },
-        {
-            "component":"tikv",
-            "cpu_expectation":8,
-            "count":2
-        },
-        {
-            "component":"tidb",
-            "cpu_expectation":2,
-            "count":2
-        }
-    ],
     "resources":[
         {
             "resource_type":"resource_a",
             "cpu":1,
             "memory":8,
-            "storage":1000
+            "storage":1000,
+            "count": 2
         },
         {
             "resource_type":"resource_b",
             "cpu":2,
             "memory":4,
-            "storage":2000
+            "storage":2000,
+            "count": 4
         }
     ]
 }`)
