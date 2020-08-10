@@ -125,7 +125,7 @@ func makeJSONResponse(promResp *Response) (*http.Response, []byte, error) {
 		ProtoMinor:    1,
 		Body:          ioutil.NopCloser(bytes.NewBufferString(string(body))),
 		ContentLength: int64(len(body)),
-		Header:        make(http.Header, 0),
+		Header:        make(http.Header),
 	}
 	response.Header.Add("Content-Type", "application/json")
 
