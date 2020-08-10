@@ -51,6 +51,20 @@ var instanceNameTemplate = map[MemberType]string{
 	TiKV: mockTiKVInstanceNamePattern,
 }
 
+func generateInstanceNames(member MemberType) []string {
+	names := make([]string, 0, instanceCount)
+	pattern := instanceNameTemplate[member]
+	for i := 0; i < instanceCount; i++ {
+		names = append(names, fmt.Sprintf(pattern, mockClusterName, i))
+	}
+	return names
+}
+
+var instanceNames = map[MemberType][]string{
+	TiDB: generateInstanceNames(TiDB),
+	TiKV: generateInstanceNames(TiKV),
+}
+
 type testPrometheusQuerierSuite struct{}
 
 func newPrometheusQuerierWithMockClient(client promClient.Client) *PrometheusQuerier {
@@ -65,16 +79,16 @@ type normalClient struct {
 }
 
 func (c *normalClient) buildCPUMockData(member MemberType) {
-	instanceNamePattern := instanceNameTemplate[member]
+	instances := instanceNames[member]
 	cpuUsageQuery := fmt.Sprintf(cpuUsagePromQLTemplate[member], mockClusterName, mockDuration)
 	cpuQuotaQuery := fmt.Sprintf(cpuQuotaPromQLTemplate[member], mockClusterName)
 
 	results := make([]Result, 0)
 	for i := 0; i < instanceCount; i++ {
 		results = append(results, Result{
-			Value: []interface{}{"0.0", "1"},
+			Value: []interface{}{time.Now().Unix, fmt.Sprintf("%f", mockResultValue)},
 			Metric: Metric{
-				Instance: fmt.Sprintf(instanceNamePattern, mockClusterName, i),
+				Instance: instances[i],
 				Cluster:  mockClusterName,
 			},
 		})
@@ -83,7 +97,7 @@ func (c *normalClient) buildCPUMockData(member MemberType) {
 	response := &Response{
 		Status: statusSuccess,
 		Data: Data{
-			ResultType: "value",
+			ResultType: "vector",
 			Result:     results,
 		},
 	}
@@ -134,16 +148,20 @@ func (s *testPrometheusQuerierSuite) TestRetrieveCPUMetrics(c *check.C) {
 	}
 	client.buildMockData()
 	querier := newPrometheusQuerierWithMockClient(client)
-	options := NewQueryOptions(mockClusterName, TiDB, CPUUsage, []string{"mock-tidb-0", "mock-tidb-1"}, time.Now().Unix(), mockDuration)
-	result, err := querier.Query(options)
-	c.Assert(err, check.IsNil)
-	value, ok := result["mock-tidb-0"]
-	c.Assert(ok, check.IsTrue)
-	c.Assert(math.Abs(value-mockResultValue) < 1e-6, check.IsTrue)
+	metrics := []MetricType{CPUQuota, CPUUsage}
+	for member, instances := range instanceNames {
+		for _, metric := range metrics {
+			options := NewQueryOptions(mockClusterName, member, metric, instances[:len(instances)-1], time.Now().Unix(), mockDuration)
+			result, err := querier.Query(options)
+			c.Assert(err, check.IsNil)
+			value, ok := result[instances[0]]
+			c.Assert(ok, check.IsTrue)
+			c.Assert(math.Abs(value-mockResultValue) < 1e-6, check.IsTrue)
 
-	// Instance should be filtered
-	value, ok = result["mock-tidb-2"]
-	c.Assert(ok, check.IsFalse)
+			value, ok = result[instances[len(instances)-1]]
+			c.Assert(ok, check.IsFalse)
+		}
+	}
 }
 
 type emptyResponseClient struct{}
@@ -156,7 +174,7 @@ func (c *emptyResponseClient) Do(_ context.Context, req *http.Request) (response
 	promResp := &Response{
 		Status: statusSuccess,
 		Data: Data{
-			ResultType: "value",
+			ResultType: "vector",
 			Result:     make([]Result, 0),
 		},
 	}
