@@ -111,6 +111,14 @@ var rankMetricsStatus = prometheus.NewGaugeVec(
 		Help:      "rank",
 	}, []string{"scheduler"})
 
+var rankScheCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "rank_sche",
+		Help:      "Counter of scatter range region scheduler.",
+	}, []string{"type", "better_num", "src","dst"})
+
 func init() {
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(schedulerStatus)
@@ -124,4 +132,5 @@ func init() {
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(rankMetricsStatus)
+	prometheus.MustRegister(rankScheCounter)
 }

@@ -501,11 +501,6 @@ func summaryStoresLoad(
 	hotPeerFilterTy hotPeerFilterType,
 ) map[uint64]*storeLoadDetail {
 	loadDetail := make(map[uint64]*storeLoadDetail, len(storeByteRate))
-	allByteSum := 0.0
-	allKeySum := 0.0
-	allQPSSum := 0.0
-	allCount := 0.0
-
 	// Stores without byte rate statistics is not available to schedule.
 	for id, byteRate := range storeByteRate {
 		keyRate := storeKeyRate[id]
@@ -544,11 +539,6 @@ func summaryStoresLoad(
 				hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(QPSSum)
 			}
 		}
-		allByteSum += byteRate
-		allKeySum += keyRate
-		allQPSSum += QPS
-		allCount += float64(len(hotPeers))
-
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&storeLoad{
 			ByteRate: byteRate,
@@ -1063,7 +1053,12 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	keyStatus := status(keyHot, keyDecRatio)
 	byteStatus := status(byteHot, byteDecRatio)
 
-	bs.cur.progressiveRank = newRankStatus(bs.sche.rs, qpsStatus, byteStatus, keyStatus)
+	rank := newRankStatus(bs.sche.rs, qpsStatus, byteStatus, keyStatus)
+	bs.cur.progressiveRank = rank
+	rankScheCounter.WithLabelValues(bs.rwTy.String(),
+		fmt.Sprintf("%v", rank.statusNum(better)),
+		fmt.Sprintf("%v", bs.cur.srcStoreID),
+		fmt.Sprintf("%v", bs.cur.dstStoreID))
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.

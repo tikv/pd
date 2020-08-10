@@ -71,6 +71,30 @@ var (
 			Name:      "label_level",
 			Help:      "Number of regions in the different label level.",
 		}, []string{"type"})
+	readByteStat = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "read_byte_hist",
+			Help:      "Bucketed histogram of the batch size of handled requests.",
+			Buckets:   prometheus.LinearBuckets(1, 10000, 20),
+		})
+	readKeyStat = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "read_key_hist",
+			Help:      "Bucketed histogram of the batch size of handled requests.",
+			Buckets:   prometheus.LinearBuckets(1, 100, 20),
+		})
+	readQPSStat = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "read_qps_hist",
+			Help:      "Bucketed histogram of the batch size of handled requests.",
+			Buckets:   prometheus.LinearBuckets(1, 10, 20),
+		})
 )
 
 func init() {
@@ -81,4 +105,7 @@ func init() {
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
+	prometheus.MustRegister(readByteStat)
+	prometheus.MustRegister(readKeyStat)
+	prometheus.MustRegister(readQPSStat)
 }

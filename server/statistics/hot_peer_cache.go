@@ -14,6 +14,8 @@
 package statistics
 
 import (
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"math"
 	"time"
 
@@ -38,10 +40,12 @@ var (
 		WriteFlow: {
 			ByteDim: 1 * 1024,
 			KeyDim:  32,
+			QPSDim:  64,
 		},
 		ReadFlow: {
 			ByteDim: 8 * 1024,
 			KeyDim:  128,
+			QPSDim:  256,
 		},
 	}
 )
@@ -115,7 +119,6 @@ func (f *hotPeerCache) CheckRegionFlow(region *core.RegionInfo, storesStats *Sto
 	byteRate := totalBytes / float64(interval)
 	keyRate := totalKeys / float64(interval)
 	qps := totalQPS / float64(interval)
-
 	// old region is in the front and new region is in the back
 	// which ensures it will hit the cache if moving peer or transfer leader occurs with the same replica number
 
@@ -185,6 +188,7 @@ func (f *hotPeerCache) CollectMetrics(stats *StoresStats, typ string) {
 		hotCacheStatusGauge.WithLabelValues("total_length", store, typ).Set(float64(peers.Len()))
 		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[ByteDim])
 		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[KeyDim])
+		hotCacheStatusGauge.WithLabelValues("qps-rate-threshold", store, typ).Set(thresholds[QPSDim])
 		// for compatibility
 		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[ByteDim])
 	}
@@ -310,6 +314,18 @@ func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesSt
 	thresholds := f.calcHotThresholds(storesStats, newItem.StoreID)
 	isHot := newItem.ByteRate >= thresholds[ByteDim] ||
 		newItem.KeyRate >= thresholds[KeyDim] || newItem.QPS >= thresholds[QPSDim]
+	log.Info("newItem", zap.Float64("byte", newItem.ByteRate), zap.Float64("key", newItem.KeyRate), zap.Float64("qps", newItem.QPS))
+	log.Info("threshold", zap.Float64("byte", thresholds[ByteDim]), zap.Float64("key", thresholds[KeyDim]), zap.Float64("qps", thresholds[QPSDim]))
+	if f.kind == ReadFlow {
+		readByteStat.Observe(newItem.ByteRate)
+		readKeyStat.Observe(newItem.KeyRate)
+		readQPSStat.Observe(newItem.QPS)
+	}
+	//if f.kind == WriteFlow {
+	//	writeByteStat.Observe(newItem.ByteRate)
+	//	writeKeyStat.Observe(newItem.KeyRate)
+	//	writeQPSStat.Observe(newItem.QPS)
+	//}
 
 	if newItem.needDelete {
 		return newItem
