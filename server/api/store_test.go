@@ -379,7 +379,6 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 				1: {},
 				4: {},
 				6: {},
-				7: {},
 			},
 		},
 	}
