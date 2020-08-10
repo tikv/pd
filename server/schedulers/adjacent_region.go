@@ -70,6 +70,7 @@ func init() {
 
 	schedule.RegisterScheduler(AdjacentRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceAdjacentRegionConfig{
+			Name:        AdjacentRegionName,
 			LeaderLimit: defaultAdjacentLeaderLimit,
 			PeerLimit:   defaultAdjacentPeerLimit,
 		}
