@@ -85,7 +85,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 func (m *RuleManager) loadRules() error {
 	var toSave []*Rule
 	var toDelete []string
-	_, err := m.store.LoadRules(func(k, v string) {
+	err := m.store.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
 			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))

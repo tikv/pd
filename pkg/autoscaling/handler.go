@@ -25,9 +25,10 @@ import (
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
 type Strategy struct {
-	Rules                []*Rule                `json:"rules"`
-	Resources            []*Resource            `json:"resources"`
-	ResourceExpectations []*ResourceExpectation `json:"resource_expectations"`
+	// The basic unit of MaxCPUQuota is milli-core.
+	MaxCPUQuota uint64      `json:"max_cpu_quota"`
+	Rules       []*Rule     `json:"rules"`
+	Resources   []*Resource `json:"resources"`
 }
 
 // Rule is a set of constraints for a kind of component.
@@ -43,14 +44,12 @@ type Rule struct {
 type CPURule struct {
 	MaxThreshold  float64  `json:"max_threshold"`
 	MinThreshold  float64  `json:"min_threshold"`
-	MaxCount      uint64   `json:"max_count"`
 	ResourceTypes []string `json:"resource_types"`
 }
 
 // StorageRule is the constraints about storage.
 type StorageRule struct {
 	MinThreshold  float64  `json:"min_threshold"`
-	MaxCount      uint64   `json:"max_count"`
 	ResourceTypes []string `json:"resource_types"`
 }
 
@@ -63,6 +62,7 @@ type Resource struct {
 	Memory uint64 `json:"memory"`
 	// The basic unit of storage is byte.
 	Storage uint64 `json:"storage"`
+	Count   uint64 `json:"count"`
 }
 
 // Plan is the final result of auto scaling, which indicates how to scale in or scale out.
@@ -71,13 +71,6 @@ type Plan struct {
 	Count        uint64               `json:"count"`
 	ResourceType string               `json:"resource_type"`
 	Labels       []*metapb.StoreLabel `json:"labels"`
-}
-
-// ResourceExpectation is expectation of resource.
-type ResourceExpectation struct {
-	Component      string `json:"component"`
-	CPUExpectation uint64 `json:"cpu_expectation"`
-	Count          uint64 `json:"count"`
 }
 
 // HTTPHandler is a handler to handle the auto scaling HTTP request.
