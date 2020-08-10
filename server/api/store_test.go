@@ -355,7 +355,7 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 	}{
 		{
 			name: "includeTombstone",
-			url:  fmt.Sprintf("%s/stores/limit?includeTombstone=true", s.urlPrefix),
+			url:  fmt.Sprintf("%s/stores/limit?include_tombstone=true", s.urlPrefix),
 			expectedStores: map[uint64]struct{}{
 				1: {},
 				4: {},
@@ -365,7 +365,7 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 		},
 		{
 			name: "excludeTombStone",
-			url:  fmt.Sprintf("%s/stores/limit?includeTombstone=false", s.urlPrefix),
+			url:  fmt.Sprintf("%s/stores/limit?include_tombstone=false", s.urlPrefix),
 			expectedStores: map[uint64]struct{}{
 				1: {},
 				4: {},
