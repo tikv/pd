@@ -188,7 +188,57 @@ func (c *emptyResponseClient) Do(_ context.Context, req *http.Request) (response
 func (s *testPrometheusQuerierSuite) TestEmptyResponse(c *check.C) {
 	client := &emptyResponseClient{}
 	querier := newPrometheusQuerierWithMockClient(client)
-	options := NewQueryOptions(mockClusterName, TiDB, CPUUsage, []string{"mock-tidb-0", "mock-tidb-1"}, time.Now().Unix(), time.Duration(1e9))
+	options := NewQueryOptions(mockClusterName, TiDB, CPUUsage, instanceNames[TiDB], time.Now().Unix(), mockDuration)
+	result, err := querier.Query(options)
+	c.Assert(result, check.IsNil)
+	c.Assert(err, check.NotNil)
+}
+
+type errorHTTPStatusClient struct{}
+
+func (c *errorHTTPStatusClient) URL(_ string, _ map[string]string) *url.URL {
+	return nil
+}
+
+func (c *errorHTTPStatusClient) Do(_ context.Context, req *http.Request) (response *http.Response, body []byte, warnings promClient.Warnings, err error) {
+	promResp := &Response{}
+
+	response, body, err = makeJSONResponse(promResp)
+
+	response.StatusCode = 500
+	response.Status = "500 Internal Server Error"
+
+	return
+}
+
+func (s *testPrometheusQuerierSuite) TestErrorHTTPStatus(c *check.C) {
+	client := &errorHTTPStatusClient{}
+	querier := newPrometheusQuerierWithMockClient(client)
+	options := NewQueryOptions(mockClusterName, TiDB, CPUUsage, instanceNames[TiDB], time.Now().Unix(), mockDuration)
+	result, err := querier.Query(options)
+	c.Assert(result, check.IsNil)
+	c.Assert(err, check.NotNil)
+}
+
+type errorPrometheusStatusClient struct{}
+
+func (c *errorPrometheusStatusClient) URL(_ string, _ map[string]string) *url.URL {
+	return nil
+}
+
+func (c *errorPrometheusStatusClient) Do(_ context.Context, req *http.Request) (response *http.Response, body []byte, warnings promClient.Warnings, err error) {
+	promResp := &Response{
+		Status: "error",
+	}
+
+	response, body, err = makeJSONResponse(promResp)
+	return
+}
+
+func (s *testPrometheusQuerierSuite) TestErrorPrometheusStatus(c *check.C) {
+	client := &errorPrometheusStatusClient{}
+	querier := newPrometheusQuerierWithMockClient(client)
+	options := NewQueryOptions(mockClusterName, TiDB, CPUUsage, instanceNames[TiDB], time.Now().Unix(), time.Duration(1e9))
 	result, err := querier.Query(options)
 	c.Assert(result, check.IsNil)
 	c.Assert(err, check.NotNil)
