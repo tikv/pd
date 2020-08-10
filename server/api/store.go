@@ -464,12 +464,36 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 // FIXME: details of output json body
 // @Tags store
 // @Summary Get limit of all stores in the cluster.
+// @Param includeTombstone query bool false "include Tombstone" default(true)
 // @Produce json
 // @Success 200 {object} string
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [get]
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	limits := h.GetScheduleConfig().StoreLimit
+	includeTombstone := true
+	var err error
+	if includeStr := r.URL.Query().Get("includeTombstone"); includeStr != "" {
+		includeTombstone, err = strconv.ParseBool(includeStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if !includeTombstone {
+		returned := make(map[uint64]config.StoreLimitConfig, len(limits))
+		rc := getCluster(r.Context())
+		for storeID, v := range limits {
+			store := rc.GetStore(storeID)
+			if store == nil || store.IsTombstone() {
+				continue
+			} else {
+				returned[storeID] = v
+			}
+		}
+		h.rd.JSON(w, http.StatusOK, returned)
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, limits)
 }
 
