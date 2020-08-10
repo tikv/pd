@@ -487,9 +487,8 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 			store := rc.GetStore(storeID)
 			if store == nil || store.IsTombstone() {
 				continue
-			} else {
-				returned[storeID] = v
 			}
+			returned[storeID] = v
 		}
 		h.rd.JSON(w, http.StatusOK, returned)
 		return
