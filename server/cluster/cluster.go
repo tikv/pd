@@ -1334,6 +1334,9 @@ func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
 	defer c.RUnlock()
 	clusterVersion := *c.opt.GetClusterVersion()
 	minSupportVersion := *versioninfo.MinSupportedVersion(f)
+	// For features before version 5.0 (such as BatchSplit), strict version checks are performed according to the
+	// original logic. But according to Semantic Versioning, specify a version MAJOR.MINOR.PATCH, PATCH is used when you
+	// make backwards compatible bug fixes. In version 5.0 and later, we need to strictly comply.
 	if versioninfo.IsCompatible(minSupportVersion, version4_0) {
 		return !clusterVersion.LessThan(minSupportVersion)
 	}
