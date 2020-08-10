@@ -144,7 +144,7 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 		return nil, err
 	}
 	if resp.Status != statusSuccess {
-		return resp, fmt.Errorf("query error, response status: %v", resp.Status)
+		return nil, fmt.Errorf("query error, response status: %v", resp.Status)
 	}
 
 	return resp, nil

@@ -15,6 +15,9 @@ package metrics
 
 import "time"
 
+// QueryResult stores metrics value for each instance
+type QueryResult map[string]float64
+
 // Querier provides interfaces to query metrics
 type Querier interface {
 	// Query does the real query with options
@@ -50,9 +53,6 @@ type QueryOptions struct {
 	timestamp int64
 	duration  time.Duration
 }
-
-// QueryResult stores metrics value for each instance
-type QueryResult map[string]float64
 
 // NewQueryOptions constructs a new QueryOptions for metrics
 // The options will be used to query metrics of `duration` long UNTIL `timestamp`
