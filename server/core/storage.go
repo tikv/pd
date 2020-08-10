@@ -236,24 +236,19 @@ func (s *Storage) DeleteRule(ruleKey string) error {
 }
 
 // LoadRules loads placement rules from storage.
-func (s *Storage) LoadRules(f func(k, v string)) (bool, error) {
-	// Range is ['rule/\x00', 'rule0'). 'rule0' is the upper bound of all rules because '0' is next char of '/' in
-	// ascii order.
-	nextKey := path.Join(rulesPath, "\x00")
-	endKey := rulesPath + "0"
+func (s *Storage) LoadRules(f func(k, v string)) error {
+	nextKey := rulesPath + "/"
+	endKey := clientv3.GetPrefixRangeEnd(nextKey)
 	for {
 		keys, values, err := s.LoadRange(nextKey, endKey, minKVRangeLimit)
 		if err != nil {
-			return false, err
-		}
-		if len(keys) == 0 {
-			return false, nil
+			return err
 		}
 		for i := range keys {
 			f(strings.TrimPrefix(keys[i], rulesPath+"/"), values[i])
 		}
 		if len(keys) < minKVRangeLimit {
-			return true, nil
+			return nil
 		}
 		nextKey = keys[len(keys)-1] + "\x00"
 	}
@@ -434,9 +429,8 @@ func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
 func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
-	prefix := path.Join(gcPath, "safe_point", "service")
-	// the next of 'e' is 'f'
-	prefixEnd := path.Join(gcPath, "safe_point", "servicf")
+	prefix := path.Join(gcPath, "safe_point", "service") + "/"
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return nil, err
@@ -466,9 +460,10 @@ func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
 
 // LoadAllScheduleConfig loads all schedulers' config.
 func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
-	keys, values, err := s.LoadRange(customScheduleConfigPath, clientv3.GetPrefixRangeEnd(customScheduleConfigPath), 1000)
+	prefix := customScheduleConfigPath + "/"
+	keys, values, err := s.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 1000)
 	for i, key := range keys {
-		keys[i] = strings.TrimPrefix(key, customScheduleConfigPath+"/")
+		keys[i] = strings.TrimPrefix(key, prefix)
 	}
 	return keys, values, err
 }
