@@ -86,7 +86,7 @@ func (c *normalClient) buildCPUMockData(member MemberType) {
 	results := make([]Result, 0)
 	for i := 0; i < instanceCount; i++ {
 		results = append(results, Result{
-			Value: []interface{}{time.Now().Unix, fmt.Sprintf("%f", mockResultValue)},
+			Value: []interface{}{time.Now().Unix(), fmt.Sprintf("%f", mockResultValue)},
 			Metric: Metric{
 				Instance: instances[i],
 				Cluster:  mockClusterName,
@@ -154,11 +154,13 @@ func (s *testPrometheusQuerierSuite) TestRetrieveCPUMetrics(c *check.C) {
 			options := NewQueryOptions(mockClusterName, member, metric, instances[:len(instances)-1], time.Now().Unix(), mockDuration)
 			result, err := querier.Query(options)
 			c.Assert(err, check.IsNil)
-			value, ok := result[instances[0]]
-			c.Assert(ok, check.IsTrue)
-			c.Assert(math.Abs(value-mockResultValue) < 1e-6, check.IsTrue)
+			for i := 0; i < len(instances)-1; i++ {
+				value, ok := result[instances[i]]
+				c.Assert(ok, check.IsTrue)
+				c.Assert(math.Abs(value-mockResultValue) < 1e-6, check.IsTrue)
+			}
 
-			value, ok = result[instances[len(instances)-1]]
+			_, ok := result[instances[len(instances)-1]]
 			c.Assert(ok, check.IsFalse)
 		}
 	}
