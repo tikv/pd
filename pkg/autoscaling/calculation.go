@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/core"
 )
 
 const (
@@ -78,9 +79,9 @@ func getPlans(rc *cluster.RaftCluster, strategy *Strategy, component ComponentTy
 	return nil, 0
 }
 
-func filterTiKVInstances(rc *cluster.RaftCluster) []instance {
+func filterTiKVInstances(informer core.StoreSetInformer) []instance {
 	var instances []instance
-	stores := rc.GetStores()
+	stores := informer.GetStores()
 	for _, store := range stores {
 		if store.GetState() == metapb.StoreState_Up {
 			instances = append(instances, instance{id: store.GetID(), address: store.GetAddress()})
@@ -204,11 +205,11 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 	}
 }
 
-func getScaledTiKVGroups(rc *cluster.RaftCluster, healthyInstances []instance) []*Plan {
-	plans := make([]*Plan, len(healthyInstances))
+func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) []*Plan {
+	var plans []*Plan
 	planMap := make(map[string]map[uint64]struct{}, len(healthyInstances))
 	for _, instance := range healthyInstances {
-		store := rc.GetStore(instance.id)
+		store := informer.GetStore(instance.id)
 		v := store.GetLabelValue(groupLabelKey)
 		if len(v) > len(autoScalingGroupLabelKeyPrefix) &&
 			v[:len(autoScalingGroupLabelKeyPrefix)] == autoScalingGroupLabelKeyPrefix {
