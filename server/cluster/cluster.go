@@ -1326,8 +1326,6 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 	return c.changedRegions
 }
 
-var version4_0 = *versioninfo.MinSupportedVersion(versioninfo.Version4_0)
-
 // IsFeatureSupported checks if the feature is supported by current cluster.
 func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
 	c.RLock()
@@ -1337,7 +1335,7 @@ func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
 	// For features before version 5.0 (such as BatchSplit), strict version checks are performed according to the
 	// original logic. But according to Semantic Versioning, specify a version MAJOR.MINOR.PATCH, PATCH is used when you
 	// make backwards compatible bug fixes. In version 5.0 and later, we need to strictly comply.
-	if versioninfo.IsCompatible(minSupportVersion, version4_0) {
+	if versioninfo.IsCompatible(minSupportVersion, *versioninfo.MinSupportedVersion(versioninfo.Version4_0)) {
 		return !clusterVersion.LessThan(minSupportVersion)
 	}
 	return versioninfo.IsCompatible(minSupportVersion, clusterVersion)
