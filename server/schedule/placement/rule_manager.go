@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -35,6 +36,7 @@ type RuleManager struct {
 	initialized bool
 	rules       map[[2]string]*Rule
 	groups      map[string]*RuleGroup
+	defGroups   map[string]struct{} // store groups with default configuration
 	ruleList    ruleList
 }
 
@@ -57,6 +59,9 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 	}
 
 	if err := m.loadRules(); err != nil {
+		return err
+	}
+	if err := m.loadGroups(); err != nil {
 		return err
 	}
 	if len(m.rules) == 0 {
@@ -121,6 +126,21 @@ func (m *RuleManager) loadRules() error {
 		if err = m.store.DeleteRule(d); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (m *RuleManager) loadGroups() error {
+	err := m.store.LoadRuleGroups(func(k, v string) {
+		var g RuleGroup
+		if err := json.Unmarshal([]byte(v), &g); err != nil {
+			log.Error("failed to unmarshal rule group", zap.String("group-id", k), zap.Error(errs.ErrLoadRuleGroup.FastGenByArgs()), zap.NamedError("cause", err))
+			return
+		}
+		m.groups[g.ID] = &g
+	})
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -369,12 +389,88 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 }
 
 func (m *RuleManager) rebuildRuleList() (ruleList, error) {
+	m.defGroups = make(map[string]struct{})
 	for _, r := range m.rules {
 		r.group = m.groups[r.GroupID]
+		if r.group == nil {
+			m.defGroups[r.GroupID] = struct{}{}
+		}
 	}
 	rl, err := buildRuleList(m.rules)
 	if err != nil {
 		return ruleList{}, err
 	}
 	return rl, nil
+}
+
+// GetRuleGroup returns a RuleGroup configuration.
+func (m *RuleManager) GetRuleGroup(id string) *RuleGroup {
+	m.RLock()
+	defer m.RUnlock()
+	if _, ok := m.defGroups[id]; ok {
+		return &RuleGroup{ID: id}
+	}
+	return m.groups[id]
+}
+
+// GetRuleGroups returns all RuleGroup configuration.
+func (m *RuleManager) GetRuleGroups() []*RuleGroup {
+	m.RLock()
+	defer m.RUnlock()
+	var groups []*RuleGroup
+	for _, g := range m.groups {
+		groups = append(groups, g)
+	}
+	for id := range m.defGroups {
+		groups = append(groups, &RuleGroup{ID: id})
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].Index < groups[j].Index ||
+			(groups[i].Index == groups[j].Index && groups[i].ID < groups[j].ID)
+	})
+	return groups
+}
+
+// SetRuleGroup updates a RuleGroup.
+func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
+	m.Lock()
+	defer m.Unlock()
+	return m.tryUpdateGroup(group.ID, group)
+}
+
+// DeleteRuleGroup removes a RuleGroup.
+func (m *RuleManager) DeleteRuleGroup(id string) error {
+	m.Lock()
+	defer m.Unlock()
+	return m.tryUpdateGroup(id, nil)
+}
+
+func (m *RuleManager) tryUpdateGroup(id string, newGroup *RuleGroup) error {
+	oldGroup := m.groups[id]
+
+	if newGroup != nil {
+		m.groups[id] = newGroup
+	} else {
+		delete(m.groups, id)
+	}
+
+	rl, err := m.rebuildRuleList()
+	if err == nil {
+		if newGroup != nil {
+			err = m.store.SaveRuleGroup(id, newGroup)
+		} else {
+			err = m.store.DeleteRuleGroup(id)
+		}
+	}
+	if err != nil {
+		// recover old:
+		if oldGroup != nil {
+			m.groups[id] = oldGroup
+		} else {
+			delete(m.groups, id)
+		}
+		return err
+	}
+	m.ruleList = rl
+	return nil
 }

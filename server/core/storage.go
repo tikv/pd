@@ -252,7 +252,7 @@ func (s *Storage) LoadRuleGroups(f func(k, v string)) error {
 	return s.LoadRangeByPrefix(ruleGroupPath+"/", f)
 }
 
-// SaveJson saves json format data to storage.
+// SaveJSON saves json format data to storage.
 func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
 	value, err := json.Marshal(data)
 	if err != nil {
