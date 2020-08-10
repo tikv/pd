@@ -85,3 +85,8 @@ func (c ComponentType) String() string {
 		return "unknown"
 	}
 }
+
+type instance struct {
+	id      uint64
+	address string
+}
