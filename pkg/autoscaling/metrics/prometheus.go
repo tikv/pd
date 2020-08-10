@@ -192,7 +192,7 @@ var cpuQuotaPromQLTemplate = map[ComponentType]string{
 func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
 	pattern, ok := cpuQuotaPromQLTemplate[options.component]
 	if !ok {
-		return "", errors.Errorf("unspported component type %v", options.component)
+		return "", errors.Errorf("unsupported component type %v", options.component)
 	}
 
 	query := fmt.Sprintf(pattern, options.cluster)
@@ -202,7 +202,7 @@ func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
 func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
 	pattern, ok := cpuUsagePromQLTemplate[options.component]
 	if !ok {
-		return "", errors.Errorf("unspported component type %v", options.component)
+		return "", errors.Errorf("unsupported component type %v", options.component)
 	}
 
 	query := fmt.Sprintf(pattern, options.cluster, options.duration.String())
