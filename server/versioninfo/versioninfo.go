@@ -56,10 +56,10 @@ func MustParseVersion(v string) *semver.Version {
 	return ver
 }
 
-// IsCompatible checks if the clusterVersion is compatible with the specified version.
-func IsCompatible(clusterVersion, v semver.Version) bool {
-	if clusterVersion.LessThan(v) {
+// IsCompatible checks if the current version is compatible with the specified version.
+func IsCompatible(current, specified semver.Version) bool {
+	if current.LessThan(specified) {
 		return true
 	}
-	return clusterVersion.Major == v.Major && clusterVersion.Minor == v.Minor
+	return current.Major == specified.Major && current.Minor == specified.Minor
 }

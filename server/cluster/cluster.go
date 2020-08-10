@@ -1330,13 +1330,18 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 	return c.changedRegions
 }
 
+var version4_0 = *versioninfo.MinSupportedVersion(versioninfo.Version4_0)
+
 // IsFeatureSupported checks if the feature is supported by current cluster.
 func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
 	c.RLock()
 	defer c.RUnlock()
 	clusterVersion := *c.opt.GetClusterVersion()
-	minSupportVersion := versioninfo.MinSupportedVersion(f)
-	return !clusterVersion.LessThan(*minSupportVersion)
+	minSupportVersion := *versioninfo.MinSupportedVersion(f)
+	if versioninfo.IsCompatible(minSupportVersion, version4_0) {
+		return !clusterVersion.LessThan(minSupportVersion)
+	}
+	return versioninfo.IsCompatible(minSupportVersion, clusterVersion)
 }
 
 // GetConfig gets config from cluster.
