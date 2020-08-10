@@ -46,21 +46,21 @@ func Test(t *testing.T) {
 
 var _ = check.Suite(&testPrometheusQuerierSuite{})
 
-var instanceNameTemplate = map[MemberType]string{
+var instanceNameTemplate = map[ComponentType]string{
 	TiDB: mockTiDBInstanceNamePattern,
 	TiKV: mockTiKVInstanceNamePattern,
 }
 
-func generateInstanceNames(member MemberType) []string {
+func generateInstanceNames(component ComponentType) []string {
 	names := make([]string, 0, instanceCount)
-	pattern := instanceNameTemplate[member]
+	pattern := instanceNameTemplate[component]
 	for i := 0; i < instanceCount; i++ {
 		names = append(names, fmt.Sprintf(pattern, mockClusterName, i))
 	}
 	return names
 }
 
-var instanceNames = map[MemberType][]string{
+var instanceNames = map[ComponentType][]string{
 	TiDB: generateInstanceNames(TiDB),
 	TiKV: generateInstanceNames(TiKV),
 }
@@ -78,10 +78,10 @@ type normalClient struct {
 	mockData map[string]*Response
 }
 
-func (c *normalClient) buildCPUMockData(member MemberType) {
-	instances := instanceNames[member]
-	cpuUsageQuery := fmt.Sprintf(cpuUsagePromQLTemplate[member], mockClusterName, mockDuration)
-	cpuQuotaQuery := fmt.Sprintf(cpuQuotaPromQLTemplate[member], mockClusterName)
+func (c *normalClient) buildCPUMockData(component ComponentType) {
+	instances := instanceNames[component]
+	cpuUsageQuery := fmt.Sprintf(cpuUsagePromQLTemplate[component], mockClusterName, mockDuration)
+	cpuQuotaQuery := fmt.Sprintf(cpuQuotaPromQLTemplate[component], mockClusterName)
 
 	results := make([]Result, 0)
 	for i := 0; i < instanceCount; i++ {
@@ -149,9 +149,9 @@ func (s *testPrometheusQuerierSuite) TestRetrieveCPUMetrics(c *check.C) {
 	client.buildMockData()
 	querier := newPrometheusQuerierWithMockClient(client)
 	metrics := []MetricType{CPUQuota, CPUUsage}
-	for member, instances := range instanceNames {
+	for component, instances := range instanceNames {
 		for _, metric := range metrics {
-			options := NewQueryOptions(mockClusterName, member, metric, instances[:len(instances)-1], time.Now().Unix(), mockDuration)
+			options := NewQueryOptions(mockClusterName, component, metric, instances[:len(instances)-1], time.Now().Unix(), mockDuration)
 			result, err := querier.Query(options)
 			c.Assert(err, check.IsNil)
 			for i := 0; i < len(instances)-1; i++ {

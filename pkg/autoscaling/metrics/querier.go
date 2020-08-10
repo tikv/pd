@@ -24,8 +24,8 @@ type Querier interface {
 	Query(options *QueryOptions) (QueryResult, error)
 }
 
-// MemberType represents different members of a TiDB cluster
-type MemberType string
+// ComponentType represents different components of a TiDB cluster
+type ComponentType string
 
 const (
 	// TiDB represents TiDB component of a TiDB cluster
@@ -47,7 +47,7 @@ const (
 // QueryOptions includes parameters for later metrics query
 type QueryOptions struct {
 	cluster   string
-	member    MemberType
+	component ComponentType
 	metric    MetricType
 	instances []string
 	timestamp int64
@@ -56,12 +56,12 @@ type QueryOptions struct {
 
 // NewQueryOptions constructs a new QueryOptions for metrics
 // The options will be used to query metrics of `duration` long UNTIL `timestamp`
-// which has `metric` type (CPU, Storage) for a specific `member` type in a `cluster`
+// which has `metric` type (CPU, Storage) for a specific `component` type in a `cluster`
 // and returns metrics value for each instance in `instances`
-func NewQueryOptions(cluster string, member MemberType, metric MetricType, instances []string, timestamp int64, duration time.Duration) *QueryOptions {
+func NewQueryOptions(cluster string, component ComponentType, metric MetricType, instances []string, timestamp int64, duration time.Duration) *QueryOptions {
 	return &QueryOptions{
 		cluster,
-		member,
+		component,
 		metric,
 		instances,
 		timestamp,

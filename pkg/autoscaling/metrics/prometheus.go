@@ -179,20 +179,20 @@ func extractInstancesFromResponse(resp *Response, instances []string) (QueryResu
 	return result, nil
 }
 
-var cpuUsagePromQLTemplate = map[MemberType]string{
+var cpuUsagePromQLTemplate = map[ComponentType]string{
 	TiDB: tidbSumCPUUsageMetricsPattern,
 	TiKV: tikvSumCPUUsageMetricsPattern,
 }
 
-var cpuQuotaPromQLTemplate = map[MemberType]string{
+var cpuQuotaPromQLTemplate = map[ComponentType]string{
 	TiDB: tidbSumCPUQuotaMetricsPattern,
 	TiKV: tikvSumCPUQuotaMetricsPattern,
 }
 
 func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
-	pattern, ok := cpuQuotaPromQLTemplate[options.member]
+	pattern, ok := cpuQuotaPromQLTemplate[options.component]
 	if !ok {
-		return "", errors.Errorf("unspported member type %v", options.member)
+		return "", errors.Errorf("unspported component type %v", options.component)
 	}
 
 	query := fmt.Sprintf(pattern, options.cluster)
@@ -200,9 +200,9 @@ func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
 }
 
 func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
-	pattern, ok := cpuUsagePromQLTemplate[options.member]
+	pattern, ok := cpuUsagePromQLTemplate[options.component]
 	if !ok {
-		return "", errors.Errorf("unspported member type %v", options.member)
+		return "", errors.Errorf("unspported component type %v", options.component)
 	}
 
 	query := fmt.Sprintf(pattern, options.cluster, options.duration.String())
