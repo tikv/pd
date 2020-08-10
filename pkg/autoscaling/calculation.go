@@ -25,7 +25,6 @@ import (
 // TODO: adjust the value or make it configurable.
 var MetricsTimeDuration = 5 * time.Second
 
-// TODO: migrate the basic logic from operator.
 func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 	var plans []*Plan
 	var afterQuota uint64
@@ -61,12 +60,13 @@ func getPlans(rc *cluster.RaftCluster, strategy *Strategy, component ComponentTy
 	usage := totalCPUUseTime / totalCPUTime
 	maxThreshold, minThreshold := getCPUThresholdByComponent(strategy, component)
 
+	// TODO: add metrics to show why it triggers scale in/out.
 	if usage > maxThreshold {
-		scaleOutQuota := totalCPUUseTime/maxThreshold - totalCPUTime
+		scaleOutQuota := totalCPUUseTime - totalCPUTime*maxThreshold
 		return calculateScaleOutPlan(rc, strategy, component, scaleOutQuota, currentQuota)
 	}
 	if usage < minThreshold {
-		scaleInQuota := totalCPUUseTime/minThreshold - totalCPUTime
+		scaleInQuota := totalCPUTime*minThreshold - totalCPUUseTime
 		return calculateScaleInPlan(rc, strategy, component, scaleInQuota), 0
 	}
 	return nil, 0
@@ -125,12 +125,12 @@ func getResourcesByComponent(strategy *Strategy, component ComponentType) []*Res
 	return resources
 }
 
-// TODO: implement calculateScaleOutPlan details
 func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64) ([]*Plan, uint64) {
 	groups := getScaledGroupsByComponent(component)
 	group := findBestGroupToScaleOut(rc, strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
+	// TODO: support customized step
 	scaleOutCount := uint64(math.Ceil(scaleOutQuota / resCPU))
 	increasedQuota := getCPUByResourceType(strategy, group.ResourceType) * scaleOutCount
 	afterQuota := currentQuota + increasedQuota
@@ -157,7 +157,8 @@ func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component
 	}
 	group := findBestGroupToScaleIn(rc, strategy, scaleInQuota, groups)
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
-	scaleInCount := uint64(math.Floor(scaleInQuota / resCPU))
+	// TODO: support customized step
+	scaleInCount := uint64(math.Ceil(scaleInQuota / resCPU))
 	for i, g := range groups {
 		if g.ResourceType == group.ResourceType {
 			if group.Count > scaleInCount {
