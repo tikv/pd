@@ -18,12 +18,11 @@ import (
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pkg/errors"
-
 	"github.com/pingcap/pd/v4/pkg/metautil"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/pkg/errors"
 )
 
 // Builder is used to create operators. Usage:
