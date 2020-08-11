@@ -346,3 +346,52 @@ func (s *testStoreSuite) TestDownState(c *C) {
 	storeInfo = newStoreInfo(s.svr.GetScheduleConfig(), newStore)
 	c.Assert(storeInfo.Store.StateName, Equals, downStateName)
 }
+
+func (s *testStoreSuite) TestGetAllLimit(c *C) {
+	testcases := []struct {
+		name           string
+		url            string
+		expectedStores map[uint64]struct{}
+	}{
+		{
+			name: "includeTombstone",
+			url:  fmt.Sprintf("%s/stores/limit?include_tombstone=true", s.urlPrefix),
+			expectedStores: map[uint64]struct{}{
+				1: {},
+				4: {},
+				6: {},
+				7: {},
+			},
+		},
+		{
+			name: "excludeTombStone",
+			url:  fmt.Sprintf("%s/stores/limit?include_tombstone=false", s.urlPrefix),
+			expectedStores: map[uint64]struct{}{
+				1: {},
+				4: {},
+				6: {},
+			},
+		},
+		{
+			name: "default",
+			url:  fmt.Sprintf("%s/stores/limit", s.urlPrefix),
+			expectedStores: map[uint64]struct{}{
+				1: {},
+				4: {},
+				6: {},
+			},
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Logf(testcase.name)
+		info := make(map[uint64]interface{}, 4)
+		err := readJSON(testDialClient, testcase.url, &info)
+		c.Assert(err, IsNil)
+		c.Assert(len(info), Equals, len(testcase.expectedStores))
+		for id := range testcase.expectedStores {
+			_, ok := info[id]
+			c.Assert(ok, Equals, true)
+		}
+	}
+}

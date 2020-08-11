@@ -69,6 +69,7 @@ var (
 var (
 	ErrRuleContent   = ClassPlacement.DefineError().TextualCode("ErrRuleContent").MessageTemplate("invalid rule content, %s").Build()
 	ErrLoadRule      = ClassPlacement.DefineError().TextualCode("ErrLoadRule").MessageTemplate("fail to load rule").Build()
+	ErrLoadRuleGroup = ClassPlacement.DefineError().TextualCode("ErrLoadRuleGroup").MessageTemplate("fail to load rule group").Build()
 	ErrBuildRuleList = ClassPlacement.DefineError().TextualCode("ErrBuildRuleList").MessageTemplate("fail to build rule list, %s").Build()
 )
 

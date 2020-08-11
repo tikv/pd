@@ -14,7 +14,6 @@
 package autoscaling
 
 import (
-	"fmt"
 	"math"
 	"time"
 
@@ -253,13 +252,6 @@ func findBestGroupToScaleOut(rc *cluster.RaftCluster, strategy *Strategy, scaleO
 		Component:    component.String(),
 		Count:        0,
 		ResourceType: resources[0].ResourceType,
-		Labels: []*metapb.StoreLabel{
-			{
-				Key: groupLabelKey,
-				// TODO: support generating auto-scaling group name algorithm
-				Value: fmt.Sprintf("%s-%s-%v", autoScalingGroupLabelKeyPrefix, component.String(), 0),
-			},
-		},
 	}
 	return group
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/pd/v4/pkg/cache"
 	"github.com/pingcap/pd/v4/pkg/component"
 	"github.com/pingcap/pd/v4/pkg/etcdutil"
+	"github.com/pingcap/pd/v4/pkg/keyutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/config"
@@ -449,27 +450,27 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 // AddSuspectKeyRange adds the key range with the its ruleID as the key
 // The instance of each keyRange is like following format:
 // [2][]byte: start key/end key
-func (c *RaftCluster) AddSuspectKeyRange(key string, keyRanges [2][]byte) {
+func (c *RaftCluster) AddSuspectKeyRange(start, end []byte) {
 	c.Lock()
 	defer c.Unlock()
-	c.suspectKeyRanges.Put(key, keyRanges)
+	c.suspectKeyRanges.Put(keyutil.BuildKeyRangeKey(start, end), [2][]byte{start, end})
 }
 
 // PopOneSuspectKeyRange gets one suspect keyRange group.
 // it would return value and true if pop success, or return empty [][2][]byte and false
 // if suspectKeyRanges couldn't pop keyRange group.
-func (c *RaftCluster) PopOneSuspectKeyRange() (string, [2][]byte, bool) {
+func (c *RaftCluster) PopOneSuspectKeyRange() ([2][]byte, bool) {
 	c.Lock()
 	defer c.Unlock()
-	key, value, success := c.suspectKeyRanges.Pop()
+	_, value, success := c.suspectKeyRanges.Pop()
 	if !success {
-		return "", [2][]byte{}, false
+		return [2][]byte{}, false
 	}
 	v, ok := value.([2][]byte)
 	if !ok {
-		return "", [2][]byte{}, false
+		return [2][]byte{}, false
 	}
-	return key, v, true
+	return v, true
 }
 
 // ClearSuspectKeyRanges clears the suspect keyRanges, only for unit test
