@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/core"
+	"go.uber.org/zap"
 )
 
 const (
@@ -209,6 +211,11 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 	planMap := make(map[string]map[uint64]struct{}, len(healthyInstances))
 	for _, instance := range healthyInstances {
 		store := informer.GetStore(instance.id)
+		if store == nil {
+			log.Warn("inconsistency between healthInstances and StoreSetInformer, exit auto-scaling calculation",
+				zap.Uint64("StoreID", instance.id))
+			return nil
+		}
 		v := store.GetLabelValue(groupLabelKey)
 		if len(v) > len(autoScalingGroupLabelKeyPrefix) &&
 			v[:len(autoScalingGroupLabelKeyPrefix)] == autoScalingGroupLabelKeyPrefix {
