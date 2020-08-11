@@ -62,10 +62,12 @@ func getPlans(rc *cluster.RaftCluster, strategy *Strategy, component ComponentTy
 
 	// TODO: add metrics to show why it triggers scale in/out.
 	if usage > maxThreshold {
+		componentScaleEventGuage.WithLabelValues(component.String(), "scale-out").Set(usage)
 		scaleOutQuota := (totalCPUUseTime - totalCPUTime*maxThreshold) / MetricsTimeDuration.Seconds()
 		return calculateScaleOutPlan(rc, strategy, component, scaleOutQuota, currentQuota)
 	}
 	if usage < minThreshold {
+		componentScaleEventGuage.WithLabelValues(component.String(), "scale-in").Set(usage)
 		scaleInQuota := (totalCPUTime*minThreshold - totalCPUUseTime) / MetricsTimeDuration.Seconds()
 		return calculateScaleInPlan(rc, strategy, component, scaleInQuota), 0
 	}
