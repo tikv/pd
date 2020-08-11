@@ -229,7 +229,7 @@ func (s *Storage) SaveRule(ruleKey string, rule interface{}) error {
 
 // DeleteRule removes a rule from storage.
 func (s *Storage) DeleteRule(ruleKey string) error {
-	return s.Base.Remove(path.Join(rulesPath, ruleKey))
+	return s.Remove(path.Join(rulesPath, ruleKey))
 }
 
 // LoadRules loads placement rules from storage.
@@ -244,7 +244,7 @@ func (s *Storage) SaveRuleGroup(groupID string, group interface{}) error {
 
 // DeleteRuleGroup removes a rule group from storage.
 func (s *Storage) DeleteRuleGroup(groupID string) error {
-	return s.Base.Remove(path.Join(ruleGroupPath, groupID))
+	return s.Remove(path.Join(ruleGroupPath, groupID))
 }
 
 // LoadRuleGroups loads all rule groups from storage.
