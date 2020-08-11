@@ -64,6 +64,9 @@ func newImportData() *Case {
 	table2 := string(codec.EncodeBytes(codec.GenerateTableKey(2)))
 	table3 := string(codec.EncodeBytes(codec.GenerateTableKey(3)))
 	e.Step = func(tick int64) map[string]int64 {
+		if tick > int64(getRegionNum())/10 {
+			return nil
+		}
 		return map[string]int64{
 			table2: 32 * MB,
 		}
@@ -112,7 +115,7 @@ func newImportData() *Case {
 		regionTotal := regions.GetRegionCount()
 		totalLeaderLog := fmt.Sprintf("%d leader:", regionTotal)
 		totalPeerLog := fmt.Sprintf("%d peer:", regionTotal*3)
-		isEnd := checkCount > uint64(getRegionNum())/10
+		isEnd := false
 		var regionProps []float64
 		for storeID := uint64(1); storeID <= 10; storeID++ {
 			regions.GetStoreRegionCount(storeID)
@@ -132,7 +135,10 @@ func newImportData() *Case {
 			dev += (p - 10) * (p - 10) / 100
 		}
 		if dev > 0.005 {
-			simutil.Logger.Warn("Not balanced, consider higher store limit", zap.Float64("dev score", dev))
+			simutil.Logger.Warn("Not balanced, change scheduler or store limit", zap.Float64("dev score", dev))
+		}
+		if checkCount > uint64(getRegionNum())/10 {
+			isEnd = dev < 0.002
 		}
 		return isEnd
 	}
