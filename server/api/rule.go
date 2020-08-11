@@ -315,3 +315,100 @@ func (h *ruleHandler) Batch(w http.ResponseWriter, r *http.Request) {
 	}
 	h.rd.JSON(w, http.StatusOK, "Batch operations successfully.")
 }
+
+// @Tags rule
+// @Summary Get rule group config by group id.
+// @Param id path string true "Group Id"
+// @Produce json
+// @Success 200 {object} placement.RuleGroup
+// @Failure 404 {string} string "The RuleGroup does not exist."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Router /config/rule_group/{id} [get]
+func (h *ruleHandler) GetGroupConfig(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	id := mux.Vars(r)["id"]
+	group := cluster.GetRuleManager().GetRuleGroup(id)
+	if group == nil {
+		h.rd.JSON(w, http.StatusNotFound, nil)
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, group)
+}
+
+// @Tags rule
+// @Summary Update rule group config.
+// @Accept json
+// @Param rule body placement.RuleGroup true "Parameters of rule group"
+// @Produce json
+// @Success 200 {string} string "Update rule group config successfully."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /config/rule_group [post]
+func (h *ruleHandler) SetGroupConfig(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	var ruleGroup placement.RuleGroup
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &ruleGroup); err != nil {
+		return
+	}
+	if err := cluster.GetRuleManager().SetRuleGroup(&ruleGroup); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, r := range cluster.GetRuleManager().GetRulesByGroup(ruleGroup.ID) {
+		key := keyutil.BuildKeyRangeKey(r.StartKey, r.EndKey)
+		cluster.AddSuspectKeyRange(key, [2][]byte{r.StartKey, r.EndKey})
+	}
+	h.rd.JSON(w, http.StatusOK, "Update rule group successfully.")
+}
+
+// @Tags rule
+// @Summary Delete rule group config.
+// @Param id path string true "Group Id"
+// @Produce text
+// @Success 200 {string} string "Delete rule group config successfully."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /config/rule_group/{id} [delete]
+func (h *ruleHandler) DeleteGroupConfig(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	id := mux.Vars(r)["id"]
+	err := cluster.GetRuleManager().DeleteRuleGroup(id)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for _, r := range cluster.GetRuleManager().GetRulesByGroup(id) {
+		key := keyutil.BuildKeyRangeKey(r.StartKey, r.EndKey)
+		cluster.AddSuspectKeyRange(key, [2][]byte{r.StartKey, r.EndKey})
+	}
+	h.rd.JSON(w, http.StatusOK, "Delete rule group successfully.")
+}
+
+// @Tags rule
+// @Summary List all rule group configs.
+// @Produce json
+// @Success 200 {array} placement.RuleGroup
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Router /config/rule_groups [get]
+func (h *ruleHandler) GetAllGroupConfigs(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	ruleGroups := cluster.GetRuleManager().GetRuleGroups()
+	h.rd.JSON(w, http.StatusOK, ruleGroups)
+}
