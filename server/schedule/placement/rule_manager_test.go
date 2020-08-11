@@ -195,6 +195,41 @@ func (s *testManagerSuite) TestRangeGap(c *C) {
 	c.Assert(err, NotNil)
 }
 
+func (s *testManagerSuite) TestGroupConfig(c *C) {
+	// group pd
+	pd1 := &RuleGroup{ID: "pd"}
+	c.Assert(s.manager.GetRuleGroup("pd"), DeepEquals, pd1)
+
+	// update group pd
+	pd2 := &RuleGroup{ID: "pd", Index: 100, Override: true}
+	err := s.manager.SetRuleGroup(pd2)
+	c.Assert(err, IsNil)
+	c.Assert(s.manager.GetRuleGroup("pd"), DeepEquals, pd2)
+
+	// new group g without config
+	err = s.manager.SetRule(&Rule{GroupID: "g", ID: "1", Role: "voter", Count: 1})
+	c.Assert(err, IsNil)
+	g1 := &RuleGroup{ID: "g"}
+	c.Assert(s.manager.GetRuleGroup("g"), DeepEquals, g1)
+	c.Assert(s.manager.GetRuleGroups(), DeepEquals, []*RuleGroup{g1, pd2})
+
+	// update group g
+	g2 := &RuleGroup{ID: "g", Index: 2, Override: true}
+	err = s.manager.SetRuleGroup(g2)
+	c.Assert(err, IsNil)
+	c.Assert(s.manager.GetRuleGroups(), DeepEquals, []*RuleGroup{g2, pd2})
+
+	// delete pd group, restore to default config
+	err = s.manager.DeleteRuleGroup("pd")
+	c.Assert(err, IsNil)
+	c.Assert(s.manager.GetRuleGroups(), DeepEquals, []*RuleGroup{pd1, g2})
+
+	// delete rule, the group is removed too
+	err = s.manager.DeleteRule("pd", "default")
+	c.Assert(err, IsNil)
+	c.Assert(s.manager.GetRuleGroups(), DeepEquals, []*RuleGroup{g2})
+}
+
 func (s *testManagerSuite) dhex(hk string) []byte {
 	k, err := hex.DecodeString(hk)
 	if err != nil {
