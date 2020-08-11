@@ -18,60 +18,10 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server"
+	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/unrolled/render"
 )
-
-// Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
-type Strategy struct {
-	// The basic unit of MaxCPUQuota is milli-core.
-	MaxCPUQuota uint64      `json:"max_cpu_quota"`
-	Rules       []*Rule     `json:"rules"`
-	Resources   []*Resource `json:"resources"`
-}
-
-// Rule is a set of constraints for a kind of component.
-type Rule struct {
-	Component               string       `json:"component"`
-	CPURule                 *CPURule     `json:"cpu_rule,omitempty"`
-	StorageRule             *StorageRule `json:"storage_rule,omitempty"`
-	ScaleOutIntervalSeconds uint64       `json:"scale_out_interval_seconds"`
-	ScaleInIntervalSeconds  uint64       `json:"scale_in_interval_seconds"`
-}
-
-// CPURule is the constraints about CPU.
-type CPURule struct {
-	MaxThreshold  float64  `json:"max_threshold"`
-	MinThreshold  float64  `json:"min_threshold"`
-	ResourceTypes []string `json:"resource_types"`
-}
-
-// StorageRule is the constraints about storage.
-type StorageRule struct {
-	MinThreshold  float64  `json:"min_threshold"`
-	ResourceTypes []string `json:"resource_types"`
-}
-
-// Resource represents a kind of resource set including CPU, memory, storage.
-type Resource struct {
-	ResourceType string `json:"resource_type"`
-	// The basic unit of CPU is milli-core.
-	CPU uint64 `json:"cpu"`
-	// The basic unit of memory is byte.
-	Memory uint64 `json:"memory"`
-	// The basic unit of storage is byte.
-	Storage uint64 `json:"storage"`
-	Count   uint64 `json:"count"`
-}
-
-// Plan is the final result of auto scaling, which indicates how to scale in or scale out.
-type Plan struct {
-	Component    string               `json:"component"`
-	Count        uint64               `json:"count"`
-	ResourceType string               `json:"resource_type"`
-	Labels       []*metapb.StoreLabel `json:"labels"`
-}
 
 // HTTPHandler is a handler to handle the auto scaling HTTP request.
 type HTTPHandler struct {
@@ -88,6 +38,11 @@ func NewHTTPHandler(svr *server.Server, rd *render.Render) *HTTPHandler {
 }
 
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rc := h.svr.GetRaftCluster()
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, cluster.ErrNotBootstrapped.Error())
+		return
+	}
 	data, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -101,11 +56,6 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan := calculate(&strategy)
+	plan := calculate(rc, &strategy)
 	h.rd.JSON(w, http.StatusOK, plan)
-}
-
-// TODO: migrate the basic logic from operator.
-func calculate(strategy *Strategy) *Plan {
-	return &Plan{}
 }
