@@ -37,6 +37,8 @@ var (
 	rulesPrefix           = "pd/api/v1/config/rules"
 	rulesBatchPrefix      = "pd/api/v1/config/rules/batch"
 	rulePrefix            = "pd/api/v1/config/rule"
+	ruleGroupPrefix       = "pd/api/v1/config/rule_group"
+	ruleGroupsPrefix      = "pd/api/v1/config/rule_groups"
 	replicationModePrefix = "pd/api/v1/config/replication-mode"
 )
 
@@ -428,7 +430,27 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   putPlacementRulesFunc,
 	}
 	save.Flags().String("in", "rules.json", "the filename contains rules")
-	c.AddCommand(enable, disable, show, load, save)
+	ruleGroup := &cobra.Command{
+		Use:   "rule_group",
+		Short: "rule group configurations",
+	}
+	ruleGroupShow := &cobra.Command{
+		Use:   "show [id]",
+		Short: "show rule group configuration(s)",
+		Run:   showRuleGroupFunc,
+	}
+	ruleGroupSet := &cobra.Command{
+		Use:   "set {id} {index} {override}",
+		Short: "update rule group configuration",
+		Run:   updateRuleGroupFunc,
+	}
+	ruleGroupDelete := &cobra.Command{
+		Use:   "delete {id}",
+		Short: "delete rule group configuration",
+		Run:   deleteRuleGroupFunc,
+	}
+	ruleGroup.AddCommand(ruleGroupShow, ruleGroupSet, ruleGroupDelete)
+	c.AddCommand(enable, disable, show, load, save, ruleGroup)
 	return c
 }
 
@@ -532,5 +554,63 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	cmd.Println("Success!")
+}
+
+func showRuleGroupFunc(cmd *cobra.Command, args []string) {
+	if len(args) > 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+
+	reqPath := ruleGroupsPrefix
+	if len(args) > 0 {
+		reqPath = path.Join(ruleGroupPrefix, args[0])
+	}
+
+	res, err := doRequest(cmd, reqPath, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println(res)
+}
+
+func updateRuleGroupFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 3 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	index, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil {
+		cmd.Printf("index %s should be a number", args[1])
+		return
+	}
+	var override bool
+	switch strings.ToLower(args[2]) {
+	case "false":
+	case "true":
+		override = true
+	default:
+		cmd.Printf("override %s should be a boolean", args[2])
+		return
+	}
+	postJSON(cmd, ruleGroupPrefix, map[string]interface{}{
+		"id":       args[0],
+		"index":    index,
+		"override": override,
+	})
+}
+
+func deleteRuleGroupFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	_, err := doRequest(cmd, path.Join(ruleGroupPrefix, args[0]), http.MethodDelete)
+	if err != nil {
+		cmd.Printf("Failed to remove rule group config: %s \n", err)
+		return
+	}
 	cmd.Println("Success!")
 }
