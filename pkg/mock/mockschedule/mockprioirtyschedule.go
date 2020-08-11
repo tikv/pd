@@ -53,4 +53,3 @@ func (mh *MockHighPrioritySchedule) RemoveHighPriorityScheduleRegion(id uint64) 
 func (mh *MockHighPrioritySchedule) Reset() {
 	mh.ids = map[uint64]struct{}{}
 }
-
