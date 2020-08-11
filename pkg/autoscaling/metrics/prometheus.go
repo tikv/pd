@@ -80,7 +80,7 @@ func (prom *PrometheusQuerier) Query(options *QueryOptions) (QueryResult, error)
 }
 
 func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestamp time.Time) (promModel.Value, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*httpRequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), httpRequestTimeout)
 	defer cancel()
 
 	resp, warnings, err := prom.api.Query(ctx, query, timestamp)
