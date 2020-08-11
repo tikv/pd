@@ -37,6 +37,7 @@ const (
 	schedulePath             = "schedule"
 	gcPath                   = "gc"
 	rulesPath                = "rules"
+	ruleGroupPath            = "rule_group"
 	replicationPath          = "replication_mode"
 	componentPath            = "component"
 	customScheduleConfigPath = "scheduler_config"
@@ -222,30 +223,55 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 }
 
 // SaveRule stores a rule cfg to the rulesPath.
-func (s *Storage) SaveRule(ruleKey string, rules interface{}) error {
-	value, err := json.Marshal(rules)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	return s.Save(path.Join(rulesPath, ruleKey), string(value))
+func (s *Storage) SaveRule(ruleKey string, rule interface{}) error {
+	return s.SaveJSON(rulesPath, ruleKey, rule)
 }
 
 // DeleteRule removes a rule from storage.
 func (s *Storage) DeleteRule(ruleKey string) error {
-	return s.Base.Remove(path.Join(rulesPath, ruleKey))
+	return s.Remove(path.Join(rulesPath, ruleKey))
 }
 
 // LoadRules loads placement rules from storage.
 func (s *Storage) LoadRules(f func(k, v string)) error {
-	nextKey := rulesPath + "/"
-	endKey := clientv3.GetPrefixRangeEnd(nextKey)
+	return s.LoadRangeByPrefix(rulesPath+"/", f)
+}
+
+// SaveRuleGroup stores a rule group config to storage.
+func (s *Storage) SaveRuleGroup(groupID string, group interface{}) error {
+	return s.SaveJSON(ruleGroupPath, groupID, group)
+}
+
+// DeleteRuleGroup removes a rule group from storage.
+func (s *Storage) DeleteRuleGroup(groupID string) error {
+	return s.Remove(path.Join(ruleGroupPath, groupID))
+}
+
+// LoadRuleGroups loads all rule groups from storage.
+func (s *Storage) LoadRuleGroups(f func(k, v string)) error {
+	return s.LoadRangeByPrefix(ruleGroupPath+"/", f)
+}
+
+// SaveJSON saves json format data to storage.
+func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
+	value, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return s.Save(path.Join(prefix, key), string(value))
+}
+
+// LoadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
+func (s *Storage) LoadRangeByPrefix(prefix string, f func(k, v string)) error {
+	nextKey := prefix
+	endKey := clientv3.GetPrefixRangeEnd(prefix)
 	for {
 		keys, values, err := s.LoadRange(nextKey, endKey, minKVRangeLimit)
 		if err != nil {
 			return err
 		}
 		for i := range keys {
-			f(strings.TrimPrefix(keys[i], rulesPath+"/"), values[i])
+			f(strings.TrimPrefix(keys[i], prefix), values[i])
 		}
 		if len(keys) < minKVRangeLimit {
 			return nil
