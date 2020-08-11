@@ -23,10 +23,10 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/mock/mockid"
 	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
+	"github.com/pingcap/pd/v4/pkg/mock/mockschedule"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
-	"github.com/pingcap/pd/v4/server/schedule/priorityscheduling"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
 	"go.uber.org/zap"
@@ -40,7 +40,7 @@ type Cluster struct {
 	*placement.RuleManager
 	*statistics.HotCache
 	*statistics.StoresStats
-	*priorityscheduling.MockHighPrioritySchedule
+	*mockschedule.MockHighPrioritySchedule
 	ID uint64
 }
 
@@ -55,7 +55,7 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 		RuleManager:              ruleManager,
 		HotCache:                 statistics.NewHotCache(),
 		StoresStats:              statistics.NewStoresStats(),
-		MockHighPrioritySchedule: priorityscheduling.NewMockHighPrioritySchedule(),
+		MockHighPrioritySchedule: mockschedule.NewMockHighPrioritySchedule(),
 	}
 }
 
