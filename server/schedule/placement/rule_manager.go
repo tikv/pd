@@ -131,7 +131,7 @@ func (m *RuleManager) loadRules() error {
 }
 
 func (m *RuleManager) loadGroups() error {
-	err := m.store.LoadRuleGroups(func(k, v string) {
+	return m.store.LoadRuleGroups(func(k, v string) {
 		var g RuleGroup
 		if err := json.Unmarshal([]byte(v), &g); err != nil {
 			log.Error("failed to unmarshal rule group", zap.String("group-id", k), zap.Error(errs.ErrLoadRuleGroup.FastGenByArgs()), zap.NamedError("cause", err))
@@ -139,10 +139,6 @@ func (m *RuleManager) loadGroups() error {
 		}
 		m.groups[g.ID] = &g
 	})
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 // check and adjust rule from client or storage.
