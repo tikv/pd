@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/keyutil"
 	"github.com/pingcap/pd/v4/pkg/logutil"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/schedule"
@@ -166,7 +165,7 @@ func (c *coordinator) patrolRegions() {
 // The regions of new version key range and old version key range would be placed into
 // the suspect regions map
 func (c *coordinator) checkSuspectKeyRanges() {
-	_, keyRange, success := c.cluster.PopOneSuspectKeyRange()
+	keyRange, success := c.cluster.PopOneSuspectKeyRange()
 	if !success {
 		return
 	}
@@ -184,11 +183,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 	// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
 	lastRegion := regions[len(regions)-1]
 	if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
-		restKeyRange := [2][]byte{
-			lastRegion.GetEndKey(),
-			keyRange[1],
-		}
-		c.cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(lastRegion.GetEndKey(), keyRange[1]), restKeyRange)
+		c.cluster.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
 	}
 	c.cluster.AddSuspectRegions(regionIDList...)
 }
