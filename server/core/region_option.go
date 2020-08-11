@@ -17,7 +17,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
-	"github.com/pingcap/pd/v4/pkg/metautil"
 )
 
 // RegionOption is used to select region.
@@ -237,7 +236,7 @@ func SetReplicationStatus(status *replication_modepb.RegionReplicationStatus) Re
 func WithAddPeer(peer *metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.meta.Peers = append(region.meta.Peers, peer)
-		if metautil.IsLearner(peer) {
+		if IsLearner(peer) {
 			region.learners = append(region.learners, peer)
 		} else {
 			region.voters = append(region.voters, peer)

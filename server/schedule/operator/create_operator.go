@@ -20,7 +20,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/pkg/metautil"
 	"github.com/pingcap/pd/v4/server/core"
 )
 
@@ -140,7 +139,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 	}
 	for _, pa := range a.GetPeers() {
 		pb := b.GetStorePeer(pa.GetStoreId())
-		if pb == nil || metautil.IsLearner(pb) != metautil.IsLearner(pa) {
+		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) {
 			return false
 		}
 	}
@@ -152,7 +151,7 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
-		if !metautil.IsLearner(peer) {
+		if !core.IsLearner(peer) {
 			ids = append(ids, id)
 		}
 	}

@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
-	"github.com/pingcap/pd/v4/pkg/metautil"
 )
 
 // RegionInfo records detail region info.
@@ -68,7 +67,7 @@ func classifyVoterAndLearner(region *RegionInfo) {
 	learners := make([]*metapb.Peer, 0, 1)
 	voters := make([]*metapb.Peer, 0, len(region.meta.Peers))
 	for _, p := range region.meta.Peers {
-		if metautil.IsLearner(p) {
+		if IsLearner(p) {
 			learners = append(learners, p)
 		} else {
 			voters = append(voters, p)
@@ -183,7 +182,7 @@ func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 // GetDownVoter returns the down voter with specified peer id.
 func (r *RegionInfo) GetDownVoter(peerID uint64) *metapb.Peer {
 	for _, down := range r.downPeers {
-		if down.GetPeer().GetId() == peerID && !metautil.IsLearner(down.GetPeer()) {
+		if down.GetPeer().GetId() == peerID && !IsLearner(down.GetPeer()) {
 			return down.GetPeer()
 		}
 	}
@@ -193,7 +192,7 @@ func (r *RegionInfo) GetDownVoter(peerID uint64) *metapb.Peer {
 // GetDownLearner returns the down learner with soecified peer id.
 func (r *RegionInfo) GetDownLearner(peerID uint64) *metapb.Peer {
 	for _, down := range r.downPeers {
-		if down.GetPeer().GetId() == peerID && metautil.IsLearner(down.GetPeer()) {
+		if down.GetPeer().GetId() == peerID && IsLearner(down.GetPeer()) {
 			return down.GetPeer()
 		}
 	}
@@ -213,7 +212,7 @@ func (r *RegionInfo) GetPendingPeer(peerID uint64) *metapb.Peer {
 // GetPendingVoter returns the pending voter with specified peer id.
 func (r *RegionInfo) GetPendingVoter(peerID uint64) *metapb.Peer {
 	for _, peer := range r.pendingPeers {
-		if peer.GetId() == peerID && !metautil.IsLearner(peer) {
+		if peer.GetId() == peerID && !IsLearner(peer) {
 			return peer
 		}
 	}
@@ -223,7 +222,7 @@ func (r *RegionInfo) GetPendingVoter(peerID uint64) *metapb.Peer {
 // GetPendingLearner returns the pending learner peer with specified peer id.
 func (r *RegionInfo) GetPendingLearner(peerID uint64) *metapb.Peer {
 	for _, peer := range r.pendingPeers {
-		if peer.GetId() == peerID && metautil.IsLearner(peer) {
+		if peer.GetId() == peerID && IsLearner(peer) {
 			return peer
 		}
 	}

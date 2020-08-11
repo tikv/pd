@@ -17,7 +17,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/metautil"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/operator"
@@ -134,7 +133,7 @@ func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, rf *placement.Rul
 }
 
 func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer) (*operator.Operator, error) {
-	if metautil.IsLearner(peer) && rf.Rule.Role != placement.Learner {
+	if core.IsLearner(peer) && rf.Rule.Role != placement.Learner {
 		checkerCounter.WithLabelValues("rule_checker", "fix-peer-role").Inc()
 		return operator.CreatePromoteLearnerOperator("fix-peer-role", c.cluster, region, peer)
 	}
@@ -152,7 +151,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 }
 
 func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
-	if metautil.IsLearner(peer) {
+	if core.IsLearner(peer) {
 		return false
 	}
 	s := c.cluster.GetStore(peer.GetStoreId())

@@ -18,7 +18,6 @@ import (
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/metautil"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/filter"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
@@ -131,7 +130,7 @@ func (b *Builder) PromoteLearner(storeID uint64) *Builder {
 	p := b.targetPeers.Get(storeID)
 	if p == nil {
 		b.err = errors.Errorf("cannot promote peer %d: not found", storeID)
-	} else if !metautil.IsLearner(p) {
+	} else if !core.IsLearner(p) {
 		b.err = errors.Errorf("cannot promote peer %d: not learner", storeID)
 	} else {
 		b.targetPeers.Set(&metapb.Peer{Id: p.GetId(), StoreId: p.GetStoreId()})
@@ -147,7 +146,7 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 	p := b.targetPeers.Get(storeID)
 	if p == nil {
 		b.err = errors.Errorf("cannot transfer leader to %d: not found", storeID)
-	} else if metautil.IsLearner(p) {
+	} else if core.IsLearner(p) {
 		b.err = errors.Errorf("cannot transfer leader to %d: not voter", storeID)
 	} else {
 		b.targetLeader = storeID
@@ -206,7 +205,7 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 func (b *Builder) prepareBuild() (string, error) {
 	var voterCount int
 	for _, p := range b.targetPeers.m {
-		if !metautil.IsLearner(p) {
+		if !core.IsLearner(p) {
 			voterCount++
 		}
 	}
@@ -219,17 +218,17 @@ func (b *Builder) prepareBuild() (string, error) {
 	for _, o := range b.originPeers.m {
 		n := b.targetPeers.Get(o.GetStoreId())
 		// no peer in targets, or target is learner while old one is voter.
-		if n == nil || (metautil.IsLearner(n) && !metautil.IsLearner(o)) {
+		if n == nil || (core.IsLearner(n) && !core.IsLearner(o)) {
 			b.toRemove.Set(o)
 			continue
 		}
-		if metautil.IsLearner(o) && !metautil.IsLearner(n) {
+		if core.IsLearner(o) && !core.IsLearner(n) {
 			b.toPromote.Set(n)
 		}
 	}
 	for _, n := range b.targetPeers.m {
 		o := b.originPeers.Get(n.GetStoreId())
-		if o == nil || (metautil.IsLearner(n) && !metautil.IsLearner(o)) {
+		if o == nil || (core.IsLearner(n) && !core.IsLearner(o)) {
 			// old peer not exists, or target is learner while old one is voter.
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
@@ -323,7 +322,7 @@ func (b *Builder) execAddPeer(p *metapb.Peer) {
 	} else {
 		b.steps = append(b.steps, AddLearner{ToStore: p.GetStoreId(), PeerID: p.GetId()})
 	}
-	if !metautil.IsLearner(p) {
+	if !core.IsLearner(p) {
 		b.steps = append(b.steps, PromoteLearner{ToStore: p.GetStoreId(), PeerID: p.GetId()})
 	}
 	b.currentPeers.Set(p)
@@ -345,7 +344,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 	if peer.GetStoreId() == b.currentLeader {
 		return true
 	}
-	if metautil.IsLearner(peer) {
+	if core.IsLearner(peer) {
 		return false
 	}
 	store := b.cluster.GetStore(peer.GetStoreId())
@@ -418,7 +417,7 @@ func (b *Builder) planReplace() stepPlan {
 		add := b.toAdd.Get(i)
 		for _, j := range b.toRemove.IDs() {
 			remove := b.toRemove.Get(j)
-			if metautil.IsLearner(remove) == metautil.IsLearner(add) {
+			if core.IsLearner(remove) == core.IsLearner(add) {
 				best = b.planReplaceLeaders(best, stepPlan{add: add, remove: remove})
 			}
 		}
@@ -427,9 +426,9 @@ func (b *Builder) planReplace() stepPlan {
 	for _, i := range b.toPromote.IDs() {
 		promote := b.toPromote.Get(i)
 		for _, j := range b.toAdd.IDs() {
-			if add := b.toAdd.Get(j); metautil.IsLearner(add) {
+			if add := b.toAdd.Get(j); core.IsLearner(add) {
 				for _, k := range b.toRemove.IDs() {
-					if remove := b.toRemove.Get(k); !metautil.IsLearner(remove) && j != k {
+					if remove := b.toRemove.Get(k); !core.IsLearner(remove) && j != k {
 						best = b.planReplaceLeaders(best, stepPlan{promote: promote, add: add, remove: remove})
 					}
 				}
@@ -598,7 +597,7 @@ func (b *Builder) preferTargetLeader(p stepPlan) int {
 
 // It is better to add target leader as early as possible.
 func (b *Builder) preferAddOrPromoteTargetLeader(p stepPlan) int {
-	addTarget := p.add != nil && !metautil.IsLearner(p.add) && p.add.GetStoreId() == b.targetLeader
+	addTarget := p.add != nil && !core.IsLearner(p.add) && p.add.GetStoreId() == b.targetLeader
 	promoteTarget := p.promote != nil && p.promote.GetStoreId() == b.targetLeader
 	return b2i(addTarget || promoteTarget)
 }
