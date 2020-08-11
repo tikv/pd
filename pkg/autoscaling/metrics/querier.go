@@ -50,7 +50,7 @@ type QueryOptions struct {
 	component ComponentType
 	metric    MetricType
 	instances []string
-	timestamp int64
+	timestamp time.Time
 	duration  time.Duration
 }
 
@@ -58,7 +58,7 @@ type QueryOptions struct {
 // The options will be used to query metrics of `duration` long UNTIL `timestamp`
 // which has `metric` type (CPU, Storage) for a specific `component` type in a `cluster`
 // and returns metrics value for each instance in `instances`
-func NewQueryOptions(cluster string, component ComponentType, metric MetricType, instances []string, timestamp int64, duration time.Duration) *QueryOptions {
+func NewQueryOptions(cluster string, component ComponentType, metric MetricType, instances []string, timestamp time.Time, duration time.Duration) *QueryOptions {
 	return &QueryOptions{
 		cluster,
 		component,
