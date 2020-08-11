@@ -88,6 +88,13 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 	c.Assert(m2.GetRule("foo", "baz"), DeepEquals, rules[2])
 }
 
+func (s *testManagerSuite) checkRules(c *C, rules []*Rule, expect [][2]string) {
+	c.Assert(rules, HasLen, len(expect))
+	for i := range rules {
+		c.Assert(rules[i].Key(), DeepEquals, expect[i])
+	}
+}
+
 func (s *testManagerSuite) TestKeys(c *C) {
 	rules := []*Rule{
 		{GroupID: "1", ID: "1", Role: "voter", Count: 1, StartKeyHex: "", EndKeyHex: ""},
@@ -104,13 +111,17 @@ func (s *testManagerSuite) TestKeys(c *C) {
 			DeleteByIDPrefix: false,
 		})
 	}
+	s.checkRules(c, s.manager.GetAllRules(), [][2]string{{"1", "1"}, {"2", "2"}, {"2", "3"}, {"pd", "default"}})
 	s.manager.Batch(toDelete)
+	s.checkRules(c, s.manager.GetAllRules(), [][2]string{{"pd", "default"}})
 
 	rules = append(rules, &Rule{GroupID: "3", ID: "4", Role: "voter", Count: 1, StartKeyHex: "44", EndKeyHex: "ee"},
 		&Rule{GroupID: "3", ID: "5", Role: "voter", Count: 1, StartKeyHex: "44", EndKeyHex: "dd"})
 	s.manager.SetRules(rules)
+	s.checkRules(c, s.manager.GetAllRules(), [][2]string{{"1", "1"}, {"2", "2"}, {"2", "3"}, {"3", "4"}, {"3", "5"}, {"pd", "default"}})
 
 	s.manager.DeleteRule("pd", "default")
+	s.checkRules(c, s.manager.GetAllRules(), [][2]string{{"1", "1"}, {"2", "2"}, {"2", "3"}, {"3", "4"}, {"3", "5"}})
 
 	splitKeys := [][]string{
 		{"", "", "11", "22", "44", "dd", "ee", "ff"},
@@ -170,6 +181,24 @@ func (s *testManagerSuite) TestKeys(c *C) {
 			c.Assert(rules[i].EndKeyHex, Equals, keys[i*2+2])
 		}
 	}
+}
+
+func (s *testManagerSuite) TestDeleteByIDPrefix(c *C) {
+	s.manager.SetRules([]*Rule{
+		{GroupID: "g1", ID: "foo1", Role: "voter", Count: 1},
+		{GroupID: "g2", ID: "foo1", Role: "voter", Count: 1},
+		{GroupID: "g2", ID: "foobar", Role: "voter", Count: 1},
+		{GroupID: "g2", ID: "baz2", Role: "voter", Count: 1},
+	})
+	s.manager.DeleteRule("pd", "default")
+	s.checkRules(c, s.manager.GetAllRules(), [][2]string{{"g1", "foo1"}, {"g2", "baz2"}, {"g2", "foo1"}, {"g2", "foobar"}})
+
+	s.manager.Batch([]RuleOp{{
+		Rule:             &Rule{GroupID: "g2", ID: "foo"},
+		Action:           RuleOpDel,
+		DeleteByIDPrefix: true,
+	}})
+	s.checkRules(c, s.manager.GetAllRules(), [][2]string{{"g1", "foo1"}, {"g2", "baz2"}})
 }
 
 func (s *testManagerSuite) TestRangeGap(c *C) {
