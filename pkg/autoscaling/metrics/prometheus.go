@@ -16,11 +16,14 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	promClient "github.com/prometheus/client_golang/api"
 	promAPI "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
-	"time"
+	"go.uber.org/zap"
 )
 
 const (
@@ -81,10 +84,14 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*httpRequestTimeout)
 	defer cancel()
 
-	resp, _, err := prom.api.Query(ctx, query, timestamp)
+	resp, warnings, err := prom.api.Query(ctx, query, timestamp)
 
 	if err != nil {
 		return nil, err
+	}
+
+	if warnings != nil && len(warnings) > 0 {
+		log.Warn("prometheus query returns with warnings", zap.Strings("warnings", warnings))
 	}
 
 	return resp, nil
