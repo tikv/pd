@@ -34,14 +34,16 @@ type RuleManager struct {
 	sync.RWMutex
 	initialized bool
 	rules       map[[2]string]*Rule
+	groups      map[string]*RuleGroup
 	ruleList    ruleList
 }
 
 // NewRuleManager creates a RuleManager instance.
 func NewRuleManager(store *core.Storage) *RuleManager {
 	return &RuleManager{
-		store: store,
-		rules: make(map[[2]string]*Rule),
+		store:  store,
+		rules:  make(map[[2]string]*Rule),
+		groups: make(map[string]*RuleGroup),
 	}
 }
 
@@ -71,7 +73,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 		}
 		m.rules[defaultRule.Key()] = defaultRule
 	}
-	ruleList, err := buildRuleList(m.rules)
+	ruleList, err := m.rebuildRuleList()
 	if err != nil {
 		return err
 	}
@@ -83,7 +85,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 func (m *RuleManager) loadRules() error {
 	var toSave []*Rule
 	var toDelete []string
-	_, err := m.store.LoadRules(func(k, v string) {
+	err := m.store.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
 			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
@@ -234,7 +236,7 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 }
 
 func (m *RuleManager) tryBuildSave(oldRules map[[2]string]*Rule) error {
-	ruleList, err := buildRuleList(m.rules)
+	ruleList, err := m.rebuildRuleList()
 	if err == nil {
 		for key := range oldRules {
 			rule := m.rules[key]
@@ -364,4 +366,15 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 
 	log.Info("placement rules updated", zap.String("batch", fmt.Sprint(todo)))
 	return nil
+}
+
+func (m *RuleManager) rebuildRuleList() (ruleList, error) {
+	for _, r := range m.rules {
+		r.group = m.groups[r.GroupID]
+	}
+	rl, err := buildRuleList(m.rules)
+	if err != nil {
+		return ruleList{}, err
+	}
+	return rl, nil
 }
