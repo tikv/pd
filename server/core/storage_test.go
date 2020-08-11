@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pkg/errors"
+	"go.etcd.io/etcd/clientv3"
 )
 
 var _ = Suite(&testKVSuite{})
@@ -212,8 +213,8 @@ func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
 		c.Assert(storage.SaveServiceGCSafePoint(ssp), IsNil)
 	}
 
-	prefix := path.Join(gcPath, "safe_point", "service")
-	prefixEnd := path.Join(gcPath, "safe_point", "servicf")
+	prefix := path.Join(gcPath, "safe_point", "service") + "/"
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := mem.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	c.Assert(err, IsNil)
 	c.Assert(len(keys), Equals, 3)

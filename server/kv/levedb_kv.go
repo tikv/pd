@@ -39,6 +39,9 @@ func NewLeveldbKV(path string) (*LeveldbKV, error) {
 func (kv *LeveldbKV) Load(key string) (string, error) {
 	v, err := kv.Get([]byte(key), nil)
 	if err != nil {
+		if err == leveldb.ErrNotFound {
+			return "", nil
+		}
 		return "", errors.WithStack(err)
 	}
 	return string(v), err
