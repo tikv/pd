@@ -431,7 +431,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	}
 	save.Flags().String("in", "rules.json", "the filename contains rules")
 	ruleGroup := &cobra.Command{
-		Use:   "rule_group",
+		Use:   "rule-group",
 		Short: "rule group configurations",
 	}
 	ruleGroupShow := &cobra.Command{
