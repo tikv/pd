@@ -16,14 +16,13 @@ package metrics
 import (
 	"context"
 	"fmt"
-	"time"
-
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	promClient "github.com/prometheus/client_golang/api"
 	promAPI "github.com/prometheus/client_golang/api/prometheus/v1"
-	"github.com/prometheus/common/model"
+	promModel "github.com/prometheus/common/model"
 	"go.uber.org/zap"
+	"time"
 )
 
 const (
@@ -80,7 +79,7 @@ func (prom *PrometheusQuerier) Query(options *QueryOptions) (QueryResult, error)
 	return result, nil
 }
 
-func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestamp time.Time) (model.Value, error) {
+func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestamp time.Time) (promModel.Value, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*httpRequestTimeout)
 	defer cancel()
 
@@ -97,16 +96,16 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 	return resp, nil
 }
 
-func extractInstancesFromResponse(resp model.Value, instances []string) (QueryResult, error) {
+func extractInstancesFromResponse(resp promModel.Value, instances []string) (QueryResult, error) {
 	if resp == nil {
 		return nil, errors.New("metrics response from Prometheus is empty")
 	}
 
-	if resp.Type() != model.ValVector {
+	if resp.Type() != promModel.ValVector {
 		return nil, errors.Errorf("expected vector type values, got %s", resp.Type().String())
 	}
 
-	vector := resp.(model.Vector)
+	vector := resp.(promModel.Vector)
 
 	instancesSet := map[string]struct{}{}
 	for _, instance := range instances {
