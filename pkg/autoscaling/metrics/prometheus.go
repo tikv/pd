@@ -105,7 +105,15 @@ func extractInstancesFromResponse(resp promModel.Value, instances []string) (Que
 		return nil, errors.Errorf("expected vector type values, got %s", resp.Type().String())
 	}
 
-	vector := resp.(promModel.Vector)
+	vector, ok := resp.(promModel.Vector)
+
+	if !ok {
+		return nil, errors.New("type conversion error")
+	}
+
+	if len(vector) == 0 {
+		return nil, errors.New("no results returned from Prometheus")
+	}
 
 	instancesSet := map[string]struct{}{}
 	for _, instance := range instances {

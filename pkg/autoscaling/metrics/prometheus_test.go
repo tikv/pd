@@ -217,8 +217,8 @@ func (s *testPrometheusQuerierSuite) TestEmptyResponse(c *check.C) {
 	querier := NewPrometheusQuerier(client)
 	options := NewQueryOptions(mockClusterName, TiDB, CPUUsage, instanceNames[TiDB], time.Now(), mockDuration)
 	result, err := querier.Query(options)
-	c.Assert(result, check.DeepEquals, QueryResult{})
-	c.Assert(err, check.IsNil)
+	c.Assert(result, check.IsNil)
+	c.Assert(err, check.NotNil)
 }
 
 type errorHTTPStatusClient struct{}
