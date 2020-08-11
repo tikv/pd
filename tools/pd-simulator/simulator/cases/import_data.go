@@ -112,7 +112,7 @@ func newImportData() *Case {
 		regionTotal := regions.GetRegionCount()
 		totalLeaderLog := fmt.Sprintf("%d leader:", regionTotal)
 		totalPeerLog := fmt.Sprintf("%d peer:", regionTotal*3)
-		isEnd := checkCount > uint64(getRegionNum()) / 10
+		isEnd := checkCount > uint64(getRegionNum())/10
 		var regionProps []float64
 		for storeID := uint64(1); storeID <= 10; storeID++ {
 			regions.GetStoreRegionCount(storeID)
