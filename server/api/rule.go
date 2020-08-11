@@ -372,7 +372,7 @@ func (h *ruleHandler) SetGroupConfig(w http.ResponseWriter, r *http.Request) {
 // @Tags rule
 // @Summary Delete rule group config.
 // @Param id path string true "Group Id"
-// @Produce text
+// @Produce json
 // @Success 200 {string} string "Delete rule group config successfully."
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Failure 500 {string} string "PD server failed to proceed the request."
