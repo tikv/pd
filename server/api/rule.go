@@ -364,8 +364,7 @@ func (h *ruleHandler) SetGroupConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, r := range cluster.GetRuleManager().GetRulesByGroup(ruleGroup.ID) {
-		key := keyutil.BuildKeyRangeKey(r.StartKey, r.EndKey)
-		cluster.AddSuspectKeyRange(key, [2][]byte{r.StartKey, r.EndKey})
+		cluster.AddSuspectKeyRange(r.StartKey, r.EndKey)
 	}
 	h.rd.JSON(w, http.StatusOK, "Update rule group successfully.")
 }
@@ -391,8 +390,7 @@ func (h *ruleHandler) DeleteGroupConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	for _, r := range cluster.GetRuleManager().GetRulesByGroup(id) {
-		key := keyutil.BuildKeyRangeKey(r.StartKey, r.EndKey)
-		cluster.AddSuspectKeyRange(key, [2][]byte{r.StartKey, r.EndKey})
+		cluster.AddSuspectKeyRange(r.StartKey, r.EndKey)
 	}
 	h.rd.JSON(w, http.StatusOK, "Delete rule group successfully.")
 }
