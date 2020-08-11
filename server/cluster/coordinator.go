@@ -114,7 +114,7 @@ func (c *coordinator) patrolRegions() {
 				continue
 			}
 			if c.opController.GetOperator(id) != nil {
-				c.cluster.CancelRegionHighPrioritySchedule(id)
+				c.cluster.RemoveHighPriorityScheduleRegion(id)
 				continue
 			}
 			checkerIsBusy, ops := c.checkers.CheckRegion(region)
@@ -124,7 +124,7 @@ func (c *coordinator) patrolRegions() {
 			if len(ops) > 0 {
 				c.opController.AddWaitingOperator(ops...)
 			}
-			c.cluster.CancelRegionHighPrioritySchedule(id)
+			c.cluster.RemoveHighPriorityScheduleRegion(id)
 		}
 
 		// Check suspect key ranges

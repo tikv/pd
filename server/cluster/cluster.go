@@ -441,9 +441,9 @@ func (c *RaftCluster) GetHighPriorityScheduleRegions() []uint64 {
 	return c.suspectRegions.GetAllID()
 }
 
-// CancelRegionHighPrioritySchedule removes region from high priority scheduling queue.
-// it implements HighPriority.CancelRegionHighPrioritySchedule
-func (c *RaftCluster) CancelRegionHighPrioritySchedule(id uint64) {
+// RemoveHighPriorityScheduleRegion removes region from high priority scheduling queue.
+// it implements HighPriority.RemoveHighPriorityScheduleRegion
+func (c *RaftCluster) RemoveHighPriorityScheduleRegion(id uint64) {
 	c.Lock()
 	defer c.Unlock()
 	c.suspectRegions.Remove(id)

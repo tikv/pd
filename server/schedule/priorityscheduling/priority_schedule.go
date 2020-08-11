@@ -17,7 +17,7 @@ package priorityscheduling
 type HighPrioritySchedule interface {
 	AddHighPriorityScheduleRegions(regionsIDs ...uint64)
 	GetHighPriorityScheduleRegions() []uint64
-	CancelRegionHighPrioritySchedule(id uint64)
+	RemoveHighPriorityScheduleRegion(id uint64)
 }
 
 // MockHighPrioritySchedule provide a mock HighPrioritySchedule, only used for unit test
@@ -51,8 +51,8 @@ func (mh *MockHighPrioritySchedule) GetHighPriorityScheduleRegions() []uint64 {
 	return returned
 }
 
-// CancelRegionHighPrioritySchedule implements the HighPrioritySchedule.CancelRegionHighPrioritySchedule
-func (mh *MockHighPrioritySchedule) CancelRegionHighPrioritySchedule(id uint64) {
+// RemoveHighPriorityScheduleRegion implements the HighPrioritySchedule.RemoveHighPriorityScheduleRegion
+func (mh *MockHighPrioritySchedule) RemoveHighPriorityScheduleRegion(id uint64) {
 	delete(mh.ids, id)
 }
 
