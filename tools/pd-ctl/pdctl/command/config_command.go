@@ -435,17 +435,17 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Short: "rule group configurations",
 	}
 	ruleGroupShow := &cobra.Command{
-		Use:   "show [id]",
+		Use:   "show [<id>]",
 		Short: "show rule group configuration(s)",
 		Run:   showRuleGroupFunc,
 	}
 	ruleGroupSet := &cobra.Command{
-		Use:   "set {id} {index} {override}",
+		Use:   "set <id> <index> <override>",
 		Short: "update rule group configuration",
 		Run:   updateRuleGroupFunc,
 	}
 	ruleGroupDelete := &cobra.Command{
-		Use:   "delete {id}",
+		Use:   "delete <id>",
 		Short: "delete rule group configuration",
 		Run:   deleteRuleGroupFunc,
 	}
