@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule"
@@ -106,7 +107,6 @@ func newMultiDimensionScheduler(opController *schedule.OperatorController, conf 
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 		regionPendings: make(map[uint64][2]*operator.Operator),
 		conf:           conf,
-		isScheduled:    false,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.pendings[ty] = map[*pendingInfluence]struct{}{}
@@ -161,17 +161,15 @@ func (h *multiDimensionScheduler) dispatch(typ rwType, cluster opt.Cluster) []*o
 	defer h.Unlock()
 
 	log.Info("execute multiDimensionScheduler")
+	h.isScheduled = true
 
 	h.prepareForBalance(cluster)
 
 	bs := newBalanceSolverHR(h, cluster, read, transferLeader)
-	ops := bs.genScheduleRequest()
-	h.isScheduled = true
-	if len(ops) > 0 {
-		return ops
-	} else {
-		return nil
-	}
+	ops := bs.greedyTwoDimension()
+	// ops := bs.genScheduleRequestFromFile()
+
+	return ops
 
 	// switch typ {
 	// case read:
@@ -570,77 +568,121 @@ func loadScheduleRequest() []scheduleCmd {
 	return ret
 }
 
-func (bs *balanceSolverHR) genScheduleRequest() []*operator.Operator {
+func (bs *balanceSolverHR) genScheduleRequestFromFile() []*operator.Operator {
 	ret := make([]*operator.Operator, 0)
 	schCmds := loadScheduleRequest()
 	for _, cmd := range schCmds {
 		log.Info(fmt.Sprintf("parse schedule cmd: %v", cmd))
-		region := bs.cluster.GetRegion(cmd.regionID)
-		if !bs.isRegionAvailable(region) {
-			log.Error("genScheduleRequest, not found region with ID", zap.Uint64("regionID", cmd.regionID))
-			continue
+		op := bs.generateOperator(cmd.regionID, cmd.srcStoreID, cmd.dstStoreID)
+		if op != nil {
+			ret = append(ret, op)
 		}
+	}
 
-		var (
-			op         *operator.Operator
-			counters   []prometheus.Counter
-			err        error
-			opTy       opType
-			srcStoreID uint64 = cmd.srcStoreID
-			dstStoreID uint64 = cmd.dstStoreID
-			rwTy       rwType = read
-		)
+	return ret
+}
 
-		if region.GetStoreVoter(dstStoreID) == nil { // move peer
-			opTy = movePeer
-			srcPeer := region.GetStorePeer(srcStoreID) // checked in getRegionAndSrcPeer
-			if srcPeer == nil {
-				log.Error("genScheduleRequest, GetStorePeer return null", zap.Uint64("storeID", srcStoreID), zap.Uint64("regionID", cmd.regionID))
-				continue
+func (bs *balanceSolverHR) generateOperator(regionID uint64, srcStoreID uint64, dstStoreID uint64) *operator.Operator {
+	var (
+		op       *operator.Operator
+		counters []prometheus.Counter
+		err      error
+		opTy     opType
+		rwTy     rwType = bs.rwTy
+	)
+
+	region := bs.cluster.GetRegion(regionID)
+	if !bs.isRegionAvailable(region) {
+		log.Error("region is not avaiable", zap.Uint64("regionID", regionID))
+		return nil
+	}
+
+	if region.GetStoreVoter(dstStoreID) == nil { // move peer
+		opTy = movePeer
+		srcPeer := region.GetStorePeer(srcStoreID) // checked in getRegionAndSrcPeer
+		if srcPeer == nil {
+			log.Error("GetStorePeer return null", zap.Uint64("storeID", srcStoreID), zap.Uint64("regionID", regionID))
+			return nil
+		}
+		dstPeer := &metapb.Peer{StoreId: dstStoreID, IsLearner: srcPeer.IsLearner}
+		op, err = operator.CreateMovePeerOperator(
+			"move-hot-"+rwTy.String()+"-region",
+			bs.cluster,
+			region,
+			operator.OpHotRegion,
+			srcStoreID,
+			dstPeer)
+
+		counters = append(counters,
+			balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(srcStoreID, 10)+"-out"),
+			balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(dstPeer.GetStoreId(), 10)+"-in"))
+	} else { // transfer leader
+		if region.GetLeader().GetStoreId() == dstStoreID {
+			log.Info("leader is already transferred", zap.Uint64("regionID", regionID), zap.Uint64("leaderStoreID", dstStoreID))
+			return nil
+		}
+		opTy = transferLeader
+		op, err = operator.CreateTransferLeaderOperator(
+			"transfer-hot-"+rwTy.String()+"-leader",
+			bs.cluster,
+			region,
+			srcStoreID,
+			dstStoreID,
+			operator.OpHotRegion)
+		counters = append(counters,
+			balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(srcStoreID, 10)+"-out"),
+			balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(dstStoreID, 10)+"-in"))
+	}
+
+	if err != nil {
+		log.Info("fail to create operator", zap.Error(err), zap.Stringer("rwType", rwTy), zap.Stringer("opType", opTy))
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
+		return nil
+	}
+
+	op.SetPriorityLevel(core.HighPriority)
+	op.Counters = append(op.Counters, counters...)
+	op.Counters = append(op.Counters,
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), opTy.String()))
+
+	return op
+}
+
+func (bs *balanceSolverHR) greedyTwoDimension() []*operator.Operator {
+	storeInfos := make([]*storeInfo, 0)
+	// create RegionInfo and StoreInfo to normalize flow data
+	for id, loadDetail := range bs.stLoadDetail {
+		hotRegions := make(map[uint64]*regionInfo)
+		for _, peer := range loadDetail.HotPeers {
+			hotRegions[peer.RegionID] = newRegionInfo(peer.RegionID, id,
+				peer.GetByteRate()/loadDetail.LoadPred.Future.ExpByteRate,
+				peer.GetKeyRate()/loadDetail.LoadPred.Future.ExpKeyRate)
+		}
+		si := newStoreInfo(id,
+			[]float64{loadDetail.LoadPred.Current.ByteRate / loadDetail.LoadPred.Future.ExpByteRate,
+				loadDetail.LoadPred.Current.KeyRate / loadDetail.LoadPred.Future.ExpKeyRate},
+			hotRegions)
+		storeInfos = append(storeInfos, si)
+	}
+
+	ret := make([]*operator.Operator, 0)
+
+	pendingRegions, needSplit := greedyBalance(storeInfos, 0.07)
+	if needSplit {
+		for _, ri := range pendingRegions {
+			opts := []float64{float64(ri.splitDimID), ri.splitRatio}
+			op := operator.CreateSplitRegionOperator("hotspot-split-region", bs.cluster.GetRegion(ri.id), operator.OpAdmin, pdpb.CheckPolicy_RATIO, nil, opts)
+			ret = append(ret, op)
+		}
+	} else {
+		for _, ri := range pendingRegions {
+			log.Info("migrate", zap.String("regionInfo", fmt.Sprintf("%+v", ri)))
+			op := bs.generateOperator(ri.id, ri.srcStoreID, ri.dstStoreID)
+			if op != nil {
+				ret = append(ret, op)
 			}
-			dstPeer := &metapb.Peer{StoreId: dstStoreID, IsLearner: srcPeer.IsLearner}
-			op, err = operator.CreateMovePeerOperator(
-				"move-hot-"+rwTy.String()+"-region",
-				bs.cluster,
-				region,
-				operator.OpHotRegion,
-				srcStoreID,
-				dstPeer)
-
-			counters = append(counters,
-				balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(srcStoreID, 10)+"-out"),
-				balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(dstPeer.GetStoreId(), 10)+"-in"))
-		} else { // transfer leader
-			if region.GetLeader().GetStoreId() == dstStoreID {
-				log.Info("leader is already transferred", zap.Uint64("regionID", cmd.regionID), zap.Uint64("leaderStoreID", dstStoreID))
-				continue
-			}
-			opTy = transferLeader
-			op, err = operator.CreateTransferLeaderOperator(
-				"transfer-hot-"+rwTy.String()+"-leader",
-				bs.cluster,
-				region,
-				srcStoreID,
-				dstStoreID,
-				operator.OpHotRegion)
-			counters = append(counters,
-				balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(srcStoreID, 10)+"-out"),
-				balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(dstStoreID, 10)+"-in"))
 		}
-
-		if err != nil {
-			log.Info("fail to create operator", zap.Error(err), zap.Stringer("rwType", rwTy), zap.Stringer("opType", opTy))
-			schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
-			continue
-		}
-
-		op.SetPriorityLevel(core.HighPriority)
-		op.Counters = append(op.Counters, counters...)
-		op.Counters = append(op.Counters,
-			schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
-			schedulerCounter.WithLabelValues(bs.sche.GetName(), opTy.String()))
-
-		ret = append(ret, op)
 	}
 
 	return ret

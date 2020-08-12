@@ -16,6 +16,7 @@ package schedulers
 import (
 	"math"
 	"net/url"
+	"sort"
 	"strconv"
 
 	"github.com/montanaflynn/stats"
@@ -338,4 +339,335 @@ func (li *storeLoadDetail) toHotPeersStat() *statistics.HotPeersStat {
 		Count:          len(li.HotPeers),
 		Stats:          peers,
 	}
+}
+
+// DimensionCount defines the number of dimensions
+const DimensionCount = 2
+
+type regionInfo struct {
+	id         uint64
+	srcStoreID uint64
+	dstStoreID uint64
+	loads      [DimensionCount]float64
+	diffLoad   float64
+	splitRatio float64
+	splitDimID uint64
+}
+
+func newRegionInfo(id uint64, srcStoreID uint64, load1 float64, load2 float64) *regionInfo {
+	return &regionInfo{
+		id:         id,
+		srcStoreID: srcStoreID,
+		loads:      [DimensionCount]float64{load1, load2},
+		diffLoad:   math.Abs(load1 - load2),
+	}
+}
+
+type regionInfoByDiff []*regionInfo
+
+func (s regionInfoByDiff) Len() int           { return len(s) }
+func (s regionInfoByDiff) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s regionInfoByDiff) Less(i, j int) bool { return s[i].diffLoad < s[j].diffLoad }
+
+type regionContainer struct {
+	emphRegions     [DimensionCount]map[uint64][]*regionInfo
+	migratedRegions map[uint64]*regionInfo
+	count           [DimensionCount]uint64
+}
+
+func newRegionContainer() *regionContainer {
+	ret := &regionContainer{
+		migratedRegions: make(map[uint64]*regionInfo, 0),
+	}
+	for i := range ret.emphRegions {
+		ret.emphRegions[i] = make(map[uint64][]*regionInfo, 0)
+	}
+	return ret
+}
+
+func (rc *regionContainer) push(dimID uint64, region *regionInfo) {
+	if _, ok := rc.emphRegions[dimID][region.srcStoreID]; !ok {
+		rc.emphRegions[dimID][region.srcStoreID] = make([]*regionInfo, 0)
+	}
+	rc.emphRegions[dimID][region.srcStoreID] = append(rc.emphRegions[dimID][region.srcStoreID], region)
+
+	rc.migratedRegions[region.id] = region
+	rc.count[dimID]++
+}
+
+func (rc *regionContainer) pop(dimID uint64, candidateStoreID uint64) *regionInfo {
+	sid := candidateStoreID
+	if _, ok := rc.emphRegions[dimID][sid]; !ok { // should pick region from remote node
+		for sid1 := range rc.emphRegions[dimID] {
+			sid = sid1
+			break
+		}
+	}
+
+	var region *regionInfo
+	{
+		length := len(rc.emphRegions[dimID][sid])
+		region = rc.emphRegions[dimID][sid][length-1]
+		region.dstStoreID = candidateStoreID
+		rc.emphRegions[dimID][sid] = rc.emphRegions[dimID][sid][:length-1]
+	}
+
+	if len(rc.emphRegions[dimID][sid]) == 0 {
+		delete(rc.emphRegions[dimID], sid)
+	}
+	rc.count[dimID]--
+
+	return region
+}
+
+func (rc *regionContainer) getMigratedRegions() []*regionInfo {
+	ret := make([]*regionInfo, 0)
+	for _, region := range rc.migratedRegions {
+		if region.srcStoreID != region.dstStoreID {
+			ret = append(ret, region)
+		}
+	}
+	return ret
+}
+
+func (rc *regionContainer) empty(dimID uint64) bool {
+	return rc.count[dimID] == 0
+}
+
+type storeInfo struct {
+	id          uint64
+	loads       []float64
+	regions     map[uint64]*regionInfo
+	emphRegions [][]*regionInfo
+}
+
+type storeInfoByLoad0 []*storeInfo
+
+func (s storeInfoByLoad0) Len() int           { return len(s) }
+func (s storeInfoByLoad0) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s storeInfoByLoad0) Less(i, j int) bool { return s[i].loads[0] < s[j].loads[0] }
+
+type storeInfoByLoad1 []*storeInfo
+
+func (s storeInfoByLoad1) Len() int           { return len(s) }
+func (s storeInfoByLoad1) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s storeInfoByLoad1) Less(i, j int) bool { return s[i].loads[1] < s[j].loads[1] }
+
+func newStoreInfo(id uint64, loads []float64, regions map[uint64]*regionInfo) *storeInfo {
+	ret := &storeInfo{
+		id:          id,
+		loads:       loads,
+		regions:     regions,
+		emphRegions: make([][]*regionInfo, DimensionCount),
+	}
+	for i := range ret.emphRegions {
+		ret.emphRegions[i] = make([]*regionInfo, 0)
+	}
+	return ret
+}
+
+func (si *storeInfo) add(region *regionInfo) {
+	si.regions[region.id] = region
+	for i := range si.loads {
+		si.loads[i] += region.loads[i]
+	}
+}
+
+func (si *storeInfo) remove(region *regionInfo) {
+	delete(si.regions, region.id)
+	for i := range si.loads {
+		si.loads[i] -= region.loads[i]
+	}
+}
+
+func (si *storeInfo) classifyRegion() {
+	for _, region := range si.regions {
+		if region.loads[0] >= region.loads[1] {
+			si.emphRegions[0] = append(si.emphRegions[0], region)
+		} else {
+			si.emphRegions[1] = append(si.emphRegions[1], region)
+		}
+	}
+	sort.Sort(regionInfoByDiff(si.emphRegions[0]))
+	sort.Sort(regionInfoByDiff(si.emphRegions[1]))
+}
+
+func calcMaxMeanRatio(storeInfos []*storeInfo) float64 {
+	var ratios []float64
+	for dimID := uint64(0); dimID < DimensionCount; dimID++ {
+		var maxLoad, avgLoad float64
+		for _, store := range storeInfos {
+			avgLoad += store.loads[dimID]
+			maxLoad = math.Max(maxLoad, store.loads[dimID])
+		}
+		avgLoad /= float64(len(storeInfos))
+		ratios = append(ratios, maxLoad/avgLoad)
+	}
+	return math.Max(ratios[0], ratios[1])
+}
+
+func greedyBalance(storeInfos []*storeInfo, ratio float64) (ret []*regionInfo, needSplit bool) {
+	type balanceType int
+
+	const (
+		above balanceType = iota
+		cross
+		under
+	)
+
+	storeBalanceType := func(store *storeInfo) balanceType {
+		if store.loads[0] > 1.0 && store.loads[1] > 1.0 {
+			return above
+		} else if (store.loads[0]-1.0)*(store.loads[1]-1.0) < 0 {
+			return cross
+		} else {
+			return under
+		}
+	}
+
+	pickHigher := func(store *storeInfo) (dimID uint64, region *regionInfo) {
+		if store.loads[0] < store.loads[1] {
+			dimID = 1
+		}
+		{
+			length := len(store.emphRegions[dimID])
+			if length == 0 {
+				log.Warn("can not choose region from pickHigher",
+					zap.Uint64("storeID", store.id),
+					zap.Int("emphRegionLen0", len(store.emphRegions[0])),
+					zap.Int("emphRegionLen1", len(store.emphRegions[1])),
+					zap.Float64("storeLoadRatio0", store.loads[0]),
+					zap.Float64("storeLoadRatio1", store.loads[1]),
+				)
+				return
+			}
+			region = store.emphRegions[dimID][length-1]
+			store.emphRegions[dimID] = store.emphRegions[dimID][:length-1]
+		}
+		return
+	}
+
+	checkOrder := func(store *storeInfo) (higher uint64, lower uint64) {
+		if store.loads[0] < store.loads[1] {
+			higher = 1
+		}
+		lower = 1 - higher
+		return
+	}
+
+	checkRegionSplit := func(region *regionInfo) bool {
+		var splitDimID uint64
+		if region.loads[0] < region.loads[1] {
+			splitDimID = 1
+		}
+		region.splitRatio = ratio / region.loads[splitDimID]
+		region.splitDimID = splitDimID
+
+		if region.splitRatio > 0.9 && region.loads[splitDimID]*(1-region.splitRatio) < ratio/2 { // avoid split small region
+			// log.Warn("greedyBalance: unpredictable region split ratio",
+			// 	zap.Uint64("regionID", region.id),
+			// )
+			region.splitRatio = 0.0
+			return false
+		}
+		log.Info("greedyBalance: split region info",
+			zap.Uint64("regionID", region.id),
+			zap.Float64("load0", region.loads[0]),
+			zap.Float64("load1", region.loads[1]),
+			zap.Float64("splitRatio", region.splitRatio),
+			zap.Uint64("splitDimID", splitDimID),
+		)
+		return true
+	}
+
+	container := newRegionContainer()
+	splitRegions := make([]*regionInfo, 0)
+
+	// step 1: remove regions to make the difference of two dimensions' loads not over `ratio`,
+	//         identify regions that need to be split
+	for _, store := range storeInfos {
+		store.classifyRegion()
+		pickCount := 0
+		for math.Abs(store.loads[0]-store.loads[1]) > ratio || storeBalanceType(store) == above {
+			preHigher, _ := checkOrder(store)
+			dimID, region := pickHigher(store)
+			if region == nil { // statistics error or no hotspots were recognized
+				// return nil, false
+				break
+			}
+
+			// check region whether needs to be split
+			if checkRegionSplit(region) {
+				splitRegions = append(splitRegions, region)
+			}
+
+			store.remove(region)
+			curHigher, _ := checkOrder(store)
+			container.push(dimID, region)
+			pickCount++
+
+			if storeBalanceType(store) != under {
+				continue
+			} else if math.Abs(store.loads[0]-store.loads[1]) <= ratio ||
+				preHigher != curHigher {
+				break
+			}
+		}
+
+		log.Info("greedyBalance: step 1",
+			zap.Int("# of picked regions", pickCount),
+			zap.Uint64("storeID", store.id),
+		)
+	}
+
+	if len(splitRegions) != 0 {
+		ret = splitRegions
+		needSplit = true
+		return
+	}
+
+	log.Info("greedyBalance: step2")
+	// step 2: carefully fill regions into stores, make sure each store will not overflow too much
+	sort.Sort(storeInfoByLoad0(storeInfos))
+	for _, store := range storeInfos {
+		for storeBalanceType(store) != above {
+			var dimID uint64
+			if store.loads[0] > store.loads[1] {
+				dimID = 1
+			}
+
+			if !container.empty(dimID) {
+				region := container.pop(dimID, store.id)
+				store.add(region)
+			} else {
+				break
+			}
+		}
+	}
+	log.Info("greedyBalance: step3")
+	// step 3: fill remaining regions
+	for dimID := uint64(0); dimID < DimensionCount; dimID++ {
+		if dimID == 0 {
+			sort.Sort(storeInfoByLoad0(storeInfos))
+		} else {
+			sort.Sort(storeInfoByLoad1(storeInfos))
+		}
+		for _, store := range storeInfos {
+			for store.loads[dimID] < 1 && !container.empty(dimID) {
+				region := container.pop(dimID, store.id)
+				store.add(region)
+			}
+		}
+	}
+
+	for _, store := range storeInfos {
+		log.Info("store load", zap.Uint64("storeID", store.id), zap.Float64("dim0", store.loads[0]), zap.Float64("dim1", store.loads[1]))
+	}
+
+	ret = container.getMigratedRegions()
+	log.Info("greedyBalance: summary",
+		zap.Int("migrationCost", len(ret)),
+		zap.Float64("balanceRatio", calcMaxMeanRatio(storeInfos)),
+	)
+	return
 }
