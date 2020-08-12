@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/core"
 	"go.uber.org/zap"
@@ -29,9 +30,15 @@ const (
 	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling-"
 )
 
-// MetricsTimeDuration is used to get the metrics of a certain time period.
 // TODO: adjust the value or make it configurable.
-var MetricsTimeDuration = 5 * time.Second
+var (
+	// MetricsTimeDuration is used to get the metrics of a certain time period.
+	MetricsTimeDuration = 5 * time.Second
+	// MaxScaleOutStep is used to indicate the maxium number of instance for scaling out operations at once.
+	MaxScaleOutStep uint64 = 1
+	// MaxScaleInStep is used to indicate the maxium number of instance for scaling in operations at once.
+	MaxScaleInStep uint64 = 1
+)
 
 func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 	var plans []*Plan
@@ -138,8 +145,7 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 	group := findBestGroupToScaleOut(rc, strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
-	// TODO: support customized step
-	scaleOutCount := uint64(math.Ceil(scaleOutQuota / resCPU))
+	scaleOutCount := typeutil.MinUint64(uint64(math.Ceil(scaleOutQuota/resCPU)), MaxScaleOutStep)
 	increasedQuota := getCPUByResourceType(strategy, group.ResourceType) * scaleOutCount
 	afterQuota := currentQuota + increasedQuota
 
@@ -165,8 +171,7 @@ func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component
 	}
 	group := findBestGroupToScaleIn(rc, strategy, scaleInQuota, groups)
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
-	// TODO: support customized step
-	scaleInCount := uint64(math.Ceil(scaleInQuota / resCPU))
+	scaleInCount := typeutil.MinUint64(uint64(math.Ceil(scaleInQuota/resCPU)), MaxScaleInStep)
 	for i, g := range groups {
 		if g.ResourceType == group.ResourceType {
 			if group.Count > scaleInCount {
