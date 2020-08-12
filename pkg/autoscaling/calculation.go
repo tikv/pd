@@ -18,7 +18,15 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/core"
+	"go.uber.org/zap"
+)
+
+const (
+	groupLabelKey                  = "group"
+	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling-"
 )
 
 // MetricsTimeDuration is used to get the metrics of a certain time period.
@@ -43,7 +51,7 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 }
 
 func getPlans(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType) ([]*Plan, uint64) {
-	var instances []string
+	var instances []instance
 	if component == TiKV {
 		instances = filterTiKVInstances(rc)
 	} else {
@@ -63,38 +71,38 @@ func getPlans(rc *cluster.RaftCluster, strategy *Strategy, component ComponentTy
 	// TODO: add metrics to show why it triggers scale in/out.
 	if usage > maxThreshold {
 		scaleOutQuota := (totalCPUUseTime - totalCPUTime*maxThreshold) / MetricsTimeDuration.Seconds()
-		return calculateScaleOutPlan(rc, strategy, component, scaleOutQuota, currentQuota)
+		return calculateScaleOutPlan(rc, strategy, component, scaleOutQuota, currentQuota, instances)
 	}
 	if usage < minThreshold {
 		scaleInQuota := (totalCPUTime*minThreshold - totalCPUUseTime) / MetricsTimeDuration.Seconds()
-		return calculateScaleInPlan(rc, strategy, component, scaleInQuota), 0
+		return calculateScaleInPlan(rc, strategy, component, scaleInQuota, instances), 0
 	}
 	return nil, 0
 }
 
-func filterTiKVInstances(rc *cluster.RaftCluster) []string {
-	var instances []string
-	stores := rc.GetStores()
+func filterTiKVInstances(informer core.StoreSetInformer) []instance {
+	var instances []instance
+	stores := informer.GetStores()
 	for _, store := range stores {
 		if store.GetState() == metapb.StoreState_Up {
-			instances = append(instances, store.GetAddress())
+			instances = append(instances, instance{id: store.GetID(), address: store.GetAddress()})
 		}
 	}
 	return instances
 }
 
 // TODO: get TiDB instances
-func getTiDBInstances() []string {
-	return []string{}
+func getTiDBInstances() []instance {
+	return []instance{}
 }
 
 // TODO: get total CPU use time through Prometheus.
-func getTotalCPUUseTime(component ComponentType, instances []string, duration time.Duration) float64 {
+func getTotalCPUUseTime(component ComponentType, instances []instance, duration time.Duration) float64 {
 	return 1.0
 }
 
 // TODO: get total CPU quota through Prometheus.
-func getTotalCPUQuota(component ComponentType, instances []string) uint64 {
+func getTotalCPUQuota(component ComponentType, instances []instance) uint64 {
 	return 1
 }
 
@@ -125,8 +133,8 @@ func getResourcesByComponent(strategy *Strategy, component ComponentType) []*Res
 	return resources
 }
 
-func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64) ([]*Plan, uint64) {
-	groups := getScaledGroupsByComponent(component)
+func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64, instances []instance) ([]*Plan, uint64) {
+	groups := getScaledGroupsByComponent(rc, component, instances)
 	group := findBestGroupToScaleOut(rc, strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
@@ -150,8 +158,8 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 	return groups, afterQuota
 }
 
-func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleInQuota float64) []*Plan {
-	groups := getScaledGroupsByComponent(component)
+func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleInQuota float64, instances []instance) []*Plan {
+	groups := getScaledGroupsByComponent(rc, component, instances)
 	if len(groups) == 0 {
 		return nil
 	}
@@ -186,8 +194,53 @@ func getCPUByResourceType(strategy *Strategy, resourceType string) uint64 {
 }
 
 // TODO: get the scaled groups
-func getScaledGroupsByComponent(component ComponentType) []*Plan {
-	return []*Plan{}
+func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType, healthyInstances []instance) []*Plan {
+	switch component {
+	case TiKV:
+		return getScaledTiKVGroups(rc, healthyInstances)
+	case TiDB:
+		// TODO: support search TiDB Group
+		return []*Plan{}
+	default:
+		return nil
+	}
+}
+
+func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) []*Plan {
+	var plans []*Plan
+	planMap := make(map[string]map[uint64]struct{}, len(healthyInstances))
+	for _, instance := range healthyInstances {
+		store := informer.GetStore(instance.id)
+		if store == nil {
+			log.Warn("inconsistency between health instances and store status, exit auto-scaling calculation",
+				zap.Uint64("store-id", instance.id))
+			return nil
+		}
+		v := store.GetLabelValue(groupLabelKey)
+		if len(v) > len(autoScalingGroupLabelKeyPrefix) &&
+			v[:len(autoScalingGroupLabelKeyPrefix)] == autoScalingGroupLabelKeyPrefix {
+			if stores, ok := planMap[v]; ok {
+				stores[instance.id] = struct{}{}
+			} else {
+				planMap[v] = map[uint64]struct{}{
+					instance.id: {},
+				}
+			}
+		}
+	}
+	for groupLabel, groupInstances := range planMap {
+		plans = append(plans, &Plan{
+			Component: TiKV.String(),
+			Count:     uint64(len(groupInstances)),
+			Labels: []*metapb.StoreLabel{
+				{
+					Key:   groupLabelKey,
+					Value: groupLabel,
+				},
+			},
+		})
+	}
+	return plans
 }
 
 // TODO: implement heterogeneous logic
