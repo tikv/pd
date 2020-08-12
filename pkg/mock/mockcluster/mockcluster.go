@@ -636,17 +636,20 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	mc.PutStore(newStore)
 }
 
+// AddSuspectRegions mock method
 func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
 	for _, id := range ids {
 		mc.suspectRegions[id] = struct{}{}
 	}
 }
 
+// CheckRegionUnderSuspect only used for unit test
 func (mc *Cluster) CheckRegionUnderSuspect(id uint64) bool {
 	_, ok := mc.suspectRegions[id]
 	return ok
 }
 
+// ResetSuspectRegions only used for unit test
 func (mc *Cluster) ResetSuspectRegions() {
 	mc.suspectRegions = map[uint64]struct{}{}
 }
