@@ -28,10 +28,10 @@ import (
 )
 
 const (
-	tikvSumCPUUsageMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total{cluster="%s"}[%s])) by (instance)`
-	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{cluster="%s",job="tidb"}[%s])) by (instance)`
-	tikvCPUQuotaMetricsPattern    = `tikv_server_cpu_cores_quota{cluster="%s"}`
-	tidbCPUQuotaMetricsPattern    = `tidb_server_maxprocs{cluster="%s"}`
+	tikvSumCPUUsageMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total[%s])) by (instance)`
+	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{job="tidb"}[%s])) by (instance)`
+	tikvCPUQuotaMetricsPattern    = `tikv_server_cpu_cores_quota`
+	tidbCPUQuotaMetricsPattern    = `tidb_server_maxprocs`
 	instanceLabelName             = "instance"
 
 	httpRequestTimeout = 5 * time.Second
@@ -151,7 +151,7 @@ func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
 		return "", errors.Errorf("unsupported component type %v", options.component)
 	}
 
-	query := fmt.Sprintf(pattern, options.cluster)
+	query := pattern
 	return query, nil
 }
 
@@ -161,6 +161,6 @@ func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
 		return "", errors.Errorf("unsupported component type %v", options.component)
 	}
 
-	query := fmt.Sprintf(pattern, options.cluster, options.duration.String())
+	query := fmt.Sprintf(pattern, options.duration.String())
 	return query, nil
 }

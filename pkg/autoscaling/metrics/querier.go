@@ -30,7 +30,6 @@ type Querier interface {
 
 // QueryOptions includes parameters for later metrics query
 type QueryOptions struct {
-	cluster   string
 	component types.ComponentType
 	metric    types.MetricType
 	instances []string
@@ -40,11 +39,10 @@ type QueryOptions struct {
 
 // NewQueryOptions constructs a new QueryOptions for metrics
 // The options will be used to query metrics of `duration` long UNTIL `timestamp`
-// which has `metric` type (CPU, Storage) for a specific `component` type in a `cluster`
+// which has `metric` type (CPU, Storage) for a specific `component` type
 // and returns metrics value for each instance in `instances`
-func NewQueryOptions(cluster string, component types.ComponentType, metric types.MetricType, instances []string, timestamp time.Time, duration time.Duration) *QueryOptions {
+func NewQueryOptions(component types.ComponentType, metric types.MetricType, instances []string, timestamp time.Time, duration time.Duration) *QueryOptions {
 	return &QueryOptions{
-		cluster,
 		component,
 		metric,
 		instances,
