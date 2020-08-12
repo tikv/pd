@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
 	"github.com/pingcap/pd/v4/pkg/testutil"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/kv"
@@ -273,16 +274,6 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	wg.Wait()
 }
 
-func MaxUint64(nums ...uint64) uint64 {
-	result := uint64(0)
-	for _, num := range nums {
-		if num > result {
-			result = num
-		}
-	}
-	return result
-}
-
 func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run func(*coordinator), c *C) (*testCluster, *coordinator, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg, opt, err := newTestScheduleConfig()
@@ -371,7 +362,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	defer cleanup()
 
 	c.Assert(tc.addRegionStore(1, 0), IsNil)
-	num := 1 + MaxUint64(co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
+	num := 1 + typeutil.MaxUint64(co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
