@@ -13,7 +13,11 @@
 
 package metrics
 
-import "time"
+import (
+	"time"
+
+	types "github.com/pingcap/pd/v4/pkg/autoscaling"
+)
 
 // QueryResult stores metrics value for each instance
 type QueryResult map[string]float64
@@ -24,31 +28,11 @@ type Querier interface {
 	Query(options *QueryOptions) (QueryResult, error)
 }
 
-// ComponentType represents different components of a TiDB cluster
-type ComponentType string
-
-const (
-	// TiDB represents TiDB component of a TiDB cluster
-	TiDB = "tidb"
-	// TiKV represents TiKV component of a TiDB cluster
-	TiKV = "tikv"
-)
-
-// MetricType represents types of resources (CPU, storage, etc...)
-type MetricType string
-
-const (
-	// CPUUsage represents cpu time cost
-	CPUUsage = "cpu_usage"
-	// CPUQuota represents cpu cores quota
-	CPUQuota = "cpu_quota"
-)
-
 // QueryOptions includes parameters for later metrics query
 type QueryOptions struct {
 	cluster   string
-	component ComponentType
-	metric    MetricType
+	component types.ComponentType
+	metric    types.MetricType
 	instances []string
 	timestamp time.Time
 	duration  time.Duration
@@ -58,7 +42,7 @@ type QueryOptions struct {
 // The options will be used to query metrics of `duration` long UNTIL `timestamp`
 // which has `metric` type (CPU, Storage) for a specific `component` type in a `cluster`
 // and returns metrics value for each instance in `instances`
-func NewQueryOptions(cluster string, component ComponentType, metric MetricType, instances []string, timestamp time.Time, duration time.Duration) *QueryOptions {
+func NewQueryOptions(cluster string, component types.ComponentType, metric types.MetricType, instances []string, timestamp time.Time, duration time.Duration) *QueryOptions {
 	return &QueryOptions{
 		cluster,
 		component,
