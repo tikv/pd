@@ -212,7 +212,7 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 	for _, instance := range healthyInstances {
 		store := informer.GetStore(instance.id)
 		if store == nil {
-			log.Warn("inconsistency between healthInstances and StoreSetInformer, exit auto-scaling calculation",
+			log.Warn("inconsistency between health instances and store status, exit auto-scaling calculation",
 				zap.Uint64("store-id", instance.id))
 			return nil
 		}
