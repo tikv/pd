@@ -86,7 +86,7 @@ type Cluster interface {
 	statistics.RegionStatInformer
 	statistics.StoreStatInformer
 	Options
-	priorityscheduling.HighPrioritySchedule
+	priorityscheduling.PrioritySchedule
 
 	AllocID() (uint64, error)
 	FitRegion(*core.RegionInfo) *placement.RegionFit

@@ -13,8 +13,10 @@
 
 package priorityscheduling
 
-// HighPrioritySchedule control the regions whether need high priority scheduling
-type HighPrioritySchedule interface {
+// PrioritySchedule control the regions priority scheduling
+type PrioritySchedule interface {
+
+	// Add/Get/Remove control the regions scheduling processing with high priority
 	AddHighPriorityScheduleRegions(regionsIDs ...uint64)
 	GetHighPriorityScheduleRegions() []uint64
 	RemoveHighPriorityScheduleRegion(id uint64)
