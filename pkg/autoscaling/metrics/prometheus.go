@@ -30,8 +30,8 @@ import (
 const (
 	tikvSumCPUUsageMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total{cluster="%s"}[%s])) by (instance)`
 	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{cluster="%s",job="tidb"}[%s])) by (instance)`
-	tikvSumCPUQuotaMetricsPattern = `tikv_server_cpu_cores_quota{cluster="%s"}`
-	tidbSumCPUQuotaMetricsPattern = `tidb_server_maxprocs{cluster="%s"}`
+	tikvCPUQuotaMetricsPattern    = `tikv_server_cpu_cores_quota{cluster="%s"}`
+	tidbCPUQuotaMetricsPattern    = `tidb_server_maxprocs{cluster="%s"}`
 	instanceLabelName             = "instance"
 
 	httpRequestTimeout = 5 * time.Second
@@ -141,8 +141,8 @@ var cpuUsagePromQLTemplate = map[types.ComponentType]string{
 }
 
 var cpuQuotaPromQLTemplate = map[types.ComponentType]string{
-	types.TiDB: tidbSumCPUQuotaMetricsPattern,
-	types.TiKV: tikvSumCPUQuotaMetricsPattern,
+	types.TiDB: tidbCPUQuotaMetricsPattern,
+	types.TiKV: tikvCPUQuotaMetricsPattern,
 }
 
 func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
