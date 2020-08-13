@@ -21,7 +21,9 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pingcap/pd/v4/server/core"
+	promClient "github.com/prometheus/client_golang/api"
 	"go.uber.org/zap"
 )
 
@@ -40,14 +42,14 @@ var (
 	MaxScaleInStep uint64 = 1
 )
 
-func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
+func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Strategy) []*Plan {
 	var plans []*Plan
 	var afterQuota uint64
-	if tikvPlans, tikvAfterQuota := getPlans(rc, strategy, TiKV); tikvPlans != nil {
+	if tikvPlans, tikvAfterQuota := getPlans(rc, cfg, strategy, TiKV); tikvPlans != nil {
 		plans = append(plans, tikvPlans...)
 		afterQuota += tikvAfterQuota
 	}
-	if tidbPlans, tidbAfterQuota := getPlans(rc, strategy, TiDB); tidbPlans != nil {
+	if tidbPlans, tidbAfterQuota := getPlans(rc, cfg, strategy, TiDB); tidbPlans != nil {
 		plans = append(plans, tidbPlans...)
 		afterQuota += tidbAfterQuota
 	}
@@ -57,7 +59,7 @@ func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 	return plans
 }
 
-func getPlans(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType) ([]*Plan, uint64) {
+func getPlans(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Strategy, component ComponentType) ([]*Plan, uint64) {
 	var instances []instance
 	if component == TiKV {
 		instances = filterTiKVInstances(rc)
@@ -69,8 +71,29 @@ func getPlans(rc *cluster.RaftCluster, strategy *Strategy, component ComponentTy
 		return nil, 0
 	}
 
-	totalCPUUseTime := getTotalCPUUseTime(component, instances, MetricsTimeDuration)
-	currentQuota := getTotalCPUQuota(component, instances)
+	client, err := promClient.NewClient(promClient.Config{
+		Address: cfg.MetricStorage,
+	})
+	if err != nil {
+		log.Error("error initializing Prometheus client", zap.String("address", cfg.MetricStorage), zap.Error(err))
+		return nil, 0
+	}
+
+	querier := NewPrometheusQuerier(client)
+	now := time.Now()
+
+	totalCPUUseTime, err := getTotalCPUUseTime(querier, component, instances, now, MetricsTimeDuration)
+	if err != nil {
+		log.Error("cannot get total CPU used time", zap.Error(err))
+		return nil, 0
+	}
+
+	currentQuota, err := getTotalCPUQuota(querier, component, instances, now)
+	if err != nil {
+		log.Error("cannot get total CPU quota", zap.Error(err))
+		return nil, 0
+	}
+
 	totalCPUTime := float64(currentQuota) * MetricsTimeDuration.Seconds()
 	usage := totalCPUUseTime / totalCPUTime
 	maxThreshold, minThreshold := getCPUThresholdByComponent(strategy, component)
@@ -103,14 +126,46 @@ func getTiDBInstances() []instance {
 	return []instance{}
 }
 
-// TODO: get total CPU use time through Prometheus.
-func getTotalCPUUseTime(component ComponentType, instances []instance, duration time.Duration) float64 {
-	return 1.0
+func instancesToStrings(instances []instance) []string {
+	names := make([]string, 0, len(instances))
+	for _, inst := range instances {
+		names = append(names, inst.String())
+	}
+	return names
 }
 
-// TODO: get total CPU quota through Prometheus.
-func getTotalCPUQuota(component ComponentType, instances []instance) uint64 {
-	return 1
+// TODO: suppport other metrics storage
+// get total CPU use time (in seconds) through Prometheus.
+func getTotalCPUUseTime(querier Querier, component ComponentType, instances []instance, timestamp time.Time, duration time.Duration) (float64, error) {
+	result, err := querier.Query(NewQueryOptions(component, CPUUsage, instancesToStrings(instances), timestamp, duration))
+	if err != nil {
+		return 0.0, err
+	}
+
+	sum := 0.0
+	for _, value := range result {
+		sum += value
+	}
+
+	return sum, nil
+}
+
+// TODO: suppport other metrics storage
+// get total CPU quota (in millicores) through Prometheus.
+func getTotalCPUQuota(querier Querier, component ComponentType, instances []instance, timestamp time.Time) (uint64, error) {
+	result, err := querier.Query(NewQueryOptions(component, CPUQuota, instancesToStrings(instances), timestamp, 0))
+	if err != nil {
+		return 0.0, err
+	}
+
+	sum := 0.0
+	for _, value := range result {
+		sum += value
+	}
+
+	millicores := uint64(math.Floor(sum * 1000))
+
+	return millicores, nil
 }
 
 func getCPUThresholdByComponent(strategy *Strategy, component ComponentType) (maxThreshold float64, minThreshold float64) {
