@@ -30,6 +30,7 @@ import (
 const (
 	groupLabelKey                  = "group"
 	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling-"
+	millicores                     = 1000
 )
 
 // TODO: adjust the value or make it configurable.
@@ -94,7 +95,7 @@ func getPlans(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Str
 		return nil, 0
 	}
 
-	totalCPUTime := float64(currentQuota) * MetricsTimeDuration.Seconds()
+	totalCPUTime := float64(currentQuota) / millicores * MetricsTimeDuration.Seconds()
 	usage := totalCPUUseTime / totalCPUTime
 	maxThreshold, minThreshold := getCPUThresholdByComponent(strategy, component)
 
@@ -155,7 +156,7 @@ func getTotalCPUUseTime(querier Querier, component ComponentType, instances []in
 func getTotalCPUQuota(querier Querier, component ComponentType, instances []instance, timestamp time.Time) (uint64, error) {
 	result, err := querier.Query(NewQueryOptions(component, CPUQuota, instancesToStrings(instances), timestamp, 0))
 	if err != nil {
-		return 0.0, err
+		return 0, err
 	}
 
 	sum := 0.0
@@ -163,9 +164,9 @@ func getTotalCPUQuota(querier Querier, component ComponentType, instances []inst
 		sum += value
 	}
 
-	millicores := uint64(math.Floor(sum * 1000))
+	quota := uint64(math.Floor(sum * float64(millicores)))
 
-	return millicores, nil
+	return quota, nil
 }
 
 func getCPUThresholdByComponent(strategy *Strategy, component ComponentType) (maxThreshold float64, minThreshold float64) {
