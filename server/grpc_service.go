@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -551,7 +552,7 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if !rc.IsFeatureSupported(cluster.BatchSplit) {
+	if !rc.IsFeatureSupported(versioninfo.BatchSplit) {
 		return &pdpb.AskBatchSplitResponse{Header: s.incompatibleVersion("batch_split")}, nil
 	}
 	if request.GetRegion() == nil {

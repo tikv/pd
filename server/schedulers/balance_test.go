@@ -862,7 +862,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	for i := 1; i <= 8; i++ {
 		id, _ := tc.Alloc()
 		origin := tc.AddLeaderRegion(id, 4)
-		newPeer := &metapb.Peer{StoreId: 3, IsLearner: false}
+		newPeer := &metapb.Peer{StoreId: 3, Role: metapb.PeerRole_Voter}
 		op, _ := operator.CreateMovePeerOperator("balance-region", tc, origin, operator.OpKind(0), 4, newPeer)
 		c.Assert(op, NotNil)
 		oc.AddOperator(op)
