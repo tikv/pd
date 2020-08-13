@@ -79,6 +79,19 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 	for _, r := range rules {
 		s.manager.SetRule(r)
 	}
+
+	c.Assert(s.manager.SetRule(&Rule{GroupID: "foo", ID: "baz", Role: "leader", Count: 2}), ErrorMatches, ".*define multiple leaders by count 2.*")
+	c.Assert(s.manager.Batch([]RuleOp{
+		{
+			Rule:   &Rule{GroupID: "g2", ID: "foo1", Role: "leader", Count: 1},
+			Action: RuleOpAdd,
+		},
+		{
+			Rule:   &Rule{GroupID: "g2", ID: "foo2", Role: "leader", Count: 1},
+			Action: RuleOpAdd,
+		},
+	}), ErrorMatches, ".*multiple leader replicas.*")
+
 	m2 := NewRuleManager(s.store)
 	err := m2.Initialize(3, []string{"no", "labels"})
 	c.Assert(err, IsNil)

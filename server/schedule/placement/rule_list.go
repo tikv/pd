@@ -113,16 +113,30 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 			sr.deleteRule(p.rule)
 		}
 		if i == len(points)-1 || !bytes.Equal(p.key, points[i+1].key) {
+			var endKey []byte
+			if i != len(points)-1 {
+				endKey = points[i+1].key
+			}
+
 			// next key is different, push sr to rl.
 			rr := sr.rules
 			if len(rr) == 0 {
-				var endKey []byte
-				if i != len(points)-1 {
-					endKey = points[i+1].key
-				}
 				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("no rule for range {%s, %s}",
 					strings.ToUpper(hex.EncodeToString(p.key)),
 					strings.ToUpper(hex.EncodeToString(endKey))))
+			}
+
+			// check multiple leaders
+			leaderCount := 0
+			for _, rule := range rr {
+				if rule.Role == Leader {
+					leaderCount += rule.Count
+				}
+				if leaderCount > 1 {
+					return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("multiple leader replicas for range {%s, %s}",
+						strings.ToUpper(hex.EncodeToString(p.key)),
+						strings.ToUpper(hex.EncodeToString(endKey))))
+				}
 			}
 			if i != len(points)-1 {
 				rr = append(rr[:0:0], rr...) // clone
