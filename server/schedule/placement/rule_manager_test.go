@@ -70,17 +70,9 @@ func (s *testManagerSuite) TestAdjustRule(c *C) {
 	}
 }
 
-func (s *testManagerSuite) TestSaveLoad(c *C) {
-	rules := []*Rule{
-		{GroupID: "pd", ID: "default", Role: "voter", Count: 5},
-		{GroupID: "foo", ID: "bar", StartKeyHex: "", EndKeyHex: "abcd", Role: "learner", Count: 1},
-		{GroupID: "foo", ID: "baz", Role: "voter", Count: 1},
-	}
-	for _, r := range rules {
-		s.manager.SetRule(r)
-	}
-
-	c.Assert(s.manager.SetRule(&Rule{GroupID: "foo", ID: "baz", Role: "leader", Count: 2}), ErrorMatches, ".*define multiple leaders by count 2.*")
+func (s *testManagerSuite) TestLeaderCheck(c *C) {
+	c.Assert(s.manager.SetRule(&Rule{GroupID: "pd", ID: "default", Role: "learner", Count: 3}), ErrorMatches, ".*needs at least one leader or voter.*")
+	c.Assert(s.manager.SetRule(&Rule{GroupID: "g2", ID: "33", Role: "leader", Count: 2}), ErrorMatches, ".*define multiple leaders by count 2.*")
 	c.Assert(s.manager.Batch([]RuleOp{
 		{
 			Rule:   &Rule{GroupID: "g2", ID: "foo1", Role: "leader", Count: 1},
@@ -91,6 +83,18 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 			Action: RuleOpAdd,
 		},
 	}), ErrorMatches, ".*multiple leader replicas.*")
+
+}
+
+func (s *testManagerSuite) TestSaveLoad(c *C) {
+	rules := []*Rule{
+		{GroupID: "pd", ID: "default", Role: "voter", Count: 5},
+		{GroupID: "foo", ID: "bar", StartKeyHex: "", EndKeyHex: "abcd", Role: "learner", Count: 1},
+		{GroupID: "foo", ID: "baz", Role: "voter", Count: 1},
+	}
+	for _, r := range rules {
+		s.manager.SetRule(r)
+	}
 
 	m2 := NewRuleManager(s.store)
 	err := m2.Initialize(3, []string{"no", "labels"})

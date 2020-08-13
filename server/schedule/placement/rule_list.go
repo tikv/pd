@@ -128,12 +128,20 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 
 			// check multiple leaders
 			leaderCount := 0
+			voterCount := 0
 			for _, rule := range rr {
 				if rule.Role == Leader {
 					leaderCount += rule.Count
+				} else if rule.Role == Voter {
+					voterCount += rule.Count
 				}
 				if leaderCount > 1 {
 					return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("multiple leader replicas for range {%s, %s}",
+						strings.ToUpper(hex.EncodeToString(p.key)),
+						strings.ToUpper(hex.EncodeToString(endKey))))
+				}
+				if (leaderCount + voterCount) < 1 {
+					return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("needs at least one leader or voter for range {%s, %s}",
 						strings.ToUpper(hex.EncodeToString(p.key)),
 						strings.ToUpper(hex.EncodeToString(endKey))))
 				}
