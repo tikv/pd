@@ -143,7 +143,7 @@ func (s *testRuleSuite) TestSet(c *C) {
 
 			popKeyRangeMap := map[string]struct{}{}
 			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
-				_, v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
 				c.Assert(got, Equals, true)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
@@ -474,7 +474,7 @@ func (s *testRuleSuite) TestDelete(c *C) {
 		if len(testcase.popKeyRange) > 0 {
 			popKeyRangeMap := map[string]struct{}{}
 			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
-				_, v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
 				c.Assert(got, Equals, true)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}

@@ -22,7 +22,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/pd/v4/pkg/apiutil"
 	"github.com/pingcap/pd/v4/pkg/codec"
-	"github.com/pingcap/pd/v4/pkg/keyutil"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/core"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
@@ -217,16 +216,9 @@ func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	newSuspectKeyRange := [2][]byte{
-		rule.StartKey,
-		rule.EndKey,
-	}
-	cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(rule.StartKey, rule.EndKey), newSuspectKeyRange)
+	cluster.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
 	if oldRule != nil {
-		cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(oldRule.StartKey, oldRule.EndKey), [2][]byte{
-			oldRule.StartKey,
-			oldRule.EndKey,
-		})
+		cluster.AddSuspectKeyRange(oldRule.StartKey, oldRule.EndKey)
 	}
 	h.rd.JSON(w, http.StatusOK, "Update rule successfully.")
 }
@@ -283,11 +275,7 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rule != nil {
-		suspectKeyRanges := [2][]byte{
-			rule.StartKey,
-			rule.EndKey,
-		}
-		cluster.AddSuspectKeyRange(keyutil.BuildKeyRangeKey(rule.StartKey, rule.EndKey), suspectKeyRanges)
+		cluster.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
 	}
 
 	h.rd.JSON(w, http.StatusOK, "Delete rule successfully.")

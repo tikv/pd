@@ -58,9 +58,9 @@ func ApplyOperatorStep(region *core.RegionInfo, op *operator.Operator) *core.Reg
 				panic("Add learner that exists")
 			}
 			peer := &metapb.Peer{
-				Id:        s.PeerID,
-				StoreId:   s.ToStore,
-				IsLearner: true,
+				Id:      s.PeerID,
+				StoreId: s.ToStore,
+				Role:    metapb.PeerRole_Learner,
 			}
 			region = region.Clone(core.WithAddPeer(peer))
 		case operator.AddLightLearner:
@@ -68,9 +68,9 @@ func ApplyOperatorStep(region *core.RegionInfo, op *operator.Operator) *core.Reg
 				panic("Add learner that exists")
 			}
 			peer := &metapb.Peer{
-				Id:        s.PeerID,
-				StoreId:   s.ToStore,
-				IsLearner: true,
+				Id:      s.PeerID,
+				StoreId: s.ToStore,
+				Role:    metapb.PeerRole_Learner,
 			}
 			region = region.Clone(core.WithAddPeer(peer))
 		case operator.PromoteLearner:

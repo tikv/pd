@@ -40,7 +40,8 @@ type Cluster struct {
 	*placement.RuleManager
 	*statistics.HotCache
 	*statistics.StoresStats
-	ID uint64
+	ID             uint64
+	suspectRegions map[uint64]struct{}
 }
 
 // NewCluster creates a new Cluster
@@ -54,6 +55,7 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 		RuleManager:     ruleManager,
 		HotCache:        statistics.NewHotCache(),
 		StoresStats:     statistics.NewStoresStats(),
+		suspectRegions:  map[uint64]struct{}{},
 	}
 }
 
@@ -618,7 +620,7 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	}
 	for _, storeID := range learnerStoreIDs {
 		peer, _ := mc.AllocPeer(storeID)
-		peer.IsLearner = true
+		peer.Role = metapb.PeerRole_Learner
 		region.Peers = append(region.Peers, peer)
 	}
 	return core.NewRegionInfo(region, leader)
@@ -638,4 +640,22 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 // IsFeatureSupported checks if the feature is supported by current cluster.
 func (mc *Cluster) IsFeatureSupported(versioninfo.Feature) bool {
 	return true
+}
+
+// AddSuspectRegions mock method
+func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
+	for _, id := range ids {
+		mc.suspectRegions[id] = struct{}{}
+	}
+}
+
+// CheckRegionUnderSuspect only used for unit test
+func (mc *Cluster) CheckRegionUnderSuspect(id uint64) bool {
+	_, ok := mc.suspectRegions[id]
+	return ok
+}
+
+// ResetSuspectRegions only used for unit test
+func (mc *Cluster) ResetSuspectRegions() {
+	mc.suspectRegions = map[uint64]struct{}{}
 }

@@ -15,6 +15,7 @@ package schedulers
 
 import (
 	"context"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
@@ -27,6 +28,11 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pingcap/pd/v4/server/statistics"
+)
+
+const (
+	KB = 1024
+	MB = 1024 * KB
 )
 
 var _ = Suite(&testShuffleLeaderSuite{})
@@ -402,7 +408,7 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 	peers := []*metapb.Peer{
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
-		{Id: 3, StoreId: 3, IsLearner: true},
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
 	}
 	region := core.NewRegionInfo(&metapb.Region{
 		Id:          1,

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/pingcap/pd/v4/server/schedule"
 	"github.com/pingcap/pd/v4/server/schedule/opt"
 )
@@ -44,9 +45,9 @@ const (
 func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowthType) time.Duration {
 	switch typ {
 	case exponentialGrowth:
-		return minDuration(time.Duration(float64(x)*ScheduleIntervalFactor), maxInterval)
+		return typeutil.MinDuration(time.Duration(float64(x)*ScheduleIntervalFactor), maxInterval)
 	case linearGrowth:
-		return minDuration(x+MinSlowScheduleInterval, maxInterval)
+		return typeutil.MinDuration(x+MinSlowScheduleInterval, maxInterval)
 	case zeroGrowth:
 		return x
 	default:
