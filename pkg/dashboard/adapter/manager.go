@@ -196,7 +196,7 @@ func (m *Manager) startService() {
 		return
 	}
 	if err := m.service.Start(m.ctx); err != nil {
-		log.Error("Can not start dashboard server", zap.Error(errs.ErrStartDashboard.Wrap(err).FastGenWithCause()))
+		log.Error("Can not start dashboard server", errs.ZapError(errs.ErrStartDashboard, err))
 	} else {
 		log.Info("Dashboard server is started")
 	}
@@ -207,7 +207,7 @@ func (m *Manager) stopService() {
 		return
 	}
 	if err := m.service.Stop(context.Background()); err != nil {
-		log.Error("Stop dashboard server error", zap.Error(errs.ErrStopDashboard.Wrap(err).FastGenWithCause()))
+		log.Error("Stop dashboard server error", errs.ZapError(errs.ErrStopDashboard, err))
 	} else {
 		log.Info("Dashboard server is stopped")
 	}

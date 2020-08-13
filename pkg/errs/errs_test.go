@@ -15,12 +15,12 @@ package errs
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
@@ -87,7 +87,8 @@ func (s *testErrorSuite) TestError(c *C) {
 	log.Error("test", zap.Error(ErrInvalidTimestamp.FastGenByArgs()))
 	c.Assert(strings.Contains(lg.Message(), rfc), IsTrue)
 	err := errors.New("test error")
-	log.Error("test", zap.Error(ErrInvalidTimestamp.Wrap(err).FastGenWithCause()))
+	log.Error("test", ZapError(ErrInvalidTimestamp, err))
 	rfc = `[error="[PD:tso:ErrInvalidTimestamp] test error"]`
+	fmt.Println(lg.Message())
 	c.Assert(strings.Contains(lg.Message(), rfc), IsTrue)
 }
