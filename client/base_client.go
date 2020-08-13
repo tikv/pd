@@ -138,7 +138,7 @@ func (c *baseClient) leaderLoop() {
 		}
 
 		if err := c.updateLeader(); err != nil {
-			log.Error("[pd] failed updateLeader", zap.Error(errs.ErrUpdateLeader.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Error("[pd] failed updateLeader", zap.Error(errs.ErrUpdateLeader.Wrap(err).FastGenWithCause()))
 		}
 	}
 }
@@ -178,7 +178,7 @@ func (c *baseClient) initClusterID() error {
 		members, err := c.getMembers(timeoutCtx, u)
 		timeoutCancel()
 		if err != nil || members.GetHeader() == nil {
-			log.Warn("[pd] failed to get cluster id", zap.String("url", u), zap.Error(errs.ErrGetClusterID.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Warn("[pd] failed to get cluster id", zap.String("url", u), zap.Error(errs.ErrGetClusterID.Wrap(err).FastGenWithCause()))
 			continue
 		}
 		c.clusterID = members.GetHeader().GetClusterId()
@@ -192,7 +192,7 @@ func (c *baseClient) updateLeader() error {
 		ctx, cancel := context.WithTimeout(c.ctx, updateLeaderTimeout)
 		members, err := c.getMembers(ctx, u)
 		if err != nil {
-			log.Warn("[pd] cannot update leader", zap.String("address", u), zap.Error(errs.ErrUpdateLeader.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Warn("[pd] cannot update leader", zap.String("address", u), zap.Error(errs.ErrUpdateLeader.Wrap(err).FastGenWithCause()))
 		}
 		cancel()
 		if err != nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {

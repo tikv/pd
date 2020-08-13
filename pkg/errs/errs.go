@@ -15,66 +15,50 @@ package errs
 
 import "github.com/pingcap/errors"
 
-var (
-	reg = errors.NewRegistry("PD")
-	// ClassTSO defines tso error class
-	ClassTSO = reg.RegisterErrorClass(1, "tso")
-	// ClassAdaptor defines adapter error class
-	ClassAdaptor = reg.RegisterErrorClass(2, "adapter")
-	// ClassMember defines member error class
-	ClassMember = reg.RegisterErrorClass(3, "member")
-	// ClassClient defines client error class
-	ClassClient = reg.RegisterErrorClass(4, "client")
-	// ClassPlacement defines placement error class
-	ClassPlacement = reg.RegisterErrorClass(5, "placement")
-	// ClassKV defines KV error class
-	ClassKV = reg.RegisterErrorClass(6, "kv")
-)
-
 // tso errors
 var (
-	ErrInvalidTimestamp    = ClassTSO.DefineError().TextualCode("ErrInvalidTimestamp").MessageTemplate("invalid timestamp").Build()
-	ErrLogicOverflow       = ClassTSO.DefineError().TextualCode("ErrLogicOverflow").MessageTemplate("logic part overflow").Build()
-	ErrIncorrectSystemTime = ClassTSO.DefineError().TextualCode("ErrIncorrectSystemTime").MessageTemplate("incorrect system time").Build()
+	ErrInvalidTimestamp    = errors.Normalize("invalid timestamp", errors.RFCCodeText("PD:tso:ErrInvalidTimestamp"))
+	ErrLogicOverflow       = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
+	ErrIncorrectSystemTime = errors.Normalize("incorrect system time", errors.RFCCodeText("PD:tso:ErrIncorrectSystemTime"))
 )
 
 // adapter errors
 var (
-	ErrStartDashboard = ClassAdaptor.DefineError().TextualCode("ErrStartDashboard").MessageTemplate("fail to start dashboard").Build()
-	ErrStopDashboard  = ClassAdaptor.DefineError().TextualCode("ErrStopDashboard").MessageTemplate("fail to stop dashboard").Build()
+	ErrStartDashboard = errors.Normalize("start dashboard failed", errors.RFCCodeText("PD:adapter:ErrStartDashboard"))
+	ErrStopDashboard  = errors.Normalize("stop dashboard failed", errors.RFCCodeText("PD:adapter:ErrStopDashboard"))
 )
 
 // member errors
 var (
-	ErretcdLeaderNotFound     = ClassMember.DefineError().TextualCode("ErretcdLeaderNotFound").MessageTemplate("etcd leader not found").Build()
-	ErrGetLeader              = ClassMember.DefineError().TextualCode("ErrGetLeader").MessageTemplate("fail to get leader").Build()
-	ErrDeleteLeaderKey        = ClassMember.DefineError().TextualCode("ErrDeleteLeaderKey").MessageTemplate("fail to delete leader key").Build()
-	ErrLoadLeaderPriority     = ClassMember.DefineError().TextualCode("ErrLoadLeaderPriority").MessageTemplate("fail to load leader priority").Build()
-	ErrLoadetcdLeaderPriority = ClassMember.DefineError().TextualCode("ErrLoadetcdLeaderPriority").MessageTemplate("fail to load etcd leader priority").Build()
-	ErrTransferetcdLeader     = ClassMember.DefineError().TextualCode("ErrTransferetcdLeader").MessageTemplate("fail to transfer etcd leader").Build()
-	ErrWatcherCancel          = ClassMember.DefineError().TextualCode("ErrWatcherCancel").MessageTemplate("watcher canceled").Build()
-	ErrMarshalLeader          = ClassMember.DefineError().TextualCode("ErrMarshalLeader").MessageTemplate("fail to marshal leader").Build()
+	ErretcdLeaderNotFound     = errors.Normalize("etcd leader not found", errors.RFCCodeText("PD:member:ErretcdLeaderNotFound"))
+	ErrGetLeader              = errors.Normalize("get leader failed", errors.RFCCodeText("PD:member:ErrGetLeader"))
+	ErrDeleteLeaderKey        = errors.Normalize("delete leader key failed", errors.RFCCodeText("PD:member:ErrDeleteLeaderKey"))
+	ErrLoadLeaderPriority     = errors.Normalize("load leader priority failed", errors.RFCCodeText("PD:member:ErrLoadLeaderPriority"))
+	ErrLoadetcdLeaderPriority = errors.Normalize("load etcd leader priority failed", errors.RFCCodeText("PD:member:ErrLoadetcdLeaderPriority"))
+	ErrTransferetcdLeader     = errors.Normalize("transfer etcd leader failed", errors.RFCCodeText("PD:member:ErrTransferetcdLeader"))
+	ErrWatcherCancel          = errors.Normalize("watcher canceled", errors.RFCCodeText("PD:member:ErrWatcherCancel"))
+	ErrMarshalLeader          = errors.Normalize("marshal leader failed", errors.RFCCodeText("PD:member:ErrMarshalLeader"))
 )
 
 // client errors
 var (
-	ErrCloseGRPCConn   = ClassClient.DefineError().TextualCode("ErrCloseGRPCConn").MessageTemplate("fail to close gRPC connection").Build()
-	ErrUpdateLeader    = ClassClient.DefineError().TextualCode("ErrUpdateLeader").MessageTemplate("fail to update leader").Build()
-	ErrCreateTSOStream = ClassClient.DefineError().TextualCode("ErrCreateTSOStream").MessageTemplate("fail to create TSO stream").Build()
-	ErrGetTSO          = ClassClient.DefineError().TextualCode("ErrGetTSO").MessageTemplate("fail to get TSO").Build()
-	ErrGetClusterID    = ClassClient.DefineError().TextualCode("ErrGetClusterID").MessageTemplate("fail to get cluster id").Build()
+	ErrCloseGRPCConn   = errors.Normalize("close gRPC connection failed", errors.RFCCodeText("PD:client:ErrCloseGRPCConn"))
+	ErrUpdateLeader    = errors.Normalize("update leader failed", errors.RFCCodeText("PD:client:ErrUpdateLeader"))
+	ErrCreateTSOStream = errors.Normalize("create TSO stream failed", errors.RFCCodeText("PD:client:ErrCreateTSOStream"))
+	ErrGetTSO          = errors.Normalize("get TSO failed", errors.RFCCodeText("PD:client:ErrGetTSO"))
+	ErrGetClusterID    = errors.Normalize("get cluster ID failed", errors.RFCCodeText("PD:client:ErrGetClusterID"))
 )
 
 // placement errors
 var (
-	ErrRuleContent   = ClassPlacement.DefineError().TextualCode("ErrRuleContent").MessageTemplate("invalid rule content, %s").Build()
-	ErrLoadRule      = ClassPlacement.DefineError().TextualCode("ErrLoadRule").MessageTemplate("fail to load rule").Build()
-	ErrLoadRuleGroup = ClassPlacement.DefineError().TextualCode("ErrLoadRuleGroup").MessageTemplate("fail to load rule group").Build()
-	ErrBuildRuleList = ClassPlacement.DefineError().TextualCode("ErrBuildRuleList").MessageTemplate("fail to build rule list, %s").Build()
+	ErrRuleContent   = errors.Normalize("invalid rule content, %s", errors.RFCCodeText("PD:placement:ErrRuleContent"))
+	ErrLoadRule      = errors.Normalize("load rule failed", errors.RFCCodeText("PD:placement:ErrLoadRule"))
+	ErrLoadRuleGroup = errors.Normalize("load rule group failed", errors.RFCCodeText("PD:placement:ErrLoadRuleGroup"))
+	ErrBuildRuleList = errors.Normalize("build rule list failed, %s", errors.RFCCodeText("PD:placement:ErrBuildRuleList"))
 )
 
 // kv errors
 var (
-	ErrEtcdKvSave   = ClassKV.DefineError().TextualCode("ErrEtcdKvSave").MessageTemplate("etcd kv save error, key is %s, value is %s").Build()
-	ErrEtcdKvRemove = ClassKV.DefineError().TextualCode("ErrEtcdKvRemove").MessageTemplate("etcd kv remove error, key is %s").Build()
+	ErrEtcdKVSave   = errors.Normalize("etcd KV save failed", errors.RFCCodeText("PD:kv:ErrEtcdKVSave"))
+	ErrEtcdKVRemove = errors.Normalize("etcd KV remove failed", errors.RFCCodeText("PD:kv:ErrEtcdKVRemove"))
 )

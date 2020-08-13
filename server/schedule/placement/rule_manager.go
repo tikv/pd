@@ -101,7 +101,7 @@ func (m *RuleManager) loadRules() error {
 			return
 		}
 		if err := m.adjustRule(&r); err != nil {
-			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.Wrap(err).FastGenWithCause()))
 			toDelete = append(toDelete, k)
 			return
 		}
@@ -137,7 +137,7 @@ func (m *RuleManager) loadGroups() error {
 	return m.store.LoadRuleGroups(func(k, v string) {
 		var g RuleGroup
 		if err := json.Unmarshal([]byte(v), &g); err != nil {
-			log.Error("failed to unmarshal rule group", zap.String("group-id", k), zap.Error(errs.ErrLoadRuleGroup.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Error("failed to unmarshal rule group", zap.String("group-id", k), zap.Error(errs.ErrLoadRuleGroup.Wrap(err).FastGenWithCause()))
 			return
 		}
 		m.groups[g.ID] = &g
