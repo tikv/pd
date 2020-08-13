@@ -114,10 +114,6 @@ func (s *testRuleSuite) TestBuildRuleList(c *C) {
 	defaultRule := &Rule{
 		GroupID:  "pd",
 		ID:       "default",
-		Index:    0,
-		Override: false,
-		StartKey: []byte{},
-		EndKey:   []byte{},
 		Role:     "voter",
 		Count:    3,
 	}
