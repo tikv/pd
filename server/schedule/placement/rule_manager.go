@@ -34,10 +34,13 @@ type RuleManager struct {
 	store *core.Storage
 	sync.RWMutex
 	initialized bool
-	rules       map[[2]string]*Rule
-	groups      map[string]*RuleGroup
-	defGroups   map[string]struct{} // store groups with default configuration
-	ruleList    ruleList
+	// Key(RuleGroupID,RuleID) => Rule
+	rules map[[2]string]*Rule
+	// GroupID => RuleGroup
+	groups map[string]*RuleGroup
+	// constructed by rebuildRuleList in runtime, store groups with default configuration
+	defGroups map[string]struct{}
+	ruleList  ruleList
 }
 
 // NewRuleManager creates a RuleManager instance.
@@ -428,6 +431,7 @@ func (m *RuleManager) GetRuleGroups() []*RuleGroup {
 }
 
 // SetRuleGroup updates a RuleGroup.
+// TODO update ruleGroup after set rule/rules
 func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
 	m.Lock()
 	defer m.Unlock()
@@ -435,6 +439,7 @@ func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
 }
 
 // DeleteRuleGroup removes a RuleGroup.
+// TODO: update ruleGroup after delete rule/rules
 func (m *RuleManager) DeleteRuleGroup(id string) error {
 	m.Lock()
 	defer m.Unlock()
