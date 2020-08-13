@@ -59,7 +59,7 @@ func (s *testFitSuite) makeRegion(def string) *core.RegionInfo {
 			idStr, role = splits[0], PeerRoleType(splits[1])
 		}
 		id, _ := strconv.Atoi(idStr)
-		peer := &metapb.Peer{Id: uint64(id), StoreId: uint64(id), IsLearner: role == Learner}
+		peer := &metapb.Peer{Id: uint64(id), StoreId: uint64(id), Role: role.MetaPeerRole()}
 		regionMeta.Peers = append(regionMeta.Peers, peer)
 		if role == Leader {
 			leader = peer

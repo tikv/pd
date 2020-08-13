@@ -86,6 +86,27 @@ func (c ComponentType) String() string {
 	}
 }
 
+// MetricType distinguishes different kinds of metrics
+type MetricType int
+
+const (
+	// CPUUsage is used cpu time in the duration
+	CPUUsage MetricType = iota
+	// CPUQuota is cpu cores quota for each instance
+	CPUQuota
+)
+
+func (c MetricType) String() string {
+	switch c {
+	case CPUUsage:
+		return "cpu_usage"
+	case CPUQuota:
+		return "cpu_quota"
+	default:
+		return "unknown"
+	}
+}
+
 type instance struct {
 	id      uint64
 	address string

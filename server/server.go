@@ -913,7 +913,7 @@ func (s *Server) GetLabelProperty() config.LabelPropertyConfig {
 
 // SetClusterVersion sets the version of cluster.
 func (s *Server) SetClusterVersion(v string) error {
-	version, err := cluster.ParseVersion(v)
+	version, err := versioninfo.ParseVersion(v)
 	if err != nil {
 		return err
 	}

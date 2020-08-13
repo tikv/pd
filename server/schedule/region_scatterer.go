@@ -127,6 +127,7 @@ func newEngineContext(filters ...filter.Filter) engineContext {
 // Scatter relocates the region.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*operator.Operator, error) {
 	if !opt.IsRegionReplicated(r.cluster, region) {
+		r.cluster.AddSuspectRegions(region.GetID())
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
 	}
 
@@ -226,8 +227,8 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 
 	target := candidates[rand.Intn(len(candidates))]
 	return &metapb.Peer{
-		StoreId:   target.GetID(),
-		IsLearner: oldPeer.GetIsLearner(),
+		StoreId: target.GetID(),
+		Role:    oldPeer.GetRole(),
 	}
 }
 

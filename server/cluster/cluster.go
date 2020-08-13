@@ -45,6 +45,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -901,12 +902,12 @@ func (c *RaftCluster) PutStore(store *metapb.Store, force bool) error {
 		return errors.Errorf("invalid put store %v", store)
 	}
 
-	v, err := ParseVersion(store.GetVersion())
+	v, err := versioninfo.ParseVersion(store.GetVersion())
 	if err != nil {
 		return errors.Errorf("invalid put store %v, error: %s", store, err)
 	}
 	clusterVersion := *c.opt.GetClusterVersion()
-	if !IsCompatible(clusterVersion, *v) {
+	if !versioninfo.IsCompatible(clusterVersion, *v) {
 		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)
 	}
 
@@ -1289,30 +1290,26 @@ func (c *RaftCluster) AllocID() (uint64, error) {
 func (c *RaftCluster) OnStoreVersionChange() {
 	c.RLock()
 	defer c.RUnlock()
-	var (
-		minVersion     *semver.Version
-		clusterVersion *semver.Version
-	)
-
+	var minVersion *semver.Version
 	stores := c.GetStores()
 	for _, s := range stores {
 		if s.IsTombstone() {
 			continue
 		}
-		v := MustParseVersion(s.GetVersion())
+		v := versioninfo.MustParseVersion(s.GetVersion())
 
 		if minVersion == nil || v.LessThan(*minVersion) {
 			minVersion = v
 		}
 	}
-	clusterVersion = c.opt.GetClusterVersion()
+	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
 	failpoint.Inject("versionChangeConcurrency", func() {
 		time.Sleep(500 * time.Millisecond)
 	})
 
-	if (*clusterVersion).LessThan(*minVersion) {
+	if minVersion != nil && clusterVersion.LessThan(*minVersion) {
 		if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
 			log.Error("cluster version changed by API at the same time")
 		}
@@ -1331,12 +1328,18 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 }
 
 // IsFeatureSupported checks if the feature is supported by current cluster.
-func (c *RaftCluster) IsFeatureSupported(f Feature) bool {
+func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
 	c.RLock()
 	defer c.RUnlock()
 	clusterVersion := *c.opt.GetClusterVersion()
-	minSupportVersion := *MinSupportedVersion(f)
-	return !clusterVersion.LessThan(minSupportVersion)
+	minSupportVersion := *versioninfo.MinSupportedVersion(f)
+	// For features before version 5.0 (such as BatchSplit), strict version checks are performed according to the
+	// original logic. But according to Semantic Versioning, specify a version MAJOR.MINOR.PATCH, PATCH is used when you
+	// make backwards compatible bug fixes. In version 5.0 and later, we need to strictly comply.
+	if versioninfo.IsCompatible(minSupportVersion, *versioninfo.MinSupportedVersion(versioninfo.Version4_0)) {
+		return !clusterVersion.LessThan(minSupportVersion)
+	}
+	return versioninfo.IsCompatible(minSupportVersion, clusterVersion)
 }
 
 // GetConfig gets config from cluster.
