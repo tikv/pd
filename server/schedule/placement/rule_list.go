@@ -140,11 +140,11 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 						strings.ToUpper(hex.EncodeToString(p.key)),
 						strings.ToUpper(hex.EncodeToString(endKey))))
 				}
-				if (leaderCount + voterCount) < 1 {
-					return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("needs at least one leader or voter for range {%s, %s}",
-						strings.ToUpper(hex.EncodeToString(p.key)),
-						strings.ToUpper(hex.EncodeToString(endKey))))
-				}
+			}
+			if (leaderCount + voterCount) < 1 {
+				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("needs at least one leader or voter for range {%s, %s}",
+					strings.ToUpper(hex.EncodeToString(p.key)),
+					strings.ToUpper(hex.EncodeToString(endKey))))
 			}
 			if i != len(points)-1 {
 				rr = append(rr[:0:0], rr...) // clone

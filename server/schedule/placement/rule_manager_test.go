@@ -83,17 +83,16 @@ func (s *testManagerSuite) TestLeaderCheck(c *C) {
 			Action: RuleOpAdd,
 		},
 	}), ErrorMatches, ".*multiple leader replicas.*")
-
 }
 
 func (s *testManagerSuite) TestSaveLoad(c *C) {
 	rules := []*Rule{
 		{GroupID: "pd", ID: "default", Role: "voter", Count: 5},
-		{GroupID: "foo", ID: "bar", StartKeyHex: "", EndKeyHex: "abcd", Role: "learner", Count: 1},
-		{GroupID: "foo", ID: "baz", Role: "voter", Count: 1},
+		{GroupID: "foo", ID: "baz", StartKeyHex: "", EndKeyHex: "abcd", Role: "voter", Count: 1},
+		{GroupID: "foo", ID: "bar", Role: "learner", Count: 1},
 	}
 	for _, r := range rules {
-		s.manager.SetRule(r)
+		c.Assert(s.manager.SetRule(r), IsNil)
 	}
 
 	m2 := NewRuleManager(s.store)
@@ -101,8 +100,8 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(m2.GetAllRules(), HasLen, 3)
 	c.Assert(m2.GetRule("pd", "default"), DeepEquals, rules[0])
-	c.Assert(m2.GetRule("foo", "bar"), DeepEquals, rules[1])
-	c.Assert(m2.GetRule("foo", "baz"), DeepEquals, rules[2])
+	c.Assert(m2.GetRule("foo", "baz"), DeepEquals, rules[1])
+	c.Assert(m2.GetRule("foo", "bar"), DeepEquals, rules[2])
 }
 
 func (s *testManagerSuite) checkRules(c *C, rules []*Rule, expect [][2]string) {
