@@ -64,6 +64,27 @@ func (sr *sortedRules) deleteRule(rule *Rule) {
 	}
 }
 
+func checkRulesRaft(rules []*Rule) string {
+	// check raft constraint
+	// one and only one leader
+	leaderCount := 0
+	voterCount := 0
+	for _, rule := range rules {
+		if rule.Role == Leader {
+			leaderCount += rule.Count
+		} else if rule.Role == Voter {
+			voterCount += rule.Count
+		}
+		if leaderCount > 1 {
+			return "multiple leader replicas"
+		}
+	}
+	if (leaderCount + voterCount) < 1 {
+		return "needs at least one leader or voter"
+	}
+	return ""
+}
+
 type rangeRules struct {
 	startKey []byte
 	// rules indicates all the rules match the given range
@@ -126,26 +147,14 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 					strings.ToUpper(hex.EncodeToString(endKey))))
 			}
 
-			// check multiple leaders
-			leaderCount := 0
-			voterCount := 0
-			for _, rule := range rr {
-				if rule.Role == Leader {
-					leaderCount += rule.Count
-				} else if rule.Role == Voter {
-					voterCount += rule.Count
-				}
-				if leaderCount > 1 {
-					return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("multiple leader replicas for range {%s, %s}",
-						strings.ToUpper(hex.EncodeToString(p.key)),
-						strings.ToUpper(hex.EncodeToString(endKey))))
-				}
-			}
-			if (leaderCount + voterCount) < 1 {
-				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("needs at least one leader or voter for range {%s, %s}",
+			err := checkRulesRaft(rr)
+			if err != "" {
+				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("%s for range {%s, %s}",
+					err,
 					strings.ToUpper(hex.EncodeToString(p.key)),
 					strings.ToUpper(hex.EncodeToString(endKey))))
 			}
+
 			if i != len(points)-1 {
 				rr = append(rr[:0:0], rr...) // clone
 			}
