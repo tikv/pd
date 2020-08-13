@@ -431,7 +431,6 @@ func (m *RuleManager) GetRuleGroups() []*RuleGroup {
 }
 
 // SetRuleGroup updates a RuleGroup.
-// TODO update ruleGroup after set rule/rules
 func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
 	m.Lock()
 	defer m.Unlock()
@@ -439,7 +438,6 @@ func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
 }
 
 // DeleteRuleGroup removes a RuleGroup.
-// TODO: update ruleGroup after delete rule/rules
 func (m *RuleManager) DeleteRuleGroup(id string) error {
 	m.Lock()
 	defer m.Unlock()
