@@ -112,10 +112,10 @@ func (s *testRuleSuite) TestGroupProperties(c *C) {
 // TODO: fulfill unit test case to cover BuildRuleList
 func (s *testRuleSuite) TestBuildRuleList(c *C) {
 	defaultRule := &Rule{
-		GroupID:  "pd",
-		ID:       "default",
-		Role:     "voter",
-		Count:    3,
+		GroupID: "pd",
+		ID:      "default",
+		Role:    "voter",
+		Count:   3,
 	}
 	byteStart, err := hex.DecodeString("a1")
 	c.Check(err, IsNil)
