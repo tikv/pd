@@ -208,14 +208,16 @@ func (s *storeTestSuite) TestStore(c *C) {
 	json.Unmarshal([]byte(echo), &allAddPeerLimit)
 	c.Assert(allAddPeerLimit["1"]["add-peer"].(float64), Equals, float64(20))
 	c.Assert(allAddPeerLimit["3"]["add-peer"].(float64), Equals, float64(20))
-	c.Assert(allAddPeerLimit["2"]["add-peer"].(float64), Equals, float64(20))
+	_, ok := allAddPeerLimit["2"]["add-peer"]
+	c.Assert(ok, Equals, false)
 
 	echo = pdctl.GetEcho([]string{"-u", pdAddr, "store", "limit", "remove-peer"})
 	allRemovePeerLimit := make(map[string]map[string]interface{})
 	json.Unmarshal([]byte(echo), &allRemovePeerLimit)
 	c.Assert(allRemovePeerLimit["1"]["remove-peer"].(float64), Equals, float64(25))
 	c.Assert(allRemovePeerLimit["3"]["remove-peer"].(float64), Equals, float64(25))
-	c.Assert(allRemovePeerLimit["2"]["remove-peer"].(float64), Equals, float64(25))
+	_, ok = allRemovePeerLimit["2"]["add-peer"]
+	c.Assert(ok, Equals, false)
 
 	// store delete <store_id> command
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)

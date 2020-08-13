@@ -16,6 +16,7 @@ package member_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -108,7 +109,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	c.Assert(len(members.Members), Equals, 2)
 
 	// member delete id <member_id>
-	args = []string{"-u", pdAddr, "member", "delete", "id", string(id)}
+	args = []string{"-u", pdAddr, "member", "delete", "id", fmt.Sprint(id)}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	members, err = etcdutil.ListEtcdMembers(client)

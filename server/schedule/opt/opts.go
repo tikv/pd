@@ -89,6 +89,7 @@ type Cluster interface {
 	AllocID() (uint64, error)
 	FitRegion(*core.RegionInfo) *placement.RegionFit
 	RemoveScheduler(name string) error
+	AddSuspectRegions(ids ...uint64)
 }
 
 // HeartbeatStream is an interface.

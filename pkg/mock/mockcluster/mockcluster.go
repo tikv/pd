@@ -39,7 +39,8 @@ type Cluster struct {
 	*placement.RuleManager
 	*statistics.HotCache
 	*statistics.StoresStats
-	ID uint64
+	ID             uint64
+	suspectRegions map[uint64]struct{}
 }
 
 // NewCluster creates a new Cluster
@@ -53,6 +54,7 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 		RuleManager:     ruleManager,
 		HotCache:        statistics.NewHotCache(),
 		StoresStats:     statistics.NewStoresStats(),
+		suspectRegions:  map[uint64]struct{}{},
 	}
 }
 
@@ -632,4 +634,22 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	}
 	newStore := store.Clone(core.SetStoreLabels(newLabels))
 	mc.PutStore(newStore)
+}
+
+// AddSuspectRegions mock method
+func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
+	for _, id := range ids {
+		mc.suspectRegions[id] = struct{}{}
+	}
+}
+
+// CheckRegionUnderSuspect only used for unit test
+func (mc *Cluster) CheckRegionUnderSuspect(id uint64) bool {
+	_, ok := mc.suspectRegions[id]
+	return ok
+}
+
+// ResetSuspectRegions only used for unit test
+func (mc *Cluster) ResetSuspectRegions() {
+	mc.suspectRegions = map[uint64]struct{}{}
 }
