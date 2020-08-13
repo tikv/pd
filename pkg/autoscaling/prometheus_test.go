@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datasource
+package autoscaling
 
 import (
 	"bytes"
@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/pingcap/check"
-	types "github.com/pingcap/pd/v4/pkg/autoscaling"
 	promClient "github.com/prometheus/client_golang/api"
 )
 
@@ -41,18 +40,18 @@ const (
 	instanceCount = 3
 )
 
-func Test(t *testing.T) {
+func TestPrometheus(t *testing.T) {
 	check.TestingT(t)
 }
 
 var _ = check.Suite(&testPrometheusQuerierSuite{})
 
-var instanceNameTemplate = map[types.ComponentType]string{
-	types.TiDB: mockTiDBInstanceNamePattern,
-	types.TiKV: mockTiKVInstanceNamePattern,
+var instanceNameTemplate = map[ComponentType]string{
+	TiDB: mockTiDBInstanceNamePattern,
+	TiKV: mockTiKVInstanceNamePattern,
 }
 
-func generateInstanceNames(component types.ComponentType) []string {
+func generateInstanceNames(component ComponentType) []string {
 	names := make([]string, 0, instanceCount)
 	pattern := instanceNameTemplate[component]
 	for i := 0; i < instanceCount; i++ {
@@ -61,9 +60,9 @@ func generateInstanceNames(component types.ComponentType) []string {
 	return names
 }
 
-var instanceNames = map[types.ComponentType][]string{
-	types.TiDB: generateInstanceNames(types.TiDB),
-	types.TiKV: generateInstanceNames(types.TiKV),
+var instanceNames = map[ComponentType][]string{
+	TiDB: generateInstanceNames(TiDB),
+	TiKV: generateInstanceNames(TiKV),
 }
 
 type testPrometheusQuerierSuite struct{}
@@ -106,7 +105,7 @@ func doURL(ep string, args map[string]string) *url.URL {
 	return u
 }
 
-func (c *normalClient) buildCPUMockData(component types.ComponentType) {
+func (c *normalClient) buildCPUMockData(component ComponentType) {
 	instances := instanceNames[component]
 	cpuUsageQuery := fmt.Sprintf(cpuUsagePromQLTemplate[component], mockDuration)
 	cpuQuotaQuery := cpuQuotaPromQLTemplate[component]
@@ -135,8 +134,8 @@ func (c *normalClient) buildCPUMockData(component types.ComponentType) {
 }
 
 func (c *normalClient) buildMockData() {
-	c.buildCPUMockData(types.TiDB)
-	c.buildCPUMockData(types.TiKV)
+	c.buildCPUMockData(TiDB)
+	c.buildCPUMockData(TiKV)
 }
 
 func makeJSONResponse(promResp *response) (*http.Response, []byte, error) {
@@ -177,7 +176,7 @@ func (s *testPrometheusQuerierSuite) TestRetrieveCPUMetrics(c *check.C) {
 	}
 	client.buildMockData()
 	querier := NewPrometheusQuerier(client)
-	metrics := []types.MetricType{types.CPUQuota, types.CPUUsage}
+	metrics := []MetricType{CPUQuota, CPUUsage}
 	for component, instances := range instanceNames {
 		for _, metric := range metrics {
 			options := NewQueryOptions(component, metric, instances[:len(instances)-1], time.Now(), mockDuration)
@@ -217,7 +216,7 @@ func (c *emptyResponseClient) Do(_ context.Context, req *http.Request) (r *http.
 func (s *testPrometheusQuerierSuite) TestEmptyResponse(c *check.C) {
 	client := &emptyResponseClient{}
 	querier := NewPrometheusQuerier(client)
-	options := NewQueryOptions(types.TiDB, types.CPUUsage, instanceNames[types.TiDB], time.Now(), mockDuration)
+	options := NewQueryOptions(TiDB, CPUUsage, instanceNames[TiDB], time.Now(), mockDuration)
 	result, err := querier.Query(options)
 	c.Assert(result, check.IsNil)
 	c.Assert(err, check.NotNil)
@@ -243,7 +242,7 @@ func (c *errorHTTPStatusClient) Do(_ context.Context, req *http.Request) (r *htt
 func (s *testPrometheusQuerierSuite) TestErrorHTTPStatus(c *check.C) {
 	client := &errorHTTPStatusClient{}
 	querier := NewPrometheusQuerier(client)
-	options := NewQueryOptions(types.TiDB, types.CPUUsage, instanceNames[types.TiDB], time.Now(), mockDuration)
+	options := NewQueryOptions(TiDB, CPUUsage, instanceNames[TiDB], time.Now(), mockDuration)
 	result, err := querier.Query(options)
 	c.Assert(result, check.IsNil)
 	c.Assert(err, check.NotNil)
@@ -267,7 +266,7 @@ func (c *errorPrometheusStatusClient) Do(_ context.Context, req *http.Request) (
 func (s *testPrometheusQuerierSuite) TestErrorPrometheusStatus(c *check.C) {
 	client := &errorPrometheusStatusClient{}
 	querier := NewPrometheusQuerier(client)
-	options := NewQueryOptions(types.TiDB, types.CPUUsage, instanceNames[types.TiDB], time.Now(), mockDuration)
+	options := NewQueryOptions(TiDB, CPUUsage, instanceNames[TiDB], time.Now(), mockDuration)
 	result, err := querier.Query(options)
 	c.Assert(result, check.IsNil)
 	c.Assert(err, check.NotNil)

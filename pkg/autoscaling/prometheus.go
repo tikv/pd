@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datasource
+package autoscaling
 
 import (
 	"context"
@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	types "github.com/pingcap/pd/v4/pkg/autoscaling"
 	"github.com/pkg/errors"
 	promClient "github.com/prometheus/client_golang/api"
 	promAPI "github.com/prometheus/client_golang/api/prometheus/v1"
@@ -51,9 +50,9 @@ func NewPrometheusQuerier(client promClient.Client) *PrometheusQuerier {
 
 type promQLBuilderFn func(*QueryOptions) (string, error)
 
-var queryBuilderFnMap = map[types.MetricType]promQLBuilderFn{
-	types.CPUQuota: buildCPUQuotaPromQL,
-	types.CPUUsage: buildCPUUsagePromQL,
+var queryBuilderFnMap = map[MetricType]promQLBuilderFn{
+	CPUQuota: buildCPUQuotaPromQL,
+	CPUUsage: buildCPUUsagePromQL,
 }
 
 // Query do the real query on Prometheus and returns metric value for each instance
@@ -135,14 +134,14 @@ func extractInstancesFromResponse(resp promModel.Value, instances []string) (Que
 	return result, nil
 }
 
-var cpuUsagePromQLTemplate = map[types.ComponentType]string{
-	types.TiDB: tidbSumCPUUsageMetricsPattern,
-	types.TiKV: tikvSumCPUUsageMetricsPattern,
+var cpuUsagePromQLTemplate = map[ComponentType]string{
+	TiDB: tidbSumCPUUsageMetricsPattern,
+	TiKV: tikvSumCPUUsageMetricsPattern,
 }
 
-var cpuQuotaPromQLTemplate = map[types.ComponentType]string{
-	types.TiDB: tidbCPUQuotaMetricsPattern,
-	types.TiKV: tikvCPUQuotaMetricsPattern,
+var cpuQuotaPromQLTemplate = map[ComponentType]string{
+	TiDB: tidbCPUQuotaMetricsPattern,
+	TiKV: tikvCPUQuotaMetricsPattern,
 }
 
 func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
