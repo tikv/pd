@@ -35,7 +35,7 @@ func (s *testLearnerCheckerSuite) TestPromoteLearner(c *C) {
 			Peers: []*metapb.Peer{
 				{Id: 101, StoreId: 1},
 				{Id: 102, StoreId: 2},
-				{Id: 103, StoreId: 3, IsLearner: true},
+				{Id: 103, StoreId: 3, Role: metapb.PeerRole_Learner},
 			},
 		}, &metapb.Peer{Id: 101, StoreId: 1})
 	op := lc.Check(region)
