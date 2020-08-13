@@ -539,7 +539,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
 	}
 
-	newPeer := &metapb.Peer{StoreId: toStoreID, IsLearner: oldPeer.GetIsLearner()}
+	newPeer := &metapb.Peer{StoreId: toStoreID, Role: oldPeer.GetRole()}
 	op, err := operator.CreateMovePeerOperator("admin-move-peer", c, region, operator.OpAdmin, fromStoreID, newPeer)
 	if err != nil {
 		log.Debug("fail to create move peer operator", zap.Error(err))
@@ -605,8 +605,8 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 	}
 
 	newPeer := &metapb.Peer{
-		StoreId:   toStoreID,
-		IsLearner: true,
+		StoreId: toStoreID,
+		Role:    metapb.PeerRole_Learner,
 	}
 
 	op, err := operator.CreateAddPeerOperator("admin-add-learner", c, region, newPeer, operator.OpAdmin)
