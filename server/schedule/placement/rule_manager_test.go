@@ -275,6 +275,68 @@ func (s *testManagerSuite) TestGroupConfig(c *C) {
 	c.Assert(s.manager.GetRuleGroups(), DeepEquals, []*RuleGroup{g2})
 }
 
+func (s *testManagerSuite) TestCheckRulesRaft(c *C) {
+	err := checkRulesRaft([]*Rule{
+		{
+			Role:  Leader,
+			Count: 1,
+		},
+	})
+	c.Assert(err, Equals, "")
+
+	err = checkRulesRaft([]*Rule{
+		{
+			Role:  Voter,
+			Count: 1,
+		},
+	})
+	c.Assert(err, Equals, "")
+
+	err = checkRulesRaft([]*Rule{
+		{
+			Role:  Leader,
+			Count: 1,
+		},
+		{
+			Role:  Voter,
+			Count: 1,
+		},
+	})
+	c.Assert(err, Equals, "")
+
+	err = checkRulesRaft([]*Rule{
+		{
+			Role:  Leader,
+			Count: 3,
+		},
+	})
+	c.Assert(err, Equals, "multiple leader replicas")
+
+	err = checkRulesRaft([]*Rule{
+		{
+			Role:  Leader,
+			Count: 1,
+		},
+		{
+			Role:  Leader,
+			Count: 1,
+		},
+	})
+	c.Assert(err, Equals, "multiple leader replicas")
+
+	err = checkRulesRaft([]*Rule{
+		{
+			Role:  Learner,
+			Count: 1,
+		},
+		{
+			Role:  Follower,
+			Count: 1,
+		},
+	})
+	c.Assert(err, Equals, "needs at least one leader or voter")
+}
+
 func (s *testManagerSuite) dhex(hk string) []byte {
 	k, err := hex.DecodeString(hk)
 	if err != nil {
