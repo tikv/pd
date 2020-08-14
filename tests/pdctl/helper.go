@@ -28,8 +28,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/pd/v4/server"
 	"github.com/pingcap/pd/v4/server/api"
-	"github.com/pingcap/pd/v4/server/cluster"
 	"github.com/pingcap/pd/v4/server/core"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 	"github.com/pingcap/pd/v4/tests"
 	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl"
 	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl/command"
@@ -118,7 +118,7 @@ func MustPutStore(c *check.C, svr *server.Server, id uint64, state metapb.StoreS
 			Address: fmt.Sprintf("tikv%d", id),
 			State:   state,
 			Labels:  labels,
-			Version: (*cluster.MinSupportedVersion(cluster.Version2_0)).String(),
+			Version: versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
 		},
 	})
 	c.Assert(err, check.IsNil)
