@@ -808,7 +808,7 @@ func newBootstrapRequest(c *C, clusterID uint64, storeAddr string) *pdpb.Bootstr
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
 		Store:  &metapb.Store{Id: 1, Address: storeAddr},
-		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, IsLearner: false}}},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 
 	return req

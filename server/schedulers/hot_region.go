@@ -1061,7 +1061,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	switch bs.opTy {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
-		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, IsLearner: srcPeer.IsLearner}
+		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
 		op, err = operator.CreateMovePeerOperator(
 			"move-hot-"+bs.rwTy.String()+"-region",
 			bs.cluster,

@@ -101,8 +101,8 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 		peers := make(map[uint64]*metapb.Peer)
 		for _, p := range target.GetPeers() {
 			peers[p.GetStoreId()] = &metapb.Peer{
-				StoreId:   p.GetStoreId(),
-				IsLearner: p.GetIsLearner(),
+				StoreId: p.GetStoreId(),
+				Role:    p.GetRole(),
 			}
 		}
 		matchOp, err := NewBuilder("", cluster, source).
@@ -139,7 +139,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 	}
 	for _, pa := range a.GetPeers() {
 		pb := b.GetStorePeer(pa.GetStoreId())
-		if pb == nil || pb.GetIsLearner() != pa.GetIsLearner() {
+		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) {
 			return false
 		}
 	}
@@ -151,7 +151,7 @@ func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.Regi
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
-		if !peer.IsLearner {
+		if !core.IsLearner(peer) {
 			ids = append(ids, id)
 		}
 	}

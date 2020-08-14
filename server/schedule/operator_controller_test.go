@@ -497,9 +497,9 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		// region2 has peer 2 in pending state, so the AddPeer step
 		// is left unfinished
 		region2 := region.Clone(
-			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, IsLearner: true}),
+			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}),
 			core.WithPendingPeers([]*metapb.Peer{
-				{Id: 3, StoreId: 3, IsLearner: true},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
 			}),
 			core.WithIncConfVer(),
 		)
@@ -519,7 +519,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 
 		// Finish the step by clearing the pending state
 		region3 := region.Clone(
-			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, IsLearner: true}),
+			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}),
 			core.WithIncConfVer(),
 		)
 		c.Assert(steps[0].IsFinish(region3), Equals, true)

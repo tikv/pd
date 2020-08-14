@@ -48,7 +48,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(s.svr.clusterID),
 		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
-		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, IsLearner: false}}},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	_, err = s.svr.bootstrapCluster(bootstrapReq)
 	c.Assert(err, IsNil)

@@ -662,9 +662,9 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 				Peer: &metapb.Peer{
-					Id:        st.PeerID,
-					StoreId:   st.ToStore,
-					IsLearner: true,
+					Id:      st.PeerID,
+					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Learner,
 				},
 			},
 		}
@@ -678,9 +678,9 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 				Peer: &metapb.Peer{
-					Id:        st.PeerID,
-					StoreId:   st.ToStore,
-					IsLearner: true,
+					Id:      st.PeerID,
+					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Learner,
 				},
 			},
 		}

@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pingcap/pd/v4/server/statistics"
+	"github.com/pingcap/pd/v4/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -619,7 +620,7 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	}
 	for _, storeID := range learnerStoreIDs {
 		peer, _ := mc.AllocPeer(storeID)
-		peer.IsLearner = true
+		peer.Role = metapb.PeerRole_Learner
 		region.Peers = append(region.Peers, peer)
 	}
 	return core.NewRegionInfo(region, leader)
@@ -634,6 +635,11 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	}
 	newStore := store.Clone(core.SetStoreLabels(newLabels))
 	mc.PutStore(newStore)
+}
+
+// IsFeatureSupported checks if the feature is supported by current cluster.
+func (mc *Cluster) IsFeatureSupported(versioninfo.Feature) bool {
+	return true
 }
 
 // AddSuspectRegions mock method
