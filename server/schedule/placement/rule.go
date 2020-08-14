@@ -115,7 +115,7 @@ func sortRules(rules []*Rule) {
 	sort.Slice(rules, func(i, j int) bool { return compareRule(rules[i], rules[j]) < 0 })
 }
 
-// prepareRulesForApply search the target the rules from the given rules.
+// prepareRulesForApply search the target rules from the given rules.
 // it will filter the rules depends on the interval index override in the same group or the
 // group-index override between different groups
 // For example, given rules:
