@@ -111,7 +111,3 @@ type instance struct {
 	id      uint64
 	address string
 }
-
-func (inst instance) String() string {
-	return inst.address
-}

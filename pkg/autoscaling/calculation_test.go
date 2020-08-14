@@ -248,3 +248,35 @@ func (s *calculationTestSuite) TestGetTotalCPUQuota(c *C) {
 	expected := uint64(mockResultValue * float64(len(instances)*millicores))
 	c.Assert(totalCPUQuota, Equals, expected)
 }
+
+func (s *calculationTestSuite) TestGetPodNameFromAddress(c *C) {
+	testcases := []struct {
+		address              string
+		expectedInstanceName string
+	}{
+		{
+			address:              "test-tikv-0.test-tikv-peer.namespace.svc:20080",
+			expectedInstanceName: "test-tikv-0",
+		},
+		{
+			address:              "tidb-0_10080",
+			expectedInstanceName: "tidb-0_10080",
+		},
+		{
+			address:              "1.2.3.4:2333",
+			expectedInstanceName: "1.2.3.4:2333",
+		},
+		{
+			address:              "1.2.3.4",
+			expectedInstanceName: "1.2.3.4",
+		},
+		{
+			address:              "test-tikv-0.test-tikv-peer.namespace.svc",
+			expectedInstanceName: "test-tikv-0",
+		},
+	}
+	for _, testcase := range testcases {
+		instanceName := getInstanceNameFromAddress(testcase.address)
+		c.Assert(instanceName, Equals, testcase.expectedInstanceName)
+	}
+}

@@ -15,6 +15,8 @@ package autoscaling
 
 import (
 	"math"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -127,10 +129,37 @@ func getTiDBInstances() []instance {
 	return []instance{}
 }
 
-func instancesToStrings(instances []instance) []string {
+// this function assumes that addr is already a valid resolvable address
+func getInstanceNameFromAddress(addr string) string {
+	// In K8s, a StatefulSet pod address is composed of pod-name.peer-svc.namespace.svc:port
+
+	// Extract the hostname part without port
+	hostname := addr
+	portColonIdx := strings.LastIndex(addr, ":")
+	if portColonIdx >= 0 {
+		hostname = addr[:portColonIdx]
+	}
+
+	// Just to make sure it is not an IP address
+	ip := net.ParseIP(hostname)
+	if ip != nil {
+		// Hostname is an IP address, return the whole address
+		return addr
+	}
+
+	firstDotIdx := strings.Index(hostname, ".")
+	if firstDotIdx < 0 {
+		// Cannot infer pod name, return the whole address
+		return addr
+	}
+
+	return addr[:firstDotIdx]
+}
+
+func getInstanceNames(instances []instance) []string {
 	names := make([]string, 0, len(instances))
 	for _, inst := range instances {
-		names = append(names, inst.String())
+		names = append(names, getInstanceNameFromAddress(inst.address))
 	}
 	return names
 }
@@ -138,7 +167,7 @@ func instancesToStrings(instances []instance) []string {
 // TODO: suppport other metrics storage
 // get total CPU use time (in seconds) through Prometheus.
 func getTotalCPUUseTime(querier Querier, component ComponentType, instances []instance, timestamp time.Time, duration time.Duration) (float64, error) {
-	result, err := querier.Query(NewQueryOptions(component, CPUUsage, instancesToStrings(instances), timestamp, duration))
+	result, err := querier.Query(NewQueryOptions(component, CPUUsage, getInstanceNames(instances), timestamp, duration))
 	if err != nil {
 		return 0.0, err
 	}
@@ -154,7 +183,7 @@ func getTotalCPUUseTime(querier Querier, component ComponentType, instances []in
 // TODO: suppport other metrics storage
 // get total CPU quota (in millicores) through Prometheus.
 func getTotalCPUQuota(querier Querier, component ComponentType, instances []instance, timestamp time.Time) (uint64, error) {
-	result, err := querier.Query(NewQueryOptions(component, CPUQuota, instancesToStrings(instances), timestamp, 0))
+	result, err := querier.Query(NewQueryOptions(component, CPUQuota, getInstanceNames(instances), timestamp, 0))
 	if err != nil {
 		return 0, err
 	}
