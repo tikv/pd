@@ -249,13 +249,13 @@ func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags leader
-// @Summary Transfer leadership to another PD server.
+// @Summary Transfer etcd leadership to another PD server.
 // @Produce json
 // @Success 200 {string} string "The transfer command is submitted."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /leader/resign [post]
 func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
-	err := h.svr.GetMember().ResignLeader(h.svr.Context(), h.svr.Name(), "")
+	err := h.svr.GetMember().ResignEtcdLeader(h.svr.Context(), h.svr.Name(), "")
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -265,14 +265,14 @@ func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags leader
-// @Summary Transfer leadership to the specific PD server.
+// @Summary Transfer etcd leadership to the specific PD server.
 // @Param nextLeader path string true "PD server that transfer leader to"
 // @Produce json
 // @Success 200 {string} string "The transfer command is submitted."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /leader/transfer/{nextLeader} [post]
 func (h *leaderHandler) Transfer(w http.ResponseWriter, r *http.Request) {
-	err := h.svr.GetMember().ResignLeader(h.svr.Context(), h.svr.Name(), mux.Vars(r)["next_leader"])
+	err := h.svr.GetMember().ResignEtcdLeader(h.svr.Context(), h.svr.Name(), mux.Vars(r)["next_leader"])
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

@@ -125,7 +125,18 @@ func sortRules(rules []*Rule) {
 	sort.Slice(rules, func(i, j int) bool { return compareRule(rules[i], rules[j]) < 0 })
 }
 
-// Sort Rules, trim concealed rules.
+// prepareRulesForApply search the target rules from the given rules.
+// it will filter the rules depends on the interval index override in the same group or the
+// group-index override between different groups
+// For example, given rules:
+// ruleA: group_id: 4, id: 2, override: true
+// ruleB: group_id: 4, id: 1, override: true
+// ruleC: group_id: 3
+// ruleD: group_id: 2
+// RuleGroupA: id:4, override: false
+// RuleGroupB: id:3, override: true
+// RuleGroupC: id:2, override: false
+// Finally only ruleA and ruleC will be selected.
 func prepareRulesForApply(rules []*Rule) []*Rule {
 	var res []*Rule
 	var i, j int

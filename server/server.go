@@ -634,7 +634,7 @@ func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
 }
 
-// GetLeader returns leader of etcd.
+// GetLeader returns the leader of PD cluster(i.e the PD leader).
 func (s *Server) GetLeader() *pdpb.Member {
 	return s.member.GetLeader()
 }
@@ -644,7 +644,7 @@ func (s *Server) GetMember() *member.Member {
 	return s.member
 }
 
-// GetLease returns the lease of member and only leader server's lease is not nil.
+// GetLease returns the lease of member and only PD leader's lease will not be nil.
 func (s *Server) GetLease() *member.LeaderLease {
 	s.leaseMu.RLock()
 	defer s.leaseMu.RUnlock()
@@ -1046,7 +1046,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 			// NOTE: since we can't put the 2 storage mutations in a batch, it
 			// is possible that memory and persistent data become different
 			// (when below revert fail). They will become the same after PD is
-			// restart or leader is changed.
+			// restart or PD leader is changed.
 			s.persistOptions.SetReplicationModeConfig(old)
 			revertErr := s.persistOptions.Persist(s.storage)
 			if revertErr != nil {
@@ -1065,7 +1065,7 @@ func (s *Server) leaderLoop() {
 
 	for {
 		if s.IsClosed() {
-			log.Info("server is closed, return leader loop")
+			log.Info("server is closed, return pd leader loop")
 			return
 		}
 
@@ -1083,15 +1083,15 @@ func (s *Server) leaderLoop() {
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
-			log.Info("start watch leader", zap.Stringer("leader", leader))
+			log.Info("start watch pd leader", zap.Stringer("pd-leader", leader))
 			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
 			syncer.StopSyncWithLeader()
-			log.Info("leader changed, try to campaign leader")
+			log.Info("pd leader changed, try to re-campaign a pd leader")
 		}
 
 		etcdLeader := s.member.GetEtcdLeader()
 		if etcdLeader != s.member.ID() {
-			log.Info("skip campaign leader and check later",
+			log.Info("skip campaigning of pd leader and check later",
 				zap.String("server-name", s.Name()),
 				zap.Uint64("etcd-leader-id", etcdLeader))
 			time.Sleep(200 * time.Millisecond)
@@ -1102,17 +1102,17 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
+	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
 
 	lease := member.NewLeaderLease(s.client)
 	defer lease.Close()
 	if err := s.member.CampaignLeader(lease, s.cfg.LeaderLease); err != nil {
-		log.Error("campaign leader meet error", zap.Error(err))
+		log.Error("campaigning pd leader meets error", zap.Error(err))
 		return
 	}
 
 	// Start keepalive and enable TSO service.
-	// TSO service is strictly enabled/disabled by leader lease for 2 reasons:
+	// TSO service is strictly enabled/disabled by PD leader lease for 2 reasons:
 	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 
@@ -1121,7 +1121,7 @@ func (s *Server) campaignLeader() {
 	go lease.KeepAlive(ctx)
 	s.SetLease(lease)
 	defer s.SetLease(nil)
-	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
+	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
 	log.Debug("sync timestamp for tso")
 	if err := s.tso.SyncTimestamp(lease); err != nil {
@@ -1147,7 +1147,7 @@ func (s *Server) campaignLeader() {
 	defer s.member.DisableLeader()
 
 	CheckPDVersion(s.persistOptions)
-	log.Info("PD cluster leader is ready to serve", zap.String("leader-name", s.Name()))
+	log.Info("PD cluster leader is ready to serve", zap.String("pd-leader-name", s.Name()))
 
 	tsTicker := time.NewTicker(tso.UpdateTimestampStep)
 	defer tsTicker.Stop()
@@ -1158,12 +1158,12 @@ func (s *Server) campaignLeader() {
 		select {
 		case <-leaderTicker.C:
 			if lease.IsExpired() {
-				log.Info("lease expired, leader step down")
+				log.Info("lease expired, pd leader step down")
 				return
 			}
 			etcdLeader := s.member.GetEtcdLeader()
 			if etcdLeader != s.member.ID() {
-				log.Info("etcd leader changed, resigns leadership", zap.String("old-leader-name", s.Name()))
+				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
 				return
 			}
 		case <-tsTicker.C:

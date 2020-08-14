@@ -133,7 +133,7 @@ func (s *TestServer) Destroy() error {
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
-	return s.server.GetMember().ResignLeader(s.server.Context(), s.server.Name(), "")
+	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
 }
 
 // State returns the current TestServer's state.

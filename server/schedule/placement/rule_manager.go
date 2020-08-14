@@ -34,10 +34,13 @@ type RuleManager struct {
 	store *core.Storage
 	sync.RWMutex
 	initialized bool
-	rules       map[[2]string]*Rule
-	groups      map[string]*RuleGroup
-	defGroups   map[string]struct{} // store groups with default configuration
-	ruleList    ruleList
+	// Key(RuleGroupID,RuleID) => Rule
+	rules map[[2]string]*Rule
+	// GroupID => RuleGroup
+	groups map[string]*RuleGroup
+	// constructed by rebuildRuleList in runtime, store groups with default configuration
+	defGroups map[string]struct{}
+	ruleList  ruleList
 }
 
 // NewRuleManager creates a RuleManager instance.
