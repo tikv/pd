@@ -15,7 +15,6 @@ package tso
 
 import (
 	"path"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -43,12 +42,12 @@ const (
 
 // TimestampOracle is used to maintain the logic of tso.
 type TimestampOracle struct {
-	// For tso, set after pd becomes leader.
-	ts            unsafe.Pointer
+	// For tso, set after PD becomes leader.
+	ts unsafe.Pointer
+	// stored as Time.time
 	lastSavedTime atomic.Value
-
-	mu    sync.RWMutex
-	lease *member.LeaderLease
+	// stored as *member.LeaderLease
+	lease atomic.Value
 
 	rootPath      string
 	member        string
@@ -89,16 +88,21 @@ func (t *TimestampOracle) loadTimestamp() (time.Time, error) {
 	return typeutil.ParseTimestamp(data)
 }
 
-func (t *TimestampOracle) checkLease() bool {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.lease != nil && !t.lease.IsExpired()
+func (t *TimestampOracle) getLease() *member.LeaderLease {
+	lease := t.lease.Load()
+	if lease == nil {
+		return nil
+	}
+	return lease.(*member.LeaderLease)
 }
 
 func (t *TimestampOracle) setLease(lease *member.LeaderLease) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.lease = lease
+	t.lease.Store(lease)
+}
+
+func (t *TimestampOracle) checkLease() bool {
+	lease := t.getLease()
+	return lease != nil && !lease.IsExpired()
 }
 
 // save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,

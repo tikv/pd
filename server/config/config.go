@@ -23,7 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/pd/v4/pkg/grpcutil"
@@ -223,9 +223,9 @@ var (
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
 	// DefaultStoreLimit is the default store limit of add peer and remove peer.
-	DefaultStoreLimit StoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
+	DefaultStoreLimit StoreLimit = NewStoreLimit(15, 15)
 	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
-	DefaultTiFlashStoreLimit StoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
+	DefaultTiFlashStoreLimit StoreLimit = NewStoreLimit(30, 30)
 )
 
 func init() {
@@ -240,34 +240,37 @@ func initByLDFlags(edition string) {
 
 // StoreLimit is the default limit of adding peer and removing peer when putting stores.
 type StoreLimit struct {
-	mu sync.RWMutex
-	// AddPeer is the default rate of adding peers for store limit (per minute).
-	AddPeer float64
-	// RemovePeer is the default rate of removing peers for store limit (per minute).
-	RemovePeer float64
+	// AddPeer is the default rate of adding peers for store limit (per minute), stored as float64
+	AddPeer atomic.Value
+	// RemovePeer is the default rate of removing peers for store limit (per minute), stored as float64
+	RemovePeer atomic.Value
+}
+
+// NewStoreLimit creates a new StoreLimit
+func NewStoreLimit(addPeer, removePeer float64) StoreLimit {
+	sl := StoreLimit{}
+	sl.AddPeer.Store(addPeer)
+	sl.RemovePeer.Store(removePeer)
+	return sl
 }
 
 // SetDefaultStoreLimit sets the default store limit for a given type.
 func (sl *StoreLimit) SetDefaultStoreLimit(typ storelimit.Type, ratePerMin float64) {
-	sl.mu.Lock()
-	defer sl.mu.Unlock()
 	switch typ {
 	case storelimit.AddPeer:
-		sl.AddPeer = ratePerMin
+		sl.AddPeer.Store(ratePerMin)
 	case storelimit.RemovePeer:
-		sl.RemovePeer = ratePerMin
+		sl.RemovePeer.Store(ratePerMin)
 	}
 }
 
 // GetDefaultStoreLimit gets the default store limit for a given type.
 func (sl *StoreLimit) GetDefaultStoreLimit(typ storelimit.Type) float64 {
-	sl.mu.RLock()
-	defer sl.mu.RUnlock()
 	switch typ {
 	case storelimit.AddPeer:
-		return sl.AddPeer
+		return sl.AddPeer.Load().(float64)
 	case storelimit.RemovePeer:
-		return sl.RemovePeer
+		return sl.RemovePeer.Load().(float64)
 	default:
 		panic("invalid type")
 	}
@@ -808,7 +811,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData) error {
 	}
 
 	if c.StoreBalanceRate != 0 {
-		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		DefaultStoreLimit = NewStoreLimit(c.StoreBalanceRate, c.StoreBalanceRate)
 		c.StoreBalanceRate = 0
 	}
 
@@ -848,7 +851,7 @@ func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, 
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.DisableLearner = false
 	if c.StoreBalanceRate != 0 {
-		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		DefaultStoreLimit = NewStoreLimit(c.StoreBalanceRate, c.StoreBalanceRate)
 		c.StoreBalanceRate = 0
 	}
 	for _, b := range c.migrateConfigurationMap() {

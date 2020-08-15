@@ -48,6 +48,7 @@ const (
 
 // Member is used for the election related logic.
 type Member struct {
+	// leader info, stored as *pdpb.Member
 	leader atomic.Value
 	// Etcd and cluster information.
 	etcd     *embed.Etcd

@@ -99,9 +99,8 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	// leader lease
-	lease   *member.LeaderLease
-	leaseMu sync.RWMutex
+	// leader lease, stored as *member.LeaderLease
+	lease atomic.Value
 
 	member *member.Member
 	// etcd client
@@ -646,16 +645,16 @@ func (s *Server) GetMember() *member.Member {
 
 // GetLease returns the lease of member and only PD leader's lease will not be nil.
 func (s *Server) GetLease() *member.LeaderLease {
-	s.leaseMu.RLock()
-	defer s.leaseMu.RUnlock()
-	return s.lease
+	lease := s.lease.Load()
+	if lease == nil {
+		return nil
+	}
+	return lease.(*member.LeaderLease)
 }
 
 // SetLease changes the lease.
 func (s *Server) SetLease(lease *member.LeaderLease) {
-	s.leaseMu.Lock()
-	defer s.leaseMu.Unlock()
-	s.lease = lease
+	s.lease.Store(lease)
 }
 
 // GetStorage returns the backend storage of server.

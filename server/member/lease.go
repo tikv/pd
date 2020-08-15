@@ -30,7 +30,7 @@ type LeaderLease struct {
 	lease        clientv3.Lease
 	ID           clientv3.LeaseID
 	leaseTimeout time.Duration
-
+	// the expiration of the lease, stored as time.Time
 	expireTime atomic.Value
 }
 
