@@ -14,6 +14,7 @@
 package placement
 
 import (
+	"encoding/hex"
 	"math/rand"
 
 	. "github.com/pingcap/check"
@@ -105,5 +106,84 @@ func (s *testRuleSuite) TestGroupProperties(c *C) {
 		for i := range rules {
 			c.Assert(rules[i].Key(), Equals, tc.expect[i])
 		}
+	}
+}
+
+// TODO: fulfill unit test case to cover BuildRuleList
+func (s *testRuleSuite) TestBuildRuleList(c *C) {
+	defaultRule := &Rule{
+		GroupID:  "pd",
+		ID:       "default",
+		Role:     "voter",
+		StartKey: []byte{},
+		EndKey:   []byte{},
+		Count:    3,
+	}
+	byteStart, err := hex.DecodeString("a1")
+	c.Check(err, IsNil)
+	byteEnd, err := hex.DecodeString("a2")
+	c.Check(err, IsNil)
+	ruleMeta := &Rule{
+		GroupID:  "pd",
+		ID:       "meta",
+		Index:    1,
+		Override: true,
+		StartKey: byteStart,
+		EndKey:   byteEnd,
+		Role:     "voter",
+		Count:    5,
+	}
+
+	testcases := []struct {
+		name   string
+		rules  map[[2]string]*Rule
+		expect ruleList
+	}{
+		{
+			name: "default rule",
+			rules: map[[2]string]*Rule{
+				{"pd", "default"}: defaultRule,
+			},
+			expect: ruleList{
+				ranges: []rangeRules{
+					{
+						startKey:   []byte{},
+						rules:      []*Rule{defaultRule},
+						applyRules: []*Rule{defaultRule},
+					},
+				},
+			},
+		},
+		{
+			name: "metadata case",
+			rules: map[[2]string]*Rule{
+				{"pd", "default"}: defaultRule,
+				{"pd", "meta"}:    ruleMeta,
+			},
+			expect: ruleList{ranges: []rangeRules{
+				{
+					startKey:   []byte{},
+					rules:      []*Rule{defaultRule},
+					applyRules: []*Rule{defaultRule},
+				},
+				{
+					startKey:   byteStart,
+					rules:      []*Rule{defaultRule, ruleMeta},
+					applyRules: []*Rule{ruleMeta},
+				},
+				{
+					startKey:   byteEnd,
+					rules:      []*Rule{defaultRule},
+					applyRules: []*Rule{defaultRule},
+				},
+			}},
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		result, err := buildRuleList(testcase.rules)
+		c.Assert(err, IsNil)
+		c.Assert(result, DeepEquals, testcase.expect)
 	}
 }
