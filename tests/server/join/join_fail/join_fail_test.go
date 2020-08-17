@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/tests"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
 
@@ -54,9 +54,9 @@ func (s *joinTestSuite) TestFailedPDJoinInStep1(c *C) {
 	cluster.WaitLeader()
 
 	// Join the second PD.
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/join/add-member-failed", `return`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/join/add-member-failed", `return`), IsNil)
 	_, err = cluster.Join(ctx)
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "join failed"), IsTrue)
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/join/add-member-failed"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/join/add-member-failed"), IsNil)
 }

@@ -6,7 +6,7 @@ Start by forking the `pd` GitHub repository, make changes in a branch and then s
 ## Set up your pd GitHub Repository
 
 
-After forking the [PD upstream](https://github.com/pingcap/pd/fork) source repository to your personal repository. You can set up your personal development environment for PD project.
+After forking the [PD upstream](https://github.com/tikv/pd/fork) source repository to your personal repository. You can set up your personal development environment for PD project.
 
 ```sh
 $ cd $GOPATH/src/github.com/pingcap
@@ -18,7 +18,7 @@ $ cd pd
 
 
 ```sh
-$ git remote add upstream https://github.com/pingcap/pd
+$ git remote add upstream https://github.com/tikv/pd
 $ git fetch upstream
 $ git merge upstream/master
 ...
