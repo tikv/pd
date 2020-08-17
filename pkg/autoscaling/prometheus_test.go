@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	mockDuration                = time.Duration(1e9)
+	mockDuration                = 1 * time.Second
 	mockClusterName             = "mock"
 	mockTiDBInstanceNamePattern = "%s-tidb-%d"
 	mockTiKVInstanceNamePattern = "%s-tikv-%d"
@@ -56,7 +56,7 @@ func generatePodNames(component ComponentType) []string {
 	names := make([]string, 0, instanceCount)
 	pattern := podNameTemplate[component]
 	for i := 0; i < instanceCount; i++ {
-		names = append(names, fmt.Sprintf(pattern, i))
+		names = append(names, fmt.Sprintf(pattern, mockClusterName, i))
 	}
 	return names
 }
@@ -304,19 +304,23 @@ func (s *testPrometheusQuerierSuite) TestGetInstanceNameFromAddress(c *C) {
 		},
 		{
 			address:              "tidb-0_10080",
-			expectedInstanceName: "tidb-0_10080",
+			expectedInstanceName: "",
 		},
 		{
 			address:              "1.2.3.4:2333",
-			expectedInstanceName: "1.2.3.4:2333",
+			expectedInstanceName: "",
 		},
 		{
 			address:              "1.2.3.4",
-			expectedInstanceName: "1.2.3.4",
+			expectedInstanceName: "",
 		},
 	}
 	for _, testcase := range testcases {
-		instanceName := getInstanceNameFromAddress(testcase.address)
-		c.Assert(instanceName, Equals, testcase.expectedInstanceName)
+		instanceName, err := getInstanceNameFromAddress(testcase.address)
+		if testcase.expectedInstanceName == "" {
+			c.Assert(err, NotNil)
+		} else {
+			c.Assert(instanceName, Equals, testcase.expectedInstanceName)
+		}
 	}
 }

@@ -121,7 +121,10 @@ func extractInstancesFromResponse(resp promModel.Value, addresses []string) (Que
 
 	instancesSet := map[string]string{}
 	for _, addr := range addresses {
-		instancesSet[getInstanceNameFromAddress(addr)] = addr
+		instanceName, err := getInstanceNameFromAddress(addr)
+		if err == nil {
+			instancesSet[instanceName] = addr
+		}
 	}
 
 	result := make(QueryResult)
@@ -179,7 +182,7 @@ func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
 
 // this function assumes that addr is already a valid resolvable address
 // returns in format "podname_namespace"
-func getInstanceNameFromAddress(addr string) string {
+func getInstanceNameFromAddress(addr string) (string, error) {
 	// In K8s, a StatefulSet pod address is composed of pod-name.peer-svc.namespace.svc:port
 	// Extract the hostname part without port
 	hostname := addr
@@ -192,17 +195,17 @@ func getInstanceNameFromAddress(addr string) string {
 	ip := net.ParseIP(hostname)
 	if ip != nil {
 		// Hostname is an IP address, return the whole address
-		return addr
+		return "", errors.Errorf("address %s is an ip address", addr)
 	}
 
 	parts := strings.Split(hostname, ".")
 	if len(parts) < 4 {
-		return addr
+		return "", errors.Errorf("address %s has less than 4 parts", addr)
 	}
 
 	podName, namespace := parts[0], parts[2]
 
-	return buildInstanceIdentifier(podName, namespace)
+	return buildInstanceIdentifier(podName, namespace), nil
 }
 
 func buildInstanceIdentifier(podName string, namespace string) string {
