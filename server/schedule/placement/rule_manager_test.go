@@ -275,24 +275,24 @@ func (s *testManagerSuite) TestGroupConfig(c *C) {
 	c.Assert(s.manager.GetRuleGroups(), DeepEquals, []*RuleGroup{g2})
 }
 
-func (s *testManagerSuite) TestCheckRulesRaft(c *C) {
-	err := checkRulesRaft([]*Rule{
+func (s *testManagerSuite) TestCheckApplyRules(c *C) {
+	err := checkApplyRules([]*Rule{
 		{
 			Role:  Leader,
 			Count: 1,
 		},
 	})
-	c.Assert(err, Equals, "")
+	c.Assert(err, IsNil)
 
-	err = checkRulesRaft([]*Rule{
+	err = checkApplyRules([]*Rule{
 		{
 			Role:  Voter,
 			Count: 1,
 		},
 	})
-	c.Assert(err, Equals, "")
+	c.Assert(err, IsNil)
 
-	err = checkRulesRaft([]*Rule{
+	err = checkApplyRules([]*Rule{
 		{
 			Role:  Leader,
 			Count: 1,
@@ -302,17 +302,17 @@ func (s *testManagerSuite) TestCheckRulesRaft(c *C) {
 			Count: 1,
 		},
 	})
-	c.Assert(err, Equals, "")
+	c.Assert(err, IsNil)
 
-	err = checkRulesRaft([]*Rule{
+	err = checkApplyRules([]*Rule{
 		{
 			Role:  Leader,
 			Count: 3,
 		},
 	})
-	c.Assert(err, Equals, "multiple leader replicas")
+	c.Assert(err, ErrorMatches, "multiple leader replicas")
 
-	err = checkRulesRaft([]*Rule{
+	err = checkApplyRules([]*Rule{
 		{
 			Role:  Leader,
 			Count: 1,
@@ -322,9 +322,9 @@ func (s *testManagerSuite) TestCheckRulesRaft(c *C) {
 			Count: 1,
 		},
 	})
-	c.Assert(err, Equals, "multiple leader replicas")
+	c.Assert(err, ErrorMatches, "multiple leader replicas")
 
-	err = checkRulesRaft([]*Rule{
+	err = checkApplyRules([]*Rule{
 		{
 			Role:  Learner,
 			Count: 1,
@@ -334,7 +334,7 @@ func (s *testManagerSuite) TestCheckRulesRaft(c *C) {
 			Count: 1,
 		},
 	})
-	c.Assert(err, Equals, "needs at least one leader or voter")
+	c.Assert(err, ErrorMatches, "needs at least one leader or voter")
 }
 
 func (s *testManagerSuite) dhex(hk string) []byte {

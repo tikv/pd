@@ -16,6 +16,7 @@ package placement
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -64,7 +65,7 @@ func (sr *sortedRules) deleteRule(rule *Rule) {
 	}
 }
 
-func checkRulesRaft(rules []*Rule) string {
+func checkApplyRules(rules []*Rule) error {
 	// check raft constraint
 	// one and only one leader
 	leaderCount := 0
@@ -76,13 +77,13 @@ func checkRulesRaft(rules []*Rule) string {
 			voterCount += rule.Count
 		}
 		if leaderCount > 1 {
-			return "multiple leader replicas"
+			return errors.New("multiple leader replicas")
 		}
 	}
 	if (leaderCount + voterCount) < 1 {
-		return "needs at least one leader or voter"
+		return errors.New("needs at least one leader or voter")
 	}
-	return ""
+	return nil
 }
 
 type rangeRules struct {
@@ -147,8 +148,8 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 					strings.ToUpper(hex.EncodeToString(endKey))))
 			}
 
-			err := checkRulesRaft(rr)
-			if err != "" {
+			err := checkApplyRules(rr)
+			if err != nil {
 				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("%s for range {%s, %s}",
 					err,
 					strings.ToUpper(hex.EncodeToString(p.key)),
