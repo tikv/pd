@@ -1,9 +1,9 @@
-PD_PKG := github.com/tikv/pd/v4
+PD_PKG := github.com/tikv/pd
 
 TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
-                     sort -u | sed -e "s/^\./github.com\/pingcap\/pd\/v4/")
+                     sort -u | sed -e "s/^\./github.com\/pingcap\/pd/")
 INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
-                     sort -u | sed -e "s/^\./github.com\/pingcap\/pd\/v4/" | grep -E "tests")
+                     sort -u | sed -e "s/^\./github.com\/pingcap\/pd/" | grep -E "tests")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 
 PACKAGES := go list ./...
