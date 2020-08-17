@@ -16,7 +16,7 @@ package api
 import (
 	"context"
 
-	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/tikv/pd/server/cluster"
 )
 
 type contextKey int

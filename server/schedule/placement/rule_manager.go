@@ -23,8 +23,8 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/errs"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 

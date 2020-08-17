@@ -18,7 +18,7 @@ import (
 	"math/rand"
 	"sort"
 
-	"github.com/pingcap/pd/v4/pkg/codec"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/pkg/errors"
 )
 

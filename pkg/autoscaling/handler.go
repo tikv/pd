@@ -18,8 +18,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 

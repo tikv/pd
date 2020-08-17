@@ -17,11 +17,11 @@ import (
 	"fmt"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/slice"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
 

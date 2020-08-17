@@ -5,7 +5,7 @@
 ## Build
 
 1. [Go](https://golang.org/) Version 1.13 or later
-2. In the root directory of the [PD project](https://github.com/pingcap/pd), use the `make pd-recover` command to compile and generate `bin/pd-recover`.
+2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make pd-recover` command to compile and generate `bin/pd-recover`.
 
 ## Usage
 

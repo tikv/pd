@@ -18,7 +18,7 @@ import (
 	"io/ioutil"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/server"
+	"github.com/tikv/pd/server"
 )
 
 var _ = Suite(&testDiagnoseAPISuite{})

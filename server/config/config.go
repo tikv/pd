@@ -26,12 +26,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/pd/v4/pkg/grpcutil"
-	"github.com/pingcap/pd/v4/pkg/metricutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
-	"github.com/pingcap/pd/v4/server/versioninfo"
+	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/metricutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/versioninfo"
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"

@@ -23,7 +23,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server/kv"
+	"github.com/tikv/pd/server/kv"
 	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 )

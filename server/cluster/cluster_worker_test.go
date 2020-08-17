@@ -18,10 +18,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
-	"github.com/pingcap/pd/v4/pkg/mock/mockid"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/kv"
-	_ "github.com/pingcap/pd/v4/server/schedulers"
+	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
 var _ = Suite(&testClusterWorkerSuite{})

@@ -14,8 +14,8 @@
 package filter
 
 import (
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/opt"
 )
 
 // StoreComparer compares 2 stores. Often used for StoreCandidates to

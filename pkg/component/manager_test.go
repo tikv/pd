@@ -18,8 +18,8 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/kv"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
 )
 
 func Test(t *testing.T) {

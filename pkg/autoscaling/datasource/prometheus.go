@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	types "github.com/pingcap/pd/v4/pkg/autoscaling"
+	types "github.com/tikv/pd/pkg/autoscaling"
 	"github.com/pkg/errors"
 	promClient "github.com/prometheus/client_golang/api"
 	promAPI "github.com/prometheus/client_golang/api/prometheus/v1"

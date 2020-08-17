@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/server"
+	"github.com/tikv/pd/server"
 	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
