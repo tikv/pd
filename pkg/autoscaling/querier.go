@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,7 @@
 
 package autoscaling
 
-import (
-	"time"
-)
+import "time"
 
 // QueryResult stores metrics value for each instance
 type QueryResult map[string]float64
@@ -30,7 +28,7 @@ type Querier interface {
 type QueryOptions struct {
 	component ComponentType
 	metric    MetricType
-	instances []string
+	addresses []string
 	timestamp time.Time
 	duration  time.Duration
 }
@@ -39,11 +37,11 @@ type QueryOptions struct {
 // The options will be used to query metrics of `duration` long UNTIL `timestamp`
 // which has `metric` type (CPU, Storage) for a specific `component` type
 // and returns metrics value for each instance in `instances`
-func NewQueryOptions(component ComponentType, metric MetricType, instances []string, timestamp time.Time, duration time.Duration) *QueryOptions {
+func NewQueryOptions(component ComponentType, metric MetricType, addresses []string, timestamp time.Time, duration time.Duration) *QueryOptions {
 	return &QueryOptions{
 		component,
 		metric,
-		instances,
+		addresses,
 		timestamp,
 		duration,
 	}

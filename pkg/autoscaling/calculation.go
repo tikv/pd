@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,17 +15,16 @@ package autoscaling
 
 import (
 	"math"
-	"net"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/core"
 	promClient "github.com/prometheus/client_golang/api"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -45,9 +44,30 @@ var (
 	MaxScaleInStep uint64 = 1
 )
 
+var (
+	querierInstance Querier
+	once            sync.Once
+)
+
+func getQuerier(cfg *config.PDServerConfig) Querier {
+	once.Do(func() {
+		var err error
+		client, err := promClient.NewClient(promClient.Config{
+			Address: cfg.MetricStorage,
+		})
+		if err != nil {
+			log.Error("error initializing Prometheus client", zap.String("address", cfg.MetricStorage), zap.Error(err))
+		}
+
+		querierInstance = NewPrometheusQuerier(client)
+	})
+	return querierInstance
+}
+
 func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Strategy) []*Plan {
 	var plans []*Plan
 	var afterQuota uint64
+
 	if tikvPlans, tikvAfterQuota := getPlans(rc, cfg, strategy, TiKV); tikvPlans != nil {
 		plans = append(plans, tikvPlans...)
 		afterQuota += tikvAfterQuota
@@ -74,15 +94,13 @@ func getPlans(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Str
 		return nil, 0
 	}
 
-	client, err := promClient.NewClient(promClient.Config{
-		Address: cfg.MetricStorage,
-	})
-	if err != nil {
-		log.Error("error initializing Prometheus client", zap.String("address", cfg.MetricStorage), zap.Error(err))
+	querier := getQuerier(cfg)
+
+	if querier == nil {
+		log.Error("querier not intialized, cannot getPlans")
 		return nil, 0
 	}
 
-	querier := NewPrometheusQuerier(client)
 	now := time.Now()
 
 	totalCPUUseTime, err := getTotalCPUUseTime(querier, component, instances, now, MetricsTimeDuration)
@@ -129,37 +147,10 @@ func getTiDBInstances() []instance {
 	return []instance{}
 }
 
-// this function assumes that addr is already a valid resolvable address
-func getInstanceNameFromAddress(addr string) string {
-	// In K8s, a StatefulSet pod address is composed of pod-name.peer-svc.namespace.svc:port
-
-	// Extract the hostname part without port
-	hostname := addr
-	portColonIdx := strings.LastIndex(addr, ":")
-	if portColonIdx >= 0 {
-		hostname = addr[:portColonIdx]
-	}
-
-	// Just to make sure it is not an IP address
-	ip := net.ParseIP(hostname)
-	if ip != nil {
-		// Hostname is an IP address, return the whole address
-		return addr
-	}
-
-	firstDotIdx := strings.Index(hostname, ".")
-	if firstDotIdx < 0 {
-		// Cannot infer pod name, return the whole address
-		return addr
-	}
-
-	return addr[:firstDotIdx]
-}
-
-func getInstanceNames(instances []instance) []string {
+func getAddresses(instances []instance) []string {
 	names := make([]string, 0, len(instances))
 	for _, inst := range instances {
-		names = append(names, getInstanceNameFromAddress(inst.address))
+		names = append(names, inst.address)
 	}
 	return names
 }
@@ -167,7 +158,7 @@ func getInstanceNames(instances []instance) []string {
 // TODO: suppport other metrics storage
 // get total CPU use time (in seconds) through Prometheus.
 func getTotalCPUUseTime(querier Querier, component ComponentType, instances []instance, timestamp time.Time, duration time.Duration) (float64, error) {
-	result, err := querier.Query(NewQueryOptions(component, CPUUsage, getInstanceNames(instances), timestamp, duration))
+	result, err := querier.Query(NewQueryOptions(component, CPUUsage, getAddresses(instances), timestamp, duration))
 	if err != nil {
 		return 0.0, err
 	}
@@ -183,7 +174,7 @@ func getTotalCPUUseTime(querier Querier, component ComponentType, instances []in
 // TODO: suppport other metrics storage
 // get total CPU quota (in millicores) through Prometheus.
 func getTotalCPUQuota(querier Querier, component ComponentType, instances []instance, timestamp time.Time) (uint64, error) {
-	result, err := querier.Query(NewQueryOptions(component, CPUQuota, getInstanceNames(instances), timestamp, 0))
+	result, err := querier.Query(NewQueryOptions(component, CPUQuota, getAddresses(instances), timestamp, 0))
 	if err != nil {
 		return 0, err
 	}

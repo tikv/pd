@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/core"
 )
 
 func Test(t *testing.T) {
@@ -201,9 +201,10 @@ type mockQuerier struct{}
 
 func (q *mockQuerier) Query(options *QueryOptions) (QueryResult, error) {
 	result := make(QueryResult)
-	for _, instance := range options.instances {
-		result[instance] = mockResultValue
+	for _, addr := range options.addresses {
+		result[addr] = mockResultValue
 	}
+
 	return result, nil
 }
 
@@ -247,36 +248,4 @@ func (s *calculationTestSuite) TestGetTotalCPUQuota(c *C) {
 	totalCPUQuota, _ := getTotalCPUQuota(querier, TiDB, instances, time.Now())
 	expected := uint64(mockResultValue * float64(len(instances)*millicores))
 	c.Assert(totalCPUQuota, Equals, expected)
-}
-
-func (s *calculationTestSuite) TestGetPodNameFromAddress(c *C) {
-	testcases := []struct {
-		address              string
-		expectedInstanceName string
-	}{
-		{
-			address:              "test-tikv-0.test-tikv-peer.namespace.svc:20080",
-			expectedInstanceName: "test-tikv-0",
-		},
-		{
-			address:              "tidb-0_10080",
-			expectedInstanceName: "tidb-0_10080",
-		},
-		{
-			address:              "1.2.3.4:2333",
-			expectedInstanceName: "1.2.3.4:2333",
-		},
-		{
-			address:              "1.2.3.4",
-			expectedInstanceName: "1.2.3.4",
-		},
-		{
-			address:              "test-tikv-0.test-tikv-peer.namespace.svc",
-			expectedInstanceName: "test-tikv-0",
-		},
-	}
-	for _, testcase := range testcases {
-		instanceName := getInstanceNameFromAddress(testcase.address)
-		c.Assert(instanceName, Equals, testcase.expectedInstanceName)
-	}
 }
