@@ -15,6 +15,7 @@ package autoscaling
 
 import (
 	"math"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -243,7 +244,7 @@ func getScaledTiDBGroups(informer tidbInformer, healthyInstances []instance) []*
 
 func buildPlanMap(planMap map[string]map[string]struct{}, groupName, address string) {
 	if len(groupName) > len(autoScalingGroupLabelKeyPrefix) &&
-		groupName[:len(autoScalingGroupLabelKeyPrefix)] == autoScalingGroupLabelKeyPrefix {
+		strings.HasPrefix(groupName, autoScalingGroupLabelKeyPrefix) {
 		if component, ok := planMap[groupName]; ok {
 			component[address] = struct{}{}
 		} else {

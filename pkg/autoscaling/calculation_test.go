@@ -301,7 +301,7 @@ func newMockTiDBInformer() *mockTidbInformer {
 
 // GetTiDBs implements TiDBInformer.GetTiDBs
 func (mc *mockTidbInformer) GetTiDBs() []*TiDBInfo {
-	returned := make([]*TiDBInfo, len(mc.tidbs))
+	returned := make([]*TiDBInfo, 0, len(mc.tidbs))
 	for _, v := range mc.tidbs {
 		returned = append(returned, v)
 	}
