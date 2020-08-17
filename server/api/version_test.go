@@ -59,7 +59,7 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 	go func(cfg *config.Config) {
 		s, err := server.CreateServer(ctx, cfg, NewHandler)
 		c.Assert(err, IsNil)
-		c.Assert(failpoint.Enable("github.com/tikv/pd/v4/server/memberNil", `return(true)`), IsNil)
+		c.Assert(failpoint.Enable("github.com/tikv/pd/server/memberNil", `return(true)`), IsNil)
 		reqCh <- struct{}{}
 		err = s.Run()
 		c.Assert(err, IsNil)
@@ -80,5 +80,5 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 		cancel()
 		testutil.CleanServer(cfg.DataDir)
 	}()
-	c.Assert(failpoint.Disable("github.com/tikv/pd/v4/server/memberNil"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/memberNil"), IsNil)
 }

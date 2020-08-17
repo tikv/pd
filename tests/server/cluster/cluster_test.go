@@ -372,7 +372,7 @@ func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
 	c.Assert(tc, NotNil)
 
 	// let the job run at small interval
-	c.Assert(failpoint.Enable("github.com/tikv/pd/v4/server/highFrequencyClusterJobs", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
 	for i := 0; i < 100; i++ {
 		err = rc.Start(leaderServer.GetServer())
 		c.Assert(err, IsNil)
@@ -428,7 +428,7 @@ func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
 	c.Assert(err, IsNil)
 	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", storeID))
 	var wg sync.WaitGroup
-	c.Assert(failpoint.Enable("github.com/tikv/pd/v4/server/versionChangeConcurrency", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/versionChangeConcurrency", `return(true)`), IsNil)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -441,7 +441,7 @@ func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
 	v, err := semver.NewVersion("1.0.0")
 	c.Assert(err, IsNil)
 	c.Assert(svr.GetClusterVersion(), Equals, *v)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/v4/server/versionChangeConcurrency"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/versionChangeConcurrency"), IsNil)
 }
 
 func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {

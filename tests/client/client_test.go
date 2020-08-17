@@ -205,9 +205,9 @@ func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	c.Assert(err, IsNil)
 
 	start := time.Now()
-	c.Assert(failpoint.Enable("github.com/tikv/pd/v4/server/customTimeout", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/customTimeout", "return(true)"), IsNil)
 	_, err = cli.GetAllStores(context.TODO())
-	c.Assert(failpoint.Disable("github.com/tikv/pd/v4/server/customTimeout"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/customTimeout"), IsNil)
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), GreaterEqual, 1*time.Second)
 	c.Assert(time.Since(start), Less, 2*time.Second)

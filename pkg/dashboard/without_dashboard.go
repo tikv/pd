@@ -23,7 +23,7 @@ import (
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
 
-	"github.com/tikv/pd/v4/server"
+	"github.com/tikv/pd/server"
 )
 
 var (
