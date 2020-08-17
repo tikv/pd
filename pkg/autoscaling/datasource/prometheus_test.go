@@ -27,8 +27,8 @@ import (
 	"time"
 
 	"github.com/pingcap/check"
-	types "github.com/tikv/pd/pkg/autoscaling"
 	promClient "github.com/prometheus/client_golang/api"
+	types "github.com/tikv/pd/pkg/autoscaling"
 )
 
 const (

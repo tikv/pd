@@ -19,11 +19,11 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	types "github.com/tikv/pd/pkg/autoscaling"
 	"github.com/pkg/errors"
 	promClient "github.com/prometheus/client_golang/api"
 	promAPI "github.com/prometheus/client_golang/api/prometheus/v1"
 	promModel "github.com/prometheus/common/model"
+	types "github.com/tikv/pd/pkg/autoscaling"
 	"go.uber.org/zap"
 )
 

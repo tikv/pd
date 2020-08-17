@@ -18,8 +18,8 @@ import (
 	"math/rand"
 	"sort"
 
-	"github.com/tikv/pd/pkg/codec"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/codec"
 )
 
 const (
