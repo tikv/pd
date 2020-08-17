@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/operator"
 )
 
 // PriorityWeight is used to represent the weight of different priorities of operators.
