@@ -24,9 +24,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/spf13/cobra"
 )
 
 var (

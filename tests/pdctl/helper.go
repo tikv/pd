@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/spf13/cobra"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/cluster"
@@ -33,7 +34,6 @@ import (
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
-	"github.com/spf13/cobra"
 )
 
 // InitCommand is used to initialize command.

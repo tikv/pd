@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/server"
@@ -34,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/member"
-	"github.com/pkg/errors"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )

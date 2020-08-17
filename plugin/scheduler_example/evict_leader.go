@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
+	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -29,7 +30,6 @@ import (
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/selector"
 	"github.com/tikv/pd/server/schedulers"
-	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )

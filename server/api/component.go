@@ -18,9 +18,9 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
+	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/pkg/errors"
 	"github.com/unrolled/render"
 )
 

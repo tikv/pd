@@ -17,13 +17,13 @@ import (
 	"net/http"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pkg/errors"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/selector"
-	"github.com/pkg/errors"
 )
 
 const (

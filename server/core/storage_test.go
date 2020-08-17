@@ -23,8 +23,8 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server/kv"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/kv"
 )
 
 var _ = Suite(&testKVSuite{})
