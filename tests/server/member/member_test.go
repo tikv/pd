@@ -26,11 +26,11 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/tests"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
 

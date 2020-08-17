@@ -20,9 +20,9 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/mattn/go-shellwords"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
 // CommandFlags are flags that used in all Commands

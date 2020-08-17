@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pingcap/pd/v4/pkg/errs"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 type splitPointType int

@@ -16,8 +16,8 @@ package command
 import (
 	"strconv"
 
-	"github.com/pingcap/pd/v4/pkg/tsoutil"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/pkg/tsoutil"
 )
 
 // NewTSOCommand return a ping subcommand of rootCmd

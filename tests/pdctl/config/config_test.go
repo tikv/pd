@@ -25,12 +25,12 @@ import (
 	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
-	"github.com/pingcap/pd/v4/tests"
-	"github.com/pingcap/pd/v4/tests/pdctl"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/pdctl"
 )
 
 func Test(t *testing.T) {

@@ -14,7 +14,7 @@
 package statistics
 
 import (
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 const (

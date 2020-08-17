@@ -21,10 +21,10 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server"
-	clusterpkg "github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/tests"
-	"github.com/pingcap/pd/v4/tests/pdctl"
+	"github.com/tikv/pd/server"
+	clusterpkg "github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/pdctl"
 )
 
 func Test(t *testing.T) {

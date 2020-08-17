@@ -23,9 +23,9 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/tests"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
 
@@ -240,7 +240,7 @@ func (s *testTsoSuite) TestDeplaySyncTimestamp(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/tso/delaySyncTimestamp", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/delaySyncTimestamp", `return(true)`), IsNil)
 
 	// Make the old leader resign and wait for the new leader to get a lease
 	leaderServer.ResignLeader()
@@ -254,7 +254,7 @@ func (s *testTsoSuite) TestDeplaySyncTimestamp(c *C) {
 	resp, err := tsoClient.Recv()
 	c.Assert(err, IsNil)
 	c.Assert(resp.GetCount(), Equals, uint32(1))
-	failpoint.Disable("github.com/pingcap/pd/v4/server/tso/delaySyncTimestamp")
+	failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp")
 }
 
 var _ = Suite(&testTimeFallBackSuite{})
@@ -269,8 +269,8 @@ type testTimeFallBackSuite struct {
 
 func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/tso/fallBackSync", `return(true)`), IsNil)
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/tso/fallBackUpdate", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/fallBackSync", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/fallBackUpdate", `return(true)`), IsNil)
 	var err error
 	s.cluster, err = tests.NewTestCluster(s.ctx, 1)
 	c.Assert(err, IsNil)
@@ -283,8 +283,8 @@ func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
 	s.grpcPDClient = testutil.MustNewGrpcClient(c, s.server.GetAddr())
 	svr := s.server.GetServer()
 	svr.Close()
-	failpoint.Disable("github.com/pingcap/pd/v4/server/tso/fallBackSync")
-	failpoint.Disable("github.com/pingcap/pd/v4/server/tso/fallBackUpdate")
+	failpoint.Disable("github.com/tikv/pd/server/tso/fallBackSync")
+	failpoint.Disable("github.com/tikv/pd/server/tso/fallBackUpdate")
 	err = svr.Run()
 	c.Assert(err, IsNil)
 	s.cluster.WaitLeader()
@@ -364,7 +364,7 @@ func (s *testFollowerTsoSuite) TearDownSuite(c *C) {
 }
 
 func (s *testFollowerTsoSuite) TestRequest(c *C) {
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/tso/skipRetryGetTS", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/skipRetryGetTS", `return(true)`), IsNil)
 	var err error
 	cluster, err := tests.NewTestCluster(s.ctx, 2)
 	defer cluster.Destroy()
@@ -396,5 +396,5 @@ func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	_, err = tsoClient.Recv()
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "can not get timestamp"), IsTrue)
-	failpoint.Disable("github.com/pingcap/pd/v4/server/tso/skipRetryGetTS")
+	failpoint.Disable("github.com/tikv/pd/server/tso/skipRetryGetTS")
 }

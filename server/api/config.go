@@ -24,11 +24,11 @@ import (
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/apiutil"
-	"github.com/pingcap/pd/v4/pkg/logutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/unrolled/render"
 )
 

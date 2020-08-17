@@ -19,7 +19,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server"
+	"github.com/tikv/pd/server"
 )
 
 var _ = Suite(&testLogSuite{})

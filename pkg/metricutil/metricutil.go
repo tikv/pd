@@ -19,9 +19,9 @@ import (
 	"unicode"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
+	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
 

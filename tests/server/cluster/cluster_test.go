@@ -26,19 +26,19 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
-	"github.com/pingcap/pd/v4/pkg/dashboard"
-	"github.com/pingcap/pd/v4/pkg/mock/mockid"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/kv"
-	syncer "github.com/pingcap/pd/v4/server/region_syncer"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
-	"github.com/pingcap/pd/v4/tests"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	syncer "github.com/tikv/pd/server/region_syncer"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/tests"
 )
 
 func Test(t *testing.T) {
@@ -372,7 +372,7 @@ func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
 	c.Assert(tc, NotNil)
 
 	// let the job run at small interval
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/highFrequencyClusterJobs", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
 	for i := 0; i < 100; i++ {
 		err = rc.Start(leaderServer.GetServer())
 		c.Assert(err, IsNil)
@@ -428,7 +428,7 @@ func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
 	c.Assert(err, IsNil)
 	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Up, fmt.Sprintf("test/store%d", storeID))
 	var wg sync.WaitGroup
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/versionChangeConcurrency", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/versionChangeConcurrency", `return(true)`), IsNil)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -441,7 +441,7 @@ func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
 	v, err := semver.NewVersion("1.0.0")
 	c.Assert(err, IsNil)
 	c.Assert(svr.GetClusterVersion(), Equals, *v)
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/versionChangeConcurrency"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/versionChangeConcurrency"), IsNil)
 }
 
 func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {

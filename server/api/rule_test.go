@@ -21,8 +21,8 @@ import (
 	"strings"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 var _ = Suite(&testRuleSuite{})

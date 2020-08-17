@@ -16,7 +16,7 @@ package datasource
 import (
 	"time"
 
-	types "github.com/pingcap/pd/v4/pkg/autoscaling"
+	types "github.com/tikv/pd/pkg/autoscaling"
 )
 
 // QueryResult stores metrics value for each instance

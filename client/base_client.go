@@ -22,9 +22,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/errs"
-	"github.com/pingcap/pd/v4/pkg/grpcutil"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )

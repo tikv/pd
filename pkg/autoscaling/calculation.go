@@ -20,9 +20,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
