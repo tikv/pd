@@ -18,8 +18,8 @@ import (
 	"net/http"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/core"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/core"
 )
 
 var _ = Suite(&testAdminSuite{})

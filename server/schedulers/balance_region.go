@@ -18,10 +18,10 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/server/cache"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/schedule"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/server/cache"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"go.uber.org/zap"
 )
 

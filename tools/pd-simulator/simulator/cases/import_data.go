@@ -21,9 +21,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/table"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/simutil"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/table"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
 func newImportData() *Case {

@@ -16,9 +16,9 @@ package schedule
 import (
 	"fmt"
 
-	"github.com/pingcap/pd/v3/server/cache"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/namespace"
+	"github.com/tikv/pd/server/cache"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/namespace"
 )
 
 //revive:disable:unused-parameter

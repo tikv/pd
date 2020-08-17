@@ -14,8 +14,8 @@
 package statistics
 
 import (
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/namespace"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/namespace"
 )
 
 // RegionStatisticType represents the type of the region's status.

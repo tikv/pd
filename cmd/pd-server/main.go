@@ -22,17 +22,17 @@ import (
 
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/logutil"
-	"github.com/pingcap/pd/v3/pkg/metricutil"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/api"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/metricutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"go.uber.org/zap"
 
 	// Register schedulers.
-	_ "github.com/pingcap/pd/v3/server/schedulers"
+	_ "github.com/tikv/pd/server/schedulers"
 	// Register namespace classifiers.
-	_ "github.com/pingcap/pd/v3/table"
+	_ "github.com/tikv/pd/table"
 )
 
 func main() {

@@ -23,10 +23,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/api"
-	"github.com/pingcap/pd/v3/server/core"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/core"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )

@@ -16,7 +16,7 @@ package schedule
 import (
 	"math/rand"
 
-	"github.com/pingcap/pd/v3/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 // BalanceSelector selects source/target from store candidates based on their

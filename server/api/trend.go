@@ -18,9 +18,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pingcap/pd/v3/pkg/typeutil"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/statistics"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 )
 

@@ -1,10 +1,10 @@
 # PD
 
-[![TravisCI Build Status](https://travis-ci.org/pingcap/pd.svg?branch=master)](https://travis-ci.org/pingcap/pd)
-![GitHub release](https://img.shields.io/github/release/pingcap/pd.svg)
-[![CircleCI Build Status](https://circleci.com/gh/pingcap/pd.svg?style=shield)](https://circleci.com/gh/pingcap/pd)
-[![Go Report Card](https://goreportcard.com/badge/github.com/pingcap/pd)](https://goreportcard.com/report/github.com/pingcap/pd)
-[![codecov](https://codecov.io/gh/pingcap/pd/branch/master/graph/badge.svg)](https://codecov.io/gh/pingcap/pd)
+[![TravisCI Build Status](https://travis-ci.org/tikv/pd.svg?branch=master)](https://travis-ci.org/tikv/pd)
+![GitHub release](https://img.shields.io/github/release/tikv/pd.svg)
+[![CircleCI Build Status](https://circleci.com/gh/tikv/pd.svg?style=shield)](https://circleci.com/gh/tikv/pd)
+[![Go Report Card](https://goreportcard.com/badge/github.com/tikv/pd)](https://goreportcard.com/report/github.com/tikv/pd)
+[![codecov](https://codecov.io/gh/tikv/pd/branch/master/graph/badge.svg)](https://codecov.io/gh/tikv/pd)
 
 PD is the abbreviation for Placement Driver. It is used to manage and schedule the [TiKV](https://github.com/tikv/tikv) cluster.
 
@@ -76,13 +76,13 @@ X-Etcd-Cluster-Id: 33dc747581249309
 You can use the following command to build a PD image directly:
 
 ```bash
-docker build -t pingcap/pd .
+docker build -t tikv/pd .
 ```
 
 Or you can also use following command to get PD from Docker hub:
 
 ```bash
-docker pull pingcap/pd
+docker pull tikv/pd
 ```
 
 Run a single node with Docker:
@@ -91,7 +91,7 @@ Run a single node with Docker:
 # Set correct HostIP here.
 export HostIP="192.168.199.105"
 
-docker run -d -p 2379:2379 -p 2380:2380 --name pd pingcap/pd \
+docker run -d -p 2379:2379 -p 2380:2380 --name pd tikv/pd \
           --name="pd" \
           --data-dir="pd" \
           --client-urls="http://0.0.0.0:2379" \

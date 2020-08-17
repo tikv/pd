@@ -20,8 +20,8 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v3/server"
-	_ "github.com/pingcap/pd/v3/table"
+	"github.com/tikv/pd/server"
+	_ "github.com/tikv/pd/table"
 )
 
 var _ = Suite(&testStoreNsSuite{})

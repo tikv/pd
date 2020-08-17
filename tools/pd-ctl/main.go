@@ -24,9 +24,9 @@ import (
 
 	"github.com/chzyer/readline"
 	shellwords "github.com/mattn/go-shellwords"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/tools/pd-ctl/pdctl"
 	flag "github.com/spf13/pflag"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 var (

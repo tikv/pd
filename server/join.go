@@ -23,8 +23,8 @@ import (
 
 	"github.com/pingcap/failpoint"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/etcdutil"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.uber.org/zap"

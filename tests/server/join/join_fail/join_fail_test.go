@@ -19,8 +19,8 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/tests"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
 )
 
 func Test(t *testing.T) {
@@ -45,9 +45,9 @@ func (s *serverTestSuite) TestFailedPDJoinInStep1(c *C) {
 	cluster.WaitLeader()
 
 	// Join the second PD.
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v3/server/add-member-failed", `return`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/add-member-failed", `return`), IsNil)
 	_, err = cluster.Join()
 	c.Assert(err, NotNil)
 	c.Assert(strings.Contains(err.Error(), "join failed"), IsTrue)
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/v3/server/add-member-failed"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/add-member-failed"), IsNil)
 }

@@ -24,9 +24,9 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v3/pkg/mock/mockid"
-	"github.com/pingcap/pd/v3/server/core"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/server/core"
 	"google.golang.org/grpc"
 )
 
@@ -462,7 +462,7 @@ func (s *testClusterSuite) TestRaftClusterMultipleRestart(c *C) {
 	c.Assert(cluster, NotNil)
 
 	// let the job run at small interval
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v3/server/highFrequencyClusterJobs", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
 	for i := 0; i < 100; i++ {
 		err = s.svr.createRaftCluster()
 		c.Assert(err, IsNil)

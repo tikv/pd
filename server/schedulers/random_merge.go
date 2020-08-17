@@ -16,8 +16,8 @@ package schedulers
 import (
 	"math/rand"
 
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/schedule"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 )
 
 func init() {

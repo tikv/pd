@@ -18,7 +18,7 @@ import (
 	"path"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/v3/server"
+	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
 

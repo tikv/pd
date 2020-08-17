@@ -15,10 +15,10 @@ package server
 
 import (
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v3/pkg/testutil"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/namespace"
-	"github.com/pingcap/pd/v3/server/schedule"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/namespace"
+	"github.com/tikv/pd/server/schedule"
 )
 
 var _ = Suite(&testNamespaceSuite{})

@@ -16,8 +16,8 @@ package namespace
 import (
 	"fmt"
 
-	"github.com/pingcap/pd/v3/server/core"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/core"
 )
 
 // DefaultNamespace is the namespace all the store and region belong to by

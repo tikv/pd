@@ -20,9 +20,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/tests"
-	"github.com/pingcap/pd/v3/tests/pdctl"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/pdctl"
 )
 
 func Test(t *testing.T) {

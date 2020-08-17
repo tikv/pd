@@ -17,8 +17,8 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/pingcap/pd/v3/server/schedule"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/schedule"
 )
 
 func init() {
