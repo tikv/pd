@@ -19,12 +19,12 @@ import (
 
 	. "github.com/pingcap/check"
 
-	"github.com/pingcap/pd/v4/pkg/dashboard"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/tests"
+	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
 
 	// Register schedulers.
-	_ "github.com/pingcap/pd/v4/server/schedulers"
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
 var _ = Suite(&raceTestSuite{})

@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/info"
-	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/simutil"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
 

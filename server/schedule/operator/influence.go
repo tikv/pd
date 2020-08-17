@@ -14,8 +14,8 @@
 package operator
 
 import (
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/storelimit"
 )
 
 // OpInfluence records the influence of the cluster.

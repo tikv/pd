@@ -26,7 +26,7 @@ The full test suite is ran with:
 
 This takes a while to run. The test suite uses a fork of [gocheck](http://labix.org/gocheck). With gocheck, individual tests can be ran with this form:
 
-    go test github.com/pingcap/pd/server/api -check.f TestJsonRespondError
+    go test github.com/tikv/pd/server/api -check.f TestJsonRespondError
 
 # Changing APIs
 

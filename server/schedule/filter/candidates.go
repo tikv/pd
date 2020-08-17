@@ -17,8 +17,8 @@ import (
 	"math/rand"
 	"sort"
 
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/opt"
 )
 
 // StoreCandidates wraps store list and proivde utilities to select source or

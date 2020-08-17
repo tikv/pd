@@ -22,20 +22,20 @@ import (
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/autoscaling"
-	"github.com/pingcap/pd/v4/pkg/dashboard"
-	"github.com/pingcap/pd/v4/pkg/logutil"
-	"github.com/pingcap/pd/v4/pkg/metricutil"
-	"github.com/pingcap/pd/v4/pkg/swaggerserver"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/api"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/join"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/autoscaling"
+	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/metricutil"
+	"github.com/tikv/pd/pkg/swaggerserver"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/join"
 	"go.uber.org/zap"
 
 	// Register schedulers.
-	_ "github.com/pingcap/pd/v4/server/schedulers"
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
 func main() {

@@ -17,8 +17,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/pingcap/pd/v4/pkg/apiutil/serverapi"
-	"github.com/pingcap/pd/v4/server"
+	"github.com/tikv/pd/pkg/apiutil/serverapi"
+	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
 )

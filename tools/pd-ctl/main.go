@@ -21,7 +21,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func main() {

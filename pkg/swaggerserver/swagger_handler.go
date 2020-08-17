@@ -18,8 +18,8 @@ package swaggerserver
 import (
 	"net/http"
 
-	_ "github.com/pingcap/pd/v4/docs/swagger" // nolint: swagger docs
 	httpSwagger "github.com/swaggo/http-swagger"
+	_ "github.com/tikv/pd/docs/swagger" // nolint: swagger docs
 )
 
 func handler() http.Handler {
