@@ -28,12 +28,12 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	pd "github.com/pingcap/pd/v4/client"
-	"github.com/pingcap/pd/v4/pkg/mock/mockid"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/tests"
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/tests"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 )
@@ -205,9 +205,9 @@ func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	c.Assert(err, IsNil)
 
 	start := time.Now()
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/customTimeout", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/customTimeout", "return(true)"), IsNil)
 	_, err = cli.GetAllStores(context.TODO())
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/customTimeout"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/customTimeout"), IsNil)
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), GreaterEqual, 1*time.Second)
 	c.Assert(time.Since(start), Less, 2*time.Second)

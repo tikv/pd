@@ -18,9 +18,9 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/v4/pkg/apiutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/unrolled/render"
 )
 

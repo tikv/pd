@@ -5,7 +5,7 @@ pd-ctl is a command line tool for PD, pd-ctl obtains the state information of th
 
 ## Build
 1. [Go](https://golang.org/) Version 1.9 or later
-2. In the root directory of the [PD project](https://github.com/pingcap/pd), use the `make` or `make pd-ctl` command to compile and generate `bin/pd-ctl`
+2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make` or `make pd-ctl` command to compile and generate `bin/pd-ctl`
 
 > **Note:** Generally, you don't need to compile source code as the PD Control tool already exists in the released Binary or Docker. However, dev users can refer to the above instruction for compiling source code.
 

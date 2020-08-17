@@ -16,8 +16,8 @@ package keyvisual
 import (
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
 
-	"github.com/pingcap/pd/v4/pkg/dashboard/keyvisual/input"
-	"github.com/pingcap/pd/v4/server"
+	"github.com/tikv/pd/pkg/dashboard/keyvisual/input"
+	"github.com/tikv/pd/server"
 )
 
 // GenCustomDataProvider generates a custom DataProvider for the dashboard keyvisual package.

@@ -4,9 +4,9 @@ cache:
   directories:
     - $HOME/.cache/go-build
     - $GOPATH/pkg/mod
-    - $GOPATH/src/github.com/pingcap/pd/.tools
+    - $GOPATH/src/github.com/tikv/pd/.tools
     # Cache for old branches
-    - $GOPATH/src/github.com/pingcap/pd/.retools
+    - $GOPATH/src/github.com/tikv/pd/.retools
 
 go:
   - 1.13

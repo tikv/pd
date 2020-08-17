@@ -15,7 +15,7 @@ package swaggerserver
 
 import (
 	"context"
-	"github.com/pingcap/pd/v4/server"
+	"github.com/tikv/pd/server"
 	"net/http"
 )
 

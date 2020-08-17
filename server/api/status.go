@@ -16,8 +16,8 @@ package api
 import (
 	"net/http"
 
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/versioninfo"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/versioninfo"
 	"github.com/unrolled/render"
 )
 

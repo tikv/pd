@@ -5,7 +5,7 @@ pd-recover is a disaster recovery tool of PD, used to recover the PD cluster whi
 
 ## Build
 1. [Go](https://golang.org/) Version 1.9 or later
-2. In the root directory of the [PD project](https://github.com/pingcap/pd), use the `make` command to compile and generate `bin/pd-recover`
+2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make` command to compile and generate `bin/pd-recover`
 
 
 ## Usage

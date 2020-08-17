@@ -24,9 +24,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/logutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/cluster"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 )
 
 var (

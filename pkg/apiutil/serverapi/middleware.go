@@ -20,8 +20,8 @@ import (
 	"strings"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/urfave/negroni"
 	"go.uber.org/zap"
 )

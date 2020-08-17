@@ -17,7 +17,7 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/tests/pdctl"
+	"github.com/tikv/pd/tests/pdctl"
 )
 
 func Test(t *testing.T) {

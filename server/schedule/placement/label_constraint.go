@@ -16,8 +16,8 @@ package placement
 import (
 	"strings"
 
-	"github.com/pingcap/pd/v4/pkg/slice"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/server/core"
 )
 
 // LabelConstraintOp defines how a LabelConstraint matches a store. It can be one of
