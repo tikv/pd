@@ -25,17 +25,17 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v3/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/v3/pkg/testutil"
-	"github.com/pingcap/pd/v3/server/config"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/kv"
-	"github.com/pingcap/pd/v3/server/schedule"
-	"github.com/pingcap/pd/v3/server/schedule/operator"
-	"github.com/pingcap/pd/v3/server/schedule/opt"
-	"github.com/pingcap/pd/v3/server/schedule/storelimit"
-	"github.com/pingcap/pd/v3/server/schedulers"
-	"github.com/pingcap/pd/v3/server/statistics"
+	"github.com/tikv/pd/pkg/mock/mockhbstream"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/statistics"
 )
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
@@ -147,7 +147,7 @@ type testCoordinatorSuite struct {
 
 func (s *testCoordinatorSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v3/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testCoordinatorSuite) TearDownSuite(c *C) {
@@ -864,7 +864,7 @@ type testOperatorControllerSuite struct {
 
 func (s *testOperatorControllerSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v3/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testOperatorControllerSuite) TearDownSuite(c *C) {
@@ -991,7 +991,7 @@ type testScheduleControllerSuite struct {
 
 func (s *testScheduleControllerSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v3/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testScheduleControllerSuite) TearDownSuite(c *C) {

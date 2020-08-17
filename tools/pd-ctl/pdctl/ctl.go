@@ -16,8 +16,8 @@ package pdctl
 import (
 	"os"
 
-	"github.com/pingcap/pd/v3/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
 // CommandFlags are flags that used in all Commands

@@ -19,11 +19,11 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/api"
-	"github.com/pingcap/pd/v3/server/cluster"
-	"github.com/pingcap/pd/v3/tests"
-	"github.com/pingcap/pd/v3/tests/pdctl"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/pdctl"
 )
 
 func Test(t *testing.T) {

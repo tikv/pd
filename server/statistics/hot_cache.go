@@ -16,7 +16,7 @@ package statistics
 import (
 	"math/rand"
 
-	"github.com/pingcap/pd/v3/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 // Denoising is an option to calculate flow base on the real heartbeats. Should

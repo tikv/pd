@@ -16,7 +16,7 @@ package schedule
 import (
 	"time"
 
-	"github.com/pingcap/pd/v3/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/operator"
 )
 
 type operatorWithTime struct {

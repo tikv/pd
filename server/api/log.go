@@ -20,8 +20,8 @@ import (
 	"net/http"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/logutil"
-	"github.com/pingcap/pd/v3/server"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
 

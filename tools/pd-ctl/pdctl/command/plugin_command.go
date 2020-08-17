@@ -18,8 +18,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/pingcap/pd/v3/server/cluster"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server/cluster"
 )
 
 var (

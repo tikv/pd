@@ -19,7 +19,7 @@ import (
 	"net/http"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/server"
+	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 )
 

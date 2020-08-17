@@ -18,10 +18,10 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v3/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v3/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v3/server/schedule"
-	"github.com/pingcap/pd/v3/server/schedule/storelimit"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/storelimit"
 )
 
 var _ = Suite(&testStoreLimiterSuite{})

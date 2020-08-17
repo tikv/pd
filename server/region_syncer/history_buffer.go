@@ -18,8 +18,8 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/kv"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
 	"go.uber.org/zap"
 )
 

@@ -20,11 +20,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/cases"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/info"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/simutil"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
 // Driver promotes the cluster status change.

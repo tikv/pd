@@ -18,10 +18,10 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/etcdutil"
-	"github.com/pingcap/pd/v3/pkg/typeutil"
-	"github.com/pingcap/pd/v3/server/kv"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )

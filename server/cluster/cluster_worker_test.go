@@ -19,7 +19,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	// Register schedulers
-	_ "github.com/pingcap/pd/v3/server/schedulers"
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
 var _ = Suite(&testClusterWorkerSuite{})

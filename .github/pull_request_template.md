@@ -1,5 +1,5 @@
 <!--
-Thank you for working on PD! Please read PD's [CONTRIBUTING](https://github.com/pingcap/pd/blob/master/CONTRIBUTING.md) document **BEFORE** filing this PR.
+Thank you for working on PD! Please read PD's [CONTRIBUTING](https://github.com/tikv/pd/blob/master/CONTRIBUTING.md) document **BEFORE** filing this PR.
 -->
 
 ### What problem does this PR solve? <!--add the issue link with summary if it exists-->
@@ -20,7 +20,7 @@ Tests <!-- At least one of them must be included. -->
 Code changes
 
  - Has configuration change
- - Has HTTP API interfaces change (Don't forget to [update API document](https://github.com/pingcap/pd/blob/master/docs/development.md#updating-api-documentation))
+ - Has HTTP API interfaces change (Don't forget to [update API document](https://github.com/tikv/pd/blob/master/docs/development.md#updating-api-documentation))
  - Has persistent data change
 
 Side effects

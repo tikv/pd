@@ -25,10 +25,10 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/configpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/apiutil"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/config"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )

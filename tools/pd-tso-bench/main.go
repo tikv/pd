@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	pd "github.com/pingcap/pd/v3/client"
 	"github.com/pkg/errors"
+	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
 )
 

@@ -16,8 +16,8 @@ package api
 import (
 	"net/http"
 
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/cluster"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 

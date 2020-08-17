@@ -19,9 +19,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/cluster"
-	"github.com/pingcap/pd/v3/server/config"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 )
 
 var _ = Suite(&testClusterSuite{})

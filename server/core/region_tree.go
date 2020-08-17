@@ -19,7 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/btree"
+	"github.com/tikv/pd/pkg/btree"
 	"go.uber.org/zap"
 )
 

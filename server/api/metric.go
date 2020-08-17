@@ -19,8 +19,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pingcap/pd/v3/pkg/apiutil/serverapi"
-	"github.com/pingcap/pd/v3/server"
+	"github.com/tikv/pd/pkg/apiutil/serverapi"
+	"github.com/tikv/pd/server"
 )
 
 type queryMetric struct {

@@ -1,4 +1,4 @@
-module github.com/pingcap/pd/v3
+module github.com/tikv/pd
 
 go 1.13
 

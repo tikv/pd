@@ -16,12 +16,12 @@ package filter
 import (
 	"fmt"
 
-	"github.com/pingcap/pd/v3/pkg/cache"
-	"github.com/pingcap/pd/v3/pkg/slice"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/schedule/opt"
-	"github.com/pingcap/pd/v3/server/schedule/placement"
-	"github.com/pingcap/pd/v3/server/schedule/storelimit"
+	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/storelimit"
 )
 
 // revive:disable:unused-parameter

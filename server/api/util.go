@@ -22,10 +22,10 @@ import (
 	"net/url"
 
 	"github.com/pingcap/kvproto/pkg/configpb"
-	pd "github.com/pingcap/pd/v3/client"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/config_manager"
 	"github.com/pkg/errors"
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config_manager"
 )
 
 var (

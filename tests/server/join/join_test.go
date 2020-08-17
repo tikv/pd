@@ -21,10 +21,10 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v3/pkg/etcdutil"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/join"
-	"github.com/pingcap/pd/v3/tests"
+	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/join"
+	"github.com/tikv/pd/tests"
 )
 
 func Test(t *testing.T) {

@@ -18,8 +18,8 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/kv"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
 )
 
 var _ = Suite(&testManagerSuite{})

@@ -18,11 +18,11 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/v3/pkg/apiutil"
-	"github.com/pingcap/pd/v3/pkg/slice"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/schedule"
-	"github.com/pingcap/pd/v3/server/schedule/placement"
+	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/unrolled/render"
 )
 

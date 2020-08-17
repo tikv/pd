@@ -21,14 +21,14 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/logutil"
-	"github.com/pingcap/pd/v3/server/config"
-	"github.com/pingcap/pd/v3/server/schedule"
-	"github.com/pingcap/pd/v3/server/schedule/operator"
-	"github.com/pingcap/pd/v3/server/schedule/opt"
-	"github.com/pingcap/pd/v3/server/schedulers"
-	"github.com/pingcap/pd/v3/server/statistics"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 

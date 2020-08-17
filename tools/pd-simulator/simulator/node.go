@@ -24,9 +24,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/cases"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/info"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/simutil"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
 const (

@@ -23,10 +23,10 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/kvproto/pkg/configpb"
-	"github.com/pingcap/pd/v3/server/cluster"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/member"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/member"
 )
 
 var (

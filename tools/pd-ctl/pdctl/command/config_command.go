@@ -22,8 +22,8 @@ import (
 	"path"
 	"strconv"
 
-	"github.com/pingcap/pd/v3/server/schedule/placement"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 var (
