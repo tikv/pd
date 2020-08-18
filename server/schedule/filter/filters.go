@@ -15,8 +15,8 @@ package filter
 
 import (
 	"fmt"
-	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
