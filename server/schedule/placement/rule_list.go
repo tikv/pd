@@ -148,6 +148,8 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 					strings.ToUpper(hex.EncodeToString(endKey))))
 			}
 
+			rr = prepareRulesForApply(rr) // clone internally
+
 			err := checkApplyRules(rr)
 			if err != nil {
 				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("%s for range {%s, %s}",
@@ -162,7 +164,7 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 			rl.ranges = append(rl.ranges, rangeRules{
 				startKey:   p.key,
 				rules:      rr,
-				applyRules: prepareRulesForApply(rr), // clone internally
+				applyRules: rr,
 			})
 		}
 	}
