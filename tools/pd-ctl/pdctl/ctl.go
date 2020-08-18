@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/chzyer/readline"
 	"github.com/mattn/go-shellwords"
@@ -37,9 +38,10 @@ type CommandFlags struct {
 var (
 	commandFlags = CommandFlags{}
 
-	detach   bool
-	interact bool
-	version  bool
+	detach            bool
+	interact          bool
+	version           bool
+	readlinecompleter *readline.PrefixCompleter
 )
 
 func init() {
@@ -117,6 +119,7 @@ func getMainCmd(args []string) *cobra.Command {
 	rootCmd.ParseFlags(args)
 	rootCmd.SetOutput(os.Stdout)
 
+	readlinecompleter = readline.NewPrefixCompleter(genCompleter(rootCmd)...)
 	return rootCmd
 }
 
@@ -156,6 +159,7 @@ func loop() {
 	l, err := readline.NewEx(&readline.Config{
 		Prompt:            "\033[31m»\033[0m ",
 		HistoryFile:       "/tmp/readline.tmp",
+		AutoComplete:      readlinecompleter,
 		InterruptPrompt:   "^C",
 		EOFPrompt:         "^D",
 		HistorySearchFold: true,
@@ -189,4 +193,24 @@ func loop() {
 		}
 		Start(args)
 	}
+}
+
+func genCompleter(cmd *cobra.Command) []readline.PrefixCompleterInterface {
+	pc := []readline.PrefixCompleterInterface{}
+	if len(cmd.Commands()) != 0 {
+		for _, v := range cmd.Commands() {
+			if v.HasFlags() {
+				flagspc := []readline.PrefixCompleterInterface{}
+				flaguseages := strings.Split(strings.Trim(v.Flags().FlagUsages(), " "), "\n")
+				for i := 0; i < len(flaguseages)-1; i++ {
+					flagspc = append(flagspc, readline.PcItem(strings.Split(strings.Trim(flaguseages[i], " "), " ")[0]))
+				}
+				flagspc = append(flagspc, genCompleter(v)...)
+				pc = append(pc, readline.PcItem(strings.Split(v.Use, " ")[0], flagspc...))
+			} else {
+				pc = append(pc, readline.PcItem(strings.Split(v.Use, " ")[0], genCompleter(v)...))
+			}
+		}
+	}
+	return pc
 }
