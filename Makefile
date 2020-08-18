@@ -11,6 +11,7 @@ PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
+BUILD_BIN_PATH := $(shell pwd)/bin
 GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' /bin/bash
@@ -100,7 +101,7 @@ PD_SERVER_DEP += dashboard-ui
 
 pd-server: export GO111MODULE=on
 pd-server: ${PD_SERVER_DEP}
-	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
 pd-server-basic: export GO111MODULE=on
 pd-server-basic:
@@ -126,19 +127,19 @@ dashboard-ui:
 # Tools
 pd-ctl: export GO111MODULE=on
 pd-ctl:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
 pd-tso-bench: export GO111MODULE=on
 pd-tso-bench:
-	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
+	CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench tools/pd-tso-bench/main.go
 pd-recover: export GO111MODULE=on
 pd-recover:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-recover tools/pd-recover/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
 pd-analysis: export GO111MODULE=on
 pd-analysis:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-analysis tools/pd-analysis/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis tools/pd-analysis/main.go
 pd-heartbeat-bench: export GO111MODULE=on
 pd-heartbeat-bench:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
 test: install-go-tools
 	# testing...
@@ -189,15 +190,15 @@ endif
 
 simulator: export GO111MODULE=on
 simulator:
-	CGO_ENABLED=0 go build -o bin/pd-simulator tools/pd-simulator/main.go
+	CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-simulator tools/pd-simulator/main.go
 
 regions-dump: export GO111MODULE=on
 regions-dump:
-	CGO_ENABLED=0 go build -o bin/regions-dump tools/regions-dump/main.go
+	CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/regions-dump tools/regions-dump/main.go
 
 stores-dump: export GO111MODULE=on
 stores-dump:
-	CGO_ENABLED=0 go build -o bin/stores-dump tools/stores-dump/main.go
+	CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/stores-dump tools/stores-dump/main.go
 
 clean-test:
 	# Cleaning test tmp...
@@ -205,9 +206,11 @@ clean-test:
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
 
-clean-bin:
-	# Cleaning binary files...
-	rm -rf bin/
+clean-build:
+	# Cleaning building files...
+	rm -rf .dashboard_asset_cache/
+	rm -rf $(BUILD_BIN_PATH)
+	rm -rf $(GO_TOOLS_BIN_PATH)
 
 deadlock-enable: install-go-tools
 	@$(DEADLOCK_ENABLE)
@@ -223,6 +226,6 @@ failpoint-disable:
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
 
-clean: clean-bin clean-test failpoint-disable deadlock-disable
+clean: failpoint-disable deadlock-disable clean-test clean-build
 
-.PHONY: all ci vendor tidy clean-test clean-bin clean
+.PHONY: all ci vendor tidy clean-test clean-build clean
