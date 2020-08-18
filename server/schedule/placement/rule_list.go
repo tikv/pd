@@ -148,9 +148,12 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 					strings.ToUpper(hex.EncodeToString(endKey))))
 			}
 
-			rr = prepareRulesForApply(rr) // clone internally
+			if i != len(points)-1 {
+				rr = append(rr[:0:0], rr...) // clone
+			}
 
-			err := checkApplyRules(rr)
+			arr := prepareRulesForApply(rr) // clone internally
+			err := checkApplyRules(arr)
 			if err != nil {
 				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("%s for range {%s, %s}",
 					err,
@@ -158,13 +161,10 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 					strings.ToUpper(hex.EncodeToString(endKey))))
 			}
 
-			if i != len(points)-1 {
-				rr = append(rr[:0:0], rr...) // clone
-			}
 			rl.ranges = append(rl.ranges, rangeRules{
 				startKey:   p.key,
 				rules:      rr,
-				applyRules: rr,
+				applyRules: arr,
 			})
 		}
 	}
