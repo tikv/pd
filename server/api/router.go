@@ -208,6 +208,11 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	apiRouter.Handle("/debug/pprof/block", pprof.Handler("block"))
 	apiRouter.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
 
+	// service GC safepoint API
+	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
+	apiRouter.HandleFunc("/servicegcsafepoint", serviceGCSafepointHandler.List).Methods("GET")
+	apiRouter.HandleFunc("/servicegcsafepoint/{service_id}", serviceGCSafepointHandler.Delete).Methods("DELETE")
+
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
 	// Deprecated

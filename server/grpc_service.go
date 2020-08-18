@@ -775,7 +775,11 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		}
 	}
 
-	min, err := s.storage.LoadMinServiceGCSafePoint()
+	now, err := s.tso.Now()
+	if err != nil {
+		return nil, err
+	}
+	min, err := s.storage.LoadMinServiceGCSafePoint(now)
 	if err != nil {
 		return nil, err
 	}
@@ -783,7 +787,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 	if request.TTL > 0 && request.SafePoint >= min.SafePoint {
 		ssp := &core.ServiceSafePoint{
 			ServiceID: string(request.ServiceId),
-			ExpiredAt: time.Now().Unix() + request.TTL,
+			ExpiredAt: now.Unix() + request.TTL,
 			SafePoint: request.SafePoint,
 		}
 		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
@@ -795,7 +799,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			zap.Uint64("safepoint", ssp.SafePoint))
 		// If the min safepoint is updated, load the next one
 		if string(request.ServiceId) == min.ServiceID {
-			min, err = s.storage.LoadMinServiceGCSafePoint()
+			min, err = s.storage.LoadMinServiceGCSafePoint(now)
 			if err != nil {
 				return nil, err
 			}
@@ -809,7 +813,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 	return &pdpb.UpdateServiceGCSafePointResponse{
 		Header:       s.header(),
 		ServiceId:    []byte(min.ServiceID),
-		TTL:          min.ExpiredAt - time.Now().Unix(),
+		TTL:          min.ExpiredAt - now.Unix(),
 		MinSafePoint: min.SafePoint,
 	}, nil
 }
