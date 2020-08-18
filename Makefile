@@ -200,9 +200,14 @@ stores-dump:
 	CGO_ENABLED=0 go build -o bin/stores-dump tools/stores-dump/main.go
 
 clean-test:
+	# Cleaning test tmp...
 	rm -rf /tmp/test_pd*
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
+
+clean-bin:
+	# Cleaning binary files...
+	rm -rf bin/
 
 deadlock-enable: install-go-tools
 	@$(DEADLOCK_ENABLE)
@@ -218,4 +223,6 @@ failpoint-disable:
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
 
-.PHONY: all ci vendor clean-test tidy
+clean: clean-bin clean-test failpoint-disable deadlock-disable
+
+.PHONY: all ci vendor tidy clean-test clean-bin clean
