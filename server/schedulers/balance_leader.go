@@ -35,6 +35,10 @@ const (
 	BalanceLeaderType = "balance-leader"
 	// balanceLeaderRetryLimit is the limit to retry schedule for selected source store and target store.
 	balanceLeaderRetryLimit = 10
+	// fitRegionCalling is the limit of the count of calling FitRegion in one scheduler Schedule
+	// when placement rule is enabled.
+	// TODO: set a proper value
+	fitRegionCallingLimit = 10
 )
 
 func init() {
@@ -70,10 +74,11 @@ type balanceLeaderSchedulerConfig struct {
 
 type balanceLeaderScheduler struct {
 	*BaseScheduler
-	conf         *balanceLeaderSchedulerConfig
-	opController *schedule.OperatorController
-	filters      []filter.Filter
-	counter      *prometheus.CounterVec
+	conf                  *balanceLeaderSchedulerConfig
+	opController          *schedule.OperatorController
+	filters               []filter.Filter
+	counter               *prometheus.CounterVec
+	fitRegionCallingCount int
 }
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
@@ -94,6 +99,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 		filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
+	s.fitRegionCallingCount = 0
 	return s
 }
 
@@ -131,6 +137,7 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+	l.fitRegionCallingCount = 0
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
 	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
@@ -153,6 +160,10 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	})
 
 	for i := 0; i < len(sources) || i < len(targets); i++ {
+		if cluster.IsPlacementRulesEnabled() && l.fitRegionCallingCount >= fitRegionCallingLimit {
+			log.Info("fitRegionCallingCount exceed limit", zap.String("scheduler", l.GetName()), zap.Int("fitRegionCallingCount", l.fitRegionCallingCount))
+			break
+		}
 		if i < len(sources) {
 			source := sources[i]
 			sourceID := source.GetID()
@@ -205,6 +216,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(cluster opt.Cluster, source *
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
+	l.fitRegionCallingCount += len(targets)
 	leaderSchedulePolicy := l.opController.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
@@ -252,6 +264,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(cluster opt.Cluster, target *c
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, cluster)
+	l.fitRegionCallingCount += len(targets)
 	if len(targets) < 1 {
 		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", region.GetID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
