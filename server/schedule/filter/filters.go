@@ -15,6 +15,7 @@ package filter
 
 import (
 	"fmt"
+	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
@@ -425,7 +426,7 @@ func (f *ruleFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	region := f.region.Clone(core.WithReplacePeerStore(f.oldStore, store.GetID()))
+	region := cloneRegion(f.region, core.WithReplacePeerStore(f.oldStore, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
@@ -468,8 +469,8 @@ func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) boo
 		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
 		return false
 	}
-	region := f.region.Clone(core.WithLeader(targetPeer))
-	newFit := f.fitter.FitRegion(region)
+	copyRegion := cloneRegion(f.region, core.WithLeader(targetPeer))
+	newFit := f.fitter.FitRegion(copyRegion)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
@@ -671,4 +672,29 @@ func (f *isolationFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 		}
 	}
 	return true
+}
+
+// cloneRegion is used to replace region.Clone in filter which call the FitRegion,
+// as FitRegion only needs partial information(startKey, endKey, peers, leader peer)
+func cloneRegion(region *core.RegionInfo, opts ...core.RegionCreateOption) *core.RegionInfo {
+	copyLeader := &metapb.Peer{
+		Id:      region.GetLeader().Id,
+		StoreId: region.GetLeader().StoreId,
+		Role:    region.GetLeader().Role,
+	}
+	copyPeers := make([]*metapb.Peer, 0, len(region.GetPeers()))
+	for _, p := range region.GetPeers() {
+		peer := &metapb.Peer{
+			Id:      p.Id,
+			StoreId: p.StoreId,
+			Role:    p.Role,
+		}
+		copyPeers = append(copyPeers, peer)
+	}
+	cloneRegion := core.NewRegionInfo(&metapb.Region{
+		StartKey: region.GetStartKey(),
+		EndKey:   region.GetEndKey(),
+		Peers:    copyPeers,
+	}, copyLeader, opts...)
+	return cloneRegion
 }

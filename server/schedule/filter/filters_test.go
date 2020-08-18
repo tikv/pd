@@ -272,3 +272,28 @@ func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 		FitsTypeOf,
 		newRuleFitFilter("", testCluster, region, 1))
 }
+
+func BenchmarkCloneRegionTest(b *testing.B) {
+	epoch := &metapb.RegionEpoch{
+		ConfVer: 1,
+		Version: 1,
+	}
+	region := core.NewRegionInfo(
+		&metapb.Region{
+			Id:       4,
+			StartKey: []byte("x"),
+			EndKey:   []byte(""),
+			Peers: []*metapb.Peer{
+				{Id: 108, StoreId: 4},
+			},
+			RegionEpoch: epoch,
+		},
+		&metapb.Peer{Id: 108, StoreId: 4},
+		core.SetApproximateSize(50),
+		core.SetApproximateKeys(20),
+	)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = cloneRegion(region)
+	}
+}
