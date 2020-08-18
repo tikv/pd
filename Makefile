@@ -218,4 +218,6 @@ failpoint-disable:
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
 
-.PHONY: all ci vendor clean-test tidy
+clean: clean-test failpoint-disable deadlock-disable
+
+.PHONY: all ci vendor clean-test tidy clean
