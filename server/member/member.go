@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -42,14 +43,13 @@ import (
 const (
 	// The timeout to wait transfer etcd leader to complete.
 	moveLeaderTimeout = 5 * time.Second
-	requestTimeout    = etcdutil.DefaultRequestTimeout
-	slowRequestTime   = etcdutil.DefaultSlowRequestTime
 )
 
 // Member is used for the election related logic.
 type Member struct {
-	leader atomic.Value
-	// Etcd and cluster information.
+	Leadership *election.Leadership
+	leader     atomic.Value // stored as *pdpb.Member
+	// etcd and cluster information.
 	etcd     *embed.Etcd
 	client   *clientv3.Client
 	id       uint64       // etcd server id.
@@ -64,9 +64,10 @@ type Member struct {
 // NewMember create a new Member.
 func NewMember(etcd *embed.Etcd, client *clientv3.Client, id uint64) *Member {
 	return &Member{
-		etcd:   etcd,
-		client: client,
-		id:     id,
+		Leadership: election.NewLeadership(client, "pd leader election"),
+		etcd:       etcd,
+		client:     client,
+		id:         id,
 	}
 }
 
@@ -137,7 +138,7 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 		return nil, 0, true
 	}
 
-	leader, rev, err := getLeader(m.client, m.GetLeaderPath())
+	leader, rev, err := election.GetLeader(m.client, m.GetLeaderPath())
 	if err != nil {
 		log.Error("getting pd leader meets error", zap.Error(errs.ErrGetLeader.FastGenByArgs()), zap.NamedError("cause", err))
 		time.Sleep(200 * time.Millisecond)
@@ -148,7 +149,8 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 			// oh, we are already a PD leader, which indicates we may meet something wrong
 			// in previous CampaignLeader. We should delete the leadership and campaign again.
 			log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
-			if err = m.deleteLeaderKey(); err != nil {
+			log.Info("current pd leadership", zap.Any("leadership", m.Leadership))
+			if err = m.Leadership.DeleteLeader(); err != nil {
 				log.Error("deleting pd leader key meets error", zap.Error(errs.ErrDeleteLeaderKey.FastGenByArgs()), zap.NamedError("cause", err))
 				time.Sleep(200 * time.Millisecond)
 				return nil, 0, true
@@ -193,20 +195,6 @@ func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
 	return errors.WithStack(m.etcd.Server.MoveLeader(moveCtx, old, new))
 }
 
-// getLeader gets cluster's PD leader from etcd.
-func getLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
-	leader := &pdpb.Member{}
-	ok, rev, err := etcdutil.GetProtoMsgWithModRev(c, leaderPath, leader)
-	if err != nil {
-		return nil, 0, err
-	}
-	if !ok {
-		return nil, 0, nil
-	}
-
-	return leader, rev, nil
-}
-
 // GetEtcdLeader returns the etcd leader ID.
 func (m *Member) GetEtcdLeader() uint64 {
 	return m.etcd.Server.Lead()
@@ -236,28 +224,6 @@ func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
 	m.rootPath = rootPath
 }
 
-// CampaignLeader is used to campaign the PD leader.
-func (m *Member) CampaignLeader(lease *LeaderLease, leaseTimeout int64) error {
-	err := lease.Grant(leaseTimeout)
-	if err != nil {
-		return err
-	}
-
-	leaderKey := m.GetLeaderPath()
-	// The PD leader key must not exist, so the CreateRevision is 0.
-	resp, err := kv.NewSlowLogTxn(m.client).
-		If(clientv3.Compare(clientv3.CreateRevision(leaderKey), "=", 0)).
-		Then(clientv3.OpPut(leaderKey, m.memberValue, clientv3.WithLease(lease.ID))).
-		Commit()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !resp.Succeeded {
-		return errors.New("failed to campaign pd leader, other server may campaign ok")
-	}
-	return nil
-}
-
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all
 // other pd-servers can campaign.
 func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLeader string) error {
@@ -280,13 +246,6 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID)
 }
 
-// LeaderTxn returns txn() with a leader comparison to guarantee that
-// the transaction can be executed only if the server is PD leader.
-func (m *Member) LeaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
-	txn := kv.NewSlowLogTxn(m.client)
-	return txn.If(append(cs, m.leaderCmp())...)
-}
-
 func (m *Member) getMemberLeaderPriorityPath(id uint64) string {
 	return path.Join(m.rootPath, fmt.Sprintf("member/%d/leader_priority", id))
 }
@@ -294,7 +253,7 @@ func (m *Member) getMemberLeaderPriorityPath(id uint64) string {
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
 func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 	key := m.getMemberLeaderPriorityPath(id)
-	res, err := m.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
+	res, err := m.Leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -307,7 +266,7 @@ func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 // DeleteMemberLeaderPriority removes a member's ectd leader priority config.
 func (m *Member) DeleteMemberLeaderPriority(id uint64) error {
 	key := m.getMemberLeaderPriorityPath(id)
-	res, err := m.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
+	res, err := m.Leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -432,25 +391,7 @@ func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
 	return nil
 }
 
-func (m *Member) deleteLeaderKey() error {
-	// delete PD leader itself and let others start a new election again.
-	leaderKey := m.GetLeaderPath()
-	resp, err := m.LeaderTxn().Then(clientv3.OpDelete(leaderKey)).Commit()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !resp.Succeeded {
-		return errors.New("resign pd leader failed, we are not pd leader yet")
-	}
-
-	return nil
-}
-
-func (m *Member) leaderCmp() clientv3.Cmp {
-	return clientv3.Compare(clientv3.Value(m.GetLeaderPath()), "=", m.memberValue)
-}
-
-// WatchLeader is used to watch the changes of the PD leader.
+// WatchLeader is used to watch the changes of the leader.
 func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
 	m.leader.Store(leader)
 	defer m.leader.Store(&pdpb.Member{})
