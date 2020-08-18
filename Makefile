@@ -105,7 +105,7 @@ pd-server: ${PD_SERVER_DEP}
 
 pd-server-basic: export GO111MODULE=on
 pd-server-basic:
-	SWAGGER=0 DASHBOARD=0 make pd-server
+	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
 # dependent
 install-go-tools: export GO111MODULE=on
@@ -161,7 +161,7 @@ check-all: static lint tidy
 
 check-plugin:
 	@echo "checking plugin"
-	cd ./plugin/scheduler_example && make evictLeaderPlugin.so && rm evictLeaderPlugin.so
+	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
 static: export GO111MODULE=on
 static:
@@ -213,16 +213,18 @@ clean-build:
 	rm -rf $(GO_TOOLS_BIN_PATH)
 
 deadlock-enable: install-go-tools
+	# Enabling deadlock...
 	@$(DEADLOCK_ENABLE)
 
-deadlock-disable:
+deadlock-disable: install-go-tools
+	# Disabling deadlock...
 	@$(DEADLOCK_DISABLE)
 
 failpoint-enable: install-go-tools
 	# Converting failpoints...
 	@$(FAILPOINT_ENABLE)
 
-failpoint-disable:
+failpoint-disable: install-go-tools
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
 
