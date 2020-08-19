@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -296,6 +296,69 @@ func (s *configTestSuite) TestPlacementRules(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(rules, HasLen, 1)
 	c.Assert(rules[0].Key(), Equals, [2]string{"pd", "test1"})
+}
+
+func (s *configTestSuite) TestPlacementRuleGroups(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctl.InitCommand()
+
+	store := metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	pdctl.MustPutStore(c, svr, store.Id, store.State, store.Labels)
+	defer cluster.Destroy()
+
+	_, output, err := pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+
+	// test show
+	var group placement.RuleGroup
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "pd")
+	c.Assert(err, IsNil)
+	err = json.Unmarshal(output, &group)
+	c.Assert(err, IsNil)
+	c.Assert(group, DeepEquals, placement.RuleGroup{ID: "pd"})
+
+	// test set
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", "pd", "42", "true")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", "group2", "100", "false")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+
+	// show all
+	var groups []placement.RuleGroup
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show")
+	c.Assert(err, IsNil)
+	err = json.Unmarshal(output, &groups)
+	c.Assert(err, IsNil)
+	c.Assert(groups, DeepEquals, []placement.RuleGroup{
+		{ID: "pd", Index: 42, Override: true},
+		{ID: "group2", Index: 100, Override: false},
+	})
+
+	// delete
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "delete", "group2")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+
+	// show again
+	_, output, err = pdctl.ExecuteCommandC(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group2")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "404"), IsTrue)
 }
 
 func (s *configTestSuite) TestReplicationMode(c *C) {

@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
@@ -99,10 +100,9 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	// leader lease
-	lease   *member.LeaderLease
-	leaseMu sync.RWMutex
-
+	// Member roles need to be elected
+	// In a PD cluster, there will be two kinds of election.
+	// One is for PD leader, another is for TSO Allocator
 	member *member.Member
 	// etcd client
 	client *clientv3.Client
@@ -634,6 +634,11 @@ func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
 }
 
+// GetLeadership returns the member's leadership
+func (s *Server) GetLeadership() *election.Leadership {
+	return s.member.Leadership
+}
+
 // GetLeader returns the leader of PD cluster(i.e the PD leader).
 func (s *Server) GetLeader() *pdpb.Member {
 	return s.member.GetLeader()
@@ -642,20 +647,6 @@ func (s *Server) GetLeader() *pdpb.Member {
 // GetMember returns the member of server.
 func (s *Server) GetMember() *member.Member {
 	return s.member
-}
-
-// GetLease returns the lease of member and only PD leader's lease will not be nil.
-func (s *Server) GetLease() *member.LeaderLease {
-	s.leaseMu.RLock()
-	defer s.leaseMu.RUnlock()
-	return s.lease
-}
-
-// SetLease changes the lease.
-func (s *Server) SetLease(lease *member.LeaderLease) {
-	s.leaseMu.Lock()
-	defer s.leaseMu.Unlock()
-	s.lease = lease
 }
 
 // GetStorage returns the backend storage of server.
@@ -1102,42 +1093,39 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
-
-	lease := member.NewLeaderLease(s.client)
-	defer lease.Close()
-	if err := s.member.CampaignLeader(lease, s.cfg.LeaderLease); err != nil {
-		log.Error("campaigning pd leader meets error", zap.Error(err))
+	log.Info("start to campaign pd leader",
+		zap.String("campaign-pd-leader-name", s.Name()),
+		zap.String("purpose", s.member.Leadership.Purpose))
+	if err := s.member.Leadership.Campaign(s.cfg.LeaderLease, s.member.GetLeaderPath(), s.member.MemberValue()); err != nil {
+		log.Error("campaign pd leader meet error", zap.Error(err))
 		return
 	}
 
-	// Start keepalive and enable TSO service.
+	// Start keepalive the leadership and enable TSO service.
 	// TSO service is strictly enabled/disabled by PD leader lease for 2 reasons:
 	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-	go lease.KeepAlive(ctx)
-	s.SetLease(lease)
-	defer s.SetLease(nil)
+	defer s.member.Leadership.Reset()
+	// maintain the leadership
+	go s.member.Leadership.Keep(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
 	log.Debug("sync timestamp for tso")
-	if err := s.tso.SyncTimestamp(lease); err != nil {
+	if err := s.tso.SyncTimestamp(s.member.Leadership); err != nil {
 		log.Error("failed to sync timestamp", zap.Error(err))
 		return
 	}
 	defer s.tso.ResetTimestamp()
 
-	err := s.reloadConfigFromKV()
-	if err != nil {
+	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", zap.Error(err))
 		return
 	}
 	// Try to create raft cluster.
-	err = s.createRaftCluster()
-	if err != nil {
+	if err := s.createRaftCluster(); err != nil {
 		log.Error("failed to create raft cluster", zap.Error(err))
 		return
 	}
@@ -1157,8 +1145,8 @@ func (s *Server) campaignLeader() {
 	for {
 		select {
 		case <-leaderTicker.C:
-			if lease.IsExpired() {
-				log.Info("lease expired, pd leader step down")
+			if !s.member.Leadership.Check() {
+				log.Info("leadership is invalid because lease has expired, pd leader will step down")
 				return
 			}
 			etcdLeader := s.member.GetEtcdLeader()
@@ -1167,7 +1155,7 @@ func (s *Server) campaignLeader() {
 				return
 			}
 		case <-tsTicker.C:
-			if err = s.tso.UpdateTimestamp(); err != nil {
+			if err := s.tso.UpdateTimestamp(); err != nil {
 				log.Error("failed to update timestamp", zap.Error(err))
 				return
 			}

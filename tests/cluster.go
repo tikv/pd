@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/join"
-	"github.com/tikv/pd/server/member"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -330,17 +329,17 @@ func (s *TestServer) BootstrapCluster() error {
 	return nil
 }
 
-// WaitLease is used to get leader lease.
+// WaitLeadership is used to get instant leadership in order to
+// make a test know the PD leader has been elected as soon as possible.
 // If it exceeds the maximum number of loops, it will return nil.
-func (s *TestServer) WaitLease() *member.LeaderLease {
+func (s *TestServer) WaitLeadership() bool {
 	for i := 0; i < 100; i++ {
-		lease := s.server.GetLease()
-		if lease != nil {
-			return lease
+		if s.server.GetLeadership().Check() {
+			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)
 	}
-	return nil
+	return false
 }
 
 // TestCluster is only for test.

@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -244,7 +244,7 @@ func (s *testTsoSuite) TestDeplaySyncTimestamp(c *C) {
 
 	// Make the old leader resign and wait for the new leader to get a lease
 	leaderServer.ResignLeader()
-	c.Assert(nextLeaderServer.WaitLease(), NotNil)
+	c.Assert(nextLeaderServer.WaitLeadership(), IsTrue)
 
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)

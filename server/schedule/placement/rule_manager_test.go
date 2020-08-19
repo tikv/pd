@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,22 +70,38 @@ func (s *testManagerSuite) TestAdjustRule(c *C) {
 	}
 }
 
+func (s *testManagerSuite) TestLeaderCheck(c *C) {
+	c.Assert(s.manager.SetRule(&Rule{GroupID: "pd", ID: "default", Role: "learner", Count: 3}), ErrorMatches, ".*needs at least one leader or voter.*")
+	c.Assert(s.manager.SetRule(&Rule{GroupID: "g2", ID: "33", Role: "leader", Count: 2}), ErrorMatches, ".*define multiple leaders by count 2.*")
+	c.Assert(s.manager.Batch([]RuleOp{
+		{
+			Rule:   &Rule{GroupID: "g2", ID: "foo1", Role: "leader", Count: 1},
+			Action: RuleOpAdd,
+		},
+		{
+			Rule:   &Rule{GroupID: "g2", ID: "foo2", Role: "leader", Count: 1},
+			Action: RuleOpAdd,
+		},
+	}), ErrorMatches, ".*multiple leader replicas.*")
+}
+
 func (s *testManagerSuite) TestSaveLoad(c *C) {
 	rules := []*Rule{
 		{GroupID: "pd", ID: "default", Role: "voter", Count: 5},
-		{GroupID: "foo", ID: "bar", StartKeyHex: "", EndKeyHex: "abcd", Role: "learner", Count: 1},
-		{GroupID: "foo", ID: "baz", Role: "voter", Count: 1},
+		{GroupID: "foo", ID: "baz", StartKeyHex: "", EndKeyHex: "abcd", Role: "voter", Count: 1},
+		{GroupID: "foo", ID: "bar", Role: "learner", Count: 1},
 	}
 	for _, r := range rules {
-		s.manager.SetRule(r)
+		c.Assert(s.manager.SetRule(r), IsNil)
 	}
+
 	m2 := NewRuleManager(s.store)
 	err := m2.Initialize(3, []string{"no", "labels"})
 	c.Assert(err, IsNil)
 	c.Assert(m2.GetAllRules(), HasLen, 3)
 	c.Assert(m2.GetRule("pd", "default"), DeepEquals, rules[0])
-	c.Assert(m2.GetRule("foo", "bar"), DeepEquals, rules[1])
-	c.Assert(m2.GetRule("foo", "baz"), DeepEquals, rules[2])
+	c.Assert(m2.GetRule("foo", "baz"), DeepEquals, rules[1])
+	c.Assert(m2.GetRule("foo", "bar"), DeepEquals, rules[2])
 }
 
 func (s *testManagerSuite) checkRules(c *C, rules []*Rule, expect [][2]string) {
@@ -257,6 +273,68 @@ func (s *testManagerSuite) TestGroupConfig(c *C) {
 	err = s.manager.DeleteRule("pd", "default")
 	c.Assert(err, IsNil)
 	c.Assert(s.manager.GetRuleGroups(), DeepEquals, []*RuleGroup{g2})
+}
+
+func (s *testManagerSuite) TestCheckApplyRules(c *C) {
+	err := checkApplyRules([]*Rule{
+		{
+			Role:  Leader,
+			Count: 1,
+		},
+	})
+	c.Assert(err, IsNil)
+
+	err = checkApplyRules([]*Rule{
+		{
+			Role:  Voter,
+			Count: 1,
+		},
+	})
+	c.Assert(err, IsNil)
+
+	err = checkApplyRules([]*Rule{
+		{
+			Role:  Leader,
+			Count: 1,
+		},
+		{
+			Role:  Voter,
+			Count: 1,
+		},
+	})
+	c.Assert(err, IsNil)
+
+	err = checkApplyRules([]*Rule{
+		{
+			Role:  Leader,
+			Count: 3,
+		},
+	})
+	c.Assert(err, ErrorMatches, "multiple leader replicas")
+
+	err = checkApplyRules([]*Rule{
+		{
+			Role:  Leader,
+			Count: 1,
+		},
+		{
+			Role:  Leader,
+			Count: 1,
+		},
+	})
+	c.Assert(err, ErrorMatches, "multiple leader replicas")
+
+	err = checkApplyRules([]*Rule{
+		{
+			Role:  Learner,
+			Count: 1,
+		},
+		{
+			Role:  Follower,
+			Count: 1,
+		},
+	})
+	c.Assert(err, ErrorMatches, "needs at least one leader or voter")
 }
 
 func (s *testManagerSuite) dhex(hk string) []byte {

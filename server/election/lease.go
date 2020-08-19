@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package member
+package election
 
 import (
 	"context"
@@ -20,30 +20,33 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
-// LeaderLease is used for renewing leadership of PD server.
-type LeaderLease struct {
-	client       *clientv3.Client
-	lease        clientv3.Lease
-	ID           clientv3.LeaseID
+const (
+	revokeLeaseTimeout = time.Second
+	requestTimeout     = etcdutil.DefaultRequestTimeout
+	slowRequestTime    = etcdutil.DefaultSlowRequestTime
+)
+
+// lease is used as the low-level mechanism for campaigning and renewing elected leadership.
+// The way to gain and maintain leadership is to update and keep the lease alive continuously.
+type lease struct {
+	// purpose is used to show what this election for
+	Purpose string
+	// etcd client and lease
+	client *clientv3.Client
+	lease  clientv3.Lease
+	ID     clientv3.LeaseID
+	// leaseTimeout and expireTime are used to control the lease's lifetime
 	leaseTimeout time.Duration
-
-	expireTime atomic.Value
-}
-
-// NewLeaderLease creates a lease.
-func NewLeaderLease(client *clientv3.Client) *LeaderLease {
-	return &LeaderLease{
-		client: client,
-		lease:  clientv3.NewLease(client),
-	}
+	expireTime   atomic.Value
 }
 
 // Grant uses `lease.Grant` to initialize the lease and expireTime.
-func (l *LeaderLease) Grant(leaseTimeout int64) error {
+func (l *lease) Grant(leaseTimeout int64) error {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), requestTimeout)
 	leaseResp, err := l.lease.Grant(ctx, leaseTimeout)
@@ -52,7 +55,7 @@ func (l *LeaderLease) Grant(leaseTimeout int64) error {
 		return errors.WithStack(err)
 	}
 	if cost := time.Since(start); cost > slowRequestTime {
-		log.Warn("lease grants too slow", zap.Duration("cost", cost))
+		log.Warn("lease grants too slow", zap.Duration("cost", cost), zap.String("purpose", l.Purpose))
 	}
 	l.ID = leaseResp.ID
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
@@ -60,10 +63,8 @@ func (l *LeaderLease) Grant(leaseTimeout int64) error {
 	return nil
 }
 
-const revokeLeaseTimeout = time.Second
-
 // Close releases the lease.
-func (l *LeaderLease) Close() error {
+func (l *lease) Close() error {
 	// Reset expire time.
 	l.expireTime.Store(time.Time{})
 	// Try to revoke lease to make subsequent elections faster.
@@ -73,14 +74,14 @@ func (l *LeaderLease) Close() error {
 	return l.lease.Close()
 }
 
-// IsExpired checks if the lease is expired. If it returns true, current PD
-// server should step down and try to re-elect again.
-func (l *LeaderLease) IsExpired() bool {
+// IsExpired checks if the lease is expired. If it returns true,
+// current leader should step down and try to re-elect again.
+func (l *lease) IsExpired() bool {
 	return time.Now().After(l.expireTime.Load().(time.Time))
 }
 
 // KeepAlive auto renews the lease and update expireTime.
-func (l *LeaderLease) KeepAlive(ctx context.Context) {
+func (l *lease) KeepAlive(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
@@ -102,7 +103,7 @@ func (l *LeaderLease) KeepAlive(ctx context.Context) {
 }
 
 // Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.
-func (l *LeaderLease) keepAliveWorker(ctx context.Context, interval time.Duration) <-chan time.Time {
+func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-chan time.Time {
 	ch := make(chan time.Time)
 
 	go func() {
@@ -116,7 +117,7 @@ func (l *LeaderLease) keepAliveWorker(ctx context.Context, interval time.Duratio
 				defer cancel()
 				res, err := l.lease.KeepAliveOnce(ctx1, l.ID)
 				if err != nil {
-					log.Warn("leader lease keep alive failed", zap.Error(err))
+					log.Warn("lease keep alive failed", zap.Error(err), zap.String("purpose", l.Purpose))
 					return
 				}
 				if res.TTL > 0 {

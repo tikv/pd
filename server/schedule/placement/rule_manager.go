@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -169,6 +169,9 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 	}
 	if r.Count <= 0 {
 		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid count %d", r.Count))
+	}
+	if r.Role == Leader && r.Count > 1 {
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple leaders by count %d", r.Count))
 	}
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
