@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,14 +21,14 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/kv"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockhbstream"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/operator"
 )
 
 func newTestReplication(mso *mockoption.ScheduleOptions, maxReplicas int, locationLabels ...string) {
@@ -862,7 +862,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	for i := 1; i <= 8; i++ {
 		id, _ := tc.Alloc()
 		origin := tc.AddLeaderRegion(id, 4)
-		newPeer := &metapb.Peer{StoreId: 3, IsLearner: false}
+		newPeer := &metapb.Peer{StoreId: 3, Role: metapb.PeerRole_Voter}
 		op, _ := operator.CreateMovePeerOperator("balance-region", tc, origin, operator.OpKind(0), 4, newPeer)
 		c.Assert(op, NotNil)
 		oc.AddOperator(op)

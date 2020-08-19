@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/errs"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -33,15 +34,21 @@ type RuleManager struct {
 	store *core.Storage
 	sync.RWMutex
 	initialized bool
-	rules       map[[2]string]*Rule
-	ruleList    ruleList
+	// Key(RuleGroupID,RuleID) => Rule
+	rules map[[2]string]*Rule
+	// GroupID => RuleGroup
+	groups map[string]*RuleGroup
+	// constructed by rebuildRuleList in runtime, store groups with default configuration
+	defGroups map[string]struct{}
+	ruleList  ruleList
 }
 
 // NewRuleManager creates a RuleManager instance.
 func NewRuleManager(store *core.Storage) *RuleManager {
 	return &RuleManager{
-		store: store,
-		rules: make(map[[2]string]*Rule),
+		store:  store,
+		rules:  make(map[[2]string]*Rule),
+		groups: make(map[string]*RuleGroup),
 	}
 }
 
@@ -55,6 +62,9 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 	}
 
 	if err := m.loadRules(); err != nil {
+		return err
+	}
+	if err := m.loadGroups(); err != nil {
 		return err
 	}
 	if len(m.rules) == 0 {
@@ -71,7 +81,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 		}
 		m.rules[defaultRule.Key()] = defaultRule
 	}
-	ruleList, err := buildRuleList(m.rules)
+	ruleList, err := m.rebuildRuleList()
 	if err != nil {
 		return err
 	}
@@ -83,7 +93,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 func (m *RuleManager) loadRules() error {
 	var toSave []*Rule
 	var toDelete []string
-	_, err := m.store.LoadRules(func(k, v string) {
+	err := m.store.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
 			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(errs.ErrLoadRule.FastGenByArgs()))
@@ -123,6 +133,17 @@ func (m *RuleManager) loadRules() error {
 	return nil
 }
 
+func (m *RuleManager) loadGroups() error {
+	return m.store.LoadRuleGroups(func(k, v string) {
+		var g RuleGroup
+		if err := json.Unmarshal([]byte(v), &g); err != nil {
+			log.Error("failed to unmarshal rule group", zap.String("group-id", k), zap.Error(errs.ErrLoadRuleGroup.FastGenByArgs()), zap.NamedError("cause", err))
+			return
+		}
+		m.groups[g.ID] = &g
+	})
+}
+
 // check and adjust rule from client or storage.
 func (m *RuleManager) adjustRule(r *Rule) error {
 	var err error
@@ -149,6 +170,9 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 	if r.Count <= 0 {
 		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid count %d", r.Count))
 	}
+	if r.Role == Leader && r.Count > 1 {
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple leaders by count %d", r.Count))
+	}
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
@@ -166,61 +190,18 @@ func (m *RuleManager) GetRule(group, id string) *Rule {
 
 // SetRule inserts or updates a Rule.
 func (m *RuleManager) SetRule(rule *Rule) error {
-	err := m.adjustRule(rule)
-	if err != nil {
-		return err
-	}
-	m.Lock()
-	defer m.Unlock()
-	old := m.rules[rule.Key()]
-	m.rules[rule.Key()] = rule
-
-	ruleList, err := buildRuleList(m.rules)
-	if err == nil {
-		err = m.store.SaveRule(rule.StoreKey(), rule)
-	}
-
-	// restore
-	if err != nil {
-		if old == nil {
-			delete(m.rules, rule.Key())
-		} else {
-			m.rules[old.Key()] = old
-		}
-		return err
-	}
-
-	m.ruleList = ruleList
-	log.Info("placement rule updated", zap.Stringer("rule", rule))
-	return nil
+	return m.Batch([]RuleOp{{
+		Rule:   rule,
+		Action: RuleOpAdd,
+	}})
 }
 
 // DeleteRule removes a Rule.
 func (m *RuleManager) DeleteRule(group, id string) error {
-	m.Lock()
-	defer m.Unlock()
-	key := [2]string{group, id}
-	old, ok := m.rules[key]
-	if !ok {
-		return nil
-	}
-	delete(m.rules, [2]string{group, id})
-
-	ruleList, err := buildRuleList(m.rules)
-	if err != nil {
-		// restore
-		m.rules[key] = old
-		return err
-	}
-
-	if err := m.store.DeleteRule(old.StoreKey()); err != nil {
-		// restore
-		m.rules[key] = old
-		return err
-	}
-	m.ruleList = ruleList
-	log.Info("placement rule removed", zap.Stringer("rule", old))
-	return nil
+	return m.Batch([]RuleOp{{
+		Rule:   &Rule{GroupID: group, ID: id},
+		Action: RuleOpDel,
+	}})
 }
 
 // GetSplitKeys returns all split keys in the range (start, end).
@@ -277,7 +258,7 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 }
 
 func (m *RuleManager) tryBuildSave(oldRules map[[2]string]*Rule) error {
-	ruleList, err := buildRuleList(m.rules)
+	ruleList, err := m.rebuildRuleList()
 	if err == nil {
 		for key := range oldRules {
 			rule := m.rules[key]
@@ -325,28 +306,15 @@ func (m *RuleManager) addRule(rule *Rule, oldRules map[[2]string]*Rule) {
 
 // SetRules inserts or updates lots of Rules at once.
 func (m *RuleManager) SetRules(rules []*Rule) error {
-	for _, rule := range rules {
+	ruleOps := make([]RuleOp, len(rules))
+	for i, rule := range rules {
 		err := m.adjustRule(rule)
 		if err != nil {
 			return err
 		}
+		ruleOps[i] = RuleOp{Rule: rule, Action: RuleOpAdd}
 	}
-
-	m.Lock()
-	defer m.Unlock()
-
-	oldRules := make(map[[2]string]*Rule)
-
-	for _, rule := range rules {
-		m.addRule(rule, oldRules)
-	}
-
-	if err := m.tryBuildSave(oldRules); err != nil {
-		return err
-	}
-
-	log.Info("placement rule updated", zap.String("rules", fmt.Sprint(rules)))
-	return nil
+	return m.Batch(ruleOps)
 }
 
 func (m *RuleManager) delRuleByID(group, id string, oldRules map[[2]string]*Rule) {
@@ -388,6 +356,11 @@ type RuleOp struct {
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
+func (r RuleOp) String() string {
+	b, _ := json.Marshal(r)
+	return string(b)
+}
+
 // Batch executes a series of actions at once.
 func (m *RuleManager) Batch(todo []RuleOp) error {
 	for _, t := range todo {
@@ -419,5 +392,92 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 	}
 
 	log.Info("placement rules updated", zap.String("batch", fmt.Sprint(todo)))
+	return nil
+}
+
+func (m *RuleManager) rebuildRuleList() (ruleList, error) {
+	m.defGroups = make(map[string]struct{})
+	for _, r := range m.rules {
+		r.group = m.groups[r.GroupID]
+		if r.group == nil {
+			m.defGroups[r.GroupID] = struct{}{}
+		}
+	}
+	rl, err := buildRuleList(m.rules)
+	if err != nil {
+		return ruleList{}, err
+	}
+	return rl, nil
+}
+
+// GetRuleGroup returns a RuleGroup configuration.
+func (m *RuleManager) GetRuleGroup(id string) *RuleGroup {
+	m.RLock()
+	defer m.RUnlock()
+	if _, ok := m.defGroups[id]; ok {
+		return &RuleGroup{ID: id}
+	}
+	return m.groups[id]
+}
+
+// GetRuleGroups returns all RuleGroup configuration.
+func (m *RuleManager) GetRuleGroups() []*RuleGroup {
+	m.RLock()
+	defer m.RUnlock()
+	var groups []*RuleGroup
+	for _, g := range m.groups {
+		groups = append(groups, g)
+	}
+	for id := range m.defGroups {
+		groups = append(groups, &RuleGroup{ID: id})
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].Index < groups[j].Index ||
+			(groups[i].Index == groups[j].Index && groups[i].ID < groups[j].ID)
+	})
+	return groups
+}
+
+// SetRuleGroup updates a RuleGroup.
+func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
+	m.Lock()
+	defer m.Unlock()
+	return m.tryUpdateGroup(group.ID, group)
+}
+
+// DeleteRuleGroup removes a RuleGroup.
+func (m *RuleManager) DeleteRuleGroup(id string) error {
+	m.Lock()
+	defer m.Unlock()
+	return m.tryUpdateGroup(id, nil)
+}
+
+func (m *RuleManager) tryUpdateGroup(id string, newGroup *RuleGroup) error {
+	oldGroup := m.groups[id]
+
+	if newGroup != nil {
+		m.groups[id] = newGroup
+	} else {
+		delete(m.groups, id)
+	}
+
+	rl, err := m.rebuildRuleList()
+	if err == nil {
+		if newGroup != nil {
+			err = m.store.SaveRuleGroup(id, newGroup)
+		} else {
+			err = m.store.DeleteRuleGroup(id)
+		}
+	}
+	if err != nil {
+		// recover old:
+		if oldGroup != nil {
+			m.groups[id] = oldGroup
+		} else {
+			delete(m.groups, id)
+		}
+		return err
+	}
+	m.ruleList = rl
 	return nil
 }

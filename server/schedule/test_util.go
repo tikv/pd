@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@ package schedule
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
 )
 
 // ApplyOperatorStep applies operator step. Only for test purpose.
@@ -58,9 +58,9 @@ func ApplyOperatorStep(region *core.RegionInfo, op *operator.Operator) *core.Reg
 				panic("Add learner that exists")
 			}
 			peer := &metapb.Peer{
-				Id:        s.PeerID,
-				StoreId:   s.ToStore,
-				IsLearner: true,
+				Id:      s.PeerID,
+				StoreId: s.ToStore,
+				Role:    metapb.PeerRole_Learner,
 			}
 			region = region.Clone(core.WithAddPeer(peer))
 		case operator.AddLightLearner:
@@ -68,9 +68,9 @@ func ApplyOperatorStep(region *core.RegionInfo, op *operator.Operator) *core.Reg
 				panic("Add learner that exists")
 			}
 			peer := &metapb.Peer{
-				Id:        s.PeerID,
-				StoreId:   s.ToStore,
-				IsLearner: true,
+				Id:      s.PeerID,
+				StoreId: s.ToStore,
+				Role:    metapb.PeerRole_Learner,
 			}
 			region = region.Clone(core.WithAddPeer(peer))
 		case operator.PromoteLearner:

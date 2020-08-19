@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,9 +27,9 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	pd "github.com/pingcap/pd/v4/client"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
 )
 

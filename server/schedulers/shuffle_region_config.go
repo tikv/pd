@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/v4/pkg/apiutil"
-	"github.com/pingcap/pd/v4/pkg/slice"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/unrolled/render"
 )
 

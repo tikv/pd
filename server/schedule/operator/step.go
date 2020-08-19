@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
 
@@ -60,7 +60,7 @@ func (tl TransferLeader) CheckSafety(region *core.RegionInfo) error {
 	if peer == nil {
 		return errors.New("peer does not existed")
 	}
-	if peer.IsLearner {
+	if core.IsLearner(peer) {
 		return errors.New("peer already is a learner")
 	}
 	return nil
@@ -162,7 +162,7 @@ func (al AddLearner) CheckSafety(region *core.RegionInfo) error {
 	if peer.GetId() != al.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
 	}
-	if !peer.IsLearner {
+	if !core.IsLearner(peer) {
 		return errors.New("peer already is a voter")
 	}
 	return nil
@@ -424,7 +424,7 @@ func (al AddLightLearner) CheckSafety(region *core.RegionInfo) error {
 	if peer.GetId() != al.PeerID {
 		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
 	}
-	if !peer.IsLearner {
+	if !core.IsLearner(peer) {
 		return errors.New("peer already is a voter")
 	}
 	return nil

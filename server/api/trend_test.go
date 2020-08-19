@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
 )
 
 var _ = Suite(&testTrendSuite{})
@@ -59,7 +59,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(op, NotNil)
 	newPeerID := op.Step(0).(operator.AddLearner).PeerID
-	region5 = region5.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, IsLearner: true}), core.WithIncConfVer())
+	region5 = region5.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, Role: metapb.PeerRole_Learner}), core.WithIncConfVer())
 	mustRegionHeartbeat(c, svr, region5)
 	region5 = region5.Clone(core.WithPromoteLearner(newPeerID), core.WithRemoveStorePeer(2), core.WithIncConfVer())
 	mustRegionHeartbeat(c, svr, region5)
@@ -68,7 +68,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(op, NotNil)
 	newPeerID = op.Step(0).(operator.AddLearner).PeerID
-	region6 = region6.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, IsLearner: true}), core.WithIncConfVer())
+	region6 = region6.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, Role: metapb.PeerRole_Learner}), core.WithIncConfVer())
 	mustRegionHeartbeat(c, svr, region6)
 	region6 = region6.Clone(core.WithPromoteLearner(newPeerID), core.WithLeader(region6.GetStorePeer(2)), core.WithRemoveStorePeer(1), core.WithIncConfVer())
 	mustRegionHeartbeat(c, svr, region6)
@@ -111,7 +111,7 @@ func (s *testTrendSuite) newRegionInfo(id uint64, startKey, endKey string, confV
 		peers = append(peers, p)
 	}
 	for _, id := range learners {
-		p := &metapb.Peer{Id: 10 + id, StoreId: id, IsLearner: true}
+		p := &metapb.Peer{Id: 10 + id, StoreId: id, Role: metapb.PeerRole_Learner}
 		peers = append(peers, p)
 	}
 	return core.NewRegionInfo(

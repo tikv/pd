@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -48,7 +48,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(s.svr.clusterID),
 		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
-		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, IsLearner: false}}},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	_, err = s.svr.bootstrapCluster(bootstrapReq)
 	c.Assert(err, IsNil)

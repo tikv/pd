@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,12 +22,11 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/etcdutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/versioninfo"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -69,9 +68,9 @@ func PrintConfigCheckMsg(cfg *config.Config) {
 
 // CheckPDVersion checks if PD needs to be upgraded.
 func CheckPDVersion(opt *config.PersistOptions) {
-	pdVersion := *cluster.MinSupportedVersion(cluster.Base)
+	pdVersion := versioninfo.MinSupportedVersion(versioninfo.Base)
 	if versioninfo.PDReleaseVersion != "None" {
-		pdVersion = *cluster.MustParseVersion(versioninfo.PDReleaseVersion)
+		pdVersion = versioninfo.MustParseVersion(versioninfo.PDReleaseVersion)
 	}
 	clusterVersion := *opt.GetClusterVersion()
 	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))

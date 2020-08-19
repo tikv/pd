@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,8 +23,9 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/kv"
+	"go.etcd.io/etcd/clientv3"
 )
 
 var _ = Suite(&testKVSuite{})
@@ -212,8 +213,8 @@ func (s *testKVSuite) TestSaveServiceGCSafePoint(c *C) {
 		c.Assert(storage.SaveServiceGCSafePoint(ssp), IsNil)
 	}
 
-	prefix := path.Join(gcPath, "safe_point", "service")
-	prefixEnd := path.Join(gcPath, "safe_point", "servicf")
+	prefix := path.Join(gcPath, "safe_point", "service") + "/"
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := mem.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	c.Assert(err, IsNil)
 	c.Assert(len(keys), Equals, 3)

@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"github.com/pingcap/pd/v4/pkg/tempurl"
-	"github.com/pingcap/pd/v4/server/config"
+	"github.com/tikv/pd/pkg/tempurl"
+	"github.com/tikv/pd/server/config"
 )
 
 type serverConfig struct {

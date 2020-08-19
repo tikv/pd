@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,8 +28,8 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/core"
 )
 
 var _ = Suite(&testStoreSuite{})
@@ -345,4 +345,53 @@ func (s *testStoreSuite) TestDownState(c *C) {
 	newStore = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 2)))
 	storeInfo = newStoreInfo(s.svr.GetScheduleConfig(), newStore)
 	c.Assert(storeInfo.Store.StateName, Equals, downStateName)
+}
+
+func (s *testStoreSuite) TestGetAllLimit(c *C) {
+	testcases := []struct {
+		name           string
+		url            string
+		expectedStores map[uint64]struct{}
+	}{
+		{
+			name: "includeTombstone",
+			url:  fmt.Sprintf("%s/stores/limit?include_tombstone=true", s.urlPrefix),
+			expectedStores: map[uint64]struct{}{
+				1: {},
+				4: {},
+				6: {},
+				7: {},
+			},
+		},
+		{
+			name: "excludeTombStone",
+			url:  fmt.Sprintf("%s/stores/limit?include_tombstone=false", s.urlPrefix),
+			expectedStores: map[uint64]struct{}{
+				1: {},
+				4: {},
+				6: {},
+			},
+		},
+		{
+			name: "default",
+			url:  fmt.Sprintf("%s/stores/limit", s.urlPrefix),
+			expectedStores: map[uint64]struct{}{
+				1: {},
+				4: {},
+				6: {},
+			},
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Logf(testcase.name)
+		info := make(map[uint64]interface{}, 4)
+		err := readJSON(testDialClient, testcase.url, &info)
+		c.Assert(err, IsNil)
+		c.Assert(len(info), Equals, len(testcase.expectedStores))
+		for id := range testcase.expectedStores {
+			_, ok := info[id]
+			c.Assert(ok, Equals, true)
+		}
+	}
 }

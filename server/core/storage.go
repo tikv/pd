@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,8 +26,8 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server/kv"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -37,6 +37,7 @@ const (
 	schedulePath             = "schedule"
 	gcPath                   = "gc"
 	rulesPath                = "rules"
+	ruleGroupPath            = "rule_group"
 	replicationPath          = "replication_mode"
 	componentPath            = "component"
 	customScheduleConfigPath = "scheduler_config"
@@ -222,38 +223,58 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 }
 
 // SaveRule stores a rule cfg to the rulesPath.
-func (s *Storage) SaveRule(ruleKey string, rules interface{}) error {
-	value, err := json.Marshal(rules)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	return s.Save(path.Join(rulesPath, ruleKey), string(value))
+func (s *Storage) SaveRule(ruleKey string, rule interface{}) error {
+	return s.SaveJSON(rulesPath, ruleKey, rule)
 }
 
 // DeleteRule removes a rule from storage.
 func (s *Storage) DeleteRule(ruleKey string) error {
-	return s.Base.Remove(path.Join(rulesPath, ruleKey))
+	return s.Remove(path.Join(rulesPath, ruleKey))
 }
 
 // LoadRules loads placement rules from storage.
-func (s *Storage) LoadRules(f func(k, v string)) (bool, error) {
-	// Range is ['rule/\x00', 'rule0'). 'rule0' is the upper bound of all rules because '0' is next char of '/' in
-	// ascii order.
-	nextKey := path.Join(rulesPath, "\x00")
-	endKey := rulesPath + "0"
+func (s *Storage) LoadRules(f func(k, v string)) error {
+	return s.LoadRangeByPrefix(rulesPath+"/", f)
+}
+
+// SaveRuleGroup stores a rule group config to storage.
+func (s *Storage) SaveRuleGroup(groupID string, group interface{}) error {
+	return s.SaveJSON(ruleGroupPath, groupID, group)
+}
+
+// DeleteRuleGroup removes a rule group from storage.
+func (s *Storage) DeleteRuleGroup(groupID string) error {
+	return s.Remove(path.Join(ruleGroupPath, groupID))
+}
+
+// LoadRuleGroups loads all rule groups from storage.
+func (s *Storage) LoadRuleGroups(f func(k, v string)) error {
+	return s.LoadRangeByPrefix(ruleGroupPath+"/", f)
+}
+
+// SaveJSON saves json format data to storage.
+func (s *Storage) SaveJSON(prefix, key string, data interface{}) error {
+	value, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return s.Save(path.Join(prefix, key), string(value))
+}
+
+// LoadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
+func (s *Storage) LoadRangeByPrefix(prefix string, f func(k, v string)) error {
+	nextKey := prefix
+	endKey := clientv3.GetPrefixRangeEnd(prefix)
 	for {
 		keys, values, err := s.LoadRange(nextKey, endKey, minKVRangeLimit)
 		if err != nil {
-			return false, err
-		}
-		if len(keys) == 0 {
-			return false, nil
+			return err
 		}
 		for i := range keys {
-			f(strings.TrimPrefix(keys[i], rulesPath+"/"), values[i])
+			f(strings.TrimPrefix(keys[i], prefix), values[i])
 		}
 		if len(keys) < minKVRangeLimit {
-			return true, nil
+			return nil
 		}
 		nextKey = keys[len(keys)-1] + "\x00"
 	}
@@ -434,9 +455,8 @@ func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
 func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
-	prefix := path.Join(gcPath, "safe_point", "service")
-	// the next of 'e' is 'f'
-	prefixEnd := path.Join(gcPath, "safe_point", "servicf")
+	prefix := path.Join(gcPath, "safe_point", "service") + "/"
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return nil, err
@@ -466,9 +486,10 @@ func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
 
 // LoadAllScheduleConfig loads all schedulers' config.
 func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
-	keys, values, err := s.LoadRange(customScheduleConfigPath, clientv3.GetPrefixRangeEnd(customScheduleConfigPath), 1000)
+	prefix := customScheduleConfigPath + "/"
+	keys, values, err := s.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 1000)
 	for i, key := range keys {
-		keys[i] = strings.TrimPrefix(key, customScheduleConfigPath+"/")
+		keys[i] = strings.TrimPrefix(key, prefix)
 	}
 	return keys, values, err
 }

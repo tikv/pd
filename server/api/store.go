@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,13 +22,13 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/apiutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/storelimit"
 	"github.com/unrolled/render"
 )
 
@@ -464,12 +464,35 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 // FIXME: details of output json body
 // @Tags store
 // @Summary Get limit of all stores in the cluster.
+// @Param include_tombstone query bool false "include Tombstone" default(false)
 // @Produce json
 // @Success 200 {object} string
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [get]
 func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 	limits := h.GetScheduleConfig().StoreLimit
+	includeTombstone := false
+	var err error
+	if includeStr := r.URL.Query().Get("include_tombstone"); includeStr != "" {
+		includeTombstone, err = strconv.ParseBool(includeStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if !includeTombstone {
+		returned := make(map[uint64]config.StoreLimitConfig, len(limits))
+		rc := getCluster(r.Context())
+		for storeID, v := range limits {
+			store := rc.GetStore(storeID)
+			if store == nil || store.IsTombstone() {
+				continue
+			}
+			returned[storeID] = v
+		}
+		h.rd.JSON(w, http.StatusOK, returned)
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, limits)
 }
 

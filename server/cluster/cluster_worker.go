@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedulers"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -66,7 +67,7 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		}
 	}
 
-	if c.IsFeatureSupported(RegionMerge) {
+	if c.IsFeatureSupported(versioninfo.RegionMerge) {
 		// Disable merge for the 2 regions in a period of time.
 		c.GetMergeChecker().RecordRegionSplit([]uint64{reqRegion.GetId(), newRegionID})
 	}
@@ -132,7 +133,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	}
 
 	recordRegions = append(recordRegions, reqRegion.GetId())
-	if c.IsFeatureSupported(RegionMerge) {
+	if c.IsFeatureSupported(versioninfo.RegionMerge) {
 		// Disable merge the regions in a period of time.
 		c.GetMergeChecker().RecordRegionSplit(recordRegions)
 	}

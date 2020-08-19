@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,15 +24,15 @@ import (
 	. "github.com/pingcap/check"
 	"go.uber.org/goleak"
 
-	"github.com/pingcap/pd/v4/pkg/dashboard"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/tests"
-	"github.com/pingcap/pd/v4/tests/pdctl"
+	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/pdctl"
 
 	// Register schedulers.
-	_ "github.com/pingcap/pd/v4/server/schedulers"
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
 func Test(t *testing.T) {
