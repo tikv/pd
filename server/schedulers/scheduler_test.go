@@ -15,6 +15,7 @@ package schedulers
 
 import (
 	"context"
+	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -34,6 +35,10 @@ const (
 	KB = 1024
 	MB = 1024 * KB
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testShuffleLeaderSuite{})
 
