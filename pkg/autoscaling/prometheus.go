@@ -29,12 +29,13 @@ import (
 )
 
 const (
-	tikvSumCPUUsageMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total[%s])) by (instance,kubernetes_namespace)`
-	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{job="tidb"}[%s])) by (instance,kubernetes_namespace)`
+	tikvSumCPUUsageMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total[%s])) by (instance, kubernetes_namespace)`
+	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{job="tidb"}[%s])) by (instance, kubernetes_namespace)`
 	tikvCPUQuotaMetricsPattern    = `tikv_server_cpu_cores_quota`
 	tidbCPUQuotaMetricsPattern    = `tidb_server_maxprocs`
 	instanceLabelName             = "instance"
 	namespaceLabelName            = "kubernetes_namespace"
+	addressFormat                 = "pod-name.peer-svc.namespace.svc:port"
 
 	httpRequestTimeout = 5 * time.Second
 )
@@ -200,7 +201,7 @@ func getInstanceNameFromAddress(addr string) (string, error) {
 
 	parts := strings.Split(hostname, ".")
 	if len(parts) < 4 {
-		return "", errors.Errorf("address %s has less than 4 parts", addr)
+		return "", errors.Errorf("address %s does not match the expected format %s", addr, addressFormat)
 	}
 
 	podName, namespace := parts[0], parts[2]

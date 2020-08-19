@@ -15,7 +15,6 @@ package autoscaling
 
 import (
 	"math"
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -44,35 +43,24 @@ var (
 	MaxScaleInStep uint64 = 1
 )
 
-var (
-	querierInstance Querier
-	once            sync.Once
-)
-
-func getQuerier(cfg *config.PDServerConfig) Querier {
-	once.Do(func() {
-		var err error
-		client, err := promClient.NewClient(promClient.Config{
-			Address: cfg.MetricStorage,
-		})
-		if err != nil {
-			log.Error("error initializing Prometheus client", zap.String("address", cfg.MetricStorage), zap.Error(err))
-		}
-
-		querierInstance = NewPrometheusQuerier(client)
-	})
-	return querierInstance
-}
-
 func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Strategy) []*Plan {
 	var plans []*Plan
 	var afterQuota uint64
 
-	if tikvPlans, tikvAfterQuota := getPlans(rc, cfg, strategy, TiKV); tikvPlans != nil {
+	client, err := promClient.NewClient(promClient.Config{
+		Address: cfg.MetricStorage,
+	})
+	if err != nil {
+		log.Error("error initializing Prometheus client", zap.String("metric-storage", cfg.MetricStorage), zap.Error(err))
+		return nil
+	}
+	querier := NewPrometheusQuerier(client)
+
+	if tikvPlans, tikvAfterQuota := getPlans(rc, querier, strategy, TiKV); tikvPlans != nil {
 		plans = append(plans, tikvPlans...)
 		afterQuota += tikvAfterQuota
 	}
-	if tidbPlans, tidbAfterQuota := getPlans(rc, cfg, strategy, TiDB); tidbPlans != nil {
+	if tidbPlans, tidbAfterQuota := getPlans(rc, querier, strategy, TiDB); tidbPlans != nil {
 		plans = append(plans, tidbPlans...)
 		afterQuota += tidbAfterQuota
 	}
@@ -82,7 +70,7 @@ func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *St
 	return plans
 }
 
-func getPlans(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Strategy, component ComponentType) ([]*Plan, uint64) {
+func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, component ComponentType) ([]*Plan, uint64) {
 	var instances []instance
 	if component == TiKV {
 		instances = filterTiKVInstances(rc)
@@ -94,15 +82,7 @@ func getPlans(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Str
 		return nil, 0
 	}
 
-	querier := getQuerier(cfg)
-
-	if querier == nil {
-		log.Error("querier not intialized, cannot getPlans")
-		return nil, 0
-	}
-
 	now := time.Now()
-
 	totalCPUUseTime, err := getTotalCPUUseTime(querier, component, instances, now, MetricsTimeDuration)
 	if err != nil {
 		log.Error("cannot get total CPU used time", zap.Error(err))
