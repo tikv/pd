@@ -299,15 +299,6 @@ func newMockTiDBInformer() *mockTidbInformer {
 	}
 }
 
-// GetTiDBs implements TiDBInformer.GetTiDBs
-func (mc *mockTidbInformer) GetTiDBs() []*TiDBInfo {
-	returned := make([]*TiDBInfo, 0, len(mc.tidbs))
-	for _, v := range mc.tidbs {
-		returned = append(returned, v)
-	}
-	return returned
-}
-
 // GetTiDB implements TiDBInformer.GetTiDB
 func (mc *mockTidbInformer) GetTiDB(address string) *TiDBInfo {
 	return mc.tidbs[address]
@@ -318,9 +309,4 @@ func (mc *mockTidbInformer) SetTiDBs(tidbs []*TiDBInfo) {
 	for _, tidb := range tidbs {
 		mc.tidbs[tidb.Address] = tidb
 	}
-}
-
-// ResetTiDB clear the tidb list
-func (mc *mockTidbInformer) ResetTiDB() {
-	mc.tidbs = map[string]*TiDBInfo{}
 }
