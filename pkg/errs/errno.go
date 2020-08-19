@@ -65,7 +65,7 @@ var (
 
 // apiutil errors
 var (
-	ErrHTTPRequest = errors.Normalize("send HTTP request failed", errors.RFCCodeText("PD:apiutil:ErrHTTPRequest"))
-	ErrReadBody    = errors.Normalize("read HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrReadBody"))
-	ErrWriteBody   = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrWriteBody"))
+	ErrRequestHTTP   = errors.Normalize("send HTTP request failed", errors.RFCCodeText("PD:apiutil:ErrRequestHTTP"))
+	ErrReadHTTPBody  = errors.Normalize("read HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrReadHTTPBody"))
+	ErrWriteHTTPBody = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrWriteHTTPBody"))
 )
