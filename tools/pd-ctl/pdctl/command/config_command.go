@@ -435,7 +435,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Short: "rule group configurations",
 	}
 	ruleGroupShow := &cobra.Command{
-		Use:   "show [<id>]",
+		Use:   "show [id]",
 		Short: "show rule group configuration(s)",
 		Run:   showRuleGroupFunc,
 	}
