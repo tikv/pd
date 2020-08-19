@@ -37,9 +37,10 @@ func NewServiceGCSafepointCommand() *cobra.Command {
 // NewDeleteServiceGCSafepointCommand return a subcommand to delete service gc safepoint
 func NewDeleteServiceGCSafepointCommand() *cobra.Command {
 	l := &cobra.Command{
-		Use:   "delete <service ID>",
-		Short: "delete a service gc safepoint",
-		Run:   deleteSSP,
+		Use:    "delete <service ID>",
+		Short:  "delete a service gc safepoint",
+		Run:    deleteSSP,
+		Hidden: true,
 	}
 	return l
 }
