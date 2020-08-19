@@ -54,3 +54,5 @@ require (
 )
 
 replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
+
+replace github.com/pingcap/errors => github.com/pingcap/errors v0.11.5-0.20200812093836-57ec461934ff

@@ -194,3 +194,119 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 		}
 	}
 }
+
+func (s *calculationTestSuite) TestGetScaledTiDBGroups(c *C) {
+	case1 := newMockTiDBInformer()
+	case1.SetTiDBs([]*TiDBInfo{
+		{
+			Address: "tidb-0",
+			Labels: map[string]string{
+				groupLabelKey: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+			},
+		},
+		{
+			Address: "tidb-1",
+			Labels: map[string]string{
+				groupLabelKey: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+			},
+		},
+		{
+			Address: "tidb-2",
+			Labels:  map[string]string{},
+		},
+	})
+	testcases := []struct {
+		name             string
+		informer         tidbInformer
+		healthyInstances []instance
+		expectedPlan     []*Plan
+	}{
+		{
+			name:     "exist 1 scaled tidb group",
+			informer: case1,
+			healthyInstances: []instance{
+				{
+					id:      0,
+					address: "tidb-0",
+				},
+				{
+					id:      1,
+					address: "tidb-1",
+				},
+				{
+					id:      2,
+					address: "tidb-2",
+				},
+			},
+			expectedPlan: []*Plan{
+				{
+					Component: TiDB.String(),
+					Count:     2,
+					Labels: []*metapb.StoreLabel{
+						{
+							Key:   groupLabelKey,
+							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						},
+					},
+				},
+			},
+		},
+		{
+			name:     "exist 1 tidb scaled group with less healthy instances",
+			informer: case1,
+			healthyInstances: []instance{
+				{
+					id:      1,
+					address: "tidb-1",
+				},
+				{
+					id:      2,
+					address: "tidb-2",
+				},
+			},
+			expectedPlan: []*Plan{
+				{
+					Component: TiDB.String(),
+					Count:     1,
+					Labels: []*metapb.StoreLabel{
+						{
+							Key:   groupLabelKey,
+							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		plans := getScaledTiDBGroups(testcase.informer, testcase.healthyInstances)
+		if testcase.expectedPlan == nil {
+			c.Assert(plans, IsNil)
+		} else {
+			c.Assert(plans, DeepEquals, testcase.expectedPlan)
+		}
+	}
+}
+
+type mockTidbInformer struct {
+	tidbs map[string]*TiDBInfo
+}
+
+func newMockTiDBInformer() *mockTidbInformer {
+	return &mockTidbInformer{
+		tidbs: map[string]*TiDBInfo{},
+	}
+}
+
+// GetTiDB implements TiDBInformer.GetTiDB
+func (mc *mockTidbInformer) GetTiDB(address string) *TiDBInfo {
+	return mc.tidbs[address]
+}
+
+// SetTiDBs set multiple TiDB
+func (mc *mockTidbInformer) SetTiDBs(tidbs []*TiDBInfo) {
+	for _, tidb := range tidbs {
+		mc.tidbs[tidb.Address] = tidb
+	}
+}
