@@ -54,17 +54,17 @@ func (s *testServiceGCSafepointSuite) TestRegionStats(c *C) {
 	storage := s.svr.GetStorage()
 	list := &listServiceGCSafepoint{
 		ServiceGCSafepoints: []*core.ServiceSafePoint{
-			&core.ServiceSafePoint{
+			{
 				ServiceID: "a",
 				ExpiredAt: time.Now().Unix() + 10,
 				SafePoint: 1,
 			},
-			&core.ServiceSafePoint{
+			{
 				ServiceID: "b",
 				ExpiredAt: time.Now().Unix() + 10,
 				SafePoint: 2,
 			},
-			&core.ServiceSafePoint{
+			{
 				ServiceID: "c",
 				ExpiredAt: time.Now().Unix() + 10,
 				SafePoint: 3,
