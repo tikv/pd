@@ -38,6 +38,7 @@ var (
 	ErrTransferetcdLeader     = errors.Normalize("transfer etcd leader failed", errors.RFCCodeText("PD:member:ErrTransferetcdLeader"))
 	ErrWatcherCancel          = errors.Normalize("watcher canceled", errors.RFCCodeText("PD:member:ErrWatcherCancel"))
 	ErrMarshalLeader          = errors.Normalize("marshal leader failed", errors.RFCCodeText("PD:member:ErrMarshalLeader"))
+	ErrGetMembers             = errors.Normalize("get members failed", errors.RFCCodeText("PD:member:ErrGetMembers"))
 )
 
 // client errors
@@ -65,7 +66,18 @@ var (
 
 // apiutil errors
 var (
-	ErrRequestHTTP   = errors.Normalize("send HTTP request failed", errors.RFCCodeText("PD:apiutil:ErrRequestHTTP"))
-	ErrReadHTTPBody  = errors.Normalize("read HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrReadHTTPBody"))
-	ErrWriteHTTPBody = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrWriteHTTPBody"))
+	ErrRequestHTTP    = errors.Normalize("send HTTP request failed", errors.RFCCodeText("PD:apiutil:ErrRequestHTTP"))
+	ErrReadHTTPBody   = errors.Normalize("read HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrReadHTTPBody"))
+	ErrWriteHTTPBody  = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrWriteHTTPBody"))
+	ErrNewHTTPRequest = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:apiutil:ErrNewHTTPRequest"))
+)
+
+// cluster errors
+var (
+	ErrPersistStore          = errors.Normalize("failed to persist store", errors.RFCCodeText("PD:cluster:ErrPersistStore"))
+	ErrDeleteRegion          = errors.Normalize("failed to delete region from storage", errors.RFCCodeText("PD:cluster:ErrDeleteRegion"))
+	ErrSaveRegion            = errors.Normalize("failed to save region from storage", errors.RFCCodeText("PD:cluster:ErrSaveRegion"))
+	ErrBuryStore             = errors.Normalize("failed to bury store", errors.RFCCodeText("PD:cluster:ErrBuryStore"))
+	ErrDeleteStore           = errors.Normalize("failed to delete store", errors.RFCCodeText("PD:cluster:ErrDeleteStore"))
+	ErrPersistClusterVersion = errors.Normalize("persist cluster version meet error", errors.RFCCodeText("PD:cluster:ErrPersistClusterVersion"))
 )
