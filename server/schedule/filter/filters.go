@@ -426,7 +426,9 @@ func (f *ruleFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	region := cloneRegion(f.region, core.WithReplacePeerStore(f.oldStore, store.GetID()))
+	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
+		f.region.GetPeers(), f.region.GetLeader(),
+		core.WithReplacePeerStore(f.oldStore, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
@@ -469,7 +471,9 @@ func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) boo
 		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
 		return false
 	}
-	copyRegion := cloneRegion(f.region, core.WithLeader(targetPeer))
+	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
+		f.region.GetPeers(), f.region.GetLeader(),
+		core.WithLeader(targetPeer))
 	newFit := f.fitter.FitRegion(copyRegion)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
@@ -674,16 +678,17 @@ func (f *isolationFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 	return true
 }
 
-// cloneRegion is used to replace region.Clone in filter which call the FitRegion,
-// as FitRegion only needs partial information(startKey, endKey, peers, leader peer)
-func cloneRegion(region *core.RegionInfo, opts ...core.RegionCreateOption) *core.RegionInfo {
+// createRegionForRuleFit is used to create a clone region with RegionCreateOptions which is only used for
+// FitRegion in filter
+func createRegionForRuleFit(startKey, endKey []byte,
+	peers []*metapb.Peer, leader *metapb.Peer, opts ...core.RegionCreateOption) *core.RegionInfo {
 	copyLeader := &metapb.Peer{
-		Id:      region.GetLeader().Id,
-		StoreId: region.GetLeader().StoreId,
-		Role:    region.GetLeader().Role,
+		Id:      leader.Id,
+		StoreId: leader.StoreId,
+		Role:    leader.Role,
 	}
-	copyPeers := make([]*metapb.Peer, 0, len(region.GetPeers()))
-	for _, p := range region.GetPeers() {
+	copyPeers := make([]*metapb.Peer, 0, len(peers))
+	for _, p := range peers {
 		peer := &metapb.Peer{
 			Id:      p.Id,
 			StoreId: p.StoreId,
@@ -692,8 +697,8 @@ func cloneRegion(region *core.RegionInfo, opts ...core.RegionCreateOption) *core
 		copyPeers = append(copyPeers, peer)
 	}
 	cloneRegion := core.NewRegionInfo(&metapb.Region{
-		StartKey: region.GetStartKey(),
-		EndKey:   region.GetEndKey(),
+		StartKey: startKey,
+		EndKey:   endKey,
 		Peers:    copyPeers,
 	}, copyLeader, opts...)
 	return cloneRegion

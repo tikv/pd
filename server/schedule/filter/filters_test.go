@@ -294,6 +294,6 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 	)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = cloneRegion(region)
+		_ = createRegionForRuleFit(region.GetStartKey(), region.GetEndKey(), region.GetPeers(), region.GetLeader())
 	}
 }
