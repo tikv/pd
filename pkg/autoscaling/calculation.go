@@ -15,6 +15,7 @@ package autoscaling
 
 import (
 	"math"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -212,8 +213,7 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 }
 
 func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) []*Plan {
-	var plans []*Plan
-	planMap := make(map[string]map[uint64]struct{}, len(healthyInstances))
+	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	for _, instance := range healthyInstances {
 		store := informer.GetStore(instance.id)
 		if store == nil {
@@ -222,20 +222,44 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 			return nil
 		}
 		v := store.GetLabelValue(groupLabelKey)
-		if len(v) > len(autoScalingGroupLabelKeyPrefix) &&
-			v[:len(autoScalingGroupLabelKeyPrefix)] == autoScalingGroupLabelKeyPrefix {
-			if stores, ok := planMap[v]; ok {
-				stores[instance.id] = struct{}{}
-			} else {
-				planMap[v] = map[uint64]struct{}{
-					instance.id: {},
-				}
+		buildPlanMap(planMap, v, instance.address)
+	}
+	return buildPlans(planMap, TiKV)
+}
+
+func getScaledTiDBGroups(informer tidbInformer, healthyInstances []instance) []*Plan {
+	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
+	for _, instance := range healthyInstances {
+		tidb := informer.GetTiDB(instance.address)
+		if tidb == nil {
+			log.Warn("inconsistency between health instances and tidb status, exit auto-scaling calculation",
+				zap.String("tidb-address", instance.address))
+			return nil
+		}
+		v := tidb.getLabelValue(groupLabelKey)
+		buildPlanMap(planMap, v, instance.address)
+	}
+	return buildPlans(planMap, TiDB)
+}
+
+func buildPlanMap(planMap map[string]map[string]struct{}, groupName, address string) {
+	if len(groupName) > len(autoScalingGroupLabelKeyPrefix) &&
+		strings.HasPrefix(groupName, autoScalingGroupLabelKeyPrefix) {
+		if component, ok := planMap[groupName]; ok {
+			component[address] = struct{}{}
+		} else {
+			planMap[groupName] = map[string]struct{}{
+				address: {},
 			}
 		}
 	}
+}
+
+func buildPlans(planMap map[string]map[string]struct{}, componentType ComponentType) []*Plan {
+	var plans []*Plan
 	for groupLabel, groupInstances := range planMap {
 		plans = append(plans, &Plan{
-			Component: TiKV.String(),
+			Component: componentType.String(),
 			Count:     uint64(len(groupInstances)),
 			Labels: []*metapb.StoreLabel{
 				{
