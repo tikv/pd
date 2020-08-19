@@ -35,8 +35,7 @@ func Test(t *testing.T) {
 
 var _ = Suite(&testEtcdutilSuite{})
 
-type testEtcdutilSuite struct {
-}
+type testEtcdutilSuite struct{}
 
 func newTestSingleConfig() *embed.Config {
 	cfg := embed.NewConfig()
