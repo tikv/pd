@@ -583,7 +583,7 @@ func updateRuleGroupFunc(cmd *cobra.Command, args []string) {
 	}
 	index, err := strconv.ParseInt(args[1], 10, 64)
 	if err != nil {
-		cmd.Printf("index %s should be a number", args[1])
+		cmd.Printf("index %s should be a number\n", args[1])
 		return
 	}
 	var override bool
@@ -592,7 +592,7 @@ func updateRuleGroupFunc(cmd *cobra.Command, args []string) {
 	case "true":
 		override = true
 	default:
-		cmd.Printf("override %s should be a boolean", args[2])
+		cmd.Printf("override %s should be a boolean\n", args[2])
 		return
 	}
 	postJSON(cmd, ruleGroupPrefix, map[string]interface{}{
