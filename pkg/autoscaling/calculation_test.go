@@ -300,8 +300,8 @@ func newMockTiDBInformer() *mockTidbInformer {
 }
 
 // GetTiDB implements TiDBInformer.GetTiDB
-func (mc *mockTidbInformer) GetTiDB(address string) *TiDBInfo {
-	return mc.tidbs[address]
+func (mc *mockTidbInformer) GetTiDB(address string) (*TiDBInfo, error) {
+	return mc.tidbs[address], nil
 }
 
 // SetTiDBs set multiple TiDB
