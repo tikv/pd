@@ -27,7 +27,7 @@ func newCommand(usage, short string) *cobra.Command {
 	return cmd
 }
 
-func Test_genCompleter(t *testing.T) {
+func TestGenCompleter(t *testing.T) {
 	var subcommand = []string{"testa", "testb", "testc", "testdef"}
 
 	rootCmd := &cobra.Command{
