@@ -13,7 +13,11 @@
 
 package autoscaling
 
-import "github.com/pingcap/kvproto/pkg/metapb"
+import (
+	"strings"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+)
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
 type Strategy struct {
@@ -106,4 +110,31 @@ func (c MetricType) String() string {
 type instance struct {
 	id      uint64
 	address string
+}
+
+// TiDBInformer is used to fetch tidb info
+// TODO: implement TiDBInformer
+type tidbInformer interface {
+	GetTiDB(address string) *TiDBInfo
+}
+
+// TiDBInfo record the detail tidb info
+type TiDBInfo struct {
+	Address string
+	Labels  map[string]string
+}
+
+// GetLabelValue returns a label's value (if exists).
+func (t *TiDBInfo) getLabelValue(key string) string {
+	for k, v := range t.getLabels() {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return ""
+}
+
+// GetLabels returns the labels of the tidb.
+func (t *TiDBInfo) getLabels() map[string]string {
+	return t.Labels
 }
