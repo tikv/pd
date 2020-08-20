@@ -1790,6 +1790,7 @@ func (c *RaftCluster) GetClusterVersion() string {
 	return c.opt.GetClusterVersion().String()
 }
 
+// GetEtcdClient returns the current etcd client
 func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 	return c.etcdClient
 }
