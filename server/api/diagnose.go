@@ -19,8 +19,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )

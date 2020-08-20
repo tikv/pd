@@ -20,8 +20,9 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver"
 	"go.etcd.io/etcd/pkg/types"
@@ -61,7 +62,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Co
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
-			log.Error("failed to get cluster from remote", zap.Error(gerr))
+			log.Error("failed to get cluster from remote", errs.ZapError(errs.ErrGetCluster, gerr))
 			continue
 		}
 
@@ -105,7 +106,7 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	start := time.Now()
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if err != nil {
-		log.Error("load from etcd meet error", zap.Error(err))
+		log.Error("load from etcd meet error", errs.ZapError(errs.ErrLoadValue, err))
 	}
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), zap.Error(err))

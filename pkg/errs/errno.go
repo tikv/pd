@@ -80,4 +80,14 @@ var (
 	ErrDeleteStore           = errors.Normalize("failed to delete store", errors.RFCCodeText("PD:cluster:ErrDeleteStore"))
 	ErrPersistClusterVersion = errors.Normalize("persist cluster version meet error", errors.RFCCodeText("PD:cluster:ErrPersistClusterVersion"))
 	ErrNewHTTPRequest        = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:cluster:ErrNewHTTPRequest"))
+
+// metricutil errors
+var (
+	ErrPushGateway = errors.Normalize("push metrics to gateway failed", errors.RFCCodeText("PD:metricutil:ErrPushGateway"))
+)
+
+// etcdutil errors
+var (
+	ErrLoadValue  = errors.Normalize("load value from etcd failed", errors.RFCCodeText("PD:etcdutil:ErrLoadValue"))
+	ErrGetCluster = errors.Normalize("get cluster from remote peer failed", errors.RFCCodeText("PD:etcdutil:ErrGetCluster"))
 )

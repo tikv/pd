@@ -17,14 +17,13 @@ import (
 	"context"
 	"sync"
 
-	"go.uber.org/zap"
-
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 // Driver promotes the cluster status change.

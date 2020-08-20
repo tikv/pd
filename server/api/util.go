@@ -20,7 +20,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
 var (

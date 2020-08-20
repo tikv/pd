@@ -25,8 +25,8 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
