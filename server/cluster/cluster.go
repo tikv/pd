@@ -398,6 +398,11 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.core.PutStore(newStore)
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
+<<<<<<< HEAD
+=======
+	c.storesStats.UpdateTotalKeysRate(c.core.GetStores)
+	c.storesStats.FilterUnhealthyStore(c)
+>>>>>>> 3a4cae5... scheduler: filter unhealthy store in summaryStoresLoad (#2737)
 
 	// c.limiter is nil before "start" is called
 	if c.limiter != nil && c.opt.Load().StoreLimitMode == "auto" {
@@ -727,6 +732,7 @@ func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.Region
 }
 
 // GetStoresStats returns stores' statistics from cluster.
+// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
 func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 	c.RLock()
 	defer c.RUnlock()
