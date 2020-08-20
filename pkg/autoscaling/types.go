@@ -21,19 +21,15 @@ import (
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
 type Strategy struct {
-	// The basic unit of MaxCPUQuota is milli-core.
-	MaxCPUQuota uint64      `json:"max_cpu_quota"`
-	Rules       []*Rule     `json:"rules"`
-	Resources   []*Resource `json:"resources"`
+	Rules     []*Rule     `json:"rules"`
+	Resources []*Resource `json:"resources"`
 }
 
 // Rule is a set of constraints for a kind of component.
 type Rule struct {
-	Component               string       `json:"component"`
-	CPURule                 *CPURule     `json:"cpu_rule,omitempty"`
-	StorageRule             *StorageRule `json:"storage_rule,omitempty"`
-	ScaleOutIntervalSeconds uint64       `json:"scale_out_interval_seconds"`
-	ScaleInIntervalSeconds  uint64       `json:"scale_in_interval_seconds"`
+	Component   string       `json:"component"`
+	CPURule     *CPURule     `json:"cpu_rule,omitempty"`
+	StorageRule *StorageRule `json:"storage_rule,omitempty"`
 }
 
 // CPURule is the constraints about CPU.
