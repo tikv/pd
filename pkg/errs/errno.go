@@ -62,3 +62,10 @@ var (
 	ErrEtcdKVSave   = errors.Normalize("etcd KV save failed", errors.RFCCodeText("PD:kv:ErrEtcdKVSave"))
 	ErrEtcdKVRemove = errors.Normalize("etcd KV remove failed", errors.RFCCodeText("PD:kv:ErrEtcdKVRemove"))
 )
+
+// apiutil errors
+var (
+	ErrRequestHTTP   = errors.Normalize("send HTTP request failed", errors.RFCCodeText("PD:apiutil:ErrRequestHTTP"))
+	ErrReadHTTPBody  = errors.Normalize("read HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrReadHTTPBody"))
+	ErrWriteHTTPBody = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrWriteHTTPBody"))
+)
