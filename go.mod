@@ -28,7 +28,7 @@ require (
 	github.com/pingcap-incubator/tidb-dashboard v0.0.0-20200807020752-01f0abe88e93
 	github.com/pingcap/check v0.0.0-20191216031241-8a5a85928f12
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
-	github.com/pingcap/errors v0.11.5-0.20200729012136-4e113ddee29e
+	github.com/pingcap/errors v0.11.5-0.20200820035142-66eb5bf1d1cd
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
 	github.com/pingcap/kvproto v0.0.0-20200810113304-6157337686b1
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
@@ -54,5 +54,3 @@ require (
 )
 
 replace go.etcd.io/bbolt => go.etcd.io/bbolt v1.3.5
-
-replace github.com/pingcap/errors => github.com/pingcap/errors v0.11.5-0.20200812093836-57ec461934ff
