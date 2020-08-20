@@ -19,8 +19,11 @@ import (
 	"strings"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
@@ -161,17 +164,17 @@ func (informer *tidbInformerImpl) GetTiDB(address string) (*TiDBInfo, error) {
 	}
 	if resp.Count < 1 {
 		err := fmt.Errorf("resp loaded for tidb[%s] is empty", address)
-		//log.Error("failed to load tidb info",
-		//	zap.String("address", address),
-		//	errs.ZapError(errs.ErrLoadTiDBInfo, err))
+		log.Error("failed to load tidb info",
+			zap.String("address", address),
+			errs.ZapError(errs.ErrLoadTiDBInfo, err))
 		return nil, err
 	}
 	tidb := &TiDBInfo{}
 	err = json.Unmarshal(resp.Kvs[0].Value, tidb)
 	if err != nil {
-		//log.Error("failed to parse tidb info",
-		//	zap.String("address", address),
-		//	errs.ZapError(errs.ErrParseTiDBInfo, err))
+		log.Error("failed to parse tidb info",
+			zap.String("address", address),
+			errs.ZapError(errs.ErrParseTiDBInfo, err))
 		return nil, err
 	}
 	tidb.Address = address
