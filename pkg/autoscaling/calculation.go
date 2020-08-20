@@ -15,6 +15,7 @@ package autoscaling
 
 import (
 	"math"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -45,7 +46,6 @@ var (
 
 func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Strategy) []*Plan {
 	var plans []*Plan
-	var afterQuota uint64
 
 	client, err := promClient.NewClient(promClient.Config{
 		Address: cfg.MetricStorage,
@@ -56,21 +56,16 @@ func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *St
 	}
 	querier := NewPrometheusQuerier(client)
 
-	if tikvPlans, tikvAfterQuota := getPlans(rc, querier, strategy, TiKV); tikvPlans != nil {
+	if tikvPlans := getPlans(rc, querier, strategy, TiKV); tikvPlans != nil {
 		plans = append(plans, tikvPlans...)
-		afterQuota += tikvAfterQuota
 	}
-	if tidbPlans, tidbAfterQuota := getPlans(rc, querier, strategy, TiDB); tidbPlans != nil {
+	if tidbPlans := getPlans(rc, querier, strategy, TiDB); tidbPlans != nil {
 		plans = append(plans, tidbPlans...)
-		afterQuota += tidbAfterQuota
-	}
-	if exceedMaxCPUQuota(strategy, afterQuota) {
-		return nil
 	}
 	return plans
 }
 
-func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, component ComponentType) ([]*Plan, uint64) {
+func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, component ComponentType) []*Plan {
 	var instances []instance
 	if component == TiKV {
 		instances = filterTiKVInstances(rc)
@@ -79,20 +74,20 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	}
 
 	if len(instances) == 0 {
-		return nil, 0
+		return nil
 	}
 
 	now := time.Now()
 	totalCPUUseTime, err := getTotalCPUUseTime(querier, component, instances, now, MetricsTimeDuration)
 	if err != nil {
 		log.Error("cannot get total CPU used time", zap.Error(err))
-		return nil, 0
+		return nil
 	}
 
 	currentQuota, err := getTotalCPUQuota(querier, component, instances, now)
 	if err != nil {
 		log.Error("cannot get total CPU quota", zap.Error(err))
-		return nil, 0
+		return nil
 	}
 
 	totalCPUTime := float64(currentQuota) / millicores * MetricsTimeDuration.Seconds()
@@ -106,9 +101,9 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	}
 	if usage < minThreshold {
 		scaleInQuota := (totalCPUTime*minThreshold - totalCPUUseTime) / MetricsTimeDuration.Seconds()
-		return calculateScaleInPlan(rc, strategy, component, scaleInQuota, instances), 0
+		return calculateScaleInPlan(rc, strategy, component, scaleInQuota, instances)
 	}
-	return nil, 0
+	return nil
 }
 
 func filterTiKVInstances(informer core.StoreSetInformer) []instance {
@@ -196,28 +191,31 @@ func getResourcesByComponent(strategy *Strategy, component ComponentType) []*Res
 	return resources
 }
 
-func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64, instances []instance) ([]*Plan, uint64) {
+func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64, instances []instance) []*Plan {
 	groups := getScaledGroupsByComponent(rc, component, instances)
 	group := findBestGroupToScaleOut(rc, strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
+	resCount := getCountByResourceType(strategy, group.ResourceType)
 	scaleOutCount := typeutil.MinUint64(uint64(math.Ceil(scaleOutQuota/resCPU)), MaxScaleOutStep)
-	increasedQuota := getCPUByResourceType(strategy, group.ResourceType) * scaleOutCount
-	afterQuota := currentQuota + increasedQuota
 
 	// A new group created
 	if len(groups) == 0 {
-		return []*Plan{&group}, afterQuota
+		if group.Count+scaleOutCount <= resCount {
+			group.Count += scaleOutCount
+			return []*Plan{&group}
+		}
+		return nil
 	}
 
 	// update the existed group
 	for i, g := range groups {
-		if g.ResourceType == group.ResourceType {
+		if g.ResourceType == group.ResourceType && group.Count+scaleOutCount <= resCount {
 			group.Count += scaleOutCount
 			groups[i] = &group
 		}
 	}
-	return groups, afterQuota
+	return groups
 }
 
 func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleInQuota float64, instances []instance) []*Plan {
@@ -241,14 +239,19 @@ func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component
 	return groups
 }
 
-func exceedMaxCPUQuota(strategy *Strategy, totalCPUQuota uint64) bool {
-	return totalCPUQuota > strategy.MaxCPUQuota
-}
-
 func getCPUByResourceType(strategy *Strategy, resourceType string) uint64 {
 	for _, res := range strategy.Resources {
 		if res.ResourceType == resourceType {
 			return res.CPU
+		}
+	}
+	return 0
+}
+
+func getCountByResourceType(strategy *Strategy, resourceType string) uint64 {
+	for _, res := range strategy.Resources {
+		if res.ResourceType == resourceType {
+			return res.Count
 		}
 	}
 	return 0
@@ -268,8 +271,7 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 }
 
 func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) []*Plan {
-	var plans []*Plan
-	planMap := make(map[string]map[uint64]struct{}, len(healthyInstances))
+	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	for _, instance := range healthyInstances {
 		store := informer.GetStore(instance.id)
 		if store == nil {
@@ -278,20 +280,44 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 			return nil
 		}
 		v := store.GetLabelValue(groupLabelKey)
-		if len(v) > len(autoScalingGroupLabelKeyPrefix) &&
-			v[:len(autoScalingGroupLabelKeyPrefix)] == autoScalingGroupLabelKeyPrefix {
-			if stores, ok := planMap[v]; ok {
-				stores[instance.id] = struct{}{}
-			} else {
-				planMap[v] = map[uint64]struct{}{
-					instance.id: {},
-				}
+		buildPlanMap(planMap, v, instance.address)
+	}
+	return buildPlans(planMap, TiKV)
+}
+
+func getScaledTiDBGroups(informer tidbInformer, healthyInstances []instance) []*Plan {
+	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
+	for _, instance := range healthyInstances {
+		tidb := informer.GetTiDB(instance.address)
+		if tidb == nil {
+			log.Warn("inconsistency between health instances and tidb status, exit auto-scaling calculation",
+				zap.String("tidb-address", instance.address))
+			return nil
+		}
+		v := tidb.getLabelValue(groupLabelKey)
+		buildPlanMap(planMap, v, instance.address)
+	}
+	return buildPlans(planMap, TiDB)
+}
+
+func buildPlanMap(planMap map[string]map[string]struct{}, groupName, address string) {
+	if len(groupName) > len(autoScalingGroupLabelKeyPrefix) &&
+		strings.HasPrefix(groupName, autoScalingGroupLabelKeyPrefix) {
+		if component, ok := planMap[groupName]; ok {
+			component[address] = struct{}{}
+		} else {
+			planMap[groupName] = map[string]struct{}{
+				address: {},
 			}
 		}
 	}
+}
+
+func buildPlans(planMap map[string]map[string]struct{}, componentType ComponentType) []*Plan {
+	var plans []*Plan
 	for groupLabel, groupInstances := range planMap {
 		plans = append(plans, &Plan{
-			Component: TiKV.String(),
+			Component: componentType.String(),
 			Count:     uint64(len(groupInstances)),
 			Labels: []*metapb.StoreLabel{
 				{

@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/urfave/negroni"
@@ -145,21 +146,21 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error("request failed", zap.Error(err))
+			log.Error("request failed", errs.ZapError(errs.ErrRequestHTTP, err))
 			continue
 		}
 
 		b, err := ioutil.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			log.Error("request failed", zap.Error(err))
+			log.Error("read failed", errs.ZapError(errs.ErrReadHTTPBody, err))
 			continue
 		}
 
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 		if _, err := w.Write(b); err != nil {
-			log.Error("write failed", zap.Error(err))
+			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err))
 			continue
 		}
 

@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"

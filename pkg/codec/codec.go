@@ -17,7 +17,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
 var (

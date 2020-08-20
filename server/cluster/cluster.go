@@ -23,12 +23,12 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/component"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -509,6 +509,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 	c.storesStats.UpdateTotalKeysRate(c.core.GetStores)
+	c.storesStats.FilterUnhealthyStore(c)
 
 	// c.limiter is nil before "start" is called
 	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
@@ -829,6 +830,7 @@ func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.Region
 }
 
 // GetStoresStats returns stores' statistics from cluster.
+// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
 func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 	c.RLock()
 	defer c.RUnlock()

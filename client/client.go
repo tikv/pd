@@ -20,10 +20,10 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 )
