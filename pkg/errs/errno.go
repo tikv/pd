@@ -38,7 +38,6 @@ var (
 	ErrTransferetcdLeader     = errors.Normalize("transfer etcd leader failed", errors.RFCCodeText("PD:member:ErrTransferetcdLeader"))
 	ErrWatcherCancel          = errors.Normalize("watcher canceled", errors.RFCCodeText("PD:member:ErrWatcherCancel"))
 	ErrMarshalLeader          = errors.Normalize("marshal leader failed", errors.RFCCodeText("PD:member:ErrMarshalLeader"))
-	ErrGetMembers             = errors.Normalize("get members failed", errors.RFCCodeText("PD:member:ErrGetMembers"))
 )
 
 // client errors
@@ -80,6 +79,8 @@ var (
 	ErrDeleteStore           = errors.Normalize("failed to delete store", errors.RFCCodeText("PD:cluster:ErrDeleteStore"))
 	ErrPersistClusterVersion = errors.Normalize("persist cluster version meet error", errors.RFCCodeText("PD:cluster:ErrPersistClusterVersion"))
 	ErrNewHTTPRequest        = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:cluster:ErrNewHTTPRequest"))
+	ErrGetMembers            = errors.Normalize("get members failed", errors.RFCCodeText("PD:cluster:ErrGetMembers"))
+)
 
 // metricutil errors
 var (
