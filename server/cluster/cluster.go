@@ -501,6 +501,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 	c.storesStats.UpdateTotalKeysRate(c.core.GetStores)
+	c.storesStats.FilterUnhealthyStore(c)
 
 	// c.limiter is nil before "start" is called
 	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
@@ -821,6 +822,7 @@ func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.Region
 }
 
 // GetStoresStats returns stores' statistics from cluster.
+// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
 func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 	c.RLock()
 	defer c.RUnlock()

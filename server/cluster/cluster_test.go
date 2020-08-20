@@ -90,6 +90,38 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	stores := newTestStores(3)
+	for _, store := range stores {
+		storeStats := &pdpb.StoreStats{
+			StoreId:     store.GetID(),
+			Capacity:    100,
+			Available:   50,
+			RegionCount: 1,
+		}
+		c.Assert(cluster.putStoreLocked(store), IsNil)
+		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
+		c.Assert(cluster.storesStats.GetRollingStoreStats(store.GetID()), NotNil)
+	}
+
+	for _, store := range stores {
+		storeStats := &pdpb.StoreStats{
+			StoreId:     store.GetID(),
+			Capacity:    100,
+			Available:   50,
+			RegionCount: 1,
+		}
+		newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+		c.Assert(cluster.putStoreLocked(newStore), IsNil)
+		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
+		c.Assert(cluster.storesStats.GetRollingStoreStats(store.GetID()), IsNil)
+	}
+}
+
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
