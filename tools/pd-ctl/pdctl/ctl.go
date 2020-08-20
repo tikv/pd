@@ -41,7 +41,7 @@ var (
 	detach            bool
 	interact          bool
 	version           bool
-	readlinecompleter *readline.PrefixCompleter
+	readlineCompleter *readline.PrefixCompleter
 )
 
 func init() {
@@ -119,7 +119,7 @@ func getMainCmd(args []string) *cobra.Command {
 	rootCmd.ParseFlags(args)
 	rootCmd.SetOutput(os.Stdout)
 
-	readlinecompleter = readline.NewPrefixCompleter(genCompleter(rootCmd)...)
+	readlineCompleter = readline.NewPrefixCompleter(genCompleter(rootCmd)...)
 	return rootCmd
 }
 
@@ -159,7 +159,7 @@ func loop() {
 	l, err := readline.NewEx(&readline.Config{
 		Prompt:            "\033[31m»\033[0m ",
 		HistoryFile:       "/tmp/readline.tmp",
-		AutoComplete:      readlinecompleter,
+		AutoComplete:      readlineCompleter,
 		InterruptPrompt:   "^C",
 		EOFPrompt:         "^D",
 		HistorySearchFold: true,

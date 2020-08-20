@@ -19,35 +19,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newACommand() *cobra.Command {
-	a := &cobra.Command{
-		Use:   "testa",
-		Short: "test A command",
+func newCommand(usage, short string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   usage,
+		Short: short,
 	}
-	return a
-}
-
-func newBCommand() *cobra.Command {
-	a := &cobra.Command{
-		Use:   "testb",
-		Short: "test b command",
-	}
-	return a
-}
-func newDEFCommand() *cobra.Command {
-	a := &cobra.Command{
-		Use:   "testdef",
-		Short: "test def command",
-	}
-	return a
-}
-
-func newCCommand() *cobra.Command {
-	a := &cobra.Command{
-		Use:   "testc",
-		Short: "test c command",
-	}
-	return a
+	return cmd
 }
 
 func Test_genCompleter(t *testing.T) {
@@ -57,7 +34,13 @@ func Test_genCompleter(t *testing.T) {
 		Use:   "roottest",
 		Short: "test root cmd",
 	}
-	rootCmd.AddCommand(newACommand(), newBCommand(), newCCommand(), newDEFCommand())
+
+	cmdA := newCommand("testa", "test a command")
+	cmdB := newCommand("testb", "test b command")
+	cmdC := newCommand("testc", "test c command")
+	cmdDEF := newCommand("testdef", "test def command")
+
+	rootCmd.AddCommand(cmdA, cmdB, cmdC, cmdDEF)
 
 	pc := genCompleter(rootCmd)
 
