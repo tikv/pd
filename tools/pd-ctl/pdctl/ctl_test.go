@@ -28,7 +28,7 @@ func newCommand(usage, short string) *cobra.Command {
 }
 
 func TestGenCompleter(t *testing.T) {
-	var subcommand = []string{"testa", "testb", "testc", "testdef"}
+	var subCommand = []string{"testa", "testb", "testc", "testdef"}
 
 	rootCmd := &cobra.Command{
 		Use:   "roottest",
@@ -44,25 +44,25 @@ func TestGenCompleter(t *testing.T) {
 
 	pc := genCompleter(rootCmd)
 
-	for _, cmd := range subcommand {
-		runarray := []rune(cmd)
-		inprefixarray := true
+	for _, cmd := range subCommand {
+		runArray := []rune(cmd)
+		inPrefixArray := true
 		for _, v := range pc {
-			inprefixarray = true
-			if len(runarray) != len(v.GetName())-1 {
+			inPrefixArray = true
+			if len(runArray) != len(v.GetName())-1 {
 				continue
 			}
-			for i := 0; i < len(runarray); i++ {
-				if runarray[i] != v.GetName()[i] {
-					inprefixarray = false
+			for i := 0; i < len(runArray); i++ {
+				if runArray[i] != v.GetName()[i] {
+					inPrefixArray = false
 				}
 			}
-			if inprefixarray == true {
+			if inPrefixArray == true {
 				break
 			}
 		}
 
-		if inprefixarray == false {
+		if inPrefixArray == false {
 			t.Errorf("%s not in prefix array", cmd)
 		}
 	}
