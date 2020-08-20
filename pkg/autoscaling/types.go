@@ -127,8 +127,11 @@ type tidbInformer interface {
 
 // TiDBInfo record the detail tidb info
 type TiDBInfo struct {
-	Address string
-	Labels  map[string]string
+	Version        string            `json:"version"`
+	StartTimestamp int64             `json:"start_timestamp"`
+	Labels         map[string]string `json:"labels"`
+	GitHash        string            `json:"git_hash"`
+	Address        string
 }
 
 // GetLabelValue returns a label's value (if exists).
