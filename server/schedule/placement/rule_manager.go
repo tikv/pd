@@ -19,8 +19,8 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )

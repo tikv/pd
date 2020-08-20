@@ -18,7 +18,7 @@ import (
 	"crypto/tls"
 	"net/url"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 	"go.etcd.io/etcd/pkg/transport"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"

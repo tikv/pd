@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 )

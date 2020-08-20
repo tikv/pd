@@ -20,7 +20,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyutil"

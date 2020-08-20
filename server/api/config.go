@@ -23,8 +23,8 @@ import (
 	"strings"
 
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server"

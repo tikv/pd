@@ -18,8 +18,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
