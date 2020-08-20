@@ -210,8 +210,8 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 
 	// service GC safepoint API
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
-	apiRouter.HandleFunc("/servicegcsafepoint", serviceGCSafepointHandler.List).Methods("GET")
-	apiRouter.HandleFunc("/servicegcsafepoint/{service_id}", serviceGCSafepointHandler.Delete).Methods("DELETE")
+	apiRouter.HandleFunc("/gc/safepoint", serviceGCSafepointHandler.List).Methods("GET")
+	apiRouter.HandleFunc("/gc/safepoint/{service_id}", serviceGCSafepointHandler.Delete).Methods("DELETE")
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")

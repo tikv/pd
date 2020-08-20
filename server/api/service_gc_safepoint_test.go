@@ -49,7 +49,7 @@ func (s *testServiceGCSafepointSuite) TearDownSuite(c *C) {
 }
 
 func (s *testServiceGCSafepointSuite) TestRegionStats(c *C) {
-	sspURL := s.urlPrefix + "/servicegcsafepoint"
+	sspURL := s.urlPrefix + "/gc/safepoint"
 
 	storage := s.svr.GetStorage()
 	list := &listServiceGCSafepoint{

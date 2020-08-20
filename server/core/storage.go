@@ -491,11 +491,11 @@ func (s *Storage) GetAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
 	if err != nil {
 		return nil, err
 	}
-	ssps := make([]*ServiceSafePoint, 0, len(keys))
 	if len(keys) == 0 {
-		return ssps, nil
+		return []*ServiceSafePoint{}, nil
 	}
 
+	ssps := make([]*ServiceSafePoint, 0, len(keys))
 	for i := range keys {
 		ssp := &ServiceSafePoint{}
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {

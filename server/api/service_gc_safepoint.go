@@ -44,7 +44,7 @@ type listServiceGCSafepoint struct {
 // @Produce json
 // @Success 200 {array} listServiceGCSafepoint
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /servicegcsafepoint [get]
+// @Router /gc/safepoint [get]
 func (h *serviceGCSafepointHandler) List(w http.ResponseWriter, r *http.Request) {
 	storage := h.svr.GetStorage()
 	gcSafepoint, err := storage.LoadGCSafePoint()
@@ -70,7 +70,7 @@ func (h *serviceGCSafepointHandler) List(w http.ResponseWriter, r *http.Request)
 // @Produce json
 // @Success 200 {string} string "Delete service GC safepoint successfully."
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /servicegcsafepoint/{service_id} [delete]
+// @Router /gc/safepoint/{service_id} [delete]
 // @Tags rule
 func (h *serviceGCSafepointHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	storage := h.svr.GetStorage()
