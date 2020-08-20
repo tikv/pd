@@ -66,10 +66,9 @@ var (
 
 // apiutil errors
 var (
-	ErrRequestHTTP    = errors.Normalize("send HTTP request failed", errors.RFCCodeText("PD:apiutil:ErrRequestHTTP"))
-	ErrReadHTTPBody   = errors.Normalize("read HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrReadHTTPBody"))
-	ErrWriteHTTPBody  = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrWriteHTTPBody"))
-	ErrNewHTTPRequest = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:apiutil:ErrNewHTTPRequest"))
+	ErrRequestHTTP   = errors.Normalize("send HTTP request failed", errors.RFCCodeText("PD:apiutil:ErrRequestHTTP"))
+	ErrReadHTTPBody  = errors.Normalize("read HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrReadHTTPBody"))
+	ErrWriteHTTPBody = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrWriteHTTPBody"))
 )
 
 // cluster errors
@@ -80,4 +79,5 @@ var (
 	ErrBuryStore             = errors.Normalize("failed to bury store", errors.RFCCodeText("PD:cluster:ErrBuryStore"))
 	ErrDeleteStore           = errors.Normalize("failed to delete store", errors.RFCCodeText("PD:cluster:ErrDeleteStore"))
 	ErrPersistClusterVersion = errors.Normalize("persist cluster version meet error", errors.RFCCodeText("PD:cluster:ErrPersistClusterVersion"))
+	ErrNewHTTPRequest        = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:cluster:ErrNewHTTPRequest"))
 )
