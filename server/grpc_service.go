@@ -21,11 +21,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/versioninfo"
@@ -90,7 +90,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.tso.GetRespTS(count)
+		ts, err := s.tsoAllocator.GenerateTSO(count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}

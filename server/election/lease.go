@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -57,6 +57,7 @@ func (l *lease) Grant(leaseTimeout int64) error {
 	if cost := time.Since(start); cost > slowRequestTime {
 		log.Warn("lease grants too slow", zap.Duration("cost", cost), zap.String("purpose", l.Purpose))
 	}
+	log.Info("lease granted", zap.Int64("lease-id", int64(leaseResp.ID)), zap.Int64("lease-timeout", leaseTimeout), zap.String("purpose", l.Purpose))
 	l.ID = leaseResp.ID
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
 	l.expireTime.Store(start.Add(time.Duration(leaseResp.TTL) * time.Second))
@@ -77,6 +78,9 @@ func (l *lease) Close() error {
 // IsExpired checks if the lease is expired. If it returns true,
 // current leader should step down and try to re-elect again.
 func (l *lease) IsExpired() bool {
+	if l.expireTime.Load() == nil {
+		return false
+	}
 	return time.Now().After(l.expireTime.Load().(time.Time))
 }
 
@@ -95,6 +99,7 @@ func (l *lease) KeepAlive(ctx context.Context) {
 				l.expireTime.Store(t)
 			}
 		case <-time.After(l.leaseTimeout):
+			log.Info("lease timeout", zap.Time("expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
 			return
 		case <-ctx.Done():
 			return
@@ -109,6 +114,9 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
+
+		log.Info("start lease keep alive worker", zap.Duration("interval", interval), zap.String("purpose", l.Purpose))
+		defer log.Info("stop lease keep alive worker", zap.String("purpose", l.Purpose))
 
 		for {
 			go func() {

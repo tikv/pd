@@ -24,10 +24,10 @@ import (
 	"time"
 
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -825,11 +825,11 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 
 // ResetTS resets the ts with specified tso.
 func (h *Handler) ResetTS(ts uint64) error {
-	tsoServer := h.s.tso
-	if tsoServer == nil {
+	tsoAllocator := h.s.tsoAllocator
+	if tsoAllocator == nil {
 		return ErrServerNotStarted
 	}
-	return tsoServer.ResetUserTimestamp(ts)
+	return tsoAllocator.SetTSO(ts)
 }
 
 // SetStoreLimitScene sets the limit values for differents scenes
