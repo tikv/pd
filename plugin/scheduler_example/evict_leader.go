@@ -20,8 +20,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"

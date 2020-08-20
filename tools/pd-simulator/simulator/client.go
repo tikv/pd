@@ -19,13 +19,12 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 

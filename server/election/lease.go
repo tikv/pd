@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"

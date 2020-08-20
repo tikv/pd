@@ -16,7 +16,7 @@ package operator
 import (
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
 // OpKind is a bit field to identify operator types.

@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	promClient "github.com/prometheus/client_golang/api"
 	promAPI "github.com/prometheus/client_golang/api/prometheus/v1"
 	promModel "github.com/prometheus/common/model"
