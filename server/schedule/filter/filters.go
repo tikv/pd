@@ -717,90 +717,22 @@ const (
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
 var allSpeicalEngines = []string{EngineTiFlash}
-<<<<<<< HEAD
-=======
-
-type isolationFilter struct {
-	scope          string
-	locationLabels []string
-	constraintSet  [][]string
-}
-
-// NewIsolationFilter creates a filter that filters out stores with isolationLevel
-// For example, a region has 3 replicas in z1, z2 and z3 individually.
-// With isolationLevel = zone, if the region on z1 is down, we need to filter out z2 and z3
-// because these two zones already have one of the region's replicas on them.
-// We need to choose a store on z1 or z4 to place the new replica to meet the isolationLevel explicitly and forcibly.
-func NewIsolationFilter(scope, isolationLevel string, locationLabels []string, regionStores []*core.StoreInfo) Filter {
-	isolationFilter := &isolationFilter{
-		scope:          scope,
-		locationLabels: locationLabels,
-		constraintSet:  make([][]string, 0),
-	}
-	// Get which idx this isolationLevel at according to locationLabels
-	var isolationLevelIdx int
-	for level, label := range locationLabels {
-		if label == isolationLevel {
-			isolationLevelIdx = level
-			break
-		}
-	}
-	// Collect all constraints for given isolationLevel
-	for _, regionStore := range regionStores {
-		constraintList := make([]string, 0)
-		for i := 0; i <= isolationLevelIdx; i++ {
-			constraintList = append(constraintList, regionStore.GetLabelValue(locationLabels[i]))
-		}
-		isolationFilter.constraintSet = append(isolationFilter.constraintSet, constraintList)
-	}
-	return isolationFilter
-}
-
-func (f *isolationFilter) Scope() string {
-	return f.scope
-}
-
-func (f *isolationFilter) Type() string {
-	return "isolation-filter"
-}
-
-func (f *isolationFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
-	return true
-}
-
-func (f *isolationFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	// No isolation constraint to fit
-	if len(f.constraintSet) <= 0 {
-		return true
-	}
-	for _, constrainList := range f.constraintSet {
-		match := true
-		for idx, constraint := range constrainList {
-			// Check every constraint in constrainList
-			match = store.GetLabelValue(f.locationLabels[idx]) == constraint && match
-		}
-		if len(constrainList) > 0 && match {
-			return false
-		}
-	}
-	return true
-}
 
 // createRegionForRuleFit is used to create a clone region with RegionCreateOptions which is only used for
 // FitRegion in filter
 func createRegionForRuleFit(startKey, endKey []byte,
 	peers []*metapb.Peer, leader *metapb.Peer, opts ...core.RegionCreateOption) *core.RegionInfo {
 	copyLeader := &metapb.Peer{
-		Id:      leader.Id,
-		StoreId: leader.StoreId,
-		Role:    leader.Role,
+		Id:        leader.Id,
+		StoreId:   leader.StoreId,
+		IsLearner: leader.IsLearner,
 	}
 	copyPeers := make([]*metapb.Peer, 0, len(peers))
 	for _, p := range peers {
 		peer := &metapb.Peer{
-			Id:      p.Id,
-			StoreId: p.StoreId,
-			Role:    p.Role,
+			Id:        p.Id,
+			StoreId:   p.StoreId,
+			IsLearner: p.IsLearner,
 		}
 		copyPeers = append(copyPeers, peer)
 	}
@@ -811,4 +743,3 @@ func createRegionForRuleFit(startKey, endKey []byte,
 	}, copyLeader, opts...)
 	return cloneRegion
 }
->>>>>>> a0eba9b... filter: replace region.Clone in filter (#2794)
