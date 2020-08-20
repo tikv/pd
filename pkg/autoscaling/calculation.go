@@ -31,6 +31,10 @@ const (
 	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling-"
 )
 
+var (
+	informer tidbInformer
+)
+
 // TODO: adjust the value or make it configurable.
 var (
 	// MetricsTimeDuration is used to get the metrics of a certain time period.
@@ -40,6 +44,12 @@ var (
 	// MaxScaleInStep is used to indicate the maxium number of instance for scaling in operations at once.
 	MaxScaleInStep uint64 = 1
 )
+
+func setInformer(rc *cluster.RaftCluster) {
+	if informer == nil {
+		informer = newTidbInformer(rc.GetEtcdClient())
+	}
+}
 
 func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
 	var plans []*Plan
@@ -93,7 +103,7 @@ func filterTiKVInstances(informer core.StoreSetInformer) []instance {
 	return instances
 }
 
-// TODO: get TiDB instances
+// TODO: get TiDB instances, we can directly visit prometheus 'up{job="tidb"}' metrics to know the healthy tidb instances
 func getTiDBInstances() []instance {
 	return []instance{}
 }
@@ -207,8 +217,8 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 	case TiKV:
 		return getScaledTiKVGroups(rc, healthyInstances)
 	case TiDB:
-		// TODO: support search TiDB Group
-		return []*Plan{}
+		setInformer(rc)
+		return getScaledTiDBGroups(informer, healthyInstances)
 	default:
 		return nil
 	}
@@ -232,7 +242,11 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 func getScaledTiDBGroups(informer tidbInformer, healthyInstances []instance) []*Plan {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	for _, instance := range healthyInstances {
-		tidb := informer.GetTiDB(instance.address)
+		tidb, err := informer.GetTiDB(instance.address)
+		if err != nil {
+			// TODO: error handling
+			return nil
+		}
 		if tidb == nil {
 			log.Warn("inconsistency between health instances and tidb status, exit auto-scaling calculation",
 				zap.String("tidb-address", instance.address))

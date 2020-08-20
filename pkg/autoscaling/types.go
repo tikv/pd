@@ -14,9 +14,13 @@
 package autoscaling
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/etcdutil"
+	"go.etcd.io/etcd/clientv3"
 )
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
@@ -115,7 +119,7 @@ type instance struct {
 // TiDBInformer is used to fetch tidb info
 // TODO: implement TiDBInformer
 type tidbInformer interface {
-	GetTiDB(address string) *TiDBInfo
+	GetTiDB(address string) (*TiDBInfo, error)
 }
 
 // TiDBInfo record the detail tidb info
@@ -137,4 +141,39 @@ func (t *TiDBInfo) getLabelValue(key string) string {
 // GetLabels returns the labels of the tidb.
 func (t *TiDBInfo) getLabels() map[string]string {
 	return t.Labels
+}
+
+type tidbInformerImpl struct {
+	etcdClient *clientv3.Client
+}
+
+func newTidbInformer(client *clientv3.Client) tidbInformer {
+	return &tidbInformerImpl{
+		etcdClient: client,
+	}
+}
+
+func (informer *tidbInformerImpl) GetTiDB(address string) (*TiDBInfo, error) {
+	key := fmt.Sprintf("/topology/tidb/%s/info", address)
+	resp, err := etcdutil.EtcdKVGet(informer.etcdClient, key)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Count < 1 {
+		err := fmt.Errorf("resp loaded for tidb[%s] is empty", address)
+		//log.Error("failed to load tidb info",
+		//	zap.String("address", address),
+		//	errs.ZapError(errs.ErrLoadTiDBInfo, err))
+		return nil, err
+	}
+	tidb := &TiDBInfo{}
+	err = json.Unmarshal(resp.Kvs[0].Value, tidb)
+	if err != nil {
+		//log.Error("failed to parse tidb info",
+		//	zap.String("address", address),
+		//	errs.ZapError(errs.ErrParseTiDBInfo, err))
+		return nil, err
+	}
+	tidb.Address = address
+	return tidb, nil
 }
