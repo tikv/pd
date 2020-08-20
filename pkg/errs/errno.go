@@ -69,3 +69,16 @@ var (
 	ErrReadHTTPBody  = errors.Normalize("read HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrReadHTTPBody"))
 	ErrWriteHTTPBody = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrWriteHTTPBody"))
 )
+
+// metricutil errors
+var (
+	ErrPushGateway = errors.Normalize("push metrics to gateway failed", errors.RFCCodeText("PD:metricutil:ErrPushGateway"))
+)
+
+// etcdutil errors
+var (
+	ErrLoadValue     = errors.Normalize("load value from etcd failed", errors.RFCCodeText("PD:etcdutil:ErrLoadValue"))
+	ErrGetCluster    = errors.Normalize("get cluster from remote peer failed", errors.RFCCodeText("PD:etcdutil:ErrGetCluster"))
+	ErrLoadTiDBInfo  = errors.Normalize("load tidb info from etcd failed", errors.RFCCodeText("PD:etcdutil:ErrLoadTiDBInfo"))
+	ErrParseTiDBInfo = errors.Normalize("parse tidb info from etcd failed", errors.RFCCodeText("PD:etcdutil:ErrParseTiDBInfo"))
+)

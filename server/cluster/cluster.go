@@ -15,6 +15,7 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/component"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -509,6 +511,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	c.storesStats.Observe(newStore.GetID(), newStore.GetStoreStats())
 	c.storesStats.UpdateTotalBytesRate(c.core.GetStores)
 	c.storesStats.UpdateTotalKeysRate(c.core.GetStores)
+	c.storesStats.FilterUnhealthyStore(c)
 
 	// c.limiter is nil before "start" is called
 	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
@@ -829,6 +832,7 @@ func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.Region
 }
 
 // GetStoresStats returns stores' statistics from cluster.
+// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
 func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 	c.RLock()
 	defer c.RUnlock()
@@ -1785,6 +1789,31 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 // GetClusterVersion returns the current cluster version.
 func (c *RaftCluster) GetClusterVersion() string {
 	return c.opt.GetClusterVersion().String()
+}
+
+func (c *RaftCluster) GetTiDB(address string) (*typeutil.TiDBInfo, error) {
+	key := fmt.Sprintf("/topology/tidb/%s/info", address)
+	resp, err := etcdutil.EtcdKVGet(c.etcdClient, key)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Count < 1 {
+		err := fmt.Errorf("resp loaded for tidb[%s] is empty", address)
+		log.Error("failed to load tidb info",
+			zap.String("address", address),
+			errs.ZapError(errs.ErrLoadTiDBInfo, err))
+		return nil, err
+	}
+	tidb := &typeutil.TiDBInfo{}
+	err = json.Unmarshal(resp.Kvs[0].Value, tidb)
+	if err != nil {
+		log.Error("failed to parse tidb info",
+			zap.String("address", address),
+			errs.ZapError(errs.ErrParseTiDBInfo, err))
+		return nil, err
+	}
+	tidb.Address = address
+	return tidb, nil
 }
 
 var healthURL = "/pd/api/v1/ping"

@@ -93,7 +93,7 @@ func filterTiKVInstances(informer core.StoreSetInformer) []instance {
 	return instances
 }
 
-// TODO: get TiDB instances
+// TODO: get TiDB instances, we can directly visit prometheus 'up{job="tidb"}' metrics to know the healthy tidb instances
 func getTiDBInstances() []instance {
 	return []instance{}
 }
@@ -207,8 +207,7 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 	case TiKV:
 		return getScaledTiKVGroups(rc, healthyInstances)
 	case TiDB:
-		// TODO: support search TiDB Group
-		return []*Plan{}
+		return getScaledTiDBGroups(rc, healthyInstances)
 	default:
 		return nil
 	}
@@ -232,13 +231,17 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 func getScaledTiDBGroups(informer tidbInformer, healthyInstances []instance) []*Plan {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	for _, instance := range healthyInstances {
-		tidb := informer.GetTiDB(instance.address)
+		tidb, err := informer.GetTiDB(instance.address)
+		if err != nil {
+			// TODO: need to handle the error
+			return nil
+		}
 		if tidb == nil {
 			log.Warn("inconsistency between health instances and tidb status, exit auto-scaling calculation",
 				zap.String("tidb-address", instance.address))
 			return nil
 		}
-		v := tidb.getLabelValue(groupLabelKey)
+		v := tidb.GetLabelValue(groupLabelKey)
 		buildPlanMap(planMap, v, instance.address)
 	}
 	return buildPlans(planMap, TiDB)

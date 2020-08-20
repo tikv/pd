@@ -14,9 +14,8 @@
 package autoscaling
 
 import (
-	"strings"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/typeutil"
 )
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
@@ -115,26 +114,5 @@ type instance struct {
 // TiDBInformer is used to fetch tidb info
 // TODO: implement TiDBInformer
 type tidbInformer interface {
-	GetTiDB(address string) *TiDBInfo
-}
-
-// TiDBInfo record the detail tidb info
-type TiDBInfo struct {
-	Address string
-	Labels  map[string]string
-}
-
-// GetLabelValue returns a label's value (if exists).
-func (t *TiDBInfo) getLabelValue(key string) string {
-	for k, v := range t.getLabels() {
-		if strings.EqualFold(k, key) {
-			return v
-		}
-	}
-	return ""
-}
-
-// GetLabels returns the labels of the tidb.
-func (t *TiDBInfo) getLabels() map[string]string {
-	return t.Labels
+	GetTiDB(address string) (*typeutil.TiDBInfo, error)
 }
