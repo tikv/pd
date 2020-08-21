@@ -127,10 +127,10 @@ type tidbInformer interface {
 
 // TiDBInfo record the detail tidb info
 type TiDBInfo struct {
-	Version        string            `json:"version"`
-	StartTimestamp int64             `json:"start_timestamp"`
+	Version        *string           `json:"version,omitempty"`
+	StartTimestamp *int64            `json:"start_timestamp,omitempty"`
 	Labels         map[string]string `json:"labels"`
-	GitHash        string            `json:"git_hash"`
+	GitHash        *string           `json:"git_hash,omitempty"`
 	Address        string
 }
 
