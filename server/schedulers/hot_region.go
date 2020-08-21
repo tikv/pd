@@ -652,7 +652,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
 	for id, detail := range bs.stLoadDetail {
 		if bs.cluster.GetStore(id) == nil {
-			log.Error("failed", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(id)))
+			log.Error("failed to get the source store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(id)))
 			continue
 		}
 		if len(detail.HotPeers) == 0 {
@@ -1077,7 +1077,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	}
 
 	if err != nil {
-		log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs()), zap.NamedError("cause", err))
+		log.Debug("fail to create operator", zap.Error(errs.ErrCreateOperator.Wrap(err).FastGenByArgs()))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
 		return nil, nil
 	}

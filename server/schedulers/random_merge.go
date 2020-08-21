@@ -43,7 +43,7 @@ func init() {
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
+				return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("ranges")
 			}
 			conf.Ranges = ranges
 			conf.Name = RandomMergeName
@@ -127,7 +127,7 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 
 	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpAdmin)
 	if err != nil {
-		log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs()), zap.NamedError("cause", err))
+		log.Debug("fail to create merge region operator", zap.Error(errs.ErrCreateOperator.Wrap(err).FastGenByArgs()))
 		return nil
 	}
 	ops[0].Counters = append(ops[0].Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))

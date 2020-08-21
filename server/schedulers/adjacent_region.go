@@ -51,11 +51,11 @@ func init() {
 			if len(args) == 2 {
 				leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
 				if err != nil {
-					return errs.ErrSchedulerConfig.FastGenByArgs("leader limit")
+					return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("leader limit")
 				}
 				peerLimit, err := strconv.ParseUint(args[1], 10, 64)
 				if err != nil {
-					return errs.ErrSchedulerConfig.FastGenByArgs("peer limit")
+					return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("peer limit")
 				}
 				conf.LeaderLimit = leaderLimit
 				conf.PeerLimit = peerLimit
@@ -265,7 +265,7 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster opt.Cluster, re
 	leaderStoreID := region.GetLeader().GetStoreId()
 	store := cluster.GetStore(leaderStoreID)
 	if store == nil {
-		log.Error("failed", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(leaderStoreID)))
+		log.Error("failed to get the store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(leaderStoreID)))
 		return true
 	}
 	if !filter.Source(cluster, store, l.filters) {
@@ -301,7 +301,7 @@ func (l *balanceAdjacentRegionScheduler) disperseLeader(cluster opt.Cluster, bef
 	}
 	op, err := operator.CreateTransferLeaderOperator("balance-adjacent-leader", cluster, before, before.GetLeader().GetStoreId(), target.GetID(), operator.OpAdjacent)
 	if err != nil {
-		log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs()), zap.NamedError("cause", err))
+		log.Debug("fail to create transfer leader operator", zap.Error(errs.ErrCreateOperator.Wrap(err).FastGenByArgs()))
 		return nil
 	}
 	op.SetPriorityLevel(core.LowPriority)
@@ -317,7 +317,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 	leaderStoreID := region.GetLeader().GetStoreId()
 	source := cluster.GetStore(leaderStoreID)
 	if source == nil {
-		log.Error("failed", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(leaderStoreID)))
+		log.Error("failed to get the source store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(leaderStoreID)))
 		return nil
 	}
 	scoreGuard := filter.NewPlacementSafeguard(l.GetName(), cluster, region, source)

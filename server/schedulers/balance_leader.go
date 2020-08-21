@@ -46,7 +46,7 @@ func init() {
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
+				return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("ranges")
 			}
 			conf.Ranges = ranges
 			conf.Name = BalanceLeaderName

@@ -40,7 +40,7 @@ func init() {
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
+				return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("ranges")
 			}
 			conf.Ranges = ranges
 			conf.Name = LabelName
@@ -130,7 +130,7 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 
 			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, id, target.GetID(), operator.OpLeader)
 			if err != nil {
-				log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs()), zap.NamedError("cause", err))
+				log.Debug("fail to create transfer label reject leader operator", zap.Error(errs.ErrCreateOperator.Wrap(err).FastGenByArgs()))
 				return nil
 			}
 			op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))

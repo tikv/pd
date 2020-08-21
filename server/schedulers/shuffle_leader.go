@@ -40,7 +40,7 @@ func init() {
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
+				return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("ranges")
 			}
 			conf.Ranges = ranges
 			conf.Name = ShuffleLeaderName
@@ -118,7 +118,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	}
 	op, err := operator.CreateTransferLeaderOperator(ShuffleLeaderType, cluster, region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
 	if err != nil {
-		log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs()), zap.NamedError("cause", err))
+		log.Debug("fail to create shuffle leader operator", zap.Error(errs.ErrCreateOperator.Wrap(err).FastGenByArgs()))
 		return nil
 	}
 	op.SetPriorityLevel(core.HighPriority)

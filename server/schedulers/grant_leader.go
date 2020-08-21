@@ -86,11 +86,11 @@ func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		return errs.ErrSchedulerConfig.FastGenByArgs("id")
+		return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("id")
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {
-		return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
+		return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("ranges")
 	}
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
@@ -220,7 +220,7 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 
 		op, err := operator.CreateTransferLeaderOperator(GrantLeaderType, cluster, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
 		if err != nil {
-			log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Debug("fail to create grant leader operator", zap.Error(errs.ErrCreateOperator.Wrap(err).FastGenByArgs()))
 			continue
 		}
 		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))

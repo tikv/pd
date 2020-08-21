@@ -47,7 +47,7 @@ func init() {
 			if len(args) == 1 {
 				limit, err := strconv.ParseUint(args[0], 10, 64)
 				if err != nil {
-					return errs.ErrSchedulerConfig.FastGenByArgs("limit")
+					return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("limit")
 				}
 				conf.Limit = limit
 			}
@@ -166,7 +166,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 		srcStoreID := srcRegion.GetLeader().GetStoreId()
 		srcStore := cluster.GetStore(srcStoreID)
 		if srcStore == nil {
-			log.Error("failed", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(srcStoreID)))
+			log.Error("failed to get the source store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(srcStoreID)))
 		}
 
 		filters := []filter.Filter{
@@ -197,7 +197,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 		destPeer := &metapb.Peer{StoreId: destStoreID}
 		op, err := operator.CreateMoveLeaderOperator("random-move-hot-leader", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStoreID, destPeer)
 		if err != nil {
-			log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Debug("fail to create move leader operator", zap.Error(errs.ErrCreateOperator.Wrap(err).FastGenByArgs()))
 			return nil
 		}
 		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))

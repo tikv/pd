@@ -38,7 +38,7 @@ func init() {
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
+				return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("ranges")
 			}
 			conf.Ranges = ranges
 			conf.Name = BalanceRegionName
@@ -189,7 +189,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 	sourceStoreID := oldPeer.GetStoreId()
 	source := cluster.GetStore(sourceStoreID)
 	if source == nil {
-		log.Error("failed", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(sourceStoreID)))
+		log.Error("failed to get the source store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(sourceStoreID)))
 		return nil
 	}
 

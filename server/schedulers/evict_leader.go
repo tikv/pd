@@ -55,11 +55,11 @@ func init() {
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
-				return errs.ErrSchedulerConfig.FastGenByArgs("id")
+				return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("id")
 			}
 			ranges, err := getKeyRanges(args[1:])
 			if err != nil {
-				return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
+				return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("ranges")
 			}
 			conf.StoreIDWithRanges[id] = ranges
 			return nil
@@ -91,11 +91,11 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		return errs.ErrSchedulerConfig.FastGenByArgs("id")
+		return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("id")
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {
-		return errs.ErrSchedulerConfig.FastGenByArgs("ranges")
+		return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("ranges")
 	}
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
@@ -230,7 +230,7 @@ func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Ope
 		}
 		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 		if err != nil {
-			log.Debug("failed", zap.Error(errs.ErrCreateOperator.FastGenByArgs()), zap.NamedError("cause", err))
+			log.Debug("fail to create evict leader operator", zap.Error(errs.ErrCreateOperator.Wrap(err).FastGenByArgs()))
 			continue
 		}
 		op.SetPriorityLevel(core.HighPriority)
