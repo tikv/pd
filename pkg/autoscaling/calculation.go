@@ -20,8 +20,10 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	promClient "github.com/prometheus/client_golang/api"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
@@ -29,10 +31,7 @@ import (
 const (
 	groupLabelKey                  = "group"
 	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling-"
-)
-
-var (
-	informer tidbInformer
+	millicores                     = 1000
 )
 
 // TODO: adjust the value or make it configurable.
@@ -45,24 +44,28 @@ var (
 	MaxScaleInStep uint64 = 1
 )
 
-func setInformer(rc *cluster.RaftCluster) {
-	if informer == nil {
-		informer = newTidbInformer(rc.GetEtcdClient())
-	}
-}
-
-func calculate(rc *cluster.RaftCluster, strategy *Strategy) []*Plan {
+func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Strategy) []*Plan {
 	var plans []*Plan
-	if tikvPlans := getPlans(rc, strategy, TiKV); tikvPlans != nil {
+
+	client, err := promClient.NewClient(promClient.Config{
+		Address: cfg.MetricStorage,
+	})
+	if err != nil {
+		log.Error("error initializing Prometheus client", zap.String("metric-storage", cfg.MetricStorage), zap.Error(err))
+		return nil
+	}
+	querier := NewPrometheusQuerier(client)
+
+	if tikvPlans := getPlans(rc, querier, strategy, TiKV); tikvPlans != nil {
 		plans = append(plans, tikvPlans...)
 	}
-	if tidbPlans := getPlans(rc, strategy, TiDB); tidbPlans != nil {
+	if tidbPlans := getPlans(rc, querier, strategy, TiDB); tidbPlans != nil {
 		plans = append(plans, tidbPlans...)
 	}
 	return plans
 }
 
-func getPlans(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType) []*Plan {
+func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, component ComponentType) []*Plan {
 	var instances []instance
 	if component == TiKV {
 		instances = filterTiKVInstances(rc)
@@ -74,9 +77,20 @@ func getPlans(rc *cluster.RaftCluster, strategy *Strategy, component ComponentTy
 		return nil
 	}
 
-	totalCPUUseTime := getTotalCPUUseTime(component, instances, MetricsTimeDuration)
-	currentQuota := getTotalCPUQuota(component, instances)
-	totalCPUTime := float64(currentQuota) * MetricsTimeDuration.Seconds()
+	now := time.Now()
+	totalCPUUseTime, err := getTotalCPUUseTime(querier, component, instances, now, MetricsTimeDuration)
+	if err != nil {
+		log.Error("cannot get total CPU used time", zap.Error(err))
+		return nil
+	}
+
+	currentQuota, err := getTotalCPUQuota(querier, component, instances, now)
+	if err != nil {
+		log.Error("cannot get total CPU quota", zap.Error(err))
+		return nil
+	}
+
+	totalCPUTime := float64(currentQuota) / millicores * MetricsTimeDuration.Seconds()
 	usage := totalCPUUseTime / totalCPUTime
 	maxThreshold, minThreshold := getCPUThresholdByComponent(strategy, component)
 
@@ -108,14 +122,46 @@ func getTiDBInstances() []instance {
 	return []instance{}
 }
 
-// TODO: get total CPU use time through Prometheus.
-func getTotalCPUUseTime(component ComponentType, instances []instance, duration time.Duration) float64 {
-	return 1.0
+func getAddresses(instances []instance) []string {
+	names := make([]string, 0, len(instances))
+	for _, inst := range instances {
+		names = append(names, inst.address)
+	}
+	return names
 }
 
-// TODO: get total CPU quota through Prometheus.
-func getTotalCPUQuota(component ComponentType, instances []instance) uint64 {
-	return 1
+// TODO: suppport other metrics storage
+// get total CPU use time (in seconds) through Prometheus.
+func getTotalCPUUseTime(querier Querier, component ComponentType, instances []instance, timestamp time.Time, duration time.Duration) (float64, error) {
+	result, err := querier.Query(NewQueryOptions(component, CPUUsage, getAddresses(instances), timestamp, duration))
+	if err != nil {
+		return 0.0, err
+	}
+
+	sum := 0.0
+	for _, value := range result {
+		sum += value
+	}
+
+	return sum, nil
+}
+
+// TODO: suppport other metrics storage
+// get total CPU quota (in millicores) through Prometheus.
+func getTotalCPUQuota(querier Querier, component ComponentType, instances []instance, timestamp time.Time) (uint64, error) {
+	result, err := querier.Query(NewQueryOptions(component, CPUQuota, getAddresses(instances), timestamp, 0))
+	if err != nil {
+		return 0, err
+	}
+
+	sum := 0.0
+	for _, value := range result {
+		sum += value
+	}
+
+	quota := uint64(math.Floor(sum * float64(millicores)))
+
+	return quota, nil
 }
 
 func getCPUThresholdByComponent(strategy *Strategy, component ComponentType) (maxThreshold float64, minThreshold float64) {
@@ -217,7 +263,7 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 	case TiKV:
 		return getScaledTiKVGroups(rc, healthyInstances)
 	case TiDB:
-		setInformer(rc)
+		informer := newTidbInformer(rc.GetEtcdClient())
 		return getScaledTiDBGroups(informer, healthyInstances)
 	default:
 		return nil

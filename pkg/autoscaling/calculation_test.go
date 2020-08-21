@@ -15,7 +15,9 @@ package autoscaling
 
 import (
 	"fmt"
+	"math"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -193,6 +195,59 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 			c.Assert(plans, DeepEquals, testcase.expectedPlan)
 		}
 	}
+}
+
+type mockQuerier struct{}
+
+func (q *mockQuerier) Query(options *QueryOptions) (QueryResult, error) {
+	result := make(QueryResult)
+	for _, addr := range options.addresses {
+		result[addr] = mockResultValue
+	}
+
+	return result, nil
+}
+
+func (s *calculationTestSuite) TestGetTotalCPUUseTime(c *C) {
+	querier := &mockQuerier{}
+	instances := []instance{
+		{
+			address: "1",
+			id:      1,
+		},
+		{
+			address: "2",
+			id:      2,
+		},
+		{
+			address: "3",
+			id:      3,
+		},
+	}
+	totalCPUUseTime, _ := getTotalCPUUseTime(querier, TiDB, instances, time.Now(), 0)
+	expected := mockResultValue * float64(len(instances))
+	c.Assert(math.Abs(expected-totalCPUUseTime) < 1e-6, IsTrue)
+}
+
+func (s *calculationTestSuite) TestGetTotalCPUQuota(c *C) {
+	querier := &mockQuerier{}
+	instances := []instance{
+		{
+			address: "1",
+			id:      1,
+		},
+		{
+			address: "2",
+			id:      2,
+		},
+		{
+			address: "3",
+			id:      3,
+		},
+	}
+	totalCPUQuota, _ := getTotalCPUQuota(querier, TiDB, instances, time.Now())
+	expected := uint64(mockResultValue * float64(len(instances)*millicores))
+	c.Assert(totalCPUQuota, Equals, expected)
 }
 
 func (s *calculationTestSuite) TestGetScaledTiDBGroups(c *C) {
