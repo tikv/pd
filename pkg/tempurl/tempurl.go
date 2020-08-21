@@ -46,8 +46,7 @@ func tryAllocTestURL() string {
 		log.Fatal("listen failed", zap.Error(err))
 	}
 	addr := fmt.Sprintf("http://%s", l.Addr())
-	err = l.Close()
-	if err != nil {
+	if err = l.Close(); err != nil {
 		log.Fatal("close failed", zap.Error(err))
 	}
 
