@@ -58,7 +58,7 @@ type GlobalTSOAllocator struct {
 func NewGlobalTSOAllocator(leadership *election.Leadership, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration) Allocator {
 	gta := &GlobalTSOAllocator{
 		timestampOracle: &timestampOracle{
-			client:        leadership.Client,
+			client:        leadership.GetClient(),
 			rootPath:      rootPath,
 			saveInterval:  saveInterval,
 			maxResetTSGap: maxResetTSGap,

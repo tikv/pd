@@ -46,7 +46,7 @@ type Leadership struct {
 	Purpose string
 	// The lease which is used to get this leadership
 	lease  atomic.Value // stored as *lease
-	Client *clientv3.Client
+	client *clientv3.Client
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
 	leaderValue string
@@ -56,7 +56,7 @@ type Leadership struct {
 func NewLeadership(client *clientv3.Client, purpose string) *Leadership {
 	leadership := &Leadership{
 		Purpose: purpose,
-		Client:  client,
+		client:  client,
 	}
 	return leadership
 }
@@ -75,6 +75,11 @@ func (ls *Leadership) setLease(lease *lease) {
 	ls.lease.Store(lease)
 }
 
+// GetClient is used to get the etcd client.
+func (ls *Leadership) GetClient() *clientv3.Client {
+	return ls.client
+}
+
 // Campaign is used to campaign the leader with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderPath, leaderData string) error {
 	ls.leaderKey = leaderPath
@@ -82,14 +87,14 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderPath, leaderData string
 	// Create a new lease to campaign
 	ls.setLease(&lease{
 		Purpose: ls.Purpose,
-		client:  ls.Client,
-		lease:   clientv3.NewLease(ls.Client),
+		client:  ls.client,
+		lease:   clientv3.NewLease(ls.client),
 	})
 	if err := ls.getLease().Grant(leaseTimeout); err != nil {
 		return err
 	}
 	// The leader key must not exist, so the CreateRevision is 0.
-	resp, err := kv.NewSlowLogTxn(ls.Client).
+	resp, err := kv.NewSlowLogTxn(ls.client).
 		If(clientv3.Compare(clientv3.CreateRevision(leaderPath), "=", 0)).
 		Then(clientv3.OpPut(leaderPath, leaderData, clientv3.WithLease(ls.getLease().ID))).
 		Commit()
@@ -117,7 +122,7 @@ func (ls *Leadership) Check() bool {
 // LeaderTxn returns txn() with a leader comparison to guarantee that
 // the transaction can be executed only if the server is leader.
 func (ls *Leadership) LeaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
-	txn := kv.NewSlowLogTxn(ls.Client)
+	txn := kv.NewSlowLogTxn(ls.client)
 	return txn.If(append(cs, ls.leaderCmp())...)
 }
 
