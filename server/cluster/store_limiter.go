@@ -88,13 +88,13 @@ func (s *StoreLimiter) calculateRate(limitType storelimit.Type, state LoadState)
 	rate := float64(0)
 	switch state {
 	case LoadStateIdle:
-		rate = float64(s.scene[limitType].Idle) / schedule.StoreBalanceBaseTime
+		rate = float64(s.scene[limitType].Idle)
 	case LoadStateLow:
-		rate = float64(s.scene[limitType].Low) / schedule.StoreBalanceBaseTime
+		rate = float64(s.scene[limitType].Low)
 	case LoadStateNormal:
-		rate = float64(s.scene[limitType].Normal) / schedule.StoreBalanceBaseTime
+		rate = float64(s.scene[limitType].Normal)
 	case LoadStateHigh:
-		rate = float64(s.scene[limitType].High) / schedule.StoreBalanceBaseTime
+		rate = float64(s.scene[limitType].High)
 	}
 	return rate
 }
