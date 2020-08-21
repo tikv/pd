@@ -17,7 +17,7 @@ import (
 	"strconv"
 
 	"github.com/docker/go-units"
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
 // ByteSize is a retype uint64 for TOML and JSON.

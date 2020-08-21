@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
 // Duration is a wrapper of time.Duration for TOML and JSON.

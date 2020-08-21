@@ -17,9 +17,9 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"

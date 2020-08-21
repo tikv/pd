@@ -100,6 +100,11 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	clusterRouter.HandleFunc("/config/rule", rulesHandler.Set).Methods("POST")
 	clusterRouter.HandleFunc("/config/rule/{group}/{id}", rulesHandler.Delete).Methods("DELETE")
 
+	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.GetGroupConfig).Methods("GET")
+	clusterRouter.HandleFunc("/config/rule_group", rulesHandler.SetGroupConfig).Methods("POST")
+	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.DeleteGroupConfig).Methods("DELETE")
+	clusterRouter.HandleFunc("/config/rule_groups", rulesHandler.GetAllGroupConfigs).Methods("GET")
+
 	storeHandler := newStoreHandler(handler, rd)
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Get).Methods("GET")
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Delete).Methods("DELETE")
@@ -207,6 +212,11 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	apiRouter.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
 	apiRouter.Handle("/debug/pprof/block", pprof.Handler("block"))
 	apiRouter.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+
+	// service GC safepoint API
+	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
+	apiRouter.HandleFunc("/gc/safepoint", serviceGCSafepointHandler.List).Methods("GET")
+	apiRouter.HandleFunc("/gc/safepoint/{service_id}", serviceGCSafepointHandler.Delete).Methods("DELETE")
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")

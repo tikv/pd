@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/errs"
 )
 
@@ -62,6 +63,27 @@ func (sr *sortedRules) deleteRule(rule *Rule) {
 			return
 		}
 	}
+}
+
+func checkApplyRules(rules []*Rule) error {
+	// check raft constraint
+	// one and only one leader
+	leaderCount := 0
+	voterCount := 0
+	for _, rule := range rules {
+		if rule.Role == Leader {
+			leaderCount += rule.Count
+		} else if rule.Role == Voter {
+			voterCount += rule.Count
+		}
+		if leaderCount > 1 {
+			return errors.New("multiple leader replicas")
+		}
+	}
+	if (leaderCount + voterCount) < 1 {
+		return errors.New("needs at least one leader or voter")
+	}
+	return nil
 }
 
 type rangeRules struct {
@@ -113,24 +135,36 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 			sr.deleteRule(p.rule)
 		}
 		if i == len(points)-1 || !bytes.Equal(p.key, points[i+1].key) {
+			var endKey []byte
+			if i != len(points)-1 {
+				endKey = points[i+1].key
+			}
+
 			// next key is different, push sr to rl.
 			rr := sr.rules
 			if len(rr) == 0 {
-				var endKey []byte
-				if i != len(points)-1 {
-					endKey = points[i+1].key
-				}
 				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("no rule for range {%s, %s}",
 					strings.ToUpper(hex.EncodeToString(p.key)),
 					strings.ToUpper(hex.EncodeToString(endKey))))
 			}
+
 			if i != len(points)-1 {
 				rr = append(rr[:0:0], rr...) // clone
 			}
+
+			arr := prepareRulesForApply(rr) // clone internally
+			err := checkApplyRules(arr)
+			if err != nil {
+				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("%s for range {%s, %s}",
+					err,
+					strings.ToUpper(hex.EncodeToString(p.key)),
+					strings.ToUpper(hex.EncodeToString(endKey))))
+			}
+
 			rl.ranges = append(rl.ranges, rangeRules{
 				startKey:   p.key,
 				rules:      rr,
-				applyRules: prepareRulesForApply(rr), // clone internally
+				applyRules: arr,
 			})
 		}
 	}

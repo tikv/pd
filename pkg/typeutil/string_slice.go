@@ -17,7 +17,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
 // StringSlice is more friendly to json encode/decode

@@ -17,8 +17,8 @@ import (
 	"net/url"
 	"regexp"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pkg/errors"
 )
 
 const (

@@ -16,7 +16,7 @@ package typeutil
 import (
 	"encoding/binary"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
 // BytesToUint64 converts a byte slice to uint64.
