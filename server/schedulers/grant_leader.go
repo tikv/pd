@@ -114,8 +114,7 @@ func (conf *grantLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	err = conf.storage.SaveScheduleConfig(name, data)
-	return err
+	return conf.storage.SaveScheduleConfig(name, data)
 }
 
 func (conf *grantLeaderSchedulerConfig) getSchedulerName() string {
