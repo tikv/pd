@@ -465,6 +465,54 @@ func (c *client) parseRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	return r
 }
 
+func (c *client) waitForRegion(ctx context.Context, key []byte) (*pdpb.GetRegionResponse, error) {
+	ctx, cancel := context.WithCancel(ctx)
+
+	ch := make(chan *pdpb.GetRegionResponse, len(c.connMu.clientConns))
+
+	c.connMu.RLock()
+	for _, conn := range c.connMu.clientConns {
+		go c.getRegionResponse(ctx, pdpb.NewPDClient(conn), key, ch)
+	}
+	c.connMu.RUnlock()
+
+	var resp *pdpb.GetRegionResponse
+
+	for resp = range ch {
+		if resp != nil {
+			cancel()
+			close(ch)
+			break
+		}
+	}
+
+	if resp == nil {
+		log.Warn("get region error")
+		cancel()
+		return nil, errors.New("get region error")
+	}
+
+	cancel()
+	return resp, nil
+}
+
+func (c *client) getRegionResponse(ctx context.Context, cc pdpb.PDClient, key []byte, ch chan<- *pdpb.GetRegionResponse) {
+	resp, err := cc.GetRegion(ctx, &pdpb.GetRegionRequest{
+		Header:    c.requestHeader(),
+		RegionKey: key,
+	})
+	if err != nil {
+		log.Warn("get region error")
+		resp = nil
+	}
+
+	select {
+	case <-ctx.Done():
+	case ch <- resp:
+		return
+	}
+}
+
 func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
@@ -474,10 +522,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	resp, err := c.leaderClient().GetRegion(ctx, &pdpb.GetRegionRequest{
-		Header:    c.requestHeader(),
-		RegionKey: key,
-	})
+	resp, err := c.waitForRegion(ctx, key)
 	cancel()
 
 	if err != nil {
