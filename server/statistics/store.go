@@ -352,6 +352,7 @@ func newRollingStats() *rollingStats {
 		keys:     NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
 		qps:      NewTimeMedian(DefaultAotSize, DefaultWriteMfSize),
 		diskRate: NewMedianFilter(storeStatsRollingWindows),
+	}
 }
 
 func (s *StoresStats) storeIsUnhealthy(cluster core.StoreSetInformer, storeID uint64) bool {
