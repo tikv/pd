@@ -15,7 +15,6 @@ package schedulers
 
 import (
 	"fmt"
-	"go.uber.org/zap"
 	"net/http"
 	"time"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/opt"
+	"go.uber.org/zap"
 )
 
 // options for interval of schedulers
