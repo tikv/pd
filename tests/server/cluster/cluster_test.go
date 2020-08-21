@@ -22,11 +22,11 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"

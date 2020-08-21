@@ -25,7 +25,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

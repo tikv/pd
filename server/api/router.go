@@ -100,6 +100,11 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	clusterRouter.HandleFunc("/config/rule", rulesHandler.Set).Methods("POST")
 	clusterRouter.HandleFunc("/config/rule/{group}/{id}", rulesHandler.Delete).Methods("DELETE")
 
+	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.GetGroupConfig).Methods("GET")
+	clusterRouter.HandleFunc("/config/rule_group", rulesHandler.SetGroupConfig).Methods("POST")
+	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.DeleteGroupConfig).Methods("DELETE")
+	clusterRouter.HandleFunc("/config/rule_groups", rulesHandler.GetAllGroupConfigs).Methods("GET")
+
 	storeHandler := newStoreHandler(handler, rd)
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Get).Methods("GET")
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Delete).Methods("DELETE")

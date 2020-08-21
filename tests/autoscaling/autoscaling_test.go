@@ -53,7 +53,6 @@ func (s *apiTestSuite) TestAPI(c *C) {
 
 	var jsonStr = []byte(`
 {
-    "max_cpu_quota":40000,
     "rules":[
         {
             "component":"tikv",
@@ -70,9 +69,7 @@ func (s *apiTestSuite) TestAPI(c *C) {
                 "resource_type":[
                     "resource_a"
                 ]
-            },
-            "scale_out_interval_seconds":30,
-            "scale_in_interval_seconds":30
+            }
         },
         {
             "component":"tidb",
@@ -83,9 +80,7 @@ func (s *apiTestSuite) TestAPI(c *C) {
                 "resource_type":[
                     "resource_a"
                 ]
-            },
-            "scale_out_interval_seconds":30,
-            "scale_in_interval_seconds":30
+            }
         }
     ],
     "resources":[

@@ -19,9 +19,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/server/kv"
 	"go.uber.org/zap"
 )
