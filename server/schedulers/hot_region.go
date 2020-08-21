@@ -505,7 +505,7 @@ func summaryStoresLoad(
 	storeByteRate map[uint64]float64,
 	storeKeyRate map[uint64]float64,
 	storeQPS map[uint64]float64,
-	pendings map[uint64]Influence,
+	storePendings map[uint64]Influence,
 	storeHotPeers map[uint64][]*statistics.HotPeerStat,
 	minHotDegree int,
 	hotRegionThreshold [2]uint64,
@@ -1149,7 +1149,7 @@ func (bs *balanceSolver) compareSrcStore(st1, st2 uint64) int {
 
 		lpCmp = sliceLPCmp(
 			minLPCmp(negLoadCmp(sliceLoadCmp(
-				bs.getCmps(true)...
+				bs.getCmps(true)...,
 			))),
 			diffCmp(
 				stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)), // todo
@@ -1170,7 +1170,7 @@ func (bs *balanceSolver) compareDstStore(st1, st2 uint64) int {
 		var lpCmp storeLPCmp
 		lpCmp = sliceLPCmp(
 			maxLPCmp(sliceLoadCmp(
-				bs.getCmps(false)...
+				bs.getCmps(false)...,
 			)),
 			diffCmp(
 				stLdRankCmp(stLdByteRate, stepRank(0, bs.rankStep.ByteRate)),
