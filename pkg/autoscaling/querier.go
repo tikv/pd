@@ -11,13 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datasource
+package autoscaling
 
-import (
-	"time"
-
-	types "github.com/tikv/pd/pkg/autoscaling"
-)
+import "time"
 
 // QueryResult stores metrics value for each instance
 type QueryResult map[string]float64
@@ -30,9 +26,9 @@ type Querier interface {
 
 // QueryOptions includes parameters for later metrics query
 type QueryOptions struct {
-	component types.ComponentType
-	metric    types.MetricType
-	instances []string
+	component ComponentType
+	metric    MetricType
+	addresses []string
 	timestamp time.Time
 	duration  time.Duration
 }
@@ -41,11 +37,11 @@ type QueryOptions struct {
 // The options will be used to query metrics of `duration` long UNTIL `timestamp`
 // which has `metric` type (CPU, Storage) for a specific `component` type
 // and returns metrics value for each instance in `instances`
-func NewQueryOptions(component types.ComponentType, metric types.MetricType, instances []string, timestamp time.Time, duration time.Duration) *QueryOptions {
+func NewQueryOptions(component ComponentType, metric MetricType, addresses []string, timestamp time.Time, duration time.Duration) *QueryOptions {
 	return &QueryOptions{
 		component,
 		metric,
-		instances,
+		addresses,
 		timestamp,
 		duration,
 	}
