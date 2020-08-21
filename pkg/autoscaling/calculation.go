@@ -78,7 +78,7 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 		informerInit.Do(func() {
 			informer = newTidbInformer(rc.GetEtcdClient())
 		})
-		instances = getTiDBInstances(rc)
+		instances = getTiDBInstances()
 	}
 
 	if len(instances) == 0 {
@@ -125,11 +125,7 @@ func filterTiKVInstances(informer core.StoreSetInformer) []instance {
 	return instances
 }
 
-func getTiDBInstances(rc *cluster.RaftCluster) []instance {
-	informerInit.Do(func() {
-		informer = newTidbInformer(rc.GetEtcdClient())
-	})
-
+func getTiDBInstances() []instance {
 	infos, err := informer.GetTiDBs()
 	if err != nil {
 		// TODO: error handling
