@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,21 +21,20 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/autoscaling"
-	"github.com/pingcap/pd/v4/pkg/dashboard"
-	"github.com/pingcap/pd/v4/pkg/swaggerserver"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/api"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/id"
-	"github.com/pingcap/pd/v4/server/join"
-	"github.com/pingcap/pd/v4/server/member"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/autoscaling"
+	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/pkg/swaggerserver"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/id"
+	"github.com/tikv/pd/server/join"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -133,7 +132,7 @@ func (s *TestServer) Destroy() error {
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
-	return s.server.GetMember().ResignLeader(s.server.Context(), s.server.Name(), "")
+	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
 }
 
 // State returns the current TestServer's state.
@@ -321,7 +320,7 @@ func (s *TestServer) BootstrapCluster() error {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: &pdpb.RequestHeader{ClusterId: s.GetClusterID()},
 		Store:  &metapb.Store{Id: 1, Address: "mock://1"},
-		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, IsLearner: false}}},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	_, err := s.server.Bootstrap(context.Background(), bootstrapReq)
 	if err != nil {
@@ -330,17 +329,17 @@ func (s *TestServer) BootstrapCluster() error {
 	return nil
 }
 
-// WaitLease is used to get leader lease.
+// WaitLeadership is used to get instant leadership in order to
+// make a test know the PD leader has been elected as soon as possible.
 // If it exceeds the maximum number of loops, it will return nil.
-func (s *TestServer) WaitLease() *member.LeaderLease {
+func (s *TestServer) WaitLeadership() bool {
 	for i := 0; i < 100; i++ {
-		lease := s.server.GetLease()
-		if lease != nil {
-			return lease
+		if s.server.GetLeadership().Check() {
+			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)
 	}
-	return nil
+	return false
 }
 
 // TestCluster is only for test.

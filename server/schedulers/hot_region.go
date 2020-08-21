@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,13 +26,13 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/filter"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/statistics"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/filter"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -537,9 +537,7 @@ func (bs *balanceSolver) init() {
 	case readLeader:
 		bs.stLoadDetail = bs.sche.stLoadInfos[readLeader]
 	}
-	for _, id := range getUnhealthyStores(bs.cluster) {
-		delete(bs.stLoadDetail, id)
-	}
+	// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
 
 	bs.maxSrc = &storeLoad{}
 	bs.minDst = &storeLoad{
@@ -560,18 +558,6 @@ func (bs *balanceSolver) init() {
 		KeyRate:  maxCur.KeyRate * bs.sche.conf.GetKeyRankStepRatio(),
 		Count:    maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
-}
-
-func getUnhealthyStores(cluster opt.Cluster) []uint64 {
-	ret := make([]uint64, 0)
-	stores := cluster.GetStores()
-	for _, store := range stores {
-		if store.IsTombstone() ||
-			store.DownTime() > cluster.GetMaxStoreDownTime() {
-			ret = append(ret, store.GetID())
-		}
-	}
-	return ret
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
@@ -1062,7 +1048,7 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	switch bs.opTy {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
-		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, IsLearner: srcPeer.IsLearner}
+		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
 		op, err = operator.CreateMovePeerOperator(
 			"move-hot-"+bs.rwTy.String()+"-region",
 			bs.cluster,

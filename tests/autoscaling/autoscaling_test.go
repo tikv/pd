@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/tests"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
 
@@ -59,7 +59,6 @@ func (s *apiTestSuite) TestAPI(c *C) {
             "cpu_rule":{
                 "max_threshold":0.8,
                 "min_threshold":0.2,
-                "max_count":3,
                 "resource_type":[
                     "resource_a",
                     "resource_b"
@@ -67,13 +66,10 @@ func (s *apiTestSuite) TestAPI(c *C) {
             },
             "storage_rule":{
                 "min_threshold":0.2,
-                "max_count":3,
                 "resource_type":[
                     "resource_a"
                 ]
-            },
-            "scale_out_interval_seconds":30,
-            "scale_in_interval_seconds":30
+            }
         },
         {
             "component":"tidb",
@@ -84,26 +80,7 @@ func (s *apiTestSuite) TestAPI(c *C) {
                 "resource_type":[
                     "resource_a"
                 ]
-            },
-            "scale_out_interval_seconds":30,
-            "scale_in_interval_seconds":30
-        }
-    ],
-    "resource_expectations":[
-        {
-            "component":"tikv",
-            "cpu_expectation":4,
-            "count":8
-        },
-        {
-            "component":"tikv",
-            "cpu_expectation":8,
-            "count":2
-        },
-        {
-            "component":"tidb",
-            "cpu_expectation":2,
-            "count":2
+            }
         }
     ],
     "resources":[
@@ -111,13 +88,15 @@ func (s *apiTestSuite) TestAPI(c *C) {
             "resource_type":"resource_a",
             "cpu":1,
             "memory":8,
-            "storage":1000
+            "storage":1000,
+            "count": 2
         },
         {
             "resource_type":"resource_b",
             "cpu":2,
             "memory":4,
-            "storage":2000
+            "storage":2000,
+            "count": 4
         }
     ]
 }`)

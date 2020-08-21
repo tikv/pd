@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ import (
 	"strconv"
 
 	"github.com/docker/go-units"
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 )
 
 // ByteSize is a retype uint64 for TOML and JSON.

@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -288,6 +288,22 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 		res[storeID] = stats.GetKeysReadRate()
 	}
 	return res
+}
+
+func (s *StoresStats) storeIsUnhealthy(cluster core.StoreSetInformer, storeID uint64) bool {
+	store := cluster.GetStore(storeID)
+	return store.IsTombstone() || store.IsUnhealth()
+}
+
+// FilterUnhealthyStore filter unhealthy store
+func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
+	s.Lock()
+	defer s.Unlock()
+	for storeID := range s.rollingStoresStats {
+		if s.storeIsUnhealthy(cluster, storeID) {
+			delete(s.rollingStoresStats, storeID)
+		}
+	}
 }
 
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.

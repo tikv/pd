@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/errs"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/opt"
 )
 
 // options for interval of schedulers
@@ -46,9 +47,9 @@ const (
 func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowthType) time.Duration {
 	switch typ {
 	case exponentialGrowth:
-		return minDuration(time.Duration(float64(x)*ScheduleIntervalFactor), maxInterval)
+		return typeutil.MinDuration(time.Duration(float64(x)*ScheduleIntervalFactor), maxInterval)
 	case linearGrowth:
-		return minDuration(x+MinSlowScheduleInterval, maxInterval)
+		return typeutil.MinDuration(x+MinSlowScheduleInterval, maxInterval)
 	case zeroGrowth:
 		return x
 	default:

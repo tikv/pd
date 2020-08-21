@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import (
 	"crypto/tls"
 	"net/url"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 	"go.etcd.io/etcd/pkg/transport"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"

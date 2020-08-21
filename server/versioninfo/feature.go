@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,12 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cluster
+package versioninfo
 
 import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -37,13 +36,22 @@ const (
 	// BatchSplit can speed up the region split.
 	// and PD will response the BatchSplit request.
 	BatchSplit
+	Version3_0
+	Version4_0
+	Version5_0
+	// JointConsensus can support safe conf change across data center.
+	JointConsensus
 )
 
 var featuresDict = map[Feature]string{
-	Base:        "1.0.0",
-	Version2_0:  "2.0.0",
-	RegionMerge: "2.0.0",
-	BatchSplit:  "2.1.0-rc.1",
+	Base:           "1.0.0",
+	Version2_0:     "2.0.0",
+	RegionMerge:    "2.0.0",
+	BatchSplit:     "2.1.0-rc.1",
+	Version3_0:     "3.0.0",
+	Version4_0:     "4.0.0",
+	Version5_0:     "5.0.0",
+	JointConsensus: "5.0.0",
 }
 
 // MinSupportedVersion returns the minimum support version for the specified feature.
@@ -54,34 +62,4 @@ func MinSupportedVersion(v Feature) *semver.Version {
 	}
 	version := MustParseVersion(target)
 	return version
-}
-
-// ParseVersion wraps semver.NewVersion and handles compatibility issues.
-func ParseVersion(v string) (*semver.Version, error) {
-	// for compatibility with old version which not support `version` mechanism.
-	if v == "" {
-		return semver.New(featuresDict[Base]), nil
-	}
-	if v[0] == 'v' {
-		v = v[1:]
-	}
-	ver, err := semver.NewVersion(v)
-	return ver, errors.WithStack(err)
-}
-
-// MustParseVersion wraps ParseVersion and will panic if error is not nil.
-func MustParseVersion(v string) *semver.Version {
-	ver, err := ParseVersion(v)
-	if err != nil {
-		log.Fatal("version string is illegal", zap.Error(err))
-	}
-	return ver
-}
-
-// IsCompatible checks if the clusterVersion is compatible with the specified version.
-func IsCompatible(clusterVersion, v semver.Version) bool {
-	if clusterVersion.LessThan(v) {
-		return true
-	}
-	return clusterVersion.Major == v.Major && clusterVersion.Minor == v.Minor
 }

@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -86,7 +86,7 @@ func (s *testLogSuite) TestLogging(c *C) {
 
 	log.SetOutput(s.buf)
 
-	tlog := capnslog.NewPackageLogger("github.com/pingcap/pd/v4/pkg/logutil", "test")
+	tlog := capnslog.NewPackageLogger("github.com/tikv/pd/pkg/logutil", "test")
 
 	tlog.Infof("[this message should not be sent to buf]")
 	c.Assert(s.buf.Len(), Equals, 0)
