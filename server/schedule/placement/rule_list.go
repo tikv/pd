@@ -16,11 +16,11 @@ package placement
 import (
 	"bytes"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/errs"
 )
 

@@ -19,10 +19,10 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/tsoutil"
@@ -320,4 +320,14 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 		return resp, nil
 	}
 	return resp, errors.New("can not get timestamp")
+}
+
+// Now returns the current tso time.
+func (t *TimestampOracle) Now() (time.Time, error) {
+	resp, err := t.GetRespTS(1)
+	if err != nil {
+		return time.Time{}, err
+	}
+	tm, _ := tsoutil.ParseTimestamp(resp)
+	return tm, nil
 }

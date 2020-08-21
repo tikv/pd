@@ -11,28 +11,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datasource
+package autoscaling
 
 import (
 	"context"
 	"fmt"
+	"net"
+	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	promClient "github.com/prometheus/client_golang/api"
 	promAPI "github.com/prometheus/client_golang/api/prometheus/v1"
 	promModel "github.com/prometheus/common/model"
-	types "github.com/tikv/pd/pkg/autoscaling"
 	"go.uber.org/zap"
 )
 
 const (
-	tikvSumCPUUsageMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total[%s])) by (instance)`
-	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{job="tidb"}[%s])) by (instance)`
+	tikvSumCPUUsageMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total[%s])) by (instance, kubernetes_namespace)`
+	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{job="tidb"}[%s])) by (instance, kubernetes_namespace)`
 	tikvCPUQuotaMetricsPattern    = `tikv_server_cpu_cores_quota`
 	tidbCPUQuotaMetricsPattern    = `tidb_server_maxprocs`
 	instanceLabelName             = "instance"
+	namespaceLabelName            = "kubernetes_namespace"
+	addressFormat                 = "pod-name.peer-svc.namespace.svc:port"
 
 	httpRequestTimeout = 5 * time.Second
 )
@@ -51,9 +54,9 @@ func NewPrometheusQuerier(client promClient.Client) *PrometheusQuerier {
 
 type promQLBuilderFn func(*QueryOptions) (string, error)
 
-var queryBuilderFnMap = map[types.MetricType]promQLBuilderFn{
-	types.CPUQuota: buildCPUQuotaPromQL,
-	types.CPUUsage: buildCPUUsagePromQL,
+var queryBuilderFnMap = map[MetricType]promQLBuilderFn{
+	CPUQuota: buildCPUQuotaPromQL,
+	CPUUsage: buildCPUUsagePromQL,
 }
 
 // Query do the real query on Prometheus and returns metric value for each instance
@@ -73,7 +76,7 @@ func (prom *PrometheusQuerier) Query(options *QueryOptions) (QueryResult, error)
 		return nil, err
 	}
 
-	result, err := extractInstancesFromResponse(resp, options.instances)
+	result, err := extractInstancesFromResponse(resp, options.addresses)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +101,7 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 	return resp, nil
 }
 
-func extractInstancesFromResponse(resp promModel.Value, instances []string) (QueryResult, error) {
+func extractInstancesFromResponse(resp promModel.Value, addresses []string) (QueryResult, error) {
 	if resp == nil {
 		return nil, errors.New("metrics response from Prometheus is empty")
 	}
@@ -117,32 +120,45 @@ func extractInstancesFromResponse(resp promModel.Value, instances []string) (Que
 		return nil, errors.New("no results returned from Prometheus")
 	}
 
-	instancesSet := map[string]struct{}{}
-	for _, instance := range instances {
-		instancesSet[instance] = struct{}{}
+	instancesSet := map[string]string{}
+	for _, addr := range addresses {
+		instanceName, err := getInstanceNameFromAddress(addr)
+		if err == nil {
+			instancesSet[instanceName] = addr
+		}
 	}
 
 	result := make(QueryResult)
 
 	for _, sample := range vector {
-		if instance, ok := sample.Metric[instanceLabelName]; ok {
-			if _, ok := instancesSet[string(instance)]; ok {
-				result[string(instance)] = float64(sample.Value)
-			}
+		podName, ok := sample.Metric[instanceLabelName]
+		if !ok {
+			continue
+		}
+
+		namespace, ok := sample.Metric[namespaceLabelName]
+		if !ok {
+			continue
+		}
+
+		instanceName := buildInstanceIdentifier(string(podName), string(namespace))
+
+		if addr, ok := instancesSet[string(instanceName)]; ok {
+			result[addr] = float64(sample.Value)
 		}
 	}
 
 	return result, nil
 }
 
-var cpuUsagePromQLTemplate = map[types.ComponentType]string{
-	types.TiDB: tidbSumCPUUsageMetricsPattern,
-	types.TiKV: tikvSumCPUUsageMetricsPattern,
+var cpuUsagePromQLTemplate = map[ComponentType]string{
+	TiDB: tidbSumCPUUsageMetricsPattern,
+	TiKV: tikvSumCPUUsageMetricsPattern,
 }
 
-var cpuQuotaPromQLTemplate = map[types.ComponentType]string{
-	types.TiDB: tidbCPUQuotaMetricsPattern,
-	types.TiKV: tikvCPUQuotaMetricsPattern,
+var cpuQuotaPromQLTemplate = map[ComponentType]string{
+	TiDB: tidbCPUQuotaMetricsPattern,
+	TiKV: tikvCPUQuotaMetricsPattern,
 }
 
 func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
@@ -163,4 +179,36 @@ func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
 
 	query := fmt.Sprintf(pattern, options.duration.String())
 	return query, nil
+}
+
+// this function assumes that addr is already a valid resolvable address
+// returns in format "podname_namespace"
+func getInstanceNameFromAddress(addr string) (string, error) {
+	// In K8s, a StatefulSet pod address is composed of pod-name.peer-svc.namespace.svc:port
+	// Extract the hostname part without port
+	hostname := addr
+	portColonIdx := strings.LastIndex(addr, ":")
+	if portColonIdx >= 0 {
+		hostname = addr[:portColonIdx]
+	}
+
+	// Just to make sure it is not an IP address
+	ip := net.ParseIP(hostname)
+	if ip != nil {
+		// Hostname is an IP address, return the whole address
+		return "", errors.Errorf("address %s is an ip address", addr)
+	}
+
+	parts := strings.Split(hostname, ".")
+	if len(parts) < 4 {
+		return "", errors.Errorf("address %s does not match the expected format %s", addr, addressFormat)
+	}
+
+	podName, namespace := parts[0], parts[2]
+
+	return buildInstanceIdentifier(podName, namespace), nil
+}
+
+func buildInstanceIdentifier(podName string, namespace string) string {
+	return fmt.Sprintf("%s_%s", podName, namespace)
 }

@@ -21,8 +21,8 @@ import (
 	"net/http"
 
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pkg/errors"
 )
 
 var (

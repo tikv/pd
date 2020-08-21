@@ -23,7 +23,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
 	"go.etcd.io/etcd/pkg/transport"
 )
