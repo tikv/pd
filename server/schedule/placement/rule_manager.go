@@ -385,7 +385,7 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 func (m *RuleManager) GetRuleGroup(id string) *RuleGroup {
 	m.RLock()
 	defer m.RUnlock()
-	return m.ruleConfig.getGroup(id)
+	return m.ruleConfig.groups[id]
 }
 
 // GetRuleGroups returns all RuleGroup configuration.

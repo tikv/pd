@@ -56,13 +56,6 @@ func (c *ruleConfig) getRule(key [2]string) *Rule {
 	return c.rules[key]
 }
 
-func (c *ruleConfig) getGroup(id string) *RuleGroup {
-	if g, ok := c.groups[id]; ok {
-		return g
-	}
-	return &RuleGroup{ID: id}
-}
-
 func (c *ruleConfig) iterateRules(f func(*Rule)) {
 	for _, r := range c.rules {
 		f(r)
