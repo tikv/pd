@@ -87,6 +87,7 @@ func getBasicCmd() *cobra.Command {
 		command.NewHealthCommand(),
 		command.NewLogCommand(),
 		command.NewPluginCommand(),
+		command.NewServiceGCSafepointCommand(),
 		command.NewCompletionCommand(),
 	)
 
