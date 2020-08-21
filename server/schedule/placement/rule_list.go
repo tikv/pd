@@ -98,15 +98,16 @@ type ruleList struct {
 	ranges []rangeRules // ranges[i] contains rules apply to [ranges[i].startKey, ranges[i+1].startKey).
 }
 
+type ruleContainer interface {
+	iterateRules(func(*Rule))
+}
+
 // buildRuleList builds the applied ruleList for the give rules
 // rules indicates the map (rule's GroupID, ID) => rule
-func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
-	if len(rules) == 0 {
-		return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs("no rule left")
-	}
+func buildRuleList(rules ruleContainer) (ruleList, error) {
 	// collect and sort split points.
 	var points []splitPoint
-	for _, r := range rules {
+	rules.iterateRules(func(r *Rule) {
 		points = append(points, splitPoint{
 			typ:  tStart,
 			key:  r.StartKey,
@@ -119,6 +120,9 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 				rule: r,
 			})
 		}
+	})
+	if len(points) == 0 {
+		return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs("no rule left")
 	}
 	sort.Slice(points, func(i, j int) bool {
 		return bytes.Compare(points[i].key, points[j].key) < 0
