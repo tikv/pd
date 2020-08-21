@@ -246,13 +246,3 @@ func (t *timestampOracle) ResetTimestamp() {
 	}
 	atomic.StorePointer(&t.TSO, unsafe.Pointer(zero))
 }
-
-// Now returns the current tso time.
-func (t *TimestampOracle) Now() (time.Time, error) {
-	resp, err := t.GetRespTS(1)
-	if err != nil {
-		return time.Time{}, err
-	}
-	tm, _ := tsoutil.ParseTimestamp(resp)
-	return tm, nil
-}
