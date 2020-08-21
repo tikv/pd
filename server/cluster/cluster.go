@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/component"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -500,7 +501,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	}
 	if newStore.NeedPersist() && c.storage != nil {
 		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
-			log.Error("failed to persist store", zap.Uint64("store-id", newStore.GetID()))
+			log.Error("failed to persist store", zap.Uint64("store-id", newStore.GetID()), errs.ZapError(errs.ErrPersistStore, err))
 		} else {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
 		}
@@ -628,7 +629,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 					log.Error("failed to delete region from storage",
 						zap.Uint64("region-id", item.GetID()),
 						zap.Stringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
-						zap.Error(err))
+						errs.ZapError(errs.ErrDeleteRegion, err))
 				}
 			}
 		}
@@ -680,7 +681,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			log.Error("failed to save region to storage",
 				zap.Uint64("region-id", region.GetID()),
 				zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
-				zap.Error(err))
+				errs.ZapError(errs.ErrSaveRegion, err))
 		}
 		regionEventCounter.WithLabelValues("update_kv").Inc()
 	}
@@ -1139,7 +1140,7 @@ func (c *RaftCluster) checkStores() {
 			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
-					zap.Error(err))
+					errs.ZapError(errs.ErrBuryStore, err))
 			}
 		} else {
 			offlineStores = append(offlineStores, offlineStore)
@@ -1170,7 +1171,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 			if err != nil {
 				log.Error("delete store failed",
 					zap.Stringer("store", store.GetMeta()),
-					zap.Error(err))
+					errs.ZapError(errs.ErrDeleteStore, err))
 				return err
 			}
 			c.RemoveStoreLimit(store.GetID())
@@ -1243,7 +1244,7 @@ func (c *RaftCluster) resetClusterMetrics() {
 func (c *RaftCluster) collectHealthStatus() {
 	members, err := GetMembers(c.etcdClient)
 	if err != nil {
-		log.Error("get members error", zap.Error(err))
+		log.Error("get members error", errs.ZapError(errs.ErrGetMembers, err))
 	}
 	unhealth := CheckHealth(c.httpClient, members)
 	for _, member := range members {
@@ -1317,7 +1318,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 		}
 		err := c.opt.Persist(c.storage)
 		if err != nil {
-			log.Error("persist cluster version meet error", zap.Error(err))
+			log.Error("persist cluster version meet error", errs.ZapError(errs.ErrPersistClusterVersion, err))
 		}
 		log.Info("cluster version changed",
 			zap.Stringer("old-cluster-version", clusterVersion),
@@ -1799,7 +1800,7 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
 			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s%s", cURL, healthURL), nil)
 			if err != nil {
-				log.Error("failed to new request", zap.Error(err))
+				log.Error("failed to new request", errs.ZapError(errs.ErrNewHTTPRequest, err))
 				cancel()
 				continue
 			}

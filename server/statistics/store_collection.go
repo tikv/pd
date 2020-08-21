@@ -104,6 +104,10 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 
 	// Store flows.
 	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
+	if storeFlowStats == nil {
+		return
+	}
+
 	storeWriteRateByte, storeReadRateByte := storeFlowStats.GetBytesRate()
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes").Set(storeWriteRateByte)
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes").Set(storeReadRateByte)

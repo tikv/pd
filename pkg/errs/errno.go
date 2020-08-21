@@ -70,6 +70,19 @@ var (
 	ErrWriteHTTPBody = errors.Normalize("write HTTP body failed", errors.RFCCodeText("PD:apiutil:ErrWriteHTTPBody"))
 )
 
+// cluster errors
+var (
+	ErrPersistStore          = errors.Normalize("failed to persist store", errors.RFCCodeText("PD:cluster:ErrPersistStore"))
+	ErrDeleteRegion          = errors.Normalize("failed to delete region from storage", errors.RFCCodeText("PD:cluster:ErrDeleteRegion"))
+	ErrSaveRegion            = errors.Normalize("failed to save region from storage", errors.RFCCodeText("PD:cluster:ErrSaveRegion"))
+	ErrBuryStore             = errors.Normalize("failed to bury store", errors.RFCCodeText("PD:cluster:ErrBuryStore"))
+	ErrDeleteStore           = errors.Normalize("failed to delete store", errors.RFCCodeText("PD:cluster:ErrDeleteStore"))
+	ErrPersistClusterVersion = errors.Normalize("persist cluster version meet error", errors.RFCCodeText("PD:cluster:ErrPersistClusterVersion"))
+	ErrGetMembers            = errors.Normalize("get members failed", errors.RFCCodeText("PD:cluster:ErrGetMembers"))
+	// TODO: ErrNewHTTPRequest may not be suitable to put in cluster category
+	ErrNewHTTPRequest = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:cluster:ErrNewHTTPRequest"))
+)
+
 // metricutil errors
 var (
 	ErrPushGateway = errors.Normalize("push metrics to gateway failed", errors.RFCCodeText("PD:metricutil:ErrPushGateway"))
