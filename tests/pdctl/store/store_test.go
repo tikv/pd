@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,11 +21,11 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/api"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
-	"github.com/pingcap/pd/v4/tests"
-	"github.com/pingcap/pd/v4/tests/pdctl"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -208,14 +208,16 @@ func (s *storeTestSuite) TestStore(c *C) {
 	json.Unmarshal([]byte(echo), &allAddPeerLimit)
 	c.Assert(allAddPeerLimit["1"]["add-peer"].(float64), Equals, float64(20))
 	c.Assert(allAddPeerLimit["3"]["add-peer"].(float64), Equals, float64(20))
-	c.Assert(allAddPeerLimit["2"]["add-peer"].(float64), Equals, float64(20))
+	_, ok := allAddPeerLimit["2"]["add-peer"]
+	c.Assert(ok, Equals, false)
 
 	echo = pdctl.GetEcho([]string{"-u", pdAddr, "store", "limit", "remove-peer"})
 	allRemovePeerLimit := make(map[string]map[string]interface{})
 	json.Unmarshal([]byte(echo), &allRemovePeerLimit)
 	c.Assert(allRemovePeerLimit["1"]["remove-peer"].(float64), Equals, float64(25))
 	c.Assert(allRemovePeerLimit["3"]["remove-peer"].(float64), Equals, float64(25))
-	c.Assert(allRemovePeerLimit["2"]["remove-peer"].(float64), Equals, float64(25))
+	_, ok = allRemovePeerLimit["2"]["add-peer"]
+	c.Assert(ok, Equals, false)
 
 	// store delete <store_id> command
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)

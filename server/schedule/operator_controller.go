@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,11 +27,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/cache"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
 
@@ -662,9 +662,9 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 				Peer: &metapb.Peer{
-					Id:        st.PeerID,
-					StoreId:   st.ToStore,
-					IsLearner: true,
+					Id:      st.PeerID,
+					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Learner,
 				},
 			},
 		}
@@ -678,9 +678,9 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 			ChangePeer: &pdpb.ChangePeer{
 				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 				Peer: &metapb.Peer{
-					Id:        st.PeerID,
-					StoreId:   st.ToStore,
-					IsLearner: true,
+					Id:      st.PeerID,
+					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Learner,
 				},
 			},
 		}
@@ -849,7 +849,7 @@ func (o *OperatorWithStatus) MarshalJSON() ([]byte, error) {
 
 // OperatorRecords remains the operator and its status for a while.
 type OperatorRecords struct {
-	ttl *cache.TTL
+	ttl *cache.TTLUint64
 }
 
 const operatorStatusRemainTime = 10 * time.Minute
@@ -857,7 +857,7 @@ const operatorStatusRemainTime = 10 * time.Minute
 // NewOperatorRecords returns a OperatorRecords.
 func NewOperatorRecords(ctx context.Context) *OperatorRecords {
 	return &OperatorRecords{
-		ttl: cache.NewTTL(ctx, time.Minute, operatorStatusRemainTime),
+		ttl: cache.NewIDTTL(ctx, time.Minute, operatorStatusRemainTime),
 	}
 }
 

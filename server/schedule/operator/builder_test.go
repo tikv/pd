@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ package operator
 import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/opt"
 )
 
 var _ = Suite(&testBuilderSuite{})
@@ -46,7 +46,7 @@ func (s *testBuilderSuite) SetUpTest(c *C) {
 }
 
 func (s *testBuilderSuite) TestNewBuilder(c *C) {
-	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2, IsLearner: true}}
+	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2, Role: metapb.PeerRole_Learner}}
 	region := core.NewRegionInfo(&metapb.Region{Id: 42, Peers: peers}, peers[0])
 	builder := NewBuilder("test", s.cluster, region)
 	c.Assert(builder.err, IsNil)
@@ -66,7 +66,7 @@ func (s *testBuilderSuite) newBuilder() *Builder {
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 12, StoreId: 2},
-		{Id: 13, StoreId: 3, IsLearner: true},
+		{Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner},
 	}
 	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
 	return NewBuilder("test", s.cluster, region)
@@ -80,7 +80,7 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 	c.Assert(s.newBuilder().SetLeader(1).SetLeader(2).err, IsNil)
 	c.Assert(s.newBuilder().SetLeader(3).err, NotNil)
 	c.Assert(s.newBuilder().RemovePeer(4).err, NotNil)
-	c.Assert(s.newBuilder().AddPeer(&metapb.Peer{StoreId: 4, IsLearner: true}).RemovePeer(4).err, IsNil)
+	c.Assert(s.newBuilder().AddPeer(&metapb.Peer{StoreId: 4, Role: metapb.PeerRole_Learner}).RemovePeer(4).err, IsNil)
 	c.Assert(s.newBuilder().SetLeader(2).RemovePeer(2).err, NotNil)
 	c.Assert(s.newBuilder().PromoteLearner(4).err, NotNil)
 	c.Assert(s.newBuilder().SetLeader(4).err, NotNil)
@@ -88,7 +88,7 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 
 	m := map[uint64]*metapb.Peer{
 		2: {StoreId: 2},
-		3: {StoreId: 3, IsLearner: true},
+		3: {StoreId: 3, Role: metapb.PeerRole_Learner},
 		4: {StoreId: 4},
 	}
 	builder := s.newBuilder().SetPeers(m).SetLightWeight()
@@ -102,24 +102,24 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 
 func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	// no voter.
-	_, err := s.newBuilder().SetPeers(map[uint64]*metapb.Peer{4: {StoreId: 4, IsLearner: true}}).prepareBuild()
+	_, err := s.newBuilder().SetPeers(map[uint64]*metapb.Peer{4: {StoreId: 4, Role: metapb.PeerRole_Learner}}).prepareBuild()
 	c.Assert(err, NotNil)
 
 	builder := s.newBuilder().SetPeers(map[uint64]*metapb.Peer{
-		1: {StoreId: 1, IsLearner: true},
+		1: {StoreId: 1, Role: metapb.PeerRole_Learner},
 		2: {StoreId: 2},
 		3: {StoreId: 3},
 		4: {StoreId: 4, Id: 14},
-		5: {StoreId: 5, IsLearner: true},
+		5: {StoreId: 5, Role: metapb.PeerRole_Learner},
 	})
 	_, err = builder.prepareBuild()
 	c.Assert(err, IsNil)
 	c.Assert(builder.toAdd.Len(), Equals, 3)
-	c.Assert(builder.toAdd.Get(1).IsLearner, IsTrue)
+	c.Assert(builder.toAdd.Get(1).Role, Equals, metapb.PeerRole_Learner)
 	c.Assert(builder.toAdd.Get(1).Id, Not(Equals), uint64(0))
-	c.Assert(builder.toAdd.Get(4).IsLearner, IsFalse)
+	c.Assert(builder.toAdd.Get(4).Role, Not(Equals), metapb.PeerRole_Learner)
 	c.Assert(builder.toAdd.Get(4).Id, Equals, uint64(14))
-	c.Assert(builder.toAdd.Get(5).IsLearner, IsTrue)
+	c.Assert(builder.toAdd.Get(5).Role, Equals, metapb.PeerRole_Learner)
 	c.Assert(builder.toAdd.Get(5).Id, Not(Equals), uint64(0))
 	c.Assert(builder.toRemove.Len(), Equals, 1)
 	c.Assert(builder.toRemove.Get(1), NotNil)
@@ -136,8 +136,8 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 	}
 	cases := []testCase{
 		{ // prefer replace
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsLearner: true}},
-			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, IsLearner: true}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
 				AddLearner{ToStore: 4},
 				PromoteLearner{ToStore: 4},
@@ -160,7 +160,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 		},
 		{ // replace voter with learner
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{StoreId: 1}, {StoreId: 2, IsLearner: true}},
+			[]*metapb.Peer{{StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
 				RemovePeer{FromStore: 2},
 				AddLearner{ToStore: 2},
@@ -190,7 +190,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{ // promote learner
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, IsLearner: true}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
 			[]OpStep{
 				PromoteLearner{ToStore: 2},
@@ -208,8 +208,8 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			[]OpStep{},
 		},
 		{ // add learner + promote learner + remove voter
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, IsLearner: true}},
-			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, IsLearner: true}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
 				AddLearner{ToStore: 3},
 				PromoteLearner{ToStore: 2},

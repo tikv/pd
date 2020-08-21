@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/etcdutil"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -64,8 +65,12 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 }
 
 func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
-	key = path.Join(kv.rootPath, key)
-	endKey = path.Join(kv.rootPath, endKey)
+	// Note: reason to use `strings.Join` instead of `path.Join` is that the latter will
+	// removes suffix '/' of the joined string.
+	// As a result, when we try to scan from "foo/", it ends up scanning from "/pd/foo"
+	// internally, and returns unexpected keys such as "foo_bar/baz".
+	key = strings.Join([]string{kv.rootPath, key}, "/")
+	endKey = strings.Join([]string{kv.rootPath, endKey}, "/")
 
 	withRange := clientv3.WithRange(endKey)
 	withLimit := clientv3.WithLimit(int64(limit))
@@ -88,7 +93,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
-		log.Error("save to etcd meet error", zap.Error(err))
+		log.Error("save to etcd meet error", zap.String("key", key), zap.String("value", value), errs.ZapError(errs.ErrEtcdKVSave, err))
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
@@ -103,7 +108,7 @@ func (kv *etcdKVBase) Remove(key string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
-		log.Error("remove from etcd meet error", zap.Error(err))
+		log.Error("remove from etcd meet error", zap.String("key", key), errs.ZapError(errs.ErrEtcdKVRemove, err))
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {

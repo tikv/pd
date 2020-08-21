@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,16 +16,17 @@ package member_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/pkg/etcdutil"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/tests"
-	"github.com/pingcap/pd/v4/tests/pdctl"
+	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/pdctl"
 )
 
 func Test(t *testing.T) {
@@ -108,7 +109,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	c.Assert(len(members.Members), Equals, 2)
 
 	// member delete id <member_id>
-	args = []string{"-u", pdAddr, "member", "delete", "id", string(id)}
+	args = []string{"-u", pdAddr, "member", "delete", "id", fmt.Sprint(id)}
 	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
 	c.Assert(err, IsNil)
 	members, err = etcdutil.ListEtcdMembers(client)

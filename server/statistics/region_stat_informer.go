@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,14 @@
 
 package statistics
 
-import "github.com/pingcap/pd/v4/server/core"
+import "github.com/tikv/pd/server/core"
 
 // RegionStatInformer provides access to a shared informer of statistics.
 type RegionStatInformer interface {
 	IsRegionHot(region *core.RegionInfo) bool
+	// RegionWriteStats return the storeID -> write stat of peers on this store
 	RegionWriteStats() map[uint64][]*HotPeerStat
+	// RegionReadStats return the storeID -> read stat of peers on this store
 	RegionReadStats() map[uint64][]*HotPeerStat
 	RandHotRegionFromStore(store uint64, kind FlowKind) *core.RegionInfo
 }

@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,15 @@
 package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 var _ = Suite(&testRuleSuite{})
@@ -55,6 +56,10 @@ func (s *testRuleSuite) TestSet(c *C) {
 	rule := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	successData, err := json.Marshal(rule)
 	c.Assert(err, IsNil)
+	oldStartKey, err := hex.DecodeString(rule.StartKeyHex)
+	c.Assert(err, IsNil)
+	oldEndKey, err := hex.DecodeString(rule.EndKeyHex)
+	c.Assert(err, IsNil)
 	parseErrData := []byte("foo")
 	rule1 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
 	checkErrData, err := json.Marshal(rule1)
@@ -62,18 +67,42 @@ func (s *testRuleSuite) TestSet(c *C) {
 	rule2 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
 	setErrData, err := json.Marshal(rule2)
 	c.Assert(err, IsNil)
+	rule3 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "follower", Count: 3}
+	updateData, err := json.Marshal(rule3)
+	c.Assert(err, IsNil)
+	newStartKey, err := hex.DecodeString(rule.StartKeyHex)
+	c.Assert(err, IsNil)
+	newEndKey, err := hex.DecodeString(rule.EndKeyHex)
+	c.Assert(err, IsNil)
 
 	testcases := []struct {
-		name     string
-		rawData  []byte
-		success  bool
-		response string
+		name        string
+		rawData     []byte
+		success     bool
+		response    string
+		popKeyRange map[string]struct{}
 	}{
 		{
-			name:     "Set rule success",
+			name:     "Set a new rule success",
 			rawData:  successData,
 			success:  true,
 			response: "",
+			popKeyRange: map[string]struct{}{
+				hex.EncodeToString(oldStartKey): {},
+				hex.EncodeToString(oldEndKey):   {},
+			},
+		},
+		{
+			name:     "Update an existed rule success",
+			rawData:  updateData,
+			success:  true,
+			response: "",
+			popKeyRange: map[string]struct{}{
+				hex.EncodeToString(oldStartKey): {},
+				hex.EncodeToString(oldEndKey):   {},
+				hex.EncodeToString(newStartKey): {},
+				hex.EncodeToString(newEndKey):   {},
+			},
 		},
 		{
 			name:    "Parse Json failed",
@@ -99,16 +128,32 @@ func (s *testRuleSuite) TestSet(c *C) {
 			name:    "Set Rule Failed",
 			rawData: setErrData,
 			success: false,
-			response: `"invalid count -1"
+			response: `"[PD:placement:ErrRuleContent] invalid rule content, invalid count -1"
 `,
 		},
 	}
 
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
+		// clear suspect keyRanges to prevent test case from others
+		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
 		err = postJSON(testDialClient, s.urlPrefix+"/rule", testcase.rawData)
 		if testcase.success {
 			c.Assert(err, IsNil)
+
+			popKeyRangeMap := map[string]struct{}{}
+			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
+				v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				c.Assert(got, Equals, true)
+				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
+				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
+			}
+			c.Assert(len(popKeyRangeMap), Equals, len(testcase.popKeyRange))
+			for k := range popKeyRangeMap {
+				_, ok := testcase.popKeyRange[k]
+				c.Assert(ok, Equals, true)
+			}
+
 		} else {
 			c.Assert(err, NotNil)
 			c.Assert(err.Error(), Equals, testcase.response)
@@ -168,6 +213,74 @@ func (s *testRuleSuite) TestGetAll(c *C) {
 	err = readJSON(testDialClient, s.urlPrefix+"/rules", &resp2)
 	c.Assert(err, IsNil)
 	c.Assert(len(resp2), GreaterEqual, 1)
+}
+
+func (s *testRuleSuite) TestSetAll(c *C) {
+	rule1 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule4 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
+
+	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
+	c.Assert(err, IsNil)
+
+	checkErrData, err := json.Marshal([]*placement.Rule{&rule1, &rule3})
+	c.Assert(err, IsNil)
+
+	setErrData, err := json.Marshal([]*placement.Rule{&rule1, &rule4})
+	c.Assert(err, IsNil)
+
+	testcases := []struct {
+		name     string
+		rawData  []byte
+		success  bool
+		response string
+	}{
+		{
+			name:     "Set rules successfully, with oldRules full of nil",
+			rawData:  successData,
+			success:  true,
+			response: "",
+		},
+		{
+			name:    "Parse Json failed",
+			rawData: []byte("foo"),
+			success: false,
+			response: `{
+  "code": "input",
+  "msg": "invalid character 'o' in literal false (expecting 'a')",
+  "data": {
+    "Offset": 2
+  }
+}
+`,
+		},
+		{
+			name:    "Check rule failed",
+			rawData: checkErrData,
+			success: false,
+			response: `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
+`,
+		},
+		{
+			name:    "Set Rule Failed",
+			rawData: setErrData,
+			success: false,
+			response: `"[PD:placement:ErrRuleContent] invalid rule content, invalid count -1"
+`,
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		err := postJSON(testDialClient, s.urlPrefix+"/rules", testcase.rawData)
+		if testcase.success {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(err, NotNil)
+			c.Assert(err.Error(), Equals, testcase.response)
+		}
+	}
 }
 
 func (s *testRuleSuite) TestGetAllByGroup(c *C) {
@@ -323,29 +436,55 @@ func (s *testRuleSuite) TestDelete(c *C) {
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
 	c.Assert(err, IsNil)
+	oldStartKey, err := hex.DecodeString(rule.StartKeyHex)
+	c.Assert(err, IsNil)
+	oldEndKey, err := hex.DecodeString(rule.EndKeyHex)
+	c.Assert(err, IsNil)
 
 	testcases := []struct {
-		name    string
-		groupID string
-		id      string
+		name        string
+		groupID     string
+		id          string
+		popKeyRange map[string]struct{}
 	}{
 		{
 			name:    "delete existed rule",
 			groupID: "g",
 			id:      "10",
+			popKeyRange: map[string]struct{}{
+				hex.EncodeToString(oldStartKey): {},
+				hex.EncodeToString(oldEndKey):   {},
+			},
 		},
 		{
-			name:    "delete non-existed rule",
-			groupID: "g",
-			id:      "15",
+			name:        "delete non-existed rule",
+			groupID:     "g",
+			id:          "15",
+			popKeyRange: map[string]struct{}{},
 		},
 	}
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.groupID, testcase.id)
+		// clear suspect keyRanges to prevent test case from others
+		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
 		resp, err := doDelete(testDialClient, url)
 		c.Assert(err, IsNil)
 		c.Assert(resp.StatusCode, Equals, http.StatusOK)
+		if len(testcase.popKeyRange) > 0 {
+			popKeyRangeMap := map[string]struct{}{}
+			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
+				v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				c.Assert(got, Equals, true)
+				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
+				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
+			}
+			c.Assert(len(popKeyRangeMap), Equals, len(testcase.popKeyRange))
+			for k := range popKeyRangeMap {
+				_, ok := testcase.popKeyRange[k]
+				c.Assert(ok, Equals, true)
+			}
+		}
 	}
 }
 
@@ -356,4 +495,123 @@ func compareRule(c *C, r1 *placement.Rule, r2 *placement.Rule) {
 	c.Assert(r1.EndKeyHex, Equals, r2.EndKeyHex)
 	c.Assert(r1.Role, Equals, r2.Role)
 	c.Assert(r1.Count, Equals, r2.Count)
+}
+
+func (s *testRuleSuite) TestBatch(c *C) {
+	opt1 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
+		Rule:   &placement.Rule{GroupID: "a", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+	}
+	opt2 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
+		Rule:   &placement.Rule{GroupID: "b", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+	}
+	opt3 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
+		Rule:   &placement.Rule{GroupID: "a", ID: "14", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+	}
+	opt4 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
+		Rule:   &placement.Rule{GroupID: "a", ID: "15", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+	}
+	opt5 := placement.RuleOp{
+		Action: placement.RuleOpDel,
+		Rule:   &placement.Rule{GroupID: "a", ID: "14"},
+	}
+	opt6 := placement.RuleOp{
+		Action:           placement.RuleOpDel,
+		Rule:             &placement.Rule{GroupID: "b", ID: "1"},
+		DeleteByIDPrefix: true,
+	}
+	opt7 := placement.RuleOp{
+		Action: placement.RuleOpDel,
+		Rule:   &placement.Rule{GroupID: "a", ID: "1"},
+	}
+	opt8 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
+		Rule:   &placement.Rule{GroupID: "a", ID: "16", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1},
+	}
+	opt9 := placement.RuleOp{
+		Action: placement.RuleOpAdd,
+		Rule:   &placement.Rule{GroupID: "a", ID: "17", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1},
+	}
+
+	successData1, err := json.Marshal([]placement.RuleOp{opt1, opt2, opt3})
+	c.Assert(err, IsNil)
+
+	successData2, err := json.Marshal([]placement.RuleOp{opt5, opt7})
+	c.Assert(err, IsNil)
+
+	successData3, err := json.Marshal([]placement.RuleOp{opt4, opt6})
+	c.Assert(err, IsNil)
+
+	checkErrData, err := json.Marshal([]placement.RuleOp{opt8})
+	c.Assert(err, IsNil)
+
+	setErrData, err := json.Marshal([]placement.RuleOp{opt9})
+	c.Assert(err, IsNil)
+
+	testcases := []struct {
+		name     string
+		rawData  []byte
+		success  bool
+		response string
+	}{
+		{
+			name:     "Batch adds successfully",
+			rawData:  successData1,
+			success:  true,
+			response: "",
+		},
+		{
+			name:     "Batch removes successfully",
+			rawData:  successData2,
+			success:  true,
+			response: "",
+		},
+		{
+			name:     "Batch add and remove successfully",
+			rawData:  successData3,
+			success:  true,
+			response: "",
+		},
+		{
+			name:    "Parse Json failed",
+			rawData: []byte("foo"),
+			success: false,
+			response: `{
+  "code": "input",
+  "msg": "invalid character 'o' in literal false (expecting 'a')",
+  "data": {
+    "Offset": 2
+  }
+}
+`,
+		},
+		{
+			name:    "Check rule failed",
+			rawData: checkErrData,
+			success: false,
+			response: `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
+`,
+		},
+		{
+			name:    "Set Rule Failed",
+			rawData: setErrData,
+			success: false,
+			response: `"[PD:placement:ErrRuleContent] invalid rule content, invalid count -1"
+`,
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		err := postJSON(testDialClient, s.urlPrefix+"/rules/batch", testcase.rawData)
+		if testcase.success {
+			c.Assert(err, IsNil)
+		} else {
+			c.Assert(err, NotNil)
+			c.Assert(err.Error(), Equals, testcase.response)
+		}
+	}
 }

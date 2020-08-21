@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
@@ -101,8 +101,8 @@ func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.Region
 		peers := make(map[uint64]*metapb.Peer)
 		for _, p := range target.GetPeers() {
 			peers[p.GetStoreId()] = &metapb.Peer{
-				StoreId:   p.GetStoreId(),
-				IsLearner: p.GetIsLearner(),
+				StoreId: p.GetStoreId(),
+				Role:    p.GetRole(),
 			}
 		}
 		matchOp, err := NewBuilder("", cluster, source).
@@ -139,7 +139,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 	}
 	for _, pa := range a.GetPeers() {
 		pb := b.GetStorePeer(pa.GetStoreId())
-		if pb == nil || pb.GetIsLearner() != pa.GetIsLearner() {
+		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) {
 			return false
 		}
 	}
@@ -147,17 +147,20 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
-func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer) (*Operator, error) {
+func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) (*Operator, error) {
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
-		if !peer.IsLearner {
+		if !core.IsLearner(peer) {
 			ids = append(ids, id)
 		}
 	}
 	var leader uint64
 	if len(ids) > 0 {
 		leader = ids[rand.Intn(len(ids))]
+	}
+	if targetLeader != 0 {
+		leader = targetLeader
 	}
 	return NewBuilder(desc, cluster, origin).
 		SetPeers(targetPeers).

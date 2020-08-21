@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/slice"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
 )
 

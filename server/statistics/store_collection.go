@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import (
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 const (
@@ -104,6 +104,10 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 
 	// Store flows.
 	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
+	if storeFlowStats == nil {
+		return
+	}
+
 	storeWriteRateByte, storeReadRateByte := storeFlowStats.GetBytesRate()
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes").Set(storeWriteRateByte)
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes").Set(storeReadRateByte)

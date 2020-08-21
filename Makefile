@@ -1,9 +1,9 @@
-PD_PKG := github.com/pingcap/pd/v4
+PD_PKG := github.com/tikv/pd
 
 TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
-                     sort -u | sed -e "s/^\./github.com\/pingcap\/pd\/v4/")
+                     sort -u | sed -e "s/^\./github.com\/tikv\/pd/")
 INTEGRATION_TEST_PKGS := $(shell find . -iname "*_test.go" -exec dirname {} \; | \
-                     sort -u | sed -e "s/^\./github.com\/pingcap\/pd\/v4/" | grep -E "tests")
+                     sort -u | sed -e "s/^\./github.com\/tikv\/pd/" | grep -E "tests")
 BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
 
 PACKAGES := go list ./...
@@ -11,6 +11,7 @@ PACKAGE_DIRECTORIES := $(PACKAGES) | sed 's|$(PD_PKG)/||'
 GOCHECKER := awk '{ print } END { if (NR > 0) { exit 1 } }'
 OVERALLS := overalls
 
+BUILD_BIN_PATH := $(shell pwd)/bin
 GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' /bin/bash
@@ -96,17 +97,15 @@ PD_SERVER_DEP :=
 ifneq ($(SWAGGER), 0)
 	PD_SERVER_DEP += swagger-spec
 endif
-ifneq ($(DASHBOARD), 0)
-	PD_SERVER_DEP += dashboard-ui
-endif
+PD_SERVER_DEP += dashboard-ui
 
 pd-server: export GO111MODULE=on
 pd-server: ${PD_SERVER_DEP}
-	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o bin/pd-server cmd/pd-server/main.go
+	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
 pd-server-basic: export GO111MODULE=on
 pd-server-basic:
-	SWAGGER=0 DASHBOARD=0 make pd-server
+	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
 # dependent
 install-go-tools: export GO111MODULE=on
@@ -119,6 +118,7 @@ swagger-spec: export GO111MODULE=on
 swagger-spec: install-go-tools
 	go mod vendor
 	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap-incubator/tidb-dashboard --output docs/swagger
+	go mod tidy
 
 dashboard-ui: export GO111MODULE=on
 dashboard-ui:
@@ -127,19 +127,19 @@ dashboard-ui:
 # Tools
 pd-ctl: export GO111MODULE=on
 pd-ctl:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-ctl tools/pd-ctl/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
 pd-tso-bench: export GO111MODULE=on
 pd-tso-bench:
-	CGO_ENABLED=0 go build -o bin/pd-tso-bench tools/pd-tso-bench/main.go
+	CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench tools/pd-tso-bench/main.go
 pd-recover: export GO111MODULE=on
 pd-recover:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-recover tools/pd-recover/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
 pd-analysis: export GO111MODULE=on
 pd-analysis:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-analysis tools/pd-analysis/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis tools/pd-analysis/main.go
 pd-heartbeat-bench: export GO111MODULE=on
 pd-heartbeat-bench:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o bin/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
+	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
 test: install-go-tools
 	# testing...
@@ -161,7 +161,7 @@ check-all: static lint tidy
 
 check-plugin:
 	@echo "checking plugin"
-	cd ./plugin/scheduler_example && make evictLeaderPlugin.so && rm evictLeaderPlugin.so
+	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
 static: export GO111MODULE=on
 static:
@@ -182,7 +182,7 @@ travis_coverage: export GO111MODULE=on
 travis_coverage:
 ifeq ("$(TRAVIS_COVERAGE)", "1")
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 $(OVERALLS) -concurrency=8 -project=github.com/pingcap/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
+	CGO_ENABLED=1 $(OVERALLS) -concurrency=8 -project=github.com/tikv/pd -covermode=count -ignore='.git,vendor' -- -coverpkg=./... || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 else
 	@echo "coverage only runs in travis."
@@ -190,33 +190,44 @@ endif
 
 simulator: export GO111MODULE=on
 simulator:
-	CGO_ENABLED=0 go build -o bin/pd-simulator tools/pd-simulator/main.go
+	CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-simulator tools/pd-simulator/main.go
 
 regions-dump: export GO111MODULE=on
 regions-dump:
-	CGO_ENABLED=0 go build -o bin/regions-dump tools/regions-dump/main.go
+	CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/regions-dump tools/regions-dump/main.go
 
 stores-dump: export GO111MODULE=on
 stores-dump:
-	CGO_ENABLED=0 go build -o bin/stores-dump tools/stores-dump/main.go
+	CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/stores-dump tools/stores-dump/main.go
 
 clean-test:
+	# Cleaning test tmp...
 	rm -rf /tmp/test_pd*
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
 
+clean-build:
+	# Cleaning building files...
+	rm -rf .dashboard_asset_cache/
+	rm -rf $(BUILD_BIN_PATH)
+	rm -rf $(GO_TOOLS_BIN_PATH)
+
 deadlock-enable: install-go-tools
+	# Enabling deadlock...
 	@$(DEADLOCK_ENABLE)
 
-deadlock-disable:
+deadlock-disable: install-go-tools
+	# Disabling deadlock...
 	@$(DEADLOCK_DISABLE)
 
 failpoint-enable: install-go-tools
 	# Converting failpoints...
 	@$(FAILPOINT_ENABLE)
 
-failpoint-disable:
+failpoint-disable: install-go-tools
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
 
-.PHONY: all ci vendor clean-test tidy
+clean: failpoint-disable deadlock-disable clean-test clean-build
+
+.PHONY: all ci vendor tidy clean-test clean-build clean

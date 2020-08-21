@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,18 +26,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/pd/v4/pkg/grpcutil"
-	"github.com/pingcap/pd/v4/pkg/metricutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
-	"github.com/pingcap/pd/v4/server/versioninfo"
+	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/metricutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/versioninfo"
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
@@ -64,6 +64,7 @@ type Config struct {
 
 	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
 	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
+	InitialClusterToken string `toml:"initial-cluster-token" json:"initial-cluster-token"`
 
 	// Join to an existing pd cluster, a string of endpoints.
 	Join string `toml:"join" json:"join"`
@@ -187,6 +188,7 @@ const (
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
 	defaultInitialClusterState = embed.ClusterStateFlagNew
+	defaultInitialClusterToken = "pd-cluster"
 
 	// etcd use 100ms for heartbeat and 1s for election timeout.
 	// We can enlarge both a little to reduce the network aggression.
@@ -479,6 +481,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	adjustString(&c.InitialClusterState, defaultInitialClusterState)
+	adjustString(&c.InitialClusterToken, defaultInitialClusterToken)
 
 	if len(c.Join) > 0 {
 		if _, err := url.Parse(c.Join); err != nil {
@@ -1000,7 +1003,7 @@ func (c *ReplicationConfig) Validate() error {
 			foundIsolationLevel = true
 		}
 	}
-	if len(c.IsolationLevel) > 0 && !foundIsolationLevel {
+	if c.IsolationLevel != "" && !foundIsolationLevel {
 		return errors.New("isolation-level must be one of location-labels or empty")
 	}
 	return nil
@@ -1178,6 +1181,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.WalDir = ""
 	cfg.InitialCluster = c.InitialCluster
 	cfg.ClusterState = c.InitialClusterState
+	cfg.InitialClusterToken = c.InitialClusterToken
 	cfg.EnablePprof = true
 	cfg.PreVote = c.PreVote
 	cfg.StrictReconfigCheck = !c.DisableStrictReconfigCheck

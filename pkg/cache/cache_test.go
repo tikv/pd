@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,36 @@ type testRegionCacheSuite struct {
 func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cache := NewTTL(ctx, time.Second, 2*time.Second)
+	cache := NewIDTTL(ctx, time.Second, 2*time.Second)
+	// Test Pop
+	cache.PutWithTTL(9, "9", 5*time.Second)
+	cache.PutWithTTL(10, "10", 5*time.Second)
+	c.Assert(cache.Len(), Equals, 2)
+	k, v, success := cache.pop()
+	c.Assert(success, Equals, true)
+	c.Assert(cache.Len(), Equals, 1)
+	k2, v2, success := cache.pop()
+	c.Assert(success, Equals, true)
+	// we can't ensure the order which the key/value pop from cache, so we save into a map
+	kvMap := map[uint64]string{
+		9:  "9",
+		10: "10",
+	}
+	expV, ok := kvMap[k.(uint64)]
+	c.Assert(ok, Equals, true)
+	c.Assert(expV, Equals, v.(string))
+	expV, ok = kvMap[k2.(uint64)]
+	c.Assert(ok, Equals, true)
+	c.Assert(expV, Equals, v2.(string))
+
+	cache.PutWithTTL(11, "11", 1*time.Second)
+	time.Sleep(5 * time.Second)
+	k, v, success = cache.pop()
+	c.Assert(success, Equals, false)
+	c.Assert(k, IsNil)
+	c.Assert(v, IsNil)
+
+	// Test Get
 	cache.PutWithTTL(1, 1, 1*time.Second)
 	cache.PutWithTTL(2, "v2", 5*time.Second)
 	cache.PutWithTTL(3, 3.0, 5*time.Second)
@@ -53,7 +82,7 @@ func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 
 	c.Assert(cache.Len(), Equals, 3)
 
-	c.Assert(sortIDs(cache.GetKeys()), DeepEquals, []uint64{1, 2, 3})
+	c.Assert(sortIDs(cache.GetAllID()), DeepEquals, []uint64{1, 2, 3})
 
 	time.Sleep(2 * time.Second)
 
@@ -70,7 +99,7 @@ func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 	c.Assert(value, Equals, 3.0)
 
 	c.Assert(cache.Len(), Equals, 2)
-	c.Assert(sortIDs(cache.GetKeys()), DeepEquals, []uint64{2, 3})
+	c.Assert(sortIDs(cache.GetAllID()), DeepEquals, []uint64{2, 3})
 
 	cache.Remove(2)
 
@@ -83,7 +112,7 @@ func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
 	c.Assert(value, Equals, 3.0)
 
 	c.Assert(cache.Len(), Equals, 1)
-	c.Assert(sortIDs(cache.GetKeys()), DeepEquals, []uint64{3})
+	c.Assert(sortIDs(cache.GetAllID()), DeepEquals, []uint64{3})
 }
 
 func sortIDs(ids []uint64) []uint64 {
@@ -94,6 +123,7 @@ func sortIDs(ids []uint64) []uint64 {
 
 func (s *testRegionCacheSuite) TestLRUCache(c *C) {
 	cache := newLRU(3)
+
 	cache.Put(1, "1")
 	cache.Put(2, "2")
 	cache.Put(3, "3")

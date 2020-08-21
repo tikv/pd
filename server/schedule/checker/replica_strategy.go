@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@ package checker
 
 import (
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/filter"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/filter"
+	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -57,6 +57,9 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 		filter.NewSpecialUseFilter(s.checkerName),
 		filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true},
 	}
+	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
+		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores))
+	}
 	if len(extraFilters) > 0 {
 		filters = append(filters, extraFilters...)
 	}
@@ -91,8 +94,13 @@ func (s *ReplicaStrategy) SelectStoreToReplace(coLocationStores []*core.StoreInf
 func (s *ReplicaStrategy) SelectStoreToImprove(coLocationStores []*core.StoreInfo, old uint64) uint64 {
 	// trick to avoid creating a slice with `old` removed.
 	s.swapStoreToFirst(coLocationStores, old)
-	improver := filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, s.cluster.GetStore(old))
-	return s.SelectStoreToAdd(coLocationStores[1:], improver)
+	filters := []filter.Filter{
+		filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, s.cluster.GetStore(old)),
+	}
+	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
+		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores[1:]))
+	}
+	return s.SelectStoreToAdd(coLocationStores[1:], filters...)
 }
 
 func (s *ReplicaStrategy) swapStoreToFirst(stores []*core.StoreInfo, id uint64) {

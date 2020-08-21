@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,12 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/cache"
-	"github.com/pingcap/pd/v4/pkg/codec"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
 )
 

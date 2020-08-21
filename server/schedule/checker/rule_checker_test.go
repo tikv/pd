@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,11 +19,11 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 var _ = Suite(&testRuleCheckerSuite{})
@@ -72,6 +72,41 @@ func (s *testRuleCheckerSuite) TestAddRulePeer(c *C) {
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "add-rule-peer")
 	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(3))
+}
+
+func (s *testRuleCheckerSuite) TestAddRulePeerWithIsolationLevel(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z1", "rack": "r3", "host": "h1"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	s.ruleManager.SetRule(&placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "rack", "host"},
+		IsolationLevel: "zone",
+	})
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3)
+	s.ruleManager.SetRule(&placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "rack", "host"},
+		IsolationLevel: "rack",
+	})
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "add-rule-peer")
+	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(4))
 }
 
 func (s *testRuleCheckerSuite) TestFixPeer(c *C) {
@@ -139,7 +174,7 @@ func (s *testRuleCheckerSuite) TestFixRole(c *C) {
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 2, 1, 3)
 	r := s.cluster.GetRegion(1)
 	p := r.GetStorePeer(1)
-	p.IsLearner = true
+	p.Role = metapb.PeerRole_Learner
 	r = r.Clone(core.WithLearners([]*metapb.Peer{p}))
 	op := s.rc.Check(r)
 	c.Assert(op, NotNil)
@@ -253,7 +288,7 @@ func (s *testRuleCheckerSuite) TestIssue2419(c *C) {
 	s.cluster.SetStoreOffline(3)
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
 	r := s.cluster.GetRegion(1)
-	r = r.Clone(core.WithAddPeer(&metapb.Peer{Id: 5, StoreId: 4, IsLearner: true}))
+	r = r.Clone(core.WithAddPeer(&metapb.Peer{Id: 5, StoreId: 4, Role: metapb.PeerRole_Learner}))
 	op := s.rc.Check(r)
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "remove-orphan-peer")

@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ type HotPeerStat struct {
 	StoreID  uint64 `json:"store_id"`
 	RegionID uint64 `json:"region_id"`
 
-	// HotDegree records the hot region update times
+	// HotDegree records the times for the region considered as hot spot during each HandleRegionHeartbeat
 	HotDegree int `json:"hot_degree"`
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int `json:"anti_count"`

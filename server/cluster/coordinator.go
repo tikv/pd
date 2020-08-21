@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -21,15 +22,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/logutil"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedulers"
-	"github.com/pingcap/pd/v4/server/statistics"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -125,6 +126,9 @@ func (c *coordinator) patrolRegions() {
 			c.cluster.RemoveSuspectRegion(id)
 		}
 
+		// Check suspect key ranges
+		c.checkSuspectKeyRanges()
+
 		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
 		if len(regions) == 0 {
 			// Resets the scan key.
@@ -155,6 +159,33 @@ func (c *coordinator) patrolRegions() {
 			start = time.Now()
 		}
 	}
+}
+
+// checkSuspectKeyRanges would pop one suspect key range group
+// The regions of new version key range and old version key range would be placed into
+// the suspect regions map
+func (c *coordinator) checkSuspectKeyRanges() {
+	keyRange, success := c.cluster.PopOneSuspectKeyRange()
+	if !success {
+		return
+	}
+	limit := 1024
+	regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], limit)
+	if len(regions) == 0 {
+		return
+	}
+	regionIDList := make([]uint64, 0, len(regions))
+	for _, region := range regions {
+		regionIDList = append(regionIDList, region.GetID())
+	}
+
+	// if the last region's end key is smaller the keyRange[1] which means there existed the remaining regions between
+	// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
+	lastRegion := regions[len(regions)-1]
+	if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
+		c.cluster.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
+	}
+	c.cluster.AddSuspectRegions(regionIDList...)
 }
 
 // drivePushOperator is used to push the unfinished operator to the excutor.

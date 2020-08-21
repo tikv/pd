@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,14 +18,15 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/pkg/tempurl"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/tests"
+	"github.com/tikv/pd/pkg/tempurl"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 
 	// Register schedulers.
-	_ "github.com/pingcap/pd/v4/server/schedulers"
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
 func Test(t *testing.T) {
@@ -113,6 +114,14 @@ func (s *serverTestSuite) TestClusterID(c *C) {
 	for _, s := range cluster.GetServers() {
 		c.Assert(s.GetClusterID(), Equals, clusterID)
 	}
+
+	cluster2, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config) { conf.InitialClusterToken = "foobar" })
+	defer cluster2.Destroy()
+	c.Assert(err, IsNil)
+	err = cluster2.RunInitialServers()
+	c.Assert(err, IsNil)
+	clusterID2 := cluster2.GetServer("pd1").GetClusterID()
+	c.Assert(clusterID2, Not(Equals), clusterID)
 }
 
 func (s *serverTestSuite) TestLeader(c *C) {

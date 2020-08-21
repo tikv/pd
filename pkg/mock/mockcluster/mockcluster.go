@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,13 +21,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/mock/mockid"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/kv"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
-	"github.com/pingcap/pd/v4/server/statistics"
+	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -39,7 +40,8 @@ type Cluster struct {
 	*placement.RuleManager
 	*statistics.HotCache
 	*statistics.StoresStats
-	ID uint64
+	ID             uint64
+	suspectRegions map[uint64]struct{}
 }
 
 // NewCluster creates a new Cluster
@@ -53,6 +55,7 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 		RuleManager:     ruleManager,
 		HotCache:        statistics.NewHotCache(),
 		StoresStats:     statistics.NewStoresStats(),
+		suspectRegions:  map[uint64]struct{}{},
 	}
 }
 
@@ -215,7 +218,12 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	stats.Capacity = 1000 * (1 << 20)
 	stats.Available = stats.Capacity - uint64(regionCount)*10
 	store := core.NewStoreInfo(
-		&metapb.Store{Id: storeID},
+		&metapb.Store{Id: storeID, Labels: []*metapb.StoreLabel{
+			{
+				Key:   "ID",
+				Value: fmt.Sprintf("%v", storeID),
+			},
+		}},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
 		core.SetRegionSize(int64(regionCount)*10),
@@ -264,16 +272,16 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 }
 
 // AddLeaderRegion adds region with specified leader and followers.
-func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderID uint64, followerIds ...uint64) *core.RegionInfo {
-	origin := mc.newMockRegionInfo(regionID, leaderID, followerIds...)
+func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
+	origin := mc.newMockRegionInfo(regionID, leaderStoreID, followerStoreIDs...)
 	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
 }
 
 // AddRegionWithLearner adds region with specified leader, followers and learners.
-func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderID uint64, followerIDs, learnerIDs []uint64) *core.RegionInfo {
-	origin := mc.MockRegionInfo(regionID, leaderID, followerIDs, learnerIDs, nil)
+func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, followerStoreIDs, learnerStoreIDs []uint64) *core.RegionInfo {
+	origin := mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)
 	region := origin.Clone(core.SetApproximateSize(10), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
@@ -515,8 +523,8 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	mc.PutStore(newStore)
 }
 
-func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderID uint64, followerIDs ...uint64) *core.RegionInfo {
-	return mc.MockRegionInfo(regionID, leaderID, followerIDs, []uint64{}, nil)
+func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) *core.RegionInfo {
+	return mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, []uint64{}, nil)
 }
 
 // GetOpt mocks method.
@@ -595,8 +603,8 @@ func (mc *Cluster) RemoveScheduler(name string) error {
 }
 
 // MockRegionInfo returns a mock region
-func (mc *Cluster) MockRegionInfo(regionID uint64, leaderID uint64,
-	followerIDs, learnerIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
+func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
+	followerStoreIDs, learnerStoreIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
 
 	region := &metapb.Region{
 		Id:          regionID,
@@ -604,16 +612,50 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderID uint64,
 		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
 		RegionEpoch: epoch,
 	}
-	leader, _ := mc.AllocPeer(leaderID)
+	leader, _ := mc.AllocPeer(leaderStoreID)
 	region.Peers = []*metapb.Peer{leader}
-	for _, id := range followerIDs {
-		peer, _ := mc.AllocPeer(id)
+	for _, storeID := range followerStoreIDs {
+		peer, _ := mc.AllocPeer(storeID)
 		region.Peers = append(region.Peers, peer)
 	}
-	for _, id := range learnerIDs {
-		peer, _ := mc.AllocPeer(id)
-		peer.IsLearner = true
+	for _, storeID := range learnerStoreIDs {
+		peer, _ := mc.AllocPeer(storeID)
+		peer.Role = metapb.PeerRole_Learner
 		region.Peers = append(region.Peers, peer)
 	}
 	return core.NewRegionInfo(region, leader)
+}
+
+// SetStoreLabel set the labels to the target store
+func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
+	store := mc.GetStore(storeID)
+	newLabels := make([]*metapb.StoreLabel, 0, len(labels))
+	for k, v := range labels {
+		newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
+	}
+	newStore := store.Clone(core.SetStoreLabels(newLabels))
+	mc.PutStore(newStore)
+}
+
+// IsFeatureSupported checks if the feature is supported by current cluster.
+func (mc *Cluster) IsFeatureSupported(versioninfo.Feature) bool {
+	return true
+}
+
+// AddSuspectRegions mock method
+func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
+	for _, id := range ids {
+		mc.suspectRegions[id] = struct{}{}
+	}
+}
+
+// CheckRegionUnderSuspect only used for unit test
+func (mc *Cluster) CheckRegionUnderSuspect(id uint64) bool {
+	_, ok := mc.suspectRegions[id]
+	return ok
+}
+
+// ResetSuspectRegions only used for unit test
+func (mc *Cluster) ResetSuspectRegions() {
+	mc.suspectRegions = map[uint64]struct{}{}
 }

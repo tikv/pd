@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/codec"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/info"
-	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/simutil"
+	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
 func newImportData() *Case {
@@ -40,8 +40,8 @@ func newImportData() *Case {
 		})
 	}
 
-	storeIDs := rand.Perm(3)
-	for i := 0; i < 40; i++ {
+	for i := 0; i < getRegionNum(); i++ {
+		storeIDs := rand.Perm(10)
 		peers := []*metapb.Peer{
 			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[0] + 1)},
 			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[1] + 1)},
@@ -63,23 +63,18 @@ func newImportData() *Case {
 	e := &WriteFlowOnSpotDescriptor{}
 	table2 := string(codec.EncodeBytes(codec.GenerateTableKey(2)))
 	table3 := string(codec.EncodeBytes(codec.GenerateTableKey(3)))
-	table5 := string(codec.EncodeBytes(codec.GenerateTableKey(5)))
 	e.Step = func(tick int64) map[string]int64 {
-		if tick < 100 {
-			return map[string]int64{
-				table3: 4 * MB,
-				table5: 32 * MB,
-			}
+		if tick > int64(getRegionNum())/10 {
+			return nil
 		}
 		return map[string]int64{
-			table2: 2 * MB,
-			table3: 4 * MB,
-			table5: 16 * MB,
+			table2: 32 * MB,
 		}
 	}
 	simCase.Events = []EventDescriptor{e}
 
 	// Checker description
+	checkCount := uint64(0)
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		leaderDist := make(map[uint64]int)
 		peerDist := make(map[uint64]int)
@@ -120,14 +115,13 @@ func newImportData() *Case {
 		regionTotal := regions.GetRegionCount()
 		totalLeaderLog := fmt.Sprintf("%d leader:", regionTotal)
 		totalPeerLog := fmt.Sprintf("%d peer:", regionTotal*3)
-		isEnd := true
+		isEnd := false
+		var regionProps []float64
 		for storeID := uint64(1); storeID <= 10; storeID++ {
 			regions.GetStoreRegionCount(storeID)
 			totalLeaderLog = fmt.Sprintf("%s [store %d]:%.2f%%", totalLeaderLog, storeID, float64(regions.GetStoreLeaderCount(storeID))/float64(regionTotal)*100)
 			regionProp := float64(regions.GetStoreRegionCount(storeID)) / float64(regionTotal*3) * 100
-			if regionProp > 13.8 {
-				isEnd = false
-			}
+			regionProps = append(regionProps, regionProp)
 			totalPeerLog = fmt.Sprintf("%s [store %d]:%.2f%%", totalPeerLog, storeID, regionProp)
 		}
 		simutil.Logger.Info("import data information",
@@ -135,6 +129,17 @@ func newImportData() *Case {
 			zap.String("table-peer", tablePeerLog),
 			zap.String("total-leader", totalLeaderLog),
 			zap.String("total-peer", totalPeerLog))
+		checkCount++
+		dev := 0.0
+		for _, p := range regionProps {
+			dev += (p - 10) * (p - 10) / 100
+		}
+		if dev > 0.005 {
+			simutil.Logger.Warn("Not balanced, change scheduler or store limit", zap.Float64("dev score", dev))
+		}
+		if checkCount > uint64(getRegionNum())/10 {
+			isEnd = dev < 0.002
+		}
 		return isEnd
 	}
 	return &simCase

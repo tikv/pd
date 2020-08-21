@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import (
 	"net/http/pprof"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/pd/v4/server"
+	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
 
@@ -40,7 +40,7 @@ func createIndentRender() *render.Render {
 // @version 1.0
 // @description This is placement driver.
 // @contact.name Placement Driver Support
-// @contact.url https://github.com/pingcap/pd/issues
+// @contact.url https://github.com/tikv/pd/issues
 // @contact.email info@pingcap.com
 // @license.name Apache 2.0
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
@@ -91,12 +91,19 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 
 	rulesHandler := newRulesHandler(svr, rd)
 	clusterRouter.HandleFunc("/config/rules", rulesHandler.GetAll).Methods("GET")
+	clusterRouter.HandleFunc("/config/rules", rulesHandler.SetAll).Methods("POST")
+	clusterRouter.HandleFunc("/config/rules/batch", rulesHandler.Batch).Methods("POST")
 	clusterRouter.HandleFunc("/config/rules/group/{group}", rulesHandler.GetAllByGroup).Methods("GET")
 	clusterRouter.HandleFunc("/config/rules/region/{region}", rulesHandler.GetAllByRegion).Methods("GET")
 	clusterRouter.HandleFunc("/config/rules/key/{key}", rulesHandler.GetAllByKey).Methods("GET")
 	clusterRouter.HandleFunc("/config/rule/{group}/{id}", rulesHandler.Get).Methods("GET")
 	clusterRouter.HandleFunc("/config/rule", rulesHandler.Set).Methods("POST")
 	clusterRouter.HandleFunc("/config/rule/{group}/{id}", rulesHandler.Delete).Methods("DELETE")
+
+	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.GetGroupConfig).Methods("GET")
+	clusterRouter.HandleFunc("/config/rule_group", rulesHandler.SetGroupConfig).Methods("POST")
+	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.DeleteGroupConfig).Methods("DELETE")
+	clusterRouter.HandleFunc("/config/rule_groups", rulesHandler.GetAllGroupConfigs).Methods("GET")
 
 	storeHandler := newStoreHandler(handler, rd)
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Get).Methods("GET")
@@ -205,6 +212,11 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	apiRouter.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
 	apiRouter.Handle("/debug/pprof/block", pprof.Handler("block"))
 	apiRouter.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+
+	// service GC safepoint API
+	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
+	apiRouter.HandleFunc("/gc/safepoint", serviceGCSafepointHandler.List).Methods("GET")
+	apiRouter.HandleFunc("/gc/safepoint/{service_id}", serviceGCSafepointHandler.Delete).Methods("DELETE")
 
 	// Deprecated
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
