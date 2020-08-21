@@ -93,9 +93,3 @@ var (
 	ErrLoadValue  = errors.Normalize("load value from etcd failed", errors.RFCCodeText("PD:etcdutil:ErrLoadValue"))
 	ErrGetCluster = errors.Normalize("get cluster from remote peer failed", errors.RFCCodeText("PD:etcdutil:ErrGetCluster"))
 )
-
-// autoscaling errors
-var (
-	ErrLoadTiDBInfo  = errors.Normalize("load tidb info from etcd failed", errors.RFCCodeText("PD:autoscaling:ErrLoadTiDB"))
-	ErrParseTiDBInfo = errors.Normalize("parse tidb info from etcd failed", errors.RFCCodeText("PD:autoscaling:ErrParseTiDBInfo"))
-)

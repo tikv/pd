@@ -359,6 +359,15 @@ func (mc *mockTidbInformer) GetTiDB(address string) (*TiDBInfo, error) {
 	return mc.tidbs[address], nil
 }
 
+// GetTiDBs implements TiDBInformer.GetTiDBs
+func (mc *mockTidbInformer) GetTiDBs() ([]*TiDBInfo, error) {
+	list := make([]*TiDBInfo, 0, len(mc.tidbs))
+	for _, v := range mc.tidbs {
+		list = append(list, v)
+	}
+	return list, nil
+}
+
 // SetTiDBs set multiple TiDB
 func (mc *mockTidbInformer) SetTiDBs(tidbs []*TiDBInfo) {
 	for _, tidb := range tidbs {

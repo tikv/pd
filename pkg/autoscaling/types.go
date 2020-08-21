@@ -16,14 +16,13 @@ package autoscaling
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 )
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
@@ -123,6 +122,7 @@ type instance struct {
 // TODO: implement TiDBInformer
 type tidbInformer interface {
 	GetTiDB(address string) (*TiDBInfo, error)
+	GetTiDBs() ([]*TiDBInfo, error)
 }
 
 // TiDBInfo record the detail tidb info
@@ -142,6 +142,18 @@ func (t *TiDBInfo) getLabelValue(key string) string {
 		}
 	}
 	return ""
+}
+
+var (
+	tidbInfoPattern *regexp.Regexp
+	err             error
+)
+
+func init() {
+	tidbInfoPattern, err = regexp.Compile("/topology/tidb/.+/info")
+	if err != nil {
+		log.Fatal(err.Error())
+	}
 }
 
 // GetLabels returns the labels of the tidb.
@@ -167,19 +179,31 @@ func (informer *tidbInformerImpl) GetTiDB(address string) (*TiDBInfo, error) {
 	}
 	if resp.Count < 1 {
 		err := fmt.Errorf("resp loaded for tidb[%s] is empty", address)
-		log.Error("failed to load tidb info",
-			zap.String("address", address),
-			errs.ZapError(errs.ErrLoadTiDBInfo, err))
 		return nil, err
 	}
 	tidb := &TiDBInfo{}
 	err = json.Unmarshal(resp.Kvs[0].Value, tidb)
 	if err != nil {
-		log.Error("failed to parse tidb info",
-			zap.String("address", address),
-			errs.ZapError(errs.ErrParseTiDBInfo, err))
 		return nil, err
 	}
 	tidb.Address = address
 	return tidb, nil
+}
+
+func (informer *tidbInformerImpl) GetTiDBs() ([]*TiDBInfo, error) {
+	prefix := "/topology/tidb/"
+	resps, err := etcdutil.EtcdKVGet(informer.etcdClient, prefix, clientv3.WithPrefix())
+	if err != nil {
+		return nil, err
+	}
+	tidbs := make([]*TiDBInfo, 0, resps.Count)
+	for _, resp := range resps.Kvs {
+		key := string(resp.Key)
+		if tidbInfoPattern.MatchString(key) {
+			tidbs = append(tidbs, &TiDBInfo{
+				Address: key[len("/topology/tidb/") : len(key)-5],
+			})
+		}
+	}
+	return tidbs, nil
 }

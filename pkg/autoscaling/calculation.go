@@ -16,6 +16,7 @@ package autoscaling
 import (
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -42,6 +43,10 @@ var (
 	MaxScaleOutStep uint64 = 1
 	// MaxScaleInStep is used to indicate the maxium number of instance for scaling in operations at once.
 	MaxScaleInStep uint64 = 1
+
+	informer tidbInformer
+
+	informerInit = sync.Once{}
 )
 
 func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Strategy) []*Plan {
@@ -70,7 +75,10 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	if component == TiKV {
 		instances = filterTiKVInstances(rc)
 	} else {
-		instances = getTiDBInstances()
+		informerInit.Do(func() {
+			informer = newTidbInformer(rc.GetEtcdClient())
+		})
+		instances = getTiDBInstances(rc)
 	}
 
 	if len(instances) == 0 {
@@ -117,9 +125,21 @@ func filterTiKVInstances(informer core.StoreSetInformer) []instance {
 	return instances
 }
 
-// TODO: get TiDB instances, we can directly visit prometheus 'up{job="tidb"}' metrics to know the healthy tidb instances
-func getTiDBInstances() []instance {
-	return []instance{}
+func getTiDBInstances(rc *cluster.RaftCluster) []instance {
+	informerInit.Do(func() {
+		informer = newTidbInformer(rc.GetEtcdClient())
+	})
+
+	infos, err := informer.GetTiDBs()
+	if err != nil {
+		// TODO: error handling
+		return []instance{}
+	}
+	instances := make([]instance, 0, len(infos))
+	for _, info := range infos {
+		instances = append(instances, instance{address: info.Address})
+	}
+	return instances
 }
 
 func getAddresses(instances []instance) []string {
@@ -257,13 +277,11 @@ func getCountByResourceType(strategy *Strategy, resourceType string) uint64 {
 	return 0
 }
 
-// TODO: get the scaled groups
 func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType, healthyInstances []instance) []*Plan {
 	switch component {
 	case TiKV:
 		return getScaledTiKVGroups(rc, healthyInstances)
 	case TiDB:
-		informer := newTidbInformer(rc.GetEtcdClient())
 		return getScaledTiDBGroups(informer, healthyInstances)
 	default:
 		return nil
