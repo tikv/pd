@@ -517,9 +517,7 @@ func (bs *balanceSolver) init() {
 	case readLeader:
 		bs.stLoadDetail = bs.sche.stLoadInfos[readLeader]
 	}
-	for _, id := range getUnhealthyStores(bs.cluster) {
-		delete(bs.stLoadDetail, id)
-	}
+	// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
 
 	bs.maxSrc = &storeLoad{}
 	bs.minDst = &storeLoad{
@@ -540,18 +538,6 @@ func (bs *balanceSolver) init() {
 		KeyRate:  maxCur.KeyRate * bs.sche.conf.GetKeyRankStepRatio(),
 		Count:    maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
-}
-
-func getUnhealthyStores(cluster opt.Cluster) []uint64 {
-	ret := make([]uint64, 0)
-	stores := cluster.GetStores()
-	for _, store := range stores {
-		if store.IsTombstone() ||
-			store.DownTime() > cluster.GetMaxStoreDownTime() {
-			ret = append(ret, store.GetID())
-		}
-	}
-	return ret
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy rwType, opTy opType) *balanceSolver {
