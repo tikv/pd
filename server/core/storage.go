@@ -433,16 +433,10 @@ func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
 }
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
-<<<<<<< HEAD
-func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
+func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
 	prefix := path.Join(gcPath, "safe_point", "service")
 	// the next of 'e' is 'f'
 	prefixEnd := path.Join(gcPath, "safe_point", "servicf")
-=======
-func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
-	prefix := path.Join(gcPath, "safe_point", "service") + "/"
-	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
->>>>>>> d40341c... *: add service gc safepoint commands (#2797)
 	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return nil, err
