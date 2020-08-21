@@ -15,7 +15,6 @@ package schedulers
 
 import (
 	"fmt"
-	"github.com/pingcap/pd/v4/pkg/errs"
 	"math"
 	"math/rand"
 	"net/http"
@@ -27,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
