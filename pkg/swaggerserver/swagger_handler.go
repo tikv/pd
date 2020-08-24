@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ package swaggerserver
 import (
 	"net/http"
 
-	_ "github.com/pingcap/pd/v4/docs/swagger" // nolint: swagger docs
 	httpSwagger "github.com/swaggo/http-swagger"
+	_ "github.com/tikv/pd/docs/swagger" // nolint: swagger docs
 )
 
 func handler() http.Handler {

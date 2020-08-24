@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,19 +15,30 @@ package schedulers
 
 import (
 	"context"
+	"testing"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/kv"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
-	"github.com/pingcap/pd/v4/server/statistics"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/statistics"
 )
+
+const (
+	KB = 1024
+	MB = 1024 * KB
+)
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testShuffleLeaderSuite{})
 
@@ -402,7 +413,7 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 	peers := []*metapb.Peer{
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
-		{Id: 3, StoreId: 3, IsLearner: true},
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
 	}
 	region := core.NewRegionInfo(&metapb.Region{
 		Id:          1,
@@ -545,42 +556,97 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) schedule() []*operator.
 }
 
 func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithConflictRule(c *C) {
-	rule := placement.Rule{
-		GroupID:  "test",
-		ID:       "1",
-		Index:    1,
-		StartKey: []byte(""),
-		EndKey:   []byte(""),
-		Role:     placement.Leader,
-		Count:    1,
-		LabelConstraints: []placement.LabelConstraint{
-			{
-				Key:    "role",
-				Op:     placement.In,
-				Values: []string{"leader"},
-			},
-		},
-		LocationLabels: []string{"host"},
-	}
-	c.Check(s.tc.SetRule(&rule), IsNil)
-	c.Check(s.tc.DeleteRule("pd", "default"), IsNil)
-
-	// Stores:     1    2    3    4
-	// Leaders:    1    0    0    0
-	// Region1:    L    F    F    F
+	// Stores:     1    2    3
+	// Leaders:    1    0    0
+	// Region1:    L    F    F
 	s.tc.AddLeaderStore(1, 1)
 	s.tc.AddLeaderStore(2, 0)
 	s.tc.AddLeaderStore(3, 0)
-	s.tc.AddLeaderStore(4, 0)
-	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	s.tc.AddLabelsStore(1, 1, map[string]string{
-		"role": "leader",
+	s.tc.AddLeaderRegion(1, 1, 2, 3)
+	s.tc.SetStoreLabel(1, map[string]string{
+		"host": "a",
 	})
-	c.Check(s.schedule(), IsNil)
+	s.tc.SetStoreLabel(2, map[string]string{
+		"host": "b",
+	})
+	s.tc.SetStoreLabel(3, map[string]string{
+		"host": "c",
+	})
 
-	// Stores:     1    2    3    4
-	// Leaders:    16   0    0    0
-	// Region1:    L    F    F    F
+	// Stores:     1    2    3
+	// Leaders:    16   0    0
+	// Region1:    L    F    F
 	s.tc.UpdateLeaderCount(1, 16)
-	c.Check(s.schedule(), IsNil)
+	testcases := []struct {
+		name     string
+		rule     placement.Rule
+		schedule bool
+	}{
+		{
+			name: "default Rule",
+			rule: placement.Rule{
+				GroupID:        "pd",
+				ID:             "default",
+				Index:          1,
+				StartKey:       []byte(""),
+				EndKey:         []byte(""),
+				Role:           placement.Voter,
+				Count:          3,
+				LocationLabels: []string{"host"},
+			},
+			schedule: true,
+		},
+		{
+			name: "single store allowed to be placed leader",
+			rule: placement.Rule{
+				GroupID:  "pd",
+				ID:       "default",
+				Index:    1,
+				StartKey: []byte(""),
+				EndKey:   []byte(""),
+				Role:     placement.Leader,
+				Count:    1,
+				LabelConstraints: []placement.LabelConstraint{
+					{
+						Key:    "host",
+						Op:     placement.In,
+						Values: []string{"a"},
+					},
+				},
+				LocationLabels: []string{"host"},
+			},
+			schedule: false,
+		},
+		{
+			name: "2 store allowed to be placed leader",
+			rule: placement.Rule{
+				GroupID:  "pd",
+				ID:       "default",
+				Index:    1,
+				StartKey: []byte(""),
+				EndKey:   []byte(""),
+				Role:     placement.Leader,
+				Count:    1,
+				LabelConstraints: []placement.LabelConstraint{
+					{
+						Key:    "host",
+						Op:     placement.In,
+						Values: []string{"a", "b"},
+					},
+				},
+				LocationLabels: []string{"host"},
+			},
+			schedule: true,
+		},
+	}
+
+	for _, testcase := range testcases {
+		c.Logf(testcase.name)
+		c.Check(s.tc.SetRule(&testcase.rule), IsNil)
+		if testcase.schedule {
+			c.Check(len(s.schedule()), Equals, 1)
+		} else {
+			c.Check(s.schedule(), IsNil)
+		}
+	}
 }

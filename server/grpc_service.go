@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,13 +21,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/tsoutil"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -89,7 +91,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.tso.GetRespTS(count)
+		ts, err := s.tsoAllocator.GenerateTSO(count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
@@ -551,7 +553,7 @@ func (s *Server) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitR
 		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if !rc.IsFeatureSupported(cluster.BatchSplit) {
+	if !rc.IsFeatureSupported(versioninfo.BatchSplit) {
 		return &pdpb.AskBatchSplitResponse{Header: s.incompatibleVersion("batch_split")}, nil
 	}
 	if request.GetRegion() == nil {
@@ -774,7 +776,12 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		}
 	}
 
-	min, err := s.storage.LoadMinServiceGCSafePoint()
+	nowTSO, err := s.tsoAllocator.GenerateTSO(1)
+	if err != nil {
+		return nil, err
+	}
+	now, _ := tsoutil.ParseTimestamp(nowTSO)
+	min, err := s.storage.LoadMinServiceGCSafePoint(now)
 	if err != nil {
 		return nil, err
 	}
@@ -782,7 +789,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 	if request.TTL > 0 && request.SafePoint >= min.SafePoint {
 		ssp := &core.ServiceSafePoint{
 			ServiceID: string(request.ServiceId),
-			ExpiredAt: time.Now().Unix() + request.TTL,
+			ExpiredAt: now.Unix() + request.TTL,
 			SafePoint: request.SafePoint,
 		}
 		if err := s.storage.SaveServiceGCSafePoint(ssp); err != nil {
@@ -794,7 +801,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 			zap.Uint64("safepoint", ssp.SafePoint))
 		// If the min safepoint is updated, load the next one
 		if string(request.ServiceId) == min.ServiceID {
-			min, err = s.storage.LoadMinServiceGCSafePoint()
+			min, err = s.storage.LoadMinServiceGCSafePoint(now)
 			if err != nil {
 				return nil, err
 			}
@@ -808,7 +815,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 	return &pdpb.UpdateServiceGCSafePointResponse{
 		Header:       s.header(),
 		ServiceId:    []byte(min.ServiceID),
-		TTL:          min.ExpiredAt - time.Now().Unix(),
+		TTL:          min.ExpiredAt - now.Unix(),
 		MinSafePoint: min.SafePoint,
 	}, nil
 }

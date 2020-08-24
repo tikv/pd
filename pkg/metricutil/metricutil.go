@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ import (
 	"unicode"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
-	"go.uber.org/zap"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
 )
 
 const zeroDuration = time.Duration(0)
@@ -68,7 +68,7 @@ func prometheusPushClient(job, addr string, interval time.Duration) {
 	for {
 		err := pusher.Push()
 		if err != nil {
-			log.Error("could not push metrics to Prometheus Pushgateway", zap.Error(err))
+			log.Error("could not push metrics to Prometheus Pushgateway", errs.ZapError(errs.ErrPushGateway, err))
 		}
 
 		time.Sleep(interval)

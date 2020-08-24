@@ -4,11 +4,12 @@ import (
 	"context"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockhbstream"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 type sequencer struct {
@@ -225,5 +226,48 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 		if op, _ := scatterer.Scatter(region); op != nil {
 			c.Assert(oc.AddWaitingOperator(op), Equals, 1)
 		}
+	}
+}
+
+func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
+	opt := mockoption.NewScheduleOptions()
+	tc := mockcluster.NewCluster(opt)
+	// Add 5 stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	testcases := []struct {
+		name        string
+		checkRegion *core.RegionInfo
+		needFix     bool
+	}{
+		{
+			name:        "region with 4 replicas",
+			checkRegion: tc.AddLeaderRegion(1, 1, 2, 3, 4),
+			needFix:     true,
+		},
+		{
+			name:        "region with 3 replicas",
+			checkRegion: tc.AddLeaderRegion(1, 1, 2, 3),
+			needFix:     false,
+		},
+		{
+			name:        "region with 2 replicas",
+			checkRegion: tc.AddLeaderRegion(1, 1, 2),
+			needFix:     true,
+		},
+	}
+	for _, testcase := range testcases {
+		c.Logf(testcase.name)
+		scatterer := NewRegionScatterer(tc)
+		_, err := scatterer.Scatter(testcase.checkRegion)
+		if testcase.needFix {
+			c.Assert(err, NotNil)
+			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, true)
+		} else {
+			c.Assert(err, IsNil)
+			c.Assert(tc.CheckRegionUnderSuspect(1), Equals, false)
+		}
+		tc.ResetSuspectRegions()
 	}
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ package statistics
 import (
 	"math/rand"
 
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 // Denoising is an option to calculate flow base on the real heartbeats. Should
@@ -95,9 +95,9 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool {
 }
 
 // CollectMetrics collects the hot cache metrics.
-func (w *HotCache) CollectMetrics(stats *StoresStats) {
-	w.writeFlow.CollectMetrics(stats, "write")
-	w.readFlow.CollectMetrics(stats, "read")
+func (w *HotCache) CollectMetrics() {
+	w.writeFlow.CollectMetrics("write")
+	w.readFlow.CollectMetrics("read")
 }
 
 // ResetMetrics resets the hot cache metrics.

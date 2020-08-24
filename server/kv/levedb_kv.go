@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@ package kv
 
 import (
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pkg/errors"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
@@ -39,6 +39,9 @@ func NewLeveldbKV(path string) (*LeveldbKV, error) {
 func (kv *LeveldbKV) Load(key string) (string, error) {
 	v, err := kv.Get([]byte(key), nil)
 	if err != nil {
+		if err == leveldb.ErrNotFound {
+			return "", nil
+		}
 		return "", errors.WithStack(err)
 	}
 	return string(v), err

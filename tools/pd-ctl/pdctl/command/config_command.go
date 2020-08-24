@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ package command
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"path"
@@ -24,9 +23,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 var (
@@ -36,7 +35,10 @@ var (
 	labelPropertyPrefix   = "pd/api/v1/config/label-property"
 	clusterVersionPrefix  = "pd/api/v1/config/cluster-version"
 	rulesPrefix           = "pd/api/v1/config/rules"
+	rulesBatchPrefix      = "pd/api/v1/config/rules/batch"
 	rulePrefix            = "pd/api/v1/config/rule"
+	ruleGroupPrefix       = "pd/api/v1/config/rule_group"
+	ruleGroupsPrefix      = "pd/api/v1/config/rule_groups"
 	replicationModePrefix = "pd/api/v1/config/replication-mode"
 )
 
@@ -428,7 +430,27 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   putPlacementRulesFunc,
 	}
 	save.Flags().String("in", "rules.json", "the filename contains rules")
-	c.AddCommand(enable, disable, show, load, save)
+	ruleGroup := &cobra.Command{
+		Use:   "rule-group",
+		Short: "rule group configurations",
+	}
+	ruleGroupShow := &cobra.Command{
+		Use:   "show [id]",
+		Short: "show rule group configuration(s)",
+		Run:   showRuleGroupFunc,
+	}
+	ruleGroupSet := &cobra.Command{
+		Use:   "set <id> <index> <override>",
+		Short: "update rule group configuration",
+		Run:   updateRuleGroupFunc,
+	}
+	ruleGroupDelete := &cobra.Command{
+		Use:   "delete <id>",
+		Short: "delete rule group configuration",
+		Run:   deleteRuleGroupFunc,
+	}
+	ruleGroup.AddCommand(ruleGroupShow, ruleGroupSet, ruleGroupDelete)
+	c.AddCommand(enable, disable, show, load, save, ruleGroup)
 	return c
 }
 
@@ -507,31 +529,88 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	}
-	var rules []*placement.Rule
-	if err = json.Unmarshal(content, &rules); err != nil {
+
+	var opts []*placement.RuleOp
+	if err = json.Unmarshal(content, &opts); err != nil {
 		cmd.Println(err)
 		return
 	}
-	for _, r := range rules {
-		if r.Count > 0 {
-			b, _ := json.Marshal(r)
-			_, err = doRequest(cmd, rulePrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
-			if err != nil {
-				fmt.Printf("failed to save rule %s/%s: %v\n", r.GroupID, r.ID, err)
-				return
-			}
-			fmt.Printf("saved rule %s/%s\n", r.GroupID, r.ID)
+
+	validOpts := opts[:0]
+	for _, op := range opts {
+		if op.Count > 0 {
+			op.Action = placement.RuleOpAdd
+			validOpts = append(validOpts, op)
+		} else if op.Count == 0 {
+			op.Action = placement.RuleOpDel
+			validOpts = append(validOpts, op)
 		}
 	}
-	for _, r := range rules {
-		if r.Count == 0 {
-			_, err = doRequest(cmd, path.Join(rulePrefix, r.GroupID, r.ID), http.MethodDelete)
-			if err != nil {
-				fmt.Printf("failed to delete rule %s/%s: %v\n", r.GroupID, r.ID, err)
-				return
-			}
-			fmt.Printf("deleted rule %s/%s\n", r.GroupID, r.ID)
-		}
+
+	b, _ := json.Marshal(validOpts)
+	_, err = doRequest(cmd, rulesBatchPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
+	if err != nil {
+		cmd.Printf("failed to save rules %s: %s\n", b, err)
+		return
+	}
+
+	cmd.Println("Success!")
+}
+
+func showRuleGroupFunc(cmd *cobra.Command, args []string) {
+	if len(args) > 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+
+	reqPath := ruleGroupsPrefix
+	if len(args) > 0 {
+		reqPath = path.Join(ruleGroupPrefix, args[0])
+	}
+
+	res, err := doRequest(cmd, reqPath, http.MethodGet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println(res)
+}
+
+func updateRuleGroupFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 3 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	index, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil {
+		cmd.Printf("index %s should be a number\n", args[1])
+		return
+	}
+	var override bool
+	switch strings.ToLower(args[2]) {
+	case "false":
+	case "true":
+		override = true
+	default:
+		cmd.Printf("override %s should be a boolean\n", args[2])
+		return
+	}
+	postJSON(cmd, ruleGroupPrefix, map[string]interface{}{
+		"id":       args[0],
+		"index":    index,
+		"override": override,
+	})
+}
+
+func deleteRuleGroupFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	_, err := doRequest(cmd, path.Join(ruleGroupPrefix, args[0]), http.MethodDelete)
+	if err != nil {
+		cmd.Printf("Failed to remove rule group config: %s \n", err)
+		return
 	}
 	cmd.Println("Success!")
 }

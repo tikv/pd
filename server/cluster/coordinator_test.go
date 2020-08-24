@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,17 +25,18 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/kv"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
-	"github.com/pingcap/pd/v4/server/schedulers"
-	"github.com/pingcap/pd/v4/server/statistics"
+	"github.com/tikv/pd/pkg/mock/mockhbstream"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/statistics"
 )
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
@@ -153,7 +154,7 @@ type testCoordinatorSuite struct {
 
 func (s *testCoordinatorSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testCoordinatorSuite) TearDownSuite(c *C) {
@@ -273,16 +274,6 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	wg.Wait()
 }
 
-func MaxUint64(nums ...uint64) uint64 {
-	result := uint64(0)
-	for _, num := range nums {
-		if num > result {
-			result = num
-		}
-	}
-	return result
-}
-
 func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run func(*coordinator), c *C) (*testCluster, *coordinator, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg, opt, err := newTestScheduleConfig()
@@ -333,7 +324,7 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	s.checkRegion(c, tc, co, 1, false, 0)
 
 	r := tc.GetRegion(1)
-	p := &metapb.Peer{Id: 1, StoreId: 1, IsLearner: true}
+	p := &metapb.Peer{Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}
 	r = r.Clone(
 		core.WithAddPeer(p),
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
@@ -371,7 +362,7 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	defer cleanup()
 
 	c.Assert(tc.addRegionStore(1, 0), IsNil)
-	num := 1 + MaxUint64(co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
+	num := 1 + typeutil.MaxUint64(co.cluster.GetReplicaScheduleLimit(), co.cluster.GetMergeScheduleLimit())
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
@@ -875,7 +866,7 @@ type testOperatorControllerSuite struct {
 
 func (s *testOperatorControllerSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testOperatorControllerSuite) TearDownSuite(c *C) {
@@ -996,7 +987,7 @@ type testScheduleControllerSuite struct {
 
 func (s *testScheduleControllerSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (s *testScheduleControllerSuite) TearDownSuite(c *C) {
