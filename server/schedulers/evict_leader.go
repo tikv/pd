@@ -50,7 +50,7 @@ func init() {
 			}
 			conf, ok := v.(*evictLeaderSchedulerConfig)
 			if !ok {
-				return errs.ErrScheduleConfigNotExist
+				return ErrScheduleConfigNotExist
 			}
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
@@ -341,7 +341,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		}
 		if last {
 			if err := handler.config.cluster.RemoveScheduler(EvictLeaderName); err != nil {
-				if err == errs.ErrSchedulerNotFound {
+				if err == ErrSchedulerNotFound {
 					handler.rd.JSON(w, http.StatusNotFound, err)
 				} else {
 					handler.rd.JSON(w, http.StatusInternalServerError, err)
@@ -354,7 +354,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	handler.rd.JSON(w, http.StatusNotFound, errs.ErrScheduleConfigNotExist)
+	handler.rd.JSON(w, http.StatusNotFound, ErrScheduleConfigNotExist)
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
