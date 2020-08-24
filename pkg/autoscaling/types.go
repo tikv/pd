@@ -20,7 +20,6 @@ import (
 	"strings"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -137,23 +136,12 @@ func (t *TiDBInfo) getLabelValue(key string) string {
 	return ""
 }
 
-var (
-	tidbInfoPattern *regexp.Regexp
-	err             error
-)
-
-func init() {
-	tidbInfoPattern, err = regexp.Compile("/topology/tidb/.+/info")
-	if err != nil {
-		log.Fatal(err.Error())
-	}
-}
-
 // GetLabels returns the labels of the tidb.
 func (t *TiDBInfo) getLabels() map[string]string {
 	return t.Labels
 }
 
+// GetTiDB get TiDB info which registered in PD by address
 func GetTiDB(etcdClient *clientv3.Client, address string) (*TiDBInfo, error) {
 	key := fmt.Sprintf("/topology/tidb/%s/info", address)
 	resp, err := etcdutil.EtcdKVGet(etcdClient, key)
@@ -173,7 +161,12 @@ func GetTiDB(etcdClient *clientv3.Client, address string) (*TiDBInfo, error) {
 	return tidb, nil
 }
 
+// GetTiDBs list TiDB register in PD
 func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
+	tidbInfoPattern, err := regexp.Compile("/topology/tidb/.+/info")
+	if err != nil {
+		return nil, err
+	}
 	prefix := "/topology/tidb/"
 	resps, err := etcdutil.EtcdKVGet(etcdClient, prefix, clientv3.WithPrefix())
 	if err != nil {
