@@ -207,8 +207,6 @@ func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.Canc
 
 func (c *client) GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error) {
 	start := time.Now()
-	defer func() { cmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
-
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	resp, err := c.leaderClient().GetMembers(ctx, &pdpb.GetMembersRequest{})
 	cancel()
