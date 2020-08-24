@@ -16,7 +16,6 @@ package member
 import (
 	"context"
 	"fmt"
-	"github.com/pingcap/pd/v4/pkg/errs"
 	"math/rand"
 	"os"
 	"path"
