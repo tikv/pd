@@ -26,8 +26,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/testutil"
-	"github.com/pingcap/pd/v3/server"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
 	"google.golang.org/grpc"
 )
 

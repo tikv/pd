@@ -24,14 +24,14 @@ import (
 
 	"github.com/pingcap/check"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/tempurl"
-	"github.com/pingcap/pd/v3/pkg/typeutil"
+	"github.com/tikv/pd/pkg/tempurl"
+	"github.com/tikv/pd/pkg/typeutil"
 	"go.etcd.io/etcd/embed"
 
 	// Register namespace classifiers.
-	_ "github.com/pingcap/pd/v3/table"
+	_ "github.com/tikv/pd/table"
 	// Register schedulers
-	_ "github.com/pingcap/pd/v3/server/schedulers"
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
 // CleanupFunc closes test pd server(s) and deletes any files left behind.

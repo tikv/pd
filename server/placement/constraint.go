@@ -13,7 +13,7 @@
 
 package placement
 
-import "github.com/pingcap/pd/v3/server/core"
+import "github.com/tikv/pd/server/core"
 
 // Config is consist of a list of constraints.
 type Config struct {

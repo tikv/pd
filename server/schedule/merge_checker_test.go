@@ -19,11 +19,11 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v3/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v3/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/v3/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/namespace"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockhbstream"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/namespace"
 )
 
 func TestChecker(t *testing.T) {

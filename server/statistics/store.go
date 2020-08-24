@@ -17,7 +17,7 @@ import (
 	"sync"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v3/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 // StoresStats is a cache hold hot regions.

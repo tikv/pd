@@ -25,14 +25,14 @@ import (
 	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/api"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/tests"
-	"github.com/pingcap/pd/v3/tools/pd-ctl/pdctl"
-	ctl "github.com/pingcap/pd/v3/tools/pd-ctl/pdctl"
-	"github.com/pingcap/pd/v3/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl"
+	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
 // InitCommand is used to initialize command.

@@ -22,9 +22,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/etcdutil"
-	"github.com/pingcap/pd/v3/server"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )

@@ -16,7 +16,7 @@ package schedule
 import (
 	"math"
 
-	"github.com/pingcap/pd/v3/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 const replicaBaseScore = 100

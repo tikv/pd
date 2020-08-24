@@ -24,19 +24,19 @@ import (
 
 	"github.com/BurntSushi/toml"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/logutil"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/api"
-	"github.com/pingcap/pd/v3/server/statistics"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/cases"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/simutil"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/tools/pd-simulator/simulator"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 
 	// Register schedulers.
-	_ "github.com/pingcap/pd/v3/server/schedulers"
+	_ "github.com/tikv/pd/server/schedulers"
 	// Register namespace classifiers.
-	_ "github.com/pingcap/pd/v3/table"
+	_ "github.com/tikv/pd/table"
 )
 
 var (

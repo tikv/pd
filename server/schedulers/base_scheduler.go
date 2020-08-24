@@ -17,7 +17,7 @@ import (
 	"time"
 
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/server/schedule"
+	"github.com/tikv/pd/server/schedule"
 )
 
 // options for interval of schedulers

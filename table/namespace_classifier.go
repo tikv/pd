@@ -24,9 +24,9 @@ import (
 	"time"
 
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/namespace"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/namespace"
 	"go.uber.org/zap"
 )
 

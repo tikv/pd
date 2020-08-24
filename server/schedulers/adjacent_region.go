@@ -19,9 +19,9 @@ import (
 	"time"
 
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/schedule"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"go.uber.org/zap"
 )
 

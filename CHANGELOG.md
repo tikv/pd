@@ -2,33 +2,33 @@
 
 ## v3.0.4
 
-+ Fix a thread-safe bug and improve code [#1719](https://github.com/pingcap/pd/pull/1719)
-+ Fix TLS in pd control [#1729](https://github.com/pingcap/pd/pull/1729)
-+ Fix the issue that a region does not merge to the sibling with smaller size [#1723](https://github.com/pingcap/pd/pull/1723)
++ Fix a thread-safe bug and improve code [#1719](https://github.com/tikv/pd/pull/1719)
++ Fix TLS in pd control [#1729](https://github.com/tikv/pd/pull/1729)
++ Fix the issue that a region does not merge to the sibling with smaller size [#1723](https://github.com/tikv/pd/pull/1723)
 
 ## v3.0.3
 
-+ Return success message for `pdctl` [#1685](https://github.com/pingcap/pd/pull/1685)
++ Return success message for `pdctl` [#1685](https://github.com/tikv/pd/pull/1685)
 
 ## v3.0.2
 
-+ Fix the bug that the Scatter Region scheduler cannot work [#1642](https://github.com/pingcap/pd/pull/1642)
-+ Fix the bug that the merge region operation cannot be performed in PD Control [#1653](https://github.com/pingcap/pd/pull/1653)
-+ Fix the bug that the remove-tombstone operation cannot be performed in PD Control [#1651](https://github.com/pingcap/pd/pull/1651)
-+ Fix the issue that the Region intersecting with the key scope cannot be found when performing the scan region operation [#1648](https://github.com/pingcap/pd/pull/1648)
-+ Add the retrying mechanism to make sure that the members are added successfully in PD [#1643](https://github.com/pingcap/pd/pull/1643)
++ Fix the bug that the Scatter Region scheduler cannot work [#1642](https://github.com/tikv/pd/pull/1642)
++ Fix the bug that the merge region operation cannot be performed in PD Control [#1653](https://github.com/tikv/pd/pull/1653)
++ Fix the bug that the remove-tombstone operation cannot be performed in PD Control [#1651](https://github.com/tikv/pd/pull/1651)
++ Fix the issue that the Region intersecting with the key scope cannot be found when performing the scan region operation [#1648](https://github.com/tikv/pd/pull/1648)
++ Add the retrying mechanism to make sure that the members are added successfully in PD [#1643](https://github.com/tikv/pd/pull/1643)
 
 ## v3.0.1
 
-+ Fix the issue about the limit of the hot region [#1552](https://github.com/pingcap/pd/pull/1552)
-+ Add a option about grpc gateway [#1596](https://github.com/pingcap/pd/pull/1596)
-+ Add the missing schedule config items [#1601](https://github.com/pingcap/pd/pull/1601)
-+ Fix the issue about checking the number of replicas before scheduling for hot region scheduler [#1609](https://github.com/pingcap/pd/pull/1609)
-+ Set influence for the operator according to the region size [#1613](https://github.com/pingcap/pd/pull/1613)
-+ Enlarge the default limit of the hot region scheduler [#1616](https://github.com/pingcap/pd/pull/1616)
-+ Fix the issue about ignoring the pending peer when balancing regions [#1617](https://github.com/pingcap/pd/pull/1617)
-+ Fix the issue about some Region meta keys in log output are not in the hex format [#1627](https://github.com/pingcap/pd/pull/1627)
-+ Fix the issue about `random-merge` and `admin-merge-region` cannot be added [#1633](https://github.com/pingcap/pd/pull/1633)
++ Fix the issue about the limit of the hot region [#1552](https://github.com/tikv/pd/pull/1552)
++ Add a option about grpc gateway [#1596](https://github.com/tikv/pd/pull/1596)
++ Add the missing schedule config items [#1601](https://github.com/tikv/pd/pull/1601)
++ Fix the issue about checking the number of replicas before scheduling for hot region scheduler [#1609](https://github.com/tikv/pd/pull/1609)
++ Set influence for the operator according to the region size [#1613](https://github.com/tikv/pd/pull/1613)
++ Enlarge the default limit of the hot region scheduler [#1616](https://github.com/tikv/pd/pull/1616)
++ Fix the issue about ignoring the pending peer when balancing regions [#1617](https://github.com/tikv/pd/pull/1617)
++ Fix the issue about some Region meta keys in log output are not in the hex format [#1627](https://github.com/tikv/pd/pull/1627)
++ Fix the issue about `random-merge` and `admin-merge-region` cannot be added [#1633](https://github.com/tikv/pd/pull/1633)
 
 ## v3.0.0
 
@@ -61,72 +61,72 @@
 
 ## v3.0.0-rc.3
 
-+ Add light peer without considering the influence [1563](https://github.com/pingcap/pd/pull/1563)
-+ Add initialized flag in cluster status [1581](https://github.com/pingcap/pd/pull/1581)
-+ Add option to only merge from left into right [1583](https://github.com/pingcap/pd/pull/1583)
-+ Improve config check [1585](https://github.com/pingcap/pd/pull/1585)
-+ Fix store maybe always overloaded [1590](https://github.com/pingcap/pd/pull/1590)
-+ Adjust store balance rate meaning [1591](https://github.com/pingcap/pd/pull/1591)
++ Add light peer without considering the influence [1563](https://github.com/tikv/pd/pull/1563)
++ Add initialized flag in cluster status [1581](https://github.com/tikv/pd/pull/1581)
++ Add option to only merge from left into right [1583](https://github.com/tikv/pd/pull/1583)
++ Improve config check [1585](https://github.com/tikv/pd/pull/1585)
++ Fix store maybe always overloaded [1590](https://github.com/tikv/pd/pull/1590)
++ Adjust store balance rate meaning [1591](https://github.com/tikv/pd/pull/1591)
 
 ## v3.0.0-rc.2
 
-+ Enable the Region storage by default to store the Region metadata [1524](https://github.com/pingcap/pd/pull/1524)
-+ Fix the issue that hot Region scheduling is preempted by another scheduler [1522](https://github.com/pingcap/pd/pull/1522)
-+ Fix the issue that the priority for the leader does not take effect [1533](https://github.com/pingcap/pd/pull/1533)
-+ Add the gRPC interface for ScanRegions [1535](https://github.com/pingcap/pd/pull/1535)
-+ Push operators actively [1536](https://github.com/pingcap/pd/pull/1536)
-+ Add the store limit mechanism for separately controlling the speed of operators for each store [1474](https://github.com/pingcap/pd/pull/1474)
-+ Fix the issue of inconsistent Config status [1476](https://github.com/pingcap/pd/pull/1476)
++ Enable the Region storage by default to store the Region metadata [1524](https://github.com/tikv/pd/pull/1524)
++ Fix the issue that hot Region scheduling is preempted by another scheduler [1522](https://github.com/tikv/pd/pull/1522)
++ Fix the issue that the priority for the leader does not take effect [1533](https://github.com/tikv/pd/pull/1533)
++ Add the gRPC interface for ScanRegions [1535](https://github.com/tikv/pd/pull/1535)
++ Push operators actively [1536](https://github.com/tikv/pd/pull/1536)
++ Add the store limit mechanism for separately controlling the speed of operators for each store [1474](https://github.com/tikv/pd/pull/1474)
++ Fix the issue of inconsistent Config status [1476](https://github.com/tikv/pd/pull/1476)
 
 ## v3.0.0-rc.1
 
-+ Upgrade ETCD [1452](https://github.com/pingcap/pd/pull/1452)
++ Upgrade ETCD [1452](https://github.com/tikv/pd/pull/1452)
     - Unify the log format of etcd and PD server
     - Fix the issue of failing to elect Leader by PreVote
     - Support fast dropping the “propose” and “read” requests that are to fail to avoid blocking the subsequent requests
     - Fix the deadlock issue of Lease
-+ Fix the issue that a hot store makes incorrect statistics of keys [1487](https://github.com/pingcap/pd/pull/1487)
-+ Support forcibly rebuilding a PD cluster from a single PD node [1485](https://github.com/pingcap/pd/pull/1485)
-+ Fix the issue that regionScatterer might generate an invalid OperatorStep [1482](https://github.com/pingcap/pd/pull/1482)
-+ Fix the too short timeout issue of the MergeRegion operator [1495](https://github.com/pingcap/pd/pull/1495)
-+ Support giving high priority to hot region scheduling [1492](https://github.com/pingcap/pd/pull/1492)
-+ Add the metrics for recording the time of handling TSO requests on the PD server side [1502](https://github.com/pingcap/pd/pull/1502)
-+ Add the corresponding Store ID and Address to the metrics related to the store [1506](https://github.com/pingcap/pd/pull/1506)
-+ Support the GetOperator service [1477](https://github.com/pingcap/pd/pull/1477)
-+ Fix the issue that the error cannot be sent in the Heartbeat stream because the store cannot be found [1521](https://github.com/pingcap/pd/pull/1521)
++ Fix the issue that a hot store makes incorrect statistics of keys [1487](https://github.com/tikv/pd/pull/1487)
++ Support forcibly rebuilding a PD cluster from a single PD node [1485](https://github.com/tikv/pd/pull/1485)
++ Fix the issue that regionScatterer might generate an invalid OperatorStep [1482](https://github.com/tikv/pd/pull/1482)
++ Fix the too short timeout issue of the MergeRegion operator [1495](https://github.com/tikv/pd/pull/1495)
++ Support giving high priority to hot region scheduling [1492](https://github.com/tikv/pd/pull/1492)
++ Add the metrics for recording the time of handling TSO requests on the PD server side [1502](https://github.com/tikv/pd/pull/1502)
++ Add the corresponding Store ID and Address to the metrics related to the store [1506](https://github.com/tikv/pd/pull/1506)
++ Support the GetOperator service [1477](https://github.com/tikv/pd/pull/1477)
++ Fix the issue that the error cannot be sent in the Heartbeat stream because the store cannot be found [1521](https://github.com/tikv/pd/pull/1521)
 
 ## v3.0.0-beta.1
 
 + Unify the log format for easy collection and analysis by tools
 + Simulator
-    - Support different heartbeat intervals in different stores [#1418](https://github.com/pingcap/pd/pull/1418)
-    - Add a case about importing data [#1263](https://github.com/pingcap/pd/pull/1263)
-+ Make hotspot scheduling configurable [#1412](https://github.com/pingcap/pd/pull/1412)
-+ Add the store address as the dimension monitoring item to replace the previous Store ID [#1429](https://github.com/pingcap/pd/pull/1429)
-+ Optimize the `GetStores` overhead to speed up the Region inspection cycle [#1410](https://github.com/pingcap/pd/pull/1410)
-+ Add an interface to delete the Tombstone Store [#1472](https://github.com/pingcap/pd/pull/1472)
+    - Support different heartbeat intervals in different stores [#1418](https://github.com/tikv/pd/pull/1418)
+    - Add a case about importing data [#1263](https://github.com/tikv/pd/pull/1263)
++ Make hotspot scheduling configurable [#1412](https://github.com/tikv/pd/pull/1412)
++ Add the store address as the dimension monitoring item to replace the previous Store ID [#1429](https://github.com/tikv/pd/pull/1429)
++ Optimize the `GetStores` overhead to speed up the Region inspection cycle [#1410](https://github.com/tikv/pd/pull/1410)
++ Add an interface to delete the Tombstone Store [#1472](https://github.com/tikv/pd/pull/1472)
 
 ## v3.0.0-beta
-- Add `RegionStorage` to store Region metadata separately [#1237](https://github.com/pingcap/pd/pull/1237)
-- Add shuffle hot Region scheduler [#1361](https://github.com/pingcap/pd/pull/1361)
-- Add scheduling parameter related metrics [#1406](https://github.com/pingcap/pd/pull/1406)
-- Add cluster label related metrics [#1402](https://github.com/pingcap/pd/pull/1402)
-- Add the importing data simulator [#1263](https://github.com/pingcap/pd/pull/1263)
-- Fix the `Watch` issue about leader election [#1396](https://github.com/pingcap/pd/pull/1396)
+- Add `RegionStorage` to store Region metadata separately [#1237](https://github.com/tikv/pd/pull/1237)
+- Add shuffle hot Region scheduler [#1361](https://github.com/tikv/pd/pull/1361)
+- Add scheduling parameter related metrics [#1406](https://github.com/tikv/pd/pull/1406)
+- Add cluster label related metrics [#1402](https://github.com/tikv/pd/pull/1402)
+- Add the importing data simulator [#1263](https://github.com/tikv/pd/pull/1263)
+- Fix the `Watch` issue about leader election [#1396](https://github.com/tikv/pd/pull/1396)
 
 ## v2.1.2
-- Fix the Region information update issue about Region merge [#1377](https://github.com/pingcap/pd/pull/1377)
+- Fix the Region information update issue about Region merge [#1377](https://github.com/tikv/pd/pull/1377)
 
 ## v2.1.1
-- Fix the issue that some configuration items cannot be set to `0` in the configuration file [#1334](https://github.com/pingcap/pd/pull/1334)
-- Check the undefined configuration when starting PD [#1362](https://github.com/pingcap/pd/pull/1362)
-- Avoid transferring the leader to a newly created peer, to optimize the possible delay [#1339](https://github.com/pingcap/pd/pull/1339)
-- Fix the issue that `RaftCluster` cannot stop caused by deadlock [#1370](https://github.com/pingcap/pd/pull/1370)
+- Fix the issue that some configuration items cannot be set to `0` in the configuration file [#1334](https://github.com/tikv/pd/pull/1334)
+- Check the undefined configuration when starting PD [#1362](https://github.com/tikv/pd/pull/1362)
+- Avoid transferring the leader to a newly created peer, to optimize the possible delay [#1339](https://github.com/tikv/pd/pull/1339)
+- Fix the issue that `RaftCluster` cannot stop caused by deadlock [#1370](https://github.com/tikv/pd/pull/1370)
 
 ## v2.1.0
 + Optimize availability
     - Introduce the version control mechanism and support rolling update of the cluster compatibly
-    - [Enable `Raft PreVote`](https://github.com/pingcap/pd/blob/5c7b18cf3af91098f07cf46df0b59fbf8c7c5462/conf/config.toml#L22) among PD nodes to avoid leader reelection when network recovers after network isolation
+    - [Enable `Raft PreVote`](https://github.com/tikv/pd/blob/5c7b18cf3af91098f07cf46df0b59fbf8c7c5462/conf/config.toml#L22) among PD nodes to avoid leader reelection when network recovers after network isolation
     - Enable `raft learner` by default to lower the risk of unavailable data caused by machine failure during scheduling
     - TSO allocation is no longer affected by the system clock going backwards
     - Support the `Region merge` feature to reduce the overhead brought by metadata
@@ -138,7 +138,7 @@
     - Optimize the issue that Balance Scheduler schedules small Regions frequently
     - Optimize Region merge to consider the number of rows within the Region
     - [Add more commands to control the scheduling policy](https://pingcap.com/docs/tools/pd-control/#config-show--set-option-value)
-    - Improve [PD simulator](https://github.com/pingcap/pd/tree/release-2.1/tools/pd-simulator) to simulate the scheduling scenarios
+    - Improve [PD simulator](https://github.com/tikv/pd/tree/release-2.1/tools/pd-simulator) to simulate the scheduling scenarios
 
 + API and operation tools
     - Add the [`GetPrevRegion` interface](https://github.com/pingcap/kvproto/blob/8e3f33ac49297d7c93b61a955531191084a2f685/proto/pdpb.proto#L40) to support the `TiDB reverse scan` feature
@@ -164,25 +164,25 @@
     - Optimize the performance of computing hotspot statistics
 
 ## v2.1.0-rc.5
-- Fix the issues related to `pd-ctl` reading the Region key [#1298](https://github.com/pingcap/pd/pull/1298) [#1299](https://github.com/pingcap/pd/pull/1299) [#1308](https://github.com/pingcap/pd/pull/1308)
-- Fix the issue that the `regions/check` API returns the wrong result [#1311](https://github.com/pingcap/pd/pull/1311)
-- Fix the issue that PD cannot restart join after a PD join failure [#1279](https://github.com/pingcap/pd/pull/1279)
-- Fix the issue that `watch leader` might lose events in some cases [#1317](https://github.com/pingcap/pd/pull/1317)
+- Fix the issues related to `pd-ctl` reading the Region key [#1298](https://github.com/tikv/pd/pull/1298) [#1299](https://github.com/tikv/pd/pull/1299) [#1308](https://github.com/tikv/pd/pull/1308)
+- Fix the issue that the `regions/check` API returns the wrong result [#1311](https://github.com/tikv/pd/pull/1311)
+- Fix the issue that PD cannot restart join after a PD join failure [#1279](https://github.com/tikv/pd/pull/1279)
+- Fix the issue that `watch leader` might lose events in some cases [#1317](https://github.com/tikv/pd/pull/1317)
 
 ## v2.1.0-rc.4
-- Fix the issue that the tombstone TiKV is not removed from Grafana [#1261](https://github.com/pingcap/pd/pull/1261)
-- Fix the data race issue when grpc-go configures the status [#1265](https://github.com/pingcap/pd/pull/1265)
-- Fix the issue that the PD server gets stuck caused by etcd startup failure [#1267](https://github.com/pingcap/pd/pull/1267)
-- Fix the issue that data race might occur during leader switching [#1273](https://github.com/pingcap/pd/pull/1273)
-- Fix the issue that extra warning logs might be output when TiKV becomes tombstone [#1280](https://github.com/pingcap/pd/pull/1273)
+- Fix the issue that the tombstone TiKV is not removed from Grafana [#1261](https://github.com/tikv/pd/pull/1261)
+- Fix the data race issue when grpc-go configures the status [#1265](https://github.com/tikv/pd/pull/1265)
+- Fix the issue that the PD server gets stuck caused by etcd startup failure [#1267](https://github.com/tikv/pd/pull/1267)
+- Fix the issue that data race might occur during leader switching [#1273](https://github.com/tikv/pd/pull/1273)
+- Fix the issue that extra warning logs might be output when TiKV becomes tombstone [#1280](https://github.com/tikv/pd/pull/1273)
 
 ## v2.1.0-rc.3
 ### New feature
-- Add the API to get the Region list by size in reverse order [#1254](https://github.com/pingcap/pd/pull/1254)
+- Add the API to get the Region list by size in reverse order [#1254](https://github.com/tikv/pd/pull/1254)
 ### Improvement
-- Return more detailed information in the Region API [#1252](https://github.com/pingcap/pd/pull/1252)
+- Return more detailed information in the Region API [#1252](https://github.com/tikv/pd/pull/1252)
 ### Bug fix
-- Fix the issue that `adjacent-region-scheduler` might lead to a crash after PD switches the leader [#1250](https://github.com/pingcap/pd/pull/1250)
+- Fix the issue that `adjacent-region-scheduler` might lead to a crash after PD switches the leader [#1250](https://github.com/tikv/pd/pull/1250)
 
 ## v2.1.0-rc2
 ### Features

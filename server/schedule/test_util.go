@@ -15,8 +15,8 @@ package schedule
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v3/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v3/server/core"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/server/core"
 )
 
 // ApplyOperatorStep applies operator step. Only for test purpose.

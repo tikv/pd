@@ -1,5 +1,5 @@
 <!--
-Thank you for working on PD! Please read PD's [CONTRIBUTING](https://github.com/pingcap/pd/blob/master/CONTRIBUTING.md) document **BEFORE** filing this PR.
+Thank you for working on PD! Please read PD's [CONTRIBUTING](https://github.com/tikv/pd/blob/master/CONTRIBUTING.md) document **BEFORE** filing this PR.
 -->
 
 ### What problem does this PR solve? <!--add the issue link with summary if it exists-->

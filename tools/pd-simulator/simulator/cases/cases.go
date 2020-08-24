@@ -15,7 +15,7 @@ package cases
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v3/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 // Store is used to simulate tikv.

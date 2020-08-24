@@ -22,8 +22,8 @@ import (
 
 	"github.com/pingcap/errcode"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/apiutil"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/unrolled/render"
 )
 

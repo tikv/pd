@@ -113,15 +113,15 @@ type testTimeFallBackSuite struct {
 }
 
 func (s *testTimeFallBackSuite) SetUpSuite(c *C) {
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v3/server/fallBackSync", `return(true)`), IsNil)
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v3/server/fallBackUpdate", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/fallBackSync", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/fallBackUpdate", `return(true)`), IsNil)
 	s.svr, s.cleanup = mustRunTestServer(c)
 	s.client = s.svr.client
 	mustWaitLeader(c, []*Server{s.svr})
 	s.grpcPDClient = mustNewGrpcClient(c, s.svr.GetAddr())
 	s.svr.Close()
-	failpoint.Disable("github.com/pingcap/pd/v3/server/fallBackSync")
-	failpoint.Disable("github.com/pingcap/pd/v3/server/fallBackUpdate")
+	failpoint.Disable("github.com/tikv/pd/server/fallBackSync")
+	failpoint.Disable("github.com/tikv/pd/server/fallBackUpdate")
 	err := s.svr.Run(context.TODO())
 	c.Assert(err, IsNil)
 	mustWaitLeader(c, []*Server{s.svr})

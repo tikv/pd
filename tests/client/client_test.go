@@ -23,10 +23,10 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	pd "github.com/pingcap/pd/v3/client"
-	"github.com/pingcap/pd/v3/pkg/testutil"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/tests"
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
 	"go.etcd.io/etcd/clientv3"
 )
 
