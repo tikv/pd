@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,12 +28,12 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	pd "github.com/pingcap/pd/v4/client"
-	"github.com/pingcap/pd/v4/pkg/mock/mockid"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/tests"
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/tests"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 )
@@ -205,9 +205,9 @@ func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	c.Assert(err, IsNil)
 
 	start := time.Now()
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/customTimeout", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/customTimeout", "return(true)"), IsNil)
 	_, err = cli.GetAllStores(context.TODO())
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/customTimeout"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/customTimeout"), IsNil)
 	c.Assert(err, NotNil)
 	c.Assert(time.Since(start), GreaterEqual, 1*time.Second)
 	c.Assert(time.Since(start), Less, 2*time.Second)
@@ -676,7 +676,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(min, Equals, uint64(3))
 
 	// Update only the TTL of the minimum safepoint
-	oldMinSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint()
+	oldMinSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(oldMinSsp.ServiceID, Equals, "c")
 	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
@@ -684,7 +684,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		"c", 2000, 3)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(3))
-	minSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint()
+	minSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
@@ -695,7 +695,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		"c", 1, 3)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(3))
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint()
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))

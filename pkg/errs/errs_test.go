@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,12 @@ package errs
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	. "github.com/pingcap/check"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
@@ -50,12 +51,11 @@ type verifyLogger struct {
 	w *testingWriter
 }
 
-func (logger *verifyLogger) Contain(t *testing.T, s string) {
+func (logger *verifyLogger) Message() string {
 	if logger.w.messages == nil {
-		t.Error()
+		return ""
 	}
-	msg := logger.w.messages[len(logger.w.messages)-1]
-	IsContain(t, msg, s)
+	return logger.w.messages[len(logger.w.messages)-1]
 }
 
 func newZapTestLogger(cfg *log.Config, opts ...zap.Option) verifyLogger {
@@ -70,22 +70,25 @@ func newZapTestLogger(cfg *log.Config, opts ...zap.Option) verifyLogger {
 	}
 }
 
-func IsContain(t *testing.T, s1 string, s2 string) {
-	if !strings.Contains(s1, s2) {
-		t.Error()
-	}
+func Test(t *testing.T) {
+	TestingT(t)
 }
 
-func TestError(t *testing.T) {
+var _ = Suite(&testErrorSuite{})
+
+type testErrorSuite struct{}
+
+func (s *testErrorSuite) TestError(c *C) {
 	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
 	lg := newZapTestLogger(conf)
 	log.ReplaceGlobals(lg.Logger, nil)
 
 	rfc := `[error="[PD:tso:ErrInvalidTimestamp] invalid timestamp"]`
 	log.Error("test", zap.Error(ErrInvalidTimestamp.FastGenByArgs()))
-	lg.Contain(t, rfc)
-	cause := `[cause="test err"]`
-	log.Error("test", zap.Error(ErrInvalidTimestamp.FastGenByArgs()), zap.NamedError("cause", errors.New("test err")))
-	lg.Contain(t, rfc)
-	lg.Contain(t, cause)
+	c.Assert(strings.Contains(lg.Message(), rfc), IsTrue)
+	err := errors.New("test error")
+	log.Error("test", ZapError(ErrInvalidTimestamp, err))
+	rfc = `[error="[PD:tso:ErrInvalidTimestamp] test error"]`
+	fmt.Println(lg.Message())
+	c.Assert(strings.Contains(lg.Message(), rfc), IsTrue)
 }

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/etcdutil"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/server/core"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/transport"
 )

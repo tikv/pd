@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datasource
+package autoscaling
 
 import (
 	"bytes"
@@ -26,44 +26,58 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/check"
-	types "github.com/pingcap/pd/v4/pkg/autoscaling"
+	. "github.com/pingcap/check"
 	promClient "github.com/prometheus/client_golang/api"
 )
 
 const (
-	mockDuration                = time.Duration(1e9)
+	mockDuration                = 1 * time.Second
 	mockClusterName             = "mock"
 	mockTiDBInstanceNamePattern = "%s-tidb-%d"
 	mockTiKVInstanceNamePattern = "%s-tikv-%d"
 	mockResultValue             = 1.0
+	mockKubernetesNamespace     = "mock"
 
 	instanceCount = 3
 )
 
-func Test(t *testing.T) {
-	check.TestingT(t)
+func TestPrometheus(t *testing.T) {
+	TestingT(t)
 }
 
-var _ = check.Suite(&testPrometheusQuerierSuite{})
+var _ = Suite(&testPrometheusQuerierSuite{})
 
-var instanceNameTemplate = map[types.ComponentType]string{
-	types.TiDB: mockTiDBInstanceNamePattern,
-	types.TiKV: mockTiKVInstanceNamePattern,
+var podNameTemplate = map[ComponentType]string{
+	TiDB: mockTiDBInstanceNamePattern,
+	TiKV: mockTiKVInstanceNamePattern,
 }
 
-func generateInstanceNames(component types.ComponentType) []string {
+func generatePodNames(component ComponentType) []string {
 	names := make([]string, 0, instanceCount)
-	pattern := instanceNameTemplate[component]
+	pattern := podNameTemplate[component]
 	for i := 0; i < instanceCount; i++ {
-		names = append(names, fmt.Sprintf(pattern, i))
+		names = append(names, fmt.Sprintf(pattern, mockClusterName, i))
 	}
 	return names
 }
 
-var instanceNames = map[types.ComponentType][]string{
-	types.TiDB: generateInstanceNames(types.TiDB),
-	types.TiKV: generateInstanceNames(types.TiKV),
+var podNames = map[ComponentType][]string{
+	TiDB: generatePodNames(TiDB),
+	TiKV: generatePodNames(TiKV),
+}
+
+func generateAddresses(component ComponentType) []string {
+	pods := podNames[component]
+	addresses := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		addresses = append(addresses, fmt.Sprintf("%s.%s-%s-peer.%s.svc:20080", pod, mockClusterName, component.String(), mockKubernetesNamespace))
+	}
+	return addresses
+}
+
+var podAddresses = map[ComponentType][]string{
+	TiDB: generateAddresses(TiDB),
+	TiKV: generateAddresses(TiKV),
 }
 
 type testPrometheusQuerierSuite struct{}
@@ -85,9 +99,10 @@ type result struct {
 }
 
 type metric struct {
-	Cluster  string `json:"cluster,omitempty"`
-	Instance string `json:"instance"`
-	Job      string `json:"job,omitempty"`
+	Cluster             string `json:"cluster,omitempty"`
+	Instance            string `json:"instance"`
+	Job                 string `json:"job,omitempty"`
+	KubernetesNamespace string `json:"kubernetes_namespace"`
 }
 
 type normalClient struct {
@@ -106,8 +121,8 @@ func doURL(ep string, args map[string]string) *url.URL {
 	return u
 }
 
-func (c *normalClient) buildCPUMockData(component types.ComponentType) {
-	instances := instanceNames[component]
+func (c *normalClient) buildCPUMockData(component ComponentType) {
+	pods := podNames[component]
 	cpuUsageQuery := fmt.Sprintf(cpuUsagePromQLTemplate[component], mockDuration)
 	cpuQuotaQuery := cpuQuotaPromQLTemplate[component]
 
@@ -116,8 +131,9 @@ func (c *normalClient) buildCPUMockData(component types.ComponentType) {
 		results = append(results, result{
 			Value: []interface{}{time.Now().Unix(), fmt.Sprintf("%f", mockResultValue)},
 			Metric: metric{
-				Instance: instances[i],
-				Cluster:  mockClusterName,
+				Instance:            pods[i],
+				Cluster:             mockClusterName,
+				KubernetesNamespace: mockKubernetesNamespace,
 			},
 		})
 	}
@@ -135,8 +151,8 @@ func (c *normalClient) buildCPUMockData(component types.ComponentType) {
 }
 
 func (c *normalClient) buildMockData() {
-	c.buildCPUMockData(types.TiDB)
-	c.buildCPUMockData(types.TiKV)
+	c.buildCPUMockData(TiDB)
+	c.buildCPUMockData(TiKV)
 }
 
 func makeJSONResponse(promResp *response) (*http.Response, []byte, error) {
@@ -171,26 +187,26 @@ func (c *normalClient) Do(_ context.Context, req *http.Request) (response *http.
 	return
 }
 
-func (s *testPrometheusQuerierSuite) TestRetrieveCPUMetrics(c *check.C) {
+func (s *testPrometheusQuerierSuite) TestRetrieveCPUMetrics(c *C) {
 	client := &normalClient{
 		mockData: make(map[string]*response),
 	}
 	client.buildMockData()
 	querier := NewPrometheusQuerier(client)
-	metrics := []types.MetricType{types.CPUQuota, types.CPUUsage}
-	for component, instances := range instanceNames {
+	metrics := []MetricType{CPUQuota, CPUUsage}
+	for component, addresses := range podAddresses {
 		for _, metric := range metrics {
-			options := NewQueryOptions(component, metric, instances[:len(instances)-1], time.Now(), mockDuration)
+			options := NewQueryOptions(component, metric, addresses[:len(addresses)-1], time.Now(), mockDuration)
 			result, err := querier.Query(options)
-			c.Assert(err, check.IsNil)
-			for i := 0; i < len(instances)-1; i++ {
-				value, ok := result[instances[i]]
-				c.Assert(ok, check.IsTrue)
-				c.Assert(math.Abs(value-mockResultValue) < 1e-6, check.IsTrue)
+			c.Assert(err, IsNil)
+			for i := 0; i < len(addresses)-1; i++ {
+				value, ok := result[addresses[i]]
+				c.Assert(ok, IsTrue)
+				c.Assert(math.Abs(value-mockResultValue) < 1e-6, IsTrue)
 			}
 
-			_, ok := result[instances[len(instances)-1]]
-			c.Assert(ok, check.IsFalse)
+			_, ok := result[addresses[len(addresses)-1]]
+			c.Assert(ok, IsFalse)
 		}
 	}
 }
@@ -214,13 +230,13 @@ func (c *emptyResponseClient) Do(_ context.Context, req *http.Request) (r *http.
 	return
 }
 
-func (s *testPrometheusQuerierSuite) TestEmptyResponse(c *check.C) {
+func (s *testPrometheusQuerierSuite) TestEmptyResponse(c *C) {
 	client := &emptyResponseClient{}
 	querier := NewPrometheusQuerier(client)
-	options := NewQueryOptions(types.TiDB, types.CPUUsage, instanceNames[types.TiDB], time.Now(), mockDuration)
+	options := NewQueryOptions(TiDB, CPUUsage, podAddresses[TiDB], time.Now(), mockDuration)
 	result, err := querier.Query(options)
-	c.Assert(result, check.IsNil)
-	c.Assert(err, check.NotNil)
+	c.Assert(result, IsNil)
+	c.Assert(err, NotNil)
 }
 
 type errorHTTPStatusClient struct{}
@@ -240,13 +256,13 @@ func (c *errorHTTPStatusClient) Do(_ context.Context, req *http.Request) (r *htt
 	return
 }
 
-func (s *testPrometheusQuerierSuite) TestErrorHTTPStatus(c *check.C) {
+func (s *testPrometheusQuerierSuite) TestErrorHTTPStatus(c *C) {
 	client := &errorHTTPStatusClient{}
 	querier := NewPrometheusQuerier(client)
-	options := NewQueryOptions(types.TiDB, types.CPUUsage, instanceNames[types.TiDB], time.Now(), mockDuration)
+	options := NewQueryOptions(TiDB, CPUUsage, podAddresses[TiDB], time.Now(), mockDuration)
 	result, err := querier.Query(options)
-	c.Assert(result, check.IsNil)
-	c.Assert(err, check.NotNil)
+	c.Assert(result, IsNil)
+	c.Assert(err, NotNil)
 }
 
 type errorPrometheusStatusClient struct{}
@@ -264,11 +280,47 @@ func (c *errorPrometheusStatusClient) Do(_ context.Context, req *http.Request) (
 	return
 }
 
-func (s *testPrometheusQuerierSuite) TestErrorPrometheusStatus(c *check.C) {
+func (s *testPrometheusQuerierSuite) TestErrorPrometheusStatus(c *C) {
 	client := &errorPrometheusStatusClient{}
 	querier := NewPrometheusQuerier(client)
-	options := NewQueryOptions(types.TiDB, types.CPUUsage, instanceNames[types.TiDB], time.Now(), mockDuration)
+	options := NewQueryOptions(TiDB, CPUUsage, podAddresses[TiDB], time.Now(), mockDuration)
 	result, err := querier.Query(options)
-	c.Assert(result, check.IsNil)
-	c.Assert(err, check.NotNil)
+	c.Assert(result, IsNil)
+	c.Assert(err, NotNil)
+}
+
+func (s *testPrometheusQuerierSuite) TestGetInstanceNameFromAddress(c *C) {
+	testcases := []struct {
+		address              string
+		expectedInstanceName string
+	}{
+		{
+			address:              "test-tikv-0.test-tikv-peer.namespace.svc:20080",
+			expectedInstanceName: "test-tikv-0_namespace",
+		},
+		{
+			address:              "test-tikv-0.test-tikv-peer.namespace.svc",
+			expectedInstanceName: "test-tikv-0_namespace",
+		},
+		{
+			address:              "tidb-0_10080",
+			expectedInstanceName: "",
+		},
+		{
+			address:              "1.2.3.4:2333",
+			expectedInstanceName: "",
+		},
+		{
+			address:              "1.2.3.4",
+			expectedInstanceName: "",
+		},
+	}
+	for _, testcase := range testcases {
+		instanceName, err := getInstanceNameFromAddress(testcase.address)
+		if testcase.expectedInstanceName == "" {
+			c.Assert(err, NotNil)
+		} else {
+			c.Assert(instanceName, Equals, testcase.expectedInstanceName)
+		}
+	}
 }

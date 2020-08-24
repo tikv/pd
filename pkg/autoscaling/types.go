@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,23 +13,23 @@
 
 package autoscaling
 
-import "github.com/pingcap/kvproto/pkg/metapb"
+import (
+	"strings"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+)
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.
 type Strategy struct {
-	// The basic unit of MaxCPUQuota is milli-core.
-	MaxCPUQuota uint64      `json:"max_cpu_quota"`
-	Rules       []*Rule     `json:"rules"`
-	Resources   []*Resource `json:"resources"`
+	Rules     []*Rule     `json:"rules"`
+	Resources []*Resource `json:"resources"`
 }
 
 // Rule is a set of constraints for a kind of component.
 type Rule struct {
-	Component               string       `json:"component"`
-	CPURule                 *CPURule     `json:"cpu_rule,omitempty"`
-	StorageRule             *StorageRule `json:"storage_rule,omitempty"`
-	ScaleOutIntervalSeconds uint64       `json:"scale_out_interval_seconds"`
-	ScaleInIntervalSeconds  uint64       `json:"scale_in_interval_seconds"`
+	Component   string       `json:"component"`
+	CPURule     *CPURule     `json:"cpu_rule,omitempty"`
+	StorageRule *StorageRule `json:"storage_rule,omitempty"`
 }
 
 // CPURule is the constraints about CPU.
@@ -110,4 +110,31 @@ func (c MetricType) String() string {
 type instance struct {
 	id      uint64
 	address string
+}
+
+// TiDBInformer is used to fetch tidb info
+// TODO: implement TiDBInformer
+type tidbInformer interface {
+	GetTiDB(address string) *TiDBInfo
+}
+
+// TiDBInfo record the detail tidb info
+type TiDBInfo struct {
+	Address string
+	Labels  map[string]string
+}
+
+// GetLabelValue returns a label's value (if exists).
+func (t *TiDBInfo) getLabelValue(key string) string {
+	for k, v := range t.getLabels() {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return ""
+}
+
+// GetLabels returns the labels of the tidb.
+func (t *TiDBInfo) getLabels() map[string]string {
+	return t.Labels
 }

@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 var _ = Suite(&testFitSuite{})
@@ -59,7 +59,7 @@ func (s *testFitSuite) makeRegion(def string) *core.RegionInfo {
 			idStr, role = splits[0], PeerRoleType(splits[1])
 		}
 		id, _ := strconv.Atoi(idStr)
-		peer := &metapb.Peer{Id: uint64(id), StoreId: uint64(id), IsLearner: role == Learner}
+		peer := &metapb.Peer{Id: uint64(id), StoreId: uint64(id), Role: role.MetaPeerRole()}
 		regionMeta.Peers = append(regionMeta.Peers, peer)
 		if role == Leader {
 			leader = peer
