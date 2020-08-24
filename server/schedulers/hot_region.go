@@ -1215,8 +1215,9 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 	case movePeer:
 		srcPeer := bs.cur.region.GetStorePeer(bs.cur.srcStoreID) // checked in getRegionAndSrcPeer
 		dstPeer := &metapb.Peer{StoreId: bs.cur.dstStoreID, Role: srcPeer.Role}
+		desc := "move-hot-" + bs.rwTy.String() + "-peer"
 		op, err = operator.CreateMovePeerOperator(
-			"move-hot-"+bs.rwTy.String()+"-region",
+			desc,
 			bs.cluster,
 			bs.cur.region,
 			operator.OpHotRegion,
@@ -1224,22 +1225,23 @@ func (bs *balanceSolver) buildOperators() ([]*operator.Operator, []Influence) {
 			dstPeer)
 
 		counters = append(counters,
-			balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(bs.cur.srcStoreID, 10)+"-out"),
-			balanceHotRegionCounter.WithLabelValues("move-peer", strconv.FormatUint(dstPeer.GetStoreId(), 10)+"-in"))
+			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
+			hotDirectionCounter.WithLabelValues("move-peer", bs.rwTy.String(), strconv.FormatUint(dstPeer.GetStoreId(), 10), "in"))
 	case transferLeader:
 		if bs.cur.region.GetStoreVoter(bs.cur.dstStoreID) == nil {
 			return nil, nil
 		}
+		desc := "transfer-hot-" + bs.rwTy.String() + "-leader"
 		op, err = operator.CreateTransferLeaderOperator(
-			"transfer-hot-"+bs.rwTy.String()+"-leader",
+			desc,
 			bs.cluster,
 			bs.cur.region,
 			bs.cur.srcStoreID,
 			bs.cur.dstStoreID,
 			operator.OpHotRegion)
 		counters = append(counters,
-			balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(bs.cur.srcStoreID, 10)+"-out"),
-			balanceHotRegionCounter.WithLabelValues("move-leader", strconv.FormatUint(bs.cur.dstStoreID, 10)+"-in"))
+			hotDirectionCounter.WithLabelValues("transfer-leader", bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStoreID, 10), "out"),
+			hotDirectionCounter.WithLabelValues("transfer-leader", bs.rwTy.String(), strconv.FormatUint(bs.cur.dstStoreID, 10), "in"))
 	}
 
 	if err != nil {
