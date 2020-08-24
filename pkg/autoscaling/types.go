@@ -118,13 +118,6 @@ type instance struct {
 	address string
 }
 
-// TiDBInformer is used to fetch tidb info
-// TODO: implement TiDBInformer
-type tidbInformer interface {
-	GetTiDB(address string) (*TiDBInfo, error)
-	GetTiDBs() ([]*TiDBInfo, error)
-}
-
 // TiDBInfo record the detail tidb info
 type TiDBInfo struct {
 	Version        *string           `json:"version,omitempty"`
@@ -161,19 +154,9 @@ func (t *TiDBInfo) getLabels() map[string]string {
 	return t.Labels
 }
 
-type tidbInformerImpl struct {
-	etcdClient *clientv3.Client
-}
-
-func newTidbInformer(client *clientv3.Client) tidbInformer {
-	return &tidbInformerImpl{
-		etcdClient: client,
-	}
-}
-
-func (informer *tidbInformerImpl) GetTiDB(address string) (*TiDBInfo, error) {
+func GetTiDB(etcdClient *clientv3.Client, address string) (*TiDBInfo, error) {
 	key := fmt.Sprintf("/topology/tidb/%s/info", address)
-	resp, err := etcdutil.EtcdKVGet(informer.etcdClient, key)
+	resp, err := etcdutil.EtcdKVGet(etcdClient, key)
 	if err != nil {
 		return nil, err
 	}
@@ -190,9 +173,9 @@ func (informer *tidbInformerImpl) GetTiDB(address string) (*TiDBInfo, error) {
 	return tidb, nil
 }
 
-func (informer *tidbInformerImpl) GetTiDBs() ([]*TiDBInfo, error) {
+func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
 	prefix := "/topology/tidb/"
-	resps, err := etcdutil.EtcdKVGet(informer.etcdClient, prefix, clientv3.WithPrefix())
+	resps, err := etcdutil.EtcdKVGet(etcdClient, prefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}

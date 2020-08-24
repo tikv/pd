@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
@@ -70,7 +71,7 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	if component == TiKV {
 		instances = filterTiKVInstances(rc)
 	} else {
-		instances = getTiDBInstances(rc)
+		instances = getTiDBInstances(rc.GetEtcdClient())
 	}
 
 	if len(instances) == 0 {
@@ -117,9 +118,8 @@ func filterTiKVInstances(informer core.StoreSetInformer) []instance {
 	return instances
 }
 
-func getTiDBInstances(rc *cluster.RaftCluster) []instance {
-	informer := newTidbInformer(rc.GetEtcdClient())
-	infos, err := informer.GetTiDBs()
+func getTiDBInstances(etcdClient *clientv3.Client) []instance {
+	infos, err := GetTiDBs(etcdClient)
 	if err != nil {
 		// TODO: error handling
 		return []instance{}
@@ -271,8 +271,7 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 	case TiKV:
 		return getScaledTiKVGroups(rc, healthyInstances)
 	case TiDB:
-		informer := newTidbInformer(rc.GetEtcdClient())
-		return getScaledTiDBGroups(informer, healthyInstances)
+		return getScaledTiDBGroups(rc.GetEtcdClient(), healthyInstances)
 	default:
 		return nil
 	}
@@ -293,10 +292,10 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 	return buildPlans(planMap, TiKV)
 }
 
-func getScaledTiDBGroups(informer tidbInformer, healthyInstances []instance) []*Plan {
+func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instance) []*Plan {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	for _, instance := range healthyInstances {
-		tidb, err := informer.GetTiDB(instance.address)
+		tidb, err := GetTiDB(etcdClient, instance.address)
 		if err != nil {
 			// TODO: error handling
 			return nil
