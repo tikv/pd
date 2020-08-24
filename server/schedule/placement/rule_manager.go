@@ -185,18 +185,31 @@ func (m *RuleManager) GetRule(group, id string) *Rule {
 
 // SetRule inserts or updates a Rule.
 func (m *RuleManager) SetRule(rule *Rule) error {
-	return m.Batch([]RuleOp{{
-		Rule:   rule,
-		Action: RuleOpAdd,
-	}})
+	if err := m.adjustRule(rule); err != nil {
+		return err
+	}
+	m.Lock()
+	defer m.Unlock()
+	p := m.ruleConfig.beginPatch()
+	p.setRule(rule)
+	if err := m.tryCommitPatch(p); err != nil {
+		return err
+	}
+	log.Info("placement rule updated", zap.String("rule", fmt.Sprint(rule)))
+	return nil
 }
 
 // DeleteRule removes a Rule.
 func (m *RuleManager) DeleteRule(group, id string) error {
-	return m.Batch([]RuleOp{{
-		Rule:   &Rule{GroupID: group, ID: id},
-		Action: RuleOpDel,
-	}})
+	m.Lock()
+	defer m.Unlock()
+	p := m.ruleConfig.beginPatch()
+	p.deleteRule(group, id)
+	if err := m.tryCommitPatch(p); err != nil {
+		return err
+	}
+	log.Info("placement rule is removed", zap.String("group", group), zap.String("id", id))
+	return nil
 }
 
 // GetSplitKeys returns all split keys in the range (start, end).
@@ -306,15 +319,21 @@ func (m *RuleManager) savePatch(p *ruleConfig) error {
 
 // SetRules inserts or updates lots of Rules at once.
 func (m *RuleManager) SetRules(rules []*Rule) error {
-	ruleOps := make([]RuleOp, len(rules))
-	for i, rule := range rules {
-		err := m.adjustRule(rule)
-		if err != nil {
+	m.Lock()
+	defer m.Unlock()
+	p := m.ruleConfig.beginPatch()
+	for _, r := range rules {
+		if err := m.adjustRule(r); err != nil {
 			return err
 		}
-		ruleOps[i] = RuleOp{Rule: rule, Action: RuleOpAdd}
+		p.setRule(r)
 	}
-	return m.Batch(ruleOps)
+	if err := m.tryCommitPatch(p); err != nil {
+		return err
+	}
+
+	log.Info("placement rules updated", zap.String("rules", fmt.Sprint(rules)))
+	return nil
 }
 
 // RuleOpType indicates the operation type
