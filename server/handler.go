@@ -825,11 +825,11 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 
 // ResetTS resets the ts with specified tso.
 func (h *Handler) ResetTS(ts uint64) error {
-	tsoServer := h.s.tso
-	if tsoServer == nil {
+	tsoAllocator := h.s.tsoAllocator
+	if tsoAllocator == nil {
 		return ErrServerNotStarted
 	}
-	return tsoServer.ResetUserTimestamp(ts)
+	return tsoAllocator.SetTSO(ts)
 }
 
 // SetStoreLimitScene sets the limit values for differents scenes
