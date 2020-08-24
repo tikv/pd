@@ -100,9 +100,7 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	// Member roles need to be elected
-	// In a PD cluster, there will be two kinds of election.
-	// One is for PD leader, another is for TSO Allocator
+	// for PD leader election.
 	member *member.Member
 	// etcd client
 	client *clientv3.Client
@@ -121,7 +119,7 @@ type Server struct {
 	// for baiscCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
-	tso *tso.TimestampOracle
+	tsoAllocator tso.Allocator
 	// for raft cluster
 	cluster *cluster.RaftCluster
 	// For async region heartbeat.
@@ -350,10 +348,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
-	s.tso = tso.NewTimestampOracle(
-		s.client,
+	s.tsoAllocator = tso.NewGlobalTSOAllocator(
+		s.member.Leadership,
 		s.rootPath,
-		s.member.MemberValue(),
 		s.cfg.TsoSaveInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 	)
@@ -1113,12 +1110,12 @@ func (s *Server) campaignLeader() {
 	go s.member.Leadership.Keep(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
-	log.Debug("sync timestamp for tso")
-	if err := s.tso.SyncTimestamp(s.member.Leadership); err != nil {
-		log.Error("failed to sync timestamp", zap.Error(err))
+	log.Info("initialize the global TSO allocator")
+	if err := s.tsoAllocator.Initialize(); err != nil {
+		log.Error("failed to initialize the global TSO allocator", zap.Error(err))
 		return
 	}
-	defer s.tso.ResetTimestamp()
+	defer s.tsoAllocator.Reset()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", zap.Error(err))
@@ -1155,7 +1152,7 @@ func (s *Server) campaignLeader() {
 				return
 			}
 		case <-tsTicker.C:
-			if err := s.tso.UpdateTimestamp(); err != nil {
+			if err := s.tsoAllocator.UpdateTSO(); err != nil {
 				log.Error("failed to update timestamp", zap.Error(err))
 				return
 			}
