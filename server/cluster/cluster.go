@@ -427,11 +427,11 @@ func (c *RaftCluster) SetStorage(s *core.Storage) {
 }
 
 // AddSuspectRegions adds regions to suspect list.
-func (c *RaftCluster) AddSuspectRegions(ids ...uint64) {
+func (c *RaftCluster) AddSuspectRegions(regionIDs ...uint64) {
 	c.Lock()
 	defer c.Unlock()
-	for _, id := range ids {
-		c.suspectRegions.Put(id, nil)
+	for _, regionID := range regionIDs {
+		c.suspectRegions.Put(regionID, nil)
 	}
 }
 
