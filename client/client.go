@@ -54,6 +54,8 @@ type Client interface {
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
 	GetRegion(ctx context.Context, key []byte) (*Region, error)
+	// GetRegionRandomly gets a region from the server which responds earliest
+	GetRegionRandomly(ctx context.Context, key []byte) (*Region, error)
 	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
 	GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
@@ -465,6 +467,29 @@ func (c *client) parseRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	return r
 }
 
+func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	resp, err := c.leaderClient().GetRegion(ctx, &pdpb.GetRegionRequest{
+		Header:    c.requestHeader(),
+		RegionKey: key,
+	})
+	cancel()
+
+	if err != nil {
+		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return nil, errors.WithStack(err)
+	}
+	return c.parseRegionResponse(resp), nil
+}
+
 func (c *client) waitForRegion(ctx context.Context, key []byte) (*pdpb.GetRegionResponse, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -513,9 +538,9 @@ func (c *client) getRegionResponse(ctx context.Context, cc pdpb.PDClient, key []
 	}
 }
 
-func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
+func (c *client) GetRegionRandomly(ctx context.Context, key []byte) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("pdclient.GetRegionRandomly", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
