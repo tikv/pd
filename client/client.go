@@ -41,7 +41,7 @@ type Region struct {
 type Client interface {
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
-	// GetMemberInfo gets the member ID from PD
+	// GetMemberInfo gets the PDmember ID from PD
 	GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error)
 	// GetLeaderAddr returns current leader's address. It returns "" before
 	// syncing leader from server.
