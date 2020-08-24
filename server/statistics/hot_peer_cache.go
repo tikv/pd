@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 const (
@@ -175,10 +175,10 @@ func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool 
 	return false
 }
 
-func (f *hotPeerCache) CollectMetrics(stats *StoresStats, typ string) {
+func (f *hotPeerCache) CollectMetrics(typ string) {
 	for storeID, peers := range f.peersOfStore {
 		store := storeTag(storeID)
-		thresholds := f.calcHotThresholds(stats, storeID)
+		thresholds := f.calcHotThresholds(storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", store, typ).Set(float64(peers.Len()))
 		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[byteDim])
 		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[keyDim])
@@ -226,7 +226,7 @@ func (f *hotPeerCache) isRegionExpired(region *core.RegionInfo, storeID uint64) 
 	return false
 }
 
-func (f *hotPeerCache) calcHotThresholds(stats *StoresStats, storeID uint64) [dimLen]float64 {
+func (f *hotPeerCache) calcHotThresholds(storeID uint64) [dimLen]float64 {
 	minThresholds := minHotThresholds[f.kind]
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < topNN {
@@ -293,7 +293,7 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 }
 
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesStats *StoresStats) *HotPeerStat {
-	thresholds := f.calcHotThresholds(storesStats, newItem.StoreID)
+	thresholds := f.calcHotThresholds(newItem.StoreID)
 	isHot := newItem.ByteRate >= thresholds[byteDim] ||
 		newItem.KeyRate >= thresholds[keyDim]
 

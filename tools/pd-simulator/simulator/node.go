@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,9 +24,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/cases"
-	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/info"
-	"github.com/pingcap/pd/v4/tools/pd-simulator/simulator/simutil"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
 const (

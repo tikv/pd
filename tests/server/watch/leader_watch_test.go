@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,10 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/tests"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
 
@@ -71,7 +71,7 @@ func (s *serverTestSuite) TestWatcher(c *C) {
 	time.Sleep(5 * time.Second)
 	pd3, err := cluster.Join(s.ctx)
 	c.Assert(err, IsNil)
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/delayWatcher", `pause`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`), IsNil)
 	err = pd3.Run()
 	c.Assert(err, IsNil)
 	time.Sleep(200 * time.Millisecond)
@@ -80,7 +80,7 @@ func (s *serverTestSuite) TestWatcher(c *C) {
 	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	c.Assert(pd2.GetLeader().GetName(), Equals, pd2.GetConfig().Name)
-	failpoint.Disable("github.com/pingcap/pd/v4/server/delayWatcher")
+	failpoint.Disable("github.com/tikv/pd/server/delayWatcher")
 	testutil.WaitUntil(c, func(c *C) bool {
 		return c.Check(pd3.GetLeader().GetName(), Equals, pd2.GetConfig().Name)
 	})

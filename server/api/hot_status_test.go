@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ import (
 	"fmt"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v4/server"
-	_ "github.com/pingcap/pd/v4/server/schedulers"
+	"github.com/tikv/pd/server"
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
 var _ = Suite(&testHotStatusSuite{})

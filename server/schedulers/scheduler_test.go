@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,25 +15,30 @@ package schedulers
 
 import (
 	"context"
+	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/kv"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
-	"github.com/pingcap/pd/v4/server/statistics"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/statistics"
 )
 
 const (
 	KB = 1024
 	MB = 1024 * KB
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testShuffleLeaderSuite{})
 
@@ -408,7 +413,7 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 	peers := []*metapb.Peer{
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
-		{Id: 3, StoreId: 3, IsLearner: true},
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
 	}
 	region := core.NewRegionInfo(&metapb.Region{
 		Id:          1,

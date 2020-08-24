@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,13 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
-	"github.com/pingcap/pd/v4/pkg/apiutil"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
 

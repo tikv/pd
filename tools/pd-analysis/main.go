@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import (
 	"os"
 
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/tools/pd-analysis/analysis"
+	"github.com/tikv/pd/tools/pd-analysis/analysis"
 	"go.uber.org/zap"
 )
 

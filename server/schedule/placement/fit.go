@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import (
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server/core"
 )
 
 // RegionFit is the result of fitting a region's peers to rule list.
@@ -265,13 +265,13 @@ type fitPeer struct {
 func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 	switch role {
 	case Voter: // Voter matches either Leader or Follower.
-		return !p.IsLearner
+		return !core.IsLearner(p.Peer)
 	case Leader:
 		return p.isLeader
 	case Follower:
-		return !p.IsLearner && !p.isLeader
+		return !core.IsLearner(p.Peer) && !p.isLeader
 	case Learner:
-		return p.IsLearner
+		return core.IsLearner(p.Peer)
 	}
 	return false
 }
@@ -280,7 +280,7 @@ func (p *fitPeer) matchRoleLoose(role PeerRoleType) bool {
 	// non-learner cannot become learner. All other roles can migrate to
 	// others by scheduling. For example, Leader->Follower, Learner->Leader
 	// are possible, but Voter->Learner is impossible.
-	return role != Learner || p.IsLearner
+	return role != Learner || core.IsLearner(p.Peer)
 }
 
 func isolationScore(peers []*fitPeer, labels []string) float64 {
