@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/versioninfo"
@@ -90,7 +91,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.tso.GetRespTS(count)
+		ts, err := s.tsoAllocator.GenerateTSO(count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
@@ -775,10 +776,11 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		}
 	}
 
-	now, err := s.tso.Now()
+	nowTSO, err := s.tsoAllocator.GenerateTSO(1)
 	if err != nil {
 		return nil, err
 	}
+	now, _ := tsoutil.ParseTimestamp(nowTSO)
 	min, err := s.storage.LoadMinServiceGCSafePoint(now)
 	if err != nil {
 		return nil, err

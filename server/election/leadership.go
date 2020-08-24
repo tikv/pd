@@ -75,9 +75,9 @@ func (ls *Leadership) setLease(lease *lease) {
 	ls.lease.Store(lease)
 }
 
-// ResetLease sets the lease of leadership to nil.
-func (ls *Leadership) resetLease() {
-	ls.setLease(nil)
+// GetClient is used to get the etcd client.
+func (ls *Leadership) GetClient() *clientv3.Client {
+	return ls.client
 }
 
 // Campaign is used to campaign the leader with given lease and returns a leadership
@@ -147,5 +147,4 @@ func (ls *Leadership) DeleteLeader() error {
 // Reset does some defer job such as closing lease, resetting lease etc.
 func (ls *Leadership) Reset() {
 	ls.getLease().Close()
-	ls.resetLease()
 }
