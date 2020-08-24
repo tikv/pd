@@ -20,8 +20,8 @@ import (
 
 // ruleConfig contains rule and rule group configurations.
 type ruleConfig struct {
-	rules  map[[2]string]*Rule
-	groups map[string]*RuleGroup
+	rules  map[[2]string]*Rule   // {group, id} => Rule
+	groups map[string]*RuleGroup // id => RuleGroup
 }
 
 func newRuleConfig() *ruleConfig {
