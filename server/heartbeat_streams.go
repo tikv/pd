@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,11 +22,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/errs"
-	"github.com/pingcap/pd/v4/pkg/logutil"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -88,7 +88,8 @@ func (s *heartbeatStreams) run() {
 			if store == nil {
 				log.Error("failed to get store",
 					zap.Uint64("region-id", msg.RegionId),
-					zap.Error(errs.ErrInternalStoreNotFound.FastGenByArgs(storeID)))
+					zap.Uint64("store-id", storeID),
+					errs.ZapError(errs.ErrStoreNotFound))
 				delete(s.streams, storeID)
 				continue
 			}
@@ -96,7 +97,7 @@ func (s *heartbeatStreams) run() {
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
 					log.Error("send heartbeat message fail",
-						zap.Uint64("region-id", msg.RegionId), zap.Error(errs.ErrGRPCHeartbeat))
+						zap.Uint64("region-id", msg.RegionId), errs.ZapError(errs.ErrGRPCHeartbeat, err))
 					delete(s.streams, storeID)
 					regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
 				} else {
@@ -112,7 +113,7 @@ func (s *heartbeatStreams) run() {
 			for storeID, stream := range s.streams {
 				store := s.cluster.GetStore(storeID)
 				if store == nil {
-					log.Error("failed to get store", zap.Error(errs.ErrInternalStoreNotFound.FastGenByArgs(storeID)))
+					log.Error("failed to get store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrStoreNotFound))
 					delete(s.streams, storeID)
 					continue
 				}

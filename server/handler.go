@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,21 +24,20 @@ import (
 	"time"
 
 	"github.com/pingcap/errcode"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/errs"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
-	"github.com/pingcap/pd/v4/server/schedulers"
-	"github.com/pingcap/pd/v4/server/statistics"
-	"github.com/pkg/errors"
-	"github.com/sasha-s/go-deadlock"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/storelimit"
+	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -211,9 +210,9 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 	if err = c.AddScheduler(s, args...); err != nil {
-		log.Error("can not add scheduler", zap.Error(errs.ErrSchedulerOperation.FastGenByArgs(s.GetName())), zap.NamedError("cause", err))
+		log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(errs.ErrSchedulerOperation, err))
 	} else if err = h.opt.Persist(c.GetStorage()); err != nil {
-		log.Error("can not persist scheduler config", zap.Error(errs.ErrSavePersistOptions), zap.NamedError("cause", err))
+		log.Error("can not persist scheduler config", errs.ZapError(errs.ErrSavePersistOptions, err))
 	}
 	return err
 }
@@ -225,7 +224,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 		return err
 	}
 	if err = c.RemoveScheduler(name); err != nil {
-		log.Error("can not remove scheduler", zap.Error(errs.ErrSchedulerOperation.FastGenByArgs(name)), zap.NamedError("cause", err))
+		log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(errs.ErrSchedulerOperation, err))
 	}
 	return err
 }
@@ -240,9 +239,9 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 	}
 	if err = c.PauseOrResumeScheduler(name, t); err != nil {
 		if t == 0 {
-			log.Error("can not resume scheduler", zap.Error(errs.ErrSchedulerOperation.FastGenByArgs(name)), zap.NamedError("cause", err))
+			log.Error("can not resume scheduler", zap.String("scheduler-name", name), errs.ZapError(errs.ErrSchedulerOperation, err))
 		} else {
-			log.Error("can not pause scheduler", zap.Error(errs.ErrSchedulerOperation.FastGenByArgs(name)), zap.NamedError("cause", err))
+			log.Error("can not pause scheduler", zap.String("scheduler-name", name), errs.ZapError(errs.ErrSchedulerOperation, err))
 		}
 	}
 	return err
@@ -541,7 +540,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return errcode.Op("operator.add").AddTo(core.StoreTombstonedErr{StoreID: toStoreID})
 	}
 
-	newPeer := &metapb.Peer{StoreId: toStoreID, IsLearner: oldPeer.GetIsLearner()}
+	newPeer := &metapb.Peer{StoreId: toStoreID, Role: oldPeer.GetRole()}
 	op, err := operator.CreateMovePeerOperator("admin-move-peer", c, region, operator.OpAdmin, fromStoreID, newPeer)
 	if err != nil {
 		log.Debug("fail to create move peer operator", zap.Error(err))
@@ -607,8 +606,8 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 	}
 
 	newPeer := &metapb.Peer{
-		StoreId:   toStoreID,
-		IsLearner: true,
+		StoreId: toStoreID,
+		Role:    metapb.PeerRole_Learner,
 	}
 
 	op, err := operator.CreateAddPeerOperator("admin-add-learner", c, region, newPeer, operator.OpAdmin)
@@ -827,11 +826,11 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 
 // ResetTS resets the ts with specified tso.
 func (h *Handler) ResetTS(ts uint64) error {
-	tsoServer := h.s.tso
-	if tsoServer == nil {
+	tsoAllocator := h.s.tsoAllocator
+	if tsoAllocator == nil {
 		return ErrServerNotStarted
 	}
-	return tsoServer.ResetUserTimestamp(ts)
+	return tsoAllocator.SetTSO(ts)
 }
 
 // SetStoreLimitScene sets the limit values for differents scenes

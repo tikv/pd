@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ func (t *testParseLog) TestTransferCounterParseLog(c *C) {
 	}
 	{
 		operator := "balance-region"
-		content := "[2019/09/03 17:42:07.898 +08:00] [INFO] [operator_controller.go:119] [\"operator finish\"] [region-id=24622] [operator=\"\"balance-region {mv peer: store 6 to 1} (kind:region,balance, region:24622(1,1), createAt:2019-09-03 17:42:06.602589701 +0800 CST m=+737.457773921, startAt:2019-09-03 17:42:06.602849306 +0800 CST m=+737.458033475, currentStep:3, steps:[add learner peer 64064 on store 1, promote learner peer 64064 on store 1 to voter, remove peer on store 6]) finished\"\"]\""
+		content := "[2019/09/03 17:42:07.898 +08:00] [INFO] [operator_controller.go:119] [\"operator finish\"] [region-id=24622] [operator=\"\"balance-region {mv peer: store [6] to [1]} (kind:region,balance, region:24622(1,1), createAt:2019-09-03 17:42:06.602589701 +0800 CST m=+737.457773921, startAt:2019-09-03 17:42:06.602849306 +0800 CST m=+737.458033475, currentStep:3, steps:[add learner peer 64064 on store 1, promote learner peer 64064 on store 1 to voter, remove peer on store 6]) finished\"\"]\""
 		var expect = []uint64{24622, 6, 1}
 		c.Assert(transferCounterParseLog(operator, content, expect), Equals, true)
 	}
@@ -63,7 +63,7 @@ func (t *testParseLog) TestTransferCounterParseLog(c *C) {
 	}
 	{
 		operator := "move-hot-write-region"
-		content := "[2019/09/05 14:05:54.311 +08:00] [INFO] [operator_controller.go:119] [\"operator finish\"] [region-id=98] [operator=\"\"move-hot-write-region {mv peer: store 2 to 10} (kind:region,hot-region, region:98(1,1), createAt:2019-09-05 14:05:49.718201432 +0800 CST m=+21.997446945, startAt:2019-09-05 14:05:49.718336308 +0800 CST m=+21.997581822, currentStep:3, steps:[add learner peer 2048 on store 10, promote learner peer 2048 on store 10 to voter, remove peer on store 2]) finished\"\"]"
+		content := "[2019/09/05 14:05:54.311 +08:00] [INFO] [operator_controller.go:119] [\"operator finish\"] [region-id=98] [operator=\"\"move-hot-write-region {mv peer: store [2] to [10]} (kind:region,hot-region, region:98(1,1), createAt:2019-09-05 14:05:49.718201432 +0800 CST m=+21.997446945, startAt:2019-09-05 14:05:49.718336308 +0800 CST m=+21.997581822, currentStep:3, steps:[add learner peer 2048 on store 10, promote learner peer 2048 on store 10 to voter, remove peer on store 2]) finished\"\"]"
 		var expect = []uint64{98, 2, 10}
 		c.Assert(transferCounterParseLog(operator, content, expect), Equals, true)
 	}
@@ -75,7 +75,7 @@ func (t *testParseLog) TestTransferCounterParseLog(c *C) {
 	}
 	{
 		operator := "move-hot-read-region"
-		content := "[2019/09/05 14:19:15.066 +08:00] [INFO] [operator_controller.go:119] [\"operator finish\"] [region-id=389] [operator=\"\"move-hot-read-region {mv peer: store 5 to 4} (kind:leader,region,hot-region, region:389(1,1), createAt:2019-09-05 14:19:13.576359364 +0800 CST m=+25.855737101, startAt:2019-09-05 14:19:13.576556556 +0800 CST m=+25.855934288, currentStep:4, steps:[add learner peer 2014 on store 4, promote learner peer 2014 on store 4 to voter, transfer leader from store 5 to store 3, remove peer on store 5]) finished\"\"]"
+		content := "[2019/09/05 14:19:15.066 +08:00] [INFO] [operator_controller.go:119] [\"operator finish\"] [region-id=389] [operator=\"\"move-hot-read-region {mv peer: store [5] to [4]} (kind:leader,region,hot-region, region:389(1,1), createAt:2019-09-05 14:19:13.576359364 +0800 CST m=+25.855737101, startAt:2019-09-05 14:19:13.576556556 +0800 CST m=+25.855934288, currentStep:4, steps:[add learner peer 2014 on store 4, promote learner peer 2014 on store 4 to voter, transfer leader from store 5 to store 3, remove peer on store 5]) finished\"\"]"
 		var expect = []uint64{389, 5, 4}
 		c.Assert(transferCounterParseLog(operator, content, expect), Equals, true)
 	}

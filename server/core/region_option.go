@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ func WithLearners(learners []*metapb.Peer) RegionCreateOption {
 		for i := range peers {
 			for _, l := range learners {
 				if peers[i].GetId() == l.GetId() {
-					peers[i] = &metapb.Peer{Id: l.GetId(), StoreId: l.GetStoreId(), IsLearner: true}
+					peers[i] = &metapb.Peer{Id: l.GetId(), StoreId: l.GetStoreId(), Role: metapb.PeerRole_Learner}
 					break
 				}
 			}
@@ -236,7 +236,7 @@ func SetReplicationStatus(status *replication_modepb.RegionReplicationStatus) Re
 func WithAddPeer(peer *metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.meta.Peers = append(region.meta.Peers, peer)
-		if peer.IsLearner {
+		if IsLearner(peer) {
 			region.learners = append(region.learners, peer)
 		} else {
 			region.voters = append(region.voters, peer)
@@ -249,7 +249,7 @@ func WithPromoteLearner(peerID uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		for _, p := range region.GetPeers() {
 			if p.GetId() == peerID {
-				p.IsLearner = false
+				p.Role = metapb.PeerRole_Voter
 			}
 		}
 	}

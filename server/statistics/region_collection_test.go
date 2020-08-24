@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/core"
 )
 
 var _ = Suite(&testRegionStatisticsSuite{})
@@ -31,7 +31,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 		{Id: 5, StoreId: 1},
 		{Id: 6, StoreId: 2},
 		{Id: 4, StoreId: 3},
-		{Id: 8, StoreId: 7, IsLearner: true},
+		{Id: 8, StoreId: 7, Role: metapb.PeerRole_Learner},
 	}
 
 	metaStores := []*metapb.Store{

@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@ import (
 	"sync"
 
 	"github.com/coreos/pkg/capnslog"
+	"github.com/pingcap/errors"
 	zaplog "github.com/pingcap/log"
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"go.etcd.io/etcd/raft"
 	"go.uber.org/zap"

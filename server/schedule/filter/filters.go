@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,11 +16,14 @@ package filter
 import (
 	"fmt"
 
-	"github.com/pingcap/pd/v4/pkg/slice"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pingcap/pd/v4/server/schedule/placement"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/storelimit"
+	"go.uber.org/zap"
 )
 
 // revive:disable:unused-parameter
@@ -423,7 +426,9 @@ func (f *ruleFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	region := f.region.Clone(core.WithReplacePeerStore(f.oldStore, store.GetID()))
+	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
+		f.region.GetPeers(), f.region.GetLeader(),
+		core.WithReplacePeerStore(f.oldStore, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
@@ -461,10 +466,15 @@ func (f *ruleLeaderFitFilter) Source(opt opt.Options, store *core.StoreInfo) boo
 }
 
 func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	oldLeaderPeerReplica := *f.region.GetLeader()
-	oldLeaderPeerReplica.StoreId = store.GetID()
-	region := f.region.Clone(core.WithReplacePeerStore(f.oldLeaderStoreID, store.GetID()), core.WithLeader(&oldLeaderPeerReplica))
-	newFit := f.fitter.FitRegion(region)
+	targetPeer := f.region.GetStorePeer(store.GetID())
+	if targetPeer == nil {
+		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
+		return false
+	}
+	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
+		f.region.GetPeers(), f.region.GetLeader(),
+		core.WithLeader(targetPeer))
+	newFit := f.fitter.FitRegion(copyRegion)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
@@ -666,4 +676,30 @@ func (f *isolationFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
 		}
 	}
 	return true
+}
+
+// createRegionForRuleFit is used to create a clone region with RegionCreateOptions which is only used for
+// FitRegion in filter
+func createRegionForRuleFit(startKey, endKey []byte,
+	peers []*metapb.Peer, leader *metapb.Peer, opts ...core.RegionCreateOption) *core.RegionInfo {
+	copyLeader := &metapb.Peer{
+		Id:      leader.Id,
+		StoreId: leader.StoreId,
+		Role:    leader.Role,
+	}
+	copyPeers := make([]*metapb.Peer, 0, len(peers))
+	for _, p := range peers {
+		peer := &metapb.Peer{
+			Id:      p.Id,
+			StoreId: p.StoreId,
+			Role:    p.Role,
+		}
+		copyPeers = append(copyPeers, peer)
+	}
+	cloneRegion := core.NewRegionInfo(&metapb.Region{
+		StartKey: startKey,
+		EndKey:   endKey,
+		Peers:    copyPeers,
+	}, copyLeader, opts...)
+	return cloneRegion
 }

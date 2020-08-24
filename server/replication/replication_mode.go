@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,9 +23,9 @@ import (
 
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -292,7 +292,7 @@ func (m *ModeManager) drPersistStatus(status drAutoSyncStatus) error {
 			// inability to accurately determine whether data is fully
 			// synchronized when using dr DC to disaster recovery.
 			// TODO: introduce PD's leader-follower connection timeout to solve
-			// this issue. More details: https://github.com/pingcap/pd/issues/2490
+			// this issue. More details: https://github.com/tikv/pd/issues/2490
 			return nil
 		}
 	}

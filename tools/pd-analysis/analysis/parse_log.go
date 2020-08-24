@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,8 @@ import (
 	"time"
 )
 
-var supportOperators = []string{"balance-region", "balance-leader", "transfer-hot-read-leader", "move-hot-read-region", "transfer-hot-write-leader", "move-hot-write-region"}
+var regionOperators = []string{"balance-region", "move-hot-read-region", "move-hot-write-region"}
+var leaderOperators = []string{"balance-leader", "transfer-hot-read-leader", "transfer-hot-write-leader"}
 
 // DefaultLayout is the default layout to parse log.
 const DefaultLayout = "2006/01/02 15:04:05"
@@ -44,8 +45,14 @@ func (c *TransferCounter) CompileRegex(operator string) (*regexp.Regexp, error) 
 	var r *regexp.Regexp
 	var err error
 
-	for _, supportOperator := range supportOperators {
-		if operator == supportOperator {
+	for _, regionOperator := range regionOperators {
+		if operator == regionOperator {
+			r, err = regexp.Compile(".*?operator finish.*?region-id=([0-9]*).*?" + operator + ".*?store \\[([0-9]*)\\] to \\[([0-9]*)\\].*?")
+		}
+	}
+
+	for _, leaderOperator := range leaderOperators {
+		if operator == leaderOperator {
 			r, err = regexp.Compile(".*?operator finish.*?region-id=([0-9]*).*?" + operator + ".*?store ([0-9]*) to ([0-9]*).*?")
 		}
 	}

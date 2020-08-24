@@ -5,7 +5,7 @@ pd-tso-bench is a tool to benchmark GetTS performance.
 
 ## Build
 1. [Go](https://golang.org/) Version 1.9 or later
-2. In the root directory of the [PD project](https://github.com/pingcap/pd), use the `make` command to compile and generate `bin/pd-tso-bench`
+2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make` command to compile and generate `bin/pd-tso-bench`
 
 
 ## Usage
