@@ -41,6 +41,8 @@ type Region struct {
 type Client interface {
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
+	// GetMemberInfo gets the member ID from PD
+	GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error)
 	// GetLeaderAddr returns current leader's address. It returns "" before
 	// syncing leader from server.
 	GetLeaderAddr() string
@@ -201,6 +203,22 @@ func (c *client) checkStreamTimeout(loopCtx context.Context, cancel context.Canc
 	case <-loopCtx.Done():
 		return
 	}
+}
+
+func (c *client) GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error) {
+	start := time.Now()
+	defer func() { cmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	resp, err := c.leaderClient().GetMembers(ctx, &pdpb.GetMembersRequest{})
+	cancel()
+	if err != nil {
+		cmdFailedDurationGetAllStores.Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return nil, errors.WithStack(err)
+	}
+	stores := resp.GetMembers()
+	return stores, nil
 }
 
 func (c *client) tsLoop() {

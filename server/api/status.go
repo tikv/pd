@@ -51,6 +51,5 @@ func (h *statusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Version:        versioninfo.PDReleaseVersion,
 		StartTimestamp: h.svr.StartTimestamp(),
 	}
-
 	h.rd.JSON(w, http.StatusOK, version)
 }
