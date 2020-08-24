@@ -16,7 +16,6 @@ package autoscaling
 import (
 	"math"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -43,10 +42,6 @@ var (
 	MaxScaleOutStep uint64 = 1
 	// MaxScaleInStep is used to indicate the maxium number of instance for scaling in operations at once.
 	MaxScaleInStep uint64 = 1
-
-	informer tidbInformer
-
-	informerInit = sync.Once{}
 )
 
 func calculate(rc *cluster.RaftCluster, cfg *config.PDServerConfig, strategy *Strategy) []*Plan {
@@ -75,10 +70,7 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	if component == TiKV {
 		instances = filterTiKVInstances(rc)
 	} else {
-		informerInit.Do(func() {
-			informer = newTidbInformer(rc.GetEtcdClient())
-		})
-		instances = getTiDBInstances()
+		instances = getTiDBInstances(rc)
 	}
 
 	if len(instances) == 0 {
@@ -125,7 +117,8 @@ func filterTiKVInstances(informer core.StoreSetInformer) []instance {
 	return instances
 }
 
-func getTiDBInstances() []instance {
+func getTiDBInstances(rc *cluster.RaftCluster) []instance {
+	informer := newTidbInformer(rc.GetEtcdClient())
 	infos, err := informer.GetTiDBs()
 	if err != nil {
 		// TODO: error handling
@@ -278,6 +271,7 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 	case TiKV:
 		return getScaledTiKVGroups(rc, healthyInstances)
 	case TiDB:
+		informer := newTidbInformer(rc.GetEtcdClient())
 		return getScaledTiDBGroups(informer, healthyInstances)
 	default:
 		return nil
