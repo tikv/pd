@@ -51,5 +51,5 @@ func tryAllocTestURL() string {
 }
 
 func allocPort() int {
-	return 10000 + rand.Int()%6000
+	return 10000 + rand.Int()%40000
 }
