@@ -50,7 +50,10 @@ func tryAllocTestURL() string {
 	if err != nil {
 		log.Fatal("close failed", zap.Error(err))
 	}
-
+	err = checkPortInUse(addr)
+	if err != nil {
+		return ""
+	}
 	testAddrMutex.Lock()
 	defer testAddrMutex.Unlock()
 	if _, ok := testAddrMap[addr]; ok {
@@ -58,4 +61,17 @@ func tryAllocTestURL() string {
 	}
 	testAddrMap[addr] = struct{}{}
 	return addr
+}
+
+func checkPortInUse(address string) error {
+	// Since the host is always 127.0.0.1, 1 sec timeout is enough
+	timeout := time.Second
+	conn, err := net.DialTimeout("tcp", address, timeout)
+	if err != nil {
+		return err
+	}
+	if conn != nil {
+		defer conn.Close()
+	}
+	return nil
 }
