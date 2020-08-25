@@ -14,8 +14,6 @@
 package statistics
 
 import (
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 	"math"
 	"time"
 
