@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,13 +25,13 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockhbstream"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule/checker"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/storelimit"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockhbstream"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/checker"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/storelimit"
 )
 
 func Test(t *testing.T) {
@@ -47,7 +47,7 @@ type testOperatorControllerSuite struct {
 
 func (t *testOperatorControllerSuite) SetUpSuite(c *C) {
 	t.ctx, t.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 }
 
 func (t *testOperatorControllerSuite) TearDownSuite(c *C) {
@@ -163,7 +163,7 @@ func (t *testOperatorControllerSuite) TestFastFailOperator(c *C) {
 }
 
 func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
-	c.Assert(failpoint.Disable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/unexpectedOperator"), IsNil)
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
 	oc := NewOperatorController(t.ctx, tc, mockhbstream.NewHeartbeatStream())
@@ -246,7 +246,7 @@ func (t *testOperatorControllerSuite) TestConcurrentRemoveOperator(c *C) {
 	c.Assert(op1.Start(), IsTrue)
 	oc.SetOperator(op1)
 
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/concurrentRemoveOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/concurrentRemoveOperator", "return(true)"), IsNil)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -497,9 +497,9 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		// region2 has peer 2 in pending state, so the AddPeer step
 		// is left unfinished
 		region2 := region.Clone(
-			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, IsLearner: true}),
+			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}),
 			core.WithPendingPeers([]*metapb.Peer{
-				{Id: 3, StoreId: 3, IsLearner: true},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
 			}),
 			core.WithIncConfVer(),
 		)
@@ -519,7 +519,7 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 
 		// Finish the step by clearing the pending state
 		region3 := region.Clone(
-			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, IsLearner: true}),
+			core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}),
 			core.WithIncConfVer(),
 		)
 		c.Assert(steps[0].IsFinish(region3), Equals, true)

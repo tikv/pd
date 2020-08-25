@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,10 +23,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/config"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 var _ = Suite(&testOperatorSuite{})
@@ -38,7 +38,7 @@ type testOperatorSuite struct {
 }
 
 func (s *testOperatorSuite) SetUpSuite(c *C) {
-	c.Assert(failpoint.Enable("github.com/pingcap/pd/v4/server/schedule/unexpectedOperator", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 1 })
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -143,7 +143,7 @@ func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, 
 			Address: fmt.Sprintf("tikv%d", id),
 			State:   state,
 			Labels:  labels,
-			Version: (*cluster.MinSupportedVersion(cluster.Version2_0)).String(),
+			Version: versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
 		},
 	})
 	c.Assert(err, IsNil)

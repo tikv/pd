@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/errs"
-	"github.com/pingcap/pd/v4/pkg/etcdutil"
-	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -93,7 +93,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
-		log.Error("save to etcd meet error", zap.Error(errs.ErrEtcdKvSave.FastGenByArgs(key, value)), zap.NamedError("cause", err))
+		log.Error("save to etcd meet error", zap.String("key", key), zap.String("value", value), errs.ZapError(errs.ErrEtcdKVSave, err))
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {
@@ -108,7 +108,7 @@ func (kv *etcdKVBase) Remove(key string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
-		log.Error("remove from etcd meet error", zap.Error(errs.ErrEtcdKvRemove.FastGenByArgs(key)), zap.NamedError("cause", err))
+		log.Error("remove from etcd meet error", zap.String("key", key), errs.ZapError(errs.ErrEtcdKVRemove, err))
 		return errors.WithStack(err)
 	}
 	if !resp.Succeeded {

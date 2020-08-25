@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,7 +61,7 @@ var balanceLeaderCounter = prometheus.NewCounterVec(
 		Subsystem: "scheduler",
 		Name:      "balance_leader",
 		Help:      "Counter of balance leader scheduler.",
-	}, []string{"type", "address", "store"})
+	}, []string{"type", "store"})
 
 var balanceRegionCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -69,7 +69,7 @@ var balanceRegionCounter = prometheus.NewCounterVec(
 		Subsystem: "scheduler",
 		Name:      "balance_region",
 		Help:      "Counter of balance region scheduler.",
-	}, []string{"type", "address", "store"})
+	}, []string{"type", "store"})
 
 var balanceHotRegionCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -93,7 +93,7 @@ var scatterRangeLeaderCounter = prometheus.NewCounterVec(
 		Subsystem: "scheduler",
 		Name:      "scatter_range_leader",
 		Help:      "Counter of scatter range leader scheduler.",
-	}, []string{"type", "address", "store"})
+	}, []string{"type", "store"})
 
 var scatterRangeRegionCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -101,7 +101,7 @@ var scatterRangeRegionCounter = prometheus.NewCounterVec(
 		Subsystem: "scheduler",
 		Name:      "scatter_range_region",
 		Help:      "Counter of scatter range region scheduler.",
-	}, []string{"type", "address", "store"})
+	}, []string{"type", "store"})
 
 func init() {
 	prometheus.MustRegister(schedulerCounter)

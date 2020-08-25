@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -192,36 +192,24 @@ func (s *StoresStats) GetStoreDiskWriteRate(storeID uint64) float64 {
 }
 
 // GetStoresCPUUsage returns the cpu usage stat of all StoreInfo.
-func (s *StoresStats) GetStoresCPUUsage() map[uint64]float64 {
-	s.RLock()
-	defer s.RUnlock()
-	res := make(map[uint64]float64, len(s.rollingStoresStats))
-	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = stats.GetCPUUsage()
-	}
-	return res
+func (s *StoresStats) GetStoresCPUUsage(cluster core.StoreSetInformer) map[uint64]float64 {
+	return s.getStat(func(stats *RollingStoreStats) float64 {
+		return stats.GetCPUUsage()
+	})
 }
 
 // GetStoresDiskReadRate returns the disk read rate stat of all StoreInfo.
 func (s *StoresStats) GetStoresDiskReadRate() map[uint64]float64 {
-	s.RLock()
-	defer s.RUnlock()
-	res := make(map[uint64]float64, len(s.rollingStoresStats))
-	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = stats.GetDiskReadRate()
-	}
-	return res
+	return s.getStat(func(stats *RollingStoreStats) float64 {
+		return stats.GetDiskReadRate()
+	})
 }
 
 // GetStoresDiskWriteRate returns the disk write rate stat of all StoreInfo.
 func (s *StoresStats) GetStoresDiskWriteRate() map[uint64]float64 {
-	s.RLock()
-	defer s.RUnlock()
-	res := make(map[uint64]float64, len(s.rollingStoresStats))
-	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = stats.GetDiskWriteRate()
-	}
-	return res
+	return s.getStat(func(stats *RollingStoreStats) float64 {
+		return stats.GetDiskWriteRate()
+	})
 }
 
 // GetStoreBytesWriteRate returns the bytes write stat of the specified store.
@@ -246,48 +234,56 @@ func (s *StoresStats) GetStoreBytesReadRate(storeID uint64) float64 {
 
 // GetStoresBytesWriteStat returns the bytes write stat of all StoreInfo.
 func (s *StoresStats) GetStoresBytesWriteStat() map[uint64]float64 {
-	s.RLock()
-	defer s.RUnlock()
-	res := make(map[uint64]float64, len(s.rollingStoresStats))
-	for storeID, stats := range s.rollingStoresStats {
-		writeRate, _ := stats.GetBytesRate()
-		res[storeID] = writeRate
-	}
-	return res
+	return s.getStat(func(stats *RollingStoreStats) float64 {
+		return stats.GetBytesWriteRate()
+	})
 }
 
 // GetStoresBytesReadStat returns the bytes read stat of all StoreInfo.
 func (s *StoresStats) GetStoresBytesReadStat() map[uint64]float64 {
-	s.RLock()
-	defer s.RUnlock()
-	res := make(map[uint64]float64, len(s.rollingStoresStats))
-	for storeID, stats := range s.rollingStoresStats {
-		_, readRate := stats.GetBytesRate()
-		res[storeID] = readRate
-	}
-	return res
+	return s.getStat(func(stats *RollingStoreStats) float64 {
+		return stats.GetBytesReadRate()
+	})
 }
 
 // GetStoresKeysWriteStat returns the keys write stat of all StoreInfo.
 func (s *StoresStats) GetStoresKeysWriteStat() map[uint64]float64 {
-	s.RLock()
-	defer s.RUnlock()
-	res := make(map[uint64]float64, len(s.rollingStoresStats))
-	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = stats.GetKeysWriteRate()
-	}
-	return res
+	return s.getStat(func(stats *RollingStoreStats) float64 {
+		return stats.GetKeysWriteRate()
+	})
 }
 
 // GetStoresKeysReadStat returns the bytes read stat of all StoreInfo.
 func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
+	return s.getStat(func(stats *RollingStoreStats) float64 {
+		return stats.GetKeysReadRate()
+	})
+}
+
+func (s *StoresStats) getStat(getRate func(*RollingStoreStats) float64) map[uint64]float64 {
 	s.RLock()
 	defer s.RUnlock()
 	res := make(map[uint64]float64, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		res[storeID] = stats.GetKeysReadRate()
+		res[storeID] = getRate(stats)
 	}
 	return res
+}
+
+func (s *StoresStats) storeIsUnhealthy(cluster core.StoreSetInformer, storeID uint64) bool {
+	store := cluster.GetStore(storeID)
+	return store.IsTombstone() || store.IsUnhealth()
+}
+
+// FilterUnhealthyStore filter unhealthy store
+func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
+	s.Lock()
+	defer s.Unlock()
+	for storeID := range s.rollingStoresStats {
+		if s.storeIsUnhealthy(cluster, storeID) {
+			delete(s.rollingStoresStats, storeID)
+		}
+	}
 }
 
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.

@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,15 @@ package autoscaling
 
 import (
 	"fmt"
+	"math"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v4/pkg/mock/mockcluster"
-	"github.com/pingcap/pd/v4/pkg/mock/mockoption"
-	"github.com/pingcap/pd/v4/server/core"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockoption"
+	"github.com/tikv/pd/server/core"
 )
 
 func Test(t *testing.T) {
@@ -192,5 +194,174 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 		} else {
 			c.Assert(plans, DeepEquals, testcase.expectedPlan)
 		}
+	}
+}
+
+type mockQuerier struct{}
+
+func (q *mockQuerier) Query(options *QueryOptions) (QueryResult, error) {
+	result := make(QueryResult)
+	for _, addr := range options.addresses {
+		result[addr] = mockResultValue
+	}
+
+	return result, nil
+}
+
+func (s *calculationTestSuite) TestGetTotalCPUUseTime(c *C) {
+	querier := &mockQuerier{}
+	instances := []instance{
+		{
+			address: "1",
+			id:      1,
+		},
+		{
+			address: "2",
+			id:      2,
+		},
+		{
+			address: "3",
+			id:      3,
+		},
+	}
+	totalCPUUseTime, _ := getTotalCPUUseTime(querier, TiDB, instances, time.Now(), 0)
+	expected := mockResultValue * float64(len(instances))
+	c.Assert(math.Abs(expected-totalCPUUseTime) < 1e-6, IsTrue)
+}
+
+func (s *calculationTestSuite) TestGetTotalCPUQuota(c *C) {
+	querier := &mockQuerier{}
+	instances := []instance{
+		{
+			address: "1",
+			id:      1,
+		},
+		{
+			address: "2",
+			id:      2,
+		},
+		{
+			address: "3",
+			id:      3,
+		},
+	}
+	totalCPUQuota, _ := getTotalCPUQuota(querier, TiDB, instances, time.Now())
+	expected := uint64(mockResultValue * float64(len(instances)*millicores))
+	c.Assert(totalCPUQuota, Equals, expected)
+}
+
+func (s *calculationTestSuite) TestGetScaledTiDBGroups(c *C) {
+	case1 := newMockTiDBInformer()
+	case1.SetTiDBs([]*TiDBInfo{
+		{
+			Address: "tidb-0",
+			Labels: map[string]string{
+				groupLabelKey: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+			},
+		},
+		{
+			Address: "tidb-1",
+			Labels: map[string]string{
+				groupLabelKey: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+			},
+		},
+		{
+			Address: "tidb-2",
+			Labels:  map[string]string{},
+		},
+	})
+	testcases := []struct {
+		name             string
+		informer         tidbInformer
+		healthyInstances []instance
+		expectedPlan     []*Plan
+	}{
+		{
+			name:     "exist 1 scaled tidb group",
+			informer: case1,
+			healthyInstances: []instance{
+				{
+					id:      0,
+					address: "tidb-0",
+				},
+				{
+					id:      1,
+					address: "tidb-1",
+				},
+				{
+					id:      2,
+					address: "tidb-2",
+				},
+			},
+			expectedPlan: []*Plan{
+				{
+					Component: TiDB.String(),
+					Count:     2,
+					Labels: []*metapb.StoreLabel{
+						{
+							Key:   groupLabelKey,
+							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						},
+					},
+				},
+			},
+		},
+		{
+			name:     "exist 1 tidb scaled group with less healthy instances",
+			informer: case1,
+			healthyInstances: []instance{
+				{
+					id:      1,
+					address: "tidb-1",
+				},
+				{
+					id:      2,
+					address: "tidb-2",
+				},
+			},
+			expectedPlan: []*Plan{
+				{
+					Component: TiDB.String(),
+					Count:     1,
+					Labels: []*metapb.StoreLabel{
+						{
+							Key:   groupLabelKey,
+							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		plans := getScaledTiDBGroups(testcase.informer, testcase.healthyInstances)
+		if testcase.expectedPlan == nil {
+			c.Assert(plans, IsNil)
+		} else {
+			c.Assert(plans, DeepEquals, testcase.expectedPlan)
+		}
+	}
+}
+
+type mockTidbInformer struct {
+	tidbs map[string]*TiDBInfo
+}
+
+func newMockTiDBInformer() *mockTidbInformer {
+	return &mockTidbInformer{
+		tidbs: map[string]*TiDBInfo{},
+	}
+}
+
+// GetTiDB implements TiDBInformer.GetTiDB
+func (mc *mockTidbInformer) GetTiDB(address string) *TiDBInfo {
+	return mc.tidbs[address]
+}
+
+// SetTiDBs set multiple TiDB
+func (mc *mockTidbInformer) SetTiDBs(tidbs []*TiDBInfo) {
+	for _, tidb := range tidbs {
+		mc.tidbs[tidb.Address] = tidb
 	}
 }

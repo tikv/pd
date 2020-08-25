@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,14 +23,14 @@ import (
 
 	"github.com/pingcap/check"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/pkg/tempurl"
-	"github.com/pingcap/pd/v4/pkg/testutil"
-	"github.com/pingcap/pd/v4/pkg/typeutil"
-	"github.com/pingcap/pd/v4/server/config"
+	"github.com/tikv/pd/pkg/tempurl"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/embed"
 
 	// Register schedulers
-	_ "github.com/pingcap/pd/v4/server/schedulers"
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
 // CleanupFunc closes test pd server(s) and deletes any files left behind.

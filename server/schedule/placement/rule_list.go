@@ -1,4 +1,4 @@
-// Copyright 2020 PingCAP, Inc.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pingcap/pd/v4/pkg/errs"
+	"github.com/pingcap/errors"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 type splitPointType int
@@ -42,6 +43,7 @@ type sortedRules struct {
 	rules []*Rule
 }
 
+// insertRule inserts a rule into soretedRules while keeping the order unchanged
 func (sr *sortedRules) insertRule(rule *Rule) {
 	i := sort.Search(len(sr.rules), func(i int) bool {
 		return compareRule(sr.rules[i], rule) > 0
@@ -63,16 +65,41 @@ func (sr *sortedRules) deleteRule(rule *Rule) {
 	}
 }
 
+func checkApplyRules(rules []*Rule) error {
+	// check raft constraint
+	// one and only one leader
+	leaderCount := 0
+	voterCount := 0
+	for _, rule := range rules {
+		if rule.Role == Leader {
+			leaderCount += rule.Count
+		} else if rule.Role == Voter {
+			voterCount += rule.Count
+		}
+		if leaderCount > 1 {
+			return errors.New("multiple leader replicas")
+		}
+	}
+	if (leaderCount + voterCount) < 1 {
+		return errors.New("needs at least one leader or voter")
+	}
+	return nil
+}
+
 type rangeRules struct {
-	startKey   []byte
-	rules      []*Rule
+	startKey []byte
+	// rules indicates all the rules match the given range
+	rules []*Rule
+	// applyRules indicates the selected rules(filtered by prepareRulesForApply) from the given rules
 	applyRules []*Rule
 }
 
 type ruleList struct {
-	ranges []rangeRules // ranges[i] contains rules apply to (ranges[i].startKey, ranges[i+1].startKey).
+	ranges []rangeRules // ranges[i] contains rules apply to [ranges[i].startKey, ranges[i+1].startKey).
 }
 
+// buildRuleList builds the applied ruleList for the give rules
+// rules indicates the map (rule's GroupID, ID) => rule
 func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 	if len(rules) == 0 {
 		return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs("no rule left")
@@ -108,24 +135,36 @@ func buildRuleList(rules map[[2]string]*Rule) (ruleList, error) {
 			sr.deleteRule(p.rule)
 		}
 		if i == len(points)-1 || !bytes.Equal(p.key, points[i+1].key) {
+			var endKey []byte
+			if i != len(points)-1 {
+				endKey = points[i+1].key
+			}
+
 			// next key is different, push sr to rl.
 			rr := sr.rules
 			if len(rr) == 0 {
-				var endKey []byte
-				if i != len(points)-1 {
-					endKey = points[i+1].key
-				}
 				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("no rule for range {%s, %s}",
 					strings.ToUpper(hex.EncodeToString(p.key)),
 					strings.ToUpper(hex.EncodeToString(endKey))))
 			}
+
 			if i != len(points)-1 {
 				rr = append(rr[:0:0], rr...) // clone
 			}
+
+			arr := prepareRulesForApply(rr) // clone internally
+			err := checkApplyRules(arr)
+			if err != nil {
+				return ruleList{}, errs.ErrBuildRuleList.FastGenByArgs(fmt.Sprintf("%s for range {%s, %s}",
+					err,
+					strings.ToUpper(hex.EncodeToString(p.key)),
+					strings.ToUpper(hex.EncodeToString(endKey))))
+			}
+
 			rl.ranges = append(rl.ranges, rangeRules{
 				startKey:   p.key,
 				rules:      rr,
-				applyRules: prepareRulesForApply(rr), // clone internally
+				applyRules: arr,
 			})
 		}
 	}

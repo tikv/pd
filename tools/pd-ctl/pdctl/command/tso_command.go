@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ package command
 import (
 	"strconv"
 
-	"github.com/pingcap/pd/v4/pkg/tsoutil"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/pkg/tsoutil"
 )
 
 // NewTSOCommand return a ping subcommand of rootCmd
