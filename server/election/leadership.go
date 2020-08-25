@@ -29,7 +29,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// GetLeader gets the coresponding leader from etcd by given leaderPath (as the key).
+// GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
 	leader := &pdpb.Member{}
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(c, leaderPath, leader)
@@ -117,7 +117,7 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	ls.getLease().KeepAlive(ctx)
 }
 
-// Check returns whether the leadership is still avalibale
+// Check returns whether the leadership is still available
 func (ls *Leadership) Check() bool {
 	return ls != nil && ls.getLease() != nil && !ls.getLease().IsExpired()
 }
@@ -133,7 +133,7 @@ func (ls *Leadership) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.leaderValue)
 }
 
-// DeleteLeader deletes the coresponding leader from etcd by given leaderPath (as the key).
+// DeleteLeader deletes the corresponding leader from etcd by given leaderPath (as the key).
 func (ls *Leadership) DeleteLeader() error {
 	// delete leader itself and let others start a new election again.
 	resp, err := ls.LeaderTxn().Then(clientv3.OpDelete(ls.leaderKey)).Commit()
