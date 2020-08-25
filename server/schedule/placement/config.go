@@ -75,7 +75,7 @@ func (c *ruleConfig) beginPatch() *ruleConfigPatch {
 
 // A helper data structure to update ruleConfig.
 type ruleConfigPatch struct {
-	c   *ruleConfig
+	c   *ruleConfig // original configuration to be updated
 	mut *ruleConfig // record all to-commit rules and groups
 }
 
