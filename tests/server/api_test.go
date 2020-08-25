@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v3/pkg/testutil"
-	"github.com/pingcap/pd/v3/pkg/typeutil"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/tests"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
 )
 
 func (s *serverTestSuite) TestReconnect(c *C) {

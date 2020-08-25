@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ package server
 import (
 	"math/rand"
 
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/namespace"
-	"github.com/pingcap/pd/v3/server/schedule"
-	"github.com/pingcap/pd/v3/server/statistics"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/namespace"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/statistics"
 )
 
 // namespaceCluster is part of a global cluster that contains stores and regions

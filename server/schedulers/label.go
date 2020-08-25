@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@ package schedulers
 
 import (
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/schedule"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"go.uber.org/zap"
 )
 

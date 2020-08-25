@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ import (
 
 	"github.com/pingcap/errcode"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/apiutil"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/unrolled/render"
 )
 

@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,10 @@ package server
 
 import (
 	. "github.com/pingcap/check"
-	"github.com/pingcap/pd/v3/pkg/testutil"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/server/namespace"
-	"github.com/pingcap/pd/v3/server/schedule"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/namespace"
+	"github.com/tikv/pd/server/schedule"
 )
 
 var _ = Suite(&testNamespaceSuite{})

@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ import (
 	"math/rand"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/pd/v3/server/core"
-	"github.com/pingcap/pd/v3/tools/pd-simulator/simulator/simutil"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
 

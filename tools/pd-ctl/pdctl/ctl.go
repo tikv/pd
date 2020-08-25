@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ package pdctl
 import (
 	"os"
 
-	"github.com/pingcap/pd/v3/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
 // CommandFlags are flags that used in all Commands

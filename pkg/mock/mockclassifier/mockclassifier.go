@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 
 package mockclassifier
 
-import "github.com/pingcap/pd/v3/server/core"
+import "github.com/tikv/pd/server/core"
 
 // Classifier is used for test purpose.
 type Classifier struct{}

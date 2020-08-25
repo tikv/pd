@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@ package testutil
 
 import (
 	check "github.com/pingcap/check"
-	"github.com/pingcap/pd/v3/server/schedule"
+	"github.com/tikv/pd/server/schedule"
 )
 
 // CheckAddPeer checks if the operator is to add peer on specified store.

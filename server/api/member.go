@@ -1,4 +1,4 @@
-// Copyright 2016 PingCAP, Inc.
+// Copyright 2016 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,9 +22,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/pkg/etcdutil"
-	"github.com/pingcap/pd/v3/server"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )

@@ -1,4 +1,4 @@
-// Copyright 2018 PingCAP, Inc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,10 +23,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	log "github.com/pingcap/log"
-	"github.com/pingcap/pd/v3/server"
-	"github.com/pingcap/pd/v3/server/api"
-	"github.com/pingcap/pd/v3/server/core"
 	"github.com/pkg/errors"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/core"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
