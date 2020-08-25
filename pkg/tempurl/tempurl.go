@@ -40,7 +40,7 @@ func Alloc() string {
 }
 
 func tryAllocTestURL() string {
-	addr := fmt.Sprintf("127.0.0.1:%v", allocPort())
+	addr := fmt.Sprintf("http://127.0.0.1:%v", allocPort())
 	testAddrMutex.Lock()
 	defer testAddrMutex.Unlock()
 	if _, ok := testAddrMap[addr]; ok {
