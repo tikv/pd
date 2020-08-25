@@ -163,6 +163,7 @@ func GetTiDB(etcdClient *clientv3.Client, address string) (*TiDBInfo, error) {
 
 const (
 	tidbInfoPatternStr = "/topology/tidb/.+/info"
+	tidbInfoPrefix     = "/topology/tidb/"
 )
 
 // GetTiDBs list TiDB register in PD
@@ -171,8 +172,7 @@ func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	prefix := "/topology/tidb/"
-	resps, err := etcdutil.EtcdKVGet(etcdClient, prefix, clientv3.WithPrefix())
+	resps, err := etcdutil.EtcdKVGet(etcdClient, tidbInfoPrefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
 	for _, resp := range resps.Kvs {
 		key := string(resp.Key)
 		if tidbInfoPattern.MatchString(key) {
-			address := key[len("/topology/tidb/") : len(key)-5]
+			address := key[len(tidbInfoPrefix) : len(key)-len("/info")]
 			// In order to avoid make "aaa/bbb" in "/topology/tidb/aaa/bbb/info" stored as tidb address
 			if !strings.Contains(address, "/") {
 				tidbs = append(tidbs, &TiDBInfo{
