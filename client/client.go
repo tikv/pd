@@ -210,7 +210,9 @@ func (c *client) GetMemberInfo(ctx context.Context) ([]*pdpb.Member, error) {
 	defer func() { cmdDurationGetMemberInfo.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	resp, err := c.leaderClient().GetMembers(ctx, &pdpb.GetMembersRequest{})
+	resp, err := c.leaderClient().GetMembers(ctx, &pdpb.GetMembersRequest{
+		Header: c.requestHeader(),
+	})
 	cancel()
 	if err != nil {
 		cmdFailDurationGetMemberInfo.Observe(time.Since(start).Seconds())
