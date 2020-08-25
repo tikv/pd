@@ -405,11 +405,17 @@ func (s *Server) Close() {
 
 	log.Info("closing server")
 
-	s.stopServerLoop()
+	if s.httpClient != nil {
+		s.httpClient.CloseIdleConnections()
+	}
 
 	if s.client != nil {
-		s.client.Close()
+		if err := s.client.Close(); err != nil {
+			log.Error("close etcd client meet error", zap.Error(err))
+		}
 	}
+
+	s.stopServerLoop()
 
 	if s.member.Etcd() != nil {
 		s.member.Close()
