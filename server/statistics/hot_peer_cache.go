@@ -181,10 +181,10 @@ func (f *hotPeerCache) IsRegionHot(region *core.RegionInfo, hotDegree int) bool 
 	return false
 }
 
-func (f *hotPeerCache) CollectMetrics(stats *StoresStats, typ string) {
+func (f *hotPeerCache) CollectMetrics(typ string) {
 	for storeID, peers := range f.peersOfStore {
 		store := storeTag(storeID)
-		thresholds := f.calcHotThresholds(stats, storeID)
+		thresholds := f.calcHotThresholds(storeID)
 		hotCacheStatusGauge.WithLabelValues("total_length", store, typ).Set(float64(peers.Len()))
 		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[ByteDim])
 		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[KeyDim])
@@ -243,7 +243,7 @@ func (f *hotPeerCache) isRegionExpired(region *core.RegionInfo, storeID uint64) 
 	return false
 }
 
-func (f *hotPeerCache) calcHotThresholds(stats *StoresStats, storeID uint64) [DimLen]float64 {
+func (f *hotPeerCache) calcHotThresholds(storeID uint64) [DimLen]float64 {
 	minThresholds := minHotThresholds[f.kind]
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < topNN {
@@ -311,11 +311,10 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 }
 
 func (f *hotPeerCache) updateHotPeerStat(newItem, oldItem *HotPeerStat, storesStats *StoresStats) *HotPeerStat {
-	thresholds := f.calcHotThresholds(storesStats, newItem.StoreID)
+
+	thresholds := f.calcHotThresholds(newItem.StoreID)
 	isHot := newItem.ByteRate >= thresholds[ByteDim] ||
 		newItem.KeyRate >= thresholds[KeyDim] || newItem.QPS >= thresholds[QPSDim]
-	log.Info("newItem", zap.Float64("byte", newItem.ByteRate), zap.Float64("key", newItem.KeyRate), zap.Float64("qps", newItem.QPS))
-	log.Info("threshold", zap.Float64("byte", thresholds[ByteDim]), zap.Float64("key", thresholds[KeyDim]), zap.Float64("qps", thresholds[QPSDim]))
 	if f.kind == ReadFlow {
 		readByteStat.Observe(newItem.ByteRate)
 		readKeyStat.Observe(newItem.KeyRate)
