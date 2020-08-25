@@ -43,6 +43,7 @@ var (
 // client errors
 var (
 	ErrCloseGRPCConn   = errors.Normalize("close gRPC connection failed", errors.RFCCodeText("PD:client:ErrCloseGRPCConn"))
+	ErrCloseEtcdClient = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:client:ErrCloseEtcdClient"))
 	ErrUpdateLeader    = errors.Normalize("update leader failed", errors.RFCCodeText("PD:client:ErrUpdateLeader"))
 	ErrCreateTSOStream = errors.Normalize("create TSO stream failed", errors.RFCCodeText("PD:client:ErrCreateTSOStream"))
 	ErrGetTSO          = errors.Normalize("get TSO failed", errors.RFCCodeText("PD:client:ErrGetTSO"))
