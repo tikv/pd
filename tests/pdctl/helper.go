@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,14 +26,14 @@ import (
 	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/pd/v4/server"
-	"github.com/pingcap/pd/v4/server/api"
-	"github.com/pingcap/pd/v4/server/cluster"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/tests"
-	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl"
-	"github.com/pingcap/pd/v4/tools/pd-ctl/pdctl/command"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/versioninfo"
+	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
 // InitCommand is used to initialize command.
@@ -118,7 +118,7 @@ func MustPutStore(c *check.C, svr *server.Server, id uint64, state metapb.StoreS
 			Address: fmt.Sprintf("tikv%d", id),
 			State:   state,
 			Labels:  labels,
-			Version: (*cluster.MinSupportedVersion(cluster.Version2_0)).String(),
+			Version: versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
 		},
 	})
 	c.Assert(err, check.IsNil)

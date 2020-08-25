@@ -1,4 +1,4 @@
-// Copyright 2017 PingCAP, Inc.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,14 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pingcap/pd/v4/server/core"
-	"github.com/pingcap/pd/v4/server/schedule"
-	"github.com/pingcap/pd/v4/server/schedule/filter"
-	"github.com/pingcap/pd/v4/server/schedule/operator"
-	"github.com/pingcap/pd/v4/server/schedule/opt"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/filter"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -158,11 +158,10 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			sourceID := source.GetID()
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("source-store", sourceID))
 			sourceStoreLabel := strconv.FormatUint(sourceID, 10)
-			sourceAddress := source.GetAddress()
-			l.counter.WithLabelValues("high-score", sourceAddress, sourceStoreLabel).Inc()
+			l.counter.WithLabelValues("high-score", sourceStoreLabel).Inc()
 			for j := 0; j < balanceLeaderRetryLimit; j++ {
 				if ops := l.transferLeaderOut(cluster, source, opInfluence); len(ops) > 0 {
-					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", sourceAddress, sourceStoreLabel))
+					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", sourceStoreLabel))
 					return ops
 				}
 			}
@@ -173,12 +172,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 			targetID := target.GetID()
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("target-store", targetID))
 			targetStoreLabel := strconv.FormatUint(targetID, 10)
-			targetAddress := target.GetAddress()
-			l.counter.WithLabelValues("low-score", targetAddress, targetStoreLabel).Inc()
+			l.counter.WithLabelValues("low-score", targetStoreLabel).Inc()
 
 			for j := 0; j < balanceLeaderRetryLimit; j++ {
 				if ops := l.transferLeaderIn(cluster, target); len(ops) > 0 {
-					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-in", targetAddress, targetStoreLabel))
+					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-in", targetStoreLabel))
 					return ops
 				}
 			}
@@ -290,8 +288,8 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 	targetLabel := strconv.FormatUint(targetID, 10)
 	op.Counters = append(op.Counters,
 		schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
-		l.counter.WithLabelValues("move-leader", source.GetAddress()+"-out", sourceLabel),
-		l.counter.WithLabelValues("move-leader", target.GetAddress()+"-in", targetLabel),
+		l.counter.WithLabelValues("move-leader", sourceLabel+"-out"),
+		l.counter.WithLabelValues("move-leader", targetLabel+"-in"),
 		balanceDirectionCounter.WithLabelValues(l.GetName(), sourceLabel, targetLabel),
 	)
 	return []*operator.Operator{op}

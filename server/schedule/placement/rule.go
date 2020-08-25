@@ -1,4 +1,4 @@
-// Copyright 2019 PingCAP, Inc.
+// Copyright 2019 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"sort"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 // PeerRoleType is the expected peer type of the placement rule.
@@ -35,6 +37,14 @@ const (
 
 func validateRole(s PeerRoleType) bool {
 	return s == Voter || s == Leader || s == Follower || s == Learner
+}
+
+// MetaPeerRole converts placement.PeerRoleType to metapb.PeerRole.
+func (s PeerRoleType) MetaPeerRole() metapb.PeerRole {
+	if s == Learner {
+		return metapb.PeerRole_Learner
+	}
+	return metapb.PeerRole_Voter
 }
 
 // Rule is the placement rule that can be checked against a region. When
@@ -115,7 +125,18 @@ func sortRules(rules []*Rule) {
 	sort.Slice(rules, func(i, j int) bool { return compareRule(rules[i], rules[j]) < 0 })
 }
 
-// Sort Rules, trim concealed rules.
+// prepareRulesForApply search the target rules from the given rules.
+// it will filter the rules depends on the interval index override in the same group or the
+// group-index override between different groups
+// For example, given rules:
+// ruleA: group_id: 4, id: 2, override: true
+// ruleB: group_id: 4, id: 1, override: true
+// ruleC: group_id: 3
+// ruleD: group_id: 2
+// RuleGroupA: id:4, override: false
+// RuleGroupB: id:3, override: true
+// RuleGroupC: id:2, override: false
+// Finally only ruleA and ruleC will be selected.
 func prepareRulesForApply(rules []*Rule) []*Rule {
 	var res []*Rule
 	var i, j int
