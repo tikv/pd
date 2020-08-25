@@ -406,9 +406,7 @@ func (s *Server) Close() {
 
 	log.Info("closing server")
 
-	if s.httpClient != nil {
-		s.httpClient.CloseIdleConnections()
-	}
+	s.stopServerLoop()
 
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
@@ -416,7 +414,9 @@ func (s *Server) Close() {
 		}
 	}
 
-	s.stopServerLoop()
+	if s.httpClient != nil {
+		s.httpClient.CloseIdleConnections()
+	}
 
 	if s.member.Etcd() != nil {
 		s.member.Close()
