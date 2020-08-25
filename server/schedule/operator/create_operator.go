@@ -21,45 +21,46 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/opt"
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
-func CreateAddPeerOperator(desc string, cluster Cluster, region *core.RegionInfo, peer *metapb.Peer, kind OpKind) (*Operator, error) {
+func CreateAddPeerOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, peer *metapb.Peer, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
 		AddPeer(peer).
 		Build(kind)
 }
 
 // CreatePromoteLearnerOperator creates an operator that promotes a learner.
-func CreatePromoteLearnerOperator(desc string, cluster Cluster, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+func CreatePromoteLearnerOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
 		PromoteLearner(peer.GetStoreId()).
 		Build(0)
 }
 
 // CreateRemovePeerOperator creates an operator that removes a peer from region.
-func CreateRemovePeerOperator(desc string, cluster Cluster, kind OpKind, region *core.RegionInfo, storeID uint64) (*Operator, error) {
+func CreateRemovePeerOperator(desc string, cluster opt.Cluster, kind OpKind, region *core.RegionInfo, storeID uint64) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
 		RemovePeer(storeID).
 		Build(kind)
 }
 
 // CreateTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store.
-func CreateTransferLeaderOperator(desc string, cluster Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
+func CreateTransferLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
 		SetLeader(targetStoreID).
 		Build(kind)
 }
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
-func CreateMoveRegionOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, peers map[uint64]*metapb.Peer) (*Operator, error) {
+func CreateMoveRegionOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, peers map[uint64]*metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
 		SetPeers(peers).
 		Build(kind)
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
-func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
+func CreateMovePeerOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
 		RemovePeer(oldStore).
 		AddPeer(peer).
@@ -67,7 +68,7 @@ func CreateMovePeerOperator(desc string, cluster Cluster, region *core.RegionInf
 }
 
 // CreateMoveLeaderOperator creates an operator that replaces an old leader with a new leader.
-func CreateMoveLeaderOperator(desc string, cluster Cluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
+func CreateMoveLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, cluster, region).
 		RemovePeer(oldStore).
 		AddPeer(peer).
@@ -95,7 +96,7 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 }
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
-func CreateMergeRegionOperator(desc string, cluster Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OpKind) ([]*Operator, error) {
+func CreateMergeRegionOperator(desc string, cluster opt.Cluster, source *core.RegionInfo, target *core.RegionInfo, kind OpKind) ([]*Operator, error) {
 	var steps []OpStep
 	if !isRegionMatch(source, target) {
 		peers := make(map[uint64]*metapb.Peer)
@@ -147,7 +148,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
-func CreateScatterRegionOperator(desc string, cluster Cluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) (*Operator, error) {
+func CreateScatterRegionOperator(desc string, cluster opt.Cluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) (*Operator, error) {
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
