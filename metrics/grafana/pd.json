@@ -4088,7 +4088,7 @@
               "expr": "- sum(delta(pd_scheduler_hot_region_direction{type=\"transfer-leader\",direction=\"out\",rw=\"write\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 1,
-              "legendFormat": "{{type}}-{{store}}",
+              "legendFormat": "store-{{store}}",
               "refId": "A",
               "step": 4
             },
@@ -4096,7 +4096,7 @@
               "expr": "sum(delta(pd_scheduler_hot_region_direction{type=\"transfer-leader\",direction=\"in\",rw=\"write\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 1,
-              "legendFormat": "{{type}}-{{store}}",
+              "legendFormat": "store-{{store}}",
               "refId": "B"
             }
           ],
@@ -4190,7 +4190,7 @@
               "expr": "- sum(delta(pd_scheduler_hot_region_direction{type=\"move-peer\",direction=\"out\",rw=\"write\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 1,
-              "legendFormat": "{{type}}-{{store}}",
+              "legendFormat": "store-{{store}}",
               "refId": "A",
               "step": 4
             },
@@ -4198,7 +4198,7 @@
               "expr": "sum(delta(pd_scheduler_hot_region_direction{type=\"move-peer\",direction=\"in\",rw=\"write\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 1,
-              "legendFormat": "{{type}}-{{store}}",
+              "legendFormat": "store-{{store}}",
               "refId": "B"
             }
           ],
@@ -4782,7 +4782,7 @@
               "expr": "- sum(delta(pd_scheduler_hot_region_direction{type=\"move-peer\",direction=\"out\",rw=\"read\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{type}}-{{store}}",
+              "legendFormat": "store-{{store}}",
               "refId": "A",
               "step": 4
             },
@@ -4790,7 +4790,7 @@
               "expr": "sum(delta(pd_scheduler_hot_region_direction{type=\"move-peer\",direction=\"in\",rw=\"read\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 1,
-              "legendFormat": "{{type}}-{{store}}",
+              "legendFormat": "store-{{store}}",
               "refId": "B"
             }
           ],
@@ -4884,7 +4884,7 @@
               "expr": "- sum(delta(pd_scheduler_hot_region_direction{type=\"transfer-leader\",direction=\"out\",rw=\"read\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 1,
-              "legendFormat": "{{type}}-{{store}}",
+              "legendFormat": "store-{{store}}",
               "refId": "A",
               "step": 4
             },
@@ -4892,7 +4892,7 @@
               "expr": "sum(delta(pd_scheduler_hot_region_direction{type=\"transfer-leader\",direction=\"in\",rw=\"read\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 1,
-              "legendFormat": "{{type}}-{{store}}",
+              "legendFormat": "store-{{store}}",
               "refId": "B"
             }
           ],
