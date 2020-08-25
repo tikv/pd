@@ -45,7 +45,7 @@ const (
 
 // Member is used for the election related logic.
 type Member struct {
-	Leadership *election.Leadership
+	leadership *election.Leadership
 	leader     atomic.Value // stored as *pdpb.Member
 	// etcd and cluster information.
 	etcd     *embed.Etcd
@@ -112,29 +112,51 @@ func (m *Member) GetLeader() *pdpb.Member {
 	return member
 }
 
-// SetLeader sets the member's PD leader.
-func (m *Member) SetLeader(member *pdpb.Member) {
+// setLeader sets the member's PD leader.
+func (m *Member) setLeader(member *pdpb.Member) {
 	m.leader.Store(member)
 }
 
 // UnsetLeader unsets the member's PD leader.
-func (m *Member) UnsetLeader() {
+func (m *Member) unsetLeader() {
 	m.leader.Store(&pdpb.Member{})
 }
 
 // EnableLeader sets the member itself to PD leader.
 func (m *Member) EnableLeader() {
-	m.SetLeader(m.member)
+	m.setLeader(m.member)
 }
 
 // DisableLeader reset the PD leader value.
 func (m *Member) DisableLeader() {
-	m.UnsetLeader()
+	m.unsetLeader()
 }
 
 // GetLeaderPath returns the path of the PD leader.
 func (m *Member) GetLeaderPath() string {
 	return path.Join(m.rootPath, "leader")
+}
+
+// GetLeadership returns the leadership of the PD member.
+func (m *Member) GetLeadership() *election.Leadership {
+	return m.leadership
+}
+
+// CampaignLeadership is used to campaign a PD member's leadership
+// and make it become a PD leader.
+func (m *Member) CampaignLeadership(leaseTimeout int64) error {
+	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
+}
+
+// KeepLeadership is used to keep the PD leader's leadership.
+func (m *Member) KeepLeadership(ctx context.Context) {
+	m.leadership.Keep(ctx)
+}
+
+// CheckLeadership is used to check whether a leadership of
+// PD member is still avalibale.
+func (m *Member) CheckLeadership() bool {
+	return m.leadership.Check()
 }
 
 // CheckLeader checks returns true if it is needed to check later.
@@ -156,7 +178,7 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 			// oh, we are already a PD leader, which indicates we may meet something wrong
 			// in previous CampaignLeader. We should delete the leadership and campaign again.
 			log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
-			if err = m.Leadership.DeleteLeader(); err != nil {
+			if err = m.leadership.DeleteLeader(); err != nil {
 				log.Error("deleting pd leader key meets error", errs.ZapError(errs.ErrDeleteLeaderKey, err))
 				time.Sleep(200 * time.Millisecond)
 				return nil, 0, true
@@ -232,7 +254,7 @@ func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
 
 // LeadershipInfo initializes the leadership info.
 func (m *Member) LeadershipInfo() {
-	m.Leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "pd leader election")
+	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "pd leader election")
 }
 
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all
@@ -264,7 +286,7 @@ func (m *Member) getMemberLeaderPriorityPath(id uint64) string {
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
 func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 	key := m.getMemberLeaderPriorityPath(id)
-	res, err := m.Leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
+	res, err := m.leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -277,7 +299,7 @@ func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 // DeleteMemberLeaderPriority removes a member's ectd leader priority config.
 func (m *Member) DeleteMemberLeaderPriority(id uint64) error {
 	key := m.getMemberLeaderPriorityPath(id)
-	res, err := m.Leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
+	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -400,6 +422,18 @@ func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
 		return errors.New("failed to save git hash")
 	}
 	return nil
+}
+
+// WatchLeader is used to watch the changes of the leader.
+func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
+	m.setLeader(leader)
+	m.leadership.Watch(serverCtx, revision)
+	m.unsetLeader()
+}
+
+// ResetLeadership is used to reset the PD member's cuurent leadership.
+func (m *Member) ResetLeadership() {
+	m.leadership.Reset()
 }
 
 // Close gracefully shuts down all servers/listeners.

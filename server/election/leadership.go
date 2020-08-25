@@ -46,7 +46,7 @@ func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, erro
 // Leadership is used to manage the leadership campaigning.
 type Leadership struct {
 	// purpose is used to show what this election for
-	Purpose string
+	purpose string
 	// The lease which is used to get this leadership
 	lease  atomic.Value // stored as *lease
 	client *clientv3.Client
@@ -58,7 +58,7 @@ type Leadership struct {
 // NewLeadership creates a new Leadership.
 func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadership {
 	leadership := &Leadership{
-		Purpose:   purpose,
+		purpose:   purpose,
 		client:    client,
 		leaderKey: leaderKey,
 	}
@@ -89,7 +89,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
 	ls.setLease(&lease{
-		Purpose: ls.Purpose,
+		Purpose: ls.purpose,
 		client:  ls.client,
 		lease:   clientv3.NewLease(ls.client),
 	})
@@ -108,7 +108,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 	if !resp.Succeeded {
 		return errors.New("failed to campaign leader, other server may campaign ok")
 	}
-	log.Info("write leaderDate to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.Purpose))
+	log.Info("write leaderDate to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
 }
 
@@ -173,7 +173,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				log.Error("leadership watcher is canceled with",
 					zap.Int64("revision", revision),
 					zap.String("leaderKey", ls.leaderKey),
-					zap.String("purpose", ls.Purpose),
+					zap.String("purpose", ls.purpose),
 					errs.ZapError(errs.ErrWatcherCancel, wresp.Err()))
 				return
 			}
@@ -182,7 +182,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				if ev.Type == mvccpb.DELETE {
 					log.Info("current leadership is deleted",
 						zap.String("leaderKey", ls.leaderKey),
-						zap.String("purpose", ls.Purpose))
+						zap.String("purpose", ls.purpose))
 					return
 				}
 			}

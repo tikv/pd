@@ -350,7 +350,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocator = tso.NewGlobalTSOAllocator(
-		s.member.Leadership,
+		s.member.GetLeadership(),
 		s.rootPath,
 		s.cfg.TsoSaveInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
@@ -634,7 +634,7 @@ func (s *Server) GetHTTPClient() *http.Client {
 
 // GetLeadership returns the member's leadership
 func (s *Server) GetLeadership() *election.Leadership {
-	return s.member.Leadership
+	return s.member.GetLeadership()
 }
 
 // GetLeader returns the leader of PD cluster(i.e the PD leader).
@@ -1073,10 +1073,8 @@ func (s *Server) leaderLoop() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
 			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
-			s.member.SetLeader(leader)
 			// WatchLeader will keep looping and never return unless the PD leader has changed.
-			s.member.Leadership.Watch(s.serverLoopCtx, rev)
-			s.member.UnsetLeader()
+			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
 			syncer.StopSyncWithLeader()
 			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
@@ -1096,10 +1094,8 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign pd leader",
-		zap.String("campaign-pd-leader-name", s.Name()),
-		zap.String("purpose", s.member.Leadership.Purpose))
-	if err := s.member.Leadership.Campaign(s.cfg.LeaderLease, s.member.MemberValue()); err != nil {
+	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
+	if err := s.member.CampaignLeadership(s.cfg.LeaderLease); err != nil {
 		log.Error("campaign pd leader meet error", zap.Error(err))
 		return
 	}
@@ -1111,9 +1107,9 @@ func (s *Server) campaignLeader() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-	defer s.member.Leadership.Reset()
+	defer s.member.ResetLeadership()
 	// maintain the leadership
-	go s.member.Leadership.Keep(ctx)
+	go s.member.KeepLeadership(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
 	log.Info("initialize the global TSO allocator")
@@ -1148,7 +1144,7 @@ func (s *Server) campaignLeader() {
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !s.member.Leadership.Check() {
+			if !s.member.CheckLeadership() {
 				log.Info("leadership is invalid because lease has expired, pd leader will step down")
 				return
 			}
