@@ -1226,7 +1226,7 @@ func (c *RaftCluster) collectClusterMetrics() {
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
 	// collect hot cache metrics
-	c.hotSpotCache.CollectMetrics(c.storesStats)
+	c.hotSpotCache.CollectMetrics()
 }
 
 func (c *RaftCluster) resetClusterMetrics() {
