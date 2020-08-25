@@ -15,12 +15,11 @@ package tempurl
 
 import (
 	"fmt"
-	"net"
+	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/pingcap/log"
-	"go.uber.org/zap"
 )
 
 var (
@@ -41,16 +40,7 @@ func Alloc() string {
 }
 
 func tryAllocTestURL() string {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		log.Fatal("listen failed", zap.Error(err))
-	}
-	addr := fmt.Sprintf("http://%s", l.Addr())
-	err = l.Close()
-	if err != nil {
-		log.Fatal("close failed", zap.Error(err))
-	}
-
+	addr := fmt.Sprintf("127.0.0.1:%v", allocPort())
 	testAddrMutex.Lock()
 	defer testAddrMutex.Unlock()
 	if _, ok := testAddrMap[addr]; ok {
@@ -58,4 +48,8 @@ func tryAllocTestURL() string {
 	}
 	testAddrMap[addr] = struct{}{}
 	return addr
+}
+
+func allocPort() int {
+	return 10000 + rand.Int()%6000
 }
