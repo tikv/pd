@@ -344,6 +344,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	s.member.MemberInfo(s.cfg, s.Name(), s.rootPath)
+	s.member.LeadershipInfo()
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
@@ -1071,17 +1072,22 @@ func (s *Server) leaderLoop() {
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
-			log.Info("start watch pd leader", zap.Stringer("pd-leader", leader))
-			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
+			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
+			s.member.SetLeader(leader)
+			// WatchLeader will keep looping and never return unless the PD leader has changed.
+			s.member.Leadership.Watch(s.serverLoopCtx, rev)
+			s.member.UnsetLeader()
 			syncer.StopSyncWithLeader()
-			log.Info("pd leader changed, try to re-campaign a pd leader")
+			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
 
+		// To make sure the etcd leader and PD leader are on the same server.
 		etcdLeader := s.member.GetEtcdLeader()
 		if etcdLeader != s.member.ID() {
 			log.Info("skip campaigning of pd leader and check later",
 				zap.String("server-name", s.Name()),
-				zap.Uint64("etcd-leader-id", etcdLeader))
+				zap.Uint64("etcd-leader-id", etcdLeader),
+				zap.Uint64("member-id", s.member.ID()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -1093,7 +1099,7 @@ func (s *Server) campaignLeader() {
 	log.Info("start to campaign pd leader",
 		zap.String("campaign-pd-leader-name", s.Name()),
 		zap.String("purpose", s.member.Leadership.Purpose))
-	if err := s.member.Leadership.Campaign(s.cfg.LeaderLease, s.member.GetLeaderPath(), s.member.MemberValue()); err != nil {
+	if err := s.member.Leadership.Campaign(s.cfg.LeaderLease, s.member.MemberValue()); err != nil {
 		log.Error("campaign pd leader meet error", zap.Error(err))
 		return
 	}

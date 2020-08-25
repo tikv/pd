@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -36,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
 )
 
@@ -64,10 +62,9 @@ type Member struct {
 // NewMember create a new Member.
 func NewMember(etcd *embed.Etcd, client *clientv3.Client, id uint64) *Member {
 	return &Member{
-		Leadership: election.NewLeadership(client, "pd leader election"),
-		etcd:       etcd,
-		client:     client,
-		id:         id,
+		etcd:   etcd,
+		client: client,
+		id:     id,
 	}
 }
 
@@ -115,14 +112,24 @@ func (m *Member) GetLeader() *pdpb.Member {
 	return member
 }
 
-// EnableLeader sets the member to PD leader.
+// SetLeader sets the member's PD leader.
+func (m *Member) SetLeader(member *pdpb.Member) {
+	m.leader.Store(member)
+}
+
+// UnsetLeader unsets the member's PD leader.
+func (m *Member) UnsetLeader() {
+	m.leader.Store(&pdpb.Member{})
+}
+
+// EnableLeader sets the member itself to PD leader.
 func (m *Member) EnableLeader() {
-	m.leader.Store(m.member)
+	m.SetLeader(m.member)
 }
 
 // DisableLeader reset the PD leader value.
 func (m *Member) DisableLeader() {
-	m.leader.Store(&pdpb.Member{})
+	m.UnsetLeader()
 }
 
 // GetLeaderPath returns the path of the PD leader.
@@ -221,6 +228,11 @@ func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
 	m.member = leader
 	m.memberValue = string(data)
 	m.rootPath = rootPath
+}
+
+// LeadershipInfo initializes the leadership info.
+func (m *Member) LeadershipInfo() {
+	m.Leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "pd leader election")
 }
 
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all
@@ -388,54 +400,6 @@ func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
 		return errors.New("failed to save git hash")
 	}
 	return nil
-}
-
-// WatchLeader is used to watch the changes of the leader.
-func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
-	m.leader.Store(leader)
-	defer m.leader.Store(&pdpb.Member{})
-
-	watcher := clientv3.NewWatcher(m.client)
-	defer watcher.Close()
-
-	ctx, cancel := context.WithCancel(serverCtx)
-	defer cancel()
-
-	// The revision is the revision of last modification on this key.
-	// If the revision is compacted, will meet required revision has been compacted error.
-	// In this case, use the compact revision to re-watch the key.
-	for {
-		failpoint.Inject("delayWatcher", nil)
-		rch := watcher.Watch(ctx, m.GetLeaderPath(), clientv3.WithRev(revision))
-		for wresp := range rch {
-			// meet compacted error, use the compact revision.
-			if wresp.CompactRevision != 0 {
-				log.Warn("required revision has been compacted, use the compact revision",
-					zap.Int64("required-revision", revision),
-					zap.Int64("compact-revision", wresp.CompactRevision))
-				revision = wresp.CompactRevision
-				break
-			}
-			if wresp.Canceled {
-				log.Error("pd leader watcher is canceled with", zap.Int64("revision", revision), errs.ZapError(errs.ErrWatcherCancel, wresp.Err()))
-				return
-			}
-
-			for _, ev := range wresp.Events {
-				if ev.Type == mvccpb.DELETE {
-					log.Info("current pd leader is deleted")
-					return
-				}
-			}
-		}
-
-		select {
-		case <-ctx.Done():
-			// server closed, return
-			return
-		default:
-		}
-	}
 }
 
 // Close gracefully shuts down all servers/listeners.
