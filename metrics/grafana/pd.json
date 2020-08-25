@@ -4052,9 +4052,9 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 80
+            "y": 79
           },
-          "id": 145,
+          "id": 150,
           "legend": {
             "alignAsTable": true,
             "avg": true,
@@ -4085,7 +4085,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "-sum(delta(pd_scheduler_hot_region{store=~\"$store-out\", instance=\"$instance\", type=\"move-leader\"}[1m])) by (store)",
+              "expr": "- sum(delta(pd_scheduler_hot_region_direction{type=\"transfer-leader\",direction=\"out\",rw=\"write\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "store-{{store}}",
@@ -4093,7 +4093,7 @@
               "step": 4
             },
             {
-              "expr": "sum(delta(pd_scheduler_hot_region{store=~\"$store-in\", instance=\"$instance\", type=\"move-leader\"}[1m])) by (store)",
+              "expr": "sum(delta(pd_scheduler_hot_region_direction{type=\"transfer-leader\",direction=\"in\",rw=\"write\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "store-{{store}}",
@@ -4104,7 +4104,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Direction of hotspot move leader",
+          "title": "Direction of hotspot transfer leader",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -4154,9 +4154,9 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 80
+            "y": 79
           },
-          "id": 144,
+          "id": 148,
           "legend": {
             "alignAsTable": true,
             "avg": true,
@@ -4187,15 +4187,15 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "-sum(delta(pd_scheduler_hot_region{store=~\"$store-out\", instance=\"$instance\", type=\"move-peer\"}[1m])) by (store)",
+              "expr": "- sum(delta(pd_scheduler_hot_region_direction{type=\"move-peer\",direction=\"out\",rw=\"write\"}[1m]))by (store)",
               "format": "time_series",
-              "intervalFactor": 2,
+              "intervalFactor": 1,
               "legendFormat": "store-{{store}}",
               "refId": "A",
               "step": 4
             },
             {
-              "expr": "sum(delta(pd_scheduler_hot_region{store=~\"$store-in\", instance=\"$instance\", type=\"move-peer\"}[1m])) by (store)",
+              "expr": "sum(delta(pd_scheduler_hot_region_direction{type=\"move-peer\",direction=\"in\",rw=\"write\"}[1m]))by (store)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "store-{{store}}",
@@ -4697,6 +4697,210 @@
           "timeRegions": [],
           "timeShift": null,
           "title": "Hot cache Read entry numbers",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "decimals": null,
+              "format": "none",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 0,
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 67
+          },
+          "id": 144,
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": false,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "- sum(delta(pd_scheduler_hot_region_direction{type=\"move-peer\",direction=\"out\",rw=\"read\"}[1m]))by (store)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "store-{{store}}",
+              "refId": "A",
+              "step": 4
+            },
+            {
+              "expr": "sum(delta(pd_scheduler_hot_region_direction{type=\"move-peer\",direction=\"in\",rw=\"read\"}[1m]))by (store)",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "store-{{store}}",
+              "refId": "B"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Direction of hotspot move peer",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "decimals": null,
+              "format": "none",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 0,
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 74
+          },
+          "id": 149,
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": false,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "- sum(delta(pd_scheduler_hot_region_direction{type=\"transfer-leader\",direction=\"out\",rw=\"read\"}[1m]))by (store)",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "store-{{store}}",
+              "refId": "A",
+              "step": 4
+            },
+            {
+              "expr": "sum(delta(pd_scheduler_hot_region_direction{type=\"transfer-leader\",direction=\"in\",rw=\"read\"}[1m]))by (store)",
+              "format": "time_series",
+              "intervalFactor": 1,
+              "legendFormat": "store-{{store}}",
+              "refId": "B"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Direction of hotspot transfer leader",
           "tooltip": {
             "shared": true,
             "sort": 0,
