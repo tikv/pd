@@ -37,7 +37,7 @@ const (
 	// updateTimestampGuard is the min timestamp interval.
 	updateTimestampGuard = time.Millisecond
 	// maxLogical is the max upper limit for logical time.
-	// When a TSO's logical time reachs this limit,
+	// When a TSO's logical time reaches this limit,
 	// the physical time will be forced to increase.
 	maxLogical = int64(1 << 18)
 )
