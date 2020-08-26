@@ -38,7 +38,9 @@ const (
 // TODO: adjust the value or make it configurable.
 var (
 	// MetricsTimeDuration is used to get the metrics of a certain time period.
-	MetricsTimeDuration = 5 * time.Second
+	// This must be long enough to cover at least 2 scrape intervals
+	// Or you will get nothing when querying CPU usage
+	MetricsTimeDuration = 60 * time.Second
 	// MaxScaleOutStep is used to indicate the maxium number of instance for scaling out operations at once.
 	MaxScaleOutStep uint64 = 1
 	// MaxScaleInStep is used to indicate the maxium number of instance for scaling in operations at once.

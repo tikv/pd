@@ -238,7 +238,7 @@ func (o *PersistOptions) IsCrossTableMergeEnabled() bool {
 	return o.GetScheduleConfig().EnableCrossTableMerge
 }
 
-// GetPatrolRegionInterval returns the interval of patroling region.
+// GetPatrolRegionInterval returns the interval of patrolling region.
 func (o *PersistOptions) GetPatrolRegionInterval() time.Duration {
 	return o.GetScheduleConfig().PatrolRegionInterval.Duration
 }

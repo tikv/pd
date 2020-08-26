@@ -56,7 +56,7 @@ var (
 	ErrRegionNotFound = func(regionID uint64) error {
 		return errors.Errorf("region %v not found", regionID)
 	}
-	// ErrRegionAbnormalPeer is error info for region has abonormal peer.
+	// ErrRegionAbnormalPeer is error info for region has abnormal peer.
 	ErrRegionAbnormalPeer = func(regionID uint64) error {
 		return errors.Errorf("region %v has abnormal peer", regionID)
 	}
@@ -228,7 +228,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	return err
 }
 
-// PauseOrResumeScheduler pasues a scheduler for delay seconds or resume a paused scheduler.
+// PauseOrResumeScheduler pauses a scheduler for delay seconds or resume a paused scheduler.
 // t == 0 : resume scheduler.
 // t > 0 : scheduler delays t seconds.
 func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
@@ -832,13 +832,13 @@ func (h *Handler) ResetTS(ts uint64) error {
 	return tsoAllocator.SetTSO(ts)
 }
 
-// SetStoreLimitScene sets the limit values for differents scenes
+// SetStoreLimitScene sets the limit values for different scenes
 func (h *Handler) SetStoreLimitScene(scene *storelimit.Scene, limitType storelimit.Type) {
 	cluster := h.s.GetRaftCluster()
 	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
 }
 
-// GetStoreLimitScene returns the limit valus for different scenes
+// GetStoreLimitScene returns the limit values for different scenes
 func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
 	cluster := h.s.GetRaftCluster()
 	return cluster.GetStoreLimiter().StoreLimitScene(limitType)
