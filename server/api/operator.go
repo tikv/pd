@@ -279,7 +279,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			group = ""
 		}
-		if err := h.AddScatterRegionOperator(uint64(regionID), groupg); err != nil {
+		if err := h.AddScatterRegionOperator(uint64(regionID), group); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
