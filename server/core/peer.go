@@ -21,3 +21,15 @@ import (
 func IsLearner(peer *metapb.Peer) bool {
 	return peer.GetRole() == metapb.PeerRole_Learner
 }
+
+// IsInJointState judges whether the Peer is in joint state.
+func IsInJointState(peers []*metapb.Peer) bool {
+	for _, peer := range peers {
+		switch peer.GetRole() {
+		case metapb.PeerRole_IncomingVoter, metapb.PeerRole_DemotingVoter:
+			return true
+		default:
+		}
+	}
+	return false
+}
