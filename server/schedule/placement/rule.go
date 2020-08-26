@@ -97,6 +97,10 @@ type RuleGroup struct {
 	Override bool   `json:"override,omitempty"`
 }
 
+func (g *RuleGroup) isDefault() bool {
+	return g.Index == 0 && !g.Override
+}
+
 // Rules are ordered by (GroupID, Index, ID).
 func compareRule(a, b *Rule) int {
 	switch {
