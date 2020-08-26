@@ -15,46 +15,26 @@
 package tempurl
 
 import (
-	"strconv"
-	"strings"
-
 	"github.com/cakturk/go-netstat/netstat"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 )
 
 func environmentCheck(addr string) bool {
-	valid, err := checkTimeWait(addr[len("http://127.0.0.1:"):])
+	valid, err := checkAddr(addr[len("http://"):])
 	if err != nil {
 		log.Info("check port status failed", zap.Error(err))
 		return false
 	}
-	if !valid {
-		return false
-	}
-	return true
+	return valid
 }
 
-func checkTimeWait(portStr string) (bool, error) {
-	port, err := strconv.ParseUint(portStr, 10, 64)
-	if err != nil {
-		return false, err
-	}
-
+func checkAddr(addr string) (bool, error) {
 	tabs, err := netstat.TCPSocks(func(s *netstat.SockTabEntry) bool {
-		remote := strings.ToLower(s.RemoteAddr.IP.String()) == "localhost" || s.RemoteAddr.IP.String() == "127.0.0.1"
-		local := strings.ToLower(s.LocalAddr.IP.String()) == "localhost" || s.LocalAddr.IP.String() == "127.0.0.1"
-		status := strings.ToUpper(s.State.String()) == "TIME_WAIT"
-		return remote && status && local
+		return s.RemoteAddr.String() == addr || s.LocalAddr.String() == addr
 	})
 	if err != nil {
 		return false, err
 	}
-
-	for _, e := range tabs {
-		if e.LocalAddr.Port == uint16(port) || e.RemoteAddr.Port == uint16(port) {
-			return false, nil
-		}
-	}
-	return true, nil
+	return len(tabs) < 1, nil
 }
