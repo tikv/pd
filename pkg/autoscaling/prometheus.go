@@ -16,6 +16,7 @@ package autoscaling
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"strings"
 	"time"
@@ -117,7 +118,7 @@ func extractInstancesFromResponse(resp promModel.Value, addresses []string) (Que
 	}
 
 	if len(vector) == 0 {
-		return nil, errors.New("no results returned from Prometheus")
+		return nil, errors.New("no results returned from Prometheus, your query metrics duration must be at least twice the Prometheus scrape interval")
 	}
 
 	instancesSet := map[string]string{}
@@ -177,7 +178,7 @@ func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
 		return "", errors.Errorf("unsupported component type %v", options.component)
 	}
 
-	query := fmt.Sprintf(pattern, options.duration.String())
+	query := fmt.Sprintf(pattern, getDurationExpression(options.duration))
 	return query, nil
 }
 
@@ -211,4 +212,12 @@ func getInstanceNameFromAddress(addr string) (string, error) {
 
 func buildInstanceIdentifier(podName string, namespace string) string {
 	return fmt.Sprintf("%s_%s", podName, namespace)
+}
+
+func getDurationExpression(duration time.Duration) string {
+	// Prometheus only accept single unit duration like 10s, 2m
+	// and the time.Duration.String() method returns the duration like 2m0s, 2m30s,
+	// so we need to express the duration in seconds like 120s
+	seconds := int64(math.Floor(duration.Seconds()))
+	return fmt.Sprintf("%ds", seconds)
 }
