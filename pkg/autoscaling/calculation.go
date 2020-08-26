@@ -32,6 +32,7 @@ import (
 const (
 	groupLabelKey                  = "group"
 	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling-"
+	resourceTypeLabelKey           = "resource-type"
 	millicores                     = 1000
 )
 
@@ -281,6 +282,7 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 
 func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) []*Plan {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
+	resourceTypeMap := make(map[string]string)
 	for _, instance := range healthyInstances {
 		store := informer.GetStore(instance.id)
 		if store == nil {
@@ -288,14 +290,29 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 				zap.Uint64("store-id", instance.id))
 			return nil
 		}
-		v := store.GetLabelValue(groupLabelKey)
-		buildPlanMap(planMap, v, instance.address)
+
+		groupName := store.GetLabelValue(groupLabelKey)
+		if !isAutoScaledGroup(groupName) {
+			continue
+		}
+
+		buildPlanMap(planMap, groupName, instance.address)
+
+		if _, ok := resourceTypeMap[groupName]; !ok {
+			resourceType := store.GetLabelValue(resourceTypeLabelKey)
+			if resourceType == "" {
+				log.Warn("store is in auto-scaled group but has no resource type label", zap.Uint64("store-id", instance.id))
+			} else {
+				resourceTypeMap[groupName] = resourceType
+			}
+		}
 	}
-	return buildPlans(planMap, TiKV)
+	return buildPlans(planMap, resourceTypeMap, TiKV)
 }
 
 func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instance) []*Plan {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
+	resourceTypeMap := make(map[string]string)
 	for _, instance := range healthyInstances {
 		tidb, err := GetTiDB(etcdClient, instance.address)
 		if err != nil {
@@ -307,35 +324,50 @@ func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instanc
 				zap.String("tidb-address", instance.address))
 			return nil
 		}
-		v := tidb.getLabelValue(groupLabelKey)
-		buildPlanMap(planMap, v, instance.address)
+
+		groupName := tidb.getLabelValue(groupLabelKey)
+		if !isAutoScaledGroup(groupName) {
+			continue
+		}
+
+		buildPlanMap(planMap, groupName, instance.address)
+		resourceType := tidb.getLabelValue(resourceTypeLabelKey)
+		if _, ok := resourceTypeMap[groupName]; !ok {
+			if resourceType == "" {
+				log.Warn("tidb is in auto-scaled group but has no resource type label", zap.String("tidb-address", instance.address))
+			} else {
+				resourceTypeMap[groupName] = resourceType
+			}
+		}
 	}
-	return buildPlans(planMap, TiDB)
+	return buildPlans(planMap, resourceTypeMap, TiDB)
+}
+
+func isAutoScaledGroup(groupName string) bool {
+	return len(groupName) > len(autoScalingGroupLabelKeyPrefix) && strings.HasPrefix(groupName, autoScalingGroupLabelKeyPrefix)
 }
 
 func buildPlanMap(planMap map[string]map[string]struct{}, groupName, address string) {
-	if len(groupName) > len(autoScalingGroupLabelKeyPrefix) &&
-		strings.HasPrefix(groupName, autoScalingGroupLabelKeyPrefix) {
-		if component, ok := planMap[groupName]; ok {
-			component[address] = struct{}{}
-		} else {
-			planMap[groupName] = map[string]struct{}{
-				address: {},
-			}
+	if component, ok := planMap[groupName]; ok {
+		component[address] = struct{}{}
+	} else {
+		planMap[groupName] = map[string]struct{}{
+			address: {},
 		}
 	}
 }
 
-func buildPlans(planMap map[string]map[string]struct{}, componentType ComponentType) []*Plan {
+func buildPlans(planMap map[string]map[string]struct{}, resourceTypeMap map[string]string, componentType ComponentType) []*Plan {
 	var plans []*Plan
-	for groupLabel, groupInstances := range planMap {
+	for groupName, groupInstances := range planMap {
 		plans = append(plans, &Plan{
-			Component: componentType.String(),
-			Count:     uint64(len(groupInstances)),
+			Component:    componentType.String(),
+			Count:        uint64(len(groupInstances)),
+			ResourceType: resourceTypeMap[groupName],
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   groupLabelKey,
-					Value: groupLabel,
+					Value: groupName,
 				},
 			},
 		})
