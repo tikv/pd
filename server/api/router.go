@@ -105,6 +105,15 @@ func createRouter(ctx context.Context, prefix string, svr *server.Server) *mux.R
 	clusterRouter.HandleFunc("/config/rule_group/{id}", rulesHandler.DeleteGroupConfig).Methods("DELETE")
 	clusterRouter.HandleFunc("/config/rule_groups", rulesHandler.GetAllGroupConfigs).Methods("GET")
 
+	clusterRouter.HandleFunc("/config/placement-rule", rulesHandler.GetAllGroupBundles).Methods("GET")
+	clusterRouter.HandleFunc("/config/placement-rule", rulesHandler.SetAllGroupBundles).Methods("POST")
+	// {group} can be a regular expression, we should enable path encode to
+	// support special characters.
+	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
+	clusterRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.GetGroupBundle).Methods("GET")
+	clusterRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.SetGroupBundle).Methods("POST")
+	escapeRouter.HandleFunc("/config/placement-rule/{group}", rulesHandler.DeleteGroupBundle).Methods("DELETE")
+
 	storeHandler := newStoreHandler(handler, rd)
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Get).Methods("GET")
 	clusterRouter.HandleFunc("/store/{id}", storeHandler.Delete).Methods("DELETE")
