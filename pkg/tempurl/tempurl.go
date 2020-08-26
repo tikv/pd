@@ -32,7 +32,7 @@ var (
 
 func init() {
 	// we only check environment status in CI
-	if len(os.Getenv("CI_ENVIRONMENT_CHECK")) > 0 {
+	if len(os.Getenv("PD_CI_ENVIRONMENT_CHECK")) > 0 {
 		ciEnvironmentCheck = true
 	}
 }
