@@ -803,7 +803,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	co.stop()
 	co.wg.Wait()
 
-	// Recreate coodinator then add another replica on store 3.
+	// Recreate coordinator then add another replica on store 3.
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
