@@ -31,46 +31,75 @@ import (
 const regionScatterName = "region-scatter"
 
 type selectedLeaderStores struct {
-	mu     sync.Mutex
-	stores map[uint64]uint64 // storeID -> hintCount
+	mu                sync.Mutex
+	stores            map[uint64]uint64            // storeID -> hintCount
+	groupDistribution map[string]map[uint64]uint64 // group -> StoreID -> leaderCount
 }
 
-func (s *selectedLeaderStores) put(id uint64) {
+func (s *selectedLeaderStores) put(id uint64, group string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stores[id] = s.stores[id] + 1
+	if group != "" {
+		distribution, ok := s.groupDistribution[group]
+		if !ok {
+			distribution = make(map[uint64]uint64)
+		}
+		distribution[id] = distribution[id] + 1
+		s.groupDistribution[group] = distribution
+	}
 }
 
-func (s *selectedLeaderStores) get(id uint64) uint64 {
+func (s *selectedLeaderStores) get(id uint64, group string) uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.stores[id]
+	if group == "" {
+		return s.stores[id]
+	}
+	distribution, ok := s.groupDistribution[group]
+	if !ok {
+		s.groupDistribution[group] = make(map[uint64]uint64)
+		return 0
+	}
+	return distribution[id]
 }
 
 func newSelectedLeaderStores() *selectedLeaderStores {
 	return &selectedLeaderStores{
-		stores: make(map[uint64]uint64),
+		stores:            make(map[uint64]uint64),
+		groupDistribution: make(map[string]map[uint64]uint64),
 	}
 }
 
 type selectedStores struct {
-	mu     sync.Mutex
-	stores map[uint64]struct{}
+	mu                sync.Mutex
+	stores            map[uint64]struct{}
+	groupDistribution map[string]map[uint64]uint64 // group -> StoreID -> peerCount
 }
 
 func newSelectedStores() *selectedStores {
 	return &selectedStores{
-		stores: make(map[uint64]struct{}),
+		stores:            make(map[uint64]struct{}),
+		groupDistribution: make(map[string]map[uint64]uint64),
 	}
 }
 
-func (s *selectedStores) put(id uint64) bool {
+func (s *selectedStores) put(id uint64, group string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.stores[id]; ok {
 		return false
 	}
 	s.stores[id] = struct{}{}
+	if group == "" {
+		return true
+	}
+	distribution, ok := s.groupDistribution[group]
+	if !ok {
+		distribution = make(map[uint64]uint64)
+	}
+	distribution[id] = distribution[id] + 1
+	s.groupDistribution[group] = distribution
 	return true
 }
 
@@ -78,6 +107,20 @@ func (s *selectedStores) reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stores = make(map[uint64]struct{})
+}
+
+func (s *selectedStores) get(id uint64, group string) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	distribution, ok := s.groupDistribution[group]
+	if !ok {
+		return 0
+	}
+	count, ok := distribution[id]
+	if !ok {
+		return 0
+	}
+	return count
 }
 
 func (s *selectedStores) newFilter(scope string) filter.Filter {
@@ -125,7 +168,7 @@ func newEngineContext(filters ...filter.Filter) engineContext {
 }
 
 // Scatter relocates the region.
-func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*operator.Operator, error) {
+func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*operator.Operator, error) {
 	if !opt.IsRegionReplicated(r.cluster, region) {
 		r.cluster.AddSuspectRegions(region.GetID())
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
@@ -135,10 +178,10 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo) (*operator.Operator, 
 		return nil, errors.Errorf("region %d has no leader", region.GetID())
 	}
 
-	return r.scatterRegion(region), nil
+	return r.scatterRegion(region, group), nil
 }
 
-func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Operator {
+func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *operator.Operator {
 	ordinaryFilter := filter.NewOrdinaryEngineFilter(r.name)
 	var ordinaryPeers []*metapb.Peer
 	specialPeers := make(map[string][]*metapb.Peer)
@@ -162,19 +205,19 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 				context.selected.reset()
 				stores = r.collectAvailableStores(region, context)
 			}
-			if context.selected.put(peer.GetStoreId()) {
+			if context.selected.put(peer.GetStoreId(), group) {
 				delete(stores, peer.GetStoreId())
 				targetPeers[peer.GetStoreId()] = peer
 				continue
 			}
-			newPeer := r.selectPeerToReplace(stores, region, peer)
+			newPeer := r.selectPeerToReplace(group, stores, region, peer, context)
 			if newPeer == nil {
 				targetPeers[peer.GetStoreId()] = peer
 				continue
 			}
 			// Remove it from stores and mark it as selected.
 			delete(stores, newPeer.GetStoreId())
-			context.selected.put(newPeer.GetStoreId())
+			context.selected.put(newPeer.GetStoreId(), group)
 			targetPeers[newPeer.GetStoreId()] = newPeer
 		}
 	}
@@ -183,7 +226,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 	// FIXME: target leader only considers the ordinary stores，maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
-	targetLeader := r.searchLeastleaderStore(targetPeers, r.ordinaryEngine)
+	targetLeader := r.collectAvailableLeaderStores(group, targetPeers, r.ordinaryEngine)
 
 	for engine, peers := range specialPeers {
 		context, ok := r.specialEngines[engine]
@@ -203,7 +246,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo) *operator.Opera
 	return op
 }
 
-func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
+func (r *RegionScatterer) selectPeerToReplace(group string, stores map[uint64]*core.StoreInfo, region *core.RegionInfo, oldPeer *metapb.Peer, context engineContext) *metapb.Peer {
 	// scoreGuard guarantees that the distinct score will not decrease.
 	storeID := oldPeer.GetStoreId()
 	sourceStore := r.cluster.GetStore(storeID)
@@ -225,9 +268,26 @@ func (r *RegionScatterer) selectPeerToReplace(stores map[uint64]*core.StoreInfo,
 		return nil
 	}
 
-	target := candidates[rand.Intn(len(candidates))]
+	minPeer := uint64(math.MaxUint64)
+	var selectedCandidateID uint64
+	selectedCandidateID = 0
+	for _, candidate := range candidates {
+		count := context.selected.get(candidate.GetID(), group)
+		if count < minPeer {
+			minPeer = count
+			selectedCandidateID = candidate.GetID()
+		}
+	}
+	if selectedCandidateID < 1 {
+		target := candidates[rand.Intn(len(candidates))]
+		return &metapb.Peer{
+			StoreId: target.GetID(),
+			Role:    oldPeer.GetRole(),
+		}
+	}
+
 	return &metapb.Peer{
-		StoreId: target.GetID(),
+		StoreId: selectedCandidateID,
 		Role:    oldPeer.GetRole(),
 	}
 }
@@ -250,18 +310,30 @@ func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo, contex
 	return targets
 }
 
-func (r *RegionScatterer) searchLeastleaderStore(peers map[uint64]*metapb.Peer, context engineContext) uint64 {
+func (r *RegionScatterer) collectAvailableLeaderStores(group string, peers map[uint64]*metapb.Peer, context engineContext) uint64 {
 	m := uint64(math.MaxUint64)
-	id := uint64(0)
+	minTableLeaderStores := map[uint64]struct{}{}
 	for storeID := range peers {
-		count := context.selectedLeader.get(storeID)
+		count := context.selectedLeader.get(storeID, group)
+		if m > count {
+			m = count
+			minTableLeaderStores = map[uint64]struct{}{}
+			minTableLeaderStores[storeID] = struct{}{}
+		} else if m == count {
+			minTableLeaderStores[storeID] = struct{}{}
+		}
+	}
+	m = uint64(math.MaxUint64)
+	id := uint64(0)
+	for storeID := range minTableLeaderStores {
+		count := context.selectedLeader.get(storeID, group)
 		if m > count {
 			m = count
 			id = storeID
 		}
 	}
 	if id != 0 {
-		context.selectedLeader.put(id)
+		context.selectedLeader.put(id, group)
 	}
 	return id
 }
