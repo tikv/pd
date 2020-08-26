@@ -52,13 +52,13 @@ func ValidateLabels(labels []*metapb.StoreLabel) error {
 }
 
 // ValidateURLWithScheme checks the format of the URL.
-func ValidateURLWithScheme(rawUrl string) error {
-	u, err := url.ParseRequestURI(rawUrl)
+func ValidateURLWithScheme(rawURL string) error {
+	u, err := url.ParseRequestURI(rawURL)
 	if err != nil {
 		return err
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return errors.Errorf("%s has no scheme", rawUrl)
+		return errors.Errorf("%s has no scheme", rawURL)
 	}
 	return nil
 }
