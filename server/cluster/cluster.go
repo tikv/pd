@@ -1037,7 +1037,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 		if !force {
 			return errors.New("store is still up, please remove store gracefully")
 		}
-		log.Warn("forcedly bury store", zap.Stringer("store", store.GetMeta()))
+		log.Warn("force bury store", zap.Stringer("store", store.GetMeta()))
 	}
 
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
@@ -1463,7 +1463,7 @@ func (c *RaftCluster) IsCrossTableMergeEnabled() bool {
 	return c.opt.IsCrossTableMergeEnabled()
 }
 
-// GetPatrolRegionInterval returns the interval of patroling region.
+// GetPatrolRegionInterval returns the interval of patrolling region.
 func (c *RaftCluster) GetPatrolRegionInterval() time.Duration {
 	return c.opt.GetPatrolRegionInterval()
 }
