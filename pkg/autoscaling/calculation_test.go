@@ -49,10 +49,12 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	case2 := mockcluster.NewCluster(mockoption.NewScheduleOptions())
 	case2.AddLabelsStore(1, 1, map[string]string{})
 	case2.AddLabelsStore(2, 1, map[string]string{
-		groupLabelKey: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+		groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+		resourceTypeLabelKey: "a",
 	})
 	case2.AddLabelsStore(3, 1, map[string]string{
-		groupLabelKey: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+		groupLabelKey:        fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+		resourceTypeLabelKey: "a",
 	})
 
 	// case3 indicates the tikv cluster with other group existed
@@ -109,8 +111,9 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 			},
 			expectedPlan: []*Plan{
 				{
-					Component: TiKV.String(),
-					Count:     2,
+					Component:    TiKV.String(),
+					Count:        2,
+					ResourceType: "a",
 					Labels: []*metapb.StoreLabel{
 						{
 							Key:   groupLabelKey,
@@ -154,8 +157,9 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 			},
 			expectedPlan: []*Plan{
 				{
-					Component: TiKV.String(),
-					Count:     1,
+					Component:    TiKV.String(),
+					Count:        1,
+					ResourceType: "a",
 					Labels: []*metapb.StoreLabel{
 						{
 							Key:   groupLabelKey,
