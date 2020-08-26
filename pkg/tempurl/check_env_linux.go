@@ -23,7 +23,7 @@ import (
 func environmentCheck(addr string) bool {
 	valid, err := checkAddr(addr[len("http://"):])
 	if err != nil {
-		log.Info("check port status failed", zap.Error(err))
+		log.Error("check port status failed", zap.Error(err))
 		return false
 	}
 	return valid
