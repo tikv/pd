@@ -116,6 +116,7 @@ type RaftCluster struct {
 	httpClient  *http.Client
 
 	replicationMode *replication.ModeManager
+	traceRegionFlow bool
 
 	// It's used to manage components.
 	componentManager *component.Manager
@@ -207,6 +208,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.hotSpotCache = statistics.NewHotCache()
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
 	c.suspectKeyRanges = cache.NewStringTTL(c.ctx, time.Minute, 3*time.Minute)
+	c.traceRegionFlow = opt.GetPDServerConfig().TraceRegionFlow
 }
 
 // Start starts a cluster.
@@ -590,10 +592,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache = true
 		}
 
-		if region.GetBytesWritten() != origin.GetBytesWritten() ||
+		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
-			region.GetKeysRead() != origin.GetKeysRead() {
+			region.GetKeysRead() != origin.GetKeysRead()) {
 			saveCache, needSync = true, true
 		}
 
@@ -1035,7 +1037,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, force bool) error {
 		if !force {
 			return errors.New("store is still up, please remove store gracefully")
 		}
-		log.Warn("forcedly bury store", zap.Stringer("store", store.GetMeta()))
+		log.Warn("force bury store", zap.Stringer("store", store.GetMeta()))
 	}
 
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
@@ -1461,7 +1463,7 @@ func (c *RaftCluster) IsCrossTableMergeEnabled() bool {
 	return c.opt.IsCrossTableMergeEnabled()
 }
 
-// GetPatrolRegionInterval returns the interval of patroling region.
+// GetPatrolRegionInterval returns the interval of patrolling region.
 func (c *RaftCluster) GetPatrolRegionInterval() time.Duration {
 	return c.opt.GetPatrolRegionInterval()
 }

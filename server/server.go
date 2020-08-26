@@ -115,7 +115,7 @@ type Server struct {
 	idAllocator *id.AllocatorImpl
 	// for storage operation.
 	storage *core.Storage
-	// for baiscCluster operation.
+	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
 	tsoAllocator tso.Allocator
@@ -263,7 +263,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	// Check cluster ID
-	urlmap, err := types.NewURLsMap(s.cfg.InitialCluster)
+	urlMap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -272,7 +272,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		return err
 	}
 
-	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlmap, tlsConfig); err != nil {
+	if err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlMap, tlsConfig); err != nil {
 		return err
 	}
 
