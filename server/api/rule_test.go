@@ -615,3 +615,80 @@ func (s *testRuleSuite) TestBatch(c *C) {
 		}
 	}
 }
+
+func (s *testRuleSuite) TestBundle(c *C) {
+	// GetAll
+	b1 := placement.GroupBundle{
+		ID: "pd",
+		Rules: []*placement.Rule{
+			{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+		},
+	}
+	var bundles []placement.GroupBundle
+	err := readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 1)
+	compareBundle(c, bundles[0], b1)
+
+	// Set
+	b2 := placement.GroupBundle{
+		ID:       "foo",
+		Index:    42,
+		Override: true,
+		Rules: []*placement.Rule{
+			{GroupID: "foo", ID: "bar", Index: 1, Override: true, Role: "voter", Count: 1},
+		},
+	}
+	data, err := json.Marshal(b2)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule/foo", data)
+	c.Assert(err, IsNil)
+
+	// Get
+	var bundle placement.GroupBundle
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule/foo", &bundle)
+	c.Assert(err, IsNil)
+	compareBundle(c, bundle, b2)
+
+	// GetAll again
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 2)
+	compareBundle(c, bundles[0], b1)
+	compareBundle(c, bundles[1], b2)
+
+	// Delete
+	_, err = doDelete(testDialClient, s.urlPrefix+"/placement-rule/pd")
+	c.Assert(err, IsNil)
+
+	// GetAll again
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 1)
+	compareBundle(c, bundles[0], b2)
+
+	// SetAll
+	b2.Rules = append(b2.Rules, &placement.Rule{GroupID: "foo", ID: "baz", Index: 2, Role: "follower", Count: 1})
+	b2.Index, b2.Override = 0, false
+	data, err = json.Marshal([]placement.GroupBundle{b1, b2})
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule", data)
+	c.Assert(err, IsNil)
+
+	// GetAll again
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 2)
+	compareBundle(c, bundles[0], b2)
+	compareBundle(c, bundles[1], b1)
+}
+
+func compareBundle(c *C, b1, b2 placement.GroupBundle) {
+	c.Assert(b1.ID, Equals, b2.ID)
+	c.Assert(b1.Index, Equals, b2.Index)
+	c.Assert(b1.Override, Equals, b2.Override)
+	c.Assert(len(b1.Rules), Equals, len(b2.Rules))
+	for i := range b1.Rules {
+		compareRule(c, b1.Rules[i], b2.Rules[i])
+	}
+}
