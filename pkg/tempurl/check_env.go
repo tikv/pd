@@ -14,23 +14,6 @@
 
 package tempurl
 
-import (
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
-)
-
-func checkTimeWait(portStr string) (bool, error) {
-	return true, nil
-}
-
 func environmentCheck(addr string) bool {
-	valid, err := checkTimeWait(addr[len("http://127.0.0.1:"):])
-	if err != nil {
-		log.Info("check port status failed", zap.Error(err))
-		return false
-	}
-	if !valid {
-		return false
-	}
 	return true
 }
