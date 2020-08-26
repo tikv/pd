@@ -41,7 +41,7 @@ type Allocator interface {
 	// GenerateTSO is used to generate a given number of TSOs.
 	// Make sure you have initialized the TSO allocator before calling.
 	GenerateTSO(count uint32) (pdpb.Timestamp, error)
-	// Reset is uesed to reset the TSO allocator.
+	// Reset is used to reset the TSO allocator.
 	Reset()
 }
 
@@ -141,7 +141,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	return resp, errors.New("can not get timestamp")
 }
 
-// Reset is uesed to reset the TSO allocator.
+// Reset is used to reset the TSO allocator.
 func (gta *GlobalTSOAllocator) Reset() {
 	gta.timestampOracle.ResetTimestamp()
 }
