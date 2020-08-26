@@ -329,12 +329,12 @@ func (s *TestServer) BootstrapCluster() error {
 	return nil
 }
 
-// WaitLeadership is used to get instant leadership in order to
+// WaitLeader is used to get instant leader info in order to
 // make a test know the PD leader has been elected as soon as possible.
 // If it exceeds the maximum number of loops, it will return nil.
-func (s *TestServer) WaitLeadership() bool {
+func (s *TestServer) WaitLeader() bool {
 	for i := 0; i < 100; i++ {
-		if s.server.GetLeadership().Check() {
+		if s.server.GetMember().IsLeader() {
 			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)

@@ -244,7 +244,7 @@ func (s *testTsoSuite) TestDeplaySyncTimestamp(c *C) {
 
 	// Make the old leader resign and wait for the new leader to get a lease
 	leaderServer.ResignLeader()
-	c.Assert(nextLeaderServer.WaitLeadership(), IsTrue)
+	c.Assert(nextLeaderServer.WaitLeader(), IsTrue)
 
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	c.Assert(err, IsNil)

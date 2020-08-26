@@ -117,19 +117,14 @@ func (m *Member) setLeader(member *pdpb.Member) {
 	m.leader.Store(member)
 }
 
-// UnsetLeader unsets the member's PD leader.
+// unsetLeader unsets the member's PD leader.
 func (m *Member) unsetLeader() {
 	m.leader.Store(&pdpb.Member{})
 }
 
-// EnableLeader sets the member itself to PD leader.
+// EnableLeader sets the member itself to a PD leader.
 func (m *Member) EnableLeader() {
 	m.setLeader(m.member)
-}
-
-// DisableLeader reset the PD leader value.
-func (m *Member) DisableLeader() {
-	m.unsetLeader()
 }
 
 // GetLeaderPath returns the path of the PD leader.
@@ -142,20 +137,20 @@ func (m *Member) GetLeadership() *election.Leadership {
 	return m.leadership
 }
 
-// CampaignLeadership is used to campaign a PD member's leadership
+// CampaignLeader is used to campaign a PD member's leadership
 // and make it become a PD leader.
-func (m *Member) CampaignLeadership(leaseTimeout int64) error {
+func (m *Member) CampaignLeader(leaseTimeout int64) error {
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
-// KeepLeadership is used to keep the PD leader's leadership.
-func (m *Member) KeepLeadership(ctx context.Context) {
+// KeepLeader is used to keep the PD leader's leadership.
+func (m *Member) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
 }
 
-// CheckLeadership is used to check whether a leadership of
-// PD member is still avalibale.
-func (m *Member) CheckLeadership() bool {
+// IsStillLeader returns whether the PD leader is still a PD leader
+// by checking its leadership's lease.
+func (m *Member) IsStillLeader() bool {
 	return m.leadership.Check()
 }
 
@@ -186,6 +181,20 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 		}
 	}
 	return leader, rev, false
+}
+
+// WatchLeader is used to watch the changes of the leader.
+func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
+	m.setLeader(leader)
+	m.leadership.Watch(serverCtx, revision)
+	m.unsetLeader()
+}
+
+// UnsetLeader is used to reset the PD member's cuurent leadership.
+// Bascially it will reset the leader lease and unset leader info.
+func (m *Member) UnsetLeader() {
+	m.leadership.Reset()
+	m.unsetLeader()
 }
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
@@ -422,18 +431,6 @@ func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
 		return errors.New("failed to save git hash")
 	}
 	return nil
-}
-
-// WatchLeader is used to watch the changes of the leader.
-func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
-	m.setLeader(leader)
-	m.leadership.Watch(serverCtx, revision)
-	m.unsetLeader()
-}
-
-// ResetLeadership is used to reset the PD member's cuurent leadership.
-func (m *Member) ResetLeadership() {
-	m.leadership.Reset()
 }
 
 // Close gracefully shuts down all servers/listeners.

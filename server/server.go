@@ -45,7 +45,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
@@ -632,11 +631,6 @@ func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
 }
 
-// GetLeadership returns the member's leadership
-func (s *Server) GetLeadership() *election.Leadership {
-	return s.member.GetLeadership()
-}
-
 // GetLeader returns the leader of PD cluster(i.e the PD leader).
 func (s *Server) GetLeader() *pdpb.Member {
 	return s.member.GetLeader()
@@ -1095,7 +1089,7 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
-	if err := s.member.CampaignLeadership(s.cfg.LeaderLease); err != nil {
+	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		log.Error("campaign pd leader meet error", zap.Error(err))
 		return
 	}
@@ -1107,9 +1101,9 @@ func (s *Server) campaignLeader() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-	defer s.member.ResetLeadership()
-	// maintain the leadership
-	go s.member.KeepLeadership(ctx)
+	defer s.member.UnsetLeader()
+	// maintain the PD leader
+	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
 	log.Info("initialize the global TSO allocator")
@@ -1131,7 +1125,6 @@ func (s *Server) campaignLeader() {
 	defer s.stopRaftCluster()
 
 	s.member.EnableLeader()
-	defer s.member.DisableLeader()
 
 	CheckPDVersion(s.persistOptions)
 	log.Info("PD cluster leader is ready to serve", zap.String("pd-leader-name", s.Name()))
@@ -1144,8 +1137,8 @@ func (s *Server) campaignLeader() {
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !s.member.CheckLeadership() {
-				log.Info("leadership is invalid because lease has expired, pd leader will step down")
+			if !s.member.IsStillLeader() {
+				log.Info("no longer a leader because lease has expired, pd leader will step down")
 				return
 			}
 			etcdLeader := s.member.GetEtcdLeader()
