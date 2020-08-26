@@ -334,7 +334,7 @@ func (s *TestServer) BootstrapCluster() error {
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
 	for i := 0; i < 100; i++ {
-		if s.server.GetMember().IsLeader() {
+		if s.server.GetMember().IsStillLeader() {
 			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)
