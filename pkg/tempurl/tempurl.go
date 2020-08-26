@@ -16,6 +16,7 @@ package tempurl
 import (
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -24,9 +25,17 @@ import (
 )
 
 var (
-	testAddrMutex sync.Mutex
-	testAddrMap   = make(map[string]struct{})
+	testAddrMutex      sync.Mutex
+	testAddrMap        = make(map[string]struct{})
+	ciEnvironmentCheck = false
 )
+
+func init() {
+	// we only check environment status in CI
+	if len(os.Getenv("CI_ENVIRONMENT_CHECK")) > 0 {
+		ciEnvironmentCheck = true
+	}
+}
 
 // Alloc allocates a local URL for testing.
 func Alloc() string {
@@ -54,6 +63,9 @@ func tryAllocTestURL() string {
 	testAddrMutex.Lock()
 	defer testAddrMutex.Unlock()
 	if _, ok := testAddrMap[addr]; ok {
+		return ""
+	}
+	if ciEnvironmentCheck && !environmentCheck(addr) {
 		return ""
 	}
 	testAddrMap[addr] = struct{}{}
