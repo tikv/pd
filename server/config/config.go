@@ -1030,7 +1030,7 @@ type PDServerConfig struct {
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
-	// TraceRegionFlowis the option to update flow information of regions
+	// TraceRegionFlow the option to update flow information of regions
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow"`
 }
 
