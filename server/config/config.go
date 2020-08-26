@@ -203,6 +203,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage = true
+	defaultTraceRegionFlow  = true
 	defaultMaxResetTSGap    = 24 * time.Hour
 	defaultKeyType          = "table"
 
@@ -1007,6 +1008,8 @@ type PDServerConfig struct {
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
+	// TraceRegionFlow the option to update flow information of regions
+	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1022,6 +1025,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
+	}
+	if !meta.IsDefined("trace-region-flow") {
+		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
 	return c.Validate()
 }
