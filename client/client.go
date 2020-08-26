@@ -491,13 +491,13 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 }
 
 func (c *client) waitForRegion(ctx context.Context, key []byte) (*pdpb.GetRegionResponse, error) {
-	ctx, cancel := context.WithCancel(ctx)
+	childContext, cancel := context.WithCancel(ctx)
 
 	ch := make(chan *pdpb.GetRegionResponse, len(c.connMu.clientConns))
 
 	c.connMu.RLock()
 	for _, conn := range c.connMu.clientConns {
-		go c.getRegionResponse(ctx, pdpb.NewPDClient(conn), key, ch)
+		go c.getRegionResponse(childContext, pdpb.NewPDClient(conn), key, ch)
 	}
 	c.connMu.RUnlock()
 
