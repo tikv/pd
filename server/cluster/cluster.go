@@ -116,6 +116,7 @@ type RaftCluster struct {
 	httpClient  *http.Client
 
 	replicationMode *replication.ModeManager
+	traceRegionFlow bool
 
 	// It's used to manage components.
 	componentManager *component.Manager
@@ -129,15 +130,16 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client, traceRegionFlow bool) *RaftCluster {
 	return &RaftCluster{
-		ctx:          ctx,
-		running:      false,
-		clusterID:    clusterID,
-		clusterRoot:  root,
-		regionSyncer: regionSyncer,
-		httpClient:   httpClient,
-		etcdClient:   etcdClient,
+		ctx:             ctx,
+		running:         false,
+		clusterID:       clusterID,
+		clusterRoot:     root,
+		regionSyncer:    regionSyncer,
+		httpClient:      httpClient,
+		etcdClient:      etcdClient,
+		traceRegionFlow: traceRegionFlow,
 	}
 }
 
@@ -590,10 +592,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache = true
 		}
 
-		if region.GetBytesWritten() != origin.GetBytesWritten() ||
+		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
-			region.GetKeysRead() != origin.GetKeysRead() {
+			region.GetKeysRead() != origin.GetKeysRead()) {
 			saveCache, needSync = true, true
 		}
 

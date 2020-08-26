@@ -348,6 +348,33 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	processRegions := func(regions []*core.RegionInfo) {
+		for _, r := range regions {
+			cluster.processRegionHeartbeat(r)
+		}
+	}
+	regions = core.SplitRegions(regions)
+	processRegions(regions)
+	// update region
+	region := regions[0]
+	regions[0] = region.Clone(core.SetReadBytes(1000))
+	processRegions(regions)
+	newRegion := cluster.GetRegion(region.GetID())
+	c.Assert(newRegion.GetBytesRead(), Equals, uint64(0))
+
+	// trace the flow changes
+	cluster.traceRegionFlow = true
+	processRegions(regions)
+	newRegion = cluster.GetRegion(region.GetID())
+	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
+
+}
+
 func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
