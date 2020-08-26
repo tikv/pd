@@ -1100,7 +1100,7 @@ func (s *Server) campaignLeader() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-	defer s.member.UnsetLeader()
+	defer s.member.ResetLeader()
 	// maintain the PD leader
 	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))

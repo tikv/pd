@@ -190,9 +190,9 @@ func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, rev
 	m.unsetLeader()
 }
 
-// UnsetLeader is used to reset the PD member's cuurent leadership.
-// Bascially it will reset the leader lease and unset leader info.
-func (m *Member) UnsetLeader() {
+// ResetLeader is used to reset the PD member's cuurent leadership.
+// Basically it will reset the leader lease and unset leader info.
+func (m *Member) ResetLeader() {
 	m.leadership.Reset()
 	m.unsetLeader()
 }
