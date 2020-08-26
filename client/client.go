@@ -512,9 +512,8 @@ func (c *client) waitForRegion(ctx context.Context, key []byte) (*pdpb.GetRegion
 	}
 
 	if resp == nil {
-		log.Warn("get region error")
 		cancel()
-		return nil, errors.New("get region error")
+		return nil, errors.New("[pd] can't get region info from all servers")
 	}
 
 	cancel()
@@ -527,7 +526,7 @@ func (c *client) getRegionResponse(ctx context.Context, cc pdpb.PDClient, key []
 		RegionKey: key,
 	})
 	if err != nil {
-		log.Warn("get region error")
+		log.Error("[pd] get region error", errs.ZapError(errs.ErrGetRegion, err))
 		resp = nil
 	}
 
@@ -546,8 +545,8 @@ func (c *client) GetRegionRandomly(ctx context.Context, key []byte) (*Region, er
 	start := time.Now()
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	resp, err := c.waitForRegion(ctx, key)
+	childContext, cancel := context.WithTimeout(ctx, c.timeout)
+	resp, err := c.waitForRegion(childContext, key)
 	cancel()
 
 	if err != nil {

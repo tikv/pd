@@ -47,6 +47,7 @@ var (
 	ErrCreateTSOStream = errors.Normalize("create TSO stream failed", errors.RFCCodeText("PD:client:ErrCreateTSOStream"))
 	ErrGetTSO          = errors.Normalize("get TSO failed", errors.RFCCodeText("PD:client:ErrGetTSO"))
 	ErrGetClusterID    = errors.Normalize("get cluster ID failed", errors.RFCCodeText("PD:client:ErrGetClusterID"))
+	ErrGetRegion       = errors.Normalize("get region failed", errors.RFCCodeText("PD:client:ErrGetRegion"))
 )
 
 // placement errors
