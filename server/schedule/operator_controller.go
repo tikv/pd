@@ -696,6 +696,18 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 				},
 			},
 		}
+	case operator.DemoteFollower:
+		cmd = &pdpb.RegionHeartbeatResponse{
+			ChangePeer: &pdpb.ChangePeer{
+				// reuse AddLearnerNode type
+				ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+				Peer: &metapb.Peer{
+					Id:      st.PeerID,
+					StoreId: st.ToStore,
+					Role:    metapb.PeerRole_Learner,
+				},
+			},
+		}
 	case operator.RemovePeer:
 		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
