@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	. "github.com/pingcap/check"
@@ -670,7 +671,8 @@ func (s *testRuleSuite) TestBundle(c *C) {
 	// SetAll
 	b2.Rules = append(b2.Rules, &placement.Rule{GroupID: "foo", ID: "baz", Index: 2, Role: "follower", Count: 1})
 	b2.Index, b2.Override = 0, false
-	data, err = json.Marshal([]placement.GroupBundle{b1, b2})
+	b3 := placement.GroupBundle{ID: "foobar", Index: 100}
+	data, err = json.Marshal([]placement.GroupBundle{b1, b2, b3})
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule", data)
 	c.Assert(err, IsNil)
@@ -678,9 +680,20 @@ func (s *testRuleSuite) TestBundle(c *C) {
 	// GetAll again
 	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
 	c.Assert(err, IsNil)
-	c.Assert(bundles, HasLen, 2)
+	c.Assert(bundles, HasLen, 3)
 	compareBundle(c, bundles[0], b2)
 	compareBundle(c, bundles[1], b1)
+	compareBundle(c, bundles[2], b3)
+
+	// Delete using regexp
+	_, err = doDelete(testDialClient, s.urlPrefix+"/placement-rule/"+url.PathEscape("foo.*")+"?regexp")
+	c.Assert(err, IsNil)
+
+	// GetAll again
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 1)
+	compareBundle(c, bundles[0], b1)
 }
 
 func compareBundle(c *C, b1, b2 placement.GroupBundle) {
