@@ -130,16 +130,15 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client, traceRegionFlow bool) *RaftCluster {
+func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		ctx:             ctx,
-		running:         false,
-		clusterID:       clusterID,
-		clusterRoot:     root,
-		regionSyncer:    regionSyncer,
-		httpClient:      httpClient,
-		etcdClient:      etcdClient,
-		traceRegionFlow: traceRegionFlow,
+		ctx:          ctx,
+		running:      false,
+		clusterID:    clusterID,
+		clusterRoot:  root,
+		regionSyncer: regionSyncer,
+		httpClient:   httpClient,
+		etcdClient:   etcdClient,
 	}
 }
 
@@ -209,6 +208,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.hotSpotCache = statistics.NewHotCache()
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
 	c.suspectKeyRanges = cache.NewStringTTL(c.ctx, time.Minute, 3*time.Minute)
+	c.traceRegionFlow = opt.GetPDServerConfig().TraceRegionFlow
 }
 
 // Start starts a cluster.
