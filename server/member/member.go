@@ -259,10 +259,6 @@ func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
 	m.member = leader
 	m.memberValue = string(data)
 	m.rootPath = rootPath
-}
-
-// LeadershipInfo initializes the leadership info.
-func (m *Member) LeadershipInfo() {
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "pd leader election")
 }
 
