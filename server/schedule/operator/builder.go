@@ -48,7 +48,7 @@ type Builder struct {
 	err          error
 
 	// flags
-	isLigthWeight bool
+	isLightWeight bool
 
 	// intermediate states
 	currentPeers               peersMap
@@ -178,7 +178,7 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 
 // SetLightWeight marks the region as light weight. It is used for scatter regions.
 func (b *Builder) SetLightWeight() *Builder {
-	b.isLigthWeight = true
+	b.isLightWeight = true
 	return b
 }
 
@@ -251,7 +251,7 @@ func (b *Builder) brief() string {
 	switch {
 	case b.toAdd.Len() > 0 && b.toRemove.Len() > 0:
 		op := "mv peer"
-		if b.isLigthWeight {
+		if b.isLightWeight {
 			op = "mv light peer"
 		}
 		return fmt.Sprintf("%s: store %s to %s", op, b.toRemove, b.toAdd)
@@ -317,7 +317,7 @@ func (b *Builder) execPromoteLearner(p *metapb.Peer) {
 }
 
 func (b *Builder) execAddPeer(p *metapb.Peer) {
-	if b.isLigthWeight {
+	if b.isLightWeight {
 		b.steps = append(b.steps, AddLightLearner{ToStore: p.GetStoreId(), PeerID: p.GetId()})
 	} else {
 		b.steps = append(b.steps, AddLearner{ToStore: p.GetStoreId(), PeerID: p.GetId()})
