@@ -116,6 +116,7 @@ type RaftCluster struct {
 	httpClient  *http.Client
 
 	replicationMode *replication.ModeManager
+	traceRegionFlow bool
 
 	// It's used to manage components.
 	componentManager *component.Manager
@@ -207,6 +208,7 @@ func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, s
 	c.hotSpotCache = statistics.NewHotCache()
 	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
 	c.suspectKeyRanges = cache.NewStringTTL(c.ctx, time.Minute, 3*time.Minute)
+	c.traceRegionFlow = opt.GetPDServerConfig().TraceRegionFlow
 }
 
 // Start starts a cluster.
@@ -590,10 +592,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			saveCache = true
 		}
 
-		if region.GetBytesWritten() != origin.GetBytesWritten() ||
+		if c.traceRegionFlow && (region.GetBytesWritten() != origin.GetBytesWritten() ||
 			region.GetBytesRead() != origin.GetBytesRead() ||
 			region.GetKeysWritten() != origin.GetKeysWritten() ||
-			region.GetKeysRead() != origin.GetKeysRead() {
+			region.GetKeysRead() != origin.GetKeysRead()) {
 			saveCache, needSync = true, true
 		}
 
