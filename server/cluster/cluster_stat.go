@@ -29,7 +29,7 @@ import (
 //
 // The target of cluster state statistics is to statistic the load state
 // of a cluster given a time duration. The basic idea is to collect all
-// the load information from every store at the same time duration and caculates
+// the load information from every store at the same time duration and calculates
 // the load for the whole cluster.
 //
 // Now we just support CPU as the measurement of the load. The CPU information
@@ -48,21 +48,21 @@ import (
 // The max time shift between 2 stores is 2*interval which is 20s here, and
 // this is also the max time shift for the whole cluster. We assume that the
 // time of starting to heartbeat is randomized, so the average time shift of
-// the cluster is 10s. This is acceptable for statstics.
+// the cluster is 10s. This is acceptable for statistics.
 //
 // Implementation
 //
 // Keep a 5min history statistics for each store, the history is stored in a
 // circle array which evicting the oldest entry in a FIFO strategy. All the
-// stores's histories combines into the cluster's history. So we can caculate
-// any load value within 5 minutes. The algorithm for caculating is simple,
+// stores' histories combines into the cluster's history. So we can calculate
+// any load value within 5 minutes. The algorithm for calculate is simple,
 // Iterate each store's history from the latest entry with the same step and
-// caculates the average CPU usage for the cluster.
+// calculate the average CPU usage for the cluster.
 //
 // For example.
-// To caculate the average load of the cluster within 3 minutes, start from the
+// To calculate the average load of the cluster within 3 minutes, start from the
 // tail of circle array(which stores the history), and backward 18 steps to
-// collect all the statistics that being accessed, then caculates the average
+// collect all the statistics that being accessed, then calculates the average
 // CPU usage for this store. The average of all the stores CPU usage is the
 // CPU usage of the whole cluster.
 //
@@ -231,7 +231,7 @@ func (cst *StatEntries) CPU(excludes ...uint64) float64 {
 }
 
 // State collects information from store heartbeat
-// and caculates the load state of the cluster
+// and calculates the load state of the cluster
 type State struct {
 	cst *StatEntries
 }
@@ -260,7 +260,7 @@ func (cs *State) State(excludes ...uint64) LoadState {
 	// TODO we may get a more accurate state with the information of the number // of the CPU cores
 	cpu := cs.cst.CPU(excludes...)
 	log.Debug("calculated cpu", zap.Float64("usage", cpu))
-	clusterStateCPUGuage.Set(cpu)
+	clusterStateCPUGauge.Set(cpu)
 	switch {
 	case cpu < 5:
 		return LoadStateIdle
