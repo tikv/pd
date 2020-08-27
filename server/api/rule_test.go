@@ -53,6 +53,19 @@ func (s *testRuleSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
+func (s *testRuleSuite) TearDownTest(c *C) {
+	def := placement.GroupBundle{
+		ID: "pd",
+		Rules: []*placement.Rule{
+			{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+		},
+	}
+	data, err := json.Marshal([]placement.GroupBundle{def})
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule", data)
+	c.Assert(err, IsNil)
+}
+
 func (s *testRuleSuite) TestSet(c *C) {
 	rule := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	successData, err := json.Marshal(rule)
