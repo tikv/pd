@@ -96,9 +96,12 @@ var (
 
 // scheduler errors
 var (
-	ErrGetSourceStore  = errors.Normalize("failed to get the source store, store id is %s", errors.RFCCodeText("PD:scheduler:ErrGetSourceStore"))
-	ErrSchedulerConfig = errors.Normalize("wrong scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfig"))
-	ErrCacheOverflow   = errors.Normalize("cache overflow, scheduler is %s", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
-	ErrInternalGrowth  = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
-	ErrCreateOperator  = errors.Normalize("fail to create operator", errors.RFCCodeText("PD:scheduler:ErrCreateOperator"))
+	ErrGetSourceStore         = errors.Normalize("failed to get the source store, store id is %s", errors.RFCCodeText("PD:scheduler:ErrGetSourceStore"))
+	ErrSchedulerExisted       = errors.Normalize("scheduler existed", errors.RFCCodeText("PD:scheduler:ErrSchedulerExisted"))
+	ErrSchedulerNotFound      = errors.Normalize("scheduler not found", errors.RFCCodeText("PD:scheduler:ErrSchedulerNotFound"))
+	ErrScheduleConfigNotExist = errors.Normalize("the config does not exist", errors.RFCCodeText("PD:scheduler:ErrScheduleConfigNotExist"))
+	ErrSchedulerConfig        = errors.Normalize("wrong scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfig"))
+	ErrCacheOverflow          = errors.Normalize("cache overflow, scheduler is %s", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
+	ErrInternalGrowth         = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
+	ErrCreateOperator         = errors.Normalize("fail to create operator", errors.RFCCodeText("PD:scheduler:ErrCreateOperator"))
 )

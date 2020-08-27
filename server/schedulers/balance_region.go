@@ -34,7 +34,7 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*balanceRegionSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {

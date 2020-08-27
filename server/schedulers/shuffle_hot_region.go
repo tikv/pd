@@ -41,7 +41,7 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleHotRegionSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist
 			}
 			conf.Limit = uint64(1)
 			if len(args) == 1 {

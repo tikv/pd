@@ -41,7 +41,7 @@ func init() {
 			}
 			conf, ok := v.(*scatterRangeSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist
 			}
 			conf.StartKey = args[0]
 			conf.EndKey = args[1]
