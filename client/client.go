@@ -182,7 +182,7 @@ func (c *client) tsCancelLoop() {
 		case d := <-c.tsDeadlineCh:
 			select {
 			case <-d.timer:
-				log.Error("tso request is canceled due to timeout", zap.Error(errs.ErrGetTSO.FastGenByArgs()))
+				log.Error("tso request is canceled due to timeout", errs.ZapError(errs.ErrClientGetTSOTimeout.FastGenByArgs()))
 				d.cancel()
 			case <-d.done:
 			case <-ctx.Done():
@@ -255,7 +255,7 @@ func (c *client) tsLoop() {
 					return
 				default:
 				}
-				log.Error("[pd] create tso stream error", errs.ZapError(errs.ErrCreateTSOStream, err))
+				log.Error("[pd] create tso stream error", errs.ZapError(errs.ErrClientCreateTSOStream, err))
 				c.ScheduleCheckLeader()
 				cancel()
 				c.revokeTSORequest(errors.WithStack(err))
@@ -302,7 +302,7 @@ func (c *client) tsLoop() {
 				return
 			default:
 			}
-			log.Error("[pd] getTS error", errs.ZapError(errs.ErrGetTSO, err))
+			log.Error("[pd] getTS error", errs.ZapError(errs.ErrClientGetTSO, err))
 			c.ScheduleCheckLeader()
 			cancel()
 			stream, cancel = nil, nil

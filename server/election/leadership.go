@@ -34,7 +34,7 @@ func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, erro
 	leader := &pdpb.Member{}
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(c, leaderPath, leader)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, errs.ErrEtcdGetProtoMsgWithModRev.Wrap(err).FastGenWithCause()
 	}
 	if !ok {
 		return nil, 0, nil
@@ -138,10 +138,10 @@ func (ls *Leadership) DeleteLeader() error {
 	// delete leader itself and let others start a new election again.
 	resp, err := ls.LeaderTxn().Then(clientv3.OpDelete(ls.leaderKey)).Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdKVDelete.GenWithStackByArgs(err)
 	}
 	if !resp.Succeeded {
-		return errors.New("resign leader failed, we are not leader already")
+		return errs.ErrEtcdTxn.FastGenByArgs("not leader already")
 	}
 
 	return nil
@@ -174,7 +174,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 					zap.Int64("revision", revision),
 					zap.String("leaderKey", ls.leaderKey),
 					zap.String("purpose", ls.purpose),
-					errs.ZapError(errs.ErrWatcherCancel, wresp.Err()))
+					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
 				return
 			}
 

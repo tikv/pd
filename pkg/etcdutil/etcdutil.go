@@ -62,7 +62,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Co
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
-			log.Error("failed to get cluster from remote", errs.ZapError(errs.ErrGetCluster, gerr))
+			log.Error("failed to get cluster from remote", errs.ZapError(errs.ErrEtcdGetCluster, gerr))
 			continue
 		}
 
@@ -105,14 +105,14 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 
 	start := time.Now()
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
-	if err != nil {
-		log.Error("load from etcd meet error", errs.ZapError(errs.ErrLoadValue, err))
-	}
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), zap.Error(err))
 	}
 
-	return resp, errors.WithStack(err)
+	if err != nil {
+		return resp, errs.ErrEtcdKVGet.GenWithStackByArgs(err)
+	}
+	return resp, nil
 }
 
 // GetValue gets value with key from etcd.
