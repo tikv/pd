@@ -486,13 +486,13 @@ func (m *RuleManager) GetGroupBundle(id string) (b GroupBundle) {
 	b.ID = id
 	if g := m.ruleConfig.groups[id]; g != nil {
 		b.Index, b.Override = g.Index, g.Override
-	}
-	for _, r := range m.ruleConfig.rules {
-		if r.GroupID == id {
-			b.Rules = append(b.Rules, r)
+		for _, r := range m.ruleConfig.rules {
+			if r.GroupID == id {
+				b.Rules = append(b.Rules, r)
+			}
 		}
+		sortRules(b.Rules)
 	}
-	sortRules(b.Rules)
 	return
 }
 
@@ -533,9 +533,11 @@ func (m *RuleManager) SetGroupBundle(group GroupBundle) error {
 	m.Lock()
 	defer m.Unlock()
 	p := m.ruleConfig.beginPatch()
-	for k := range m.ruleConfig.rules {
-		if k[0] == group.ID {
-			p.deleteRule(k[0], k[1])
+	if _, ok := m.ruleConfig.groups[group.ID]; ok {
+		for k := range m.ruleConfig.rules {
+			if k[0] == group.ID {
+				p.deleteRule(k[0], k[1])
+			}
 		}
 	}
 	p.setGroup(&RuleGroup{
