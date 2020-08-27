@@ -54,11 +54,11 @@ type Builder struct {
 	isLightWeight     bool
 
 	// intermediate states
-	currentPeers                                 peersMap
-	currentLeaderStoreID                         uint64
-	toKeep, toAdd, toRemove, toPromote, toDemote peersMap       // pending tasks.
-	steps                                        []OpStep       // generated steps.
-	peerAddStep                                  map[uint64]int // record at which step a peer is created.
+	currentPeers                                      peersMap
+	currentLeaderStoreID                              uint64
+	toKeepVoter, toAdd, toRemove, toPromote, toDemote peersMap       // pending tasks.
+	steps                                             []OpStep       // generated steps.
+	peerAddStep                                       map[uint64]int // record at which step a peer is created.
 }
 
 // NewBuilder creates a Builder.
@@ -251,7 +251,7 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 
 // Initialize intermediate states.
 func (b *Builder) prepareBuild() (string, error) {
-	b.toKeep = newPeersMap()
+	b.toKeepVoter = newPeersMap()
 	b.toAdd = newPeersMap()
 	b.toRemove = newPeersMap()
 	b.toPromote = newPeersMap()
@@ -287,17 +287,27 @@ func (b *Builder) prepareBuild() (string, error) {
 			}
 		}
 
-		if !core.IsLearner(o) && core.IsLearner(n) {
-			if b.useJointConsensus {
-				b.toDemote.Set(n)
+		if core.IsLearner(o) {
+			if !core.IsLearner(n) {
+				// learner -> voter
+				b.toPromote.Set(n)
 			} else {
-				b.toRemove.Set(o)
-				// Need to add `b.toAdd.Set(n)` in the later targetPeers loop
+				// keep learner
+				// do nothing
 			}
-		} else if core.IsLearner(o) && !core.IsLearner(n) {
-			b.toPromote.Set(n)
 		} else {
-			b.toKeep.Set(o)
+			if core.IsLearner(n) {
+				// voter -> learner
+				if b.useJointConsensus {
+					b.toDemote.Set(n)
+				} else {
+					b.toRemove.Set(o)
+					// Need to add `b.toAdd.Set(n)` in the later targetPeers loop
+				}
+			} else {
+				// keep voter
+				b.toKeepVoter.Set(o)
+			}
 		}
 	}
 	for _, n := range b.targetPeers {
@@ -321,6 +331,10 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 
+	// If the target leader does not exist or is a Learner, the target is cancelled.
+	if peer, ok := b.targetPeers[b.targetLeaderStoreID]; !ok || core.IsLearner(peer) {
+		b.targetLeaderStoreID = 0
+	}
 	// If no target leader is specified, try not to change the leader as much as possible.
 	if b.targetLeaderStoreID == 0 {
 		if peer, ok := b.targetPeers[b.originLeaderStoreID]; ok && !core.IsLearner(peer) {
