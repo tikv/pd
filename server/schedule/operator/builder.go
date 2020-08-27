@@ -54,11 +54,15 @@ type Builder struct {
 	isLightWeight     bool
 
 	// intermediate states
-	currentPeers                                      peersMap
-	currentLeaderStoreID                              uint64
-	toKeepVoter, toAdd, toRemove, toPromote, toDemote peersMap       // pending tasks.
-	steps                                             []OpStep       // generated steps.
-	peerAddStep                                       map[uint64]int // record at which step a peer is created.
+	currentPeers                         peersMap
+	currentLeaderStoreID                 uint64
+	toAdd, toRemove, toPromote, toDemote peersMap       // pending tasks.
+	steps                                []OpStep       // generated steps.
+	peerAddStep                          map[uint64]int // record at which step a peer is created.
+
+	// comparison function
+	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithJointConsensus
+	leaderPreferFuncs   []func(uint64) int   // for buildStepsWithoutJointConsensus
 }
 
 // NewBuilder creates a Builder.
@@ -251,7 +255,6 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 
 // Initialize intermediate states.
 func (b *Builder) prepareBuild() (string, error) {
-	b.toKeepVoter = newPeersMap()
 	b.toAdd = newPeersMap()
 	b.toRemove = newPeersMap()
 	b.toPromote = newPeersMap()
@@ -306,7 +309,7 @@ func (b *Builder) prepareBuild() (string, error) {
 				}
 			} else {
 				// keep voter
-				b.toKeepVoter.Set(o)
+				// do nothing
 			}
 		}
 	}
@@ -335,11 +338,16 @@ func (b *Builder) prepareBuild() (string, error) {
 	if peer, ok := b.targetPeers[b.targetLeaderStoreID]; !ok || core.IsLearner(peer) {
 		b.targetLeaderStoreID = 0
 	}
+
 	// If no target leader is specified, try not to change the leader as much as possible.
 	if b.targetLeaderStoreID == 0 {
 		if peer, ok := b.targetPeers[b.originLeaderStoreID]; ok && !core.IsLearner(peer) {
 			b.targetLeaderStoreID = b.originLeaderStoreID
 		}
+	}
+
+	if b.targetLeaderStoreID != 0 && !b.allowLeader(b.targetPeers[b.targetLeaderStoreID]) {
+		return "", errors.New("cannot create operator: target leader is not allowed")
 	}
 
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toDemote) <= 1 ||
@@ -349,6 +357,8 @@ func (b *Builder) prepareBuild() (string, error) {
 	}
 
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.Copy(), b.originLeaderStoreID
+	b.peerAddStep = make(map[uint64]int)
+
 	return b.brief(), nil
 }
 
@@ -378,12 +388,116 @@ func (b *Builder) brief() string {
 
 // Using Joint Consensus can ensure the replica safety and reduce the number of steps.
 func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
-	return kind, errors.Errorf("not implemented")
+	b.initLeaderPreferFuncs()
+	kind |= OpRegion
+
+	// Add all the peers as Learner first. Split `Add Voter` to `Add Learner + Promote`
+	for _, add := range b.toAdd.IDs() {
+		peer := b.toAdd[add]
+		if !core.IsLearner(peer) {
+			b.execAddPeer(&metapb.Peer{
+				Id:      peer.Id,
+				StoreId: peer.StoreId,
+				Role:    metapb.PeerRole_Learner,
+			})
+			b.toPromote.Set(peer)
+		} else {
+			b.execAddPeer(peer)
+		}
+	}
+
+	b.setTargetLeaderIfNotExist()
+	if b.targetLeaderStoreID == 0 {
+		return kind, errors.New("no effective leader")
+	}
+
+	// Split `Remove Voter` to `Demote + Remove Learner`
+	for _, remove := range b.toRemove.IDs() {
+		peer := b.toRemove[remove]
+		if !core.IsLearner(peer) {
+			b.toDemote.Set(peer)
+		}
+	}
+
+	if targetLeaderBefore, ok := b.originPeers[b.targetLeaderStoreID]; ok && !core.IsLearner(targetLeaderBefore) {
+		// target leader is a voter in `originPeers`, transfer leader first.
+		if b.originLeaderStoreID != b.targetLeaderStoreID {
+			b.execTransferLeader(b.targetLeaderStoreID)
+			kind |= OpLeader
+		}
+		b.execChangePeerV2(false)
+	} else if originLeaderAfter, ok := b.targetPeers[b.originLeaderStoreID]; b.originLeaderStoreID == 0 ||
+		(ok && !core.IsLearner(originLeaderAfter)) {
+		// origin leader is none or a voter in `targetPeers`, change peers first.
+		b.execChangePeerV2(false)
+		if b.originLeaderStoreID != b.targetLeaderStoreID {
+			b.execTransferLeader(b.targetLeaderStoreID)
+			kind |= OpLeader
+		}
+	} else {
+		// both demote origin leader and promote target leader, transfer leader in joint state.
+		b.execChangePeerV2(true)
+		kind |= OpLeader
+	}
+
+	// Finally, remove all the peers as Learner
+	for _, remove := range b.toRemove.IDs() {
+		b.execRemovePeer(b.toRemove[remove])
+	}
+
+	return kind, nil
+}
+
+func (b *Builder) initLeaderPreferFuncs() {
+	b.leaderPreferFuncs = []func(uint64) int{
+		b.preferUpStoreAsLeader,
+		b.preferKeepVoterAsLeader,
+		b.preferOldPeerAsLeader,
+	}
+}
+
+func (b *Builder) setTargetLeaderIfNotExist() {
+	if b.targetLeaderStoreID != 0 {
+		return
+	}
+
+	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
+		peer := b.targetPeers[targetLeaderStoreID]
+		if !b.allowLeader(peer) {
+			continue
+		}
+		if b.targetLeaderStoreID == 0 {
+			b.targetLeaderStoreID = targetLeaderStoreID
+			continue
+		}
+		for _, f := range b.leaderPreferFuncs {
+			if best, next := f(b.targetLeaderStoreID), f(targetLeaderStoreID); best < next {
+				b.targetLeaderStoreID = targetLeaderStoreID
+				break
+			} else if best > next {
+				break
+			}
+		}
+	}
+}
+
+func (b *Builder) preferUpStoreAsLeader(targetLeaderStoreID uint64) int {
+	store := b.cluster.GetStore(targetLeaderStoreID)
+	return b2i(store != nil && store.IsUp())
+}
+
+func (b *Builder) preferKeepVoterAsLeader(targetLeaderStoreID uint64) int {
+	_, ok := b.toPromote[targetLeaderStoreID]
+	return b2i(!ok)
+}
+
+func (b *Builder) preferOldPeerAsLeader(targetLeaderStoreID uint64) int {
+	return -b.peerAddStep[targetLeaderStoreID]
 }
 
 // Some special cases, and stores that do not support using joint consensus.
 func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
-	b.peerAddStep = make(map[uint64]int)
+	b.initStepPlanPreferFuncs()
 
 	for len(b.toAdd) > 0 || len(b.toRemove) > 0 || len(b.toPromote) > 0 || len(b.toDemote) > 0 {
 		plan := b.peerPlan()
@@ -463,6 +577,34 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 	b.steps = append(b.steps, RemovePeer{FromStore: peer.StoreId})
 	delete(b.currentPeers, peer.StoreId)
 	delete(b.toRemove, peer.StoreId)
+}
+
+func (b *Builder) execChangePeerV2(needTransferLeader bool) {
+	// Enter
+	step := ChangePeerV2Enter{
+		PromoteLearners: make([]PromoteLearner, 0, len(b.toPromote)),
+		DemoteVoters:    make([]DemoteVoter, 0, len(b.toDemote)),
+	}
+
+	for _, peer := range b.toPromote {
+		step.PromoteLearners = append(step.PromoteLearners, PromoteLearner{ToStore: peer.StoreId, PeerID: peer.Id})
+		b.currentPeers.Set(peer)
+	}
+	b.toPromote = newPeersMap()
+
+	for _, peer := range b.toDemote {
+		step.DemoteVoters = append(step.DemoteVoters, DemoteVoter{ToStore: peer.StoreId, PeerID: peer.Id})
+		b.currentPeers.Set(peer)
+	}
+	b.toDemote = newPeersMap()
+
+	b.steps = append(b.steps, step)
+	// Transfer Leader
+	if needTransferLeader {
+		b.execTransferLeader(b.targetLeaderStoreID)
+	}
+	// Leave
+	b.steps = append(b.steps, ChangePeerV2Leave{PromoteLearners: step.PromoteLearners, DemoteVoters: step.DemoteVoters})
 }
 
 // check if a peer can become leader.
@@ -665,23 +807,26 @@ func (b *Builder) planAddPeer() stepPlan {
 	return best
 }
 
+func (b *Builder) initStepPlanPreferFuncs() {
+	b.stepPlanPreferFuncs = []func(stepPlan) int{
+		b.planPreferReplaceByNearest, // 1. violate it affects replica safety.
+		// 2-3 affects operator execution speed.
+		b.planPreferUpStoreAsLeader, // 2. compare to 3, it is more likely to affect execution speed.
+		b.planPreferOldPeerAsLeader, // 3. violate it may or may not affect execution speed.
+		// 4-6 are less important as they are only trying to build the
+		// operator with less leader transfer steps.
+		b.planPreferAddOrPromoteTargetLeader, // 4. it is precondition of 5 so goes first.
+		b.planPreferTargetLeader,             // 5. it may help 6 in later steps.
+		b.planPreferLessLeaderTransfer,       // 6. trivial optimization to make the operator more tidy.
+	}
+}
+
 // Pick the better plan from 2 candidates.
 func (b *Builder) comparePlan(best, next stepPlan) stepPlan {
 	if best.Empty() {
 		return next
 	}
-	fs := []func(stepPlan) int{
-		b.preferReplaceByNearest, // 1. violate it affects replica safety.
-		// 2-3 affects operator execution speed.
-		b.preferUpStoreAsLeader, // 2. compare to 3, it is more likely to affect execution speed.
-		b.preferOldPeerAsLeader, // 3. violate it may or may not affect execution speed.
-		// 4-6 are less important as they are only trying to build the
-		// operator with less leader transfer steps.
-		b.preferAddOrPromoteTargetLeader, // 4. it is precondition of 5 so goes first.
-		b.preferTargetLeader,             // 5. it may help 6 in later steps.
-		b.preferLessLeaderTransfer,       // 6. trivial optimization to make the operator more tidy.
-	}
-	for _, f := range fs {
+	for _, f := range b.stepPlanPreferFuncs {
 		if scoreBest, scoreNext := f(best), f(next); scoreBest > scoreNext {
 			return best
 		} else if scoreBest < scoreNext {
@@ -713,7 +858,7 @@ func b2i(b bool) int {
 }
 
 // return matched label count.
-func (b *Builder) preferReplaceByNearest(p stepPlan) int {
+func (b *Builder) planPreferReplaceByNearest(p stepPlan) int {
 	m := 0
 	if p.add != nil && p.remove != nil {
 		m = b.labelMatch(p.add.StoreId, p.remove.StoreId)
@@ -733,7 +878,7 @@ func (b *Builder) preferReplaceByNearest(p stepPlan) int {
 }
 
 // Avoid generating snapshots from offline stores.
-func (b *Builder) preferUpStoreAsLeader(p stepPlan) int {
+func (b *Builder) planPreferUpStoreAsLeader(p stepPlan) int {
 	if p.add != nil {
 		store := b.cluster.GetStore(p.leaderBeforeAdd)
 		return b2i(store != nil && store.IsUp())
@@ -742,7 +887,7 @@ func (b *Builder) preferUpStoreAsLeader(p stepPlan) int {
 }
 
 // Newly created peer may reject the leader. See https://github.com/tikv/tikv/issues/3819
-func (b *Builder) preferOldPeerAsLeader(p stepPlan) int {
+func (b *Builder) planPreferOldPeerAsLeader(p stepPlan) int {
 	ret := -b.peerAddStep[p.leaderBeforeAdd]
 	if p.add != nil && p.add.StoreId == p.leaderBeforeRemove {
 		ret -= len(b.steps) + 1
@@ -753,7 +898,7 @@ func (b *Builder) preferOldPeerAsLeader(p stepPlan) int {
 }
 
 // It is better to avoid transferring leader.
-func (b *Builder) preferLessLeaderTransfer(p stepPlan) int {
+func (b *Builder) planPreferLessLeaderTransfer(p stepPlan) int {
 	if p.leaderBeforeAdd == 0 || p.leaderBeforeAdd == b.currentLeaderStoreID {
 		// 3: current == leaderBeforeAdd == leaderBeforeRemove
 		// 2: current == leaderBeforeAdd != leaderBeforeRemove
@@ -765,14 +910,14 @@ func (b *Builder) preferLessLeaderTransfer(p stepPlan) int {
 }
 
 // It is better to transfer leader to the target leader.
-func (b *Builder) preferTargetLeader(p stepPlan) int {
+func (b *Builder) planPreferTargetLeader(p stepPlan) int {
 	return b2i(b.targetLeaderStoreID == 0 ||
 		(p.leaderBeforeRemove != 0 && p.leaderBeforeRemove == b.targetLeaderStoreID) ||
 		(p.leaderBeforeRemove == 0 && p.leaderBeforeAdd == b.targetLeaderStoreID))
 }
 
 // It is better to add target leader as early as possible.
-func (b *Builder) preferAddOrPromoteTargetLeader(p stepPlan) int {
+func (b *Builder) planPreferAddOrPromoteTargetLeader(p stepPlan) int {
 	if b.targetLeaderStoreID == 0 {
 		return 0
 	}
