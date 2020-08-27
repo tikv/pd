@@ -86,7 +86,7 @@ func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		errs.ErrSchedulerConfig.Wrap(err).GenWithStackByCause("id")
+		return errs.ErrSchedulerConfig.Wrap(err).GenWithStackByCause("id")
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {
