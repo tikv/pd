@@ -31,8 +31,8 @@ import (
 const regionScatterName = "region-scatter"
 
 type selectedLeaderStores struct {
-	mu                sync.Mutex
-	stores            map[uint64]uint64            // storeID -> hintCount
+	mu     sync.Mutex
+	stores map[uint64]uint64 // storeID -> hintCount
 	// TODO: support auto-gc for the groupDistribution
 	groupDistribution map[string]map[uint64]uint64 // group -> StoreID -> leaderCount
 }
@@ -73,8 +73,8 @@ func newSelectedLeaderStores() *selectedLeaderStores {
 }
 
 type selectedStores struct {
-	mu                sync.Mutex
-	stores            map[uint64]struct{}
+	mu     sync.Mutex
+	stores map[uint64]struct{}
 	// TODO: support auto-gc for the groupDistribution
 	groupDistribution map[string]map[uint64]uint64 // group -> StoreID -> peerCount
 }
