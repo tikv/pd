@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -428,7 +429,11 @@ func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
 	defer m.Unlock()
 	p := m.ruleConfig.beginPatch()
 	p.setGroup(group)
-	return m.tryCommitPatch(p)
+	if err := m.tryCommitPatch(p); err != nil {
+		return err
+	}
+	log.Info("group config updated", zap.String("group", fmt.Sprint(group)))
+	return nil
 }
 
 // DeleteRuleGroup removes a RuleGroup.
@@ -437,5 +442,150 @@ func (m *RuleManager) DeleteRuleGroup(id string) error {
 	defer m.Unlock()
 	p := m.ruleConfig.beginPatch()
 	p.deleteGroup(id)
-	return m.tryCommitPatch(p)
+	if err := m.tryCommitPatch(p); err != nil {
+		return err
+	}
+	log.Info("group config reset", zap.String("group", id))
+	return nil
+}
+
+// GetAllGroupBundles returns all rules and groups configuration. Rules are
+// grouped by groups.
+func (m *RuleManager) GetAllGroupBundles() []GroupBundle {
+	m.RLock()
+	defer m.RUnlock()
+	var bundles []GroupBundle
+	for _, g := range m.ruleConfig.groups {
+		bundles = append(bundles, GroupBundle{
+			ID:       g.ID,
+			Index:    g.Index,
+			Override: g.Override,
+		})
+	}
+	for _, r := range m.ruleConfig.rules {
+		for i := range bundles {
+			if bundles[i].ID == r.GroupID {
+				bundles[i].Rules = append(bundles[i].Rules, r)
+			}
+		}
+	}
+	sort.Slice(bundles, func(i, j int) bool {
+		return bundles[i].Index < bundles[j].Index ||
+			(bundles[i].Index == bundles[j].Index && bundles[i].ID < bundles[j].ID)
+	})
+	for _, b := range bundles {
+		sortRules(b.Rules)
+	}
+	return bundles
+}
+
+// GetGroupBundle returns a group and all rules belong to it.
+func (m *RuleManager) GetGroupBundle(id string) (b GroupBundle) {
+	m.RLock()
+	defer m.RUnlock()
+	b.ID = id
+	if g := m.ruleConfig.groups[id]; g != nil {
+		b.Index, b.Override = g.Index, g.Override
+		for _, r := range m.ruleConfig.rules {
+			if r.GroupID == id {
+				b.Rules = append(b.Rules, r)
+			}
+		}
+		sortRules(b.Rules)
+	}
+	return
+}
+
+// SetAllGroupBundles resets full configuration. All old configurations are dropped.
+func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle) error {
+	m.Lock()
+	defer m.Unlock()
+	p := m.ruleConfig.beginPatch()
+	for k := range m.ruleConfig.rules {
+		p.deleteRule(k[0], k[1])
+	}
+	for id := range m.ruleConfig.groups {
+		p.deleteGroup(id)
+	}
+	for _, g := range groups {
+		p.setGroup(&RuleGroup{
+			ID:       g.ID,
+			Index:    g.Index,
+			Override: g.Override,
+		})
+		for _, r := range g.Rules {
+			if err := m.adjustRule(r); err != nil {
+				return err
+			}
+			p.setRule(r)
+		}
+	}
+	if err := m.tryCommitPatch(p); err != nil {
+		return err
+	}
+	log.Info("full config reset", zap.String("config", fmt.Sprint(groups)))
+	return nil
+}
+
+// SetGroupBundle resets a Group and all rules belong to it. All old rules
+// belong to the Group are dropped.
+func (m *RuleManager) SetGroupBundle(group GroupBundle) error {
+	m.Lock()
+	defer m.Unlock()
+	p := m.ruleConfig.beginPatch()
+	if _, ok := m.ruleConfig.groups[group.ID]; ok {
+		for k := range m.ruleConfig.rules {
+			if k[0] == group.ID {
+				p.deleteRule(k[0], k[1])
+			}
+		}
+	}
+	p.setGroup(&RuleGroup{
+		ID:       group.ID,
+		Index:    group.Index,
+		Override: group.Override,
+	})
+	for _, r := range group.Rules {
+		if err := m.adjustRule(r); err != nil {
+			return err
+		}
+		p.setRule(r)
+	}
+	if err := m.tryCommitPatch(p); err != nil {
+		return err
+	}
+	log.Info("group is reset", zap.String("group", fmt.Sprint(group)))
+	return nil
+}
+
+// DeleteGroupBundle removes a Group and all rules belong to it. If `regex` is
+// true, `id` is a regexp expression.
+func (m *RuleManager) DeleteGroupBundle(id string, regex bool) error {
+	m.Lock()
+	defer m.Unlock()
+	matchID := func(a string) bool { return a == id }
+	if regex {
+		r, err := regexp.Compile(id)
+		if err != nil {
+			return err
+		}
+		matchID = func(a string) bool { return r.MatchString(a) }
+	}
+
+	p := m.ruleConfig.beginPatch()
+	for k := range m.ruleConfig.rules {
+		if matchID(k[0]) {
+			p.deleteRule(k[0], k[1])
+		}
+	}
+	for _, g := range m.ruleConfig.groups {
+		if matchID(g.ID) {
+			p.deleteGroup(g.ID)
+		}
+	}
+	if err := m.tryCommitPatch(p); err != nil {
+		return err
+	}
+	log.Info("groups are removed", zap.String("id", id), zap.Bool("regexp", regex))
+	return nil
 }

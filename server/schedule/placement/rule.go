@@ -101,6 +101,11 @@ func (g *RuleGroup) isDefault() bool {
 	return g.Index == 0 && !g.Override
 }
 
+func (g *RuleGroup) String() string {
+	b, _ := json.Marshal(g)
+	return string(b)
+}
+
 // Rules are ordered by (GroupID, Index, ID).
 func compareRule(a, b *Rule) int {
 	switch {
@@ -158,4 +163,17 @@ func prepareRulesForApply(rules []*Rule) []*Rule {
 		}
 	}
 	return append(res, rules[j:]...)
+}
+
+// GroupBundle represents a rule group and all rules belong to the group.
+type GroupBundle struct {
+	ID       string  `json:"group_id"`
+	Index    int     `json:"group_index"`
+	Override bool    `json:"group_override"`
+	Rules    []*Rule `json:"rules"`
+}
+
+func (g GroupBundle) String() string {
+	b, _ := json.Marshal(g)
+	return string(b)
 }

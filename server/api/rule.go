@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -409,4 +410,130 @@ func (h *ruleHandler) GetAllGroupConfigs(w http.ResponseWriter, r *http.Request)
 	}
 	ruleGroups := cluster.GetRuleManager().GetRuleGroups()
 	h.rd.JSON(w, http.StatusOK, ruleGroups)
+}
+
+// @Tags rule
+// @Summary List all rules and groups configuration.
+// @Produce json
+// @Success 200 {array} placement.GroupBundle
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Router /config/placement-rule [get]
+func (h *ruleHandler) GetAllGroupBundles(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	bundles := cluster.GetRuleManager().GetAllGroupBundles()
+	h.rd.JSON(w, http.StatusOK, bundles)
+}
+
+// @Tags rule
+// @Summary Update all rules and groups configuration.
+// @Produce json
+// @Success 200 {string} string "Update rules and groups successfully."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /config/placement-rule [post]
+func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	var groups []placement.GroupBundle
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &groups); err != nil {
+		return
+	}
+	for _, g := range groups {
+		for _, rule := range g.Rules {
+			if err := h.checkRule(rule); err != nil {
+				h.rd.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+	}
+	if err := cluster.GetRuleManager().SetAllGroupBundles(groups); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "Update rules and groups successfully.")
+}
+
+// @Tags rule
+// @Summary Get group config and all rules belong to the group.
+// @Param group path string true "The name of group"
+// @Produce json
+// @Success 200 {object} placement.GroupBundle
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Router /config/placement-rule/{group} [get]
+func (h *ruleHandler) GetGroupBundle(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	group := cluster.GetRuleManager().GetGroupBundle(mux.Vars(r)["group"])
+	h.rd.JSON(w, http.StatusOK, group)
+}
+
+// @Tags rule
+// @Summary Get group config and all rules belong to the group.
+// @Param group path string true "The name or name pattern of group"
+// @Param regexp query bool false "Use regular expression" default(false)
+// @Produce plain
+// @Success 200 {string} string "Delete group and rules successfully."
+// @Failure 400 {string} string "Bad request."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Router /config/placement-rule [delete]
+func (h *ruleHandler) DeleteGroupBundle(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	group := mux.Vars(r)["group"]
+	group, err := url.PathUnescape(group)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	_, regex := r.URL.Query()["regexp"]
+	if err := cluster.GetRuleManager().DeleteGroupBundle(group, regex); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "Delete group and rules successfully.")
+}
+
+// @Tags rule
+// @Summary Update group and all rules belong to it.
+// @Produce json
+// @Success 200 {string} string "Update group and rules successfully."
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 412 {string} string "Placement rules feature is disabled."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /config/placement-rule/{group} [post]
+func (h *ruleHandler) SetGroupBundle(w http.ResponseWriter, r *http.Request) {
+	cluster := getCluster(r.Context())
+	if !cluster.IsPlacementRulesEnabled() {
+		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
+		return
+	}
+	var group placement.GroupBundle
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &group); err != nil {
+		return
+	}
+	for _, rule := range group.Rules {
+		if err := h.checkRule(rule); err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if err := cluster.GetRuleManager().SetGroupBundle(group); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "Update group and rules successfully.")
 }
