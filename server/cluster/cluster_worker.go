@@ -94,7 +94,7 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 	regionEpoch := region.GetMeta().GetRegionEpoch()
 	if reqRegionEpoch.GetVersion() < regionEpoch.GetVersion() ||
 		reqRegionEpoch.GetConfVer() < regionEpoch.GetConfVer() {
-		return errors.Errorf("invalid region epoch, request: %v, currenrt: %v", reqRegionEpoch, regionEpoch)
+		return errors.Errorf("invalid region epoch, request: %v, current: %v", reqRegionEpoch, regionEpoch)
 	}
 	return nil
 }

@@ -57,7 +57,7 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 15),
 		})
 
-	clusterStateCPUGuage = prometheus.NewGauge(
+	clusterStateCPUGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "server",
@@ -79,6 +79,6 @@ func init() {
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(patrolCheckRegionsHistogram)
-	prometheus.MustRegister(clusterStateCPUGuage)
+	prometheus.MustRegister(clusterStateCPUGauge)
 	prometheus.MustRegister(clusterStateCurrent)
 }

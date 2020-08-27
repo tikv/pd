@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
@@ -37,7 +38,9 @@ const (
 // TODO: adjust the value or make it configurable.
 var (
 	// MetricsTimeDuration is used to get the metrics of a certain time period.
-	MetricsTimeDuration = 5 * time.Second
+	// This must be long enough to cover at least 2 scrape intervals
+	// Or you will get nothing when querying CPU usage
+	MetricsTimeDuration = 60 * time.Second
 	// MaxScaleOutStep is used to indicate the maxium number of instance for scaling out operations at once.
 	MaxScaleOutStep uint64 = 1
 	// MaxScaleInStep is used to indicate the maxium number of instance for scaling in operations at once.
@@ -70,7 +73,7 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	if component == TiKV {
 		instances = filterTiKVInstances(rc)
 	} else {
-		instances = getTiDBInstances()
+		instances = getTiDBInstances(rc.GetEtcdClient())
 	}
 
 	if len(instances) == 0 {
@@ -117,9 +120,17 @@ func filterTiKVInstances(informer core.StoreSetInformer) []instance {
 	return instances
 }
 
-// TODO: get TiDB instances
-func getTiDBInstances() []instance {
-	return []instance{}
+func getTiDBInstances(etcdClient *clientv3.Client) []instance {
+	infos, err := GetTiDBs(etcdClient)
+	if err != nil {
+		// TODO: error handling
+		return []instance{}
+	}
+	instances := make([]instance, 0, len(infos))
+	for _, info := range infos {
+		instances = append(instances, instance{address: info.Address})
+	}
+	return instances
 }
 
 func getAddresses(instances []instance) []string {
@@ -257,14 +268,12 @@ func getCountByResourceType(strategy *Strategy, resourceType string) uint64 {
 	return 0
 }
 
-// TODO: get the scaled groups
 func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType, healthyInstances []instance) []*Plan {
 	switch component {
 	case TiKV:
 		return getScaledTiKVGroups(rc, healthyInstances)
 	case TiDB:
-		// TODO: support search TiDB Group
-		return []*Plan{}
+		return getScaledTiDBGroups(rc.GetEtcdClient(), healthyInstances)
 	default:
 		return nil
 	}
@@ -285,10 +294,14 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 	return buildPlans(planMap, TiKV)
 }
 
-func getScaledTiDBGroups(informer tidbInformer, healthyInstances []instance) []*Plan {
+func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instance) []*Plan {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	for _, instance := range healthyInstances {
-		tidb := informer.GetTiDB(instance.address)
+		tidb, err := GetTiDB(etcdClient, instance.address)
+		if err != nil {
+			// TODO: error handling
+			return nil
+		}
 		if tidb == nil {
 			log.Warn("inconsistency between health instances and tidb status, exit auto-scaling calculation",
 				zap.String("tidb-address", instance.address))

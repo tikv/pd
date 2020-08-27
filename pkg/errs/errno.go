@@ -105,3 +105,8 @@ var (
 	ErrInternalGrowth         = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
 	ErrCreateOperator         = errors.Normalize("fail to create operator", errors.RFCCodeText("PD:scheduler:ErrCreateOperator"))
 )
+
+// etcd errors
+var (
+	ErrCloseEtcdClient = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:etcd:ErrCloseEtcdClient"))
+)
