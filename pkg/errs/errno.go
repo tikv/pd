@@ -103,7 +103,6 @@ var (
 	ErrSchedulerConfig        = errors.Normalize("wrong scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfig"))
 	ErrCacheOverflow          = errors.Normalize("cache overflow, scheduler is %s", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
 	ErrInternalGrowth         = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
-	ErrCreateOperator         = errors.Normalize("fail to create operator", errors.RFCCodeText("PD:scheduler:ErrCreateOperator"))
 )
 
 // etcd errors

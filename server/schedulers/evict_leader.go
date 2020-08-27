@@ -230,7 +230,7 @@ func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Ope
 		}
 		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 		if err != nil {
-			log.Debug("fail to create evict leader operator", zap.Error(errs.ErrCreateOperator.Wrap(err).FastGenByArgs()))
+			log.Debug("fail to create evict leader operator", zap.Error(err))
 			continue
 		}
 		op.SetPriorityLevel(core.HighPriority)
