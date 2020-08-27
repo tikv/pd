@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -407,7 +408,13 @@ func (s *Server) Close() {
 	s.stopServerLoop()
 
 	if s.client != nil {
-		s.client.Close()
+		if err := s.client.Close(); err != nil {
+			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+
+	if s.httpClient != nil {
+		s.httpClient.CloseIdleConnections()
 	}
 
 	if s.member.Etcd() != nil {

@@ -93,3 +93,8 @@ var (
 	ErrLoadValue  = errors.Normalize("load value from etcd failed", errors.RFCCodeText("PD:etcdutil:ErrLoadValue"))
 	ErrGetCluster = errors.Normalize("get cluster from remote peer failed", errors.RFCCodeText("PD:etcdutil:ErrGetCluster"))
 )
+
+// etcd errors
+var (
+	ErrCloseEtcdClient = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:etcd:ErrCloseEtcdClient"))
+)
