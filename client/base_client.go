@@ -48,8 +48,7 @@ type baseClient struct {
 	security SecurityOption
 
 	gRPCDialOptions []grpc.DialOption
-
-	timeout time.Duration
+	timeout         time.Duration
 }
 
 // SecurityOption records options about tls
