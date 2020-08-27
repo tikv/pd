@@ -109,7 +109,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Buil
 	}
 }
 
-// AddPeer records an add Peer operation in Builder. If p.Id is 0, the builder
+// AddPeer records an add Peer operation in Builder. If peer.Id is 0, the builder
 // will allocate a new peer ID later.
 func (b *Builder) AddPeer(peer *metapb.Peer) *Builder {
 	if b.err != nil {
@@ -419,36 +419,36 @@ func (b *Builder) execTransferLeader(id uint64) {
 	b.currentLeaderStoreID = id
 }
 
-func (b *Builder) execPromoteLearner(p *metapb.Peer) {
-	b.steps = append(b.steps, PromoteLearner{ToStore: p.StoreId, PeerID: p.Id})
-	b.currentPeers.Set(p)
-	delete(b.toPromote, p.StoreId)
+func (b *Builder) execPromoteLearner(peer *metapb.Peer) {
+	b.steps = append(b.steps, PromoteLearner{ToStore: peer.StoreId, PeerID: peer.Id})
+	b.currentPeers.Set(peer)
+	delete(b.toPromote, peer.StoreId)
 }
 
-func (b *Builder) execDemoteFollower(p *metapb.Peer) {
-	b.steps = append(b.steps, DemoteFollower{ToStore: p.StoreId, PeerID: p.Id})
-	b.currentPeers.Set(p)
-	delete(b.toDemote, p.StoreId)
+func (b *Builder) execDemoteFollower(peer *metapb.Peer) {
+	b.steps = append(b.steps, DemoteFollower{ToStore: peer.StoreId, PeerID: peer.Id})
+	b.currentPeers.Set(peer)
+	delete(b.toDemote, peer.StoreId)
 }
 
-func (b *Builder) execAddPeer(p *metapb.Peer) {
+func (b *Builder) execAddPeer(peer *metapb.Peer) {
 	if b.isLightWeight {
-		b.steps = append(b.steps, AddLightLearner{ToStore: p.StoreId, PeerID: p.Id})
+		b.steps = append(b.steps, AddLightLearner{ToStore: peer.StoreId, PeerID: peer.Id})
 	} else {
-		b.steps = append(b.steps, AddLearner{ToStore: p.StoreId, PeerID: p.Id})
+		b.steps = append(b.steps, AddLearner{ToStore: peer.StoreId, PeerID: peer.Id})
 	}
-	if !core.IsLearner(p) {
-		b.steps = append(b.steps, PromoteLearner{ToStore: p.StoreId, PeerID: p.Id})
+	if !core.IsLearner(peer) {
+		b.steps = append(b.steps, PromoteLearner{ToStore: peer.StoreId, PeerID: peer.Id})
 	}
-	b.currentPeers.Set(p)
-	b.peerAddStep[p.StoreId] = len(b.steps)
-	delete(b.toAdd, p.StoreId)
+	b.currentPeers.Set(peer)
+	b.peerAddStep[peer.StoreId] = len(b.steps)
+	delete(b.toAdd, peer.StoreId)
 }
 
-func (b *Builder) execRemovePeer(p *metapb.Peer) {
-	b.steps = append(b.steps, RemovePeer{FromStore: p.StoreId})
-	delete(b.currentPeers, p.StoreId)
-	delete(b.toRemove, p.StoreId)
+func (b *Builder) execRemovePeer(peer *metapb.Peer) {
+	b.steps = append(b.steps, RemovePeer{FromStore: peer.StoreId})
+	delete(b.currentPeers, peer.StoreId)
+	delete(b.toRemove, peer.StoreId)
 }
 
 // check if a peer can become leader.
@@ -606,8 +606,8 @@ func (b *Builder) planReplaceLeaders(best, next stepPlan) stepPlan {
 
 func (b *Builder) planPromotePeer() stepPlan {
 	for _, i := range b.toPromote.IDs() {
-		p := b.toPromote[i]
-		return stepPlan{promote: p}
+		peer := b.toPromote[i]
+		return stepPlan{promote: peer}
 	}
 	return stepPlan{}
 }
@@ -784,8 +784,8 @@ func (pm peersMap) IDs() []uint64 {
 	return ids
 }
 
-func (pm peersMap) Set(p *metapb.Peer) {
-	pm[p.StoreId] = p
+func (pm peersMap) Set(peer *metapb.Peer) {
+	pm[peer.StoreId] = peer
 }
 
 func (pm peersMap) String() string {
