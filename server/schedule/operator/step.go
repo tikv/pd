@@ -568,7 +568,7 @@ func (cpe ChangePeerV2Enter) CheckSafety(region *core.RegionInfo) error {
 			return errors.New("peer is a leader, can not demote")
 		}
 	}
-	if notInJointState && (inJointState || core.IsInJointState(region.GetPeers())) {
+	if notInJointState && (inJointState || core.IsInJointState(region.GetPeers()...)) {
 		return errors.New("unexpected peer role")
 	}
 	return nil
@@ -635,7 +635,7 @@ func (cpl ChangePeerV2Leave) ConfVerChanged(region *core.RegionInfo) bool {
 			return false
 		}
 	}
-	return !core.IsInJointState(region.GetPeers())
+	return !core.IsInJointState(region.GetPeers()...)
 }
 
 // IsFinish checks if current step is finished.
@@ -654,7 +654,7 @@ func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 			return false
 		}
 	}
-	if core.IsInJointState(region.GetPeers()) {
+	if core.IsInJointState(region.GetPeers()...) {
 		log.Warn("region is still in the joint state", zap.Uint64("region-id", region.GetID()))
 		return false
 	}
@@ -692,7 +692,7 @@ func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
 			return errors.New("unexpected peer role")
 		}
 	}
-	if notInJointState && (inJointState || core.IsInJointState(region.GetPeers())) {
+	if notInJointState && (inJointState || core.IsInJointState(region.GetPeers()...)) {
 		return errors.New("unexpected peer role")
 	}
 	return nil
