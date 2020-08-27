@@ -19,7 +19,6 @@ import (
 	"strconv"
 
 	"github.com/montanaflynn/stats"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
