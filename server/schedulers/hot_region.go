@@ -652,7 +652,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*storeLoadDetail {
 	ret := make(map[uint64]*storeLoadDetail)
 	for id, detail := range bs.stLoadDetail {
 		if bs.cluster.GetStore(id) == nil {
-			log.Error("failed to get the source store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(id)))
+			log.Error("failed to get the source store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs()), zap.Uint64("store-id", id))
 			continue
 		}
 		if len(detail.HotPeers) == 0 {

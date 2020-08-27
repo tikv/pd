@@ -189,7 +189,7 @@ func (s *balanceRegionScheduler) transferPeer(cluster opt.Cluster, region *core.
 	sourceStoreID := oldPeer.GetStoreId()
 	source := cluster.GetStore(sourceStoreID)
 	if source == nil {
-		log.Error("failed to get the source store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(sourceStoreID)))
+		log.Error("failed to get the source store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs()), zap.Uint64("store-id", sourceStoreID))
 		return nil
 	}
 

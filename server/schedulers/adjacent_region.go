@@ -233,7 +233,7 @@ func (l *balanceAdjacentRegionScheduler) process(cluster opt.Cluster) []*operato
 
 	defer func() {
 		if l.cacheRegions.len() < 0 {
-			log.Fatal("cache overflow", zap.Error(errs.ErrCacheOverflow.FastGenByArgs(l.GetName())))
+			log.Fatal("cache overflow", zap.Error(errs.ErrCacheOverflow.FastGenByArgs()), zap.String("scheduler", l.GetName()))
 		}
 		l.cacheRegions.head = head + 1
 		l.lastKey = r2.GetStartKey()
@@ -265,7 +265,7 @@ func (l *balanceAdjacentRegionScheduler) unsafeToBalance(cluster opt.Cluster, re
 	leaderStoreID := region.GetLeader().GetStoreId()
 	store := cluster.GetStore(leaderStoreID)
 	if store == nil {
-		log.Error("failed to get the store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(leaderStoreID)))
+		log.Error("failed to get the store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs()), zap.Uint64("store-id", leaderStoreID))
 		return true
 	}
 	if !filter.Source(cluster, store, l.filters) {
@@ -317,7 +317,7 @@ func (l *balanceAdjacentRegionScheduler) dispersePeer(cluster opt.Cluster, regio
 	leaderStoreID := region.GetLeader().GetStoreId()
 	source := cluster.GetStore(leaderStoreID)
 	if source == nil {
-		log.Error("failed to get the source store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs(leaderStoreID)))
+		log.Error("failed to get the source store", zap.Error(errs.ErrGetSourceStore.FastGenByArgs()), zap.Uint64("store-id", leaderStoreID))
 		return nil
 	}
 	scoreGuard := filter.NewPlacementSafeguard(l.GetName(), cluster, region, source)
