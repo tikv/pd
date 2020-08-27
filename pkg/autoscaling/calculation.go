@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	promClient "github.com/prometheus/client_golang/api"
@@ -204,7 +205,11 @@ func getResourcesByComponent(strategy *Strategy, component ComponentType) []*Res
 }
 
 func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64, instances []instance) []*Plan {
-	groups := getScaledGroupsByComponent(rc, component, instances)
+	groups, err := getScaledGroupsByComponent(rc, component, instances)
+	if err != nil {
+		// TODO: error handling
+		return nil
+	}
 	group := findBestGroupToScaleOut(rc, strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
@@ -231,7 +236,11 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 }
 
 func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleInQuota float64, instances []instance) []*Plan {
-	groups := getScaledGroupsByComponent(rc, component, instances)
+	groups, err := getScaledGroupsByComponent(rc, component, instances)
+	if err != nil {
+		// TODO: error handling
+		return nil
+	}
 	if len(groups) == 0 {
 		return nil
 	}
@@ -269,19 +278,19 @@ func getCountByResourceType(strategy *Strategy, resourceType string) uint64 {
 	return 0
 }
 
-func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType, healthyInstances []instance) []*Plan {
+func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType, healthyInstances []instance) ([]*Plan, error) {
 	switch component {
 	case TiKV:
 		return getScaledTiKVGroups(rc, healthyInstances)
 	case TiDB:
 		return getScaledTiDBGroups(rc.GetEtcdClient(), healthyInstances)
 	default:
-		return nil
+		return nil, errors.Errorf("unknown component type %s", component.String())
 	}
 }
 
 // TODO: error handling while processing labels
-func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) []*Plan {
+func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) ([]*Plan, error) {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	resourceTypeMap := make(map[string]string)
 	for _, instance := range healthyInstances {
@@ -289,7 +298,7 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 		if store == nil {
 			log.Warn("inconsistency between health instances and store status, exit auto-scaling calculation",
 				zap.Uint64("store-id", instance.id))
-			return nil
+			return nil, errors.New("inconsistent healthy instances")
 		}
 
 		groupName := store.GetLabelValue(groupLabelKey)
@@ -303,28 +312,28 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 			resourceType := store.GetLabelValue(resourceTypeLabelKey)
 			if resourceType == "" {
 				log.Warn("store is in auto-scaled group but has no resource type label, exit auto-scaling calculation", zap.Uint64("store-id", instance.id))
-				return nil
+				return nil, errors.New("missing resource type label")
 			}
 			resourceTypeMap[groupName] = resourceType
 		}
 	}
-	return buildPlans(planMap, resourceTypeMap, TiKV)
+	return buildPlans(planMap, resourceTypeMap, TiKV), nil
 }
 
 // TODO: error handling while processing labels
-func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instance) []*Plan {
+func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instance) ([]*Plan, error) {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	resourceTypeMap := make(map[string]string)
 	for _, instance := range healthyInstances {
 		tidb, err := GetTiDB(etcdClient, instance.address)
 		if err != nil {
 			// TODO: error handling
-			return nil
+			return nil, err
 		}
 		if tidb == nil {
 			log.Warn("inconsistency between health instances and tidb status, exit auto-scaling calculation",
 				zap.String("tidb-address", instance.address))
-			return nil
+			return nil, errors.New("inconsistent healthy instances")
 		}
 
 		groupName := tidb.getLabelValue(groupLabelKey)
@@ -337,12 +346,12 @@ func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instanc
 		if _, ok := resourceTypeMap[groupName]; !ok {
 			if resourceType == "" {
 				log.Warn("tidb is in auto-scaled group but has no resource type label, exit auto-scaling calculation", zap.String("tidb-address", instance.address))
-				return nil
+				return nil, errors.New("missing resource type label")
 			}
 			resourceTypeMap[groupName] = resourceType
 		}
 	}
-	return buildPlans(planMap, resourceTypeMap, TiDB)
+	return buildPlans(planMap, resourceTypeMap, TiDB), nil
 }
 
 func isAutoScaledGroup(groupName string) bool {

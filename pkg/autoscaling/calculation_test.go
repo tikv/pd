@@ -72,6 +72,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 		informer         core.StoreSetInformer
 		healthyInstances []instance
 		expectedPlan     []*Plan
+		errChecker       Checker
 	}{
 		{
 			name:     "no scaled tikv group",
@@ -91,6 +92,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 				},
 			},
 			expectedPlan: nil,
+			errChecker:   IsNil,
 		},
 		{
 			name:     "exist 1 scaled tikv group",
@@ -126,6 +128,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 					},
 				},
 			},
+			errChecker: IsNil,
 		},
 		{
 			name:     "exist 1 tikv scaled group with inconsistency healthy instances",
@@ -145,6 +148,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 				},
 			},
 			expectedPlan: nil,
+			errChecker:   NotNil,
 		},
 		{
 			name:     "exist 1 tikv scaled group with less healthy instances",
@@ -176,6 +180,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 					},
 				},
 			},
+			errChecker: IsNil,
 		},
 		{
 			name:     "existed other tikv group",
@@ -195,14 +200,16 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 				},
 			},
 			expectedPlan: nil,
+			errChecker:   IsNil,
 		},
 	}
 
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
-		plans := getScaledTiKVGroups(testcase.informer, testcase.healthyInstances)
+		plans, err := getScaledTiKVGroups(testcase.informer, testcase.healthyInstances)
 		if testcase.expectedPlan == nil {
 			c.Assert(plans, IsNil)
+			c.Assert(err, testcase.errChecker)
 		} else {
 			c.Assert(plans, DeepEquals, testcase.expectedPlan)
 		}
