@@ -119,6 +119,10 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 							Key:   groupLabelKey,
 							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
 						},
+						{
+							Key:   resourceTypeLabelKey,
+							Value: "a",
+						},
 					},
 				},
 			},
@@ -164,6 +168,10 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 						{
 							Key:   groupLabelKey,
 							Value: fmt.Sprintf("%s-0", autoScalingGroupLabelKeyPrefix),
+						},
+						{
+							Key:   resourceTypeLabelKey,
+							Value: "a",
 						},
 					},
 				},
