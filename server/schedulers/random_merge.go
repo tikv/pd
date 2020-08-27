@@ -43,7 +43,7 @@ func init() {
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errs.ErrSchedulerConfig.GenWithStackByArgs(err, "ranges")
+				return errs.ErrSchedulerConfig.Wrap(err).GenWithStackByCause("ranges")
 			}
 			conf.Ranges = ranges
 			conf.Name = RandomMergeName

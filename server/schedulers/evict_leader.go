@@ -55,11 +55,11 @@ func init() {
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
-				errs.ErrSchedulerConfig.GenWithStackByArgs(err, "id")
+				errs.ErrSchedulerConfig.Wrap(err).GenWithStackByCause("id")
 			}
 			ranges, err := getKeyRanges(args[1:])
 			if err != nil {
-				return errs.ErrSchedulerConfig.GenWithStackByArgs(err, "ranges")
+				return errs.ErrSchedulerConfig.Wrap(err).GenWithStackByCause("ranges")
 			}
 			conf.StoreIDWithRanges[id] = ranges
 			return nil
@@ -91,11 +91,11 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		errs.ErrSchedulerConfig.GenWithStackByArgs(err, "id")
+		errs.ErrSchedulerConfig.Wrap(err).GenWithStackByCause("id")
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {
-		return errs.ErrSchedulerConfig.GenWithStackByArgs(err, "ranges")
+		return errs.ErrSchedulerConfig.Wrap(err).GenWithStackByCause("ranges")
 	}
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
