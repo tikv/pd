@@ -232,7 +232,7 @@ func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
 	defer cancel()
 	err := m.etcd.Server.MoveLeader(moveCtx, old, new)
 	if err != nil {
-		return errs.ErrEtcdMoveLeader.GenWithStackByArgs(err)
+		return errs.ErrEtcdMoveLeader.Wrap(err).GenWithStackByCause()
 	}
 	return nil
 }
@@ -331,7 +331,7 @@ func (m *Member) GetMemberLeaderPriority(id uint64) (int, error) {
 	}
 	priority, err := strconv.ParseInt(string(res.Kvs[0].Value), 10, 32)
 	if err != nil {
-		return 0, errs.ErrStrconvParseInt.GenWithStackByArgs(err)
+		return 0, errs.ErrStrconvParseInt.Wrap(err).GenWithStackByCause()
 	}
 	return int(priority), nil
 }

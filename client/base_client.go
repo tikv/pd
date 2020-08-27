@@ -216,7 +216,7 @@ func (c *baseClient) getMembers(ctx context.Context, url string) (*pdpb.GetMembe
 	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetMember.GenWithStackByArgs(attachErr)
+		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
 	return members, nil
 }

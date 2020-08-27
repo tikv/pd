@@ -55,7 +55,7 @@ func (s SecurityConfig) ToTLSConfig() (*tls.Config, error) {
 
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
-		return nil, errs.ErrEtcdTLSConfig.GenWithStackByArgs(err)
+		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
 	}
 	return tlsConfig, nil
 }
@@ -93,11 +93,11 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	}
 	u, err := url.Parse(addr)
 	if err != nil {
-		return nil, errs.ErrURLParse.GenWithStackByArgs(err)
+		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
 	}
 	cc, err := grpc.DialContext(ctx, u.Host, append(do, opt)...)
 	if err != nil {
-		return nil, errs.ErrGRPCDial.GenWithStackByArgs(err)
+		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
 	}
 	return cc, nil
 }

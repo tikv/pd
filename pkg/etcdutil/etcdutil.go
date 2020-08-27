@@ -110,7 +110,7 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	}
 
 	if err != nil {
-		return resp, errs.ErrEtcdKVGet.GenWithStackByArgs(err)
+		return resp, errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
 	}
 	return resp, nil
 }

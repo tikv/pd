@@ -138,7 +138,7 @@ func (ls *Leadership) DeleteLeader() error {
 	// delete leader itself and let others start a new election again.
 	resp, err := ls.LeaderTxn().Then(clientv3.OpDelete(ls.leaderKey)).Commit()
 	if err != nil {
-		return errs.ErrEtcdKVDelete.GenWithStackByArgs(err)
+		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
 		return errs.ErrEtcdTxn.FastGenByArgs("not leader already")
