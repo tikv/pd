@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -45,7 +46,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
@@ -349,7 +349,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocator = tso.NewGlobalTSOAllocator(
-		s.member.Leadership,
+		s.member.GetLeadership(),
 		s.rootPath,
 		s.cfg.TsoSaveInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
@@ -408,7 +408,13 @@ func (s *Server) Close() {
 	s.stopServerLoop()
 
 	if s.client != nil {
-		s.client.Close()
+		if err := s.client.Close(); err != nil {
+			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+
+	if s.httpClient != nil {
+		s.httpClient.CloseIdleConnections()
 	}
 
 	if s.member.Etcd() != nil {
@@ -629,11 +635,6 @@ func (s *Server) GetClient() *clientv3.Client {
 // GetHTTPClient returns builtin etcd client.
 func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
-}
-
-// GetLeadership returns the member's leadership
-func (s *Server) GetLeadership() *election.Leadership {
-	return s.member.Leadership
 }
 
 // GetLeader returns the leader of PD cluster(i.e the PD leader).
@@ -1071,17 +1072,20 @@ func (s *Server) leaderLoop() {
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
 			}
-			log.Info("start watch pd leader", zap.Stringer("pd-leader", leader))
+			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
+			// WatchLeader will keep looping and never return unless the PD leader has changed.
 			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
 			syncer.StopSyncWithLeader()
-			log.Info("pd leader changed, try to re-campaign a pd leader")
+			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
 
+		// To make sure the etcd leader and PD leader are on the same server.
 		etcdLeader := s.member.GetEtcdLeader()
 		if etcdLeader != s.member.ID() {
 			log.Info("skip campaigning of pd leader and check later",
 				zap.String("server-name", s.Name()),
-				zap.Uint64("etcd-leader-id", etcdLeader))
+				zap.Uint64("etcd-leader-id", etcdLeader),
+				zap.Uint64("member-id", s.member.ID()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -1090,10 +1094,8 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign pd leader",
-		zap.String("campaign-pd-leader-name", s.Name()),
-		zap.String("purpose", s.member.Leadership.Purpose))
-	if err := s.member.Leadership.Campaign(s.cfg.LeaderLease, s.member.GetLeaderPath(), s.member.MemberValue()); err != nil {
+	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
+	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		log.Error("campaign pd leader meet error", zap.Error(err))
 		return
 	}
@@ -1105,9 +1107,9 @@ func (s *Server) campaignLeader() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-	defer s.member.Leadership.Reset()
-	// maintain the leadership
-	go s.member.Leadership.Keep(ctx)
+	defer s.member.ResetLeader()
+	// maintain the PD leader
+	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
 	log.Info("initialize the global TSO allocator")
@@ -1129,7 +1131,6 @@ func (s *Server) campaignLeader() {
 	defer s.stopRaftCluster()
 
 	s.member.EnableLeader()
-	defer s.member.DisableLeader()
 
 	CheckPDVersion(s.persistOptions)
 	log.Info("PD cluster leader is ready to serve", zap.String("pd-leader-name", s.Name()))
@@ -1142,8 +1143,8 @@ func (s *Server) campaignLeader() {
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !s.member.Leadership.Check() {
-				log.Info("leadership is invalid because lease has expired, pd leader will step down")
+			if !s.member.IsStillLeader() {
+				log.Info("no longer a leader because lease has expired, pd leader will step down")
 				return
 			}
 			etcdLeader := s.member.GetEtcdLeader()

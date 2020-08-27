@@ -56,6 +56,9 @@ func tryAllocTestURL() string {
 	if _, ok := testAddrMap[addr]; ok {
 		return ""
 	}
+	if !environmentCheck(addr) {
+		return ""
+	}
 	testAddrMap[addr] = struct{}{}
 	return addr
 }
