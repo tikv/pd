@@ -40,7 +40,7 @@ func init() {
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("ranges")
+				return errs.ErrSchedulerConfig.GenWithStackByArgs(err, "ranges")
 			}
 			conf.Ranges = ranges
 			conf.Name = LabelName
