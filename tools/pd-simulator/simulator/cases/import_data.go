@@ -16,9 +16,12 @@ package cases
 import (
 	"bytes"
 	"fmt"
+	"gonum.org/v1/plot/plotter"
+	"gonum.org/v1/plot/vg"
 	"math/rand"
 
 	"go.uber.org/zap"
+	"gonum.org/v1/plot"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/codec"
@@ -115,7 +118,7 @@ func newImportData() *Case {
 		regionTotal := regions.GetRegionCount()
 		totalLeaderLog := fmt.Sprintf("%d leader:", regionTotal)
 		totalPeerLog := fmt.Sprintf("%d peer:", regionTotal*3)
-		isEnd := false
+		isEnd := true
 		var regionProps []float64
 		for storeID := uint64(1); storeID <= 10; storeID++ {
 			regions.GetStoreRegionCount(storeID)
@@ -139,6 +142,17 @@ func newImportData() *Case {
 		}
 		if checkCount > uint64(getRegionNum())/10 {
 			isEnd = dev < 0.002
+		}
+		if isEnd {
+			p, _ := plot.New()
+			p.Title.Text = "New region distribution"
+			var bins plotter.XYs
+			for i, v := range regionProps {
+				bins = append(bins, plotter.XY{X: float64(i), Y: v})
+			}
+			h, _ := plotter.NewHistogram(bins, 10)
+			p.Add(h)
+			p.Save(4 * vg.Inch, 4 * vg.Inch, "histogram.png")
 		}
 		return isEnd
 	}
