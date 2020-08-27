@@ -280,6 +280,7 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 	}
 }
 
+// TODO: error handling while processing labels
 func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) []*Plan {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	resourceTypeMap := make(map[string]string)
@@ -301,15 +302,16 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 		if _, ok := resourceTypeMap[groupName]; !ok {
 			resourceType := store.GetLabelValue(resourceTypeLabelKey)
 			if resourceType == "" {
-				log.Warn("store is in auto-scaled group but has no resource type label", zap.Uint64("store-id", instance.id))
-			} else {
-				resourceTypeMap[groupName] = resourceType
+				log.Warn("store is in auto-scaled group but has no resource type label, exit auto-scaling calculation", zap.Uint64("store-id", instance.id))
+				return nil
 			}
+			resourceTypeMap[groupName] = resourceType
 		}
 	}
 	return buildPlans(planMap, resourceTypeMap, TiKV)
 }
 
+// TODO: error handling while processing labels
 func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instance) []*Plan {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	resourceTypeMap := make(map[string]string)
@@ -334,10 +336,10 @@ func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instanc
 		resourceType := tidb.getLabelValue(resourceTypeLabelKey)
 		if _, ok := resourceTypeMap[groupName]; !ok {
 			if resourceType == "" {
-				log.Warn("tidb is in auto-scaled group but has no resource type label", zap.String("tidb-address", instance.address))
-			} else {
-				resourceTypeMap[groupName] = resourceType
+				log.Warn("tidb is in auto-scaled group but has no resource type label, exit auto-scaling calculation", zap.String("tidb-address", instance.address))
+				return nil
 			}
+			resourceTypeMap[groupName] = resourceType
 		}
 	}
 	return buildPlans(planMap, resourceTypeMap, TiDB)
@@ -360,14 +362,19 @@ func buildPlanMap(planMap map[string]map[string]struct{}, groupName, address str
 func buildPlans(planMap map[string]map[string]struct{}, resourceTypeMap map[string]string, componentType ComponentType) []*Plan {
 	var plans []*Plan
 	for groupName, groupInstances := range planMap {
+		resourceType := resourceTypeMap[groupName]
 		plans = append(plans, &Plan{
 			Component:    componentType.String(),
 			Count:        uint64(len(groupInstances)),
-			ResourceType: resourceTypeMap[groupName],
+			ResourceType: resourceType,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   groupLabelKey,
 					Value: groupName,
+				},
+				{
+					Key:   resourceTypeLabelKey,
+					Value: resourceType,
 				},
 			},
 		})
