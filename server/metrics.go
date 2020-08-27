@@ -29,7 +29,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "region_heartbeat",
-			Help:      "Counter of region hearbeat.",
+			Help:      "Counter of region heartbeat.",
 		}, []string{"address", "store", "type", "status"})
 
 	regionHeartbeatLatency = prometheus.NewHistogramVec(
