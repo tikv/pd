@@ -50,12 +50,13 @@ func init() {
 			}
 			if len(args) == 2 {
 				leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
+
 				if err != nil {
-					return errs.ErrSchedulerConfig.Wrap(err).GenWithStackByCause("leader limit")
+					return errs.ErrStrconvParseInt.Wrap(err)
 				}
 				peerLimit, err := strconv.ParseUint(args[1], 10, 64)
 				if err != nil {
-					return errs.ErrSchedulerConfig.Wrap(err).GenWithStackByCause("peer limit")
+					return errs.ErrStrconvParseInt.Wrap(err)
 				}
 				conf.LeaderLimit = leaderLimit
 				conf.PeerLimit = peerLimit

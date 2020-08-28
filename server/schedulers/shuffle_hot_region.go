@@ -47,7 +47,7 @@ func init() {
 			if len(args) == 1 {
 				limit, err := strconv.ParseUint(args[0], 10, 64)
 				if err != nil {
-					return errs.ErrSchedulerConfig.Wrap(err).FastGenByArgs("limit")
+					return errs.ErrStrconvParseInt.Wrap(err)
 				}
 				conf.Limit = limit
 			}

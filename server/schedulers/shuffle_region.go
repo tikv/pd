@@ -41,7 +41,7 @@ func init() {
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errs.ErrSchedulerConfig.Wrap(err).GenWithStackByCause("ranges")
+				return err
 			}
 			conf.Ranges = ranges
 			conf.Roles = allRoles
