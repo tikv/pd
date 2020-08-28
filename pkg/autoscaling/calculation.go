@@ -289,7 +289,6 @@ func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType
 	}
 }
 
-// TODO: error handling while processing labels
 func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) ([]*Plan, error) {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	resourceTypeMap := make(map[string]string)
@@ -320,7 +319,6 @@ func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []inst
 	return buildPlans(planMap, resourceTypeMap, TiKV), nil
 }
 
-// TODO: error handling while processing labels
 func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instance) ([]*Plan, error) {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
 	resourceTypeMap := make(map[string]string)
