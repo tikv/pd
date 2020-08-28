@@ -188,7 +188,7 @@ func (c *coordinator) checkSuspectKeyRanges() {
 	c.cluster.AddSuspectRegions(regionIDList...)
 }
 
-// drivePushOperator is used to push the unfinished operator to the excutor.
+// drivePushOperator is used to push the unfinished operator to the executor.
 func (c *coordinator) drivePushOperator() {
 	defer logutil.LogPanic()
 
@@ -231,6 +231,12 @@ func (c *coordinator) run() {
 	)
 	for i := 0; i < maxLoadConfigRetries; i++ {
 		scheduleNames, configs, err = c.cluster.storage.LoadAllScheduleConfig()
+		select {
+		case <-c.ctx.Done():
+			log.Info("coordinator stops running")
+			return
+		default:
+		}
 		if err == nil {
 			break
 		}
@@ -698,7 +704,7 @@ func (s *scheduleController) AllowSchedule() bool {
 	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.IsPaused()
 }
 
-// isPaused returns if a schedueler is paused.
+// isPaused returns if a scheduler is paused.
 func (s *scheduleController) IsPaused() bool {
 	delayUntil := atomic.LoadInt64(&s.delayUntil)
 	return time.Now().Unix() < delayUntil

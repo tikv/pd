@@ -324,3 +324,32 @@ func (s *testPrometheusQuerierSuite) TestGetInstanceNameFromAddress(c *C) {
 		}
 	}
 }
+
+func (s *testPrometheusQuerierSuite) TestGetDurationExpression(c *C) {
+	testcases := []struct {
+		duration           time.Duration
+		expectedExpression string
+	}{
+		{
+			duration:           30 * time.Second,
+			expectedExpression: "30s",
+		},
+		{
+			duration:           60 * time.Second,
+			expectedExpression: "60s",
+		},
+		{
+			duration:           2 * time.Minute,
+			expectedExpression: "120s",
+		},
+		{
+			duration:           90 * time.Second,
+			expectedExpression: "90s",
+		},
+	}
+
+	for _, testcase := range testcases {
+		expression := getDurationExpression(testcase.duration)
+		c.Assert(expression, Equals, testcase.expectedExpression)
+	}
+}

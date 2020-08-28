@@ -18,15 +18,18 @@ import (
 	"sync/atomic"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
 )
 
-// GetLeader gets the coresponding leader from etcd by given leaderPath (as the key).
+// GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
 	leader := &pdpb.Member{}
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(c, leaderPath, leader)
@@ -43,7 +46,7 @@ func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, erro
 // Leadership is used to manage the leadership campaigning.
 type Leadership struct {
 	// purpose is used to show what this election for
-	Purpose string
+	purpose string
 	// The lease which is used to get this leadership
 	lease  atomic.Value // stored as *lease
 	client *clientv3.Client
@@ -53,10 +56,11 @@ type Leadership struct {
 }
 
 // NewLeadership creates a new Leadership.
-func NewLeadership(client *clientv3.Client, purpose string) *Leadership {
+func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadership {
 	leadership := &Leadership{
-		Purpose: purpose,
-		client:  client,
+		purpose:   purpose,
+		client:    client,
+		leaderKey: leaderKey,
 	}
 	return leadership
 }
@@ -81,12 +85,11 @@ func (ls *Leadership) GetClient() *clientv3.Client {
 }
 
 // Campaign is used to campaign the leader with given lease and returns a leadership
-func (ls *Leadership) Campaign(leaseTimeout int64, leaderPath, leaderData string) error {
-	ls.leaderKey = leaderPath
+func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
 	ls.setLease(&lease{
-		Purpose: ls.Purpose,
+		Purpose: ls.purpose,
 		client:  ls.client,
 		lease:   clientv3.NewLease(ls.client),
 	})
@@ -95,8 +98,8 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderPath, leaderData string
 	}
 	// The leader key must not exist, so the CreateRevision is 0.
 	resp, err := kv.NewSlowLogTxn(ls.client).
-		If(clientv3.Compare(clientv3.CreateRevision(leaderPath), "=", 0)).
-		Then(clientv3.OpPut(leaderPath, leaderData, clientv3.WithLease(ls.getLease().ID))).
+		If(clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0)).
+		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(ls.getLease().ID))).
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp), zap.Error(err))
 	if err != nil {
@@ -105,7 +108,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderPath, leaderData string
 	if !resp.Succeeded {
 		return errors.New("failed to campaign leader, other server may campaign ok")
 	}
-	log.Info("write leaderDate to leaderPath ok", zap.String("leaderPath", leaderPath), zap.String("purpose", ls.Purpose))
+	log.Info("write leaderDate to leaderPath ok", zap.String("leaderPath", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
 }
 
@@ -114,7 +117,7 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	ls.getLease().KeepAlive(ctx)
 }
 
-// Check returns whether the leadership is still avalibale
+// Check returns whether the leadership is still available
 func (ls *Leadership) Check() bool {
 	return ls != nil && ls.getLease() != nil && !ls.getLease().IsExpired()
 }
@@ -130,7 +133,7 @@ func (ls *Leadership) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.leaderValue)
 }
 
-// DeleteLeader deletes the coresponding leader from etcd by given leaderPath (as the key).
+// DeleteLeader deletes the corresponding leader from etcd by given leaderPath (as the key).
 func (ls *Leadership) DeleteLeader() error {
 	// delete leader itself and let others start a new election again.
 	resp, err := ls.LeaderTxn().Then(clientv3.OpDelete(ls.leaderKey)).Commit()
@@ -142,6 +145,56 @@ func (ls *Leadership) DeleteLeader() error {
 	}
 
 	return nil
+}
+
+// Watch is used to watch the changes of the leadership, usually is used to
+// detect the leadership steping down and restart an election as soon as possible.
+func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
+	watcher := clientv3.NewWatcher(ls.client)
+	defer watcher.Close()
+	ctx, cancel := context.WithCancel(serverCtx)
+	defer cancel()
+	// The revision is the revision of last modification on this key.
+	// If the revision is compacted, will meet required revision has been compacted error.
+	// In this case, use the compact revision to re-watch the key.
+	for {
+		failpoint.Inject("delayWatcher", nil)
+		rch := watcher.Watch(ctx, ls.leaderKey, clientv3.WithRev(revision))
+		for wresp := range rch {
+			// meet compacted error, use the compact revision.
+			if wresp.CompactRevision != 0 {
+				log.Warn("required revision has been compacted, use the compact revision",
+					zap.Int64("required-revision", revision),
+					zap.Int64("compact-revision", wresp.CompactRevision))
+				revision = wresp.CompactRevision
+				break
+			}
+			if wresp.Canceled {
+				log.Error("leadership watcher is canceled with",
+					zap.Int64("revision", revision),
+					zap.String("leaderKey", ls.leaderKey),
+					zap.String("purpose", ls.purpose),
+					errs.ZapError(errs.ErrWatcherCancel, wresp.Err()))
+				return
+			}
+
+			for _, ev := range wresp.Events {
+				if ev.Type == mvccpb.DELETE {
+					log.Info("current leadership is deleted",
+						zap.String("leaderKey", ls.leaderKey),
+						zap.String("purpose", ls.purpose))
+					return
+				}
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			// server closed, return
+			return
+		default:
+		}
+	}
 }
 
 // Reset does some defer job such as closing lease, resetting lease etc.
