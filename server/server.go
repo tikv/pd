@@ -470,10 +470,11 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(3)
+	s.serverLoopWg.Add(4)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
+	go s.allocatorLoop()
 }
 
 func (s *Server) stopServerLoop() {
@@ -496,6 +497,15 @@ func (s *Server) serverMetricsLoop() {
 			return
 		}
 	}
+}
+
+func (s *Server) allocatorLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	s.tsoAllocatorManager.AllocatorDaemon(ctx)
 }
 
 func (s *Server) collectEtcdStateMetrics() {
