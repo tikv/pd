@@ -14,13 +14,13 @@
 package schedulers
 
 import (
-	"github.com/tikv/pd/pkg/errs"
 	"math"
 	"net/url"
 	"strconv"
 
 	"github.com/montanaflynn/stats"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -122,11 +122,11 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 	for len(args) > 1 {
 		startKey, err := url.QueryUnescape(args[0])
 		if err != nil {
-			return nil, errs.ErrQueryUnescape.Wrap(err)
+			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
 		}
 		endKey, err := url.QueryUnescape(args[1])
 		if err != nil {
-			return nil, errs.ErrQueryUnescape.Wrap(err)
+			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
 		}
 		args = args[2:]
 		ranges = append(ranges, core.NewKeyRange(startKey, endKey))

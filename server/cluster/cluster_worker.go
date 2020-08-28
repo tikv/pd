@@ -113,7 +113,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	for i := 0; i < int(splitCount); i++ {
 		newRegionID, err := c.id.Alloc()
 		if err != nil {
-			return nil, errs.ErrSchedulerNotFound
+			return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))

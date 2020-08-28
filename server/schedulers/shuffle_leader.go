@@ -36,7 +36,7 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*shuffleLeaderSchedulerConfig)
 			if !ok {
-				return errs.ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {

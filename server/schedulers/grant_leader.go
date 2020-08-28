@@ -46,7 +46,7 @@ func init() {
 
 			conf, ok := v.(*grantLeaderSchedulerConfig)
 			if !ok {
-				return errs.ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
@@ -295,7 +295,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		}
 		if last {
 			if err := handler.config.cluster.RemoveScheduler(GrantLeaderName); err != nil {
-				if err == errs.ErrSchedulerNotFound {
+				if err == errs.ErrSchedulerNotFound.FastGenByArgs() {
 					handler.rd.JSON(w, http.StatusNotFound, err)
 				} else {
 					handler.rd.JSON(w, http.StatusInternalServerError, err)
@@ -308,7 +308,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	handler.rd.JSON(w, http.StatusNotFound, errs.ErrScheduleConfigNotExist)
+	handler.rd.JSON(w, http.StatusNotFound, errs.ErrScheduleConfigNotExist.FastGenByArgs())
 }
 
 func newGrantLeaderHandler(config *grantLeaderSchedulerConfig) http.Handler {

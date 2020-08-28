@@ -46,7 +46,7 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*balanceAdjacentRegionConfig)
 			if !ok {
-				return errs.ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
 			if len(args) == 2 {
 				leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
