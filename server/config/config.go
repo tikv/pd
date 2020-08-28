@@ -1009,7 +1009,7 @@ type PDServerConfig struct {
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
 	// TraceRegionFlow the option to update flow information of regions
-	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow"`
+	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
