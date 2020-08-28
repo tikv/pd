@@ -54,8 +54,8 @@ type Client interface {
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
 	GetRegion(ctx context.Context, key []byte) (*Region, error)
-	// GetRegionRandomly gets a region from the server which responds earliest
-	GetRegionRandomly(ctx context.Context, key []byte) (*Region, error)
+	// GetRegionFromMember gets a region from the server which responds earliest
+	GetRegionFromMember(ctx context.Context, key []byte) (*Region, error)
 	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
 	GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
@@ -537,9 +537,9 @@ func (c *client) getRegionResponse(ctx context.Context, cc pdpb.PDClient, key []
 	}
 }
 
-func (c *client) GetRegionRandomly(ctx context.Context, key []byte) (*Region, error) {
+func (c *client) GetRegionFromMember(ctx context.Context, key []byte) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetRegionRandomly", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
