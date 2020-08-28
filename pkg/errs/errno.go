@@ -17,6 +17,8 @@ import "github.com/pingcap/errors"
 
 // tso errors
 var (
+	ErrSetAllocator        = errors.Normalize("set allocator failed, %s", errors.RFCCodeText("PD:tso:ErrSetAllocator"))
+	ErrGetAllocator        = errors.Normalize("get allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocator"))
 	ErrInvalidTimestamp    = errors.Normalize("invalid timestamp", errors.RFCCodeText("PD:tso:ErrInvalidTimestamp"))
 	ErrLogicOverflow       = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
 	ErrIncorrectSystemTime = errors.Normalize("incorrect system time", errors.RFCCodeText("PD:tso:ErrIncorrectSystemTime"))

@@ -825,7 +825,7 @@ func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 
 // ResetTS resets the ts with specified tso.
 func (h *Handler) ResetTS(ts uint64) error {
-	tsoAllocator := h.s.tsoAllocator
+	tsoAllocator, _ := h.s.tsoAllocatorManager.GetAllocator("global")
 	if tsoAllocator == nil {
 		return ErrServerNotStarted
 	}
