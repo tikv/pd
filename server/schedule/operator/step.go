@@ -686,7 +686,9 @@ func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 
 // CheckSafety checks if the step meets the safety properties.
 func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
-	inJointState, notInJointState := false, false
+	inJointState, notInJointState, demoteLeader := false, false, false
+	leaderStoreId := region.GetLeader().StoreId
+
 	for _, pl := range cpl.PromoteLearners {
 		peer := region.GetStorePeer(pl.ToStore)
 		if peer.GetId() != pl.PeerID {
@@ -710,13 +712,19 @@ func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
 		case metapb.PeerRole_Learner:
 			notInJointState = true
 		case metapb.PeerRole_DemotingVoter:
-			inJointState = false
+			inJointState = true
+			if peer.StoreId == leaderStoreId {
+				demoteLeader = true
+			}
 		default:
 			return errors.New("unexpected peer role")
 		}
 	}
 	if notInJointState && (inJointState || core.IsInJointState(region.GetPeers()...)) {
 		return errors.New("unexpected peer role")
+	}
+	if demoteLeader {
+		return errors.New("try to demote leader when leaving joint state")
 	}
 	return nil
 }
