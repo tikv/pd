@@ -333,7 +333,7 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 			// 100 regions divided 5 stores, each store expected to have about 20 regions.
 			c.Assert(min, LessEqual, uint64(20))
 			c.Assert(max, GreaterEqual, uint64(20))
-			c.Assert(max-min, LessEqual, uint64(2))
+			c.Assert(max-min, LessEqual, uint64(3))
 		}
 	}
 }
