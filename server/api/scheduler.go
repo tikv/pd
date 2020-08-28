@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
@@ -148,13 +149,13 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err := h.AddGrantLeaderScheduler(uint64(storeID))
-		if err == errs.ErrSchedulerExisted.FastGenByArgs() {
+		if errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
 			if err := h.redirectSchedulerUpdate(schedulers.GrantLeaderName, storeID); err != nil {
 				h.r.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
-		if err != nil && err != errs.ErrSchedulerExisted.FastGenByArgs() {
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -165,13 +166,13 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err := h.AddEvictLeaderScheduler(uint64(storeID))
-		if err == errs.ErrSchedulerExisted.FastGenByArgs() {
+		if errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
 			if err := h.redirectSchedulerUpdate(schedulers.EvictLeaderName, storeID); err != nil {
 				h.r.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
-		if err != nil && err != errs.ErrSchedulerExisted.FastGenByArgs() {
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -251,7 +252,7 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
-	if err == errs.ErrSchedulerNotFound.FastGenByArgs() {
+	if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 		h.r.JSON(w, http.StatusNotFound, err.Error())
 	} else {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
