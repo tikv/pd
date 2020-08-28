@@ -304,13 +304,17 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 		c.Logf(testcase.name)
 		scatterer := NewRegionScatterer(tc)
 		regionID := 1
-		for i := 0; i < testcase.groupCount; i++ {
-			for j := 0; j < 100; j++ {
+		for i := 0; i < 100; i++ {
+			for j := 0; j < testcase.groupCount; j++ {
 				_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
-					fmt.Sprintf("group-%v", i))
+					fmt.Sprintf("group-%v", j))
 				c.Assert(err, IsNil)
 				regionID++
 			}
+			// insert region with no group
+			_, err := scatterer.Scatter(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3), "")
+			c.Assert(err, IsNil)
+			regionID++
 		}
 
 		for i := 0; i < testcase.groupCount; i++ {
@@ -326,6 +330,10 @@ func (s *testScatterRegionSuite) TestScatterGroup(c *C) {
 					min = count
 				}
 			}
+			// 100 regions divided 5 stores, each store expected to have about 20 regions.
+			c.Assert(min, LessEqual, uint64(20))
+			c.Assert(max, GreaterEqual, uint64(20))
+			c.Assert(max-min, LessEqual, uint64(2))
 		}
 	}
 }

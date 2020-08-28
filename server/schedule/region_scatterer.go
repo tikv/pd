@@ -73,15 +73,16 @@ func newSelectedLeaderStores() *selectedLeaderStores {
 }
 
 type selectedStores struct {
-	mu     sync.Mutex
-	stores map[uint64]struct{}
+	mu sync.Mutex
+	// TODO: support auto-gc for the stores
+	stores map[string]map[uint64]struct{} // group -> StoreID -> struct{}
 	// TODO: support auto-gc for the groupDistribution
 	groupDistribution map[string]map[uint64]uint64 // group -> StoreID -> peerCount
 }
 
 func newSelectedStores() *selectedStores {
 	return &selectedStores{
-		stores:            make(map[uint64]struct{}),
+		stores:            make(map[string]map[uint64]struct{}),
 		groupDistribution: make(map[string]map[uint64]uint64),
 	}
 }
@@ -89,13 +90,15 @@ func newSelectedStores() *selectedStores {
 func (s *selectedStores) put(id uint64, group string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.stores[id]; ok {
+	placed, ok := s.stores[group]
+	if !ok {
+		placed = map[uint64]struct{}{}
+	}
+	if _, ok := placed[id]; ok {
 		return false
 	}
-	s.stores[id] = struct{}{}
-	if group == "" {
-		return true
-	}
+	placed[id] = struct{}{}
+	s.stores[group] = placed
 	distribution, ok := s.groupDistribution[group]
 	if !ok {
 		distribution = make(map[uint64]uint64)
@@ -108,7 +111,7 @@ func (s *selectedStores) put(id uint64, group string) bool {
 func (s *selectedStores) reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.stores = make(map[uint64]struct{})
+	s.stores = make(map[string]map[uint64]struct{})
 }
 
 func (s *selectedStores) get(id uint64, group string) uint64 {
@@ -125,12 +128,14 @@ func (s *selectedStores) get(id uint64, group string) uint64 {
 	return count
 }
 
-func (s *selectedStores) newFilter(scope string) filter.Filter {
+func (s *selectedStores) newFilter(scope, group string) filter.Filter {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cloned := make(map[uint64]struct{})
-	for id := range s.stores {
-		cloned[id] = struct{}{}
+	if groupPlaced, ok := s.stores[group]; ok {
+		for id := range groupPlaced {
+			cloned[id] = struct{}{}
+		}
 	}
 	return filter.NewExcludedFilter(scope, nil, cloned)
 }
@@ -202,11 +207,11 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	targetPeers := make(map[uint64]*metapb.Peer)
 
 	scatterWithSameEngine := func(peers []*metapb.Peer, context engineContext) {
-		stores := r.collectAvailableStores(region, context)
+		stores := r.collectAvailableStores(group, region, context)
 		for _, peer := range peers {
 			if len(stores) == 0 {
 				context.selected.reset()
-				stores = r.collectAvailableStores(region, context)
+				stores = r.collectAvailableStores(group, region, context)
 			}
 			if context.selected.put(peer.GetStoreId(), group) {
 				delete(stores, peer.GetStoreId())
@@ -295,9 +300,9 @@ func (r *RegionScatterer) selectPeerToReplace(group string, stores map[uint64]*c
 	}
 }
 
-func (r *RegionScatterer) collectAvailableStores(region *core.RegionInfo, context engineContext) map[uint64]*core.StoreInfo {
+func (r *RegionScatterer) collectAvailableStores(group string, region *core.RegionInfo, context engineContext) map[uint64]*core.StoreInfo {
 	filters := []filter.Filter{
-		context.selected.newFilter(r.name),
+		context.selected.newFilter(r.name, group),
 		filter.NewExcludedFilter(r.name, nil, region.GetStoreIds()),
 		filter.StoreStateFilter{ActionScope: r.name, MoveRegion: true},
 	}
