@@ -157,9 +157,12 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.
 func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
-	allocator, err := am.GetAllocator(dcLocation)
-	if err != nil {
+	am.RLock()
+	defer am.RUnlock()
+	allocatorGroup, exist := am.allocatorGroups[dcLocation]
+	if !exist {
+		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, can not get timestamp", dcLocation))
 		return pdpb.Timestamp{}, err
 	}
-	return allocator.GenerateTSO(count)
+	return allocatorGroup.allocator.GenerateTSO(count)
 }
