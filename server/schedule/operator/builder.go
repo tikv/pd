@@ -65,8 +65,8 @@ type Builder struct {
 	leaderPreferFuncs   []func(uint64) int   // for buildStepsWithoutJointConsensus
 }
 
-// NewBuilder creates a Builder.
-func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Builder {
+// newBuilderWithBasicCheck creates a Builder with some basic checks.
+func newBuilderWithBasicCheck(desc string, cluster opt.Cluster, region *core.RegionInfo) *Builder {
 	var err error
 	originPeers := newPeersMap()
 
@@ -79,14 +79,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Buil
 		}
 	}
 
-	if err == nil && core.IsInJointState(region.GetPeers()...) {
-		err = errors.Errorf("cannot build operator for region is in joint state")
-	}
-
 	originLeaderStoreID := region.GetLeader().GetStoreId()
-	if _, ok := originPeers[originLeaderStoreID]; err == nil && !ok {
-		err = errors.Errorf("cannot build operator for region with no leader")
-	}
 
 	var rules []*placement.Rule
 	if err == nil && cluster.IsPlacementRulesEnabled() {
@@ -111,6 +104,21 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Buil
 		targetLeaderStoreID: originLeaderStoreID,
 		err:                 err,
 	}
+}
+
+// NewBuilder creates a Builder.
+func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Builder {
+	b := newBuilderWithBasicCheck(desc, cluster, region)
+
+	if b.err == nil && core.IsInJointState(region.GetPeers()...) {
+		b.err = errors.Errorf("cannot build operator for region is in joint state")
+	}
+
+	if _, ok := b.originPeers[b.originLeaderStoreID]; b.err == nil && !ok {
+		b.err = errors.Errorf("cannot build operator for region with no leader")
+	}
+
+	return b
 }
 
 // AddPeer records an add Peer operation in Builder. If peer.Id is 0, the builder
@@ -425,18 +433,18 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 			b.execTransferLeader(b.targetLeaderStoreID)
 			kind |= OpLeader
 		}
-		b.execChangePeerV2(false)
+		b.execChangePeerV2(true, false)
 	} else if originLeaderAfter, ok := b.targetPeers[b.originLeaderStoreID]; b.originLeaderStoreID == 0 ||
 		(ok && !core.IsLearner(originLeaderAfter)) {
 		// origin leader is none or a voter in `targetPeers`, change peers first.
-		b.execChangePeerV2(false)
+		b.execChangePeerV2(true, false)
 		if b.originLeaderStoreID != b.targetLeaderStoreID {
 			b.execTransferLeader(b.targetLeaderStoreID)
 			kind |= OpLeader
 		}
 	} else {
 		// both demote origin leader and promote target leader, transfer leader in joint state.
-		b.execChangePeerV2(true)
+		b.execChangePeerV2(true, true)
 		kind |= OpLeader
 	}
 
@@ -579,7 +587,7 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 	delete(b.toRemove, peer.StoreId)
 }
 
-func (b *Builder) execChangePeerV2(needTransferLeader bool) {
+func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	// Enter
 	step := ChangePeerV2Enter{
 		PromoteLearners: make([]PromoteLearner, 0, len(b.toPromote)),
@@ -598,9 +606,11 @@ func (b *Builder) execChangePeerV2(needTransferLeader bool) {
 	}
 	b.toDemote = newPeersMap()
 
-	b.steps = append(b.steps, step)
+	if needEnter {
+		b.steps = append(b.steps, step)
+	}
 	// Transfer Leader
-	if needTransferLeader {
+	if needTransferLeader && b.originLeaderStoreID != b.targetLeaderStoreID {
 		b.execTransferLeader(b.targetLeaderStoreID)
 	}
 	// Leave
