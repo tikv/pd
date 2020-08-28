@@ -55,7 +55,7 @@ func init() {
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
-				return errs.ErrStrconvParseInt.Wrap(err)
+				return errs.ErrStrconvParseInt.Wrap(err).FastGenByArgs()
 			}
 			ranges, err := getKeyRanges(args[1:])
 			if err != nil {
@@ -91,7 +91,7 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		return errs.ErrStrconvParseInt.Wrap(err)
+		return errs.ErrStrconvParseInt.Wrap(err).FastGenByArgs()
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {

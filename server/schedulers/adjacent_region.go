@@ -52,11 +52,11 @@ func init() {
 				leaderLimit, err := strconv.ParseUint(args[0], 10, 64)
 
 				if err != nil {
-					return errs.ErrStrconvParseInt.Wrap(err)
+					return errs.ErrStrconvParseInt.Wrap(err).FastGenByArgs()
 				}
 				peerLimit, err := strconv.ParseUint(args[1], 10, 64)
 				if err != nil {
-					return errs.ErrStrconvParseInt.Wrap(err)
+					return errs.ErrStrconvParseInt.Wrap(err).FastGenByArgs()
 				}
 				conf.LeaderLimit = leaderLimit
 				conf.PeerLimit = peerLimit
