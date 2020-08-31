@@ -234,7 +234,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	// FIXME: target leader only considers the ordinary stores，maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
-	targetLeader := r.collectAvailableLeaderStores(group, targetPeers, r.ordinaryEngine)
+	targetLeader := r.selectAvailableLeaderStores(group, targetPeers, r.ordinaryEngine)
 
 	for engine, peers := range specialPeers {
 		context, ok := r.specialEngines[engine]
@@ -317,22 +317,26 @@ func (r *RegionScatterer) collectAvailableStores(group string, region *core.Regi
 	return targets
 }
 
-func (r *RegionScatterer) collectAvailableLeaderStores(group string, peers map[uint64]*metapb.Peer, context engineContext) uint64 {
+// selectAvailableLeaderStores select the target leader store from the candidates. The candidates would be collected by
+// the existed peers store depended on the leader counts in the group level.
+func (r *RegionScatterer) selectAvailableLeaderStores(group string, peers map[uint64]*metapb.Peer, context engineContext) uint64 {
 	m := uint64(math.MaxUint64)
-	minTableLeaderStores := map[uint64]struct{}{}
+	tableLeaderStoreCandidates := map[uint64]struct{}{}
 	for storeID := range peers {
 		count := context.selectedLeader.get(storeID, group)
 		if m > count {
 			m = count
-			minTableLeaderStores = map[uint64]struct{}{}
-			minTableLeaderStores[storeID] = struct{}{}
+			// reset and add it into candidates
+			tableLeaderStoreCandidates = map[uint64]struct{}{}
+			tableLeaderStoreCandidates[storeID] = struct{}{}
 		} else if m == count {
-			minTableLeaderStores[storeID] = struct{}{}
+			// add into candidates
+			tableLeaderStoreCandidates[storeID] = struct{}{}
 		}
 	}
 	m = uint64(math.MaxUint64)
 	id := uint64(0)
-	for storeID := range minTableLeaderStores {
+	for storeID := range tableLeaderStoreCandidates {
 		count := context.selectedLeader.get(storeID, group)
 		if m > count {
 			m = count
