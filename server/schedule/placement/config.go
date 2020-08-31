@@ -98,16 +98,11 @@ func (p *ruleConfigPatch) getRule(key [2]string) *Rule {
 }
 
 func (p *ruleConfigPatch) setRule(r *Rule) {
-	if old := p.getRule(r.Key()); !jsonEquals(old, r) {
-		p.mut.rules[r.Key()] = r
-	}
+	p.mut.rules[r.Key()] = r
 }
 
 func (p *ruleConfigPatch) deleteRule(group, id string) {
-	key := [2]string{group, id}
-	if old := p.getRule(key); old != nil {
-		p.mut.rules[key] = nil
-	}
+	p.mut.rules[[2]string{group, id}] = nil
 }
 
 func (p *ruleConfigPatch) getGroup(id string) *RuleGroup {
@@ -121,10 +116,7 @@ func (p *ruleConfigPatch) getGroup(id string) *RuleGroup {
 }
 
 func (p *ruleConfigPatch) setGroup(g *RuleGroup) {
-	old := p.getGroup(g.ID)
-	if !jsonEquals(old, g) {
-		p.mut.groups[g.ID] = g
-	}
+	p.mut.groups[g.ID] = g
 }
 
 func (p *ruleConfigPatch) deleteGroup(id string) {
