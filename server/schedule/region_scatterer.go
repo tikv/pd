@@ -278,7 +278,6 @@ func (r *RegionScatterer) selectPeerToReplace(group string, stores map[uint64]*c
 
 	minPeer := uint64(math.MaxUint64)
 	var selectedCandidateID uint64
-	selectedCandidateID = 0
 	for _, candidate := range candidates {
 		count := context.selected.get(candidate.GetID(), group)
 		if count < minPeer {
