@@ -21,6 +21,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -33,14 +34,14 @@ func init() {
 	schedule.RegisterSliceDecoderBuilder(ScatterRangeType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 3 {
-				return errors.New("should specify the range and the name")
+				return errs.ErrSchedulerConfig.FastGenByArgs("ranges and name")
 			}
 			if len(args[2]) == 0 {
-				return errors.New("the range name is invalid")
+				return errs.ErrSchedulerConfig.FastGenByArgs("range name")
 			}
 			conf, ok := v.(*scatterRangeSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
 			conf.StartKey = args[0]
 			conf.EndKey = args[1]
@@ -58,7 +59,7 @@ func init() {
 		}
 		rangeName := conf.RangeName
 		if len(rangeName) == 0 {
-			return nil, errors.New("the range name is invalid")
+			return nil, errs.ErrSchedulerConfig.FastGenByArgs("range name")
 		}
 		return newScatterRangeScheduler(opController, conf), nil
 	})
@@ -81,7 +82,7 @@ type scatterRangeSchedulerConfig struct {
 
 func (conf *scatterRangeSchedulerConfig) BuildWithArgs(args []string) error {
 	if len(args) != 3 {
-		return errors.New("scatter range need 3 arguments to setup config")
+		return errs.ErrSchedulerConfig.FastGenByArgs("ranges and name")
 	}
 	conf.mu.Lock()
 	defer conf.mu.Unlock()

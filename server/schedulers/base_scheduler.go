@@ -19,6 +19,11 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+<<<<<<< HEAD
+=======
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
+>>>>>>> 33cbf3e... Refine the log errs in scheduler (#2705)
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/opt"
 )
@@ -50,7 +55,7 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 	case zeroGrowth:
 		return x
 	default:
-		log.Fatal("unknown interval growth type")
+		log.Fatal("type error", errs.ZapError(errs.ErrInternalGrowth))
 	}
 	return 0
 }

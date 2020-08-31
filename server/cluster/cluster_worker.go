@@ -20,10 +20,17 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+<<<<<<< HEAD
 	"github.com/pkg/errors"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedulers"
+=======
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/versioninfo"
+>>>>>>> 33cbf3e... Refine the log errs in scheduler (#2705)
 	"go.uber.org/zap"
 )
 
@@ -112,7 +119,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	for i := 0; i < int(splitCount); i++ {
 		newRegionID, err := c.id.Alloc()
 		if err != nil {
-			return nil, schedulers.ErrSchedulerNotFound
+			return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))

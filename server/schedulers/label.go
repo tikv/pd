@@ -15,7 +15,11 @@ package schedulers
 
 import (
 	"github.com/pingcap/log"
+<<<<<<< HEAD
 	"github.com/pkg/errors"
+=======
+	"github.com/tikv/pd/pkg/errs"
+>>>>>>> 33cbf3e... Refine the log errs in scheduler (#2705)
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -37,11 +41,11 @@ func init() {
 		return func(v interface{}) error {
 			conf, ok := v.(*labelSchedulerConfig)
 			if !ok {
-				return ErrScheduleConfigNotExist
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
 			ranges, err := getKeyRanges(args)
 			if err != nil {
-				return errors.WithStack(err)
+				return err
 			}
 			conf.Ranges = ranges
 			conf.Name = LabelName
@@ -134,7 +138,7 @@ func (s *labelScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
 
 			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, id, target.GetID(), operator.OpLeader)
 			if err != nil {
-				log.Debug("fail to create transfer label reject leader operator", zap.Error(err))
+				log.Debug("fail to create transfer label reject leader operator", errs.ZapError(err))
 				return nil
 			}
 			op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
