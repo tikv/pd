@@ -66,6 +66,10 @@ func (c *ruleConfig) setRule(r *Rule) {
 	c.rules[r.Key()] = r
 }
 
+func (c *ruleConfig) setGroup(g *RuleGroup) {
+	c.groups[g.ID] = g
+}
+
 func (c *ruleConfig) beginPatch() *ruleConfigPatch {
 	return &ruleConfigPatch{
 		c:   c,
@@ -136,6 +140,20 @@ func (p *ruleConfigPatch) iterateRules(f func(*Rule)) {
 func (p *ruleConfigPatch) adjust() {
 	// setup rule.group for `buildRuleList` use.
 	p.iterateRules(func(r *Rule) { r.group = p.getGroup(r.GroupID) })
+}
+
+// trim unnecessary updates. For example, remove a rule then insert the same rule.
+func (p *ruleConfigPatch) trim() {
+	for key, rule := range p.mut.rules {
+		if jsonEquals(rule, p.c.getRule(key)) {
+			delete(p.mut.rules, key)
+		}
+	}
+	for id, group := range p.mut.groups {
+		if jsonEquals(group, p.c.groups[id]) {
+			delete(p.mut.groups, id)
+		}
+	}
 }
 
 // merge all mutations to ruleConfig.
