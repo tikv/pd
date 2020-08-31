@@ -138,7 +138,7 @@ func (s *testErrorSuite) TestErrorWithStack(c *C) {
 	m1 := lg.Message()
 	log.Error("test", zap.Error(errors.WithStack(err)))
 	m2 := lg.Message()
-	// This test is based on line number and the first log is in line 102, the second is in line 104.
+	// This test is based on line number and the first log is in line 141, the second is in line 142.
 	// So they have the same length stack. Move this test to another place need to change the corresponding length.
 	c.Assert(len(m1[strings.Index(m1, "[stack="):]), Equals, len(m2[strings.Index(m2, "[stack="):]))
 }

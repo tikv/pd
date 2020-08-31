@@ -182,7 +182,7 @@ func (c *client) tsCancelLoop() {
 		case d := <-c.tsDeadlineCh:
 			select {
 			case <-d.timer:
-				log.Error("tso request is canceled due to timeout", errs.ZapError(errs.ErrClientGetTSOTimeout.FastGenByArgs()))
+				log.Error("tso request is canceled due to timeout", errs.ZapError(errs.ErrClientGetTSOTimeout))
 				d.cancel()
 			case <-d.done:
 			case <-ctx.Done():
