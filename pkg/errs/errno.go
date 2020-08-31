@@ -126,5 +126,15 @@ var (
 
 // ioutil error
 var (
-	ErrIORead = errors.Normalize("IO read err", errors.RFCCodeText("PD:ioutil:ErrIORead"))
+	ErrIORead = errors.Normalize("IO read error", errors.RFCCodeText("PD:ioutil:ErrIORead"))
+)
+
+// netstat error
+var (
+	ErrNetstatTCPSocks = errors.Normalize("TCP socks error", errors.RFCCodeText("PD:netstat:ErrNetstatTCPSocks"))
+)
+
+// hex error
+var (
+	ErrHexDecodingString = errors.Normalize("decode string %s error", errors.RFCCodeText("PD:hex:ErrHexDecodingString"))
 )

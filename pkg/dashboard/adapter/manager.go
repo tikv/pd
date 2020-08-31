@@ -21,7 +21,6 @@ import (
 
 	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -106,7 +105,7 @@ func (m *Manager) updateInfo() {
 
 	var err error
 	if m.members, err = cluster.GetMembers(m.srv.GetClient()); err != nil {
-		log.Warn("failed to get members", zap.Error(err))
+		log.Warn("failed to get members", errs.ZapError(err))
 		m.members = nil
 		return
 	}

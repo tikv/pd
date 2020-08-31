@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/schedule/storelimit"
 	"go.uber.org/zap"
@@ -329,7 +330,7 @@ func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	origin, err := bc.PreCheckPutRegion(region)
 	if err != nil {
-		log.Debug("region is stale", zap.Error(err), zap.Stringer("origin", origin.GetMeta()))
+		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 		// return the state region to delete.
 		return []*RegionInfo{region}
 	}

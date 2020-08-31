@@ -101,7 +101,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 		If(clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0)).
 		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(ls.getLease().ID))).
 		Commit()
-	log.Info("check campaign resp", zap.Any("resp", resp), zap.Error(err))
+	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
 		return errors.WithStack(err)
 	}

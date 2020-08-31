@@ -645,7 +645,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		case <-s.Ctx().Done():
 			log.Info("scheduler has been stopped",
 				zap.String("scheduler-name", s.GetName()),
-				zap.Error(s.Ctx().Err()))
+				errs.ZapError(s.Ctx().Err()))
 			return
 		}
 	}

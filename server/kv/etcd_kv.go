@@ -89,9 +89,9 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
-		err = errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
-		log.Error("save to etcd meet error", zap.String("key", key), zap.String("value", value), errs.ZapError(err))
-		return err
+		e := errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
+		log.Error("save to etcd meet error", zap.String("key", key), zap.String("value", value), errs.ZapError(e))
+		return e
 	}
 	if !resp.Succeeded {
 		return errs.ErrEtcdTxn.FastGenByArgs()
@@ -158,9 +158,9 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	cost := time.Since(start)
 	if cost > slowRequestTime {
 		log.Warn("txn runs too slow",
-			zap.Error(err),
 			zap.Reflect("response", resp),
-			zap.Duration("cost", cost))
+			zap.Duration("cost", cost),
+			errs.ZapError(err))
 	}
 	label := "success"
 	if err != nil {
