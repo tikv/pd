@@ -59,7 +59,6 @@ func (s *selectedLeaderStores) get(id uint64, group string) uint64 {
 	}
 	distribution, ok := s.groupDistribution[group]
 	if !ok {
-		s.groupDistribution[group] = make(map[uint64]uint64)
 		return 0
 	}
 	return distribution[id]
