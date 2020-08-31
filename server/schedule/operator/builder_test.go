@@ -57,6 +57,7 @@ func (s *testBuilderSuite) TestNewBuilder(c *C) {
 	c.Assert(len(builder.targetPeers), Equals, 2)
 	c.Assert(builder.targetPeers[1], DeepEquals, peers[0])
 	c.Assert(builder.targetPeers[2], DeepEquals, peers[1])
+
 	region = region.Clone(core.WithLeader(nil))
 	builder = NewBuilder("test", s.cluster, region)
 	c.Assert(builder.err, NotNil)
@@ -105,7 +106,30 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	_, err := s.newBuilder().SetPeers(map[uint64]*metapb.Peer{4: {StoreId: 4, Role: metapb.PeerRole_Learner}}).prepareBuild()
 	c.Assert(err, NotNil)
 
+	// use joint consensus
 	builder := s.newBuilder().SetPeers(map[uint64]*metapb.Peer{
+		1: {StoreId: 1, Role: metapb.PeerRole_Learner},
+		3: {StoreId: 3},
+		4: {StoreId: 4, Id: 14},
+		5: {StoreId: 5, Role: metapb.PeerRole_Learner},
+	})
+	_, err = builder.prepareBuild()
+	c.Assert(err, IsNil)
+	c.Assert(len(builder.toAdd), Equals, 2)
+	c.Assert(builder.toAdd[4].Role, Not(Equals), metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[4].Id, Equals, uint64(14))
+	c.Assert(builder.toAdd[5].Role, Equals, metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[5].Id, Not(Equals), uint64(0))
+	c.Assert(len(builder.toRemove), Equals, 1)
+	c.Assert(builder.toRemove[2], NotNil)
+	c.Assert(len(builder.toPromote), Equals, 1)
+	c.Assert(builder.toPromote[3], NotNil)
+	c.Assert(len(builder.toDemote), Equals, 1)
+	c.Assert(builder.toDemote[1], NotNil)
+	c.Assert(builder.currentLeaderStoreID, Equals, uint64(1))
+
+	// do not use joint consensus
+	builder = s.newBuilder().setUseJointConsensus(false).SetPeers(map[uint64]*metapb.Peer{
 		1: {StoreId: 1, Role: metapb.PeerRole_Learner},
 		2: {StoreId: 2},
 		3: {StoreId: 3},
@@ -130,12 +154,14 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 
 func (s *testBuilderSuite) TestBuild(c *C) {
 	type testCase struct {
-		originPeers []*metapb.Peer // first is leader
-		targetPeers []*metapb.Peer // first is leader
-		steps       []OpStep
+		useJointConsensus bool
+		originPeers       []*metapb.Peer // first is leader
+		targetPeers       []*metapb.Peer // first is leader
+		steps             []OpStep
 	}
 	cases := []testCase{
 		{ // prefer replace
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
@@ -149,6 +175,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{ // transfer leader before remove leader
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{StoreId: 2}},
 			[]OpStep{
@@ -159,6 +186,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{ // replace voter with learner
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
@@ -166,7 +194,8 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				AddLearner{ToStore: 2},
 			},
 		},
-		{ // prefer replace with neareast peer
+		{ // prefer replace with nearest peer
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 6, StoreId: 6}, {Id: 8, StoreId: 8}},
 			//             z1,h1                z1,h2                 z2,h1
 			[]*metapb.Peer{{StoreId: 9}, {StoreId: 7}, {StoreId: 10}},
@@ -190,6 +219,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{ // promote learner
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
 			[]OpStep{
@@ -198,16 +228,19 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{ // empty step
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]OpStep{},
 		},
 		{ // no valid leader
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{Id: 10, StoreId: 10}},
 			[]OpStep{},
 		},
 		{ // add learner + promote learner + remove voter
+			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
@@ -221,7 +254,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 
 	for _, tc := range cases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.originPeers}, tc.originPeers[0])
-		builder := NewBuilder("test", s.cluster, region)
+		builder := NewBuilder("test", s.cluster, region).setUseJointConsensus(tc.useJointConsensus)
 		m := make(map[uint64]*metapb.Peer)
 		for _, p := range tc.targetPeers {
 			m[p.GetStoreId()] = p

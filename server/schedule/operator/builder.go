@@ -102,6 +102,7 @@ func newBuilderWithBasicCheck(desc string, cluster opt.Cluster, region *core.Reg
 		originLeaderStoreID: originLeaderStoreID,
 		targetPeers:         originPeers.Copy(),
 		targetLeaderStoreID: originLeaderStoreID,
+		useJointConsensus:   cluster.IsFeatureSupported(versioninfo.JointConsensus),
 		err:                 err,
 	}
 }
@@ -237,6 +238,11 @@ func (b *Builder) SetLightWeight() *Builder {
 	return b
 }
 
+func (b *Builder) setUseJointConsensus(useJointConsensus bool) *Builder {
+	b.useJointConsensus = useJointConsensus
+	return b
+}
+
 // Build creates the Operator.
 func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	var brief string
@@ -267,7 +273,6 @@ func (b *Builder) prepareBuild() (string, error) {
 	b.toRemove = newPeersMap()
 	b.toPromote = newPeersMap()
 	b.toDemote = newPeersMap()
-	b.useJointConsensus = b.cluster.IsFeatureSupported(versioninfo.JointConsensus)
 
 	voterCount := 0
 	for _, peer := range b.targetPeers {
@@ -358,9 +363,8 @@ func (b *Builder) prepareBuild() (string, error) {
 		return "", errors.New("cannot create operator: target leader is not allowed")
 	}
 
-	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toDemote) <= 1 ||
-		len(b.originPeers) <= 1 || len(b.targetPeers) <= 1 {
-		// With some exceptions, JointConsensus is not used.
+	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toDemote) <= 1 {
+		// If only one peer changed, joint consensus is not used.
 		b.useJointConsensus = false
 	}
 
