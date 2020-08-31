@@ -74,6 +74,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 
 func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+<<<<<<< HEAD
 	region := cluster.RandFollowerRegion(s.storeID, core.HealthRegion())
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no_follower").Inc()
@@ -83,4 +84,119 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*schedule.Op
 	op := schedule.CreateTransferLeaderOperator("grant-leader", region, region.GetLeader().GetStoreId(), s.storeID, schedule.OpLeader)
 	op.SetPriorityLevel(core.HighPriority)
 	return []*schedule.Operator{op}
+=======
+	var ops []*operator.Operator
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
+	for id, ranges := range s.conf.StoreIDWithRanges {
+		region := cluster.RandFollowerRegion(id, ranges, opt.HealthRegion(cluster))
+		if region == nil {
+			schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
+			continue
+		}
+
+		op, err := operator.CreateTransferLeaderOperator(GrantLeaderType, cluster, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
+		if err != nil {
+			log.Debug("fail to create grant leader operator", errs.ZapError(err))
+			continue
+		}
+		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
+		op.SetPriorityLevel(core.HighPriority)
+		ops = append(ops, op)
+	}
+
+	return ops
+}
+
+type grantLeaderHandler struct {
+	rd     *render.Render
+	config *grantLeaderSchedulerConfig
+}
+
+func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	var args []string
+	var exists bool
+	var id uint64
+	idFloat, ok := input["store_id"].(float64)
+	if ok {
+		id = (uint64)(idFloat)
+		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
+			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
+				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		args = append(args, strconv.FormatUint(id, 10))
+	}
+
+	ranges, ok := (input["ranges"]).([]string)
+	if ok {
+		args = append(args, ranges...)
+	} else if exists {
+		args = append(args, handler.config.getRanges(id)...)
+	}
+
+	handler.config.BuildWithArgs(args)
+	err := handler.config.Persist()
+	if err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	handler.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (handler *grantLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+	conf := handler.config.Clone()
+	handler.rd.JSON(w, http.StatusOK, conf)
+}
+
+func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.Request) {
+	idStr := mux.Vars(r)["store_id"]
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var resp interface{}
+	succ, last := handler.config.mayBeRemoveStoreFromConfig(id)
+	if succ {
+		err = handler.config.Persist()
+		if err != nil {
+			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if last {
+			if err := handler.config.cluster.RemoveScheduler(GrantLeaderName); err != nil {
+				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+					handler.rd.JSON(w, http.StatusNotFound, err.Error())
+				} else {
+					handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				}
+				return
+			}
+			resp = lastStoreDeleteInfo
+		}
+		handler.rd.JSON(w, http.StatusOK, resp)
+		return
+	}
+
+	handler.rd.JSON(w, http.StatusNotFound, errs.ErrScheduleConfigNotExist.FastGenByArgs().Error())
+}
+
+func newGrantLeaderHandler(config *grantLeaderSchedulerConfig) http.Handler {
+	h := &grantLeaderHandler{
+		config: config,
+		rd:     render.New(render.Options{IndentJSON: true}),
+	}
+	router := mux.NewRouter()
+	router.HandleFunc("/config", h.UpdateConfig).Methods("POST")
+	router.HandleFunc("/list", h.ListConfig).Methods("GET")
+	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods("DELETE")
+	return router
+>>>>>>> 3e31744... fix empty http response in scheduler (#2869)
 }

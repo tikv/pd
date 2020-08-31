@@ -103,3 +103,65 @@ func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*schedule.O
 	schedulerCounter.WithLabelValues(l.GetName(), "no-need").Inc()
 	return nil
 }
+<<<<<<< HEAD
+=======
+
+type scatterRangeHandler struct {
+	rd     *render.Render
+	config *scatterRangeSchedulerConfig
+}
+
+func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	var args []string
+	name, ok := input["range-name"].(string)
+	if ok {
+		if name != handler.config.GetRangeName() {
+			handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Cannot change the range name, please delete this schedule").Error())
+			return
+		}
+		args = append(args, name)
+	} else {
+		args = append(args, handler.config.GetRangeName())
+	}
+
+	startKey, ok := input["start-key"].(string)
+	if ok {
+		args = append(args, startKey)
+	} else {
+		args = append(args, string(handler.config.GetStartKey()))
+	}
+
+	endKey, ok := input["end-key"].(string)
+	if ok {
+		args = append(args, endKey)
+	} else {
+		args = append(args, string(handler.config.GetEndKey()))
+	}
+	handler.config.BuildWithArgs(args)
+	err := handler.config.Persist()
+	if err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+	handler.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (handler *scatterRangeHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+	conf := handler.config.Clone()
+	handler.rd.JSON(w, http.StatusOK, conf)
+}
+
+func newScatterRangeHandler(config *scatterRangeSchedulerConfig) http.Handler {
+	h := &scatterRangeHandler{
+		config: config,
+		rd:     render.New(render.Options{IndentJSON: true}),
+	}
+	router := mux.NewRouter()
+	router.HandleFunc("/config", h.UpdateConfig).Methods("POST")
+	router.HandleFunc("/list", h.ListConfig).Methods("GET")
+	return router
+}
+>>>>>>> 3e31744... fix empty http response in scheduler (#2869)
