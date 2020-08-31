@@ -20,7 +20,13 @@ import (
 )
 
 // ZapError is used to make the log output eaiser.
-func ZapError(err *errors.Error, causeError error) zap.Field {
-	e := err.Wrap(causeError).FastGenWithCause()
-	return zap.Field{Key: "error", Type: zapcore.ErrorType, Interface: e}
+func ZapError(err error, causeError ...error) zap.Field {
+	if e, ok := err.(*errors.Error); ok {
+		if len(causeError) >= 1 {
+			err = e.Wrap(causeError[0]).FastGenWithCause()
+		} else {
+			err = e.FastGenByArgs()
+		}
+	}
+	return zap.Field{Key: "error", Type: zapcore.ErrorType, Interface: err}
 }
