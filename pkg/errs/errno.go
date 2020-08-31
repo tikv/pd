@@ -112,7 +112,7 @@ var (
 
 // strconv errors
 var (
-	ErrStrconvParseInt = errors.Normalize("parse int error", errors.RFCCodeText("PD:strconv:ErrStrconvParseInt"))
+	ErrStrconvParseUint = errors.Normalize("parse uint error", errors.RFCCodeText("PD:strconv:ErrStrconvParseUint"))
 )
 
 // url errors

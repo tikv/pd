@@ -24,7 +24,6 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
-	"go.uber.org/zap"
 )
 
 const (
@@ -127,7 +126,7 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 
 	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpAdmin)
 	if err != nil {
-		log.Debug("fail to create merge region operator", zap.Error(err))
+		log.Debug("fail to create merge region operator", errs.ZapError(err))
 		return nil
 	}
 	ops[0].Counters = append(ops[0].Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))

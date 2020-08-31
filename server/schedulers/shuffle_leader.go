@@ -21,7 +21,6 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
-	"go.uber.org/zap"
 )
 
 const (
@@ -118,7 +117,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	}
 	op, err := operator.CreateTransferLeaderOperator(ShuffleLeaderType, cluster, region, region.GetLeader().GetId(), targetStore.GetID(), operator.OpAdmin)
 	if err != nil {
-		log.Debug("fail to create shuffle leader operator", zap.Error(err))
+		log.Debug("fail to create shuffle leader operator", errs.ZapError(err))
 		return nil
 	}
 	op.SetPriorityLevel(core.HighPriority)

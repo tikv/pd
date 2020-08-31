@@ -23,7 +23,6 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/opt"
-	"go.uber.org/zap"
 )
 
 // options for interval of schedulers
@@ -53,7 +52,7 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 	case zeroGrowth:
 		return x
 	default:
-		log.Fatal("type error", zap.Error(errs.ErrInternalGrowth))
+		log.Fatal("type error", errs.ZapError(errs.ErrInternalGrowth))
 	}
 	return 0
 }

@@ -281,7 +281,7 @@ func (l *balanceLeaderScheduler) createOperator(cluster opt.Cluster, region *cor
 
 	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, cluster, region, region.GetLeader().GetStoreId(), targetID, operator.OpLeader)
 	if err != nil {
-		log.Debug("fail to create balance leader operator", zap.Error(err))
+		log.Debug("fail to create balance leader operator", errs.ZapError(err))
 		return nil
 	}
 	sourceLabel := strconv.FormatUint(sourceID, 10)

@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -52,7 +51,7 @@ func init() {
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
-				return errs.ErrStrconvParseInt.Wrap(err).FastGenWithCause()
+				return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
 			}
 			ranges, err := getKeyRanges(args[1:])
 			if err != nil {
@@ -87,7 +86,7 @@ func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		return errs.ErrStrconvParseInt.Wrap(err).FastGenWithCause()
+		return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {
@@ -221,7 +220,7 @@ func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 
 		op, err := operator.CreateTransferLeaderOperator(GrantLeaderType, cluster, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
 		if err != nil {
-			log.Debug("fail to create grant leader operator", zap.Error(err))
+			log.Debug("fail to create grant leader operator", errs.ZapError(err))
 			continue
 		}
 		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))

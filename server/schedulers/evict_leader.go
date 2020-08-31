@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -56,7 +55,7 @@ func init() {
 
 			id, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
-				return errs.ErrStrconvParseInt.Wrap(err).FastGenWithCause()
+				return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
 			}
 			ranges, err := getKeyRanges(args[1:])
 			if err != nil {
@@ -92,7 +91,7 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		return errs.ErrStrconvParseInt.Wrap(err).FastGenWithCause()
+		return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {
@@ -231,7 +230,7 @@ func (s *evictLeaderScheduler) scheduleOnce(cluster opt.Cluster) []*operator.Ope
 		}
 		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 		if err != nil {
-			log.Debug("fail to create evict leader operator", zap.Error(err))
+			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
 		}
 		op.SetPriorityLevel(core.HighPriority)

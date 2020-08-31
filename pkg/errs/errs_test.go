@@ -119,3 +119,11 @@ func (s *testErrorSuite) TestErrorEqual(c *C) {
 	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
 	c.Assert(errors.ErrorEqual(err1, err2), IsFalse)
 }
+
+func (s *testErrorSuite) TestZapError(c *C) {
+	err := errors.New("test")
+	log.Info("test", ZapError(err))
+	err1 := ErrSchedulerNotFound
+	log.Info("test", ZapError(err1))
+	log.Info("test", ZapError(err1, err))
+}
