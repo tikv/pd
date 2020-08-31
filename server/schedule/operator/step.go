@@ -37,6 +37,24 @@ type OpStep interface {
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
+var (
+	_ OpStep = (*TransferLeader)(nil)
+
+	_ OpStep = (*AddPeer)(nil)
+	_ OpStep = (*AddLightPeer)(nil)
+	_ OpStep = (*RemovePeer)(nil)
+	_ OpStep = (*AddLearner)(nil)
+	_ OpStep = (*AddLightLearner)(nil)
+
+	_ OpStep = (*PromoteLearner)(nil)
+	_ OpStep = (*DemoteFollower)(nil)
+	_ OpStep = (*ChangePeerV2Enter)(nil)
+	_ OpStep = (*ChangePeerV2Leave)(nil)
+
+	_ OpStep = (*MergeRegion)(nil)
+	_ OpStep = (*SplitRegion)(nil)
+)
+
 // TransferLeader is an OpStep that transfers a region's leader.
 type TransferLeader struct {
 	FromStore, ToStore uint64

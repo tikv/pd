@@ -50,13 +50,13 @@ func (s *testBuilderSuite) TestNewBuilder(c *C) {
 	region := core.NewRegionInfo(&metapb.Region{Id: 42, Peers: peers}, peers[0])
 	builder := NewBuilder("test", s.cluster, region)
 	c.Assert(builder.err, IsNil)
-	c.Assert(builder.originPeers.Len(), Equals, 2)
-	c.Assert(builder.originPeers.Get(1), DeepEquals, peers[0])
-	c.Assert(builder.originPeers.Get(2), DeepEquals, peers[1])
-	c.Assert(builder.originLeader, Equals, uint64(1))
-	c.Assert(builder.targetPeers.Len(), Equals, 2)
-	c.Assert(builder.targetPeers.Get(1), DeepEquals, peers[0])
-	c.Assert(builder.targetPeers.Get(2), DeepEquals, peers[1])
+	c.Assert(len(builder.originPeers), Equals, 2)
+	c.Assert(builder.originPeers[1], DeepEquals, peers[0])
+	c.Assert(builder.originPeers[2], DeepEquals, peers[1])
+	c.Assert(builder.originLeaderStoreID, Equals, uint64(1))
+	c.Assert(len(builder.targetPeers), Equals, 2)
+	c.Assert(builder.targetPeers[1], DeepEquals, peers[0])
+	c.Assert(builder.targetPeers[2], DeepEquals, peers[1])
 	region = region.Clone(core.WithLeader(nil))
 	builder = NewBuilder("test", s.cluster, region)
 	c.Assert(builder.err, NotNil)
@@ -92,11 +92,11 @@ func (s *testBuilderSuite) TestRecord(c *C) {
 		4: {StoreId: 4},
 	}
 	builder := s.newBuilder().SetPeers(m).SetLightWeight()
-	c.Assert(builder.targetPeers.Len(), Equals, 3)
-	c.Assert(builder.targetPeers.Get(2), DeepEquals, m[2])
-	c.Assert(builder.targetPeers.Get(3), DeepEquals, m[3])
-	c.Assert(builder.targetPeers.Get(4), DeepEquals, m[4])
-	c.Assert(builder.targetLeader, Equals, uint64(0))
+	c.Assert(len(builder.targetPeers), Equals, 3)
+	c.Assert(builder.targetPeers[2], DeepEquals, m[2])
+	c.Assert(builder.targetPeers[3], DeepEquals, m[3])
+	c.Assert(builder.targetPeers[4], DeepEquals, m[4])
+	c.Assert(builder.targetLeaderStoreID, Equals, uint64(0))
 	c.Assert(builder.isLightWeight, IsTrue)
 }
 
@@ -114,18 +114,18 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 	})
 	_, err = builder.prepareBuild()
 	c.Assert(err, IsNil)
-	c.Assert(builder.toAdd.Len(), Equals, 3)
-	c.Assert(builder.toAdd.Get(1).Role, Equals, metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd.Get(1).Id, Not(Equals), uint64(0))
-	c.Assert(builder.toAdd.Get(4).Role, Not(Equals), metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd.Get(4).Id, Equals, uint64(14))
-	c.Assert(builder.toAdd.Get(5).Role, Equals, metapb.PeerRole_Learner)
-	c.Assert(builder.toAdd.Get(5).Id, Not(Equals), uint64(0))
-	c.Assert(builder.toRemove.Len(), Equals, 1)
-	c.Assert(builder.toRemove.Get(1), NotNil)
-	c.Assert(builder.toPromote.Len(), Equals, 1)
-	c.Assert(builder.toPromote.Get(3), NotNil)
-	c.Assert(builder.currentLeader, Equals, uint64(1))
+	c.Assert(len(builder.toAdd), Equals, 3)
+	c.Assert(builder.toAdd[1].Role, Equals, metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[1].Id, Not(Equals), uint64(0))
+	c.Assert(builder.toAdd[4].Role, Not(Equals), metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[4].Id, Equals, uint64(14))
+	c.Assert(builder.toAdd[5].Role, Equals, metapb.PeerRole_Learner)
+	c.Assert(builder.toAdd[5].Id, Not(Equals), uint64(0))
+	c.Assert(len(builder.toRemove), Equals, 1)
+	c.Assert(builder.toRemove[1], NotNil)
+	c.Assert(len(builder.toPromote), Equals, 1)
+	c.Assert(builder.toPromote[3], NotNil)
+	c.Assert(builder.currentLeaderStoreID, Equals, uint64(1))
 }
 
 func (s *testBuilderSuite) TestBuild(c *C) {
@@ -232,25 +232,33 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			c.Assert(err, NotNil)
 			continue
 		}
+		c.Assert(err, IsNil)
 		c.Assert(op.Len(), Equals, len(tc.steps))
 		for i := 0; i < op.Len(); i++ {
-			step := op.Step(i)
-			switch step.(type) {
+			switch step := op.Step(i).(type) {
 			case TransferLeader:
-				c.Assert(step.(TransferLeader).FromStore, Equals, tc.steps[i].(TransferLeader).FromStore)
-				c.Assert(step.(TransferLeader).ToStore, Equals, tc.steps[i].(TransferLeader).ToStore)
+				c.Assert(step.FromStore, Equals, tc.steps[i].(TransferLeader).FromStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(TransferLeader).ToStore)
 			case AddPeer:
-				c.Assert(step.(AddPeer).ToStore, Equals, tc.steps[i].(AddPeer).ToStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(AddPeer).ToStore)
 			case AddLightPeer:
-				c.Assert(step.(AddLightPeer).ToStore, Equals, tc.steps[i].(AddLightPeer).ToStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLightPeer).ToStore)
 			case RemovePeer:
-				c.Assert(step.(RemovePeer).FromStore, Equals, tc.steps[i].(RemovePeer).FromStore)
+				c.Assert(step.FromStore, Equals, tc.steps[i].(RemovePeer).FromStore)
 			case AddLearner:
-				c.Assert(step.(AddLearner).ToStore, Equals, tc.steps[i].(AddLearner).ToStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLearner).ToStore)
 			case AddLightLearner:
-				c.Assert(step.(AddLightLearner).ToStore, Equals, tc.steps[i].(AddLightLearner).ToStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(AddLightLearner).ToStore)
 			case PromoteLearner:
-				c.Assert(step.(PromoteLearner).ToStore, Equals, tc.steps[i].(PromoteLearner).ToStore)
+				c.Assert(step.ToStore, Equals, tc.steps[i].(PromoteLearner).ToStore)
+			case DemoteFollower:
+				c.Assert(step.ToStore, Equals, tc.steps[i].(DemoteFollower).ToStore)
+			case ChangePeerV2Enter:
+				c.Assert(step.PromoteLearners, DeepEquals, tc.steps[i].(ChangePeerV2Enter).PromoteLearners)
+				c.Assert(step.DemoteVoters, DeepEquals, tc.steps[i].(ChangePeerV2Enter).DemoteVoters)
+			case ChangePeerV2Leave:
+				c.Assert(step.PromoteLearners, DeepEquals, tc.steps[i].(ChangePeerV2Leave).PromoteLearners)
+				c.Assert(step.DemoteVoters, DeepEquals, tc.steps[i].(ChangePeerV2Leave).DemoteVoters)
 			}
 		}
 	}

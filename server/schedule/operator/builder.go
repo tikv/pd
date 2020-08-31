@@ -594,13 +594,15 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 		DemoteVoters:    make([]DemoteVoter, 0, len(b.toDemote)),
 	}
 
-	for _, peer := range b.toPromote {
+	for _, p := range b.toPromote.IDs() {
+		peer := b.toPromote[p]
 		step.PromoteLearners = append(step.PromoteLearners, PromoteLearner{ToStore: peer.StoreId, PeerID: peer.Id})
 		b.currentPeers.Set(peer)
 	}
 	b.toPromote = newPeersMap()
 
-	for _, peer := range b.toDemote {
+	for _, d := range b.toDemote.IDs() {
+		peer := b.toDemote[d]
 		step.DemoteVoters = append(step.DemoteVoters, DemoteVoter{ToStore: peer.StoreId, PeerID: peer.Id})
 		b.currentPeers.Set(peer)
 	}
