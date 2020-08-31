@@ -80,6 +80,9 @@ func newBuilderWithBasicCheck(desc string, cluster opt.Cluster, region *core.Reg
 	}
 
 	originLeaderStoreID := region.GetLeader().GetStoreId()
+	if _, ok := originPeers[originLeaderStoreID]; err == nil && !ok {
+		err = errors.Errorf("cannot build operator for region with no leader")
+	}
 
 	var rules []*placement.Rule
 	if err == nil && cluster.IsPlacementRulesEnabled() {
@@ -113,10 +116,6 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo) *Buil
 
 	if b.err == nil && core.IsInJointState(region.GetPeers()...) {
 		b.err = errors.Errorf("cannot build operator for region is in joint state")
-	}
-
-	if _, ok := b.originPeers[b.originLeaderStoreID]; b.err == nil && !ok {
-		b.err = errors.Errorf("cannot build operator for region with no leader")
 	}
 
 	return b
