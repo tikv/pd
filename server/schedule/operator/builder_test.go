@@ -160,7 +160,49 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 		steps             []OpStep
 	}
 	cases := []testCase{
-		{ // prefer replace
+		{ // empty step
+			false,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]OpStep{},
+		},
+		{ // empty step
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]OpStep{},
+		},
+		{ // no valid leader
+			false,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}},
+			[]*metapb.Peer{{Id: 10, StoreId: 10}},
+			[]OpStep{},
+		},
+		{ // no valid leader
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}},
+			[]*metapb.Peer{{Id: 10, StoreId: 10}},
+			[]OpStep{},
+		},
+		{ // promote learner
+			false,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
+			[]OpStep{
+				PromoteLearner{ToStore: 2},
+				TransferLeader{FromStore: 1, ToStore: 2},
+			},
+		},
+		{ // promote learner
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
+			[]OpStep{
+				PromoteLearner{ToStore: 2},
+				TransferLeader{FromStore: 1, ToStore: 2},
+			},
+		},
+		{ // not use joint consensus: prefer replace
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
@@ -174,7 +216,28 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 1},
 			},
 		},
-		{ // transfer leader before remove leader
+		{ // use joint consensus: transfer leader in joint state
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
+			[]OpStep{
+				AddLearner{ToStore: 4},
+				AddLearner{ToStore: 5},
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{{ToStore: 4}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}, {ToStore: 2}},
+				},
+				TransferLeader{FromStore: 1, ToStore: 4},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 4}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}, {ToStore: 2}},
+				},
+				RemovePeer{FromStore: 1},
+				RemovePeer{FromStore: 2},
+				RemovePeer{FromStore: 3},
+			},
+		},
+		{ // not use joint consensus: transfer leader before remove leader
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{StoreId: 2}},
@@ -185,15 +248,42 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 1},
 			},
 		},
-		{ // replace voter with learner
+		{ // use joint consensus: transfer leader in joint state
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}},
+			[]*metapb.Peer{{StoreId: 2}},
+			[]OpStep{
+				AddLearner{ToStore: 2},
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{{ToStore: 2}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
+				},
+				TransferLeader{FromStore: 1, ToStore: 2},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 2}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
+				},
+				RemovePeer{FromStore: 1},
+			},
+		},
+		{ // not use joint consensus: replace voter with learner
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]OpStep{
 				RemovePeer{FromStore: 2},
 				AddLearner{ToStore: 2},
 			},
 		},
+		{ // use joint consensus: demote directly
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]*metapb.Peer{{StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
+			[]OpStep{
+				DemoteFollower{ToStore: 2},
+			},
+		},
+		// not use joint consensus
 		{ // prefer replace with nearest peer
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 6, StoreId: 6}, {Id: 8, StoreId: 8}},
@@ -218,27 +308,6 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				TransferLeader{FromStore: 7, ToStore: 9},
 			},
 		},
-		{ // promote learner
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
-			[]OpStep{
-				PromoteLearner{ToStore: 2},
-				TransferLeader{FromStore: 1, ToStore: 2},
-			},
-		},
-		{ // empty step
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]OpStep{},
-		},
-		{ // no valid leader
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}},
-			[]*metapb.Peer{{Id: 10, StoreId: 10}},
-			[]OpStep{},
-		},
 		{ // add learner + promote learner + remove voter
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
@@ -248,6 +317,41 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				PromoteLearner{ToStore: 2},
 				TransferLeader{FromStore: 1, ToStore: 2},
 				RemovePeer{FromStore: 1},
+			},
+		},
+		// use joint consensus
+		{ // transfer leader before entering joint state
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}},
+			[]OpStep{
+				TransferLeader{FromStore: 1, ToStore: 2},
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{{ToStore: 3}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
+				},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 3}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
+				},
+				RemovePeer{FromStore: 1},
+			},
+		},
+		{ // transfer leader after leaving joint state
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			[]*metapb.Peer{{Id: 3, StoreId: 3}, {Id: 1, StoreId: 1}},
+			[]OpStep{
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{{ToStore: 3}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 2}},
+				},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 3}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 2}},
+				},
+				TransferLeader{FromStore: 1, ToStore: 3},
+				RemovePeer{FromStore: 2},
 			},
 		},
 	}
@@ -287,11 +391,23 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			case DemoteFollower:
 				c.Assert(step.ToStore, Equals, tc.steps[i].(DemoteFollower).ToStore)
 			case ChangePeerV2Enter:
-				c.Assert(step.PromoteLearners, DeepEquals, tc.steps[i].(ChangePeerV2Enter).PromoteLearners)
-				c.Assert(step.DemoteVoters, DeepEquals, tc.steps[i].(ChangePeerV2Enter).DemoteVoters)
+				c.Assert(len(step.PromoteLearners), Equals, len(tc.steps[i].(ChangePeerV2Enter).PromoteLearners))
+				c.Assert(len(step.DemoteVoters), Equals, len(tc.steps[i].(ChangePeerV2Enter).DemoteVoters))
+				for j, p := range tc.steps[i].(ChangePeerV2Enter).PromoteLearners {
+					c.Assert(step.PromoteLearners[j].ToStore, Equals, p.ToStore)
+				}
+				for j, d := range tc.steps[i].(ChangePeerV2Enter).DemoteVoters {
+					c.Assert(step.DemoteVoters[j].ToStore, Equals, d.ToStore)
+				}
 			case ChangePeerV2Leave:
-				c.Assert(step.PromoteLearners, DeepEquals, tc.steps[i].(ChangePeerV2Leave).PromoteLearners)
-				c.Assert(step.DemoteVoters, DeepEquals, tc.steps[i].(ChangePeerV2Leave).DemoteVoters)
+				c.Assert(len(step.PromoteLearners), Equals, len(tc.steps[i].(ChangePeerV2Leave).PromoteLearners))
+				c.Assert(len(step.DemoteVoters), Equals, len(tc.steps[i].(ChangePeerV2Leave).DemoteVoters))
+				for j, p := range tc.steps[i].(ChangePeerV2Leave).PromoteLearners {
+					c.Assert(step.PromoteLearners[j].ToStore, Equals, p.ToStore)
+				}
+				for j, d := range tc.steps[i].(ChangePeerV2Leave).DemoteVoters {
+					c.Assert(step.DemoteVoters[j].ToStore, Equals, d.ToStore)
+				}
 			}
 		}
 	}

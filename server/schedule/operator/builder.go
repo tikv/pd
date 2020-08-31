@@ -419,7 +419,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
-		return kind, errors.New("no effective leader")
+		return kind, errors.New("no valid leader")
 	}
 
 	// Split `Remove Voter` to `Demote + Remove Learner`
