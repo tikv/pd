@@ -122,7 +122,6 @@ func GenerateTiDBEncodedSplitKey(start, end []byte) ([]byte, error) {
 	}
 
 	var err error
-
 	start, err = mustDecodeMvccKey(start)
 	if err != nil {
 		return nil, err
