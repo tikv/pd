@@ -405,7 +405,8 @@ func findBestGroupToScaleOut(rc *cluster.RaftCluster, strategy *Strategy, scaleO
 		ResourceType: resources[0].ResourceType,
 		Labels: []*metapb.StoreLabel{
 			{
-				Key:   groupLabelKey,
+				Key: groupLabelKey,
+				// TODO: we need to make this label not duplicated when we implement the heterogeneous logic.
 				Value: autoScalingGroupLabelKeyPrefix + component.String(),
 			},
 			{
