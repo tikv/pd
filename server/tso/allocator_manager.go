@@ -53,6 +53,7 @@ type allocatorGroup struct {
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
 type AllocatorManager struct {
 	sync.RWMutex
+	wg sync.WaitGroup
 	// There are two kinds of TSO Allocators:
 	//   1. Global TSO Allocator, as a global single point to allocate
 	//      TSO for global transactions, such as cross-region cases.
@@ -145,8 +146,10 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 			allocatorGroups := am.getAllocatorGroups()
 			// Update each allocator concurrently
 			for _, ag := range allocatorGroups {
+				am.wg.Add(1)
 				go am.updateAllocator(ag)
 			}
+			am.wg.Wait()
 		case <-serverCtx.Done():
 			return
 		}
@@ -155,8 +158,7 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 
 // updateAllocator is used to update the allocator in the group
 func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
-	am.Lock()
-	defer am.Unlock()
+	defer am.wg.Done()
 	select {
 	case <-ag.parentCtx.Done():
 		// Need to initialize first before next use
