@@ -14,8 +14,6 @@
 package errs
 
 import (
-	"reflect"
-
 	"github.com/pingcap/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -23,11 +21,12 @@ import (
 
 // ZapError is used to make the log output eaiser.
 func ZapError(err error, causeError ...error) zap.Field {
-	if len(causeError) >= 1 {
-		err = err.(*errors.Error).Wrap(causeError[0]).FastGenWithCause()
-	}
-	if reflect.TypeOf(err).Kind() == reflect.TypeOf(errors.Error{}).Kind() {
-		err = err.(*errors.Error).FastGenByArgs()
+	if e, ok := err.(*errors.Error); ok {
+		if len(causeError) >= 1 {
+			err = e.Wrap(causeError[0]).FastGenWithCause()
+		} else {
+			err = e.FastGenByArgs()
+		}
 	}
 	return zap.Field{Key: "error", Type: zapcore.ErrorType, Interface: err}
 }
