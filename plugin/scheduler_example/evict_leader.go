@@ -260,8 +260,13 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
+<<<<<<< HEAD
 			if err := handler.config.cluster.BlockStore(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err)
+=======
+			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
+				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+>>>>>>> 3e31744... fix empty http response in scheduler (#2869)
 				return
 			}
 		}
@@ -278,7 +283,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.config.BuildWithArgs(args)
 	err := handler.config.Persist()
 	if err != nil {
-		handler.rd.JSON(w, http.StatusInternalServerError, err)
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
