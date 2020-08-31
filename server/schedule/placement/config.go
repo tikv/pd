@@ -90,13 +90,6 @@ type ruleConfigPatch struct {
 	mut *ruleConfig // record all to-commit rules and groups
 }
 
-func (p *ruleConfigPatch) getRule(key [2]string) *Rule {
-	if r, ok := p.mut.rules[key]; ok {
-		return r
-	}
-	return p.c.rules[key]
-}
-
 func (p *ruleConfigPatch) setRule(r *Rule) {
 	p.mut.rules[r.Key()] = r
 }
