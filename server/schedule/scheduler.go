@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -110,16 +111,16 @@ func IsSchedulerRegistered(name string) bool {
 func CreateScheduler(typ string, opController *OperatorController, storage *core.Storage, dec ConfigDecoder) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
-		return nil, errors.Errorf("create func of %v is not registered", typ)
+		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
 	}
 
 	s, err := fn(opController, storage, dec)
 	if err != nil {
-		return nil, err
+		return nil, errs.ErrSchedulerCreate.Wrap(err).FastGenWithCause()
 	}
 	data, err := s.EncodeConfig()
 	if err != nil {
-		return nil, err
+		return nil, errs.ErrSchedulerEncodeConfig.Wrap(err).FastGenWithCause()
 	}
 	err = storage.SaveScheduleConfig(s.GetName(), data)
 	return s, err

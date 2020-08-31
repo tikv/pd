@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -86,7 +87,7 @@ func newHandler(s *Server) *Handler {
 func (h *Handler) GetRaftCluster() (*cluster.RaftCluster, error) {
 	rc := h.s.GetRaftCluster()
 	if rc == nil {
-		return nil, errors.WithStack(cluster.ErrNotBootstrapped)
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	return rc, nil
 }
@@ -95,7 +96,7 @@ func (h *Handler) GetRaftCluster() (*cluster.RaftCluster, error) {
 func (h *Handler) GetOperatorController() (*schedule.OperatorController, error) {
 	rc := h.s.GetRaftCluster()
 	if rc == nil {
-		return nil, errors.WithStack(cluster.ErrNotBootstrapped)
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	return rc.GetOperatorController(), nil
 }
@@ -127,7 +128,7 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 	rc := h.s.GetRaftCluster()
 	if rc == nil {
-		return nil, errors.WithStack(cluster.ErrNotBootstrapped)
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	storeMetas := rc.GetMetaStores()
 	stores := make([]*core.StoreInfo, 0, len(storeMetas))
@@ -758,7 +759,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64) error {
 func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, cluster.ErrNotBootstrapped
+		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 	return c.GetRegionStatsByType(statistics.DownPeer), nil
 }
@@ -767,7 +768,7 @@ func (h *Handler) GetDownPeerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, cluster.ErrNotBootstrapped
+		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 	return c.GetRegionStatsByType(statistics.ExtraPeer), nil
 }
@@ -776,7 +777,7 @@ func (h *Handler) GetExtraPeerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, cluster.ErrNotBootstrapped
+		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 	return c.GetRegionStatsByType(statistics.MissPeer), nil
 }
@@ -785,7 +786,7 @@ func (h *Handler) GetMissPeerRegions() ([]*core.RegionInfo, error) {
 func (h *Handler) GetPendingPeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, cluster.ErrNotBootstrapped
+		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 	return c.GetRegionStatsByType(statistics.PendingPeer), nil
 }
@@ -809,7 +810,7 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 func (h *Handler) GetOfflinePeer() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, cluster.ErrNotBootstrapped
+		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 	return c.GetRegionStatsByType(statistics.OfflinePeer), nil
 }
@@ -818,7 +819,7 @@ func (h *Handler) GetOfflinePeer() ([]*core.RegionInfo, error) {
 func (h *Handler) GetEmptyRegion() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
-		return nil, cluster.ErrNotBootstrapped
+		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 	return c.GetRegionStatsByType(statistics.EmptyRegion), nil
 }

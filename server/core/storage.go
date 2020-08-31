@@ -27,6 +27,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/kv"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -201,7 +202,7 @@ func (s *Storage) DeleteRegion(region *metapb.Region) error {
 func (s *Storage) SaveConfig(cfg interface{}) error {
 	value, err := json.Marshal(cfg)
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
 	return s.Save(configPath, string(value))
 }

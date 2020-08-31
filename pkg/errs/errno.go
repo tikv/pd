@@ -79,8 +79,7 @@ var (
 	ErrDeleteStore           = errors.Normalize("failed to delete store", errors.RFCCodeText("PD:cluster:ErrDeleteStore"))
 	ErrPersistClusterVersion = errors.Normalize("persist cluster version meet error", errors.RFCCodeText("PD:cluster:ErrPersistClusterVersion"))
 	ErrGetMembers            = errors.Normalize("get members failed", errors.RFCCodeText("PD:cluster:ErrGetMembers"))
-	// TODO: ErrNewHTTPRequest may not be suitable to put in cluster category
-	ErrNewHTTPRequest = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:cluster:ErrNewHTTPRequest"))
+	ErrNotBootstrapped       = errors.Normalize("TiKV cluster not bootstrapped, please start TiKV first", errors.RFCCodeText("PD:cluster:ErrNotBootstrapped"))
 )
 
 // metricutil errors
@@ -96,13 +95,16 @@ var (
 
 // scheduler errors
 var (
-	ErrGetSourceStore         = errors.Normalize("failed to get the source store", errors.RFCCodeText("PD:scheduler:ErrGetSourceStore"))
-	ErrSchedulerExisted       = errors.Normalize("scheduler existed", errors.RFCCodeText("PD:scheduler:ErrSchedulerExisted"))
-	ErrSchedulerNotFound      = errors.Normalize("scheduler not found", errors.RFCCodeText("PD:scheduler:ErrSchedulerNotFound"))
-	ErrScheduleConfigNotExist = errors.Normalize("the config does not exist", errors.RFCCodeText("PD:scheduler:ErrScheduleConfigNotExist"))
-	ErrSchedulerConfig        = errors.Normalize("wrong scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfig"))
-	ErrCacheOverflow          = errors.Normalize("cache overflow", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
-	ErrInternalGrowth         = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
+	ErrGetSourceStore                   = errors.Normalize("failed to get the source store", errors.RFCCodeText("PD:scheduler:ErrGetSourceStore"))
+	ErrSchedulerExisted                 = errors.Normalize("scheduler existed", errors.RFCCodeText("PD:scheduler:ErrSchedulerExisted"))
+	ErrSchedulerNotFound                = errors.Normalize("scheduler not found", errors.RFCCodeText("PD:scheduler:ErrSchedulerNotFound"))
+	ErrScheduleConfigNotExist           = errors.Normalize("the config does not exist", errors.RFCCodeText("PD:scheduler:ErrScheduleConfigNotExist"))
+	ErrSchedulerConfig                  = errors.Normalize("wrong scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfig"))
+	ErrCacheOverflow                    = errors.Normalize("cache overflow", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
+	ErrInternalGrowth                   = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
+	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func of %v is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
+	ErrSchedulerCreate                  = errors.Normalize("failed to create scheduler", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreate"))
+	ErrSchedulerEncodeConfig            = errors.Normalize("failed to encode scheduler config", errors.RFCCodeText("PD:scheduler:ErrSchedulerEncodeConfig"))
 )
 
 // etcd errors
@@ -118,4 +120,31 @@ var (
 // url errors
 var (
 	ErrQueryUnescape = errors.Normalize("inverse transformation of QueryEscape error", errors.RFCCodeText("PD:url:ErrQueryUnescape"))
+)
+
+// http errors
+var (
+	ErrNewHTTPRequest = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:cluster:ErrNewHTTPRequest"))
+)
+
+// storage errors
+var (
+	ErrStorageLoadRange = errors.Normalize("failed to load range from storage", errors.RFCCodeText("PD:storage:ErrStorageLoadRange"))
+)
+
+// filepath errors
+var (
+	ErrFilePathAbs = errors.Normalize("failed to convert a path to absolute path", errors.RFCCodeText("PD:filepath:ErrFilePathAbs"))
+)
+
+// plugin errors
+var (
+	ErrLoadPlugin       = errors.Normalize("failed to load plugin", errors.RFCCodeText("PD:plugin:ErrLoadPlugin"))
+	ErrLookupPluginFunc = errors.Normalize("failed to lookup plugin fuction", errors.RFCCodeText("PD:plugin:ErrLookupPluginFunc"))
+)
+
+// json errors
+var (
+	ErrJSONMarshal   = errors.Normalize("failed to marshal json", errors.RFCCodeText("PD:json:ErrJSONMarshal"))
+	ErrJSONUnmarshal = errors.Normalize("failed to unmarshal json", errors.RFCCodeText("PD:json:ErrJSONUnmarshal"))
 )
