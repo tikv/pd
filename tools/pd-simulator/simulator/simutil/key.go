@@ -122,6 +122,7 @@ func GenerateTiDBEncodedSplitKey(start, end []byte) ([]byte, error) {
 	}
 
 	var err error
+
 	start, err = mustDecodeMvccKey(start)
 	if err != nil {
 		return nil, err
@@ -134,10 +135,11 @@ func GenerateTiDBEncodedSplitKey(start, end []byte) ([]byte, error) {
 
 	// make the start key and end key in same length.
 	if len(end) == 0 {
-		end = make([]byte, 0, len(start))
-		for i := range end {
-			end[i] = 0xFF
+		_, tableID, err := codec.DecodeInt(start[1:])
+		if err != nil {
+			return nil, err
 		}
+		return GenerateTableKey(tableID+1, 0), nil
 	} else if len(start) < len(end) {
 		pad := make([]byte, len(end)-len(start))
 		start = append(start, pad...)
