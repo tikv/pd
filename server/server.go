@@ -349,7 +349,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		ctx, s.member.Etcd(), s.client, s.rootPath, s.cfg.TsoSaveInterval.Duration,
+		s.member.Etcd(), s.client, s.rootPath, s.cfg.TsoSaveInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
@@ -506,6 +506,7 @@ func (s *Server) allocatorLoop() {
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 	s.tsoAllocatorManager.AllocatorDaemon(ctx)
+	log.Info("server is closed, exit allocator loop")
 }
 
 func (s *Server) collectEtcdStateMetrics() {

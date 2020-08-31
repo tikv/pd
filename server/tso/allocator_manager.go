@@ -30,6 +30,7 @@ import (
 )
 
 type allocatorGroup struct {
+	dcLocation string
 	// allocator's parent ctx and cancel function, which is to
 	// control the allocator's behavior in AllocatorDaemon and
 	// pass the cancel signal to its parent as soon as possible
@@ -69,12 +70,12 @@ type AllocatorManager struct {
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
-func NewAllocatorManager(serverCtx context.Context, etcd *embed.Etcd, client *clientv3.Client, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration) *AllocatorManager {
+func NewAllocatorManager(etcd *embed.Etcd, client *clientv3.Client, rootPath string, saveInterval time.Duration, maxResetTSGap func() time.Duration) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
 		allocatorGroups: make(map[string]*allocatorGroup),
 		etcd:            etcd,
 		client:          client,
-		rootPath:        path.Join(rootPath, "allocator"),
+		rootPath:        rootPath,
 		saveInterval:    saveInterval,
 		maxResetTSGap:   maxResetTSGap,
 	}
@@ -82,6 +83,10 @@ func NewAllocatorManager(serverCtx context.Context, etcd *embed.Etcd, client *cl
 }
 
 func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
+	// For backward compatibility, the global timestamp's store path will still use the old one
+	if dcLocation == "global" {
+		return am.rootPath
+	}
 	return path.Join(am.rootPath, dcLocation)
 }
 
@@ -92,6 +97,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, parentCanc
 	switch dcLocation {
 	case "global":
 		am.allocatorGroups[dcLocation] = &allocatorGroup{
+			dcLocation:   dcLocation,
 			parentCtx:    parentCtx,
 			parentCancel: parentCancel,
 			leadership:   leadership,
@@ -118,6 +124,16 @@ func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
 	return allocatorGroup.allocator, nil
 }
 
+func (am *AllocatorManager) getAllocatorGroups() []*allocatorGroup {
+	am.RLock()
+	allocatorGroups := make([]*allocatorGroup, 0, len(am.allocatorGroups))
+	for _, ag := range am.allocatorGroups {
+		allocatorGroups = append(allocatorGroups, ag)
+	}
+	am.RUnlock()
+	return allocatorGroups
+}
+
 // AllocatorDaemon is used to update every allocator's TSO.
 func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	tsTicker := time.NewTicker(UpdateTimestampStep)
@@ -127,16 +143,11 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 		select {
 		case <-tsTicker.C:
 			// Collect all dc-locations first
-			am.RLock()
-			dcLocations := make([]string, 0, len(am.allocatorGroups))
-			for dcLocation := range am.allocatorGroups {
-				dcLocations = append(dcLocations, dcLocation)
-			}
-			am.RUnlock()
+			allocatorGroups := am.getAllocatorGroups()
 			// Update each allocator concurrently
-			for _, dcLocation := range dcLocations {
+			for _, ag := range allocatorGroups {
 				am.wg.Add(1)
-				go am.updateAllocator(dcLocation)
+				go am.updateAllocator(ag)
 			}
 			am.wg.Wait()
 		case <-serverCtx.Done():
@@ -145,31 +156,31 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	}
 }
 
-func (am *AllocatorManager) updateAllocator(dcLocation string) {
+// updateAllocator is used to update the allocator in the group
+func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 	defer am.wg.Done()
 
 	am.Lock()
 	defer am.Unlock()
-	allocatorGroup := am.allocatorGroups[dcLocation]
 	select {
-	case <-allocatorGroup.parentCtx.Done():
+	case <-ag.parentCtx.Done():
 		// Need to initialize first before next use
-		am.allocatorGroups[dcLocation].isInitialized = false
+		ag.isInitialized = false
 		// Resetting the allocator will clear TSO in memory
-		allocatorGroup.allocator.Reset()
+		ag.allocator.Reset()
 		return
 	default:
 	}
-	if !allocatorGroup.isInitialized {
-		log.Info("allocator has not been initialized yet", zap.String("dc-location", dcLocation))
+	if !ag.isInitialized {
+		log.Info("allocator has not been initialized yet", zap.String("dc-location", ag.dcLocation))
 		return
 	}
-	if !allocatorGroup.leadership.Check() {
+	if !ag.leadership.Check() {
 		return
 	}
-	if err := allocatorGroup.allocator.UpdateTSO(); err != nil {
-		log.Warn("failed to update allocator's timestamp", zap.String("dc-location", dcLocation), zap.Error(err))
-		allocatorGroup.parentCancel()
+	if err := ag.allocator.UpdateTSO(); err != nil {
+		log.Warn("failed to update allocator's timestamp", zap.String("dc-location", ag.dcLocation), zap.Error(err))
+		ag.parentCancel()
 		return
 	}
 }
