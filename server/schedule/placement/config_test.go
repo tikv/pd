@@ -17,7 +17,7 @@ import (
 	. "github.com/pingcap/check"
 )
 
-var _ = Suite(&testManagerSuite{})
+var _ = Suite(&testConfigSuite{})
 
 type testConfigSuite struct {
 }
@@ -27,8 +27,8 @@ func (s *testConfigSuite) TestTrim(c *C) {
 	rc.setRule(&Rule{GroupID: "g1", ID: "id1"})
 	rc.setRule(&Rule{GroupID: "g1", ID: "id2"})
 	rc.setRule(&Rule{GroupID: "g2", ID: "id3"})
-	rc.setGroup(&RuleGroup{ID: "g1"})
-	rc.setGroup(&RuleGroup{ID: "g2"})
+	rc.setGroup(&RuleGroup{ID: "g1", Index: 1})
+	rc.setGroup(&RuleGroup{ID: "g2", Index: 2})
 
 	testCases := []struct {
 		ops       func(p *ruleConfigPatch)
@@ -40,7 +40,7 @@ func (s *testConfigSuite) TestTrim(c *C) {
 				p.setRule(&Rule{GroupID: "g1", ID: "id1", Index: 100})
 				p.setRule(&Rule{GroupID: "g1", ID: "id2"})
 				p.setGroup(&RuleGroup{ID: "g1", Index: 100})
-				p.setGroup(&RuleGroup{ID: "g2"})
+				p.setGroup(&RuleGroup{ID: "g2", Index: 2})
 			},
 			map[[2]string]*Rule{{"g1", "id1"}: {GroupID: "g1", ID: "id1", Index: 100}},
 			map[string]*RuleGroup{"g1": {ID: "g1", Index: 100}},
@@ -53,7 +53,7 @@ func (s *testConfigSuite) TestTrim(c *C) {
 				p.deleteGroup("g3")
 			},
 			map[[2]string]*Rule{{"g1", "id1"}: nil},
-			map[string]*RuleGroup{"g2": nil},
+			map[string]*RuleGroup{"g2": {ID: "g2"}},
 		},
 		{
 			func(p *ruleConfigPatch) {
@@ -62,8 +62,8 @@ func (s *testConfigSuite) TestTrim(c *C) {
 				p.setRule(&Rule{GroupID: "g3", ID: "id3"})
 				p.deleteRule("g3", "id3")
 				p.setGroup(&RuleGroup{ID: "g1", Index: 100})
-				p.setGroup(&RuleGroup{ID: "g1"})
-				p.setGroup(&RuleGroup{ID: "g3"})
+				p.setGroup(&RuleGroup{ID: "g1", Index: 1})
+				p.setGroup(&RuleGroup{ID: "g3", Index: 3})
 				p.deleteGroup("g3")
 			},
 			map[[2]string]*Rule{},

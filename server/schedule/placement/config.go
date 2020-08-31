@@ -70,6 +70,13 @@ func (c *ruleConfig) setGroup(g *RuleGroup) {
 	c.groups[g.ID] = g
 }
 
+func (c *ruleConfig) getGroup(id string) *RuleGroup {
+	if g, ok := c.groups[id]; ok {
+		return g
+	}
+	return &RuleGroup{ID: id}
+}
+
 func (c *ruleConfig) beginPatch() *ruleConfigPatch {
 	return &ruleConfigPatch{
 		c:   c,
@@ -150,7 +157,7 @@ func (p *ruleConfigPatch) trim() {
 		}
 	}
 	for id, group := range p.mut.groups {
-		if jsonEquals(group, p.c.groups[id]) {
+		if jsonEquals(group, p.c.getGroup(id)) {
 			delete(p.mut.groups, id)
 		}
 	}
