@@ -19,8 +19,8 @@ import (
 	"strconv"
 
 	"github.com/montanaflynn/stats"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -34,15 +34,6 @@ const (
 	adjustRatio             float64 = 0.005
 	leaderTolerantSizeRatio float64 = 5.0
 	minTolerantSizeRatio    float64 = 1.0
-)
-
-var (
-	// ErrSchedulerExisted is error info for scheduler has already existed.
-	ErrSchedulerExisted = errors.New("scheduler existed")
-	// ErrSchedulerNotFound is error info for scheduler is not found.
-	ErrSchedulerNotFound = errors.New("scheduler not found")
-	// ErrScheduleConfigNotExist the config is not correct.
-	ErrScheduleConfigNotExist = errors.New("the config does not exist")
 )
 
 func shouldBalance(cluster opt.Cluster, source, target *core.StoreInfo, region *core.RegionInfo, kind core.ScheduleKind, opInfluence operator.OpInfluence, scheduleName string) bool {
@@ -131,11 +122,11 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 	for len(args) > 1 {
 		startKey, err := url.QueryUnescape(args[0])
 		if err != nil {
-			return nil, err
+			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
 		}
 		endKey, err := url.QueryUnescape(args[1])
 		if err != nil {
-			return nil, err
+			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
 		}
 		args = args[2:]
 		ranges = append(ranges, core.NewKeyRange(startKey, endKey))

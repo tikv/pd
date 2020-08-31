@@ -21,9 +21,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
@@ -94,7 +94,7 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 	regionEpoch := region.GetMeta().GetRegionEpoch()
 	if reqRegionEpoch.GetVersion() < regionEpoch.GetVersion() ||
 		reqRegionEpoch.GetConfVer() < regionEpoch.GetConfVer() {
-		return errors.Errorf("invalid region epoch, request: %v, currenrt: %v", reqRegionEpoch, regionEpoch)
+		return errors.Errorf("invalid region epoch, request: %v, current: %v", reqRegionEpoch, regionEpoch)
 	}
 	return nil
 }
@@ -113,7 +113,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	for i := 0; i < int(splitCount); i++ {
 		newRegionID, err := c.id.Alloc()
 		if err != nil {
-			return nil, schedulers.ErrSchedulerNotFound
+			return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))

@@ -92,3 +92,38 @@ func (s *testErrorSuite) TestError(c *C) {
 	fmt.Println(lg.Message())
 	c.Assert(strings.Contains(lg.Message(), rfc), IsTrue)
 }
+
+func (s *testErrorSuite) TestErrorEqual(c *C) {
+	err1 := ErrSchedulerNotFound.FastGenByArgs()
+	err2 := ErrSchedulerNotFound.FastGenByArgs()
+	c.Assert(errors.ErrorEqual(err1, err2), IsTrue)
+
+	err := errors.New("test")
+	err1 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
+	err2 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
+	c.Assert(errors.ErrorEqual(err1, err2), IsTrue)
+
+	err1 = ErrSchedulerNotFound.FastGenByArgs()
+	err2 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
+	c.Assert(errors.ErrorEqual(err1, err2), IsFalse)
+
+	err3 := errors.New("test")
+	err4 := errors.New("test")
+	err1 = ErrSchedulerNotFound.Wrap(err3).FastGenWithCause()
+	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
+	c.Assert(errors.ErrorEqual(err1, err2), IsTrue)
+
+	err3 = errors.New("test1")
+	err4 = errors.New("test")
+	err1 = ErrSchedulerNotFound.Wrap(err3).FastGenWithCause()
+	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
+	c.Assert(errors.ErrorEqual(err1, err2), IsFalse)
+}
+
+func (s *testErrorSuite) TestZapError(c *C) {
+	err := errors.New("test")
+	log.Info("test", ZapError(err))
+	err1 := ErrSchedulerNotFound
+	log.Info("test", ZapError(err1))
+	log.Info("test", ZapError(err1, err))
+}

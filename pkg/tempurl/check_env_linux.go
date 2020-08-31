@@ -10,23 +10,31 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
+// +build linux
 
-package errs
+package tempurl
 
 import (
-	"github.com/pingcap/errors"
+	"github.com/cakturk/go-netstat/netstat"
+	"github.com/pingcap/log"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
-// ZapError is used to make the log output eaiser.
-func ZapError(err error, causeError ...error) zap.Field {
-	if e, ok := err.(*errors.Error); ok {
-		if len(causeError) >= 1 {
-			err = e.Wrap(causeError[0]).FastGenWithCause()
-		} else {
-			err = e.FastGenByArgs()
-		}
+func environmentCheck(addr string) bool {
+	valid, err := checkAddr(addr[len("http://"):])
+	if err != nil {
+		log.Error("check port status failed", zap.Error(err))
+		return false
 	}
-	return zap.Field{Key: "error", Type: zapcore.ErrorType, Interface: err}
+	return valid
+}
+
+func checkAddr(addr string) (bool, error) {
+	tabs, err := netstat.TCPSocks(func(s *netstat.SockTabEntry) bool {
+		return s.RemoteAddr.String() == addr || s.LocalAddr.String() == addr
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(tabs) < 1, nil
 }

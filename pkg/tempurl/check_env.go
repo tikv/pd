@@ -10,23 +10,10 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // See the License for the specific language governing permissions and
 // limitations under the License.
+// +build !linux
 
-package errs
+package tempurl
 
-import (
-	"github.com/pingcap/errors"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-)
-
-// ZapError is used to make the log output eaiser.
-func ZapError(err error, causeError ...error) zap.Field {
-	if e, ok := err.(*errors.Error); ok {
-		if len(causeError) >= 1 {
-			err = e.Wrap(causeError[0]).FastGenWithCause()
-		} else {
-			err = e.FastGenByArgs()
-		}
-	}
-	return zap.Field{Key: "error", Type: zapcore.ErrorType, Interface: err}
+func environmentCheck(addr string) bool {
+	return true
 }

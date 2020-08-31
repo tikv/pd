@@ -93,6 +93,12 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(&cfg.Schedule, DeepEquals, scheduleConfig)
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
 
+	// config set trace-region-flow <value>
+	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(svr.GetPDServerConfig().TraceRegionFlow, Equals, false)
+
 	// config show schedule
 	args = []string{"-u", pdAddr, "config", "show", "schedule"}
 	_, output, err = pdctl.ExecuteCommandC(cmd, args...)

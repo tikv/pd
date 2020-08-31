@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	promClient "github.com/prometheus/client_golang/api"
@@ -32,13 +33,16 @@ import (
 const (
 	groupLabelKey                  = "group"
 	autoScalingGroupLabelKeyPrefix = "pd-auto-scaling-"
+	resourceTypeLabelKey           = "resource-type"
 	millicores                     = 1000
 )
 
 // TODO: adjust the value or make it configurable.
 var (
 	// MetricsTimeDuration is used to get the metrics of a certain time period.
-	MetricsTimeDuration = 5 * time.Second
+	// This must be long enough to cover at least 2 scrape intervals
+	// Or you will get nothing when querying CPU usage
+	MetricsTimeDuration = 60 * time.Second
 	// MaxScaleOutStep is used to indicate the maxium number of instance for scaling out operations at once.
 	MaxScaleOutStep uint64 = 1
 	// MaxScaleInStep is used to indicate the maxium number of instance for scaling in operations at once.
@@ -95,16 +99,24 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	usage := totalCPUUseTime / totalCPUTime
 	maxThreshold, minThreshold := getCPUThresholdByComponent(strategy, component)
 
+	groups, err := getScaledGroupsByComponent(rc, component, instances)
+	if err != nil {
+		// TODO: error handling
+		return nil
+	}
+
 	// TODO: add metrics to show why it triggers scale in/out.
 	if usage > maxThreshold {
 		scaleOutQuota := (totalCPUUseTime - totalCPUTime*maxThreshold) / MetricsTimeDuration.Seconds()
-		return calculateScaleOutPlan(rc, strategy, component, scaleOutQuota, currentQuota, instances)
+		return calculateScaleOutPlan(rc, strategy, component, scaleOutQuota, currentQuota, instances, groups)
 	}
+
 	if usage < minThreshold {
 		scaleInQuota := (totalCPUTime*minThreshold - totalCPUUseTime) / MetricsTimeDuration.Seconds()
-		return calculateScaleInPlan(rc, strategy, component, scaleInQuota, instances)
+		return calculateScaleInPlan(rc, strategy, component, scaleInQuota, instances, groups)
 	}
-	return nil
+
+	return groups
 }
 
 func filterTiKVInstances(informer core.StoreSetInformer) []instance {
@@ -200,8 +212,7 @@ func getResourcesByComponent(strategy *Strategy, component ComponentType) []*Res
 	return resources
 }
 
-func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64, instances []instance) []*Plan {
-	groups := getScaledGroupsByComponent(rc, component, instances)
+func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64, instances []instance, groups []*Plan) []*Plan {
 	group := findBestGroupToScaleOut(rc, strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
@@ -227,8 +238,7 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 	return groups
 }
 
-func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleInQuota float64, instances []instance) []*Plan {
-	groups := getScaledGroupsByComponent(rc, component, instances)
+func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleInQuota float64, instances []instance, groups []*Plan) []*Plan {
 	if len(groups) == 0 {
 		return nil
 	}
@@ -266,74 +276,110 @@ func getCountByResourceType(strategy *Strategy, resourceType string) uint64 {
 	return 0
 }
 
-func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType, healthyInstances []instance) []*Plan {
+func getScaledGroupsByComponent(rc *cluster.RaftCluster, component ComponentType, healthyInstances []instance) ([]*Plan, error) {
 	switch component {
 	case TiKV:
 		return getScaledTiKVGroups(rc, healthyInstances)
 	case TiDB:
 		return getScaledTiDBGroups(rc.GetEtcdClient(), healthyInstances)
 	default:
-		return nil
+		return nil, errors.Errorf("unknown component type %s", component.String())
 	}
 }
 
-func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) []*Plan {
+func getScaledTiKVGroups(informer core.StoreSetInformer, healthyInstances []instance) ([]*Plan, error) {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
+	resourceTypeMap := make(map[string]string)
 	for _, instance := range healthyInstances {
 		store := informer.GetStore(instance.id)
 		if store == nil {
 			log.Warn("inconsistency between health instances and store status, exit auto-scaling calculation",
 				zap.Uint64("store-id", instance.id))
-			return nil
+			return nil, errors.New("inconsistent healthy instances")
 		}
-		v := store.GetLabelValue(groupLabelKey)
-		buildPlanMap(planMap, v, instance.address)
+
+		groupName := store.GetLabelValue(groupLabelKey)
+		if !isAutoScaledGroup(groupName) {
+			continue
+		}
+
+		buildPlanMap(planMap, groupName, instance.address)
+
+		if _, ok := resourceTypeMap[groupName]; !ok {
+			resourceType := store.GetLabelValue(resourceTypeLabelKey)
+			if resourceType == "" {
+				log.Warn("store is in auto-scaled group but has no resource type label, exit auto-scaling calculation", zap.Uint64("store-id", instance.id))
+				return nil, errors.New("missing resource type label")
+			}
+			resourceTypeMap[groupName] = resourceType
+		}
 	}
-	return buildPlans(planMap, TiKV)
+	return buildPlans(planMap, resourceTypeMap, TiKV), nil
 }
 
-func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instance) []*Plan {
+func getScaledTiDBGroups(etcdClient *clientv3.Client, healthyInstances []instance) ([]*Plan, error) {
 	planMap := make(map[string]map[string]struct{}, len(healthyInstances))
+	resourceTypeMap := make(map[string]string)
 	for _, instance := range healthyInstances {
 		tidb, err := GetTiDB(etcdClient, instance.address)
 		if err != nil {
 			// TODO: error handling
-			return nil
+			return nil, err
 		}
 		if tidb == nil {
 			log.Warn("inconsistency between health instances and tidb status, exit auto-scaling calculation",
 				zap.String("tidb-address", instance.address))
-			return nil
+			return nil, errors.New("inconsistent healthy instances")
 		}
-		v := tidb.getLabelValue(groupLabelKey)
-		buildPlanMap(planMap, v, instance.address)
+
+		groupName := tidb.getLabelValue(groupLabelKey)
+		if !isAutoScaledGroup(groupName) {
+			continue
+		}
+
+		buildPlanMap(planMap, groupName, instance.address)
+		resourceType := tidb.getLabelValue(resourceTypeLabelKey)
+		if _, ok := resourceTypeMap[groupName]; !ok {
+			if resourceType == "" {
+				log.Warn("tidb is in auto-scaled group but has no resource type label, exit auto-scaling calculation", zap.String("tidb-address", instance.address))
+				return nil, errors.New("missing resource type label")
+			}
+			resourceTypeMap[groupName] = resourceType
+		}
 	}
-	return buildPlans(planMap, TiDB)
+	return buildPlans(planMap, resourceTypeMap, TiDB), nil
+}
+
+func isAutoScaledGroup(groupName string) bool {
+	return len(groupName) > len(autoScalingGroupLabelKeyPrefix) && strings.HasPrefix(groupName, autoScalingGroupLabelKeyPrefix)
 }
 
 func buildPlanMap(planMap map[string]map[string]struct{}, groupName, address string) {
-	if len(groupName) > len(autoScalingGroupLabelKeyPrefix) &&
-		strings.HasPrefix(groupName, autoScalingGroupLabelKeyPrefix) {
-		if component, ok := planMap[groupName]; ok {
-			component[address] = struct{}{}
-		} else {
-			planMap[groupName] = map[string]struct{}{
-				address: {},
-			}
+	if component, ok := planMap[groupName]; ok {
+		component[address] = struct{}{}
+	} else {
+		planMap[groupName] = map[string]struct{}{
+			address: {},
 		}
 	}
 }
 
-func buildPlans(planMap map[string]map[string]struct{}, componentType ComponentType) []*Plan {
+func buildPlans(planMap map[string]map[string]struct{}, resourceTypeMap map[string]string, componentType ComponentType) []*Plan {
 	var plans []*Plan
-	for groupLabel, groupInstances := range planMap {
+	for groupName, groupInstances := range planMap {
+		resourceType := resourceTypeMap[groupName]
 		plans = append(plans, &Plan{
-			Component: componentType.String(),
-			Count:     uint64(len(groupInstances)),
+			Component:    componentType.String(),
+			Count:        uint64(len(groupInstances)),
+			ResourceType: resourceType,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   groupLabelKey,
-					Value: groupLabel,
+					Value: groupName,
+				},
+				{
+					Key:   resourceTypeLabelKey,
+					Value: resourceType,
 				},
 			},
 		})
@@ -357,6 +403,17 @@ func findBestGroupToScaleOut(rc *cluster.RaftCluster, strategy *Strategy, scaleO
 		Component:    component.String(),
 		Count:        0,
 		ResourceType: resources[0].ResourceType,
+		Labels: []*metapb.StoreLabel{
+			{
+				Key: groupLabelKey,
+				// TODO: we need to make this label not duplicated when we implement the heterogeneous logic.
+				Value: autoScalingGroupLabelKeyPrefix + component.String(),
+			},
+			{
+				Key:   resourceTypeLabelKey,
+				Value: resources[0].ResourceType,
+			},
+		},
 	}
 	return group
 }

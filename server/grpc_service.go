@@ -395,7 +395,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		region := core.RegionFromHeartbeat(request)
 		if region.GetLeader() == nil {
-			log.Error("invalid request, the leader is nil", zap.Reflect("reqeust", request))
+			log.Error("invalid request, the leader is nil", zap.Reflect("request", request))
 			continue
 		}
 		if region.GetID() == 0 {
@@ -820,7 +820,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 	}, nil
 }
 
-// GetOperator gets information about the operator belonging to the speicfy region.
+// GetOperator gets information about the operator belonging to the specify region.
 func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
@@ -852,7 +852,7 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 }
 
 // validateRequest checks if Server is leader and clusterID is matched.
-// TODO: Call it in gRPC intercepter.
+// TODO: Call it in gRPC interceptor.
 func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
 	if s.IsClosed() || !s.member.IsLeader() {
 		return errors.WithStack(ErrNotLeader)
