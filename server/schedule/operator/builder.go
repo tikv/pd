@@ -624,11 +624,12 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 
 // check if a peer can become leader.
 func (b *Builder) allowLeader(peer *metapb.Peer) bool {
+	switch peer.Role {
+	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
+		return false
+	}
 	if peer.StoreId == b.currentLeaderStoreID {
 		return true
-	}
-	if core.IsLearner(peer) {
-		return false
 	}
 	store := b.cluster.GetStore(peer.StoreId)
 	if store == nil {

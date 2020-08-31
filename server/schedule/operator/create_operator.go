@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math/rand"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
@@ -172,6 +173,11 @@ func CreateScatterRegionOperator(desc string, cluster opt.Cluster, origin *core.
 
 func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *core.RegionInfo) (*Operator, error) {
 	b := newBuilderWithBasicCheck(desc, cluster, origin)
+
+	if b.err == nil && !core.IsInJointState(origin.GetPeers()...) {
+		b.err = errors.Errorf("cannot build leave joint state operator for region is not in joint state")
+	}
+
 	if b.err != nil {
 		return nil, b.err
 	}
