@@ -99,16 +99,24 @@ func getPlans(rc *cluster.RaftCluster, querier Querier, strategy *Strategy, comp
 	usage := totalCPUUseTime / totalCPUTime
 	maxThreshold, minThreshold := getCPUThresholdByComponent(strategy, component)
 
+	groups, err := getScaledGroupsByComponent(rc, component, instances)
+	if err != nil {
+		// TODO: error handling
+		return nil
+	}
+
 	// TODO: add metrics to show why it triggers scale in/out.
 	if usage > maxThreshold {
 		scaleOutQuota := (totalCPUUseTime - totalCPUTime*maxThreshold) / MetricsTimeDuration.Seconds()
-		return calculateScaleOutPlan(rc, strategy, component, scaleOutQuota, currentQuota, instances)
+		return calculateScaleOutPlan(rc, strategy, component, scaleOutQuota, currentQuota, instances, groups)
 	}
+
 	if usage < minThreshold {
 		scaleInQuota := (totalCPUTime*minThreshold - totalCPUUseTime) / MetricsTimeDuration.Seconds()
-		return calculateScaleInPlan(rc, strategy, component, scaleInQuota, instances)
+		return calculateScaleInPlan(rc, strategy, component, scaleInQuota, instances, groups)
 	}
-	return nil
+
+	return groups
 }
 
 func filterTiKVInstances(informer core.StoreSetInformer) []instance {
@@ -204,12 +212,7 @@ func getResourcesByComponent(strategy *Strategy, component ComponentType) []*Res
 	return resources
 }
 
-func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64, instances []instance) []*Plan {
-	groups, err := getScaledGroupsByComponent(rc, component, instances)
-	if err != nil {
-		// TODO: error handling
-		return nil
-	}
+func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleOutQuota float64, currentQuota uint64, instances []instance, groups []*Plan) []*Plan {
 	group := findBestGroupToScaleOut(rc, strategy, scaleOutQuota, groups, component)
 
 	resCPU := float64(getCPUByResourceType(strategy, group.ResourceType))
@@ -235,12 +238,7 @@ func calculateScaleOutPlan(rc *cluster.RaftCluster, strategy *Strategy, componen
 	return groups
 }
 
-func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleInQuota float64, instances []instance) []*Plan {
-	groups, err := getScaledGroupsByComponent(rc, component, instances)
-	if err != nil {
-		// TODO: error handling
-		return nil
-	}
+func calculateScaleInPlan(rc *cluster.RaftCluster, strategy *Strategy, component ComponentType, scaleInQuota float64, instances []instance, groups []*Plan) []*Plan {
 	if len(groups) == 0 {
 		return nil
 	}
@@ -405,6 +403,17 @@ func findBestGroupToScaleOut(rc *cluster.RaftCluster, strategy *Strategy, scaleO
 		Component:    component.String(),
 		Count:        0,
 		ResourceType: resources[0].ResourceType,
+		Labels: []*metapb.StoreLabel{
+			{
+				Key: groupLabelKey,
+				// TODO: we need to make this label not duplicated when we implement the heterogeneous logic.
+				Value: autoScalingGroupLabelKeyPrefix + component.String(),
+			},
+			{
+				Key:   resourceTypeLabelKey,
+				Value: resources[0].ResourceType,
+			},
+		},
 	}
 	return group
 }
