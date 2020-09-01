@@ -98,3 +98,8 @@ var (
 var (
 	ErrCloseEtcdClient = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:etcd:ErrCloseEtcdClient"))
 )
+
+// server errors
+var (
+	ErrDecodeSchedulerConfig = errors.Normalize("decode scheduler config failed", errors.RFCCodeText("PD:server:ErrDecodeSchedulerConfig"))
+)

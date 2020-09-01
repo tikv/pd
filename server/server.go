@@ -444,7 +444,7 @@ func (s *Server) IsClosed() bool {
 // Run runs the pd server.
 func (s *Server) Run() error {
 	go StartMonitor(s.ctx, time.Now, func() {
-		log.Error("system time jumps backward")
+		log.Error("system time jumps backward", zap.Error(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
 	})
 	if err := s.startEtcd(s.ctx); err != nil {
@@ -718,7 +718,7 @@ func (s *Server) GetConfig() *config.Config {
 			log.Error("failed to decode scheduler config",
 				zap.String("config", configs[i]),
 				zap.String("scheduler", sche),
-				zap.Error(err))
+				errs.ZapError(errs.ErrDecodeSchedulerConfig, err))
 			continue
 		}
 		payload[sche] = config
@@ -1039,7 +1039,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 			s.persistOptions.SetReplicationModeConfig(old)
 			revertErr := s.persistOptions.Persist(s.storage)
 			if revertErr != nil {
-				log.Error("failed to revert replication mode persistent config", zap.Error(err))
+				log.Error("failed to revert replication mode persistent config", zap.Error(revertErr))
 			}
 		}
 		return err
