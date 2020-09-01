@@ -274,6 +274,8 @@ func (m *RuleManager) tryCommitPatch(patch *ruleConfigPatch) error {
 		return err
 	}
 
+	patch.trim()
+
 	// save updates
 	err = m.savePatch(patch.mut)
 	if err != nil {
