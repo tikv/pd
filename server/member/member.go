@@ -157,8 +157,7 @@ func (m *Member) IsStillLeader() bool {
 // CheckLeader checks returns true if it is needed to check later.
 func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 	if m.GetEtcdLeader() == 0 {
-		err := errs.ErrEtcdLeaderNotFound.FastGenByArgs()
-		log.Error("no etcd leader, check pd leader later", errs.ZapError(err))
+		log.Error("no etcd leader, check pd leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}
