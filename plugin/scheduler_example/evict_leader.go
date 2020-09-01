@@ -255,7 +255,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
 			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
-				handler.rd.JSON(w, http.StatusInternalServerError, err)
+				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
@@ -272,7 +272,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.config.BuildWithArgs(args)
 	err := handler.config.Persist()
 	if err != nil {
-		handler.rd.JSON(w, http.StatusInternalServerError, err)
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
 }

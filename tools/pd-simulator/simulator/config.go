@@ -41,6 +41,7 @@ type SimConfig struct {
 
 // NewSimConfig create a new configuration of the simulator.
 func NewSimConfig(serverLogLevel string) *SimConfig {
+	config.DefaultStoreLimit = config.StoreLimit{AddPeer: 2000, RemovePeer: 2000}
 	cfg := &config.Config{
 		Name:       "pd",
 		ClientUrls: tempurl.Alloc(),
