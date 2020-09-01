@@ -74,9 +74,8 @@ func newBuilderWithBasicCheck(desc string, cluster opt.Cluster, region *core.Reg
 		if p == nil || p.StoreId == 0 {
 			err = errors.Errorf("cannot build operator for region with nil peer")
 			break
-		} else {
-			originPeers.Set(p)
 		}
+		originPeers.Set(p)
 	}
 
 	originLeaderStoreID := region.GetLeader().GetStoreId()

@@ -14,6 +14,7 @@
 package testutil
 
 import (
+	//revive:disable-next-line:dot-imports
 	. "github.com/pingcap/check" //nolint:stylecheck
 	"github.com/tikv/pd/server/schedule/operator"
 )

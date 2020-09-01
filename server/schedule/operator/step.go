@@ -624,6 +624,7 @@ func (cpe ChangePeerV2Enter) CheckSafety(region *core.RegionInfo) error {
 // Influence calculates the store difference that current step makes.
 func (cpe ChangePeerV2Enter) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
+// GetRequest get the ChangePeerV2 request
 func (cpe ChangePeerV2Enter) GetRequest() *pdpb.ChangePeerV2 {
 	changes := make([]*pdpb.ChangePeer, 0, len(cpe.PromoteLearners)+len(cpe.DemoteVoters))
 	for _, pl := range cpe.PromoteLearners {
