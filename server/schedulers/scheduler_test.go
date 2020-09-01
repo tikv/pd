@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 const (
@@ -90,6 +91,7 @@ func (s *testBalanceAdjacentRegionSuite) TearDownSuite(c *C) {
 func (s *testBalanceAdjacentRegionSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 
 	sc, err := schedule.CreateScheduler(AdjacentRegionType, schedule.NewOperatorController(s.ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(AdjacentRegionType, []string{"32", "2"}))
 	c.Assert(err, IsNil)
@@ -244,6 +246,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	newTestReplication(opt, 3, "zone", "host")
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
@@ -387,6 +390,7 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 	defer cancel()
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 
 	// update rule to 1leader+1follower+1learner
 	opt.EnablePlacementRules = true
@@ -454,6 +458,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.HotRegionCacheHitsThreshold = 0
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 4)
 	tc.AddRegionStore(3, 2)
@@ -504,6 +509,7 @@ func (s *testSpecialUseSuite) TestSpecialUseReserved(c *C) {
 	opt := mockoption.NewScheduleOptions()
 	opt.HotRegionCacheHitsThreshold = 0
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 4)
 	tc.AddRegionStore(3, 2)
