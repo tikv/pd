@@ -110,5 +110,5 @@ var (
 	ErrClientURL              = errors.Normalize("%s is not the client url of any member", errors.RFCCodeText("PD:etcd:ErrClientURL"))
 	ErrLogLevelIllegal        = errors.Normalize("illegal log level %s", errors.RFCCodeText("PD:etcd:ErrLogLevelIllegal"))
 	ErrReplicationModeInvalid = errors.Normalize("invalid replication mode: %v", errors.RFCCodeText("PD:etcd:ErrReplicationModeInvalid"))
-	ErrReplicateFile          = errors.Normalize("failed to replicate to member %s", errors.RFCCodeText("PD:etcd:ErrReplicateFile"))
+	ErrReplicateFile          = errors.Normalize("replicate to member %s failed", errors.RFCCodeText("PD:etcd:ErrReplicateFile"))
 )
