@@ -97,9 +97,18 @@ var (
 // etcd errors
 var (
 	ErrCloseEtcdClient = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:etcd:ErrCloseEtcdClient"))
+	ErrStartEtcd = errors.Normalize("start etcd failed", errors.RFCCodeText("PD:etcd:ErrStartEtcd"))
 )
 
 // server errors
 var (
 	ErrDecodeSchedulerConfig = errors.Normalize("decode scheduler config failed", errors.RFCCodeText("PD:server:ErrDecodeSchedulerConfig"))
+	ErrServiceRegistered = errors.Normalize("service is registered", errors.RFCCodeText("PD:server:ErrServiceRegistered"))
+	ErrAPIInformationInvalid = errors.Normalize("invalid api information", errors.RFCCodeText("PD:server:ErrAPIInformationInvalid"))
+	ErrBootstrapCluster = errors.Normalize("bootstrap cluster failed", errors.RFCCodeText("PD:server:ErrBootstrapCluster"))
+	ErrDisablePlacementRules = errors.Normalize("disable placement rules failed", errors.RFCCodeText("PD:server:ErrDisablePlacementRules"))
+	ErrClientURL = errors.Normalize("client url error", errors.RFCCodeText("PD:etcd:ErrClientURL"))
+	ErrLogLevelIllegal = errors.Normalize("illegal log level", errors.RFCCodeText("PD:etcd:ErrLogLevelIllegal"))
+	ErrReplicationModeInvalid = errors.Normalize("invalid replication mode", errors.RFCCodeText("PD:etcd:ErrReplicationModeInvalid"))
+	ErrReplicateFile = errors.Normalize("replicate file failed", errors.RFCCodeText("PD:etcd:ErrReplicateFile"))
 )
