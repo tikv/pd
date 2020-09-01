@@ -615,6 +615,8 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	b.steps = append(b.steps, ChangePeerV2Leave(step))
 }
 
+var stateFilter = filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
+
 // check if a peer can become leader.
 func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 	switch peer.Role {
@@ -628,7 +630,6 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 	if store == nil {
 		return false
 	}
-	stateFilter := filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 	if !stateFilter.Target(b.cluster, store) {
 		return false
 	}

@@ -294,7 +294,9 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 	c.Assert(err, IsNil)
 	cluster := s.srv.GetRaftCluster()
 	c.Assert(cluster, NotNil)
+	now := time.Now().UnixNano()
 	for _, store := range stores {
+		store.LastHeartbeat = now
 		s.srv.PutStore(context.Background(), &pdpb.PutStoreRequest{Header: newHeader(s.srv), Store: store})
 	}
 }
