@@ -33,3 +33,16 @@ func IsInJointState(peers ...*metapb.Peer) bool {
 	}
 	return false
 }
+
+// CountInJointState count the peers are in joint state.
+func CountInJointState(peers ...*metapb.Peer) int {
+	count := 0
+	for _, peer := range peers {
+		switch peer.GetRole() {
+		case metapb.PeerRole_IncomingVoter, metapb.PeerRole_DemotingVoter:
+			count++
+		default:
+		}
+	}
+	return count
+}

@@ -12,3 +12,338 @@
 // limitations under the License.
 
 package operator
+
+import (
+	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/server/core"
+)
+
+type testStepSuite struct{}
+
+var _ = Suite(&testStepSuite{})
+
+type testCase struct {
+	Peers          []*metapb.Peer // first is leader
+	ConfVerChanged bool
+	IsFinish       bool
+	CheckSafety    Checker
+}
+
+func (s *testStepSuite) TestDemoteFollower(c *C) {
+	df := DemoteFollower{ToStore: 2, PeerID: 2}
+	cases := []testCase{
+		{ // before step
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			false,
+			false,
+			IsNil,
+		},
+		{ // after step
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			true,
+			true,
+			IsNil,
+		},
+		{ // miss peer id
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // miss store id
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 4, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // miss peer id
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Learner},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // demote leader
+			[]*metapb.Peer{
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+	}
+	s.check(c, df, "demote follower peer 2 on store 2 to learner", cases)
+}
+
+func (s *testStepSuite) TestChangePeerV2Enter(c *C) {
+	cpe := ChangePeerV2Enter{
+		PromoteLearners: []PromoteLearner{{PeerID: 3, ToStore: 3}, {PeerID: 4, ToStore: 4}},
+		DemoteVoters:    []DemoteVoter{{PeerID: 1, ToStore: 1}, {PeerID: 2, ToStore: 2}},
+	}
+	cases := []testCase{
+		{ // before step
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Learner},
+			},
+			false,
+			false,
+			IsNil,
+		},
+		{ // after step
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			true,
+			true,
+			IsNil,
+		},
+		{ // miss peer id
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 5, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Learner},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // miss store id
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 5, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Learner},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // miss peer id
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 5, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // change is not atomic
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // change is not atomic
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Learner},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // there are other peers in the joint state
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 5, StoreId: 5, Role: metapb.PeerRole_IncomingVoter},
+			},
+			true,
+			true,
+			NotNil,
+		},
+		{ // there are other peers in the joint state
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Learner},
+				{Id: 5, StoreId: 5, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 6, StoreId: 6, Role: metapb.PeerRole_DemotingVoter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+	}
+	desc := "use joint consensus, " +
+		"promote learner peer 3 on store 3 to voter, promote learner peer 4 on store 4 to voter, " +
+		"demote voter peer 1 on store 1 to learner, demote voter peer 2 on store 2 to learner"
+	s.check(c, cpe, desc, cases)
+}
+
+func (s *testStepSuite) TestChangePeerV2Leave(c *C) {
+	cpl := ChangePeerV2Leave{
+		PromoteLearners: []PromoteLearner{{PeerID: 3, ToStore: 3}, {PeerID: 4, ToStore: 4}},
+		DemoteVoters:    []DemoteVoter{{PeerID: 1, ToStore: 1}, {PeerID: 2, ToStore: 2}},
+	}
+	cases := []testCase{
+		{ // before step
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			false,
+			false,
+			IsNil,
+		},
+		{ // after step
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Voter},
+			},
+			true,
+			true,
+			IsNil,
+		},
+		{ // miss peer id
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 5, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // miss store id
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 1, StoreId: 5, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // miss peer id
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 5, StoreId: 1, Role: metapb.PeerRole_Learner},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Voter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // change is not atomic
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // change is not atomic
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Voter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // there are other peers in the joint state
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 5, StoreId: 5, Role: metapb.PeerRole_IncomingVoter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // there are other peers in the joint state
+			[]*metapb.Peer{
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_Voter},
+				{Id: 5, StoreId: 5, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 6, StoreId: 6, Role: metapb.PeerRole_DemotingVoter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+		{ // demote leader
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+				{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			false,
+			false,
+			NotNil,
+		},
+	}
+	desc := "leave joint state, " +
+		"promote learner peer 3 on store 3 to voter, promote learner peer 4 on store 4 to voter, " +
+		"demote voter peer 1 on store 1 to learner, demote voter peer 2 on store 2 to learner"
+	s.check(c, cpl, desc, cases)
+}
+
+func (s *testStepSuite) check(c *C, step OpStep, desc string, cases []testCase) {
+	c.Assert(step.String(), Equals, desc)
+	for _, tc := range cases {
+		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.Peers}, tc.Peers[0])
+		c.Assert(step.ConfVerChanged(region), Equals, tc.ConfVerChanged)
+		c.Assert(step.IsFinish(region), Equals, tc.IsFinish)
+		c.Assert(step.CheckSafety(region), tc.CheckSafety)
+	}
+}

@@ -609,9 +609,15 @@ func (cpe ChangePeerV2Enter) CheckSafety(region *core.RegionInfo) error {
 			return errors.New("unexpected peer role")
 		}
 	}
-	if notInJointState && (inJointState || core.IsInJointState(region.GetPeers()...)) {
+
+	count := core.CountInJointState(region.GetPeers()...)
+	if (notInJointState && inJointState) ||
+		(notInJointState && count != 0) ||
+		(inJointState && count != len(cpe.PromoteLearners)+len(cpe.DemoteVoters)) {
+		// change is not atomic, or there are other peers in the joint state
 		return errors.New("unexpected peer role")
 	}
+
 	return nil
 }
 
@@ -738,12 +744,19 @@ func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
 			return errors.New("unexpected peer role")
 		}
 	}
-	if notInJointState && (inJointState || core.IsInJointState(region.GetPeers()...)) {
+
+	count := core.CountInJointState(region.GetPeers()...)
+	if (notInJointState && inJointState) ||
+		(notInJointState && count != 0) ||
+		(inJointState && count != len(cpl.PromoteLearners)+len(cpl.DemoteVoters)) {
+		// change is not atomic, or there are other peers in the joint state
 		return errors.New("unexpected peer role")
 	}
+
 	if demoteLeader {
 		return errors.New("try to demote leader when leaving joint state")
 	}
+
 	return nil
 }
 
