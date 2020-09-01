@@ -104,7 +104,6 @@ func newBuilderWithBasicCheck(desc string, cluster opt.Cluster, region *core.Reg
 		originPeers:         originPeers,
 		originLeaderStoreID: originLeaderStoreID,
 		targetPeers:         originPeers.Copy(),
-		targetLeaderStoreID: originLeaderStoreID,
 		useJointConsensus:   cluster.IsFeatureSupported(versioninfo.JointConsensus),
 		err:                 err,
 	}
