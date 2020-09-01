@@ -31,7 +31,6 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -169,7 +168,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			return nil, err
 		}
 		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
-			return nil, errors.Errorf("invalid API information, group %s version %s", info.Name, info.Version)
+			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs(info.Name, info.Version)
 		}
 		var pathPrefix string
 		if len(info.PathPrefix) != 0 {
@@ -180,7 +179,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
 		}
 		if _, ok := registerMap[pathPrefix]; ok {
-			return nil, errors.Errorf("service with path [%s] already registered", pathPrefix)
+			return nil, errs.ErrServiceRegistered.FastGenByArgs(pathPrefix)
 		}
 
 		log.Info("register REST path", zap.String("path", pathPrefix))
@@ -260,13 +259,13 @@ func (s *Server) startEtcd(ctx context.Context) error {
 
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrStartEtcd.Wrap(err)
 	}
 
 	// Check cluster ID
 	urlMap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrStartEtcd.Wrap(err)
 	}
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
@@ -281,7 +280,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	// Wait etcd until it is ready to use
 	case <-etcd.Server.ReadyNotify():
 	case <-newCtx.Done():
-		return errors.Errorf("canceled when waiting embed etcd to be ready")
+		return errs.ErrStartEtcd.FastGenByArgs("canceled when waiting embed etcd to be ready")
 	}
 
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
@@ -293,7 +292,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		TLS:         tlsConfig,
 	})
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrStartEtcd.Wrap(err)
 	}
 
 	etcdServerID := uint64(etcd.Server.ID())
@@ -301,7 +300,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	// update advertise peer urls.
 	etcdMembers, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
-		return err
+		return errs.ErrStartEtcd.Wrap(err)
 	}
 	for _, m := range etcdMembers.Members {
 		if etcdServerID == m.ID {
@@ -525,7 +524,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	// Set cluster meta
 	clusterValue, err := clusterMeta.Marshal()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errs.ErrBootstrapCluster.Wrap(err)
 	}
 	clusterRootPath := s.GetClusterRootPath()
 
@@ -544,13 +543,13 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	storePath := makeStoreKey(clusterRootPath, storeMeta.GetId())
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errs.ErrBootstrapCluster.Wrap(err)
 	}
 	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
 
 	regionValue, err := req.GetRegion().Marshal()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errs.ErrBootstrapCluster.Wrap(err)
 	}
 
 	// Set region meta with region id.
@@ -561,11 +560,11 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
 	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errs.ErrBootstrapCluster.Wrap(err)
 	}
 	if !resp.Succeeded {
 		log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
-		return nil, errors.Errorf("cluster %d already bootstrapped", clusterID)
+		return nil, errs.ErrBootstrapCluster.FastGenByArgs("cluster %d already bootstrapped", clusterID)
 	}
 
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
@@ -773,7 +772,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
-			return errors.WithStack(cluster.ErrNotBootstrapped)
+			return errs.ErrBootstrapCluster
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.
@@ -784,7 +783,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range raftCluster.GetStores() {
 				if !s.IsTombstone() && core.IsTiFlashStore(s.GetMeta()) {
-					return errors.New("cannot disable placement rules with TiFlash nodes")
+					return errs.ErrDisablePlacementRules
 				}
 			}
 		}
@@ -820,7 +819,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 			cfg.DashboardAddress = fmt.Sprintf("%s://%s", s.GetClientScheme(), cfg.DashboardAddress)
 		}
 		if !cluster.IsClientURL(cfg.DashboardAddress, s.client) {
-			return errors.Errorf("%s is not the client url of any member", cfg.DashboardAddress)
+			return errs.ErrClientURL.FastGenByArgs(cfg.DashboardAddress)
 		}
 	}
 	if err := cfg.Validate(); err != nil {
@@ -986,7 +985,7 @@ func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) error {
 	if !isLevelLegal(level) {
-		return errors.Errorf("log level %s is illegal", level)
+		return errs.ErrLogLevelIllegal.FastGenByArgs(level)
 	}
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
@@ -1011,7 +1010,7 @@ func (s *Server) GetReplicationModeConfig() *config.ReplicationModeConfig {
 // SetReplicationModeConfig sets the replication mode.
 func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) error {
 	if config.NormalizeReplicationMode(cfg.ReplicationMode) == "" {
-		return errors.Errorf("invalid replication mode: %v", cfg.ReplicationMode)
+		return errs.ErrReplicationModeInvalid.FastGenByArgs(cfg.ReplicationMode)
 	}
 
 	old := s.persistOptions.GetReplicationModeConfig()
@@ -1208,7 +1207,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		clientUrls := member.GetClientUrls()
 		if len(clientUrls) == 0 {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
-			return errors.Errorf("failed to replicate to member %s: clientUrls is empty", member.GetName())
+			return errs.ErrReplicateFile.FastGenByArgs(member.GetName())
 		}
 		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
 		req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
@@ -1216,11 +1215,11 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		res, err := s.httpClient.Do(req)
 		if err != nil {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
-			return errors.Errorf("failed to replicate to member %s", member.GetName())
+			return errs.ErrReplicateFile.Wrap(err).FastGenByArgs(member.GetName())
 		}
 		if res.StatusCode != http.StatusOK {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))
-			return errors.Errorf("failed to replicate to member %s", member.GetName())
+			return errs.ErrReplicateFile.FastGenByArgs(member.GetName())
 		}
 	}
 	return nil
