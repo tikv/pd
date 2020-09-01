@@ -25,7 +25,7 @@ var (
 
 // member errors
 var (
-	ErretcdLeaderNotFound = errors.Normalize("etcd leader not found", errors.RFCCodeText("PD:member:ErretcdLeaderNotFound"))
+	ErrEtcdLeaderNotFound = errors.Normalize("etcd leader not found", errors.RFCCodeText("PD:member:ErrEtcdLeaderNotFound"))
 	ErrMarshalLeader      = errors.Normalize("marshal leader failed", errors.RFCCodeText("PD:member:ErrMarshalLeader"))
 )
 
@@ -88,7 +88,7 @@ var (
 
 // etcd errors
 var (
-	ErrEtcdTxn                   = errors.Normalize("etcd Txn failed, %s", errors.RFCCodeText("PD:etcd:ErrEtcdKVSave"))
+	ErrEtcdTxn                   = errors.Normalize("etcd Txn failed, %s", errors.RFCCodeText("PD:etcd:ErrEtcdTxn"))
 	ErrEtcdKVPut                 = errors.Normalize("etcd KV put failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVPut"))
 	ErrEtcdKVDelete              = errors.Normalize("etcd KV delete failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVDelete"))
 	ErrEtcdKVGet                 = errors.Normalize("etcd KV get failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVGet"))
