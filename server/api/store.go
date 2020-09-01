@@ -155,7 +155,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	store := rc.GetStore(storeID)
 	if store == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID).Error())
 		return
 	}
 
@@ -353,7 +353,7 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 
 	store := rc.GetStore(storeID)
 	if store == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
+		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID).Error())
 		return
 	}
 
@@ -561,7 +561,7 @@ func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
 		if store == nil {
-			h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID))
+			h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID).Error())
 			return
 		}
 
