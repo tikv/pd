@@ -290,6 +290,22 @@ func (s *StoresStats) GetStoresKeysReadStat() map[uint64]float64 {
 	return res
 }
 
+func (s *StoresStats) storeIsUnhealthy(cluster core.StoreSetInformer, storeID uint64) bool {
+	store := cluster.GetStore(storeID)
+	return store.IsTombstone() || store.IsUnhealth()
+}
+
+// FilterUnhealthyStore filter unhealthy store
+func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
+	s.Lock()
+	defer s.Unlock()
+	for storeID := range s.rollingStoresStats {
+		if s.storeIsUnhealthy(cluster, storeID) {
+			delete(s.rollingStoresStats, storeID)
+		}
+	}
+}
+
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	sync.RWMutex

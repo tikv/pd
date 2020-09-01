@@ -16,6 +16,7 @@ package filter
 import (
 	"fmt"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
@@ -540,7 +541,9 @@ func (f *ruleFitFilter) Source(opt opt.Options, store *core.StoreInfo) bool {
 }
 
 func (f *ruleFitFilter) Target(opt opt.Options, store *core.StoreInfo) bool {
-	region := f.region.Clone(core.WithReplacePeerStore(f.oldStore, store.GetID()))
+	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
+		f.region.GetPeers(), f.region.GetLeader(),
+		core.WithReplacePeerStore(f.oldStore, store.GetID()))
 	newFit := f.fitter.FitRegion(region)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
@@ -583,8 +586,10 @@ func (f *ruleLeaderFitFilter) Target(opt opt.Options, store *core.StoreInfo) boo
 		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
 		return false
 	}
-	region := f.region.Clone(core.WithLeader(targetPeer))
-	newFit := f.fitter.FitRegion(region)
+	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
+		f.region.GetPeers(), f.region.GetLeader(),
+		core.WithLeader(targetPeer))
+	newFit := f.fitter.FitRegion(copyRegion)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
 
@@ -712,3 +717,29 @@ const (
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
 var allSpeicalEngines = []string{EngineTiFlash}
+
+// createRegionForRuleFit is used to create a clone region with RegionCreateOptions which is only used for
+// FitRegion in filter
+func createRegionForRuleFit(startKey, endKey []byte,
+	peers []*metapb.Peer, leader *metapb.Peer, opts ...core.RegionCreateOption) *core.RegionInfo {
+	copyLeader := &metapb.Peer{
+		Id:        leader.Id,
+		StoreId:   leader.StoreId,
+		IsLearner: leader.IsLearner,
+	}
+	copyPeers := make([]*metapb.Peer, 0, len(peers))
+	for _, p := range peers {
+		peer := &metapb.Peer{
+			Id:        p.Id,
+			StoreId:   p.StoreId,
+			IsLearner: p.IsLearner,
+		}
+		copyPeers = append(copyPeers, peer)
+	}
+	cloneRegion := core.NewRegionInfo(&metapb.Region{
+		StartKey: startKey,
+		EndKey:   endKey,
+		Peers:    copyPeers,
+	}, copyLeader, opts...)
+	return cloneRegion
+}

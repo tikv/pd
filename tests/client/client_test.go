@@ -661,7 +661,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 	c.Assert(min, Equals, uint64(3))
 
 	// Update only the TTL of the minimum safepoint
-	oldMinSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint()
+	oldMinSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(oldMinSsp.ServiceID, Equals, "c")
 	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
@@ -669,7 +669,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		"c", 2000, 3)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(3))
-	minSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint()
+	minSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))
@@ -680,7 +680,7 @@ func (s *testClientSuite) TestUpdateServiceGCSafePoint(c *C) {
 		"c", 1, 3)
 	c.Assert(err, IsNil)
 	c.Assert(min, Equals, uint64(3))
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint()
+	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(minSsp.ServiceID, Equals, "c")
 	c.Assert(oldMinSsp.SafePoint, Equals, uint64(3))

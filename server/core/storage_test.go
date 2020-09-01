@@ -244,7 +244,7 @@ func (s *testKVSuite) TestLoadMinServiceGCSafePoint(c *C) {
 		c.Assert(storage.SaveServiceGCSafePoint(ssp), IsNil)
 	}
 
-	ssp, err := storage.LoadMinServiceGCSafePoint()
+	ssp, err := storage.LoadMinServiceGCSafePoint(time.Now())
 	c.Assert(err, IsNil)
 	c.Assert(ssp.ServiceID, Equals, "2")
 	c.Assert(ssp.ExpiredAt, Equals, expireAt)

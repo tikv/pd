@@ -321,3 +321,13 @@ func (t *TimestampOracle) GetRespTS(count uint32) (pdpb.Timestamp, error) {
 	}
 	return resp, errors.New("can not get timestamp")
 }
+
+// Now returns the current tso time.
+func (t *TimestampOracle) Now() (time.Time, error) {
+	resp, err := t.GetRespTS(1)
+	if err != nil {
+		return time.Time{}, err
+	}
+	tm, _ := tsoutil.ParseTimestamp(resp)
+	return tm, nil
+}

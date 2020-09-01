@@ -90,6 +90,38 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+
+	stores := newTestStores(3)
+	for _, store := range stores {
+		storeStats := &pdpb.StoreStats{
+			StoreId:     store.GetID(),
+			Capacity:    100,
+			Available:   50,
+			RegionCount: 1,
+		}
+		c.Assert(cluster.putStoreLocked(store), IsNil)
+		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
+		c.Assert(cluster.storesStats.GetRollingStoreStats(store.GetID()), NotNil)
+	}
+
+	for _, store := range stores {
+		storeStats := &pdpb.StoreStats{
+			StoreId:     store.GetID(),
+			Capacity:    100,
+			Available:   50,
+			RegionCount: 1,
+		}
+		newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+		c.Assert(cluster.putStoreLocked(newStore), IsNil)
+		c.Assert(cluster.HandleStoreHeartbeat(storeStats), IsNil)
+		c.Assert(cluster.storesStats.GetRollingStoreStats(store.GetID()), IsNil)
+	}
+}
+
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
@@ -313,6 +345,34 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(region, DeepEquals, overlapRegion.GetMeta())
 	}
+}
+
+func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	processRegions := func(regions []*core.RegionInfo) {
+		for _, r := range regions {
+			cluster.processRegionHeartbeat(r)
+		}
+	}
+	regions = core.SplitRegions(regions)
+	processRegions(regions)
+	// update region
+	region := regions[0]
+	regions[0] = region.Clone(core.SetReadBytes(1000))
+	processRegions(regions)
+	newRegion := cluster.GetRegion(region.GetID())
+	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
+
+	// do not trace the flow changes
+	cluster.traceRegionFlow = false
+	processRegions([]*core.RegionInfo{region})
+	newRegion = cluster.GetRegion(region.GetID())
+	c.Assert(region.GetBytesRead(), Equals, uint64(0))
+	c.Assert(newRegion.GetBytesRead(), Not(Equals), uint64(0))
+
 }
 
 func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {

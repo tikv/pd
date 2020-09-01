@@ -99,6 +99,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit chan struct{}) {
 	var requests []*metapb.Region
 	var stats []*pdpb.RegionStat
+	var leaders []*metapb.Peer
 	ticker := time.NewTicker(syncerKeepAliveInterval)
 	for {
 		select {
@@ -108,6 +109,7 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 		case first := <-regionNotifier:
 			requests = append(requests, first.GetMeta())
 			stats := append(stats, first.GetStat())
+			leaders := append(leaders, first.GetLeader())
 			startIndex := s.history.GetNextIndex()
 			s.history.Record(first)
 			pending := len(regionNotifier)
@@ -115,13 +117,15 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 				region := <-regionNotifier
 				requests = append(requests, region.GetMeta())
 				stats = append(stats, region.GetStat())
+				leaders = append(leaders, region.GetLeader())
 				s.history.Record(region)
 			}
 			regions := &pdpb.SyncRegionResponse{
-				Header:      &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
-				Regions:     requests,
-				StartIndex:  startIndex,
-				RegionStats: stats,
+				Header:        &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+				Regions:       requests,
+				StartIndex:    startIndex,
+				RegionStats:   stats,
+				RegionLeaders: leaders,
 			}
 			s.broadcast(regions)
 		case <-ticker.C:
@@ -179,17 +183,24 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 			start := time.Now()
 			metas := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
 			stats := make([]*pdpb.RegionStat, 0, maxSyncRegionBatchSize)
+			leaders := make([]*metapb.Peer, 0, maxSyncRegionBatchSize)
 			for syncedIndex, r := range regions {
 				metas = append(metas, r.GetMeta())
 				stats = append(stats, r.GetStat())
+				leader := &metapb.Peer{}
+				if r.GetLeader() != nil {
+					leader = r.GetLeader()
+				}
+				leaders = append(leaders, leader)
 				if len(metas) < maxSyncRegionBatchSize && syncedIndex < len(regions)-1 {
 					continue
 				}
 				resp := &pdpb.SyncRegionResponse{
-					Header:      &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
-					Regions:     metas,
-					StartIndex:  uint64(lastIndex),
-					RegionStats: stats,
+					Header:        &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+					Regions:       metas,
+					StartIndex:    uint64(lastIndex),
+					RegionStats:   stats,
+					RegionLeaders: leaders,
 				}
 				s.limit.Wait(int64(resp.Size()))
 				lastIndex += len(metas)
@@ -213,15 +224,22 @@ func (s *RegionSyncer) syncHistoryRegion(request *pdpb.SyncRegionRequest, stream
 		zap.Int("records-length", len(records)))
 	regions := make([]*metapb.Region, len(records))
 	stats := make([]*pdpb.RegionStat, len(records))
+	leaders := make([]*metapb.Peer, len(records))
 	for i, r := range records {
 		regions[i] = r.GetMeta()
 		stats[i] = r.GetStat()
+		leader := &metapb.Peer{}
+		if r.GetLeader() != nil {
+			leader = r.GetLeader()
+		}
+		leaders[i] = leader
 	}
 	resp := &pdpb.SyncRegionResponse{
-		Header:      &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
-		Regions:     regions,
-		StartIndex:  startIndex,
-		RegionStats: stats,
+		Header:        &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+		Regions:       regions,
+		StartIndex:    startIndex,
+		RegionStats:   stats,
+		RegionLeaders: leaders,
 	}
 	return stream.Send(resp)
 }

@@ -410,9 +410,9 @@ func (s *Storage) LoadGCSafePoint() (uint64, error) {
 
 // ServiceSafePoint is the safepoint for a specific service
 type ServiceSafePoint struct {
-	ServiceID string
-	ExpiredAt int64
-	SafePoint uint64
+	ServiceID string `json:"service_id"`
+	ExpiredAt int64  `json:"expired_at"`
+	SafePoint uint64 `json:"safe_point"`
 }
 
 // SaveServiceGCSafePoint saves a GC safepoint for the service
@@ -433,7 +433,7 @@ func (s *Storage) RemoveServiceGCSafePoint(serviceID string) error {
 }
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
-func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
+func (s *Storage) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
 	prefix := path.Join(gcPath, "safe_point", "service")
 	// the next of 'e' is 'f'
 	prefixEnd := path.Join(gcPath, "safe_point", "servicf")
@@ -446,13 +446,12 @@ func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
 	}
 
 	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
-	now := time.Now().Unix()
 	for i, key := range keys {
 		ssp := &ServiceSafePoint{}
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
 		}
-		if ssp.ExpiredAt < now {
+		if ssp.ExpiredAt < now.Unix() {
 			s.Remove(key)
 			continue
 		}
@@ -462,6 +461,30 @@ func (s *Storage) LoadMinServiceGCSafePoint() (*ServiceSafePoint, error) {
 	}
 
 	return min, nil
+}
+
+// GetAllServiceGCSafePoints returns all services GC safepoints
+func (s *Storage) GetAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
+	prefix := path.Join(gcPath, "safe_point", "service") + "/"
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+	keys, values, err := s.LoadRange(prefix, prefixEnd, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return []*ServiceSafePoint{}, nil
+	}
+
+	ssps := make([]*ServiceSafePoint, 0, len(keys))
+	for i := range keys {
+		ssp := &ServiceSafePoint{}
+		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
+			return nil, err
+		}
+		ssps = append(ssps, ssp)
+	}
+
+	return ssps, nil
 }
 
 // LoadAllScheduleConfig loads all schedulers' config.
