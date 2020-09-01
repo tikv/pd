@@ -32,10 +32,6 @@ const (
 	slowRequestTime = 1 * time.Second
 )
 
-var (
-	errTxnFailed = errors.New("failed to commit transaction")
-)
-
 type etcdKVBase struct {
 	client   *clientv3.Client
 	rootPath string
@@ -97,7 +93,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 		return errs.ErrEtcdKVSave.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdKVSave.Wrap(errTxnFailed).GenWithStackByCause()
+		return errs.ErrEtcdTxnFailed.GenWithStackByArgs()
 	}
 	return nil
 }
@@ -111,7 +107,7 @@ func (kv *etcdKVBase) Remove(key string) error {
 		return errs.ErrEtcdKVRemove.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdKVRemove.Wrap(errTxnFailed).GenWithStackByCause()
+		return errs.ErrEtcdTxnFailed.GenWithStackByArgs()
 	}
 	return nil
 }

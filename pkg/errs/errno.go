@@ -110,6 +110,7 @@ var (
 // etcd errors
 var (
 	ErrCloseEtcdClient = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:etcd:ErrCloseEtcdClient"))
+	ErrEtcdTxnFailed   = errors.Normalize("failed to commit transaction", errors.RFCCodeText("PD:etcd:ErrEtcdTxnFailed"))
 )
 
 // strconv errors
@@ -124,7 +125,7 @@ var (
 
 // http errors
 var (
-	ErrNewHTTPRequest = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:cluster:ErrNewHTTPRequest"))
+	ErrNewHTTPRequest = errors.Normalize("new HTTP request failed", errors.RFCCodeText("PD:http:ErrNewHTTPRequest"))
 )
 
 // storage errors
@@ -140,7 +141,7 @@ var (
 // plugin errors
 var (
 	ErrLoadPlugin       = errors.Normalize("failed to load plugin", errors.RFCCodeText("PD:plugin:ErrLoadPlugin"))
-	ErrLookupPluginFunc = errors.Normalize("failed to lookup plugin fuction", errors.RFCCodeText("PD:plugin:ErrLookupPluginFunc"))
+	ErrLookupPluginFunc = errors.Normalize("failed to lookup plugin function", errors.RFCCodeText("PD:plugin:ErrLookupPluginFunc"))
 )
 
 // json errors

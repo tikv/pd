@@ -564,14 +564,23 @@ func (c *coordinator) removeScheduler(name string) error {
 
 	var err error
 	opt := c.cluster.opt
+
 	if err = opt.RemoveSchedulerCfg(s.Ctx(), name); err != nil {
-		return err
-	}
-	if err = opt.Persist(c.cluster.storage); err != nil {
+		log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		return err
 	}
 
-	return c.cluster.storage.RemoveScheduleConfig(name)
+	if err = opt.Persist(c.cluster.storage); err != nil {
+		log.Error("the option can not persist scheduler config", errs.ZapError(err))
+		return err
+	}
+
+	if err = c.cluster.storage.RemoveScheduleConfig(name); err != nil {
+		log.Error("can not remove the scheduler config", errs.ZapError(err))
+		return err
+	}
+
+	return nil
 }
 
 func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {

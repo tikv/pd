@@ -111,10 +111,11 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	}
 
 	if err != nil {
+		log.Error("load from etcd meet error", zap.String("key", key), errs.ZapError(errs.ErrLoadValue, err))
 		return resp, errs.ErrLoadValue.Wrap(err).GenWithStackByCause()
 	}
 
-	return resp, errors.WithStack(err)
+	return resp, nil
 }
 
 // GetValue gets value with key from etcd.
