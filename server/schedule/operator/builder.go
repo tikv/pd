@@ -305,9 +305,6 @@ func (b *Builder) prepareBuild() (string, error) {
 			if !core.IsLearner(n) {
 				// learner -> voter
 				b.toPromote.Set(n)
-			} else {
-				// keep learner
-				// do nothing
 			}
 		} else {
 			if core.IsLearner(n) {
@@ -318,9 +315,6 @@ func (b *Builder) prepareBuild() (string, error) {
 					b.toRemove.Set(o)
 					// Need to add `b.toAdd.Set(n)` in the later targetPeers loop
 				}
-			} else {
-				// keep voter
-				// do nothing
 			}
 		}
 	}
@@ -619,7 +613,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 		b.execTransferLeader(b.targetLeaderStoreID)
 	}
 	// Leave
-	b.steps = append(b.steps, ChangePeerV2Leave{PromoteLearners: step.PromoteLearners, DemoteVoters: step.DemoteVoters})
+	b.steps = append(b.steps, ChangePeerV2Leave(step))
 }
 
 // check if a peer can become leader.

@@ -14,7 +14,7 @@
 package testutil
 
 import (
-	. "github.com/pingcap/check"
+	. "github.com/pingcap/check" //nolint:stylecheck
 	"github.com/tikv/pd/server/schedule/operator"
 )
 

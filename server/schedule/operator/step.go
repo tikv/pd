@@ -711,7 +711,7 @@ func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 // CheckSafety checks if the step meets the safety properties.
 func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
 	inJointState, notInJointState, demoteLeader := false, false, false
-	leaderStoreId := region.GetLeader().StoreId
+	leaderStoreID := region.GetLeader().StoreId
 
 	for _, pl := range cpl.PromoteLearners {
 		peer := region.GetStorePeer(pl.ToStore)
@@ -737,7 +737,7 @@ func (cpl ChangePeerV2Leave) CheckSafety(region *core.RegionInfo) error {
 			notInJointState = true
 		case metapb.PeerRole_DemotingVoter:
 			inJointState = true
-			if peer.StoreId == leaderStoreId {
+			if peer.StoreId == leaderStoreID {
 				demoteLeader = true
 			}
 		default:
