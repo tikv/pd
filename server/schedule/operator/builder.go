@@ -358,6 +358,8 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 
+	b.currentPeers, b.currentLeaderStoreID = b.originPeers.Copy(), b.originLeaderStoreID
+
 	if b.targetLeaderStoreID != 0 && !b.allowLeader(b.targetPeers[b.targetLeaderStoreID]) {
 		return "", errors.New("cannot create operator: target leader is not allowed")
 	}
@@ -367,7 +369,6 @@ func (b *Builder) prepareBuild() (string, error) {
 		b.useJointConsensus = false
 	}
 
-	b.currentPeers, b.currentLeaderStoreID = b.originPeers.Copy(), b.originLeaderStoreID
 	b.peerAddStep = make(map[uint64]int)
 
 	return b.brief(), nil
@@ -389,7 +390,7 @@ func (b *Builder) brief() string {
 	case len(b.toPromote) > 0:
 		return fmt.Sprintf("promote peer: store %s", b.toPromote)
 	case len(b.toDemote) > 0:
-		return fmt.Sprintf("demote peer: store %s", b.toPromote)
+		return fmt.Sprintf("demote peer: store %s", b.toDemote)
 	case b.originLeaderStoreID != b.targetLeaderStoreID:
 		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
 	default:

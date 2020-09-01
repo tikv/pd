@@ -21,16 +21,26 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-type testJointStateCheckerSuite struct{}
-
 var _ = Suite(&testJointStateCheckerSuite{})
 
+type testJointStateCheckerSuite struct {
+	cluster *mockcluster.Cluster
+	jsc     *JointStateChecker
+}
+
+func (s *testJointStateCheckerSuite) SetUpTest(c *C) {
+	s.cluster = mockcluster.NewCluster(mockoption.NewScheduleOptions())
+	s.jsc = NewJointStateChecker(s.cluster)
+	for id := uint64(1); id <= 10; id++ {
+		s.cluster.PutStoreWithLabels(id)
+	}
+}
+
 func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
-	cluster := mockcluster.NewCluster(mockoption.NewScheduleOptions())
-	jsc := NewJointStateChecker(cluster)
+	jsc := s.jsc
 	type testCase struct {
-		Peers   []*metapb.Peer // first is leader
-		Checker Checker
+		Peers []*metapb.Peer // first is leader
+		OpLen int
 	}
 	cases := []testCase{
 		{
@@ -39,7 +49,7 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
 			},
-			NotNil,
+			1,
 		},
 		{
 			[]*metapb.Peer{
@@ -47,7 +57,7 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
 			},
-			NotNil,
+			1,
 		},
 		{
 			[]*metapb.Peer{
@@ -55,7 +65,15 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
 			},
-			NotNil,
+			1,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 101, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+				{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			2,
 		},
 		{
 			[]*metapb.Peer{
@@ -63,7 +81,7 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_Voter},
 			},
-			IsNil,
+			0,
 		},
 		{
 			[]*metapb.Peer{
@@ -71,16 +89,18 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 				{Id: 102, StoreId: 2, Role: metapb.PeerRole_Voter},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_Learner},
 			},
-			IsNil,
+			0,
 		},
 	}
 
 	for _, tc := range cases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.Peers}, tc.Peers[0])
 		op := jsc.Check(region)
-		c.Assert(op, tc.Checker)
-		if op != nil {
+		if tc.OpLen == 0 {
+			c.Assert(op, IsNil)
+		} else {
 			c.Assert(op.Desc(), Equals, "leave-joint-state")
+			c.Assert(op.Len(), Equals, tc.OpLen)
 		}
 	}
 }
