@@ -23,7 +23,7 @@ import (
 var (
 	tablePrefix  = []byte{'t'}
 	metaPrefix   = []byte{'m'}
-	recordPrefix = []byte{'r'}
+	recordPrefix = []byte("_r")
 )
 
 const (
