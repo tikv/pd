@@ -335,8 +335,9 @@ func (r *RegionScatterer) selectAvailableLeaderStores(group string, peers map[ui
 	}
 	m = uint64(math.MaxUint64)
 	id := uint64(0)
+	// select the store which have the least leader count in total from candidates
 	for storeID := range tableLeaderStoreCandidates {
-		count := context.selectedLeader.get(storeID, group)
+		count := context.selectedLeader.get(storeID, "")
 		if m > count {
 			m = count
 			id = storeID
