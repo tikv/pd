@@ -16,6 +16,7 @@ package errs
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -126,4 +127,19 @@ func (s *testErrorSuite) TestZapError(c *C) {
 	err1 := ErrSchedulerNotFound
 	log.Info("test", ZapError(err1))
 	log.Info("test", ZapError(err1, err))
+}
+
+func (s *testErrorSuite) TestErrorWithStack(c *C) {
+	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
+	lg := newZapTestLogger(conf)
+	log.ReplaceGlobals(lg.Logger, nil)
+
+	_, err := strconv.ParseUint("-42", 10, 64)
+	log.Error("test", ZapError(ErrStrconvParseInt.Wrap(err).GenWithStackByCause()))
+	m1 := lg.Message()
+	log.Error("test", zap.Error(errors.WithStack(err)))
+	m2 := lg.Message()
+	// This test is based on line number and the first log is in line 141, the second is in line 142.
+	// So they have the same length stack. Move this test to another place need to change the corresponding length.
+	c.Assert(len(m1[strings.Index(m1, "[stack="):]), Equals, len(m2[strings.Index(m2, "[stack="):]))
 }

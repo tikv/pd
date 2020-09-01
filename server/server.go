@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -568,11 +569,11 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
 	err = s.storage.SaveRegion(req.GetRegion())
 	if err != nil {
-		log.Warn("save the bootstrap region failed", zap.Error(err))
+		log.Warn("save the bootstrap region failed", errs.ZapError(err))
 	}
 	err = s.storage.Flush()
 	if err != nil {
-		log.Warn("flush the bootstrap region failed", zap.Error(err))
+		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
 	}
 
 	if err := s.cluster.Start(s); err != nil {
@@ -1041,7 +1042,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	if cluster != nil {
 		err := cluster.GetReplicationMode().UpdateConfig(cfg)
 		if err != nil {
-			log.Warn("failed to update replication mode", zap.Error(err))
+			log.Warn("failed to update replication mode", errs.ZapError(err))
 			// revert to old config
 			// NOTE: since we can't put the 2 storage mutations in a batch, it
 			// is possible that memory and persistent data become different
@@ -1221,7 +1222,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 	for _, member := range resp.Members {
 		clientUrls := member.GetClientUrls()
 		if len(clientUrls) == 0 {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
 			return errors.Errorf("failed to replicate to member %s: clientUrls is empty", member.GetName())
 		}
 		url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
@@ -1229,7 +1230,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		req.Header.Set("PD-Allow-follower-handle", "true")
 		res, err := s.httpClient.Do(req)
 		if err != nil {
-			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
+			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
 			return errors.Errorf("failed to replicate to member %s", member.GetName())
 		}
 		if res.StatusCode != http.StatusOK {

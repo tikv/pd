@@ -132,14 +132,14 @@ func (m *Member) GetLeaderPath() string {
 // CheckLeader checks returns true if it is needed to check later.
 func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 	if m.GetEtcdLeader() == 0 {
-		log.Error("no etcd leader, check leader later")
+		log.Error("no etcd leader, check pd leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}
 
 	leader, rev, err := getLeader(m.client, m.GetLeaderPath())
 	if err != nil {
-		log.Error("getting pd leader meets error", errs.ZapError(errs.ErrGetLeader, err))
+		log.Error("getting pd leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}
@@ -149,7 +149,7 @@ func (m *Member) CheckLeader(name string) (*pdpb.Member, int64, bool) {
 			// in previous CampaignLeader. we can delete and campaign again.
 			log.Warn("the leader has not changed, delete and campaign again", zap.Stringer("old-leader", leader))
 			if err = m.deleteLeaderKey(); err != nil {
-				log.Error("deleting pd leader key meets error", errs.ZapError(errs.ErrDeleteLeaderKey, err))
+				log.Error("deleting pd leader key meets error", errs.ZapError(err))
 				time.Sleep(200 * time.Millisecond)
 				return nil, 0, true
 			}
@@ -166,18 +166,18 @@ func (m *Member) CheckPriority(ctx context.Context) {
 	}
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
-		log.Error("failed to load leader priority", errs.ZapError(errs.ErrLoadLeaderPriority, err))
+		log.Error("failed to load leader priority", errs.ZapError(err))
 		return
 	}
 	leaderPriority, err := m.GetMemberLeaderPriority(etcdLeader)
 	if err != nil {
-		log.Error("failed to load etcd leader priority", errs.ZapError(errs.ErrLoadetcdLeaderPriority, err))
+		log.Error("failed to load etcd leader priority", errs.ZapError(err))
 		return
 	}
 	if myPriority > leaderPriority {
 		err := m.MoveEtcdLeader(ctx, etcdLeader, m.ID())
 		if err != nil {
-			log.Error("failed to transfer etcd leader", errs.ZapError(errs.ErrTransferetcdLeader, err))
+			log.Error("failed to transfer etcd leader", errs.ZapError(err))
 		} else {
 			log.Info("transfer etcd leader",
 				zap.Uint64("from", etcdLeader),
@@ -190,7 +190,11 @@ func (m *Member) CheckPriority(ctx context.Context) {
 func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
 	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
 	defer cancel()
-	return errors.WithStack(m.etcd.Server.MoveLeader(moveCtx, old, new))
+	err := m.etcd.Server.MoveLeader(moveCtx, old, new)
+	if err != nil {
+		return errs.ErrEtcdMoveLeader.Wrap(err).GenWithStackByCause()
+	}
+	return nil
 }
 
 // getLeader gets server leader from etcd.
@@ -328,7 +332,7 @@ func (m *Member) GetMemberLeaderPriority(id uint64) (int, error) {
 	}
 	priority, err := strconv.ParseInt(string(res.Kvs[0].Value), 10, 32)
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, errs.ErrStrconvParseInt.Wrap(err).GenWithStackByCause()
 	}
 	return int(priority), nil
 }

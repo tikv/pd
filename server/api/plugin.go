@@ -14,11 +14,11 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 	"os"
 	"strings"
 
+	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"

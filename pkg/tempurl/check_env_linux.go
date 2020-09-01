@@ -17,13 +17,13 @@ package tempurl
 import (
 	"github.com/cakturk/go-netstat/netstat"
 	"github.com/pingcap/log"
-	"go.uber.org/zap"
+	"github.com/tikv/pd/pkg/errs"
 )
 
 func environmentCheck(addr string) bool {
 	valid, err := checkAddr(addr[len("http://"):])
 	if err != nil {
-		log.Error("check port status failed", zap.Error(err))
+		log.Error("check port status failed", errs.ZapError(err))
 		return false
 	}
 	return valid
@@ -34,7 +34,7 @@ func checkAddr(addr string) (bool, error) {
 		return s.RemoteAddr.String() == addr || s.LocalAddr.String() == addr
 	})
 	if err != nil {
-		return false, err
+		return false, errs.ErrNetstatTCPSocks.Wrap(err).FastGenWithCause()
 	}
 	return len(tabs) < 1, nil
 }

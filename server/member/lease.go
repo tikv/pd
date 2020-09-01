@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -116,7 +117,7 @@ func (l *LeaderLease) keepAliveWorker(ctx context.Context, interval time.Duratio
 				defer cancel()
 				res, err := l.lease.KeepAliveOnce(ctx1, l.ID)
 				if err != nil {
-					log.Warn("leader lease keep alive failed", zap.Error(err))
+					log.Warn("leader lease keep alive failed", errs.ZapError(err))
 					return
 				}
 				if res.TTL > 0 {

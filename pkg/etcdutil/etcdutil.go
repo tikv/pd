@@ -22,6 +22,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver"
 	"go.etcd.io/etcd/pkg/types"
@@ -61,7 +62,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Co
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
-			log.Error("failed to get cluster from remote", zap.Error(gerr))
+			log.Error("failed to get cluster from remote", errs.ZapError(errs.ErrEtcdGetCluster, gerr))
 			continue
 		}
 
@@ -104,14 +105,16 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 
 	start := time.Now()
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
-	if err != nil {
-		log.Error("load from etcd meet error", zap.Error(err))
-	}
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
-		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), zap.Error(err))
+		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), errs.ZapError(err))
 	}
 
-	return resp, errors.WithStack(err)
+	if err != nil {
+		e := errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
+		log.Error("load from etcd meet error", zap.String("key", key), errs.ZapError(e))
+		return resp, e
+	}
+	return resp, nil
 }
 
 // GetValue gets value with key from etcd.
@@ -135,7 +138,7 @@ func get(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.G
 	if n := len(resp.Kvs); n == 0 {
 		return nil, nil
 	} else if n > 1 {
-		return nil, errors.Errorf("invalid get value resp %v, must only one", resp.Kvs)
+		return nil, errs.ErrEtcdKVGetResponse.FastGenByArgs(resp.Kvs)
 	}
 	return resp, nil
 }
@@ -151,7 +154,7 @@ func GetProtoMsgWithModRev(c *clientv3.Client, key string, msg proto.Message, op
 	}
 	value := resp.Kvs[0].Value
 	if err = proto.Unmarshal(value, msg); err != nil {
-		return false, 0, errors.WithStack(err)
+		return false, 0, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	return true, resp.Kvs[0].ModRevision, nil
 }

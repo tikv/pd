@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -58,7 +59,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	for _, rf := range fit.RuleFits {
 		op, err := c.fixRulePeer(region, fit, rf)
 		if err != nil {
-			log.Debug("fail to fix rule peer", zap.Error(err), zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID))
+			log.Debug("fail to fix rule peer", zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID), errs.ZapError(err))
 			break
 		}
 		if op != nil {
@@ -67,7 +68,7 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 	op, err := c.fixOrphanPeers(region, fit)
 	if err != nil {
-		log.Debug("fail to fix orphan peer", zap.Error(err))
+		log.Debug("fail to fix orphan peer", errs.ZapError(err))
 		return nil
 	}
 	return op

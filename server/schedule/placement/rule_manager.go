@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
@@ -84,22 +85,22 @@ func (m *RuleManager) loadRules() error {
 	_, err := m.store.LoadRules(func(k, v string) {
 		var r Rule
 		if err := json.Unmarshal([]byte(v), &r); err != nil {
-			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if err := m.adjustRule(&r); err != nil {
-			log.Error("rule is in bad format", zap.Error(err), zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if _, ok := m.rules[r.Key()]; ok {
-			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
 		}
 		if k != r.StoreKey() {
-			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v))
+			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			toSave = append(toSave, &r)
 		}
@@ -126,11 +127,11 @@ func (m *RuleManager) adjustRule(r *Rule) error {
 	var err error
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
-		return errors.Wrap(err, "start key is not hex format")
+		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
 	}
 	r.EndKey, err = hex.DecodeString(r.EndKeyHex)
 	if err != nil {
-		return errors.Wrap(err, "end key is not hex format")
+		return errs.ErrHexDecodingString.FastGenByArgs(r.EndKeyHex)
 	}
 	if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
 		return errors.New("endKey should be greater than startKey")
