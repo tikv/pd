@@ -320,5 +320,5 @@ func (h *schedulerConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		sh.ServeHTTP(w, r)
 		return
 	}
-	h.rd.JSON(w, http.StatusNotAcceptable, errNoImplement)
+	h.rd.JSON(w, http.StatusNotAcceptable, errNoImplement.Error())
 }
