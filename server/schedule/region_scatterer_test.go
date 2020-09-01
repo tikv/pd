@@ -12,6 +12,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 type sequencer struct {
@@ -78,6 +79,7 @@ func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
 func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 
 	// Add ordinary stores.
 	for i := uint64(1); i <= numStores; i++ {
@@ -132,6 +134,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpecialStores, numRegions uint64) {
 	opt := mockoption.NewScheduleOptions()
 	tc := mockcluster.NewCluster(opt)
+	tc.DisableFeature(versioninfo.JointConsensus)
 
 	// Add ordinary stores.
 	for i := uint64(1); i <= numOrdinaryStores; i++ {
