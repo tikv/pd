@@ -15,11 +15,8 @@ package schedulers
 
 import (
 	"context"
-<<<<<<< HEAD
-=======
 	"testing"
 
->>>>>>> ef1a4e9... test: add testing.T in schedulers  (#2792)
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -34,18 +31,10 @@ import (
 	"github.com/tikv/pd/server/statistics"
 )
 
-<<<<<<< HEAD
-=======
-const (
-	KB = 1024
-	MB = 1024 * KB
-)
-
 func Test(t *testing.T) {
 	TestingT(t)
 }
 
->>>>>>> ef1a4e9... test: add testing.T in schedulers  (#2792)
 var _ = Suite(&testShuffleLeaderSuite{})
 
 type testShuffleLeaderSuite struct{}
