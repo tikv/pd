@@ -299,7 +299,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
 			if err := handler.config.cluster.BlockStore(id); err != nil {
-				handler.rd.JSON(w, http.StatusInternalServerError, err)
+				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
@@ -316,7 +316,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.config.BuildWithArgs(args)
 	err := handler.config.Persist()
 	if err != nil {
-		handler.rd.JSON(w, http.StatusInternalServerError, err)
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
@@ -340,15 +340,15 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	if succ {
 		err = handler.config.Persist()
 		if err != nil {
-			handler.rd.JSON(w, http.StatusInternalServerError, err)
+			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if last {
 			if err := handler.config.cluster.RemoveScheduler(EvictLeaderName); err != nil {
 				if err == ErrSchedulerNotFound {
-					handler.rd.JSON(w, http.StatusNotFound, err)
+					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {
-					handler.rd.JSON(w, http.StatusInternalServerError, err)
+					handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				}
 				return
 			}
@@ -358,7 +358,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	handler.rd.JSON(w, http.StatusNotFound, ErrScheduleConfigNotExist)
+	handler.rd.JSON(w, http.StatusNotFound, ErrScheduleConfigNotExist.Error())
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
