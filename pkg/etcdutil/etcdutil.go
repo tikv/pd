@@ -110,7 +110,9 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	}
 
 	if err != nil {
-		return resp, errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
+		e := errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
+		log.Error("load from etcd meet error", zap.String("key", key), errs.ZapError(e))
+		return resp, e
 	}
 	return resp, nil
 }
@@ -136,7 +138,7 @@ func get(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.G
 	if n := len(resp.Kvs); n == 0 {
 		return nil, nil
 	} else if n > 1 {
-		return nil, errors.Errorf("invalid get value resp %v, must only one", resp.Kvs)
+		return nil, errs.ErrEtcdKVGetResponse.FastGenByArgs(resp.Kvs)
 	}
 	return resp, nil
 }
@@ -152,7 +154,7 @@ func GetProtoMsgWithModRev(c *clientv3.Client, key string, msg proto.Message, op
 	}
 	value := resp.Kvs[0].Value
 	if err = proto.Unmarshal(value, msg); err != nil {
-		return false, 0, errors.WithStack(err)
+		return false, 0, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	return true, resp.Kvs[0].ModRevision, nil
 }

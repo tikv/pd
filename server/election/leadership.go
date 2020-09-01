@@ -34,7 +34,7 @@ func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, erro
 	leader := &pdpb.Member{}
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(c, leaderPath, leader)
 	if err != nil {
-		return nil, 0, errs.ErrEtcdGetProtoMsgWithModRev.Wrap(err).FastGenWithCause()
+		return nil, 0, err
 	}
 	if !ok {
 		return nil, 0, nil
@@ -141,7 +141,7 @@ func (ls *Leadership) DeleteLeader() error {
 		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxn.FastGenByArgs("not leader already")
+		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	return nil
