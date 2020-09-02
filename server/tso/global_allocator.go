@@ -104,7 +104,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 				continue
 			}
 			log.Error("invalid timestamp", zap.Any("timestamp", current), errs.ZapError(errs.ErrInvalidTimestamp))
-			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("may be not leader")
+			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 
 		resp.Physical = current.physical.UnixNano() / int64(time.Millisecond)
@@ -119,7 +119,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		}
 		// In case lease expired after the first check.
 		if !gta.leadership.Check() {
-			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("may be not leader")
+			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd leader")
 		}
 		return resp, nil
 	}
