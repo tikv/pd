@@ -104,7 +104,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
-			log.Error("invalid timestamp", zap.Any("timestamp", current), zap.Error(errs.ErrInvalidTimestamp.FastGenByArgs()))
+			log.Error("invalid timestamp", zap.Any("timestamp", current), errs.ZapError(errs.ErrInvalidTimestamp))
 			return pdpb.Timestamp{}, errors.New("can not get timestamp, may be not leader")
 		}
 
@@ -113,7 +113,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		if resp.Logical >= maxLogical {
 			log.Error("logical part outside of max logical interval, please check ntp time",
 				zap.Reflect("response", resp),
-				zap.Int("retry-count", i), zap.Error(errs.ErrLogicOverflow.FastGenByArgs()))
+				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			tsoCounter.WithLabelValues("logical_overflow").Inc()
 			time.Sleep(UpdateTimestampStep)
 			continue

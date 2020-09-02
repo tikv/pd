@@ -18,6 +18,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -150,7 +151,7 @@ func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 	newPeer := &metapb.Peer{StoreId: target}
 	op, err := operator.CreateAddPeerOperator("make-up-replica", r.cluster, region, newPeer, operator.OpReplica)
 	if err != nil {
-		log.Debug("create make-up-replica operator fail", zap.Error(err))
+		log.Debug("create make-up-replica operator fail", errs.ZapError(err))
 		return nil
 	}
 	return op
