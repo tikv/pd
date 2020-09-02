@@ -267,7 +267,7 @@ func (m *RuleManager) FitRegion(stores StoreSet, region *core.RegionInfo) *Regio
 }
 
 func (m *RuleManager) beginPatch() *ruleConfigPatch {
-	return m.beginPatch()
+	return m.ruleConfig.beginPatch()
 }
 
 func (m *RuleManager) tryCommitPatch(patch *ruleConfigPatch) error {
