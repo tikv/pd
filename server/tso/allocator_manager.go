@@ -126,11 +126,11 @@ func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
 
 func (am *AllocatorManager) getAllocatorGroups() []*allocatorGroup {
 	am.RLock()
+	defer am.RUnlock()
 	allocatorGroups := make([]*allocatorGroup, 0, len(am.allocatorGroups))
 	for _, ag := range am.allocatorGroups {
 		allocatorGroups = append(allocatorGroups, ag)
 	}
-	am.RUnlock()
 	return allocatorGroups
 }
 
@@ -156,7 +156,7 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 	}
 }
 
-// updateAllocator is used to update the allocator in the group
+// updateAllocator is used to update the allocator in the group.
 func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 	defer am.wg.Done()
 	select {
@@ -173,6 +173,8 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 		return
 	}
 	if !ag.leadership.Check() {
+		log.Info("allocator doesn't campaign leadership yet", zap.String("dc-location", ag.dcLocation))
+		time.Sleep(200 * time.Millisecond)
 		return
 	}
 	if err := ag.allocator.UpdateTSO(); err != nil {

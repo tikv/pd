@@ -474,7 +474,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
-	go s.allocatorLoop()
+	go s.tsoAllocatorLoop()
 }
 
 func (s *Server) stopServerLoop() {
@@ -499,7 +499,8 @@ func (s *Server) serverMetricsLoop() {
 	}
 }
 
-func (s *Server) allocatorLoop() {
+// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
+func (s *Server) tsoAllocatorLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
