@@ -1215,7 +1215,7 @@ func (s *Server) ReplicateFileToAllMembers(ctx context.Context, name string, dat
 		res, err := s.httpClient.Do(req)
 		if err != nil {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Error(err))
-			return errs.ErrReplicateFile.Wrap(err).FastGenByArgs(member.GetName())
+			return errs.ErrReplicateFile.Wrap(err).GenWithStackByCause(member.GetName())
 		}
 		if res.StatusCode != http.StatusOK {
 			log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), zap.Int("status-code", res.StatusCode))

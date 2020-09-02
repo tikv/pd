@@ -16,6 +16,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/tikv/pd/pkg/errs"
 	"io"
 	"strconv"
 	"sync/atomic"
@@ -395,7 +396,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 
 		region := core.RegionFromHeartbeat(request)
 		if region.GetLeader() == nil {
-			log.Error("invalid request, the leader is nil", zap.Reflect("request", request))
+			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), zap.Error(errs.ErrLeaderNil))
 			continue
 		}
 		if region.GetID() == 0 {

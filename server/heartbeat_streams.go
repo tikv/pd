@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"github.com/tikv/pd/pkg/errs"
 	"strconv"
 	"sync"
 	"time"
@@ -87,7 +88,7 @@ func (s *heartbeatStreams) run() {
 			if store == nil {
 				log.Error("failed to get store",
 					zap.Uint64("region-id", msg.RegionId),
-					zap.Uint64("store-id", storeID))
+					zap.Uint64("store-id", storeID), zap.Error(errs.ErrStoreNotFound))
 				delete(s.streams, storeID)
 				continue
 			}
@@ -111,7 +112,7 @@ func (s *heartbeatStreams) run() {
 			for storeID, stream := range s.streams {
 				store := s.cluster.GetStore(storeID)
 				if store == nil {
-					log.Error("failed to get store", zap.Uint64("store-id", storeID))
+					log.Error("failed to get store", zap.Uint64("store-id", storeID), zap.Error(errs.ErrStoreNotFound))
 					delete(s.streams, storeID)
 					continue
 				}
