@@ -527,13 +527,16 @@ func loadProto(s kv.Base, key string, msg proto.Message) (bool, error) {
 		return false, nil
 	}
 	err = proto.Unmarshal([]byte(value), msg)
-	return true, errors.WithStack(err)
+	if err != nil {
+		return false, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return true, nil
 }
 
 func saveProto(s kv.Base, key string, msg proto.Message) error {
 	value, err := proto.Marshal(msg)
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
 	}
 	return s.Save(key, string(value))
 }
