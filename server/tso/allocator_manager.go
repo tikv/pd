@@ -29,6 +29,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// GlobalDCLocation is the Global TSO Allocator's dc-location label.
+const GlobalDCLocation = "global"
+
 type allocatorGroup struct {
 	dcLocation string
 	// allocator's parent ctx and cancel function, which is to
@@ -84,7 +87,7 @@ func NewAllocatorManager(etcd *embed.Etcd, client *clientv3.Client, rootPath str
 
 func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
 	// For backward compatibility, the global timestamp's store path will still use the old one
-	if dcLocation == "global" {
+	if dcLocation == GlobalDCLocation {
 		return am.rootPath
 	}
 	return path.Join(am.rootPath, dcLocation)
@@ -95,7 +98,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, parentCanc
 	am.Lock()
 	defer am.Unlock()
 	switch dcLocation {
-	case "global":
+	case GlobalDCLocation:
 		am.allocatorGroups[dcLocation] = &allocatorGroup{
 			dcLocation:   dcLocation,
 			parentCtx:    parentCtx,
@@ -104,7 +107,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, parentCanc
 			allocator:    NewGlobalTSOAllocator(leadership, am.getAllocatorPath(dcLocation), am.saveInterval, am.maxResetTSGap),
 		}
 		if err := am.allocatorGroups[dcLocation].allocator.Initialize(); err != nil {
-			return errs.ErrSetAllocator.FastGenByArgs(err)
+			return err
 		}
 		am.allocatorGroups[dcLocation].isInitialized = true
 	default:
@@ -190,7 +193,7 @@ func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (p
 	defer am.RUnlock()
 	allocatorGroup, exist := am.allocatorGroups[dcLocation]
 	if !exist {
-		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, can not get timestamp", dcLocation))
+		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
 		return pdpb.Timestamp{}, err
 	}
 	return allocatorGroup.allocator.GenerateTSO(count)

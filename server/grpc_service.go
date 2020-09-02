@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -91,7 +92,7 @@ func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.tsoAllocatorManager.HandleTSORequest("global", count)
+		ts, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
@@ -776,7 +777,7 @@ func (s *Server) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.Upd
 		}
 	}
 
-	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest("global", 1)
+	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
 	if err != nil {
 		return nil, err
 	}
