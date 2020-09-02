@@ -1334,8 +1334,6 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 
 // IsFeatureSupported checks if the feature is supported by current cluster.
 func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
-	c.RLock()
-	defer c.RUnlock()
 	clusterVersion := *c.opt.GetClusterVersion()
 	minSupportVersion := *versioninfo.MinSupportedVersion(f)
 	// For features before version 5.0 (such as BatchSplit), strict version checks are performed according to the
