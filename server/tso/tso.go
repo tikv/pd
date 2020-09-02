@@ -66,7 +66,7 @@ func (t *timestampOracle) getTimestampPath() string {
 func (t *timestampOracle) loadTimestamp() (time.Time, error) {
 	data, err := etcdutil.GetValue(t.client, t.getTimestampPath())
 	if err != nil {
-		return typeutil.ZeroTime, errs.ErrEtcdKVGet.Wrap(err).FastGenWithCause()
+		return typeutil.ZeroTime, err
 	}
 	if len(data) == 0 {
 		return typeutil.ZeroTime, nil
