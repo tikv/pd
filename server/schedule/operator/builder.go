@@ -644,11 +644,7 @@ func (b *Builder) hasAbilityLeader(peer *metapb.Peer) bool {
 		return true
 	}
 	store := b.cluster.GetStore(peer.StoreId)
-	if store == nil {
-		return false
-	}
-
-	return true
+	return store != nil
 }
 
 // check if the peer is allowed to become the leader.
