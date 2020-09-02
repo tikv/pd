@@ -126,3 +126,4 @@ to learn how to set up the cluster and run them.
 
 You can also use [Docker](https://pingcap.com/docs/dev/how-to/deploy/orchestrated/docker/#deploy-tidb-using-docker)
 to run the cluster.
+
