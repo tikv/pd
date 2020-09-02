@@ -20,7 +20,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -111,10 +110,10 @@ func (t *TimestampOracle) saveTimestamp(ts time.Time) error {
 	txn := kv.NewSlowLogTxn(t.client).If(append([]clientv3.Cmp{}, clientv3.Compare(clientv3.Value(leaderPath), "=", t.member))...)
 	resp, err := txn.Then(clientv3.OpPut(key, string(data))).Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errors.New("save timestamp failed, maybe we lost leader")
+		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	t.lastSavedTime.Store(ts)
@@ -170,7 +169,7 @@ func (t *TimestampOracle) SyncTimestamp(lease *member.LeaderLease) error {
 func (t *TimestampOracle) ResetUserTimestamp(tso uint64) error {
 	if !t.checkLease() {
 		tsoCounter.WithLabelValues("err_lease_reset_ts").Inc()
-		return errors.New("Setup timestamp failed, lease expired")
+		return errs.ErrResetUserTimestamp.FastGenByArgs("lease expired")
 	}
 	physical, _ := tsoutil.ParseTS(tso)
 	next := physical.Add(time.Millisecond)
@@ -179,12 +178,12 @@ func (t *TimestampOracle) ResetUserTimestamp(tso uint64) error {
 	// do not update
 	if typeutil.SubTimeByWallClock(next, prev.physical) <= 3*updateTimestampGuard {
 		tsoCounter.WithLabelValues("err_reset_small_ts").Inc()
-		return errors.New("the specified ts too small than now")
+		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts too small than now")
 	}
 
 	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.maxResetTSGap() {
 		tsoCounter.WithLabelValues("err_reset_large_ts").Inc()
-		return errors.New("the specified ts too large than now")
+		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts too large than now")
 	}
 
 	save := next.Add(t.saveInterval)
