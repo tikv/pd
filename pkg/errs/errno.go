@@ -145,11 +145,6 @@ var (
 	ErrHexDecodingString = errors.Normalize("decode string %s error", errors.RFCCodeText("PD:hex:ErrHexDecodingString"))
 )
 
-// storage errors
-var (
-	ErrStorageLoadRange = errors.Normalize("failed to load range from storage", errors.RFCCodeText("PD:storage:ErrStorageLoadRange"))
-)
-
 // filepath errors
 var (
 	ErrFilePathAbs = errors.Normalize("failed to convert a path to absolute path", errors.RFCCodeText("PD:filepath:ErrFilePathAbs"))
