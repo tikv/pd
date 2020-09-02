@@ -592,7 +592,7 @@ func (b *Builder) execAddPeer(peer *metapb.Peer) {
 }
 
 func (b *Builder) execRemovePeer(peer *metapb.Peer) {
-	b.steps = append(b.steps, RemovePeer{FromStore: peer.StoreId})
+	b.steps = append(b.steps, RemovePeer{FromStore: peer.StoreId, PeerID: peer.Id})
 	delete(b.currentPeers, peer.StoreId)
 	delete(b.toRemove, peer.StoreId)
 }

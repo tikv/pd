@@ -233,12 +233,13 @@ func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionI
 
 // RemovePeer is an OpStep that removes a region peer.
 type RemovePeer struct {
-	FromStore uint64
+	FromStore, PeerID uint64
 }
 
 // ConfVerChanged returns how much the conf version will increase due to this step.
 func (rp RemovePeer) ConfVerChanged(region *core.RegionInfo) uint64 {
-	return b2u64(region.GetStorePeer(rp.FromStore) == nil)
+	id := region.GetStorePeer(rp.FromStore).GetId()
+	return b2u64(id == 0 || id != rp.PeerID)
 }
 
 func (rp RemovePeer) String() string {
@@ -535,13 +536,14 @@ func (cpe ChangePeerV2Enter) String() string {
 func (cpe ChangePeerV2Enter) ConfVerChanged(region *core.RegionInfo) uint64 {
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStoreVoter(pl.ToStore)
-		if peer == nil || peer.Id != pl.PeerID || peer.Role != metapb.PeerRole_IncomingVoter {
+		if peer == nil || peer.Id != pl.PeerID ||
+			(peer.Role != metapb.PeerRole_IncomingVoter && peer.Role != metapb.PeerRole_Voter) {
 			return 0
 		}
 	}
 	for _, dv := range cpe.DemoteVoters {
 		peer := region.GetStoreVoter(dv.ToStore)
-		if peer == nil || peer.Id != dv.PeerID || peer.Role != metapb.PeerRole_DemotingVoter {
+		if peer != nil && (peer.Id != dv.PeerID || (peer.Role != metapb.PeerRole_DemotingVoter && peer.Role != metapb.PeerRole_Learner)) {
 			return 0
 		}
 	}
@@ -672,7 +674,7 @@ func (cpl ChangePeerV2Leave) ConfVerChanged(region *core.RegionInfo) uint64 {
 		}
 	}
 	for _, dv := range cpl.DemoteVoters {
-		if !dv.ConfVerChanged(region) {
+		if region.GetStorePeer(dv.PeerID) != nil && !dv.ConfVerChanged(region) {
 			return 0
 		}
 	}
