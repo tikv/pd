@@ -21,6 +21,9 @@ import (
 
 // ZapError is used to make the log output eaiser.
 func ZapError(err error, causeError ...error) zap.Field {
+	if err == nil {
+		return zap.Skip()
+	}
 	if e, ok := err.(*errors.Error); ok {
 		if len(causeError) >= 1 {
 			err = e.Wrap(causeError[0]).FastGenWithCause()

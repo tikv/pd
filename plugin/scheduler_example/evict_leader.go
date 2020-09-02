@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -30,7 +31,6 @@ import (
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -226,7 +226,7 @@ func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 		}
 		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 		if err != nil {
-			log.Debug("fail to create evict leader operator", zap.Error(err))
+			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
 
 		}
@@ -255,7 +255,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
 			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
-				handler.rd.JSON(w, http.StatusInternalServerError, err)
+				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
@@ -272,7 +272,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.config.BuildWithArgs(args)
 	err := handler.config.Persist()
 	if err != nil {
-		handler.rd.JSON(w, http.StatusInternalServerError, err)
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
 }

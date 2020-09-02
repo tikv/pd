@@ -89,11 +89,12 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
-		log.Error("save to etcd meet error", zap.String("key", key), zap.String("value", value), errs.ZapError(errs.ErrEtcdKVSave, err))
-		return errs.ErrEtcdKVSave.Wrap(err).GenWithStackByCause()
+		e := errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
+		log.Error("save to etcd meet error", zap.String("key", key), zap.String("value", value), errs.ZapError(e))
+		return e
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxnFailed.GenWithStackByArgs()
+		return errs.ErrEtcdTxn.GenWithStackByArgs()
 	}
 	return nil
 }
@@ -104,10 +105,12 @@ func (kv *etcdKVBase) Remove(key string) error {
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
-		return errs.ErrEtcdKVRemove.Wrap(err).GenWithStackByCause()
+		err = errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
+		log.Error("remove from etcd meet error", zap.String("key", key), errs.ZapError(err))
+		return err
 	}
 	if !resp.Succeeded {
-		return errs.ErrEtcdTxnFailed.GenWithStackByArgs()
+		return errs.ErrEtcdTxn.GenWithStackByArgs()
 	}
 	return nil
 }
@@ -155,9 +158,9 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	cost := time.Since(start)
 	if cost > slowRequestTime {
 		log.Warn("txn runs too slow",
-			zap.Error(err),
 			zap.Reflect("response", resp),
-			zap.Duration("cost", cost))
+			zap.Duration("cost", cost),
+			errs.ZapError(err))
 	}
 	label := "success"
 	if err != nil {

@@ -101,7 +101,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string) error {
 		If(clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0)).
 		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(ls.getLease().ID))).
 		Commit()
-	log.Info("check campaign resp", zap.Any("resp", resp), zap.Error(err))
+	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -138,10 +138,10 @@ func (ls *Leadership) DeleteLeader() error {
 	// delete leader itself and let others start a new election again.
 	resp, err := ls.LeaderTxn().Then(clientv3.OpDelete(ls.leaderKey)).Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errors.New("resign leader failed, we are not leader already")
+		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	return nil
@@ -174,7 +174,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 					zap.Int64("revision", revision),
 					zap.String("leaderKey", ls.leaderKey),
 					zap.String("purpose", ls.purpose),
-					errs.ZapError(errs.ErrWatcherCancel, wresp.Err()))
+					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
 				return
 			}
 
