@@ -236,7 +236,7 @@ func (b *Builder) SetLightWeight() *Builder {
 	return b
 }
 
-// SetLightWeight marks the step of transferring leader to target is forcible. It is used for grant leader.
+// SetForceTargetLeader marks the step of transferring leader to target is forcible. It is used for grant leader.
 func (b *Builder) SetForceTargetLeader() *Builder {
 	b.forceTargetLeader = true
 	return b
@@ -363,7 +363,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
 		if b.forceTargetLeader {
 			if !b.hasAbilityLeader(targetLeader) {
-				return "", errors.New("cannot create operator: target leader is impossible.")
+				return "", errors.New("cannot create operator: target leader is impossible")
 			}
 		} else if !b.allowLeader(targetLeader) {
 			return "", errors.New("cannot create operator: target leader is not allowed")
