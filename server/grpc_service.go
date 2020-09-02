@@ -16,7 +16,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/tikv/pd/pkg/errs"
 	"io"
 	"strconv"
 	"sync/atomic"
@@ -27,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"

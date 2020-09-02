@@ -15,10 +15,10 @@ package server
 
 import (
 	"context"
-	"github.com/tikv/pd/pkg/errs"
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 )
 
