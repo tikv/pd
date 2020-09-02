@@ -163,7 +163,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 	origin := op.RegionEpoch()
 	latest := region.GetRegionEpoch()
 	changes := latest.GetConfVer() - origin.GetConfVer()
-	if changes > uint64(op.ConfVerChanged(region)) {
+	if changes > op.ConfVerChanged(region) {
 		if oc.RemoveOperator(
 			op,
 			zap.String("reason", "stale operator, confver does not meet expectations"),
