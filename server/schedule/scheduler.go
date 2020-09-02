@@ -45,12 +45,20 @@ type Scheduler interface {
 
 // EncodeConfig encode the custom config for each scheduler.
 func EncodeConfig(v interface{}) ([]byte, error) {
-	return json.Marshal(v)
+	marshaled, err := json.Marshal(v)
+	if err != nil {
+		return nil, errs.ErrJSONMarshal.Wrap(err).FastGenWithCause()
+	}
+	return marshaled, nil
 }
 
 // DecodeConfig decode the custom config for each scheduler.
 func DecodeConfig(data []byte, v interface{}) error {
-	return json.Unmarshal(data, v)
+	err := json.Unmarshal(data, v)
+	if err != nil {
+		return errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()
+	}
+	return nil
 }
 
 // ConfigDecoder used to decode the config.
@@ -116,11 +124,11 @@ func CreateScheduler(typ string, opController *OperatorController, storage *core
 
 	s, err := fn(opController, storage, dec)
 	if err != nil {
-		return nil, errs.ErrSchedulerCreate.Wrap(err).FastGenWithCause()
+		return nil, err
 	}
 	data, err := s.EncodeConfig()
 	if err != nil {
-		return nil, errs.ErrSchedulerEncodeConfig.Wrap(err).FastGenWithCause()
+		return nil, err
 	}
 	err = storage.SaveScheduleConfig(s.GetName(), data)
 	return s, err
