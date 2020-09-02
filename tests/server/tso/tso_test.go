@@ -395,6 +395,6 @@ func (s *testFollowerTsoSuite) TestRequest(c *C) {
 	c.Assert(err, IsNil)
 	_, err = tsoClient.Recv()
 	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "can not get timestamp"), IsTrue)
+	c.Assert(strings.Contains(err.Error(), "generate timestamp failed"), IsTrue)
 	failpoint.Disable("github.com/tikv/pd/server/tso/skipRetryGetTS")
 }

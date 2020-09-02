@@ -19,7 +19,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -67,7 +66,7 @@ func (t *timestampOracle) getTimestampPath() string {
 func (t *timestampOracle) loadTimestamp() (time.Time, error) {
 	data, err := etcdutil.GetValue(t.client, t.getTimestampPath())
 	if err != nil {
-		return typeutil.ZeroTime, err
+		return typeutil.ZeroTime, errs.ErrEtcdKVGet.Wrap(err).FastGenWithCause()
 	}
 	if len(data) == 0 {
 		return typeutil.ZeroTime, nil
@@ -84,10 +83,10 @@ func (t *timestampOracle) saveTimestamp(leadership *election.Leadership, ts time
 		Then(clientv3.OpPut(key, string(data))).
 		Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errors.New("save timestamp failed, maybe we lost leader")
+		return errs.ErrSaveTimestamp.FastGenByArgs("maybe we lost leader")
 	}
 
 	t.lastSavedTime.Store(ts)
@@ -141,7 +140,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, tso uint64) error {
 	if !leadership.Check() {
 		tsoCounter.WithLabelValues("err_lease_reset_ts").Inc()
-		return errors.New("Setup timestamp failed, lease expired")
+		return errs.ErrResetUserTimestamp.FastGenByArgs("lease expired")
 	}
 	physical, _ := tsoutil.ParseTS(tso)
 	next := physical.Add(time.Millisecond)
@@ -150,12 +149,12 @@ func (t *timestampOracle) ResetUserTimestamp(leadership *election.Leadership, ts
 	// do not update
 	if typeutil.SubTimeByWallClock(next, prev.physical) <= 3*updateTimestampGuard {
 		tsoCounter.WithLabelValues("err_reset_small_ts").Inc()
-		return errors.New("the specified ts too small than now")
+		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts too small than now")
 	}
 
 	if typeutil.SubTimeByWallClock(next, prev.physical) >= t.maxResetTSGap() {
 		tsoCounter.WithLabelValues("err_reset_large_ts").Inc()
-		return errors.New("the specified ts too large than now")
+		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts too large than now")
 	}
 
 	save := next.Add(t.saveInterval)

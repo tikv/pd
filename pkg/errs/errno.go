@@ -18,6 +18,9 @@ import "github.com/pingcap/errors"
 // The internal error which is generated in PD project.
 // tso errors
 var (
+	ErrSaveTimestamp       = errors.Normalize("save timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrSaveTimestamp"))
+	ErrResetUserTimestamp  = errors.Normalize("reset user timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrResetUserTimestamp"))
+	ErrGenerateTimestamp   = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
 	ErrInvalidTimestamp    = errors.Normalize("invalid timestamp", errors.RFCCodeText("PD:tso:ErrInvalidTimestamp"))
 	ErrLogicOverflow       = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
 	ErrIncorrectSystemTime = errors.Normalize("incorrect system time", errors.RFCCodeText("PD:tso:ErrIncorrectSystemTime"))
