@@ -31,7 +31,7 @@ require (
 	github.com/pingcap/errcode v0.0.0-20180921232412-a1a7271709d9
 	github.com/pingcap/errors v0.11.5-0.20200820035142-66eb5bf1d1cd
 	github.com/pingcap/failpoint v0.0.0-20191029060244-12f4ac2fd11d
-	github.com/pingcap/kvproto v0.0.0-20200810113304-6157337686b1
+	github.com/pingcap/kvproto v0.0.0-20200827082727-23dedec2339b
 	github.com/pingcap/log v0.0.0-20200511115504-543df19646ad
 	github.com/pingcap/sysutil v0.0.0-20200715082929-4c47bcac246a
 	github.com/prometheus/client_golang v1.0.0
