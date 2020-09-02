@@ -259,13 +259,13 @@ func (s *Server) startEtcd(ctx context.Context) error {
 
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
-		return errs.ErrStartEtcd.Wrap(err)
+		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
 
 	// Check cluster ID
 	urlMap, err := types.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
-		return errs.ErrStartEtcd.Wrap(err)
+		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
@@ -292,7 +292,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		TLS:         tlsConfig,
 	})
 	if err != nil {
-		return errs.ErrStartEtcd.Wrap(err)
+		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
 
 	etcdServerID := uint64(etcd.Server.ID())
@@ -300,7 +300,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	// update advertise peer urls.
 	etcdMembers, err := etcdutil.ListEtcdMembers(client)
 	if err != nil {
-		return errs.ErrStartEtcd.Wrap(err)
+		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 	}
 	for _, m := range etcdMembers.Members {
 		if etcdServerID == m.ID {
@@ -524,7 +524,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	// Set cluster meta
 	clusterValue, err := clusterMeta.Marshal()
 	if err != nil {
-		return nil, errs.ErrBootstrapCluster.Wrap(err)
+		return nil, errs.ErrBootstrapCluster.Wrap(err).GenWithStackByCause()
 	}
 	clusterRootPath := s.GetClusterRootPath()
 
@@ -543,13 +543,13 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	storePath := makeStoreKey(clusterRootPath, storeMeta.GetId())
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
-		return nil, errs.ErrBootstrapCluster.Wrap(err)
+		return nil, errs.ErrBootstrapCluster.Wrap(err).GenWithStackByCause()
 	}
 	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
 
 	regionValue, err := req.GetRegion().Marshal()
 	if err != nil {
-		return nil, errs.ErrBootstrapCluster.Wrap(err)
+		return nil, errs.ErrBootstrapCluster.Wrap(err).GenWithStackByCause()
 	}
 
 	// Set region meta with region id.
@@ -560,7 +560,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
 	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
-		return nil, errs.ErrBootstrapCluster.Wrap(err)
+		return nil, errs.ErrBootstrapCluster.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
 		log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
