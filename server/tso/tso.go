@@ -83,10 +83,10 @@ func (t *timestampOracle) saveTimestamp(leadership *election.Leadership, ts time
 		Then(clientv3.OpPut(key, string(data))).
 		Commit()
 	if err != nil {
-		return errs.ErrEtcdTxn.Wrap(err).GenWithStackByCause()
+		return errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		return errs.ErrSaveTimestamp.FastGenByArgs("maybe we lost leader")
+		return errs.ErrEtcdTxn.FastGenByArgs()
 	}
 
 	t.lastSavedTime.Store(ts)
