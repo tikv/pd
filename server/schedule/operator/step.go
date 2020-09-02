@@ -239,7 +239,7 @@ type RemovePeer struct {
 // ConfVerChanged returns how much the conf version will increase due to this step.
 func (rp RemovePeer) ConfVerChanged(region *core.RegionInfo) uint64 {
 	id := region.GetStorePeer(rp.FromStore).GetId()
-	return b2u64(id == 0 || id != rp.PeerID)
+	return b2u64(id == 0 || (rp.PeerID != 0 && id != rp.PeerID))
 }
 
 func (rp RemovePeer) String() string {
