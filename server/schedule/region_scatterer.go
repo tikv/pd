@@ -33,7 +33,7 @@ const regionScatterName = "region-scatter"
 type selectedStores struct {
 	mu sync.Mutex
 	// If checkExist is true, after each putting operation, an entry with the key constructed by group and storeID would be put
-	// into "stores" map. And the entry with same key(storeId,group) couldn't be put before "stores" being reset
+	// into "stores" map. And the entry with the same key (storeID, group) couldn't be put before "stores" being reset
 	checkExist bool
 	// TODO: support auto-gc for the stores
 	stores map[string]map[uint64]struct{} // group -> StoreID -> struct{}
