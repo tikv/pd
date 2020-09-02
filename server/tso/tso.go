@@ -238,8 +238,9 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	return nil
 }
 
-// ResetTimestamp is used to reset the timestamp.
+// ResetTimestamp is used to reset the timestamp in memory.
 func (t *timestampOracle) ResetTimestamp() {
+	log.Info("reset the timestamp in memory")
 	zero := &atomicObject{
 		physical: typeutil.ZeroTime,
 	}
