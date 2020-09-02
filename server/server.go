@@ -772,7 +772,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
-			return errs.ErrBootstrapCluster
+			return errs.ErrClusterNotExist.FastGenByArgs()
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.

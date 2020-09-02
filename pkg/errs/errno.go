@@ -110,6 +110,7 @@ var (
 	ErrAPIInformationInvalid   = errors.Normalize("invalid api information, group %s version %s", errors.RFCCodeText("PD:server:ErrAPIInformationInvalid"))
 	ErrBootstrapClusterMarshal = errors.Normalize("bootstrap cluster marshal failed", errors.RFCCodeText("PD:server:ErrBootstrapClusterMarshal"))
 	ErrBootstrapClusterExist   = errors.Normalize("bootstrap cluster %d exist", errors.RFCCodeText("PD:server:ErrBootstrapClusterExist"))
+	ErrClusterNotExist         = errors.Normalize("cluster not exist", errors.RFCCodeText("PD:server:ErrClusterNotExist"))
 	ErrDisablePlacementRules   = errors.Normalize("cannot disable placement rules with TiFlash nodes", errors.RFCCodeText("PD:server:ErrDisablePlacementRules"))
 	ErrClientURL               = errors.Normalize("%s is not the client url of any member", errors.RFCCodeText("PD:server:ErrClientURL"))
 	ErrLogLevelIllegal         = errors.Normalize("illegal log level %s", errors.RFCCodeText("PD:server:ErrLogLevelIllegal"))
