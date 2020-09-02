@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -44,12 +45,20 @@ type Scheduler interface {
 
 // EncodeConfig encode the custom config for each scheduler.
 func EncodeConfig(v interface{}) ([]byte, error) {
-	return json.Marshal(v)
+	marshaled, err := json.Marshal(v)
+	if err != nil {
+		return nil, errs.ErrJSONMarshal.Wrap(err).FastGenWithCause()
+	}
+	return marshaled, nil
 }
 
 // DecodeConfig decode the custom config for each scheduler.
 func DecodeConfig(data []byte, v interface{}) error {
-	return json.Unmarshal(data, v)
+	err := json.Unmarshal(data, v)
+	if err != nil {
+		return errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()
+	}
+	return nil
 }
 
 // ConfigDecoder used to decode the config.
@@ -110,7 +119,7 @@ func IsSchedulerRegistered(name string) bool {
 func CreateScheduler(typ string, opController *OperatorController, storage *core.Storage, dec ConfigDecoder) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
-		return nil, errors.Errorf("create func of %v is not registered", typ)
+		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
 	}
 
 	s, err := fn(opController, storage, dec)

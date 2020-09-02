@@ -87,7 +87,10 @@ func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, err
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	listResp, err := client.MemberList(ctx)
 	cancel()
-	return listResp, errors.WithStack(err)
+	if err != nil {
+		return listResp, errs.ErrEtcdMemberList.Wrap(err).GenWithStackByCause()
+	}
+	return listResp, nil
 }
 
 // RemoveEtcdMember removes a member by the given id.
