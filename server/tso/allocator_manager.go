@@ -149,8 +149,11 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 			allocatorGroups := am.getAllocatorGroups()
 			// Update each allocator concurrently
 			for _, ag := range allocatorGroups {
-				am.wg.Add(1)
-				go am.updateAllocator(ag)
+				// Filter allocators without leadership and uninitialized
+				if ag.isInitialized && ag.leadership.Check() {
+					am.wg.Add(1)
+					go am.updateAllocator(ag)
+				}
 			}
 			am.wg.Wait()
 		case <-serverCtx.Done():
@@ -170,10 +173,6 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 		ag.allocator.Reset()
 		return
 	default:
-	}
-	if !ag.isInitialized {
-		log.Info("allocator has not been initialized yet", zap.String("dc-location", ag.dcLocation))
-		return
 	}
 	if !ag.leadership.Check() {
 		log.Info("allocator doesn't campaign leadership yet", zap.String("dc-location", ag.dcLocation))

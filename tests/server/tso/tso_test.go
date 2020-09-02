@@ -212,7 +212,7 @@ func (s *testTsoSuite) TestRequestFollower(c *C) {
 
 // In some cases, when a TSO request arrives, the SyncTimestamp may not finish yet.
 // This test is used to simulate this situation and verify that the retry mechanism.
-func (s *testTsoSuite) TestDeplaySyncTimestamp(c *C) {
+func (s *testTsoSuite) TestDelaySyncTimestamp(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 2)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
