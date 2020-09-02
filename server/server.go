@@ -783,7 +783,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range raftCluster.GetStores() {
 				if !s.IsTombstone() && core.IsTiFlashStore(s.GetMeta()) {
-					return errs.ErrDisablePlacementRules
+					return errs.ErrDisablePlacementRules.FastGenByArgs()
 				}
 			}
 		}
