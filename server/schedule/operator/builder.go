@@ -52,6 +52,7 @@ type Builder struct {
 	// flags
 	useJointConsensus bool
 	isLightWeight     bool
+	forceTargetLeader bool
 
 	// intermediate states
 	currentPeers                         peersMap
@@ -235,6 +236,12 @@ func (b *Builder) SetLightWeight() *Builder {
 	return b
 }
 
+// SetLightWeight marks the step of transferring leader to target is forcible. It is used for grant leader.
+func (b *Builder) SetForceTargetLeader() *Builder {
+	b.forceTargetLeader = true
+	return b
+}
+
 func (b *Builder) setUseJointConsensus(useJointConsensus bool) *Builder {
 	b.useJointConsensus = useJointConsensus
 	return b
@@ -352,8 +359,15 @@ func (b *Builder) prepareBuild() (string, error) {
 
 	b.currentPeers, b.currentLeaderStoreID = b.originPeers.Copy(), b.originLeaderStoreID
 
-	if b.targetLeaderStoreID != 0 && !b.allowLeader(b.targetPeers[b.targetLeaderStoreID]) {
-		return "", errors.New("cannot create operator: target leader is not allowed")
+	if b.targetLeaderStoreID != 0 {
+		targetLeader := b.targetPeers[b.targetLeaderStoreID]
+		if b.forceTargetLeader {
+			if !b.hasAbilityLeader(targetLeader) {
+				return "", errors.New("cannot create operator: target leader is impossible.")
+			}
+		} else if !b.allowLeader(targetLeader) {
+			return "", errors.New("cannot create operator: target leader is not allowed")
+		}
 	}
 
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toDemote) <= 1 {
@@ -617,12 +631,15 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 
 var stateFilter = filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 
-// check if a peer can become leader.
-func (b *Builder) allowLeader(peer *metapb.Peer) bool {
+// check if the peer has the ability to become a leader.
+func (b *Builder) hasAbilityLeader(peer *metapb.Peer) bool {
+	// these roles are not allowed to become leaders.
 	switch peer.Role {
 	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
 		return false
 	}
+
+	// store does not exist
 	if peer.StoreId == b.currentLeaderStoreID {
 		return true
 	}
@@ -630,6 +647,28 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 	if store == nil {
 		return false
 	}
+
+	return true
+}
+
+// check if the peer is allowed to become the leader.
+func (b *Builder) allowLeader(peer *metapb.Peer) bool {
+	// these roles are not allowed to become leaders.
+	switch peer.Role {
+	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
+		return false
+	}
+
+	// store does not exist
+	if peer.StoreId == b.currentLeaderStoreID {
+		return true
+	}
+	store := b.cluster.GetStore(peer.StoreId)
+	if store == nil {
+		return false
+	}
+
+	// filter and rules
 	if !stateFilter.Target(b.cluster, store) {
 		return false
 	}
@@ -642,6 +681,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
