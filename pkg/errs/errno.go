@@ -47,9 +47,7 @@ var (
 	ErrSchedulerConfig                  = errors.Normalize("wrong scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfig"))
 	ErrCacheOverflow                    = errors.Normalize("cache overflow", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
 	ErrInternalGrowth                   = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
-	ErrSchedulerEncodeConfig            = errors.Normalize("failed to encode scheduler config", errors.RFCCodeText("PD:scheduler:ErrSchedulerEncodeConfig"))
-	ErrSchedulerCreate                  = errors.Normalize("failed to create scheduler", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreate"))
-	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("scheduler create function not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
+	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func of %v is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
 )
 
 // placement errors
