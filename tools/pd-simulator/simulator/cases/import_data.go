@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 	"gonum.org/v1/plot"
 
+	"github.com/go-echarts/go-echarts/charts"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
@@ -144,15 +145,7 @@ func newImportData() *Case {
 			isEnd = dev < 0.002
 		}
 		if isEnd {
-			p, _ := plot.New()
-			p.Title.Text = "New region distribution"
-			var bins plotter.XYs
-			for i, v := range regionProps {
-				bins = append(bins, plotter.XY{X: float64(i), Y: v})
-			}
-			h, _ := plotter.NewHistogram(bins, 10)
-			p.Add(h)
-			p.Save(4 * vg.Inch, 4 * vg.Inch, "histogram.png")
+
 		}
 		return isEnd
 	}
