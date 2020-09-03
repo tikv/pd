@@ -349,7 +349,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
 	s.idAllocator = id.NewAllocatorImpl(s.client, s.rootPath, s.member.MemberValue())
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.member.Etcd(), s.client, s.rootPath, s.cfg.TsoSaveInterval.Duration,
+		s.member, s.rootPath, s.cfg.TsoSaveInterval.Duration,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() },
 	)
 	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
@@ -360,7 +360,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	s.storage = core.NewStorage(kvBase).SetRegionStorage(regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRaftPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = newHeartbeatStreams(ctx, s.clusterID, s.cluster)
 
 	// Run callbacks
@@ -537,7 +537,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	clusterRootPath := s.GetClusterRootPath()
+	clusterRootPath := s.GetClusterRaftPath()
 
 	var ops []clientv3.Op
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
@@ -686,6 +686,11 @@ func (s *Server) GetHBStreams() opt.HeartbeatStreams {
 // GetAllocator returns the ID allocator of server.
 func (s *Server) GetAllocator() *id.AllocatorImpl {
 	return s.idAllocator
+}
+
+// GetTSOAllocatorManager returns the manager of TSO Allocator.
+func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
+	return s.tsoAllocatorManager
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.
@@ -943,6 +948,11 @@ func (s *Server) GetSecurityConfig() *grpcutil.SecurityConfig {
 
 // GetClusterRootPath returns the cluster root path.
 func (s *Server) GetClusterRootPath() string {
+	return s.rootPath
+}
+
+// GetClusterRaftPath returns the cluster raft path.
+func (s *Server) GetClusterRaftPath() string {
 	return path.Join(s.rootPath, "raft")
 }
 
