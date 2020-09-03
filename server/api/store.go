@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -190,8 +191,13 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		err = rc.RemoveStore(storeID)
 	}
 
-	if err != nil {
-		apiutil.ErrorResp(h.rd, w, err)
+	if errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(storeID)) {
+		h.rd.JSON(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	if errors.ErrorEqual(err, errs.ErrStoreTombstone.FastGenByArgs(storeID)) {
+		h.rd.JSON(w, http.StatusGone, err.Error())
 		return
 	}
 

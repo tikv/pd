@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
@@ -102,7 +103,7 @@ func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 	cli := pdpb.NewPDClient(conn)
 	syncStream, err := cli.SyncRegions(s.regionSyncerCtx)
 	if err != nil {
-		return syncStream, err
+		return syncStream, errs.ErrGRPCCreateStream.Wrap(err).FastGenWithCause()
 	}
 	err = syncStream.Send(&pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
@@ -110,7 +111,7 @@ func (s *RegionSyncer) syncRegion(conn *grpc.ClientConn) (ClientStream, error) {
 		StartIndex: s.history.GetNextIndex(),
 	})
 	if err != nil {
-		return syncStream, err
+		return syncStream, errs.ErrGRPCSend.Wrap(err).FastGenWithCause()
 	}
 
 	return syncStream, nil
@@ -139,7 +140,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			}
 			conn, err = s.establish(addr)
 			if err != nil {
-				log.Error("cannot establish connection with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Error(err))
+				log.Error("cannot establish connection with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
 				continue
 			}
 			defer conn.Close()
@@ -161,7 +162,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						return
 					}
 				}
-				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Error(err))
+				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
 				time.Sleep(time.Second)
 				continue
 			}
@@ -169,9 +170,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			for {
 				resp, err := stream.Recv()
 				if err != nil {
-					log.Error("region sync with leader meet error", zap.Error(err))
+					log.Error("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
 					if err = stream.CloseSend(); err != nil {
-						log.Error("failed to terminate client stream", zap.Error(err))
+						log.Error("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
 					time.Sleep(time.Second)
 					break

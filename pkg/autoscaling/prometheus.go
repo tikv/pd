@@ -26,6 +26,7 @@ import (
 	promClient "github.com/prometheus/client_golang/api"
 	promAPI "github.com/prometheus/client_golang/api/prometheus/v1"
 	promModel "github.com/prometheus/common/model"
+	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 )
 
@@ -64,7 +65,7 @@ var queryBuilderFnMap = map[MetricType]promQLBuilderFn{
 func (prom *PrometheusQuerier) Query(options *QueryOptions) (QueryResult, error) {
 	builderFn, ok := queryBuilderFnMap[options.metric]
 	if !ok {
-		return nil, errors.Errorf("unsupported metric type %v", options.metric)
+		return nil, errs.ErrUnsupportedMetricsType.FastGenByArgs(options.metric)
 	}
 
 	query, err := builderFn(options)
@@ -92,7 +93,7 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 	resp, warnings, err := prom.api.Query(ctx, query, timestamp)
 
 	if err != nil {
-		return nil, err
+		return nil, errs.ErrPrometheusQuery.Wrap(err).FastGenWithCause()
 	}
 
 	if warnings != nil && len(warnings) > 0 {
@@ -104,21 +105,21 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 
 func extractInstancesFromResponse(resp promModel.Value, addresses []string) (QueryResult, error) {
 	if resp == nil {
-		return nil, errors.New("metrics response from Prometheus is empty")
+		return nil, errs.ErrEmptyMetricsResponse.FastGenByArgs()
 	}
 
 	if resp.Type() != promModel.ValVector {
-		return nil, errors.Errorf("expected vector type values, got %s", resp.Type().String())
+		return nil, errs.ErrUnexpectedType.FastGenByArgs(resp.Type().String())
 	}
 
 	vector, ok := resp.(promModel.Vector)
 
 	if !ok {
-		return nil, errors.New("type conversion error")
+		return nil, errs.ErrTypeConversion.FastGenByArgs()
 	}
 
 	if len(vector) == 0 {
-		return nil, errors.New("no results returned from Prometheus, your query metrics duration must be at least twice the Prometheus scrape interval")
+		return nil, errs.ErrEmptyMetricsResult.FastGenByArgs("query metrics duration must be at least twice the Prometheus scrape interval")
 	}
 
 	instancesSet := map[string]string{}
@@ -165,7 +166,7 @@ var cpuQuotaPromQLTemplate = map[ComponentType]string{
 func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
 	pattern, ok := cpuQuotaPromQLTemplate[options.component]
 	if !ok {
-		return "", errors.Errorf("unsupported component type %v", options.component)
+		return "", errs.ErrUnsupportedComponentType.FastGenByArgs(options.component)
 	}
 
 	query := pattern
@@ -175,7 +176,7 @@ func buildCPUQuotaPromQL(options *QueryOptions) (string, error) {
 func buildCPUUsagePromQL(options *QueryOptions) (string, error) {
 	pattern, ok := cpuUsagePromQLTemplate[options.component]
 	if !ok {
-		return "", errors.Errorf("unsupported component type %v", options.component)
+		return "", errs.ErrUnsupportedComponentType.FastGenByArgs(options.component)
 	}
 
 	query := fmt.Sprintf(pattern, getDurationExpression(options.duration))
