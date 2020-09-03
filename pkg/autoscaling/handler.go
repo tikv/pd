@@ -18,8 +18,8 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 
@@ -40,7 +40,7 @@ func NewHTTPHandler(svr *server.Server, rd *render.Render) *HTTPHandler {
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
 	if rc == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, cluster.ErrNotBootstrapped.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 		return
 	}
 	data, err := ioutil.ReadAll(r.Body)
