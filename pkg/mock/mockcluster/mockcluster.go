@@ -40,8 +40,9 @@ type Cluster struct {
 	*placement.RuleManager
 	*statistics.HotCache
 	*statistics.StoresStats
-	ID             uint64
-	suspectRegions map[uint64]struct{}
+	ID               uint64
+	suspectRegions   map[uint64]struct{}
+	disabledFeatures map[versioninfo.Feature]struct{}
 }
 
 // NewCluster creates a new Cluster
@@ -49,13 +50,14 @@ func NewCluster(opt *mockoption.ScheduleOptions) *Cluster {
 	ruleManager := placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()))
 	ruleManager.Initialize(opt.MaxReplicas, opt.GetLocationLabels())
 	return &Cluster{
-		BasicCluster:    core.NewBasicCluster(),
-		IDAllocator:     mockid.NewIDAllocator(),
-		ScheduleOptions: opt,
-		RuleManager:     ruleManager,
-		HotCache:        statistics.NewHotCache(),
-		StoresStats:     statistics.NewStoresStats(),
-		suspectRegions:  map[uint64]struct{}{},
+		BasicCluster:     core.NewBasicCluster(),
+		IDAllocator:      mockid.NewIDAllocator(),
+		ScheduleOptions:  opt,
+		RuleManager:      ruleManager,
+		HotCache:         statistics.NewHotCache(),
+		StoresStats:      statistics.NewStoresStats(),
+		suspectRegions:   make(map[uint64]struct{}),
+		disabledFeatures: make(map[versioninfo.Feature]struct{}),
 	}
 }
 
@@ -637,9 +639,17 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	mc.PutStore(newStore)
 }
 
+// DisableFeature marks that these features are not supported in the cluster.
+func (mc *Cluster) DisableFeature(fs ...versioninfo.Feature) {
+	for _, f := range fs {
+		mc.disabledFeatures[f] = struct{}{}
+	}
+}
+
 // IsFeatureSupported checks if the feature is supported by current cluster.
-func (mc *Cluster) IsFeatureSupported(versioninfo.Feature) bool {
-	return true
+func (mc *Cluster) IsFeatureSupported(f versioninfo.Feature) bool {
+	_, ok := mc.disabledFeatures[f]
+	return !ok
 }
 
 // AddSuspectRegions mock method
