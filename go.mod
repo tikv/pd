@@ -10,6 +10,7 @@ require (
 	github.com/coreos/pkg v0.0.0-20160727233714-3ac0863d7acf
 	github.com/docker/go-units v0.4.0
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
+	github.com/go-echarts/go-echarts v1.0.0 // indirect
 	github.com/go-playground/overalls v0.0.0-20180201144345-22ec1a223b7c
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/protobuf v1.3.2
