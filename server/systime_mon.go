@@ -32,7 +32,7 @@ func StartMonitor(ctx context.Context, now func() time.Time, systimeErrHandler f
 		select {
 		case <-tick.C:
 			if now().UnixNano() < last {
-				log.Error("system time jump backward", zap.Int64("last", last), zap.Error(errs.ErrIncorrectSystemTime))
+				log.Error("system time jump backward", zap.Int64("last", last), errs.ZapError(errs.ErrIncorrectSystemTime))
 				systimeErrHandler()
 			}
 		case <-ctx.Done():
