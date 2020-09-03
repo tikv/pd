@@ -1068,7 +1068,7 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
-		leader, rev, checkAgain := s.member.CheckLeader(s.Name())
+		leader, rev, checkAgain := s.member.CheckLeader()
 		if checkAgain {
 			continue
 		}
