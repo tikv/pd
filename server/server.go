@@ -31,6 +31,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/mux"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -772,7 +773,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
 		raftCluster := s.GetRaftCluster()
 		if raftCluster == nil {
-			return errs.ErrClusterNotExist.FastGenByArgs()
+			return errors.WithStack(cluster.ErrNotBootstrapped)
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.
@@ -783,7 +784,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range raftCluster.GetStores() {
 				if !s.IsTombstone() && core.IsTiFlashStore(s.GetMeta()) {
-					return errs.ErrDisablePlacementRules.FastGenByArgs()
+					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}
 		}
@@ -819,7 +820,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 			cfg.DashboardAddress = fmt.Sprintf("%s://%s", s.GetClientScheme(), cfg.DashboardAddress)
 		}
 		if !cluster.IsClientURL(cfg.DashboardAddress, s.client) {
-			return errs.ErrClientURL.FastGenByArgs(cfg.DashboardAddress)
+			return errors.Errorf("%s is not the client url of any member", cfg.DashboardAddress)
 		}
 	}
 	if err := cfg.Validate(); err != nil {
@@ -985,7 +986,7 @@ func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) error {
 	if !isLevelLegal(level) {
-		return errs.ErrLogLevelIllegal.FastGenByArgs(level)
+		return errors.Errorf("log level %s is illegal", level)
 	}
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
@@ -1010,7 +1011,7 @@ func (s *Server) GetReplicationModeConfig() *config.ReplicationModeConfig {
 // SetReplicationModeConfig sets the replication mode.
 func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) error {
 	if config.NormalizeReplicationMode(cfg.ReplicationMode) == "" {
-		return errs.ErrReplicationModeInvalid.FastGenByArgs(cfg.ReplicationMode)
+		return errors.Errorf("invalid replication mode: %v", cfg.ReplicationMode)
 	}
 
 	old := s.persistOptions.GetReplicationModeConfig()
